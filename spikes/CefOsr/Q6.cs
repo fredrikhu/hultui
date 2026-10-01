@@ -84,11 +84,7 @@ internal static unsafe class Q6
         var b0 = (cef_browser_t*)browser;
         H = b0->get_host(b0);
 
-        var observer = New<cef_dev_tools_message_observer_t>("devtools_observer");
-        observer->on_dev_tools_message = &OnMessage;
-        observer->on_dev_tools_method_result = &OnResult;
-        observer->on_dev_tools_event = &OnEvent;
-        var registration = H->add_dev_tools_message_observer(H, Give(observer));
+        var registration = Attach(H);
         Log($"add_dev_tools_message_observer → registration {(nint)registration:x}");
 
         // 1. Runtime.evaluate, as ExecuteScriptAsync.
@@ -202,6 +198,26 @@ internal static unsafe class Q6
         return 0;
     }
 
+    /// <summary>Registers the observer on a browser; Call then talks to it. Keep the registration.</summary>
+    public static cef_registration_t* Attach(cef_browser_host_t* host)
+    {
+        H = host;
+        var observer = New<cef_dev_tools_message_observer_t>("devtools_observer");
+        observer->on_dev_tools_message = &OnMessage;
+        observer->on_dev_tools_method_result = &OnResult;
+        observer->on_dev_tools_event = &OnEvent;
+        cef_registration_t* reg = null;
+        bool done = false;
+        Host.PostUi(() => { reg = host->add_dev_tools_message_observer(host, Give(observer)); done = true; });
+        Host.Pump(() => done, 5000);
+        return reg;
+    }
+
+    public static IEnumerable<(string method, string json)> TakeEvents()
+    {
+        while (DevEvents.TryDequeue(out var e)) yield return e;
+    }
+
     static void Navigate(cef_browser_t* b, string url)
     {
         var f = b->get_main_frame(b);
@@ -210,7 +226,7 @@ internal static unsafe class Q6
         Release(f);
     }
 
-    static string Call(string method, object args, int timeoutMs = 5000, string? sessionId = null)
+    public static string Call(string method, object args, int timeoutMs = 5000, string? sessionId = null)
     {
         int id = Interlocked.Increment(ref _nextId);
         var json = sessionId == null

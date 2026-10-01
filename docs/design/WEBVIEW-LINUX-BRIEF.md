@@ -410,6 +410,27 @@ updates incremental, and what does `on_accessibility_location_change` add? Is th
 act on a node (focus, click) by id? Check with `accerciser` or `busctl` whether Chromium puts
 anything on the AT-SPI bus by itself when windowless. **Expect not.**
 
+> **Result (2026-10-01): plain data, incremental, nothing on AT-SPI. Acting on nodes goes
+> through DevTools.**
+> - **What arrives:** `on_accessibility_tree_change` (on `CrBrowserMain`) carries Chromium's
+>   `AXTreeUpdate` as a value tree: `{ax_tree_id, events: [{event_type, id}], updates:
+>   [{root_id, tree_data (focus, selection), node_id_to_clear, nodes: [{id, role, state,
+>   attributes (name, value, checkedState, htmlId, …), child_ids, actions, location
+>   (device pixels, relative to offset_container_id)}]}]}`.
+> - **Size and cost:** a small form is 32 nodes (14 KB). Wikipedia's "Web browser" article is
+>   ~5,100 nodes (5 MB), and reading it through `cef_value_t` took 226 ms.
+> - **Incremental:** yes. A changed heading and checkbox send 4 nodes and a
+>   `checkedStateChanged` event. `on_accessibility_location_change` is a list of `{id,
+>   new_location: {bounds, offset_container_id}}`; scrolling 2000 px sent 42 KB.
+> - **Acting by id:** not through CEF; its handler is read-only. But CEF's node ids equal
+>   DevTools' AX `nodeId` and `backendDOMNodeId`, so `DOM.focus` and
+>   `DOM.resolveNode` + `Runtime.callFunctionOn("this.click()")` act on a node by id.
+> - **AT-SPI:** the registry shows nothing new from a windowless browser, as CEF's header
+>   says (TreeOnly mode).
+> - **For W8's Linux half:** mirror the tree from the updates, serve its nodes as the web
+>   view's children through our bridge, map actions to DevTools, and enable accessibility
+>   only when a screen reader is on.
+
 **10. Two pages and the way out.** Two browsers on one `cef_initialize`; close one; close
 both; `cef_shutdown`. What must be released, in what order, for the process to exit by itself?
 

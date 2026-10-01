@@ -504,7 +504,12 @@ engine's side is `IWebEngineView.AccessibleContent` plus
 tree on someone else's bus. CEF off-screen gives the embedder a tree of plain data
 (`cef_accessibility_handler_t`), so the web view's node grows real children that our
 AT-SPI bridge serves like any others; `NativeContent` is the Windows shape and need not be
-reused. Designed in step 5, from what the spike's question 9 shows.
+reused. Designed in step 5, from what the spike's question 9 shows. **Question 9 showed**
+(2026-10-01): CEF hands over Chromium's `AXTreeUpdate` as data (nodes with role, name, states,
+attributes, children, device-pixel bounds), full once and incremental after (a small form 32
+nodes, a Wikipedia article ~5,100 nodes and 5 MB); nothing reaches AT-SPI by itself; CEF cannot
+act on a node, but its node ids are DevTools' `backendDOMNodeId`, so actions go through the
+DevTools session the engine already has for messages.
 
 Not needed, checked: pixel-density math (`ScreenContentBox × Window.DisplayScale`
 is device pixels; use it rather than `LocalPosition`, which ignores scrolling),

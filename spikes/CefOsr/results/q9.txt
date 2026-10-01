@@ -1,0 +1,39 @@
+[    53.6 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    62.0 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   193.1 ms main          ] cef_initialize = 1
+[   215.9 ms CrBrowserMain (33019)] on_context_initialized
+[   232.1 ms main          ] create_browser = 1
+[   233.8 ms CrBrowserMain (33019)] on_after_created: browser 1
+[   236.2 ms CrBrowserMain (33019)] get_screen_info #1: struct size 56, answering scale 1.5
+[   252.7 ms CrBrowserMain (33019)] get_screen_info #2: struct size 56, answering scale 1.5
+[   257.3 ms CrBrowserMain (33019)] get_screen_info #3: struct size 56, answering scale 1.5
+[   561.7 ms main          ] before enabling: 0 updates
+--- after set_accessibility_state(STATE_ENABLED) on about:blank: 0 tree change(s), 0 location change(s), 0 bytes of JSON, conversion 0.0 ms in all
+--- the form page loaded: 1 tree change(s), 0 location change(s), 14263 bytes of JSON, conversion 7.3 ms in all
+      tree: keys [ax_tree_id, events, updates]; 1 update(s), 2 event(s), 32 node(s)
+--- heading text changed and the checkbox checked: 1 tree change(s), 0 location change(s), 1725 bytes of JSON, conversion 0.3 ms in all
+      tree: keys [ax_tree_id, events, updates]; 2 update(s), 1 event(s), 4 node(s)
+--- everything moved down 40 px (margin-top): 0 tree change(s), 1 location change(s), 3855 bytes of JSON, conversion 0.3 ms in all
+      location: keys [Array]; 0 update(s), 0 event(s), 0 node(s)
+[  2943.9 ms main          ] Accessibility.getFullAXTree: 32 nodes, 15266 bytes
+[  2943.9 ms main          ] DevTools AX node: button 'Press me', nodeId 30, backendDOMNodeId 30; CEF's tree has the button as id 30
+[  2957.3 ms main          ] DOM.focus(backendNodeId) → {}; document.activeElement → {"result":{"type":"string","value":"go, hasFocus false"}}
+[  2969.0 ms main          ] Runtime.callFunctionOn(this.click()) → {"result":{"type":"undefined"}}
+[  3269.1 ms main          ] page: clicked go
+--- after focusing and clicking the button through DevTools: 2 tree change(s), 0 location change(s), 2519 bytes of JSON, conversion 0.2 ms in all
+      tree: keys [ax_tree_id, events, updates]; 1 update(s), 1 event(s), 1 node(s)
+      tree: keys [ax_tree_id, events, updates]; 1 update(s), 1 event(s), 1 node(s)
+--- https://en.wikipedia.org/wiki/Web_browser, 3.9 s after navigating: 2 tree change(s), 1 location change(s), 4062767 bytes of JSON, conversion 186.1 ms in all
+      tree: keys [ax_tree_id, events, updates]; 1 update(s), 1 event(s), 5144 node(s)
+      location: keys [Array]; 0 update(s), 0 event(s), 0 node(s)
+      tree: keys [ax_tree_id, events, updates]; 34 update(s), 2 event(s), 4631 node(s)
+--- wikipedia scrolled down 2000 px: 3 tree change(s), 2 location change(s), 42588 bytes of JSON, conversion 1.9 ms in all
+      location: keys [Array]; 0 update(s), 0 event(s), 0 node(s)
+      location: keys [Array]; 0 update(s), 0 event(s), 0 node(s)
+      tree: keys [ax_tree_id, updates]; 6 update(s), 0 event(s), 7 node(s)
+      tree: keys [ax_tree_id, updates]; 27 update(s), 0 event(s), 53 node(s)
+      tree: keys [ax_tree_id, updates]; 1 update(s), 0 event(s), 1 node(s)
+[  8168.0 ms main          ] AT-SPI registry's applications before CEF: [a(so) 1 ":1.0" "/org/a11y/atspi/accessible/root"]; with a windowless browser and accessibility on: [a(so) 1 ":1.0" "/org/a11y/atspi/accessible/root"]
+[  8170.2 ms CrBrowserMain (33019)] on_before_close: browser 1
+[  8193.3 ms main          ] cef_shutdown returned after 14 ms; our refs: accessibility_handler=0, app=0, browser_process_handler=0, client=0, devtools_observer=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0, ui_task=0
+[  8704.3 ms main          ] children left: 33013 zygote; 33014 zygote; 33017 zygote; 33069 (no type); 33125 (no type)

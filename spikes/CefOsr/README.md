@@ -64,6 +64,7 @@ runs this program again),
 | 6 | Script results and page messages without code in the renderer | **Yes, through the DevTools protocol; the helper stays 20 lines of C.** `Runtime.evaluate` (`returnByValue`, `awaitPromise`) answers `ExecuteScriptAsync` with JSON: values, objects, promises, exceptions; 0.29 ms median round trip. `Runtime.addBinding` + `Runtime.bindingCalled` carries the page's posts; a shim from `Page.addScriptToEvaluateOnNewDocument` (needs `Page.enable`) builds `window.chrome.webview` on it, on every new document. The origin: `Runtime.enable`'s `executionContextCreated` names each context's origin, and every post names its context. Cross-origin iframes are other targets: `Target.setAutoAttach(flatten)` and the same setup per session. Send on CEF's UI thread. |
 | 7 | Policy hooks | **All four work.** `on_before_browse` returning 1 cancels (`ERR_ABORTED`, the page stays), asked on `CrBrowserMain`, which waited 33 ms for our thread's answer. `on_before_popup` returning 1 refuses and names the URL, for a link with `target=_blank` and for `window.open`, on a user gesture; without one Chromium's popup blocker drops it before asking. `on_render_process_terminated` (`TS_PROCESS_WAS_KILLED`, 9) on SIGKILL, and `reload` brings the page back. A scheme handler factory for `https` + `app.local` serves a folder as a secure origin (`https://app.local`, `isSecureContext`), with 404s, on `Chrome_IOThread`; and `NavigateToString` served through it gets a real origin and no `data:` crash. |
 | 8 | Zero-copy | **Yes, on `wayland` and `x11`, not on `headless`.** `on_accelerated_paint` hands over one dmabuf plane, BGRA (`DRM_FORMAT_ARGB8888`), modifier 0 (linear), stride 4864 at 1200×900, from a pool of three buffers. Imported on CEF's thread inside the callback, as CEF requires, into GL (`EGL_EXT_image_dma_buf_import`, blit, fence: 0.81 ms) or Vulkan (`VK_EXT_external_memory_dma_buf` + DRM format modifier, copy, fence: 0.73 ms); pixels checked in both. At 1650×1072, 60 frames a second, our process: **33 ms/s** either way, against 108 for copying `on_paint`'s pixels and 150 with the upload; CEF's processes 130 against 190. **On Wayland the scale needs `--disable-features=WaylandFractionalScaleV1`**; then it is exact and live, like X11's. CEF owns the fds. |
+| 9 | Accessibility | **A full, incremental tree as plain data, nothing on AT-SPI, and no way to act through CEF; DevTools can act, by the same ids.** `on_accessibility_tree_change` carries Chromium's `AXTreeUpdate` as a value tree: `{ax_tree_id, events, updates: [{nodes, root_id, tree_data, node_id_to_clear}]}`, each node with `id`, `role`, `state`, `attributes` (name, value, checked state, …), `child_ids`, `actions` and a `location` in device pixels. First update of a small form: 32 nodes, 14 KB; Wikipedia's article: ~5 100 nodes, 5 MB, 226 ms to read through `cef_value_t`. Changes are incremental (4 nodes for a changed heading and checkbox). `on_accessibility_location_change` is a list of `{id, new_location: {bounds, offset_container_id}}`. CEF's node ids are DevTools' AX `nodeId` and `backendDOMNodeId`, so `DOM.focus` and `Runtime.callFunctionOn` act on a node by id. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -533,3 +534,76 @@ the Vulkan one, so one EGL import serves both renderers. That needs the engine's
 to share with HultUI's (or the copy target to be exported to it), which the next step
 settles. A direct Vulkan import works as well and costs the same, if a Vulkan-only route is
 ever wanted. Not checked here: `<select>`'s `PET_POPUP` as a shared texture, and NVIDIA.
+
+### 9. Accessibility
+
+`set_accessibility_state(STATE_ENABLED)` on CEF's thread, and a render handler whose
+`get_accessibility_handler` returns ours. CEF's own header says what to expect: for a
+windowless browser accessibility runs in "TreeOnly" mode (`kAccessibilityModeWebContentsOnly`):
+"the full tree is computed, and events are passed to CefAccessibilityHandler, but platform
+accessibility objects are not created." Both callbacks arrive on `CrBrowserMain`. The spike
+turns each `cef_value_t` into JSON (`results/q9.txt`; the form page's first update, its
+change and a location change are saved as `results/q9-*.json`).
+
+**What a tree change carries**: Chromium's `ui::AXTreeUpdate`, as values.
+
+```
+{ ax_tree_id: "4A83…",                         one per frame tree
+  events:  [ { event_type: "loadStart" | "checkedStateChanged" | …, event_from: "page", id } ],
+  updates: [ { root_id, has_tree_data, tree_data: { focus_id, loaded, sel_anchor_object_id, … },
+               node_id_to_clear?,
+               nodes: [ { id, role: "button", state: ["focusable", …],
+                          attributes: { name: "Press me", nameFrom, htmlTag, htmlId, value,
+                                        checkedState, defaultActionVerb, labelledbyIds, … },
+                          child_ids: [9], actions: ["setValue"],
+                          location: { x, y, width, height }, offset_container_id: 20 } ] } ] }
+```
+
+Locations are in **device pixels** (the h1 is 1176 wide in an 800-DIP view at 1.5) relative to
+the offset container. Some serialisation is rough: `state` lists come padded with empty
+strings, and a plain `h1` reports `textStyle: ["italic", "underline"]`; the importer will
+have to check flags against Chromium's enums rather than trust the strings. Negative ids
+appear as children (inline text boxes).
+
+| Moment | Tree changes | Location changes | JSON | Nodes |
+|---|---|---|---|---|
+| enabled on `about:blank` | 0 | 0 | — | — |
+| the form page loaded | 1 | 0 | 14 KB | 32 |
+| heading text changed, checkbox checked | 1 (2 updates) | 0 | 1.7 KB | 4 |
+| the body moved down 40 px | 0 | 1 (24 entries) | 3.9 KB | — |
+| Wikipedia's "Web browser" article, 4 s after navigating | 3 | 2 | **5.1 MB** | ~5 100, then ~2 800 and ~4 400 again |
+| Wikipedia scrolled 2000 px | 3 | 2 | 42 KB | 7 + 53 + 1 |
+
+**Incremental: yes.** After the first full tree, an update carries only the nodes that
+changed, with their full attributes and child lists, plus events. A location change is a
+list of `{ax_tree_id, id, new_location: {bounds, offset_container_id}}`: geometry only, which
+is what scrolling mostly produces.
+
+**Cost.** Reading a big tree out of `cef_value_t` is not free: 226 ms on CEF's thread for
+Wikipedia's ~5 MB (every key and value is a call across the C API); small updates are well
+under a millisecond. Chromium enables accessibility only when an assistive technology is
+present, and the engine should do the same: enable the state when the AT-SPI bridge sees a
+screen reader (`org.a11y.Status.ScreenReaderEnabled`), not always.
+
+**Acting on a node: not through CEF.** The handler is read-only, and the browser host has no
+accessibility action call. **But the ids are DevTools' ids**: the button is node 30 in CEF's
+tree, and `Accessibility.getFullAXTree` (32 nodes, the same tree) gives it `nodeId 30`,
+`backendDOMNodeId 30`. So with question 6's DevTools session, `DOM.focus({backendNodeId})`
+moved `document.activeElement` to it, and `DOM.resolveNode` + `Runtime.callFunctionOn("this.click()")`
+clicked it (the page logged its handler). Focus events reach the page only while the browser
+has focus (`set_focus(1)`); the document reported `hasFocus false` in this run, which never
+gave it focus. Other actions (set value, scroll into view, the default action) map to
+DevTools the same way.
+
+**AT-SPI.** The bus is running in this container (`at-spi-bus-launcher`, `at-spi2-registryd`).
+The registry's root lists one application before CEF starts and the same one with a
+windowless browser up and accessibility enabled: **Chromium registers nothing**, as the
+header says and the brief expected.
+
+**So the Linux half of W8** is ours to build from data: the web view's accessibility node keeps
+a mirror of the AX tree (apply each update: clear `node_id_to_clear`'s subtree, replace nodes
+by id), exposes its nodes as children that the AT-SPI bridge serves like HultUI's own (role,
+name, states, value, bounds converted from the offset container chain plus the element's
+position), raises the bridge's events from the update's `events`, and turns AT-SPI actions
+into DevTools calls by `backendDOMNodeId`. Out-of-process iframes have trees of their own
+(`ax_tree_id`, child tree ids), as they have their own DevTools sessions.
