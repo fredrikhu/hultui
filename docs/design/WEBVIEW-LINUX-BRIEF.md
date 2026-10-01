@@ -353,6 +353,21 @@ binding in `on_context_created` and sends a process message.
 `on_render_process_terminated` fires when the renderer is killed; a scheme handler factory
 serves `https://app.local/` from a folder.
 
+> **Result (2026-10-01): all four hold.**
+> - **`on_before_browse`:** called on `CrBrowserMain` before any request. Returning 1 cancels
+>   (`ERR_ABORTED`; the page and its title stay put). CEF's thread can wait for HultUI's
+>   thread to answer: 30 ms here, as the `WebNavigationRequest` continuation will.
+> - **`on_before_popup`:** returning 1 refuses (no browser is created) and gives the URL, for
+>   `target=_blank` links and `window.open` on a user gesture. Without a gesture, the popup
+>   blocker drops them before the handler is called.
+> - **`on_render_process_terminated`:** on SIGKILL, `TS_PROCESS_WAS_KILLED` (9), and
+>   `reload` brings the page back.
+> - **Scheme handler:** `cef_register_scheme_handler_factory("https", "app.local")` serves a
+>   folder (handlers created on `Chrome_IOThread`). The page is a secure context with origin
+>   `https://app.local`, with subresources, `fetch`, 404s, and every handler released.
+>   **`NavigateToString` served through it** (`https://app.local/__string/<n>`) keeps UTF-8,
+>   has a real origin, and does not crash on `srcdoc`.
+
 **8. Zero-copy.** `shared_texture_enabled` on the window info, and `on_accelerated_paint`
 hands over dmabuf planes (fd, stride, offset, modifier, format). On the Intel GPU: does it
 arrive at all, and on which Ozone platform? Import it in a GL context with

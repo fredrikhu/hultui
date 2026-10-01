@@ -1,0 +1,58 @@
+[    55.4 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    63.8 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   208.0 ms main          ] cef_initialize = 1
+[   227.0 ms CrBrowserMain (26952)] on_context_initialized
+[   234.9 ms main          ] cef_register_scheme_handler_factory(https, app.local) = 1
+[   237.4 ms main          ] create_browser = 1
+[   239.3 ms CrBrowserMain (26952)] on_after_created: browser 1
+[   242.3 ms CrBrowserMain (26952)] get_screen_info #1: struct size 56, answering scale 1.5
+[   304.3 ms CrBrowserMain (26952)] get_screen_info #2: struct size 56, answering scale 1.5
+[   323.8 ms CrBrowserMain (26952)] get_screen_info #3: struct size 56, answering scale 1.5
+--- https://app.local/index.html: title 'app.local'
+      [host] on_before_browse https://app.local/index.html main True gesture False on CrBrowserMain (26952): allow, answered by our thread after 34 ms
+      [handler] /index.html → 200 text/html, 933 bytes, on Chrome_IOThread (26958)
+      [handler] /style.css → 200 text/css, 31 bytes, on Chrome_IOThread (26958)
+      [console] page origin https://app.local secure true h1 colour rgb(200, 30, 40)
+      [handler] /missing.txt → 404 text/plain, 9 bytes, on Chrome_IOThread (26958)
+      [handler] /data.json → 200 application/json, 11 bytes, on Chrome_IOThread (26958)
+      [console] fetch /missing.txt → 404
+      [console] fetch /data.json → {"ok":true}
+      [handler] /favicon.ico → 404 text/plain, 9 bytes, on Chrome_IOThread (26958)
+[  2778.2 ms CrBrowserMain (26952)] on_load_error: ERR_ABORTED ERR_ABORTED https://app.local/blocked.html
+--- click the link to /blocked.html: title now 'app.local'
+      [host] on_before_browse https://app.local/blocked.html main True gesture False on CrBrowserMain (26952): CANCEL, answered by our thread after 33 ms
+      [load error] -3 ERR_ABORTED https://app.local/blocked.html
+--- click the link to /other.html: title now 'other'
+      [host] on_before_browse https://app.local/other.html main True gesture False on CrBrowserMain (26952): allow, answered by our thread after 33 ms
+      [handler] /other.html → 200 text/html, 69 bytes, on Chrome_IOThread (26958)
+      [console] other.html loaded
+--- window.open and a target=_blank link from script (no user gesture): browsers created since 0
+      [host] on_before_browse https://app.local/index.html main True gesture False on CrBrowserMain (26952): allow, answered by our thread after 34 ms
+      [handler] /index.html → 200 text/html, 933 bytes, on Chrome_IOThread (26958)
+      [handler] /style.css → 200 text/css, 31 bytes, on Chrome_IOThread (26958)
+      [console] page origin https://app.local secure true h1 colour rgb(200, 30, 40)
+      [handler] /missing.txt → 404 text/plain, 9 bytes, on Chrome_IOThread (26958)
+      [handler] /data.json → 200 application/json, 11 bytes, on Chrome_IOThread (26958)
+      [console] fetch /missing.txt → 404
+      [console] fetch /data.json → {"ok":true}
+[  8852.7 ms CrBrowserMain (26952)] on_before_popup: https://example.org/popup disposition CEF_WOD_NEW_FOREGROUND_TAB gesture 1
+[  9652.5 ms CrBrowserMain (26952)] on_before_popup: https://example.org/opened-by-click disposition CEF_WOD_NEW_FOREGROUND_TAB gesture 1
+--- a real click on the target=_blank link, and on a button calling window.open: browsers created since 0, last popup url https://example.org/opened-by-click
+      [host] on_before_popup https://example.org/popup on CrBrowserMain (26952): refuse
+      [host] on_before_popup https://example.org/opened-by-click on CrBrowserMain (26952): refuse
+--- NavigateToString as https://app.local/__string/1: title 'from a string'
+      [host] on_before_browse https://app.local/__string/1 main True gesture False on CrBrowserMain (26952): allow, answered by our thread after 34 ms
+      [handler] /__string/1 → 200 text/html, 283 bytes, on Chrome_IOThread (26958)
+      [console] string page origin https://app.local, text héllo · 日本
+      [console] srcdoc inside a served string: ok
+--- SIGKILL to 3 renderer(s)
+      [host] on_render_process_terminated TS_PROCESS_WAS_KILLED code 9 '9' on CrBrowserMain (26952)
+--- browser->reload after the crash: title 'from a string'
+      [host] on_before_browse https://app.local/__string/1 main True gesture False on CrBrowserMain (26952): allow, answered by our thread after 33 ms
+      [handler] /__string/1 → 200 text/html, 283 bytes, on Chrome_IOThread (26958)
+      [console] string page origin https://app.local, text héllo · 日本
+      [console] srcdoc inside a served string: ok
+[ 13987.2 ms CrBrowserMain (26952)] on_before_close: browser 1
+[ 13993.7 ms main          ] resource handlers made: 12; references still held on them by CEF: 0
+[ 14014.6 ms main          ] cef_shutdown returned after 18 ms; our refs: app=0, browser_process_handler=0, client=2, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, resource_handler=0, scheme_handler_factory=1, ui_task=0
+[ 14517.1 ms main          ] children left: 26946 zygote; 26947 zygote; 26950 zygote; 27059 (no type)

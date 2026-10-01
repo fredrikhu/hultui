@@ -62,6 +62,7 @@ runs this program again),
 | 4 | The message loop | **Both work; `multi_threaded_message_loop` is the simpler fit.** With it every callback (`on_paint`, `on_title_change`, `on_before_browse`, life span, load) arrives on CEF's own UI thread, `CrBrowserMain`, in our process, and our thread does nothing. `external_message_pump` delivers them on our thread, but **only with a fallback timer**: CEF asks for work once and then stalls unless the host also calls `cef_do_message_loop_work` at least every 33 ms (cefclient's rule); with it CEF asks ~1/s idle and 186/s animating, always "now". Costs are the same either way: ~18 ms/s idle and ~50 ms/s animating at 60 in our process, ~155 ms/s in CEF's. All three shut down with every reference returned and no process left once ours exits; until then zygotes and two zombie renderers outlive `cef_shutdown` (question 10). |
 | 5 | Input and focus | **All of it works off-screen.** Mouse coordinates are **view coordinates (DIP)**; clicks, right-clicks, `click_count` 2 for a double click, the wheel (−120 = one notch down, 120 CSS px, smooth). Keys: **`RAWKEYDOWN`, `CHAR`, `KEYUP`, each carrying the key's Windows code and its XKB `native_key_code`**, give a page exactly what a browser does; `native_key_code` is what fills `KeyboardEvent.code` (seam W6). Text with no key goes through `ime_commit_text`. Tab past the last element raises `on_take_focus`. `<select>` paints a `PET_POPUP` buffer at the device scale with its rectangle in DIP, and clicks inside it choose. IME composition and commit work, with character bounds in DIP. |
 | 6 | Script results and page messages without code in the renderer | **Yes, through the DevTools protocol; the helper stays 20 lines of C.** `Runtime.evaluate` (`returnByValue`, `awaitPromise`) answers `ExecuteScriptAsync` with JSON: values, objects, promises, exceptions; 0.29 ms median round trip. `Runtime.addBinding` + `Runtime.bindingCalled` carries the page's posts; a shim from `Page.addScriptToEvaluateOnNewDocument` (needs `Page.enable`) builds `window.chrome.webview` on it, on every new document. The origin: `Runtime.enable`'s `executionContextCreated` names each context's origin, and every post names its context. Cross-origin iframes are other targets: `Target.setAutoAttach(flatten)` and the same setup per session. Send on CEF's UI thread. |
+| 7 | Policy hooks | **All four work.** `on_before_browse` returning 1 cancels (`ERR_ABORTED`, the page stays), asked on `CrBrowserMain`, which waited 33 ms for our thread's answer. `on_before_popup` returning 1 refuses and names the URL, for a link with `target=_blank` and for `window.open`, on a user gesture; without one Chromium's popup blocker drops it before asking. `on_render_process_terminated` (`TS_PROCESS_WAS_KILLED`, 9) on SIGKILL, and `reload` brings the page back. A scheme handler factory for `https` + `app.local` serves a folder as a secure origin (`https://app.local`, `isSecureContext`), with 404s, on `Chrome_IOThread`; and `NavigateToString` served through it gets a real origin and no `data:` crash. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -406,3 +407,44 @@ origin.
 
 **So the helper needs no code of ours**, and stays the 20 lines of C from question 1. The
 render-process-handler fallback is not needed.
+
+### 7. Policy hooks
+
+`--loop=mt`; `results/q7.txt`.
+
+**`on_before_browse` cancels, synchronously, and can wait for HultUI's thread.** It is
+called on `CrBrowserMain` for every main-frame navigation (the first load, link clicks,
+`load_url`, `reload`), before any request. The spike's handler queued the request and blocked
+CEF's thread until our main thread answered, 30 ms later, as the controller's
+`WebNavigationRequest` continuation will: returning 1 for `/blocked.html` left the page where
+it was, its title unchanged, with `on_load_error ERR_ABORTED` for the URL and no request to
+the scheme handler; `/other.html` was allowed and loaded. `user_gesture` is 0 for
+`element.click()` from script and for `load_url`; `is_main` tells frames apart.
+
+**`on_before_popup` refuses, and names the URL.** On a real mouse click (`send_mouse_click_event`)
+on a `target=_blank` link and on a button calling `window.open(url)`, it was called on
+`CrBrowserMain` with the URL, `CEF_WOD_NEW_FOREGROUND_TAB` and `user_gesture` 1; returning 1
+created no browser (`on_after_created` never fired). From script without a gesture, neither
+reached the handler: Chromium's popup blocker drops them first, as in Chrome.
+`NewWindowRequested` therefore sees the popups a user asked for, which is what it is for.
+
+**`on_render_process_terminated`.** SIGKILL to the renderer processes:
+`TS_PROCESS_WAS_KILLED`, error code 9, on `CrBrowserMain`, at once. `browser->reload`
+afterwards started a new renderer and loaded the page again (through `on_before_browse`
+and the scheme handler), so `ProcessFailed(message, canReload: true)` holds.
+
+**`https://app.local/` from a folder.** `cef_register_scheme_handler_factory("https",
+"app.local", factory)`, on CEF's UI thread after context initialisation, returns 1; no custom
+scheme registration is needed for `https`. The factory's `create` is called on
+`Chrome_IOThread` for every request, including subresources and `fetch`, and returns a new
+`cef_resource_handler_t`: `open` (`handle_request = 1`: answered now), `get_response_headers`
+(status, MIME type, charset, length), `read` (copy, return 0 at the end), `skip`, `cancel`.
+The page is a secure context with origin `https://app.local`; its CSS applied
+(`rgb(200, 30, 40)`), `fetch('/data.json')` returned the file, `/missing.txt` and
+`/favicon.ico` got 404. Paths are resolved against the folder and anything that leaves it is
+a 404. All 12 handlers were released by CEF (reference counts back to 0).
+
+**`NavigateToString` through the handler.** A reserved path (`https://app.local/__string/1`)
+served from memory: title right, `héllo · 日本` intact (UTF-8 from the response's charset),
+origin `https://app.local`, and **the `srcdoc` iframe that crashes a `data:` page works**.
+That is the engine's `NavigateToString`.
