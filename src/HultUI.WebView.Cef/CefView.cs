@@ -156,6 +156,8 @@ internal sealed unsafe partial class CefView : IWebEngineView
         _render->on_popup_show = &OnPopupShow;
         _render->on_popup_size = &OnPopupSize;
         _render->on_ime_composition_range_changed = &OnImeCompositionRangeChanged;
+        _render->start_dragging = &StartDragging;
+        _render->update_drag_cursor = &UpdateDragCursor;
 
         _lifeSpan = CefObject.New<cef_life_span_handler_t>(this);
         _lifeSpan->on_after_created = &OnAfterCreated;
@@ -173,6 +175,8 @@ internal sealed unsafe partial class CefView : IWebEngineView
 
         _load = CefObject.New<cef_load_handler_t>(this);
         _load->on_loading_state_change = &OnLoadingStateChange;
+
+        CreatePolicyHandlers();
 
         var info = new cef_window_info_t { size = (ulong)sizeof(cef_window_info_t) };
         info.windowless_rendering_enabled = 1;
@@ -387,6 +391,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
             _phase = Phase.Disposed;
         }
         StringPages.Forget(_id);
+        AnswerEverythingOwed();
         OnUi(() =>
         {
             _devTools?.Dispose();
@@ -408,6 +413,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         CefObject.Release(_display); _display = null;
         CefObject.Release(_load); _load = null;
         CefObject.Release(_focus); _focus = null;
+        ReleasePolicyHandlers();
     }
 
     // ──── Callbacks: every one on CEF's UI thread; every struct CEF hands us is released, and
@@ -516,7 +522,13 @@ internal sealed unsafe partial class CefView : IWebEngineView
         cef_popup_features_t* features, cef_window_info_t* info, cef_client_t** client, cef_browser_settings_t* settings,
         cef_dictionary_value_t** extra, int* noJavascriptAccess)
     {
-        try { return 1; }
+        try
+        {
+            // Refused; the application hears where the page wanted to go, and decides.
+            if (Uri.TryCreate(CefString.Read(url), UriKind.Absolute, out var uri))
+                Of(s)?.Raise(new WebEngineEvent.NewWindowRequested(uri, userGesture != 0));
+            return 1;
+        }
         catch (Exception ex) { CefLog.Error("on_before_popup", ex); return 1; }
         finally
         {

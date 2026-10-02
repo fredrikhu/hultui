@@ -196,12 +196,30 @@ internal static unsafe partial class CefRuntime
     /// questions 1, 3 and 8): Wayland needs fractional scaling off, or the scale the engine
     /// gives is ignored; with no window system, headless, with ANGLE on GL for the GPU.
     /// </summary>
-    internal static IEnumerable<(string Name, string? Value)> Switches(string? windowSystem) => windowSystem switch
+    internal static IEnumerable<(string Name, string? Value)> Switches(string? windowSystem, string? extra = null)
     {
-        "wayland" => [("ozone-platform", "wayland"), ("disable-features", "WaylandFractionalScaleV1")],
-        "x11" => [("ozone-platform", "x11")],
-        _ => [("ozone-platform", "headless"), ("use-angle", "gl-egl")],
-    };
+        IEnumerable<(string Name, string? Value)> own = windowSystem switch
+        {
+            "wayland" => [("ozone-platform", "wayland"), ("disable-features", "WaylandFractionalScaleV1")],
+            "x11" => [("ozone-platform", "x11")],
+            _ => [("ozone-platform", "headless"), ("use-angle", "gl-egl")],
+        };
+        return own.Concat(ExtraSwitches(extra));
+    }
+
+    /// <summary>
+    /// <c>HULTUI_CEF_SWITCHES</c>: more of Chromium's switches, for diagnosis and tests, as
+    /// <c>name[=value]</c> separated by spaces (the tests' fake camera and microphone, say).
+    /// </summary>
+    internal static IEnumerable<(string Name, string? Value)> ExtraSwitches(string? text)
+    {
+        foreach (var part in (text ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var s = part.TrimStart('-');
+            int eq = s.IndexOf('=');
+            if (s.Length > 0) yield return eq < 0 ? (s, null) : (s[..eq], s[(eq + 1)..]);
+        }
+    }
 
     [UnmanagedCallersOnly]
     private static void OnBeforeCommandLine(cef_app_t* self, cef_string_utf16_t* processType, cef_command_line_t* cl)
@@ -209,7 +227,7 @@ internal static unsafe partial class CefRuntime
         try
         {
             if (CefString.Read(processType) != "") return;   // the browser process only
-            foreach (var (name, value) in Switches(_windowSystem))
+            foreach (var (name, value) in Switches(_windowSystem, Environment.GetEnvironmentVariable("HULTUI_CEF_SWITCHES")))
             {
                 var n = CefString.Make(name);
                 if (value is null) cl->append_switch(cl, &n);

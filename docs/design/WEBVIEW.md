@@ -806,6 +806,55 @@ engine if it changed, but nothing more.
      (`"\u65e5"`), as DevTools writes them; they are written again, as WebView2 gives them
      (`"日本"`). 7 engine tests (`CefInputTests`) and 3 element tests (shortcuts, the scan
      code, the input area).
+   - **5.4, navigation, policy, the four requests, drags: done 2026-10-02.**
+     **Navigation:** `on_before_browse` (main frame) raises `NavigationStarting` and CEF's
+     thread waits for the controller's answer, the allowed direction; a redirect is asked
+     again under the same id, with `IsRedirect`. `on_load_end` completes it with the status,
+     `on_load_error` with WebView2's error names (`HostNameNotResolved`, `CannotConnect`,
+     `Cancelled`, the certificate ones; `Unknown` for the rest); a 4xx or 5xx page completes
+     unsuccessful with its status, as WebView2's does. A refused navigation completes
+     `Cancelled` once, and CEF's own `ERR_ABORTED` for it is swallowed. Each navigation is kept
+     with its address, so one replaced while still loading ends `Cancelled` and the
+     newer one completes for itself. A string document's
+     navigation reads `about:blank`, as its address does. **Nothing left waiting:** every
+     answer CEF is owed is kept with its default; disposal and process exit
+     (`CefRuntime.ShuttingDown`) give each its default, so a navigation still waiting is
+     cancelled and CEF's thread freed. **New windows:** `on_before_popup` refuses and raises
+     `NewWindowRequested` with the address and the user gesture. **The page's process:**
+     `on_render_process_terminated` is `ProcessFailed` (`CanReload`), and the next navigation
+     brings a new renderer. **Context menu:** `run_context_menu` keeps the callback; CEF's
+     model becomes the engine items under WebView2's names (`cut`, `copy`, `paste`,
+     `pasteAndMatchStyle`, `selectAll`, the spelling ones as `spellCheck`; back, reload,
+     print and view source under names the standard menu leaves out), the point is CEF's
+     view coordinates times the scale (device pixels, as WebView2's needed), and a choice is
+     `cont` with its command id. CEF gives no link text (`Target.LinkText` stays null) and,
+     off-screen, no "inspect". **Script dialogs:** `on_jsdialog` and
+     `on_before_unload_dialog`; the origin is the page's (null for a string document); left
+     unanswered at disposal, a dialog gets "no" (leave, for before-unload). **Downloads:**
+     `on_before_download` raises `DownloadRequested` and keeps the callback; not answered,
+     nothing is saved; `SaveTo` continues to that path without CEF's dialog, and
+     `on_download_updated` reports progress and the end on the UI thread (`IWebViewHost.Post`);
+     a cancel waits for the item's callback if CEF has not given it yet. **Permissions:**
+     found when built, CEF's off-screen (Alloy-style) browsers have no permission prompts:
+     notifications, geolocation, the clipboard and the rest are denied before the application
+     hears of them, and `on_show_permission_prompt` is never called (it is wired, for a CEF
+     that does). The camera and microphone are asked through
+     `on_request_media_access_permission`, one `PermissionRequested` per device, and given
+     only if every one asked is allowed (CEF takes all or none). A Linux limit, in
+     `docs/WEBVIEW.md`. Tests get a fake camera and microphone through a new
+     `HULTUI_CEF_SWITCHES` (Chromium switches, for diagnosis). **Drags in:** `SendDrag`
+     builds a drag data object from the files and text and calls the drag-target functions;
+     whether the page takes it is CEF's last `update_drag_cursor`, which comes after the step
+     (HultUI's thread does not wait), so the answer lags one step. SDL names a drag's files
+     only at the drop, so a drop carrying what the enter did not enters again with them, and
+     steps twice before dropping: Blink fires `dragenter` when the target changes and
+     `dragover` only at the step after, and a drop with no `dragover` taken is a navigation to
+     the file. **Drags the page starts:** `start_dragging` is taken (1) and the drag carried
+     inside the page by the pointer events that follow (moves are `drag_target_drag_over`, the
+     button's release the drop, then `drag_source_ended_at` and `system_drag_ended`); it cannot
+     leave the page for another application, which needs an operating-system drag source the
+     Linux side does not have (a Linux limit). Tests answer `NavigationStarting` as the
+     controller does (an internals-visible hook). 21 engine tests (`CefPolicyTests`).
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

@@ -628,7 +628,10 @@ In this order; each ends with its tests green and the step written into
    that is the Linux twin of `WindowsDropTarget` (XDND and the Wayland data device under
    SDL), a platform change of its own; note it, do not start it unasked. A drag that starts in
    the page comes to the host through CEF's start-dragging callback, which the host must turn
-   into a real drag.
+   into a real drag. **Done 2026-10-02**, with two differences from this text, in
+   `WEBVIEW.md`: off-screen CEF denies every permission but the camera and microphone without
+   asking, and a page's drag is carried inside the page, not turned into a real drag (no
+   drag source on the Linux side), so it cannot be dropped on another application.
 5. **Zero-copy.** A `IGpuFrameRenderer` registered through `IWebViewHost.UseGpuRenderer`, as
    the Windows engine's `CaptureRenderer` and the mpv backend do. Seam W7 is done: on
    Vulkan each GPU source is lent a shared image of its own, with its own semaphores.

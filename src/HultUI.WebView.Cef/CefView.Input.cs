@@ -31,6 +31,7 @@ internal sealed unsafe partial class CefView
                 y = (int)MathF.Floor(i.Y / scale),
                 modifiers = CefKeys.Flags(i.Modifiers) | ButtonFlags(i.Held),
             };
+            if (CarryPageDrag(i, &e)) return;
             switch (i.Action)
             {
                 case WebPointerAction.Move:

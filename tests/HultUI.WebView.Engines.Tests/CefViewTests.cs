@@ -40,6 +40,7 @@ public sealed class CefViewTests : IDisposable
     {
         _view = (CefView)_engine.CreateView(new WebViewOptions());
         _view.Event += _events.Enqueue;
+        _view.Event += CefPolicyTests.AllowNavigation;
         _view.Attach(_host);
     }
 

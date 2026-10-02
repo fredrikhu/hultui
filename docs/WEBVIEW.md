@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus and the input method work; navigation policy, zero-copy and accessibility follow. |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work; zero-copy and accessibility follow. |
 
 An app that never shows a web page references none of these and pays nothing.
 
@@ -175,8 +175,10 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
 - Drag and drop needs `[STAThread]` on Windows: files and text dropped from outside reach the
   page, drags inside the page work, and a page's drag can be dropped on another application.
   A page learns of a drag about a quarter of a second after it enters (Edge is quicker: its
-  drop target is in the browser's own process). On Linux, drops wait
-  for the CEF engine.
+  drop target is in the browser's own process). On Linux, files and text dropped from
+  outside reach the page, and drags inside the page work, but **a page's drag cannot be
+  dropped on another application**; and as SDL names a drag's files only at the drop, a
+  page's drop zone learns what is coming only then (it can still take the drop).
 - On Linux, **one profile per process**. CEF keeps cookies, storage and cache in one folder
   per process, and the first page's `UserDataFolder` decides which (the application's
   default, `~/.local/share/<app>/CEF`, when it names none). A later page may name that folder,
@@ -187,6 +189,12 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
   allows one browser per profile, so the second copy of an application cannot share the
   first's: its pages work, but without the first's cookies and storage, and what it stores is
   deleted when it exits. On Windows, instances share their user data folder's browser.
+- On Linux, **pages are asked only for the camera and microphone.** CEF's off-screen pages
+  have no permission prompts: notifications, location, the clipboard, MIDI, window placement
+  and the rest are denied without `PermissionRequested`. The camera and microphone are asked
+  one request per device, and given only if all asked are allowed.
+- On Linux, a context menu's `Target.LinkText` is always null (CEF does not give it), and
+  there is no "inspect" entry.
 - On Linux, **pages under X11 take the pixel path**: GPU zero-copy needs HultUI's window on
   Wayland (EGL; under X11 HultUI's GL context is GLX, which cannot take CEF's buffers).
 - The CEF engine is being built (above); `FakeWebEngine` runs anywhere.

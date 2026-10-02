@@ -74,6 +74,7 @@ static async Task<int> Folders(CefEngine engine, string root)
         var view = engine.CreateView(new HultUI.WebView.WebViewOptions { UserDataFolder = folder });
         var events = new System.Collections.Concurrent.ConcurrentQueue<HultUI.WebView.WebEngineEvent>();
         view.Event += events.Enqueue;
+        view.Event += e => { if (e is HultUI.WebView.WebEngineEvent.NavigationStarting s) s.Request.Complete(); };   // as the controller does
         view.Attach(new Host());
         view.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 200, 100), 1f));
         for (int i = 0; i < 1500 && !events.Any(e => e is HultUI.WebView.WebEngineEvent.Ready or HultUI.WebView.WebEngineEvent.Failed); i++)
