@@ -14,6 +14,10 @@ public abstract record InputEvent
     public record MouseWheelInput(float MouseX, float MouseY, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
     /// <summary>The pointer left the window. No position: it is somewhere else now.</summary>
     public record PointerLeftWindowInput() : InputEvent;
+    /// <param name="KeyCode">The key, by its position on a US layout.</param>
+    /// <param name="Modifiers">The modifiers held with it.</param>
+    /// <param name="IsDown">Pressed rather than released.</param>
+    /// <param name="IsRepeat">The key held down, repeating.</param>
     /// <param name="ScanCode">The physical key as the platform reports it: SDL's scancode, which
     /// is the USB HID usage on the keyboard page. 0 when the platform gave none.</param>
     public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat, ushort ScanCode = 0) : InputEvent;

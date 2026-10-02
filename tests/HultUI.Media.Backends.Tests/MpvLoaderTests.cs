@@ -42,11 +42,13 @@ public class MpvLoaderTests : IDisposable
     public void UnderADistributionsOwnRid_ThePortableRidsFolderIsSearchedToo()
     {
         // Fedora's own .NET reports fedora.44-x64; the natives package's folder is linux-x64.
+        // Built with the platform's separator, as the resolver builds them: this runs on Windows too.
+        static string Native(string rid) => Path.Combine("/app", "runtimes", rid, "native");
         var dirs = Mpv.Mpv.CandidateDirectories(null, "/app", "fedora.44-x64", "linux-x64");
-        Assert.Equal(["/app", "/app/runtimes/fedora.44-x64/native", "/app/runtimes/linux-x64/native", null], dirs);
+        Assert.Equal(["/app", Native("fedora.44-x64"), Native("linux-x64"), null], dirs);
 
         var portable = Mpv.Mpv.CandidateDirectories("/hint", "/app", "linux-x64", "linux-x64");
-        Assert.Equal(["/hint", "/app", "/app/runtimes/linux-x64/native", null], portable);
+        Assert.Equal(["/hint", "/app", Native("linux-x64"), null], portable);
     }
 
     [Fact]

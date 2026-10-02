@@ -705,6 +705,40 @@ Also write into `docs/WEBVIEW.md`'s limits what an application meets on Linux: t
 rule above; a second instance runs on a temporary profile (no shared cookies, unlike
 WebView2); and pages under X11 take the pixel path.
 
+## Review of steps 5.3 and 5.4 (2026-10-02)
+
+Read on the Windows side, with the whole solution built and tested on Windows. **It stands.**
+Checked in particular: seam W6 from SDL's scancode through `KeyInput`, the key events and
+`WebKeyInput`; `InputAreaChanged` to the window's input method; the navigation wait (CEF's
+thread waits one hop to HultUI's, since a `WebNavigationRequest` cannot be deferred, and every
+answer still owed gets its default at disposal and exit); the move of the release transport to
+`scripts/`, whose callers were all updated and which finds its Python half from its own
+directory. The limits found while building (permissions, drags out, the context menu) are
+the engine's, written down where an application will read them, and accepted.
+
+1. **The signal test cannot see a replaced handler.** It compares which signals are caught
+   (`SigCgt`) before and after CEF. Chromium taking `SIGCHLD` was exactly such a replacement:
+   caught before and after, by someone else. Compare each signal's handler (the
+   `sa_sigaction` address, the first field of the saved `sigaction`) for every signal .NET
+   had caught before CEF. That also covers what the two behaviour checks do not: `SIGRTMIN`,
+   with which .NET suspends threads for the garbage collector, and `SIGTERM`, `SIGINT` and
+   `SIGQUIT`, through which it shuts down cleanly.
+2. **The process tests' one timeout.** Three tests that start a process timed out together
+   once in about ten runs and never again. Too little to act on; if it comes back, have the
+   test print what is still running (`pgrep -af type=`) and the child's standard error
+   before it fails, so the next one says why.
+3. **Fixed on the Windows side** (pull before you start): `docs/ENVIRONMENT.md` had none of
+   the web view's variables, the WebView2 ones included; it has a section now, with
+   `HULTUI_CEF_SWITCHES` marked as not a supported way to configure an application.
+   `KeyInput`, `WebKeyInput` and the headless `KeyDown`/`KeyUp` documented only their new
+   scan code, which made the compiler warn about the rest; all documented now. And
+   `MpvLoaderTests.UnderADistributionsOwnRid_ThePortableRidsFolderIsSearchedToo` failed on
+   Windows, which runs it too, for expecting `/` from `Path.Combine`: it builds its expected
+   paths the same way now. **Rule for tests here: a test that runs on Windows builds its
+   expected paths with `Path.Combine`; one about Linux's paths or processes is
+   `[LinuxFact]`.** Windows CI runs the whole solution, so this is the second time it would
+   have gone red at the next merge.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

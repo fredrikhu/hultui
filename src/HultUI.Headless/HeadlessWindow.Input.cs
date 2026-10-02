@@ -169,10 +169,17 @@ public sealed partial class HeadlessWindow
         _platform.RaiseInput(new InputEvent.DropCompleteInput(modifiers));
     }
 
+    /// <summary>A key pressed.</summary>
+    /// <param name="key">The key.</param>
+    /// <param name="modifiers">The modifiers held with it.</param>
+    /// <param name="repeat">The key held down, repeating.</param>
     /// <param name="scanCode">The physical key, as SDL would report it (the USB HID usage); 0 for none.</param>
     public void KeyDown(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, bool repeat = false, ushort scanCode = 0)
         => _platform.RaiseInput(new InputEvent.KeyInput(key, modifiers, IsDown: true, IsRepeat: repeat, ScanCode: scanCode));
 
+    /// <summary>A key released.</summary>
+    /// <param name="key">The key.</param>
+    /// <param name="modifiers">The modifiers held with it.</param>
     /// <param name="scanCode">The physical key, as SDL would report it (the USB HID usage); 0 for none.</param>
     public void KeyUp(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, ushort scanCode = 0)
         => _platform.RaiseInput(new InputEvent.KeyInput(key, modifiers, IsDown: false, IsRepeat: false, ScanCode: scanCode));
