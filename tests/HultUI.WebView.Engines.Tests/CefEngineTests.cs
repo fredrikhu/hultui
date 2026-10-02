@@ -267,8 +267,28 @@ public class CefEngineTests
         var before = run.Output.Split('\n').First(l => l.StartsWith("before CEF:"))["before CEF:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var after = run.Output.Split('\n').First(l => l.StartsWith("after CEF:"))["after CEF:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         Assert.Empty(before.Except(after));
+        // Caught is not enough: Chromium's SIGCHLD was caught before and after, by Chromium.
+        // Every handler .NET had (SIGRTMIN for the collector's suspensions, TERM, INT and QUIT
+        // for a clean exit, the faults for exceptions) is still .NET's.
+        Assert.Contains("handlers changed by CEF's start: none", run.Output);
+        Assert.Contains("handlers changed by a page: none", run.Output);
+        Assert.Matches(@"handlers changed by a page: none \(of \d+: .*\bSEGV\b.*\bTERM\b.*\bCHLD\b", run.Output);
         Assert.Contains("a process started after CEF is seen to exit: True", run.Output);
         Assert.Contains("a null dereference is a NullReferenceException", run.Output);
+    }
+
+    [CefFact]
+    public void AnApplicationsSignalHandler_Runs_AndCefStopsCleanly()
+    {
+        // Chromium took SIGTERM and SIGINT for a shutdown of its own: an application's
+        // PosixSignalRegistration (or Console.CancelKeyPress) never ran.
+        var mark = Guid.NewGuid().ToString("N");
+        var run = RunCefProcess(mark, ["--on-term", "--hold", "30000"], terminateAfterMs: 4000);
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("started: CEF ", run.Output);
+        Assert.Contains("the application's SIGTERM handler ran", run.Output);
+        Assert.Contains("process exit: shutting down", run.Output);
+        Assert.Matches(@"shut down in \d+ ms on 'CEF startup'", run.Output);
     }
 
     [LinuxFact]
@@ -280,7 +300,13 @@ public class CefEngineTests
     [System.Runtime.InteropServices.DllImport("libc")]
     private static extern int gettid();
 
+    [System.Runtime.InteropServices.DllImport("libc")]
+    private static extern int kill(int pid, int signal);
+
     private static (int ExitCode, string Output) RunCefProcess(string mark, params string[] args)
+        => RunCefProcess(mark, args, terminateAfterMs: null);
+
+    private static (int ExitCode, string Output) RunCefProcess(string mark, string[] args, int? terminateAfterMs)
     {
         const string name = "HultUI.WebView.Engines.Tests.CefProcess";
         // Beside this test project: tests/<name>/bin/<config>/<tfm>/, as this assembly is.
@@ -299,13 +325,17 @@ public class CefEngineTests
         using var p = Process.Start(start)!;
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
+        if (terminateAfterMs is { } wait && !p.WaitForExit(wait)) kill(p.Id, 15);   // SIGTERM, as a kill does
         if (!p.WaitForExit(60_000))
         {
+            // Review of 5.3 and 5.4, item 2: say what was still running, so a timeout says why.
+            var running = string.Join("\n", ProcessesMarked(mark));
             p.Kill(entireProcessTree: true);
             p.WaitForExit(5000);
             // Bounded: a pipe may be held open by what the child left behind.
             Task.WaitAll([stdout, stderr], 5000);
-            return (-1, "timed out\n" + (stdout.IsCompleted ? stdout.Result : "") + "\n--- stderr ---\n" + (stderr.IsCompleted ? stderr.Result : ""));
+            return (-1, "timed out\n" + (stdout.IsCompleted ? stdout.Result : "") + "\n--- stderr ---\n" + (stderr.IsCompleted ? stderr.Result : "")
+                + "\n--- still running ---\n" + running);
         }
         return (p.ExitCode, stdout.Result + stderr.Result);
     }

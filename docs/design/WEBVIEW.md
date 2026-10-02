@@ -855,6 +855,17 @@ engine if it changed, but nothing more.
      leave the page for another application, which needs an operating-system drag source the
      Linux side does not have (a Linux limit). Tests answer `NavigationStarting` as the
      controller does (an internals-visible hook). 21 engine tests (`CefPolicyTests`).
+   - **The review of 5.3 and 5.4, item 1, found a real loss: done 2026-10-03.** Comparing each
+     signal's handler, not only whether it is caught, showed Chromium also takes **SIGINT and
+     SIGTERM** (and installs SIGHUP) for a shutdown of its own: an application's
+     `PosixSignalRegistration` or `Console.CancelKeyPress` never ran, and Ctrl+C or a `kill`
+     ended the process Chromium's way. Every signal's action is now saved before
+     `cef_initialize` and put back when the context is up (SIGCHLD's save was the special case
+     of it). Tests: the handler of every signal .NET had caught is the same after CEF's start
+     and after a page's renderer starts; an application's SIGTERM handler, made before CEF, runs
+     and exits with CEF stopped cleanly (it fails without the fix). Plain .NET, without CEF,
+     ends on SIGTERM with 143 and no `ProcessExit` too; that is .NET's default, not CEF's. A
+     process test that times out now also prints what of its was still running (item 2).
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

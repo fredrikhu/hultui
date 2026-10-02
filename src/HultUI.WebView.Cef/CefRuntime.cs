@@ -131,10 +131,12 @@ internal static unsafe partial class CefRuntime
             var argv0 = Marshal.StringToCoTaskMemUTF8(Environment.ProcessPath ?? "hultui");
             var argv = stackalloc byte*[2] { (byte*)argv0, null };
             var mainArgs = new cef_main_args_t { argc = 1, argv = argv };
-            // Even so, Chromium takes SIGCHLD while it starts, and .NET's Process learns of a
-            // child's exit only through its own handler: WaitForExit would never return, for any
-            // process the application starts. Put .NET's back once CEF is up.
-            _dotnetSigChld = SaveSignal(SIGCHLD);
+            // Even so, Chromium takes signals while it starts: SIGCHLD, and .NET's Process learns
+            // of a child's exit only through its own handler (WaitForExit would never return, for
+            // any process the application starts); and SIGINT, SIGTERM and SIGHUP for a shutdown
+            // of its own, so Ctrl+C or a kill skipped .NET's (no ProcessExit, no CancelKeyPress).
+            // Every signal's action from before is put back once CEF is up.
+            _before = SaveSignals();
             int ok = Capi.cef_initialize(&mainArgs, &settings, CefObject.Give(_app), null);
             if (ok != 1)
             {
@@ -263,7 +265,7 @@ internal static unsafe partial class CefRuntime
                 if (_state != State.Starting) return;
                 _state = State.Running;
             }
-            if (_dotnetSigChld is { } saved) RestoreSignal(SIGCHLD, saved);
+            if (_before is { } before) RestoreSignals(before);
             StringPages.Register();
             _started!.TrySetResult(null);
         }
@@ -394,8 +396,23 @@ internal static unsafe partial class CefRuntime
     [LibraryImport("libc", EntryPoint = "gethostname")]
     private static partial int gethostname(byte* name, nuint length);
 
-    private const int SIGCHLD = 17;
-    private static byte[]? _dotnetSigChld;
+    private static Dictionary<int, byte[]>? _before;
+
+    /// <summary>Every signal's action, but those no process may change (KILL, STOP) and glibc's
+    /// own two below SIGRTMIN.</summary>
+    internal static Dictionary<int, byte[]> SaveSignals()
+    {
+        var saved = new Dictionary<int, byte[]>();
+        for (int n = 1; n <= 64; n++)
+            if (n is not (9 or 19 or 32 or 33)) saved[n] = SaveSignal(n);
+        return saved;
+    }
+
+    internal static void RestoreSignals(Dictionary<int, byte[]> saved)
+    {
+        foreach (var (n, action) in saved)
+            if (!SaveSignal(n).AsSpan().SequenceEqual(action)) RestoreSignal(n, action);
+    }
 
     /// <summary>The <c>sigaction</c> of a signal, as an opaque buffer (larger than glibc's struct).</summary>
     internal static byte[] SaveSignal(int signal)

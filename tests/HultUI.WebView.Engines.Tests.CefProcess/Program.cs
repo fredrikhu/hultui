@@ -12,27 +12,51 @@ if (!engine.Availability.IsAvailable)
 CefRuntime.ShuttingDown += () => Console.WriteLine("process exit: shutting down");
 CefRuntime.ShutDown += took => Console.WriteLine($"shut down in {took.TotalMilliseconds:F0} ms on '{Thread.CurrentThread.Name}'");
 
+// An application's own SIGTERM handler, made before CEF starts as an application's would be,
+// which Chromium's had replaced: it runs, and exiting from it stops CEF cleanly.
+using var onTerm = args.Contains("--on-term") ? System.Runtime.InteropServices.PosixSignalRegistration.Create(
+    System.Runtime.InteropServices.PosixSignal.SIGTERM, context =>
+    {
+        Console.WriteLine("the application's SIGTERM handler ran");
+        context.Cancel = true;
+        Environment.Exit(0);
+    }) : null;
 if (args.Contains("--signals"))
 {
     static string Caught() => File.ReadLines("/proc/self/status").First(l => l.StartsWith("SigCgt:"))[7..].Trim();
+    static string Name(int n) => n switch
+    {
+        1 => "HUP", 2 => "INT", 3 => "QUIT", 4 => "ILL", 6 => "ABRT", 7 => "BUS", 8 => "FPE", 11 => "SEGV", 13 => "PIPE",
+        15 => "TERM", 17 => "CHLD", 18 => "CONT", 28 => "WINCH", _ => n.ToString(),
+    };
     static string Names(string mask)
     {
         var bits = Convert.ToUInt64(mask, 16);
-        return string.Join(" ", Enumerable.Range(1, 64).Where(n => (bits & (1UL << (n - 1))) != 0).Select(n => n switch
-        {
-            1 => "HUP", 2 => "INT", 3 => "QUIT", 4 => "ILL", 6 => "ABRT", 7 => "BUS", 8 => "FPE", 11 => "SEGV", 13 => "PIPE",
-            15 => "TERM", 17 => "CHLD", 18 => "CONT", 28 => "WINCH", _ => n.ToString(),
-        }));
+        return string.Join(" ", Enumerable.Range(1, 64).Where(n => (bits & (1UL << (n - 1))) != 0).Select(Name));
     }
     // .NET's SIGCHLD handler arrives with the first process it starts.
     using (var early = System.Diagnostics.Process.Start("true")) early!.WaitForExit();
+    var caught = Convert.ToUInt64(Caught(), 16);
+    // Each caught signal's handler: the first field of its sigaction, sa_handler/sa_sigaction.
+    // Caught by someone else is still caught, so whose handler it is must be compared.
+    var handlers = Enumerable.Range(1, 64).Where(n => (caught & (1UL << (n - 1))) != 0)
+        .ToDictionary(n => n, n => BitConverter.ToUInt64(CefRuntime.SaveSignal(n), 0));
+    void Compare(string when)
+    {
+        var changed = handlers.Where(h => BitConverter.ToUInt64(CefRuntime.SaveSignal(h.Key), 0) != h.Value)
+            .Select(h => Name(h.Key)).ToList();
+        Console.WriteLine($"handlers changed {when}: " + (changed.Count == 0 ? "none" : string.Join(" ", changed))
+            + $" (of {handlers.Count}: {string.Join(" ", handlers.Keys.Select(Name))})");
+    }
     Console.WriteLine("before CEF: " + Names(Caught()));
     var started = CefRuntime.Start(windowSystem: null).Wait(TimeSpan.FromSeconds(20));
     Console.WriteLine("after CEF:  " + Names(Caught()) + (started ? "" : " (did not start)"));
+    Compare("by CEF's start");
     var view = engine.CreateView(new HultUI.WebView.WebViewOptions());   // a renderer starts too
     view.Attach(new Host());
     view.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 200, 100), 1f));
     Thread.Sleep(1500);
+    Compare("by a page");
     using (var p = System.Diagnostics.Process.Start("true")!)
         Console.WriteLine("a process started after CEF is seen to exit: " + p.WaitForExit(5000));
     try { object? o = null; _ = o!.ToString(); }

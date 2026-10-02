@@ -723,6 +723,9 @@ the engine's, written down where an application will read them, and accepted.
    had caught before CEF. That also covers what the two behaviour checks do not: `SIGRTMIN`,
    with which .NET suspends threads for the garbage collector, and `SIGTERM`, `SIGINT` and
    `SIGQUIT`, through which it shuts down cleanly.
+   **Done 2026-10-03, and it found one:** Chromium had taken SIGINT and SIGTERM too, so an
+   application's own handlers for them never ran. Every signal is restored now; see
+   `WEBVIEW.md`.
 2. **The process tests' one timeout.** Three tests that start a process timed out together
    once in about ten runs and never again. Too little to act on; if it comes back, have the
    test print what is still running (`pgrep -af type=`) and the child's standard error
