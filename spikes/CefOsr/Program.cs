@@ -31,6 +31,7 @@ return probe switch
     "q8" => Q8.Run(opt),
     "q9" => Q9.Run(opt),
     "q10" => Q10.Run(opt),
+    "lifetime" => Lifetime.Run(opt),
     _ => Fail($"unknown probe {probe}"),
 };
 

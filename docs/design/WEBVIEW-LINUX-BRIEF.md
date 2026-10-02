@@ -598,7 +598,8 @@ In this order; each ends with its tests green and the step written into
 1. **`HultUI.WebView.Cef`: the directory search, `Availability`, initialise and shut down.**
    Struct layouts generated from the `capi` headers. Tests in
    `tests/HultUI.WebView.Engines.Tests`, skipped when no CEF is found (the CI runner is
-   Ubuntu and has none).
+   Ubuntu and has none). **Done 2026-10-02**; `WEBVIEW.md`'s implementation order has what was
+   built and found.
 2. **Pixels.** `on_paint` into `IWebViewHost.Pixels`. `SetPlacement` gives device pixels and a
    scale: the view rectangle is pixels divided by scale. The sample's `--check` passes on
    Linux, JIT and NativeAOT.

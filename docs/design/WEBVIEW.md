@@ -662,6 +662,39 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
+   - **5.1, find and start CEF: done 2026-10-02** (`src/HultUI.WebView.Cef`). The C API's
+     structs, enums and exports are generated from the `capi` headers at API version 14600
+     (`scripts/generate-cef-interop.py`, `Interop/Capi.g.cs`: 170 structs, offsets measured
+     by the C compiler). `CefEngine.Availability` finds a CEF directory in the brief's order
+     (`HULTUI_CEF_DIR`, the app's `cef/`, its `runtimes/<rid>/native/cef/`, `/usr/lib64/cef`,
+     `/usr/lib/cef`), insists on the resources beside the library (and says when the official
+     distribution's `Resources/` was not merged), loads it, and makes the API handshake: an
+     unsupported version answers null rather than aborting, and `cef_version_info` works
+     before it, so a too-old CEF is reported, not fatal. The helper,
+     `native/cef-helper/hultui-cef-helper.c`, is built by the engine's own Linux build when a
+     C compiler is there and copied beside every application as `runtimes/<rid>/native/`; a
+     workflow builds both RIDs and packs them. It reads the CEF directory and API version
+     from the environment the engine sets, so it is tied to neither.
+     **CEF is a per-process singleton** (`CefRuntime`): it starts at the first page, on a
+     thread of its own that makes `cef_initialize` and, at `ProcessExit`, `cef_shutdown`
+     (CEF wants both on one thread; an application's UI thread may come and go). Engines are
+     handles onto it, so a second `CefEngine` after the first is disposed works. With
+     `multi_threaded_message_loop`, CEF's callbacks arrive on `CrBrowserMain`; work for it is
+     posted with `cef_post_task`. Ozone follows the window system (`wayland` with
+     `WaylandFractionalScaleV1` disabled, `x11`, or `headless` with ANGLE on GL), merging
+     CEF's own `disable-features`. 11 tests in `HultUI.WebView.Engines.Tests` (the CEF ones
+     skip without CEF), one through a process of its own
+     (`HultUI.WebView.Engines.Tests.CefProcess`): it starts CEF, returns from `Main`, and is
+     seen to shut CEF down on its startup thread with no process carrying its environment
+     left behind.
+     Found while building it: **the profile is named after the entry assembly**, not the
+     executable (under `dotnet app.dll` every application was "dotnet"); **a second instance
+     of an application cannot share its profile** (Chromium's `SingletonLock`: the second
+     `cef_initialize` hands over to the first, "Opening in existing browser session", and
+     fails), so the engine checks the lock and starts a second instance on a temporary
+     profile, deleted when it exits, which a test shows; and a distribution's .NET reports
+     its own RID (`fedora.44-x64`), so natives are looked for under the portable one
+     (`linux-x64`).
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

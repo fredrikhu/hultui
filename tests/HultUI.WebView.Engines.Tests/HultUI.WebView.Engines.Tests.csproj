@@ -19,6 +19,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI.WebView.WebView2\HultUI.WebView.WebView2.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.WebView.Cef\HultUI.WebView.Cef.csproj" />
+    <!-- CEF starts once per process and stops when it exits: the lifetime tests watch a
+         process of their own. -->
+    <ProjectReference Include="..\HultUI.WebView.Engines.Tests.CefProcess\HultUI.WebView.Engines.Tests.CefProcess.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,43 @@
+# Builds hultui-cef-helper (native/cef-helper/README.md) for linux-x64 and linux-arm64 and
+# packs HultUI.WebView.Cef with both under runtimes/<rid>/native.
+#
+# The helper is forty lines of C that change only when its source does, so this runs on
+# changes to it and by hand. A Linux build of the engine compiles its own machine's helper
+# anyway; this is for a package that carries both architectures.
+#
+# Runs on the self-hosted Linux runner (docs/SELF-HOSTED-RUNNERS.md). linux-arm64 needs a
+# cross compiler (Ubuntu: gcc-aarch64-linux-gnu); without one the job says so and packs
+# linux-x64 alone.
+
+name: cef helper
+
+on:
+  push:
+    paths: ['native/cef-helper/**', 'src/HultUI.WebView.Cef/HultUI.WebView.Cef.csproj']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build linux-x64
+        run: native/cef-helper/build.sh linux-x64
+
+      - name: Build linux-arm64
+        run: |
+          if command -v aarch64-linux-gnu-gcc >/dev/null; then
+            native/cef-helper/build.sh linux-arm64 aarch64-linux-gnu-gcc
+          else
+            echo "::warning::No aarch64-linux-gnu-gcc on this runner: the package carries linux-x64 only."
+          fi
+
+      - name: Pack HultUI.WebView.Cef
+        run: dotnet pack src/HultUI.WebView.Cef/HultUI.WebView.Cef.csproj -c Release -o artifacts
+
+      - name: Keep the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: hultui-webview-cef
+          path: artifacts/*.nupkg
