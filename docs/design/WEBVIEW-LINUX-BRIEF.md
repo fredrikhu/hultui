@@ -453,9 +453,11 @@ both; `cef_shutdown`. What must be released, in what order, for the process to e
 >   the process exits and nothing is orphaned. A debug `libcef` would assert on the first two;
 >   the engine keeps the documented order.
 
-## Spike L0: recommendations (not yet decided)
+## Spike L0: recommendations, decided 2026-10-02
 
-Each is the spike's answer to one of "yours to decide"; none is built yet.
+Each is the spike's answer to one of "yours to decide". The owner decided them on
+2026-10-02, after the Windows side's review below; where the review changed one, the decision
+says so. None is built yet.
 
 1. **The helper process: a separate C executable**, about 20 lines (`spikes/CefOsr/Helper/helper.c`):
    `dlopen` libcef, `cef_api_hash` with the engine's API version, `cef_execute_process`. No
@@ -463,44 +465,50 @@ Each is the spike's answer to one of "yours to decide"; none is built yet.
    app's `Main`, does not depend on the CEF release (only on the API version), and finds
    libcef through `HULTUI_CEF_DIR`, which the engine `setenv`s before `cef_initialize`. Ship it
    per RID in `HultUI.WebView.Cef`'s `runtimes/<rid>/native`, built by a workflow as the mpv
-   natives are. It is the one exception to "no native code of ours", and the owner's call.
+   natives are. It is the one exception to "no native code of ours". **DECIDED: ship it.**
 2. **The message loop: `multi_threaded_message_loop`** (question 4). Callbacks arrive on
    `CrBrowserMain`, HultUI's thread does no CEF work, and the costs equal the external pump's,
    which would need a 33 ms timer and run CEF's work on the thread that draws.
    `on_before_browse` waits on CEF's thread for the controller's answer. Calls that must run
-   on CEF's UI thread go through `cef_post_task`.
+   on CEF's UI thread go through `cef_post_task`. **DECIDED**, with the review's two cautions.
 3. **Script and messages: the DevTools protocol, nothing in the renderer** (question 6).
    `Runtime.evaluate` for `ExecuteScriptAsync`. `Runtime.addBinding` plus a shim registered
    with `Page.addScriptToEvaluateOnNewDocument` (after `Page.enable`) for
    `window.chrome.webview`. `Runtime.enable`'s execution contexts give the origin. Messages
    are parsed raw (`on_dev_tools_message`), so child sessions (`Target.setAutoAttach`,
-   cross-origin iframes) work if iframe messages are wanted. **`NavigateToString` is served
-   by the `app.local` scheme handler**, not a `data:` URL (question 7).
+   cross-origin iframes) work if iframe messages are wanted. **DECIDED.** `NavigateToString`
+   is served by a scheme handler, not a `data:` URL (question 7), **but from a host of its own
+   with a `Content-Security-Policy: sandbox` header that leaves out `allow-same-origin`, so
+   its origin stays opaque**, as the contract says; not from `app.local` (the review says why).
 4. **Ozone: the window's own platform, asked for outright** (questions 1, 3, 8):
    `--ozone-platform=wayland --disable-features=WaylandFractionalScaleV1` under Wayland, and
    `--ozone-platform=x11` under X11. Both give the GPU, the exact scale (changeable live) and
    shared textures. `headless` (+ `--use-angle=gl-egl`) is only a fallback with no display:
-   it has the scale but no zero-copy.
+   it has the scale but no zero-copy. **DECIDED.**
 5. **Zero-copy: an EGL import on CEF's thread, inside `on_accelerated_paint`**, into a
    texture the engine owns, fenced before returning (question 8). HultUI's frame then draws
    the newest, as Windows draws its D3D11 copy. GL serves both renderers through the
    existing interop. How the engine's context shares with HultUI's (one share group, or the
    copy target exported to it) is step 5.5's first question. Expect ~33 ms/s against ~110–150
-   for pixels at 1650×1072, 60 frames a second.
+   for pixels at 1650×1072, 60 frames a second. **DECIDED: on Wayland only.** HultUI's GL
+   context is GLX under X11, which cannot take an `EGLImage`; there the page takes the pixel
+   path. The review prefers exporting the engine's copy targets over a share group.
 6. **Accessibility on Linux: a mirrored tree, served by our bridge, acted on through DevTools**
    (question 9). The web view's node keeps a mirror of CEF's `AXTreeUpdate`s and exposes
    their nodes as its children to the AT-SPI bridge. Actions go to DevTools by
    `backendDOMNodeId`, which is CEF's node id. Accessibility is enabled only while a screen
    reader is on (`org.a11y.Status`), because a big page costs hundreds of ms to read.
    `AccessibilityNode.NativeContent` is not reused; the bridge needs a way to host data
-   children, which is the seam to design.
+   children, which is the seam to design. **DECIDED.**
 7. **Shutdown: `cef_shutdown` at application exit only**, after every browser is closed and
-   released (question 10). The zygotes stay until then.
+   released (question 10). The zygotes stay until then. **DECIDED**, with the engine a
+   per-process singleton (the review).
 
 ### Review from the Windows side (2026-10-02)
 
 Read against the contract and the Windows engine. The spike's findings stand; these are about
-the recommendations built on them. None is decided until the owner says so.
+the recommendations built on them. The owner took the review's side on all three choices it
+raised (helper, string pages, X11).
 
 - **1, the helper: agree.** The table in question 1 rules out every .NET shape, and the "no C++"
   rule was about not needing CEF's C++ wrapper to talk to the engine: a 20-line C launcher is
@@ -624,6 +632,7 @@ In this order; each ends with its tests green and the step written into
    It ran on Windows only, so the fd export of those semaphores is unproven: once CEF
    draws, show two pages, or a page and a video, in one Vulkan window and check a
    `HULTUI_VULKAN_CAPTURE` of it, as `VulkanProbeTests` does with two WebView2 pages.
+   **On Wayland only** (decided 2026-10-02): under X11 the page takes the pixel path.
 6. **Accessibility.** The Linux half of seam W8 is not what `WEBVIEW.md` sketched for
    WebKit (a socket onto someone else's tree). CEF gives a tree of plain data, so the web
    view's node grows real children that our AT-SPI bridge serves like any others. Design it
