@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script and messages work; input, navigation policy, zero-copy and accessibility follow. |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus and the input method work; navigation policy, zero-copy and accessibility follow. |
 
 An app that never shows a web page references none of these and pays nothing.
 

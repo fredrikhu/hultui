@@ -109,6 +109,7 @@ public partial class WebViewElement : Element
         _controller.FrameArrived += OnFrameArrived;
         _controller.CursorChanged += ApplyCursor;
         _controller.FocusLeaving += OnFocusLeaving;
+        _controller.InputAreaChanged += OnInputAreaChanged;
         _controller.KeyFromPage += OnKeyFromPage;
         _controller.TitleChanged += ApplyTitle;
         _controller.AccessibleContentChanged += OnAccessibleContentChanged;
@@ -124,6 +125,7 @@ public partial class WebViewElement : Element
         c.FrameArrived -= OnFrameArrived;
         c.CursorChanged -= ApplyCursor;
         c.FocusLeaving -= OnFocusLeaving;
+        c.InputAreaChanged -= OnInputAreaChanged;
         c.KeyFromPage -= OnKeyFromPage;
         c.TitleChanged -= ApplyTitle;
         c.AccessibleContentChanged -= OnAccessibleContentChanged;
@@ -148,6 +150,7 @@ public partial class WebViewElement : Element
         StartListening();
         if (_controller is null || OverlayHost is not Window window) return;
         UpdatePlacement(window);
+        ApplyInputArea(window);
 
         // Drawn even before the first frame, as a video is: that first visit is what tells a
         // GPU frame sink which kind of surface it is on, and so how the engine should deliver.
@@ -190,6 +193,29 @@ public partial class WebViewElement : Element
         if (!_listening || _placement is not { } placement || _controller is null) return;
         _controller.SetPlacement(placement);
         _controller.SetVisible(true);
+    }
+
+    // ──── The input method ────
+
+    private PixelRect? _inputArea;
+
+    /// <summary>The engine's event, delivered on the UI thread by the controller.</summary>
+    private void OnInputAreaChanged(PixelRect area)
+    {
+        _inputArea = area;
+        MarkPaintDirty();
+    }
+
+    /// <summary>
+    /// While the page has the keyboard, the window's input method puts its candidate window at
+    /// the page's caret or composition, as a text field's does at its caret.
+    /// </summary>
+    private void ApplyInputArea(Window window)
+    {
+        if (!IsFocused || !ForwardsKeys || _inputArea is not { } a) return;
+        float scale = window.DisplayScale;
+        var box = window.ContentBoxInWindow(this);
+        window.TextInputHost.SetInputArea(new Rect(box.X + a.X / scale, box.Y + a.Y / scale, a.Width / scale, a.Height / scale), 0);
     }
 
     // ──── Pointer ────
@@ -280,19 +306,40 @@ public partial class WebViewElement : Element
         if (e.StopPropagation || e.Handled) request.Handled = true;
     }
 
+    /// <summary>A key the application took on its way to the page: its release is the app's too.</summary>
+    private KeyCode? _keptFromPage;
+
     private void OnKeyDown(KeyDownEvent e)
     {
         if (!ForwardsKeys) return;
-        _controller!.SendKey(new WebKeyInput(true, e.Key, e.Modifiers, e.IsRepeat));
         // Tab included: the page has a tab order of its own and says when it is done.
         e.StopPropagation = true;
+        // A shortcut is the application's first, as WebView2's are (seam W5): offered to the
+        // element's ancestors before the page sees it. Typing, arrows, Escape and Tab stay the
+        // page's.
+        if (WebKeys.IsShortcut(e.Key, e.Modifiers) && Parent is { } parent)
+        {
+            var offered = new KeyDownEvent { Key = e.Key, Modifiers = e.Modifiers, IsRepeat = e.IsRepeat, ScanCode = e.ScanCode };
+            EventDispatcher.Dispatch(offered, parent);
+            if (offered.StopPropagation || offered.Handled)
+            {
+                _keptFromPage = e.Key;
+                return;
+            }
+        }
+        _controller!.SendKey(new WebKeyInput(true, e.Key, e.Modifiers, e.IsRepeat, e.ScanCode));
     }
 
     private void OnKeyUp(KeyUpEvent e)
     {
         if (!ForwardsKeys) return;
-        _controller!.SendKey(new WebKeyInput(false, e.Key, e.Modifiers));
         e.StopPropagation = true;
+        if (_keptFromPage == e.Key)
+        {
+            _keptFromPage = null;
+            return;
+        }
+        _controller!.SendKey(new WebKeyInput(false, e.Key, e.Modifiers, ScanCode: e.ScanCode));
     }
 
     private void OnTextInput(TextInputEvent e)

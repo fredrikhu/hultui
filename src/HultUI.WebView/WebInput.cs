@@ -60,7 +60,9 @@ public readonly record struct WebPointerInput(
     KeyModifiers Modifiers = KeyModifiers.None);
 
 /// <summary>A key for an engine that takes forwarded keys.</summary>
-public readonly record struct WebKeyInput(bool IsDown, KeyCode Key, KeyModifiers Modifiers, bool IsRepeat = false);
+/// <param name="ScanCode">The physical key, <c>KeyDownEvent.ScanCode</c>: SDL's scancode, the USB
+/// HID usage. 0 when the platform gave none; the engine then works from <paramref name="Key"/>.</param>
+public readonly record struct WebKeyInput(bool IsDown, KeyCode Key, KeyModifiers Modifiers, bool IsRepeat = false, ushort ScanCode = 0);
 
 /// <summary>Text from the window's input method.</summary>
 /// <param name="Text">The committed text, or the composition so far (empty: cancelled).</param>

@@ -295,7 +295,7 @@ internal static unsafe partial class CefRuntime
                       $"folder or one inside it, not {f}. The first page's folder (or the application's default) decides it.");
     }
 
-    /// <summary><see cref="ResolveFolder"/> for this process, once CEF has started.</summary>
+    /// <summary><see cref="ResolveFolder(string, string, string?)"/> for this process, once CEF has started.</summary>
     public static (string? ChildPath, string? Error) ResolveFolder(string? folder)
         => ResolveFolder(_preferredRoot!, Profile!, folder);
 

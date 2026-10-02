@@ -67,7 +67,8 @@ public sealed unsafe class EventTranslator
                     TranslateScancode(evt->key.scancode),
                     TranslateKeyMod(evt->key.mod),
                     IsDown: true,
-                    IsRepeat: evt->key.repeat));
+                    IsRepeat: evt->key.repeat,
+                    ScanCode: (ushort)evt->key.scancode));
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_KEY_UP:
@@ -75,7 +76,8 @@ public sealed unsafe class EventTranslator
                     TranslateScancode(evt->key.scancode),
                     TranslateKeyMod(evt->key.mod),
                     IsDown: false,
-                    IsRepeat: false));
+                    IsRepeat: false,
+                    ScanCode: (ushort)evt->key.scancode));
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_TEXT_INPUT:

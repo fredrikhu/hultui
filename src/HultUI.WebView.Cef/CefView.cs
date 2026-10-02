@@ -23,7 +23,7 @@ namespace HultUI.WebView.Cef;
 /// <para><b>Pixels.</b> <c>on_paint</c> gives the whole view as premultiplied BGRA at the
 /// placement's scale; it is written into the host's sink as it is.</para>
 /// </remarks>
-internal sealed unsafe class CefView : IWebEngineView
+internal sealed unsafe partial class CefView : IWebEngineView
 {
     private enum Phase { Waiting, Starting, Ready, Failed, Disposed }
 
@@ -42,6 +42,7 @@ internal sealed unsafe class CefView : IWebEngineView
     private cef_life_span_handler_t* _lifeSpan;
     private cef_display_handler_t* _display;
     private cef_load_handler_t* _load;
+    private cef_focus_handler_t* _focus;
     private cef_browser_t* _browser;
     private cef_browser_host_t* _browserHost;
     private DevToolsSession? _devTools;
@@ -152,6 +153,9 @@ internal sealed unsafe class CefView : IWebEngineView
         _render->get_view_rect = &GetViewRect;
         _render->get_screen_info = &GetScreenInfo;
         _render->on_paint = &OnPaint;
+        _render->on_popup_show = &OnPopupShow;
+        _render->on_popup_size = &OnPopupSize;
+        _render->on_ime_composition_range_changed = &OnImeCompositionRangeChanged;
 
         _lifeSpan = CefObject.New<cef_life_span_handler_t>(this);
         _lifeSpan->on_after_created = &OnAfterCreated;
@@ -161,6 +165,11 @@ internal sealed unsafe class CefView : IWebEngineView
         _display = CefObject.New<cef_display_handler_t>(this);
         _display->on_title_change = &OnTitleChange;
         _display->on_address_change = &OnAddressChange;
+        _display->on_cursor_change = &OnCursorChange;
+
+        _focus = CefObject.New<cef_focus_handler_t>(this);
+        _focus->on_take_focus = &OnTakeFocus;
+        _client->get_focus_handler = &GetFocusHandler;
 
         _load = CefObject.New<cef_load_handler_t>(this);
         _load->on_loading_state_change = &OnLoadingStateChange;
@@ -170,6 +179,9 @@ internal sealed unsafe class CefView : IWebEngineView
         info.runtime_style = cef_runtime_style_t.CEF_RUNTIME_STYLE_ALLOY;
         var settings = new cef_browser_settings_t { size = (ulong)sizeof(cef_browser_settings_t) };
         settings.windowless_frame_rate = 60;
+        // Opaque white behind a page that sets no background, as WebView2 draws it: off-screen,
+        // CEF's default is transparent, and the window would show through.
+        settings.background_color = 0xFFFFFFFF;
         var url = CefString.Make("about:blank");
         _appliedScale = ScaleNow();
         var context = CefRuntime.ContextFor(CefRuntime.ResolveFolder(_options.UserDataFolder).ChildPath);
@@ -304,7 +316,14 @@ internal sealed unsafe class CefView : IWebEngineView
         }
         if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("result", out var value)
             && value.TryGetProperty("value", out var v))
-            return v.GetRawText();
+        {
+            // Written again rather than passed on: DevTools escapes every non-ASCII character
+            // ("\u65e5"), where WebView2 gives the text as it is ("日本").
+            var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+            using (var w = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+                v.WriteTo(w);
+            return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
+        }
         return "null";
     }
 
@@ -358,14 +377,6 @@ internal sealed unsafe class CefView : IWebEngineView
         => Uri.TryCreate(origin, UriKind.Absolute, out var uri) && uri.Scheme is not ("null" or "about" or "data") && uri.Host.Length > 0
             ? uri : null;
 
-    // ──── Input, focus: step 5.3 ────
-
-    public void SendPointer(in WebPointerInput input) { }
-    public void SendKey(in WebKeyInput input) { }
-    public void SendText(in WebTextInput input) { }
-    public void Focus(FocusReason reason) { }
-    public void Blur() { }
-
     // ──── Closing ────
 
     public void Dispose()
@@ -396,6 +407,7 @@ internal sealed unsafe class CefView : IWebEngineView
         CefObject.Release(_lifeSpan); _lifeSpan = null;
         CefObject.Release(_display); _display = null;
         CefObject.Release(_load); _load = null;
+        CefObject.Release(_focus); _focus = null;
     }
 
     // ──── Callbacks: every one on CEF's UI thread; every struct CEF hands us is released, and
@@ -473,9 +485,8 @@ internal sealed unsafe class CefView : IWebEngineView
     {
         try
         {
-            if (type == cef_paint_element_type_t.PET_VIEW && Of(s)?._host is { } host && width > 0 && height > 0)
-                host.Pixels.Write(width, height, PixelFormat.Bgra8888,
-                    new ReadOnlySpan<byte>(buffer, width * height * 4), width * 4);
+            if (Of(s) is { } view && width > 0 && height > 0)
+                view.Painted(type, new ReadOnlySpan<byte>(buffer, width * height * 4), width, height);
         }
         catch (Exception ex) { CefLog.Error("on_paint", ex); }
         finally { CefObject.Release(b); }

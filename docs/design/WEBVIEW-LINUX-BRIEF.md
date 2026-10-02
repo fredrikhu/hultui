@@ -610,7 +610,7 @@ In this order; each ends with its tests green and the step written into
    has exercised so far. Seam W6 lands here. Shortcuts are simpler than on Windows: the
    element sees every key first and can offer it to the app before sending it on. The
    `<select>` popup is composited by the engine into the same sink. The IME's candidate
-   position goes to `TextInputHost.SetInputArea`.
+   position goes to `TextInputHost.SetInputArea`. **Done 2026-10-02**; see `WEBVIEW.md`.
 4. **Navigation, script, messages, policy.** Everything in `WebEngineEvent`, by whichever
    route question 6 chose. That includes the four requests Windows added in step 6, each
    answered exactly once and each with a default that asks nothing of the app:

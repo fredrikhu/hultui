@@ -132,6 +132,7 @@ public sealed class WebViewController : IDisposable
     internal CursorType Cursor { get; private set; } = CursorType.Default;
     internal event Action<CursorType>? CursorChanged;
     internal event Action<bool>? FocusLeaving;
+    internal event Action<PixelRect>? InputAreaChanged;
     internal event Action<WebKeyRequest>? KeyFromPage;
     internal event Action<string>? TitleChanged;
 
@@ -426,6 +427,9 @@ public sealed class WebViewController : IDisposable
                 CursorChanged?.Invoke(c.Cursor);
                 break;
 
+            case WebEngineEvent.InputAreaChanged a:
+                InputAreaChanged?.Invoke(a.Area);
+                break;
             case WebEngineEvent.FocusLeaving l:
                 FocusLeaving?.Invoke(l.Forward);
                 break;

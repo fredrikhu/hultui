@@ -83,6 +83,14 @@ public abstract record WebEngineEvent
     /// sees it answered — denied, unless the application allows it.</summary>
     public sealed record PermissionRequested(WebPermissionRequest Request) : WebEngineEvent;
 
+    /// <summary>
+    /// Where the page's text caret or input-method composition is, in device pixels from the
+    /// page's top-left: the window's input method puts its candidate window there. Only from
+    /// engines without <see cref="WebEngineCapabilities.NativeKeyboard"/>, whose input method
+    /// is the window's.
+    /// </summary>
+    public sealed record InputAreaChanged(PixelRect Area) : WebEngineEvent;
+
     /// <summary>The page's process died. <see cref="WebViewController.Reload"/> recovers
     /// when <paramref name="CanReload"/>.</summary>
     public sealed record ProcessFailed(string Message, bool CanReload) : WebEngineEvent;

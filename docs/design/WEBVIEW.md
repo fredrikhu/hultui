@@ -463,7 +463,7 @@ WinForms host already translates virtual keys through scan codes to `KeyCode`
 (`KeyMap`); the missing piece is an internal `Window.DispatchKey(...)` the
 package can call.
 
-**W6 — Raw scan code on key events (`HultUI.Core`).** For Linux engines that take
+**W6 — Raw scan code on key events (`HultUI.Core`). Shipped in step 5.3.** For Linux engines that take
 forwarded keys. `KeyCode` is physical but maps the keypad, F13+, media and
 international keys to `Unknown`; CEF's key event wants the native key code beside
 the Windows one (what exactly is question 5 of the Linux spike). Add `KeyDownEvent.ScanCode`/`KeyUpEvent.ScanCode`.
@@ -774,6 +774,38 @@ engine if it changed, but nothing more.
      context is up; Chromium does not take it again (checked after a page's renderer started).
      A test runs a process of its own and checks every handler .NET had before CEF is there
      after, that a process is seen to exit, and that a null dereference throws.
+   - **5.3, input, focus, the input method, the `<select>` popup: done 2026-10-02.** CEF has
+     no keyboard or input method off-screen, so the element forwards both (no
+     `NativeKeyboard`), the path only the fake engine had used. **Pointer:** view coordinates
+     (device pixels over the scale); held buttons as flags; a wheel notch is 120, positive up;
+     the side buttons go back and forward in the page's history. **Keys:** `RAWKEYDOWN` and
+     `KEYUP` with the Windows key code (`key`, `keyCode`) and the XKB keycode
+     (`KeyboardEvent.code`); the text a key types, which SDL sends apart, goes as a `CHAR`
+     carrying that key's codes; Enter, Tab, Backspace and Escape get their `CHAR` with the key,
+     as Windows' WM_CHAR gives it (Enter's `keypress`, a form's submission); text from no key
+     is committed (`insertText`, no `keypress`). **Seam W6, shipped:**
+     `KeyDownEvent.ScanCode` / `KeyUpEvent.ScanCode` (and `InputEvent.KeyInput`,
+     `WebKeyInput`) carry SDL's scancode, the USB HID usage; `scripts/generate-cef-keys.py`
+     turns Chromium's `dom_code_data.inc` into the usage → XKB → DOM code table
+     (`Interop/DomCodes.g.cs`), so a key `KeyCode` has no name for (the keypad's 1) reaches a
+     page as `Numpad1`. **Shortcuts:** the element offers Ctrl, Alt and F1–F12 keys to its
+     ancestors before the page sees them, by the rule WebView2's keys are offered (now
+     `WebKeys.IsShortcut`); one an app takes, and its release, never reach the page.
+     **Input method:** composition is `ime_set_composition`, its commit `ime_commit_text`; the
+     composition's character bounds come back as a new event,
+     `WebEngineEvent.InputAreaChanged` (device pixels in the page), which the element turns
+     into `TextInputHost.SetInputArea` while it has focus. **Focus:** in by Tab starts at the
+     page's first stop, by Shift+Tab at its last: CEF has no call for it, so the page's
+     sequential-focus starting point is moved to the document's start (or end) and a Tab sent;
+     Tab past the end is `on_take_focus`, `FocusLeaving`. **Cursor:** `on_cursor_change`,
+     mapped to the nearest of HultUI's. **`<select>`:** its list is CEF's `PET_POPUP` buffer;
+     while it is open the view's last frame and the popup are both kept and composited into
+     one frame at the popup's rectangle, and clicks inside it choose. Found on the way: a page
+     with no background was transparent (CEF's off-screen default); it is white now, as on
+     WebView2. And script results came back with every non-ASCII character escaped
+     (`"\u65e5"`), as DevTools writes them; they are written again, as WebView2 gives them
+     (`"日本"`). 7 engine tests (`CefInputTests`) and 3 element tests (shortcuts, the scan
+     code, the input area).
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

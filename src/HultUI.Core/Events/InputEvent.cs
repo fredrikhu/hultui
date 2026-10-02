@@ -14,7 +14,9 @@ public abstract record InputEvent
     public record MouseWheelInput(float MouseX, float MouseY, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
     /// <summary>The pointer left the window. No position: it is somewhere else now.</summary>
     public record PointerLeftWindowInput() : InputEvent;
-    public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat) : InputEvent;
+    /// <param name="ScanCode">The physical key as the platform reports it: SDL's scancode, which
+    /// is the USB HID usage on the keyboard page. 0 when the platform gave none.</param>
+    public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat, ushort ScanCode = 0) : InputEvent;
     public record TextInputInput(string Text) : InputEvent;
     public record TextEditingInput(string Text, int SegmentStart, int SegmentLength) : InputEvent;
     /// <summary>An OS drag entered the window.</summary>

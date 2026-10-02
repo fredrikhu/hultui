@@ -153,6 +153,7 @@ public sealed class CefViewTests : IDisposable
         await Until(() => _events.OfType<WebEngineEvent.TitleChanged>().Any(t => t.Title == "Script"));
 
         Assert.Equal("\"Script\"", await _view.ExecuteScriptAsync("document.title"));
+        Assert.Equal("\"日本 · é\"", await _view.ExecuteScriptAsync("'日本 · é'"));   // as WebView2 gives it, unescaped
         Assert.Equal("3", await _view.ExecuteScriptAsync("1 + 2"));
         Assert.Equal("{\"a\":[1,\"two\",null]}", await _view.ExecuteScriptAsync("({ a: [1, 'two', null] })"));
         Assert.Equal("null", await _view.ExecuteScriptAsync("undefined"));
