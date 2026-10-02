@@ -497,6 +497,65 @@ Each is the spike's answer to one of "yours to decide"; none is built yet.
 7. **Shutdown: `cef_shutdown` at application exit only**, after every browser is closed and
    released (question 10). The zygotes stay until then.
 
+### Review from the Windows side (2026-10-02)
+
+Read against the contract and the Windows engine. The spike's findings stand; these are about
+the recommendations built on them. None is decided until the owner says so.
+
+- **1, the helper: agree.** The table in question 1 rules out every .NET shape, and the "no C++"
+  rule was about not needing CEF's C++ wrapper to talk to the engine: a 20-line C launcher is
+  not interop. Build and ship it as the mpv natives are.
+- **3, `NavigateToString` from `app.local`: no, as written.** The contract says a string
+  document's origin is **opaque** and its messages arrive with a null origin
+  (`IWebEngine.NavigateToString`, `WebEngineEvent.MessageReceived`), which is what WebView2
+  gives. Served from `https://app.local/__string/…` it would be **same-origin with the app's
+  own content**: an untrusted string (a mail body, rendered Markdown) could `fetch` the app's
+  files and share their storage, which it cannot on Windows. Keep the scheme handler, which
+  avoids the `data:` crash, but serve strings from a **host of their own** (not `app.local`)
+  with the response header `Content-Security-Policy: sandbox allow-scripts allow-forms
+  allow-popups allow-modals` (everything but `allow-same-origin`): that makes the document's
+  origin opaque, as the contract says. **Verify** that the `srcdoc` case still works that way,
+  and that `executionContextCreated` then reports the opaque origin, which the engine maps to
+  null.
+- **2, the message loop: agree, with two cautions.** HultUI's thread must never wait for
+  `CrBrowserMain` (browser creation is asynchronous already, through `on_after_created`, which
+  the controller's held-until-ready queue fits). And before `cef_shutdown` the engine must
+  answer every `on_before_browse` still waiting for the UI thread, or the shutdown, made on that
+  thread, waits for a CEF thread that waits for it.
+- **5, zero-copy: refine.** HultUI's GL context is **EGL on Wayland but GLX on X11** (SDL's
+  default; see `SDL3Window`'s `GetProcAddress`), and an `EGLImage` cannot be imported into a
+  GLX context. Two ways, cheapest first:
+  - **Zero-copy on Wayland only**, X11 on the pixel path. Fedora's GNOME and KDE are
+    Wayland-only now, so X11 is the uncommon case.
+  - Or a hand-over that both accept: the engine's ring of copy targets allocated as exportable
+    memory and imported with `GL_EXT_memory_object_fd`, which Mesa offers under GLX and EGL
+    alike. That is what the Vulkan interop already does, in reverse.
+
+  On EGL, prefer **exporting** the engine's copy targets (`EGL_MESA_image_dma_buf_export`, once
+  per slot, imported once on HultUI's side) over a share group: a context shared with SDL's
+  has to be created against it on HultUI's thread and then used on CEF's. Per frame: copy and
+  fence on CEF's thread inside `on_accelerated_paint` (the spike's 0.8 ms), publish the newest
+  slot, and let HultUI's frame blit it into the sink's target, as Windows does with its D3D11
+  copy. Three slots, so the one HultUI reads is never the one CEF writes.
+- **7, shutdown: agree, and it shapes the engine's lifetime.** CEF initialises once per
+  process. An app, or a test run, that creates a second `CefEngine` after disposing the first
+  must not fail: the engine is a per-process singleton (created on first use, shut down once,
+  on the thread that initialised it, when the application ends). `WebView2Engine` has no such
+  limit, so this is the Linux engine's to hide. The engine tests share one engine across the
+  run.
+- **Worth trying in step 5.2: `external_begin_frame_enabled`.** CEF then paints only when told
+  to (`send_external_begin_frame`). Driven from HultUI's frame loop, the page's frames line up
+  with the window's instead of running on a second 60 Hz clock, and a still page costs nothing.
+  Question 4 measured 17 ms/s in our process with the page idle; **verify** whether this
+  removes it.
+- **4, Ozone: agree.** The engine needs to know whether HultUI's windows are on Wayland or X11
+  before `cef_initialize`; that is a small seam (the SDL video driver's name), to be listed
+  beside W1 to W9.
+- **6, accessibility: agree.** Give tests a way to force it on: the Linux UI tests will run
+  with no screen reader. The AT-SPI bridge reads neither `org.a11y.Status` property today (it
+  serves its tree always), so the engine is the first to watch it: decide whether
+  `IsEnabled` (any assistive technology) or only `ScreenReaderEnabled` counts.
+
 ## Where libcef comes from
 
 The engine looks for a CEF directory (one holding `libcef.so` and its resources) in this
