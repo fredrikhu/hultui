@@ -740,6 +740,40 @@ engine if it changed, but nothing more.
      185–228 ms/s in the process, against Windows' ~300 for its pixel path at 1650×1072. 5
      view tests in `HultUI.WebView.Engines.Tests` (`CefViewTests`): pixels at the placement's
      scale, a new scale, script, the opaque string document, messages both ways.
+   - **The review of 5.1 and 5.2, fixed 2026-10-02.** String documents are kept per view, the
+     newest eight (`StringPages.KeptPerView`); older ones get the "no longer available" page.
+     The placement is applied again when the view becomes ready; the loss the review expected
+     did not show here (CEF reads the view's size again before it paints, so a test that moves
+     the placement right after CEF's first read finds the new size with or without the fix),
+     but the fix makes it ours rather than CEF's to get right. The profile lock is read
+     against `gethostname`'s whole name, not `Environment.MachineName`, which stops at a dot.
+     Every `[UnmanagedCallersOnly]` method catches, reports on standard error (`CefLog`) and
+     answers CEF with its default; a test reflects over the assembly and fails on any callback
+     without a catch clause. `SDL3Window.WindowSystem` reads SDL's driver once. The mpv
+     backend also looks under the portable RID (`runtimes/linux-x64/native`) when the runtime
+     names its own (`fedora.44-x64`), checked on this machine. The helper workflow publishes
+     through the release transport, now shared in `scripts/release-transport.sh`.
+     **`UserDataFolder`, the owner's rule:** the first page's folder (or the application's
+     default) is the process's profile, `root_cache_path`; a page naming it or none shares it;
+     a folder inside it gets a request context of its own (with the string documents' handler
+     registered on it, which a new context does not inherit); any other folder fails the page
+     with a message naming the folder in use. A second instance's temporary profile takes the
+     root's place, and folders inside the preferred root are placed inside it. Tested by rule
+     and in a process of its own. The limits an application meets on Linux are in
+     `docs/WEBVIEW.md`.
+     **Found while fixing it: CEF took .NET's signal handlers.** The engine suite hung when its
+     process tests ran after CEF had started in the test host: their children had exited and
+     were zombies, because .NET's `Process` learns of an exit only through its own `SIGCHLD`
+     handler, and Chromium takes `SIGCHLD` while it starts. Measured with `SigCgt` before and
+     after `cef_initialize`: Chromium also reset `SIGSEGV`, `SIGILL`, `SIGFPE`, `SIGBUS`,
+     `SIGABRT` and `SIGQUIT` to their defaults, and .NET turns a null dereference into a
+     `NullReferenceException` through its `SIGSEGV` handler, so **an application's first
+     `NullReferenceException` after its first page ended the process** (5.1 and 5.2 shipped
+     that way). Now `disable_signal_handlers` is set, which keeps every handler but
+     `SIGCHLD`, and .NET's `SIGCHLD` is saved before `cef_initialize` and put back when the
+     context is up; Chromium does not take it again (checked after a page's renderer started).
+     A test runs a process of its own and checks every handler .NET had before CEF is there
+     after, that a process is seen to exit, and that a null dereference throws.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

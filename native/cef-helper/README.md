@@ -22,7 +22,8 @@ CEF that offers the engine's API version, and needs rebuilding only for a new ar
   engine gets it in `runtimes/<rid>/native/`. Without a C compiler the build warns and
   `CefEngine.Availability` says the helper is missing.
 - `build.sh [rid] [cc]` builds one RID, `linux-arm64` with a cross compiler
-  (`build.sh linux-arm64 aarch64-linux-gnu-gcc`). The `cef-helper` workflow builds both and
-  packs `HultUI.WebView.Cef` with them.
+  (`build.sh linux-arm64 aarch64-linux-gnu-gcc`). The `cef-helper` workflow builds both, packs
+  `HultUI.WebView.Cef` with them, and puts the helpers and the package on a GitHub release
+  (`scripts/release-transport.sh`, as the mpv natives do: artifact storage is full).
 
 `out/` is not committed.

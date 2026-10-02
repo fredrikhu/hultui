@@ -84,10 +84,14 @@ internal sealed unsafe class CefView : IWebEngineView
 
     public event Action<WebEngineEvent>? Event;
 
+    /// <summary>For tests: CEF has just read the view's size, and whether the view was ready
+    /// then. CEF's UI thread.</summary>
+    internal event Action<bool>? ViewRectRead;
+
     private void Raise(WebEngineEvent e)
     {
         try { Event?.Invoke(e); }
-        catch (Exception ex) { Debug.WriteLine("CefView event handler: " + ex); }
+        catch (Exception ex) { CefLog.Error("an event handler", ex); }
     }
 
     public void Attach(IWebViewHost host) => _host = host;
@@ -105,9 +109,10 @@ internal sealed unsafe class CefView : IWebEngineView
             if (phase == Phase.Waiting && !placement.Bounds.IsEmpty) _phase = Phase.Starting;
         }
         if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
-            CefRuntime.Start(placement.WindowSystem).ContinueWith(t =>
+            CefRuntime.Start(placement.WindowSystem, _options.UserDataFolder).ContinueWith(t =>
             {
                 if (t.Result is { } error) Fail(WebFailure.InitializationFailed, error);
+                else if (CefRuntime.ResolveFolder(_options.UserDataFolder) is { Error: { } refused }) Fail(WebFailure.InitializationFailed, refused);
                 else CreateBrowser();
             }, TaskScheduler.Default);
         else if (phase == Phase.Ready)
@@ -129,9 +134,9 @@ internal sealed unsafe class CefView : IWebEngineView
         if (!CefRuntime.Post(() =>
             {
                 try { work(); }
-                catch (Exception ex) { Debug.WriteLine("CefView: " + ex); }
+                catch (Exception ex) { CefLog.Error("posted work", ex); }
             }))
-            Debug.WriteLine("CefView: CEF is not running");
+            CefLog.Note("CEF is not running; a call to the page was dropped.");
     }
 
     private void CreateBrowser() => OnUi(() =>
@@ -167,7 +172,9 @@ internal sealed unsafe class CefView : IWebEngineView
         settings.windowless_frame_rate = 60;
         var url = CefString.Make("about:blank");
         _appliedScale = ScaleNow();
-        int ok = Capi.cef_browser_host_create_browser(&info, CefObject.Give(_client), &url, &settings, null, null);
+        var context = CefRuntime.ContextFor(CefRuntime.ResolveFolder(_options.UserDataFolder).ChildPath);
+        if (context != null) CefObject.AddRef(context);   // the call takes a reference; the runtime keeps its own
+        int ok = Capi.cef_browser_host_create_browser(&info, CefObject.Give(_client), &url, &settings, null, context);
         CefString.Clear(&url);
         if (ok != 1) Fail(WebFailure.InitializationFailed, "CEF could not create a page.");
     });
@@ -206,6 +213,9 @@ internal sealed unsafe class CefView : IWebEngineView
             if (_phase != Phase.Starting) return;
             _phase = Phase.Ready;
         }
+        // A placement that changed while the page was being created posted nothing (the view
+        // was not ready), and CEF read the size at creation: apply the current one now.
+        OnUi(Resize);
         Raise(new WebEngineEvent.Ready());
     }, TaskScheduler.Default);
 
@@ -388,34 +398,73 @@ internal sealed unsafe class CefView : IWebEngineView
         CefObject.Release(_load); _load = null;
     }
 
-    // ──── Callbacks: every one on CEF's UI thread; every struct CEF hands us is released ────
+    // ──── Callbacks: every one on CEF's UI thread; every struct CEF hands us is released, and
+    // ──── nothing escapes one (an exception leaving an [UnmanagedCallersOnly] method ends the process)
 
     private static CefView? Of(void* self) => CefObject.Owner<CefView>(self);
 
-    [UnmanagedCallersOnly] private static cef_render_handler_t* GetRenderHandler(cef_client_t* s) => CefObject.Give(Of(s)!._render);
-    [UnmanagedCallersOnly] private static cef_life_span_handler_t* GetLifeSpanHandler(cef_client_t* s) => CefObject.Give(Of(s)!._lifeSpan);
-    [UnmanagedCallersOnly] private static cef_display_handler_t* GetDisplayHandler(cef_client_t* s) => CefObject.Give(Of(s)!._display);
-    [UnmanagedCallersOnly] private static cef_load_handler_t* GetLoadHandler(cef_client_t* s) => CefObject.Give(Of(s)!._load);
+    [UnmanagedCallersOnly]
+    private static cef_render_handler_t* GetRenderHandler(cef_client_t* s)
+    {
+        try { return Of(s) is { } v ? CefObject.Give(v._render) : null; }
+        catch (Exception ex) { CefLog.Error("get_render_handler", ex); return null; }
+    }
+
+    [UnmanagedCallersOnly]
+    private static cef_life_span_handler_t* GetLifeSpanHandler(cef_client_t* s)
+    {
+        try { return Of(s) is { } v ? CefObject.Give(v._lifeSpan) : null; }
+        catch (Exception ex) { CefLog.Error("get_life_span_handler", ex); return null; }
+    }
+
+    [UnmanagedCallersOnly]
+    private static cef_display_handler_t* GetDisplayHandler(cef_client_t* s)
+    {
+        try { return Of(s) is { } v ? CefObject.Give(v._display) : null; }
+        catch (Exception ex) { CefLog.Error("get_display_handler", ex); return null; }
+    }
+
+    [UnmanagedCallersOnly]
+    private static cef_load_handler_t* GetLoadHandler(cef_client_t* s)
+    {
+        try { return Of(s) is { } v ? CefObject.Give(v._load) : null; }
+        catch (Exception ex) { CefLog.Error("get_load_handler", ex); return null; }
+    }
 
     [UnmanagedCallersOnly]
     private static void GetViewRect(cef_render_handler_t* s, cef_browser_t* b, cef_rect_t* rect)
     {
-        var (w, h, _) = Of(s)?.ViewNow() ?? (1, 1, 1f);
-        *rect = new cef_rect_t { x = 0, y = 0, width = w, height = h };
-        CefObject.Release(b);
+        try
+        {
+            var view = Of(s);
+            var (w, h, _) = view?.ViewNow() ?? (1, 1, 1f);
+            *rect = new cef_rect_t { x = 0, y = 0, width = w, height = h };
+            if (view?.ViewRectRead is { } read)
+            {
+                bool ready;
+                lock (view._gate) ready = view._phase == Phase.Ready;
+                read(ready);
+            }
+        }
+        catch (Exception ex) { CefLog.Error("get_view_rect", ex); *rect = new cef_rect_t { width = 1, height = 1 }; }
+        finally { CefObject.Release(b); }
     }
 
     [UnmanagedCallersOnly]
     private static int GetScreenInfo(cef_render_handler_t* s, cef_browser_t* b, cef_screen_info_t* info)
     {
-        var (w, h, scale) = Of(s)?.ViewNow() ?? (1, 1, 1f);
-        info->device_scale_factor = scale;
-        info->depth = 24;
-        info->depth_per_component = 8;
-        info->rect = new cef_rect_t { width = w, height = h };
-        info->available_rect = info->rect;
-        CefObject.Release(b);
-        return 1;
+        try
+        {
+            var (w, h, scale) = Of(s)?.ViewNow() ?? (1, 1, 1f);
+            info->device_scale_factor = scale;
+            info->depth = 24;
+            info->depth_per_component = 8;
+            info->rect = new cef_rect_t { width = w, height = h };
+            info->available_rect = info->rect;
+            return 1;
+        }
+        catch (Exception ex) { CefLog.Error("get_screen_info", ex); return 0; }
+        finally { CefObject.Release(b); }
     }
 
     [UnmanagedCallersOnly]
@@ -428,7 +477,7 @@ internal sealed unsafe class CefView : IWebEngineView
                 host.Pixels.Write(width, height, PixelFormat.Bgra8888,
                     new ReadOnlySpan<byte>(buffer, width * height * 4), width * 4);
         }
-        catch (Exception ex) { Debug.WriteLine("CefView paint: " + ex); }
+        catch (Exception ex) { CefLog.Error("on_paint", ex); }
         finally { CefObject.Release(b); }
     }
 
@@ -436,7 +485,7 @@ internal sealed unsafe class CefView : IWebEngineView
     private static void OnAfterCreated(cef_life_span_handler_t* s, cef_browser_t* b)
     {
         try { Of(s)?.Created(b); }
-        catch (Exception ex) { Debug.WriteLine("CefView: " + ex); }
+        catch (Exception ex) { CefLog.Error("on_after_created", ex); }
         finally { CefObject.Release(b); }
     }
 
@@ -444,7 +493,7 @@ internal sealed unsafe class CefView : IWebEngineView
     private static void OnBeforeClose(cef_life_span_handler_t* s, cef_browser_t* b)
     {
         try { Of(s)?.Closed(); }
-        catch (Exception ex) { Debug.WriteLine("CefView: " + ex); }
+        catch (Exception ex) { CefLog.Error("on_before_close", ex); }
         finally { CefObject.Release(b); }
     }
 
@@ -456,15 +505,20 @@ internal sealed unsafe class CefView : IWebEngineView
         cef_popup_features_t* features, cef_window_info_t* info, cef_client_t** client, cef_browser_settings_t* settings,
         cef_dictionary_value_t** extra, int* noJavascriptAccess)
     {
-        CefObject.Release(b);
-        CefObject.Release(f);
-        return 1;
+        try { return 1; }
+        catch (Exception ex) { CefLog.Error("on_before_popup", ex); return 1; }
+        finally
+        {
+            CefObject.Release(b);
+            CefObject.Release(f);
+        }
     }
 
     [UnmanagedCallersOnly]
     private static void OnTitleChange(cef_display_handler_t* s, cef_browser_t* b, cef_string_utf16_t* title)
     {
         try { Of(s)?.Raise(new WebEngineEvent.TitleChanged(CefString.Read(title))); }
+        catch (Exception ex) { CefLog.Error("on_title_change", ex); }
         finally { CefObject.Release(b); }
     }
 
@@ -476,6 +530,7 @@ internal sealed unsafe class CefView : IWebEngineView
             if (f->is_main(f) != 0 && Uri.TryCreate(CefString.Read(url), UriKind.Absolute, out var uri))
                 Of(s)?.Raise(new WebEngineEvent.SourceChanged(StringPages.IsStringPage(uri) ? AboutBlank : uri));
         }
+        catch (Exception ex) { CefLog.Error("on_address_change", ex); }
         finally
         {
             CefObject.Release(b);
@@ -487,6 +542,7 @@ internal sealed unsafe class CefView : IWebEngineView
     private static void OnLoadingStateChange(cef_load_handler_t* s, cef_browser_t* b, int isLoading, int canGoBack, int canGoForward)
     {
         try { Of(s)?.Raise(new WebEngineEvent.HistoryChanged(canGoBack != 0, canGoForward != 0)); }
+        catch (Exception ex) { CefLog.Error("on_loading_state_change", ex); }
         finally { CefObject.Release(b); }
     }
 }

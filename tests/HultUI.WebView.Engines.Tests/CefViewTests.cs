@@ -122,6 +122,30 @@ public sealed class CefViewTests : IDisposable
     }
 
     [CefFact]
+    public async Task AResizeWhileThePageStarts_IsNotLost()
+    {
+        // Review of 5.1 and 5.2, item 2: CEF reads the size when the page is created; a window
+        // maximised before the page was ready kept a page the old size.
+        // The window grows after CEF has read the first size, before the view is ready.
+        bool grew = false;
+        _view.ViewRectRead += ready =>
+        {
+            if (ready || grew) return;
+            grew = true;
+            _view.SetPlacement(new WebViewPlacement(0, new PixelRect(0, 0, 900, 700), 1f));
+        };
+        _view.SetPlacement(new WebViewPlacement(0, new PixelRect(0, 0, 400, 300), 1f));
+        await Until(() => _events.Any(e => e is WebEngineEvent.Ready), 30_000);
+        // The page as created (about:blank): nothing else, a navigation, may ask for the size
+        // again and hide the loss.
+        await Until(() => _host.Pixels.IntrinsicSize.Width > 0);
+        await Task.Delay(500);
+        Assert.True(grew, "CEF read the size only once the view was ready: the case did not arise");
+        Assert.Equal(900, _host.Pixels.IntrinsicSize.Width);
+        Assert.Equal(700, _host.Pixels.IntrinsicSize.Height);
+    }
+
+    [CefFact]
     public async Task Script_AnswersWithJson_AndAThrowFaults()
     {
         await ReadyAt(400, 300, 1f);

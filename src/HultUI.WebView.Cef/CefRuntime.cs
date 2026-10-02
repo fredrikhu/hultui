@@ -63,11 +63,12 @@ internal static unsafe partial class CefRuntime
     /// decides the window system for the process. Completes, on CEF's UI thread, with null once
     /// the context is ready, or with why it is not.
     /// </summary>
-    public static Task<string?> Start(string? windowSystem)
+    public static Task<string?> Start(string? windowSystem, string? userDataFolder = null)
     {
         lock (Gate)
         {
             if (_started is not null) return _started.Task;
+            _preferredRoot = Normalize(userDataFolder ?? DefaultRootCachePath());
             _started = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
             var probe = CefLibrary.Loaded;
             if (!probe.IsLoaded) { Fail(probe.Error!); return _started.Task; }
@@ -115,7 +116,12 @@ internal static unsafe partial class CefRuntime
             settings.multi_threaded_message_loop = 1;
             settings.no_sandbox = 0;
             settings.log_severity = LogSeverity();
-            var root = ProfileFor(DefaultRootCachePath(), out _temporaryProfile);
+            // .NET's own signal handlers must survive CEF. Chromium otherwise resets SIGSEGV,
+            // SIGILL, SIGFPE, SIGBUS, SIGABRT and SIGQUIT to their defaults, and .NET turns a
+            // null dereference into a NullReferenceException through its SIGSEGV handler: an
+            // application's first one would end the process. Measured, not assumed.
+            settings.disable_signal_handlers = 1;
+            var root = ProfileFor(_preferredRoot!, out _temporaryProfile);
             Directory.CreateDirectory(root);
             Profile = root;
             CefString.Set(&settings.root_cache_path, root);
@@ -125,6 +131,10 @@ internal static unsafe partial class CefRuntime
             var argv0 = Marshal.StringToCoTaskMemUTF8(Environment.ProcessPath ?? "hultui");
             var argv = stackalloc byte*[2] { (byte*)argv0, null };
             var mainArgs = new cef_main_args_t { argc = 1, argv = argv };
+            // Even so, Chromium takes SIGCHLD while it starts, and .NET's Process learns of a
+            // child's exit only through its own handler: WaitForExit would never return, for any
+            // process the application starts. Put .NET's back once CEF is up.
+            _dotnetSigChld = SaveSignal(SIGCHLD);
             int ok = Capi.cef_initialize(&mainArgs, &settings, CefObject.Give(_app), null);
             if (ok != 1)
             {
@@ -146,7 +156,7 @@ internal static unsafe partial class CefRuntime
         if (_temporaryProfile is { } temporary)
             try { Directory.Delete(temporary, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         try { ShutDown?.Invoke(clock.Elapsed); }
-        catch (Exception ex) { Debug.WriteLine("CefRuntime: " + ex); }
+        catch (Exception ex) { CefLog.Error("shutting down", ex); }
         ShutdownDone.Set();
     }
 
@@ -157,7 +167,7 @@ internal static unsafe partial class CefRuntime
             if (_state is not (State.Starting or State.Running)) return;
         }
         try { ShuttingDown?.Invoke(); }
-        catch (Exception ex) { Debug.WriteLine("CefRuntime: " + ex); }
+        catch (Exception ex) { CefLog.Error("shutting down", ex); }
         ShutdownRequested.Set();
         ShutdownDone.Wait(TimeSpan.FromSeconds(5));
     }
@@ -178,7 +188,7 @@ internal static unsafe partial class CefRuntime
     private static void RunTask(cef_task_t* self)
     {
         try { CefObject.Owner<Action>(self)?.Invoke(); }
-        catch (Exception ex) { Debug.WriteLine("CefRuntime task: " + ex); }
+        catch (Exception ex) { CefLog.Error("posted task", ex); }
     }
 
     /// <summary>
@@ -214,22 +224,36 @@ internal static unsafe partial class CefRuntime
                 CefString.Clear(&n);
             }
         }
+        catch (Exception ex) { CefLog.Error("on_before_command_line_processing", ex); }
         finally { CefObject.Release(cl); }
     }
 
     [UnmanagedCallersOnly]
-    private static cef_browser_process_handler_t* GetProcessHandler(cef_app_t* self) => CefObject.Give(_processHandler);
+    private static cef_browser_process_handler_t* GetProcessHandler(cef_app_t* self)
+    {
+        try { return CefObject.Give(_processHandler); }
+        catch (Exception ex) { CefLog.Error("get_browser_process_handler", ex); return null; }
+    }
 
     [UnmanagedCallersOnly]
     private static void OnContextInitialized(cef_browser_process_handler_t* self)
     {
-        lock (Gate)
+        try
         {
-            if (_state != State.Starting) return;
-            _state = State.Running;
+            lock (Gate)
+            {
+                if (_state != State.Starting) return;
+                _state = State.Running;
+            }
+            if (_dotnetSigChld is { } saved) RestoreSignal(SIGCHLD, saved);
+            StringPages.Register();
+            _started!.TrySetResult(null);
         }
-        StringPages.Register();
-        _started!.TrySetResult(null);
+        catch (Exception ex)
+        {
+            CefLog.Error("on_context_initialized", ex);
+            _started?.TrySetResult("CEF started, but the engine could not set itself up: " + ex.Message);
+        }
     }
 
     /// <summary>
@@ -246,6 +270,53 @@ internal static unsafe partial class CefRuntime
     }
 
     private static string? _temporaryProfile;
+    private static string? _preferredRoot;
+    private static readonly Dictionary<string, nint> Contexts = new(StringComparer.Ordinal);
+
+    internal static string Normalize(string folder) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+
+    /// <summary>
+    /// The owner's rule for <see cref="WebViewOptions.UserDataFolder"/> (2026-10-02): CEF has one
+    /// profile per process, and the first page's folder (the application's default when it
+    /// names none) is it. A page naming the same folder, or none, shares it; a folder inside it
+    /// gets a request context of its own (CEF requires a context's cache_path to be inside the
+    /// root); any other folder is refused. <paramref name="actualRoot"/> is where the profile
+    /// really is (a second instance's temporary one), and child folders are placed there.
+    /// </summary>
+    internal static (string? ChildPath, string? Error) ResolveFolder(string preferredRoot, string actualRoot, string? folder)
+    {
+        if (folder is null) return (null, null);
+        var f = Normalize(folder);
+        var root = Normalize(preferredRoot);
+        if (f == root) return (null, null);
+        if (f.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            return (Path.Combine(actualRoot, Path.GetRelativePath(root, f)), null);
+        return (null, $"CEF keeps one profile per process, and this one's is {root}: a page's UserDataFolder may be that " +
+                      $"folder or one inside it, not {f}. The first page's folder (or the application's default) decides it.");
+    }
+
+    /// <summary><see cref="ResolveFolder"/> for this process, once CEF has started.</summary>
+    public static (string? ChildPath, string? Error) ResolveFolder(string? folder)
+        => ResolveFolder(_preferredRoot!, Profile!, folder);
+
+    /// <summary>
+    /// CEF's UI thread: the request context for a folder inside the profile, made the first time
+    /// and kept for the process (string documents served in it too); null for the profile itself.
+    /// </summary>
+    public static cef_request_context_t* ContextFor(string? childPath)
+    {
+        if (childPath is null) return null;
+        if (Contexts.TryGetValue(childPath, out var existing)) return (cef_request_context_t*)existing;
+        Directory.CreateDirectory(childPath);
+        var settings = new cef_request_context_settings_t { size = (ulong)sizeof(cef_request_context_settings_t) };
+        CefString.Set(&settings.cache_path, childPath);
+        var context = Capi.cef_request_context_create_context(&settings, null);
+        CefString.Clear(&settings.cache_path);
+        if (context == null) return null;
+        StringPages.RegisterOn(context);
+        Contexts[childPath] = (nint)context;
+        return context;
+    }
 
     /// <summary>
     /// The profile to start with: <paramref name="preferred"/>, unless another running process
@@ -260,13 +331,13 @@ internal static unsafe partial class CefRuntime
         temporary = null;
         if (HeldByAnother(preferred) is not { } holder) return preferred;
         temporary = Path.Combine(Path.GetTempPath(), $"hultui-cef-{Environment.ProcessId}");
-        Debug.WriteLine($"CEF: {preferred} is in use by process {holder}; using a temporary profile, {temporary}.");
+        CefLog.Note($"{preferred} is in use by process {holder} (another instance of this application?); this one runs on a temporary profile, {temporary}.");
         return temporary;
     }
 
     /// <summary>The live process holding a profile's <c>SingletonLock</c> (a symlink to
     /// "host-pid"), or null when none does.</summary>
-    internal static int? HeldByAnother(string profile)
+    internal static int? HeldByAnother(string profile, string? hostName = null)
     {
         try
         {
@@ -274,7 +345,9 @@ internal static unsafe partial class CefRuntime
             if (target is null) return null;
             int dash = target.LastIndexOf('-');
             if (dash < 0 || !int.TryParse(target[(dash + 1)..], out var pid)) return null;
-            if (target[..dash] != Environment.MachineName || pid == Environment.ProcessId) return null;
+            // Chromium writes gethostname's whole answer; Environment.MachineName stops at the
+            // first dot, so on host.example.com it never matched and a held profile was taken.
+            if (target[..dash] != (hostName ?? HostName()) || pid == Environment.ProcessId) return null;
             return Directory.Exists($"/proc/{pid}") ? pid : null;
         }
         catch (IOException) { return null; }
@@ -291,6 +364,36 @@ internal static unsafe partial class CefRuntime
         "disable" => cef_log_severity_t.LOGSEVERITY_DISABLE,
         _ => cef_log_severity_t.LOGSEVERITY_DEFAULT,
     };
+
+    /// <summary>The machine's host name as <c>gethostname</c> gives it, dots and all.</summary>
+    internal static string HostName()
+    {
+        var buffer = stackalloc byte[256];
+        if (gethostname(buffer, 256) != 0) return Environment.MachineName;
+        return Marshal.PtrToStringUTF8((nint)buffer) ?? Environment.MachineName;
+    }
+
+    [LibraryImport("libc", EntryPoint = "gethostname")]
+    private static partial int gethostname(byte* name, nuint length);
+
+    private const int SIGCHLD = 17;
+    private static byte[]? _dotnetSigChld;
+
+    /// <summary>The <c>sigaction</c> of a signal, as an opaque buffer (larger than glibc's struct).</summary>
+    internal static byte[] SaveSignal(int signal)
+    {
+        var saved = new byte[512];
+        fixed (byte* p = saved) sigaction(signal, null, p);
+        return saved;
+    }
+
+    internal static void RestoreSignal(int signal, byte[] saved)
+    {
+        fixed (byte* p = saved) sigaction(signal, p, null);
+    }
+
+    [LibraryImport("libc", EntryPoint = "sigaction")]
+    private static partial int sigaction(int signal, byte* act, byte* oldAct);
 
     [LibraryImport("libc", EntryPoint = "setenv", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int setenv(string name, string value, int overwrite);

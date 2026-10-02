@@ -101,7 +101,7 @@ internal sealed unsafe class DevToolsSession : IDisposable
     private static int OnMessage(cef_dev_tools_message_observer_t* self, cef_browser_t* browser, void* message, ulong size)
     {
         try { CefObject.Owner<DevToolsSession>(self)?.Receive(new ReadOnlySpan<byte>(message, (int)size)); }
-        catch (Exception ex) { Debug.WriteLine("DevToolsSession: " + ex); }
+        catch (Exception ex) { CefLog.Error("DevTools message", ex); }
         finally { CefObject.Release(browser); }
         return 1;   // parsed here; CEF need not parse it again
     }

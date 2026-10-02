@@ -47,16 +47,9 @@ internal static unsafe partial class Mpv
     {
         var hint = Environment.GetEnvironmentVariable("HULTUI_MPV_PATH");
         var files = new List<string>();
-        var directories = new List<string?>();
-        if (!string.IsNullOrEmpty(hint))
-        {
-            if (File.Exists(hint)) files.Add(hint);
-            directories.Add(hint);
-        }
-        directories.Add(AppContext.BaseDirectory);
-        // Where a NuGet natives package lands in a framework-dependent build.
-        directories.Add(Path.Combine(AppContext.BaseDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "native"));
-        directories.Add(null);   // the loader's own search
+        if (!string.IsNullOrEmpty(hint) && File.Exists(hint)) files.Add(hint);
+        var directories = CandidateDirectories(hint, AppContext.BaseDirectory,
+            RuntimeInformation.RuntimeIdentifier, PortableRid());
 
         if (TryLoadFrom(files, directories, CandidateNames(), out handle, out error)) return true;
 
@@ -65,6 +58,36 @@ internal static unsafe partial class Mpv
         foreach (var candidate in CandidateNames())
             if (NativeLibrary.TryLoad(candidate, typeof(Mpv).Assembly, null, out handle)) { error = null; return true; }
         return false;
+    }
+
+    /// <summary>
+    /// Where libmpv is looked for, in order: the hint, the application's directory, where a
+    /// NuGet natives package lands in a framework-dependent build — under the runtime's own RID
+    /// and under the portable one — and last the loader's own search (null). The portable RID
+    /// matters on a distribution's own .NET: Fedora's reports <c>fedora.44-x64</c>, and the
+    /// package's folder is <c>runtimes/linux-x64/native</c>.
+    /// </summary>
+    internal static List<string?> CandidateDirectories(string? hint, string baseDirectory, string rid, string? portableRid)
+    {
+        var directories = new List<string?>();
+        if (!string.IsNullOrEmpty(hint)) directories.Add(hint);
+        directories.Add(baseDirectory);
+        directories.Add(Path.Combine(baseDirectory, "runtimes", rid, "native"));
+        if (portableRid is not null && portableRid != rid)
+            directories.Add(Path.Combine(baseDirectory, "runtimes", portableRid, "native"));
+        directories.Add(null);
+        return directories;
+    }
+
+    /// <summary>The portable RID native packages are laid out by (<c>linux-x64</c>,
+    /// <c>win-x64</c>); null where there is none to name.</summary>
+    internal static string? PortableRid()
+    {
+        var arch = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+        return OperatingSystem.IsLinux() ? "linux-" + arch
+            : OperatingSystem.IsWindows() ? "win-" + arch
+            : OperatingSystem.IsMacOS() ? "osx-" + arch
+            : null;
     }
 
     /// <summary>

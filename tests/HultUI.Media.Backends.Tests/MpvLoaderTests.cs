@@ -37,4 +37,38 @@ public class MpvLoaderTests : IDisposable
         Assert.False(loaded);
         Assert.Null(error);
     }
+
+    [Fact]
+    public void UnderADistributionsOwnRid_ThePortableRidsFolderIsSearchedToo()
+    {
+        // Fedora's own .NET reports fedora.44-x64; the natives package's folder is linux-x64.
+        var dirs = Mpv.Mpv.CandidateDirectories(null, "/app", "fedora.44-x64", "linux-x64");
+        Assert.Equal(["/app", "/app/runtimes/fedora.44-x64/native", "/app/runtimes/linux-x64/native", null], dirs);
+
+        var portable = Mpv.Mpv.CandidateDirectories("/hint", "/app", "linux-x64", "linux-x64");
+        Assert.Equal(["/hint", "/app", "/app/runtimes/linux-x64/native", null], portable);
+    }
+
+    [Fact]
+    public void OnThisMachine_ALibraryInThePortableRidsFolder_IsFound()
+    {
+        // Only meaningful where the runtime reports a RID of its own, as Fedora's does.
+        var rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
+        var portableRid = Mpv.Mpv.PortableRid();
+        if (portableRid is null || portableRid == rid || !OperatingSystem.IsLinux()) return;
+
+        var dir = Path.Combine(AppContext.BaseDirectory, "runtimes", portableRid, "native");
+        var file = Path.Combine(dir, "libmpv.so.2");
+        bool made = !File.Exists(file);
+        if (!made) return;   // a real one is there: nothing to prove with a fake
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(file, [0x7F, (byte)'E', (byte)'L', (byte)'F', 0, 0]);
+        try
+        {
+            // Not loadable, so the loader names it: it was looked at.
+            Mpv.Mpv.TryLoad(out var handle, out var reason);
+            Assert.True(handle != 0 || (reason?.Contains(file) ?? false), $"not looked at: {reason}");
+        }
+        finally { File.Delete(file); }
+    }
 }

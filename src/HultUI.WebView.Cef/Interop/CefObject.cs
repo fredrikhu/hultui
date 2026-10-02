@@ -77,23 +77,39 @@ internal static unsafe class CefObject
     internal static long CountOf(void* ours) => Volatile.Read(ref TrailerOf((cef_base_ref_counted_t*)ours)->Count);
 
     [UnmanagedCallersOnly]
-    private static void AddRefCb(cef_base_ref_counted_t* self) => Interlocked.Increment(ref TrailerOf(self)->Count);
+    private static void AddRefCb(cef_base_ref_counted_t* self)
+    {
+        try { Interlocked.Increment(ref TrailerOf(self)->Count); }
+        catch (Exception ex) { CefLog.Error("add_ref", ex); }
+    }
 
     [UnmanagedCallersOnly]
     private static int ReleaseCb(cef_base_ref_counted_t* self)
     {
-        var t = TrailerOf(self);
-        if (Interlocked.Decrement(ref t->Count) != 0) return 0;
-        if (t->Owner != 0) GCHandle.FromIntPtr(t->Owner).Free();
-        NativeMemory.Free(self);
-        return 1;
+        try
+        {
+            var t = TrailerOf(self);
+            if (Interlocked.Decrement(ref t->Count) != 0) return 0;
+            if (t->Owner != 0) GCHandle.FromIntPtr(t->Owner).Free();
+            NativeMemory.Free(self);
+            return 1;
+        }
+        catch (Exception ex) { CefLog.Error("release", ex); return 0; }
     }
 
     [UnmanagedCallersOnly]
-    private static int HasOneRefCb(cef_base_ref_counted_t* self) => Volatile.Read(ref TrailerOf(self)->Count) == 1 ? 1 : 0;
+    private static int HasOneRefCb(cef_base_ref_counted_t* self)
+    {
+        try { return Volatile.Read(ref TrailerOf(self)->Count) == 1 ? 1 : 0; }
+        catch (Exception ex) { CefLog.Error("has_one_ref", ex); return 0; }
+    }
 
     [UnmanagedCallersOnly]
-    private static int HasAtLeastOneRefCb(cef_base_ref_counted_t* self) => Volatile.Read(ref TrailerOf(self)->Count) >= 1 ? 1 : 0;
+    private static int HasAtLeastOneRefCb(cef_base_ref_counted_t* self)
+    {
+        try { return Volatile.Read(ref TrailerOf(self)->Count) >= 1 ? 1 : 0; }
+        catch (Exception ex) { CefLog.Error("has_at_least_one_ref", ex); return 0; }
+    }
 }
 
 /// <summary>UTF-16 <c>cef_string_t</c>s, CEF's default string type.</summary>

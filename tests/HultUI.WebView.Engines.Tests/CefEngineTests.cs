@@ -181,17 +181,18 @@ public class CefEngineTests
         try
         {
             var lockPath = Path.Combine(profile, "SingletonLock");
+            var host = CefRuntime.HostName();
             Assert.Null(CefRuntime.HeldByAnother(profile));
 
-            File.CreateSymbolicLink(lockPath, $"{Environment.MachineName}-1");   // init: alive, not us
+            File.CreateSymbolicLink(lockPath, $"{host}-1");   // init: alive, not us
             Assert.Equal(1, CefRuntime.HeldByAnother(profile));
             File.Delete(lockPath);
 
-            File.CreateSymbolicLink(lockPath, $"{Environment.MachineName}-{Environment.ProcessId}");
+            File.CreateSymbolicLink(lockPath, $"{host}-{Environment.ProcessId}");
             Assert.Null(CefRuntime.HeldByAnother(profile));
             File.Delete(lockPath);
 
-            File.CreateSymbolicLink(lockPath, $"{Environment.MachineName}-{int.MaxValue}");   // no such process
+            File.CreateSymbolicLink(lockPath, $"{host}-{int.MaxValue}");   // no such process
             Assert.Null(CefRuntime.HeldByAnother(profile));
             File.Delete(lockPath);
 
@@ -200,6 +201,77 @@ public class CefEngineTests
         }
         finally { Directory.Delete(profile, recursive: true); }
     }
+
+    [LinuxFact]
+    public void OnAHostNameWithADot_TheLockIsStillRecognised()
+    {
+        // Chromium writes the whole host name; Environment.MachineName would stop at the dot.
+        var profile = Directory.CreateTempSubdirectory("hultui-cef-lock-").FullName;
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(profile, "SingletonLock"), "build-3.example.com-1");
+            Assert.Equal(1, CefRuntime.HeldByAnother(profile, hostName: "build-3.example.com"));
+            Assert.Null(CefRuntime.HeldByAnother(profile, hostName: "build-3"));
+        }
+        finally { Directory.Delete(profile, recursive: true); }
+    }
+
+    [LinuxFact]
+    public void TheProfileRule_TheFirstFolderRules()
+    {
+        const string root = "/home/u/.local/share/App/CEF";
+        Assert.Equal((null, null), CefRuntime.ResolveFolder(root, root, null));
+        Assert.Equal((null, null), CefRuntime.ResolveFolder(root, root, root + "/"));
+        Assert.Equal(((string?)(root + "/work"), (string?)null), CefRuntime.ResolveFolder(root, root, root + "/work"));
+
+        var (child, error) = CefRuntime.ResolveFolder(root, root, "/home/u/.local/share/App/CEF2");   // a sibling, not inside
+        Assert.Null(child);
+        Assert.Contains("one profile per process", error);
+        Assert.Contains(root, error);
+        Assert.Contains("/home/u/.local/share/App/CEF2", error);
+
+        // A second instance runs on a temporary profile: a folder inside the preferred one is
+        // placed inside the temporary one.
+        Assert.Equal(((string?)"/tmp/hultui-cef-9/work", (string?)null), CefRuntime.ResolveFolder(root, "/tmp/hultui-cef-9", root + "/work"));
+    }
+
+    [CefFact]
+    public void TheProfileRule_InAProcess_SharesInsideAndRefusesOutside()
+    {
+        var root = Directory.CreateTempSubdirectory("hultui-cef-root-").FullName;
+        try
+        {
+            var run = RunCefProcess(Guid.NewGuid().ToString("N"), "--folders", root);
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("root: loaded", run.Output);
+            Assert.Contains("profile: " + root, run.Output);
+            Assert.Contains("inside: loaded", run.Output);   // a request context of its own, string pages served there too
+            Assert.Contains("none: loaded", run.Output);     // no folder: the process's profile
+            Assert.Contains("outside: failed: CEF keeps one profile per process", run.Output);
+            Assert.Contains("inner folder has files: True", run.Output);
+            Assert.Contains("outside folder made: False", run.Output);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [CefFact]
+    public void DotNetsSignalHandlers_SurviveCef()
+    {
+        // Found while fixing the review: Chromium resets SIGSEGV and friends, so a null
+        // dereference ended the process instead of throwing; and it takes SIGCHLD, so a process
+        // started before CEF could never be waited for (the tests that start one hung).
+        var run = RunCefProcess(Guid.NewGuid().ToString("N"), "--signals");
+        Assert.True(run.ExitCode == 0, run.Output);
+        var before = run.Output.Split('\n').First(l => l.StartsWith("before CEF:"))["before CEF:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var after = run.Output.Split('\n').First(l => l.StartsWith("after CEF:"))["after CEF:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Empty(before.Except(after));
+        Assert.Contains("a process started after CEF is seen to exit: True", run.Output);
+        Assert.Contains("a null dereference is a NullReferenceException", run.Output);
+    }
+
+    [LinuxFact]
+    public void TheHostName_IsTheKernels_Whole()
+        => Assert.Equal(File.ReadAllText("/proc/sys/kernel/hostname").Trim(), CefRuntime.HostName());
 
     private static string ThreadName() => File.ReadAllText($"/proc/self/task/{gettid()}/comm").Trim();
 
@@ -225,7 +297,14 @@ public class CefEngineTests
         using var p = Process.Start(start)!;
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(60_000)) { p.Kill(entireProcessTree: true); return (-1, "timed out\n" + stdout.Result); }
+        if (!p.WaitForExit(60_000))
+        {
+            p.Kill(entireProcessTree: true);
+            p.WaitForExit(5000);
+            // Bounded: a pipe may be held open by what the child left behind.
+            Task.WaitAll([stdout, stderr], 5000);
+            return (-1, "timed out\n" + (stdout.IsCompleted ? stdout.Result : "") + "\n--- stderr ---\n" + (stderr.IsCompleted ? stderr.Result : ""));
+        }
         return (p.ExitCode, stdout.Result + stderr.Result);
     }
 
@@ -244,5 +323,44 @@ public class CefEngineTests
             catch (Exception) { }   // gone, or not ours
         }
         return found;
+    }
+}
+
+/// <summary>Review of 5.1 and 5.2, item 1: string documents are kept per view, a bounded number.</summary>
+public class CefStringPagesTests
+{
+    [Fact]
+    public void AView_KeepsItsNewestStringDocuments_NotAll()
+    {
+        var owner = Guid.NewGuid().ToString("N");
+        var uris = Enumerable.Range(0, StringPages.KeptPerView + 3).Select(i => StringPages.Add(owner, $"<p>{i}</p>")).ToList();
+
+        Assert.All(uris.Take(3), u => Assert.False(StringPages.IsServed(u)));
+        Assert.All(uris.Skip(3), u => Assert.True(StringPages.IsServed(u)));
+
+        var other = StringPages.Add(Guid.NewGuid().ToString("N"), "<p>another view's</p>");
+        StringPages.Forget(owner);
+        Assert.All(uris, u => Assert.False(StringPages.IsServed(u)));
+        Assert.True(StringPages.IsServed(other));
+    }
+}
+
+/// <summary>Review of 5.1 and 5.2, item 4: an exception that leaves an
+/// <c>[UnmanagedCallersOnly]</c> method ends the process, so every one in the engine catches.</summary>
+public class CefCallbackTests
+{
+    [Fact]
+    public void EveryCallbackFromCef_CatchesWhatItThrows()
+    {
+        var callbacks = typeof(CefEngine).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly))
+            .Where(m => m.IsDefined(typeof(System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute), false))
+            .ToList();
+        Assert.True(callbacks.Count > 20, $"only {callbacks.Count} callbacks found");
+        var without = callbacks
+            .Where(m => !(m.GetMethodBody()?.ExceptionHandlingClauses.Any(c => c.Flags == System.Reflection.ExceptionHandlingClauseOptions.Clause) ?? false))
+            .Select(m => $"{m.DeclaringType!.Name}.{m.Name}")
+            .ToList();
+        Assert.True(without.Count == 0, "no catch in: " + string.Join(", ", without));
     }
 }

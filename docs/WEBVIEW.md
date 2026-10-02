@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora and bundled on Debian and Ubuntu. **Not built yet.** |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script and messages work; input, navigation policy, zero-copy and accessibility follow. |
 
 An app that never shows a web page references none of these and pays nothing.
 
@@ -177,7 +177,19 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
   A page learns of a drag about a quarter of a second after it enters (Edge is quicker: its
   drop target is in the browser's own process). On Linux, drops wait
   for the CEF engine.
-- Windows only until the CEF engine exists; `FakeWebEngine` runs anywhere.
+- On Linux, **one profile per process**. CEF keeps cookies, storage and cache in one folder
+  per process, and the first page's `UserDataFolder` decides which (the application's
+  default, `~/.local/share/<app>/CEF`, when it names none). A later page may name that folder,
+  name none, or name a folder inside it, which gets a session of its own; a page naming any
+  other folder fails (`WebViewState.Failed`, with a message saying which folder is in use).
+  WebView2 has no such rule: there each folder is its own browser.
+- On Linux, **a second instance of an application runs on a temporary profile.** Chromium
+  allows one browser per profile, so the second copy of an application cannot share the
+  first's: its pages work, but without the first's cookies and storage, and what it stores is
+  deleted when it exits. On Windows, instances share their user data folder's browser.
+- On Linux, **pages under X11 take the pixel path**: GPU zero-copy needs HultUI's window on
+  Wayland (EGL; under X11 HultUI's GL context is GLX, which cannot take CEF's buffers).
+- The CEF engine is being built (above); `FakeWebEngine` runs anywhere.
 
 ## Testing
 
