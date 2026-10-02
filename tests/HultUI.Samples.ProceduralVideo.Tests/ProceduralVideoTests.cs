@@ -118,8 +118,11 @@ public class ProceduralVideoTests
         backend.FrameRate = 0;
         Assert.Equal(ProceduralBackend.MinFrameRate, backend.FrameRate);
 
-        // Generous bounds: this is a worker thread sleeping on a real clock.
-        Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 100), 25, 80);
+        // Generous bounds: this is a worker thread sleeping on a real clock. On Windows a sleep
+        // rounds up to the 15.6 ms timer tick, so "100" runs at about 64 a second, 32 frames
+        // here, and 24 on a loaded machine (seen). What is pinned is that the rate takes
+        // effect: four times the slow rate's ceiling, below.
+        Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 100), 12, 80);
         Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 4), 0, 6);
     }
 

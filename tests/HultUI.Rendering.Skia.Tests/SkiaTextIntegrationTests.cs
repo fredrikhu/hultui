@@ -274,7 +274,7 @@ public class SkiaTextIntegrationTests
         }
     }
 
-    [Theory]
+    [HanFontsTheory]
     [InlineData(10_000f)]   // one line
     [InlineData(40f)]       // wrapped between ideographs
     public void AJapaneseSentence_ReadWithAnEnglishUi_IsOneFace(float maxWidth)

@@ -643,6 +643,65 @@ In this order; each ends with its tests green and the step written into
    not be reused.
 7. **Debian and Ubuntu.** The natives package or download, and a run on each.
 
+## Review of steps 5.1 and 5.2 (2026-10-02)
+
+Read on the Windows side against the contract, with the whole solution built and tested on
+Windows. **The engine's shape stands:** `CefRuntime` as the per-process singleton on a thread
+of its own, CEF's own UI thread for every callback, every call posted, and seam W10 in the
+placement. Fix these before 5.3; each is small.
+
+1. **String pages pile up.** `StringPages` keeps every `NavigateToString` body until its view
+   is disposed. An application that renders one mail after another into the same view grows
+   without bound. Keep a bounded number per view (the newest few, enough for back and
+   forward), and serve the older ones the "no longer available" page.
+2. **A resize during start-up is lost.** A placement that changes between `create_browser`
+   and `Ready` posts no `Resize` (the phase is `Starting`), and CEF read the old size at
+   creation, so a window maximised while the page starts keeps a page the old size. Apply the
+   current placement once when the view becomes ready.
+3. **The profile lock's host check fails on a host name with a dot.** On Linux,
+   `Environment.MachineName` stops at the first `.`; Chromium's `SingletonLock` holds the
+   whole name (`host.example.com-1234`). A second instance on such a machine then takes the
+   held profile and CEF fails. Compare up to the first dot on both sides, or read the full
+   name with `gethostname`.
+4. **Every `[UnmanagedCallersOnly]` callback catches.** An exception that leaves one ends the
+   process. `OnBeforeCommandLine` has `try`/`finally` and no `catch`; `StringPages.Headers`,
+   `Read` and `Skip` have no `try` at all.
+5. **`SDL3Window.WindowSystem` asks SDL every time**, and the binding allocates a string per
+   call; the element computes its placement on every layout. One video driver per process:
+   read it once.
+6. **The mpv backend misses its natives under Fedora's .NET**, as you found (`Mpv.cs`, the
+   `runtimes/<RuntimeIdentifier>/native` probe). Add the portable RID as
+   `CefLibrary` does, and check it on this machine with Fedora's SDK.
+7. **The helper workflow should use the release transport.** Artifact storage is already
+   full: the `docs` job's upload failed on that on 2026-10-01. Do as `mpv-natives.yml` does
+   (`native/mpv/release-transport.sh`; move it somewhere shared rather than copy it).
+8. **Already fixed on the Windows side** (pull before you start):
+   - the two Skia failures here were the two rows of
+     `AJapaneseSentence_ReadWithAnEnglishUi_IsOneFace`, a theory the Han-font gate did not
+     cover. It is now `[HanFontsTheory]` and skips without a CJK font;
+   - three `CefEngineTests` failed on Windows, which runs the whole solution in CI: two expect
+     `/` in `Path.Combine`'s results, and the lock test creates symbolic links, which Windows
+     allows only with a privilege. They are `[LinuxFact]` now and still run here. Item 3
+     changes the lock test;
+   - `ProceduralVideoTests.TheFrameRate_SetsHowOftenFramesArePublished`, the one that failed
+     here once, failed on Windows too (24 frames, at least 25 wanted): a sleep rounds up to
+     the 15.6 ms timer tick there. Its lower bound is 12 now.
+
+**Decided by the owner, 2026-10-02:**
+
+- **`WebViewOptions.UserDataFolder`: the first folder rules.** The first page's folder (or
+  the application's default when it names none) becomes the process's profile,
+  `root_cache_path`. A page naming the same folder shares it; a folder inside it gets a
+  request context of its own (CEF's rule for `cache_path`); any other folder makes that page
+  fail (`WebEngineEvent.Failed`, `InitializationFailed`) with a message naming the rule and
+  the folder in use. A second instance's temporary profile applies to the root as now.
+- **The helper workflow uses the release transport** (item 7): artifact storage is full, so
+  there was no real choice.
+
+Also write into `docs/WEBVIEW.md`'s limits what an application meets on Linux: the profile
+rule above; a second instance runs on a temporary profile (no shared cookies, unlike
+WebView2); and pages under X11 take the pixel path.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

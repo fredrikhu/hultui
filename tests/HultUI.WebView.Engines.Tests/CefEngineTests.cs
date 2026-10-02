@@ -16,15 +16,26 @@ public sealed class CefFactAttribute : FactAttribute
     }
 }
 
+/// <summary>Skips off Linux: a fact about Linux's paths or processes (slashes, symbolic
+/// links, <c>/proc</c>) that needs no CEF. Windows builds paths with backslashes and creates
+/// symbolic links only with a privilege.</summary>
+public sealed class LinuxFactAttribute : FactAttribute
+{
+    public LinuxFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux()) Skip = "A fact about Linux's paths and processes.";
+    }
+}
+
 /// <summary>
 /// Step 5.1 of the Linux engine: where CEF is looked for, whether it is there, and CEF's one
-/// start and one stop per process. The search and the switches run anywhere; the rest needs
+/// start and one stop per process. The switches run anywhere, the search on Linux; the rest needs
 /// CEF, and the stop needs a process of its own (HultUI.WebView.Engines.Tests.CefProcess),
 /// because it happens when that process exits.
 /// </summary>
 public class CefEngineTests
 {
-    [Fact]
+    [LinuxFact]
     public void CefIsLookedFor_InTheBriefsOrder()
     {
         var dirs = CefLibrary.CandidateDirectories("/opt/my-cef", "/app", "linux-x64").ToList();
@@ -32,7 +43,7 @@ public class CefEngineTests
         Assert.Equal("/app/cef", CefLibrary.CandidateDirectories(null, "/app", "linux-x64").First());
     }
 
-    [Fact]
+    [LinuxFact]
     public void TheHelper_IsLookedFor_BesideTheApplication_ThenWhereThePackagePutsIt()
     {
         var helpers = CefLibrary.CandidateHelpers("/opt/helper", "/app", "linux-arm64").ToList();
@@ -163,7 +174,7 @@ public class CefEngineTests
         static string ProfileOf(string output) => output.Split('\n').First(l => l.StartsWith("profile: "))["profile: ".Length..].Trim();
     }
 
-    [Fact]
+    [LinuxFact]
     public void AProfilesLock_IsHeld_OnlyByAnotherLiveProcessOnThisMachine()
     {
         var profile = Directory.CreateTempSubdirectory("hultui-cef-lock-").FullName;
