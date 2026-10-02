@@ -511,6 +511,14 @@ nodes, a Wikipedia article ~5,100 nodes and 5 MB); nothing reaches AT-SPI by its
 act on a node, but its node ids are DevTools' `backendDOMNodeId`, so actions go through the
 DevTools session the engine already has for messages.
 
+**W10 — The window system (`HultUI.Core`, `HultUI.Platform.SDL3`, `HultUI`). Shipped in step
+5.2** as `IPlatformWindow.WindowSystem` (SDL's video driver: "wayland", "x11", "windows";
+null headless), `Window.WindowSystem`, and `WebViewPlacement.WindowSystem`, which the element
+fills. CEF draws for a display server of its own choosing, once per process: it has to be
+told HultUI's (spike L0: Wayland needs `WaylandFractionalScaleV1` off for the scale, and only
+Wayland shares GPU buffers with HultUI's EGL context). So the CEF engine starts CEF at its
+first page's first placement, which carries the answer.
+
 Not needed, checked: pixel-density math (`ScreenContentBox × Window.DisplayScale`
 is device pixels; use it rather than `LocalPosition`, which ignores scrolling),
 pointer capture (`CapturePointer`, released on up), wake from another thread
@@ -695,6 +703,43 @@ engine if it changed, but nothing more.
      profile, deleted when it exits, which a test shows; and a distribution's .NET reports
      its own RID (`fedora.44-x64`), so natives are looked for under the portable one
      (`linux-x64`).
+   - **5.2, pixels: done 2026-10-02.** `CefView`: the page is created at its first placement
+     in a window (CEF starting then, for that window's system, seam W10), asynchronously on
+     `CrBrowserMain`; `on_paint` writes each whole frame, premultiplied BGRA at the placement's
+     scale, into `IWebViewHost.Pixels`. The view rectangle is the placement's device pixels
+     over its scale, rounded up so the frame covers the element; a new scale is
+     `notify_screen_info_changed`, a new size `was_resized`; hidden is `was_hidden`. Every
+     call into CEF is posted to `CrBrowserMain` and every callback arrives there, so HultUI's
+     thread never waits for CEF. The sample's `--check` needs script and messages as well, so
+     their route (decided after the spike) is built now and step 5.4 completes it: each
+     page's DevTools session (`DevToolsSession`, raw JSON both ways) turns on `Page` and
+     `Runtime`, adds the `__hultuiPost` binding and registers the `window.chrome.webview` shim
+     for every new document before `Ready` is raised; `ExecuteScriptAsync` is
+     `Runtime.evaluate` (the value as JSON, `null` for undefined, a throw faults the task);
+     `PostMessage` is a `MessageEvent` the shim dispatches; `bindingCalled` is
+     `MessageReceived`, with the origin of its execution context. `NavigateToString` serves
+     the document from `https://hultui-string.invalid/` with `Content-Security-Policy:
+     sandbox allow-scripts allow-forms allow-popups allow-modals`, and reports
+     `about:blank` as its address, as WebView2 and the fake do.
+     **The review's sandbox holds** (it asked to verify): the document's origin is opaque
+     (`self.origin` is "null"; `location.origin` still shows the URL's, which is how a sandbox
+     behaves, and fooled the first test), its cookies are out of reach, its messages arrive
+     with a null origin, and a `srcdoc` iframe in it loads (in a `data:` page it crashed the
+     renderer). CSP from a scheme handler is honoured in general: `script-src 'none'` blocked
+     scripts in the spike's `app.local`.
+     **`external_begin_frame_enabled` is not needed** (the review asked to try it): the idle
+     cost the spike measured (17–20 ms/s) was the spike's own harness. The sample, NativeAOT,
+     idle on its home page: 4 ms/s with CEF and 4 ms/s with the fake engine, all on HultUI's
+     thread; CEF's threads idle. It changed nothing in the spike either (frame rate 60, 1, or
+     external begin frames: 20 ms/s each), and it would need a "the page wants a frame" signal
+     CEF does not give.
+     **Measured:** `--check` passes on Linux under JIT (772 ms) and NativeAOT (470 ms; no trim
+     or AOT warnings, the helper published beside the executable), at window scale 1 and 1.5
+     (the page sharp at 1.5, matching HultUI's own text), with no CEF process left after
+     exit; `--bench` (the animated page at 1916×945, 60 page frames a second, pixel path):
+     185–228 ms/s in the process, against Windows' ~300 for its pixel path at 1650×1072. 5
+     view tests in `HultUI.WebView.Engines.Tests` (`CefViewTests`): pixels at the placement's
+     scale, a new scale, script, the opaque string document, messages both ways.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

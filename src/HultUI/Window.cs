@@ -253,6 +253,13 @@ public sealed class Window : IOverlayHost, IDisposable
     public nint NativeHandle => PlatformWindow is IWin32WindowHandle win32 ? win32.Hwnd : 0;
 
     /// <summary>
+    /// The window system this window is on: "wayland", "x11", "windows", "cocoa"; null in a
+    /// headless session. A browser engine on Linux needs it before it starts, to draw for the
+    /// same display server and, on Wayland, to share GPU buffers with this window.
+    /// </summary>
+    public string? WindowSystem => PlatformWindow.WindowSystem;
+
+    /// <summary>
     /// Where <paramref name="element"/>'s content box is in this window, in layout units:
     /// <see cref="Element.ScreenContentBox"/> — every ancestor scroll applied — plus the
     /// position of the overlay the element is in, if it is in one. An overlay's content is

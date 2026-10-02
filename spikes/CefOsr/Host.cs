@@ -212,6 +212,9 @@ internal static unsafe class Host
         var info = new cef_window_info_t { size = (ulong)sizeof(cef_window_info_t) };
         info.windowless_rendering_enabled = 1;
         info.shared_texture_enabled = sharedTexture ? 1 : 0;
+        info.external_begin_frame_enabled = Opt.Rest.Contains("--external-begin-frame") ? 1 : 0;
+        var rateArg = Opt.Rest.FirstOrDefault(a => a.StartsWith("--frame-rate="));
+        if (rateArg != null) frameRate = int.Parse(rateArg["--frame-rate=".Length..]);
         info.runtime_style = cef_runtime_style_t.CEF_RUNTIME_STYLE_ALLOY;
         var bs = new cef_browser_settings_t { size = (ulong)sizeof(cef_browser_settings_t) };
         bs.windowless_frame_rate = frameRate;

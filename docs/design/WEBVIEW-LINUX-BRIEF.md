@@ -602,7 +602,9 @@ In this order; each ends with its tests green and the step written into
    built and found.
 2. **Pixels.** `on_paint` into `IWebViewHost.Pixels`. `SetPlacement` gives device pixels and a
    scale: the view rectangle is pixels divided by scale. The sample's `--check` passes on
-   Linux, JIT and NativeAOT.
+   Linux, JIT and NativeAOT. **Done 2026-10-02**, with what `--check` needs of 5.4 (script,
+   messages, string documents) built on the decided routes; the review's two "verify"s are
+   answered there (the CSP sandbox holds; external begin frames are not needed).
 3. **Input, focus, IME.** `Capabilities` does **not** include `NativeKeyboard`: the element
    then forwards keys and text through `SendKey` and `SendText`, a path only the fake engine
    has exercised so far. Seam W6 lands here. Shortcuts are simpler than on Windows: the

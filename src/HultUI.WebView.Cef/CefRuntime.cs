@@ -228,6 +228,7 @@ internal static unsafe partial class CefRuntime
             if (_state != State.Starting) return;
             _state = State.Running;
         }
+        StringPages.Register();
         _started!.TrySetResult(null);
     }
 

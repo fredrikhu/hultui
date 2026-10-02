@@ -83,6 +83,7 @@ public class WebViewElementTests
         Assert.Equal(new PixelRect(0, 60, 600, 390), placement.Bounds);
         Assert.Equal(1.5f, placement.Scale);
         Assert.Equal(0, placement.Window);        // headless: no native window
+        Assert.Null(placement.WindowSystem);      // and no window system (seam W10)
         Assert.True(engine.Views[0].IsVisible);
     }
 

@@ -171,7 +171,10 @@ public partial class WebViewElement : Element
         // elements that touch in layout units touch in pixels too.
         int x = (int)MathF.Round(box.X * scale), y = (int)MathF.Round(box.Y * scale);
         int right = (int)MathF.Round((box.X + box.Width) * scale), bottom = (int)MathF.Round((box.Y + box.Height) * scale);
-        var placement = new WebViewPlacement(window.NativeHandle, new PixelRect(x, y, right - x, bottom - y), scale);
+        var placement = new WebViewPlacement(window.NativeHandle, new PixelRect(x, y, right - x, bottom - y), scale)
+        {
+            WindowSystem = window.WindowSystem,
+        };
         if (_placement == placement) return;
         _placement = placement;
         if (_flushQueued) return;

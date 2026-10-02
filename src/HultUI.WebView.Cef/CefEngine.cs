@@ -44,7 +44,7 @@ public sealed class CefEngine : IWebEngine
     public IWebEngineView CreateView(WebViewOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        throw new NotSupportedException("CEF pages arrive in step 5.2 of docs/design/WEBVIEW-LINUX-BRIEF.md.");
+        return new CefView(options);
     }
 
     /// <summary>Releases this handle. CEF itself runs until the process exits.</summary>

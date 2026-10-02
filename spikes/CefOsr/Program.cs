@@ -32,6 +32,7 @@ return probe switch
     "q9" => Q9.Run(opt),
     "q10" => Q10.Run(opt),
     "lifetime" => Lifetime.Run(opt),
+    "url" => Url.Run(opt),
     _ => Fail($"unknown probe {probe}"),
 };
 

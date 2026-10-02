@@ -254,6 +254,12 @@ internal static unsafe class Q7
             var cs = Make("utf-8");
             response->set_charset(response, &cs);
         }
+        if (Environment.GetEnvironmentVariable("CEFOSR_CSP") is { Length: > 0 } csp && st.mime == "text/html")
+        {
+            var n = Make("Content-Security-Policy");
+            var v = Make(csp);
+            response->set_header_by_name(response, &n, &v, 1);
+        }
         *length = st.data.Length;
         Release(response);
     }

@@ -190,4 +190,10 @@ public readonly record struct PixelRect(int X, int Y, int Width, int Height)
 /// there is none — headless, or a platform whose engine needs none.</param>
 /// <param name="Bounds">The page in that window's client area, in device pixels.</param>
 /// <param name="Scale">Device pixels per layout unit, which the engine rasterizes at.</param>
-public readonly record struct WebViewPlacement(nint Window, PixelRect Bounds, float Scale);
+public readonly record struct WebViewPlacement(nint Window, PixelRect Bounds, float Scale)
+{
+    /// <summary>The window's window system (<c>Window.WindowSystem</c>): "wayland", "x11",
+    /// "windows"; null in a headless session. An engine that draws for a display server of
+    /// its own (CEF on Linux) starts against this one.</summary>
+    public string? WindowSystem { get; init; }
+}
