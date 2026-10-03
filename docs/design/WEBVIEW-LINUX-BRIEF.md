@@ -1025,11 +1025,22 @@ it. The fresh-account bug was a good find.
    --no-sandbox is not supported"), the very thing the check exists to prevent. Confirm with
    `sudo` on either machine, and report root the way the other cases are reported (unless the
    application chose to run without the sandbox).
+   **Done 2026-10-03.** Confirmed with `sudo` on both machines: CEF logs "Running as root
+   without --no-sandbox is not supported" and the process ends (exit 1) before the
+   application's own code goes on. With `HULTUI_CEF_SWITCHES=no-sandbox` the same root run
+   passed `--check` on Debian. `CefSandbox` now refuses root with a reason ("run the
+   application as an ordinary user"), on any distribution and whether or not a setuid
+   `chrome-sandbox` is there, unless the application chose no sandbox (`no-sandbox` among the
+   switches), which also lifts the AppArmor case. Rule tests for both.
 2. **Fixed on the Windows side:** `File.GetUnixFileMode` in `CefSandbox` was the branch's one
    new build warning (CA1416): the csproj's `<SupportedOSPlatform>linux</SupportedOSPlatform>`
    generates nothing for a plain `net10.0` project, so the analyzer treats the code as every
    platform's. It has an `OperatingSystem.IsWindows()` guard now. The property is inert:
    remove it, or keep it only as a comment, so nobody relies on it.
+   **Done:** removed from `HultUI.WebView.Cef.csproj`, with a comment saying why it is not
+   there and what guards the code instead. Three other projects carry the same property
+   (`HultUI.Platform.Accessibility.Linux`, `HultUI.WebView.WebView2`,
+   `HultUI.Platform.Accessibility.Windows`); not touched here.
 3. **Fixed on the Windows side:** the natives README's paragraph on what a page cannot play
    (H.264, AAC) was lost in the rewrite; it is back.
 4. **Not for you:** the empty data folder on a fresh account also hits Vesper Commander, whose
