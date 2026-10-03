@@ -4,10 +4,16 @@ namespace HultUI.WebView;
 public sealed record WebViewOptions
 {
     /// <summary>
-    /// The origin local content is served from, and the one origin whose messages are
-    /// accepted by default.
+    /// The origin local content is served from (<see cref="ContentFolder"/>), and the one origin
+    /// whose messages are accepted by default.
     /// </summary>
-    public const string AppOrigin = "https://app.local";
+    /// <remarks>
+    /// Not <c>app.local</c>, as it first was: <c>.local</c> is the name space of local-network
+    /// discovery (mDNS), and WebView2 waited for a lookup before serving each page from it, two
+    /// seconds a navigation against 11 to 21 ms for this name (measured 2026-10-03).
+    /// <c>.example</c> is reserved and never resolves; WebView2's own samples use it.
+    /// </remarks>
+    public const string AppOrigin = "https://app.example";
 
     /// <summary>
     /// Where the engine keeps cookies, cache and storage. Null lets the engine choose a
@@ -24,6 +30,20 @@ public sealed record WebViewOptions
     /// to the application unless it is listed.
     /// </summary>
     public IReadOnlyList<string> MessageOrigins { get; init; } = [AppOrigin];
+
+    /// <summary>
+    /// A folder served at <see cref="AppOrigin"/>: <c>https://app.example/index.html</c> is
+    /// <c>index.html</c> in it, and a page there finds its stylesheets, scripts and images by
+    /// relative paths, as on a web server. Null serves nothing there. A relative path is taken
+    /// from the working directory when the controller is created; the folder must exist.
+    /// </summary>
+    /// <remarks>
+    /// What is served from it is the application's own content: its messages are accepted by
+    /// default (<see cref="MessageOrigins"/>), and it is what the Linux engine still loads when
+    /// it runs without its sandbox. Pages from other origins may use its files as the source of
+    /// an image or a script, but cannot read them with <c>fetch</c>.
+    /// </remarks>
+    public string? ContentFolder { get; init; }
 
     /// <summary>Whether the engine's developer tools may be opened (F12, context menu).</summary>
     public bool DevTools { get; init; }

@@ -12,7 +12,7 @@ namespace HultUI.WebView.Cef;
 /// </summary>
 /// <remarks>
 /// <para>Not a <c>data:</c> URL: a <c>srcdoc</c> iframe inside one crashes the renderer, on 146
-/// and on 154 (spike L0, question 6). Not <c>app.local</c> either: there an untrusted string (a
+/// and on 154 (spike L0, question 6). Not <see cref="WebViewOptions.AppOrigin"/> either: there an untrusted string (a
 /// mail body, rendered Markdown) would be same-origin with the application's own content. The
 /// sandbox makes the document's origin opaque, as the contract says and WebView2 gives, so its
 /// messages arrive with a null origin (decided 2026-10-02).</para>

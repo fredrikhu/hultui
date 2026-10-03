@@ -47,16 +47,16 @@ public class CefWithoutSandboxTests
 
     [Theory]
     [InlineData("https://hultui-string.invalid/abc/1", true)]   // the string pages
-    [InlineData("https://app.local/index.html", true)]          // WebViewOptions.AppOrigin
-    [InlineData("https://APP.LOCAL/x", true)]
+    [InlineData("https://app.example/index.html", true)]          // WebViewOptions.AppOrigin
+    [InlineData("https://APP.EXAMPLE/x", true)]
     [InlineData("data:text/html,<p>hi", true)]
     [InlineData("blob:https://hultui-string.invalid/5b6c", true)]
     [InlineData("about:blank", true)]
     [InlineData("about:srcdoc", true)]
     [InlineData("https://example.org/", false)]                 // the internet
-    [InlineData("http://app.local/", false)]                    // not the app's origin: another scheme
-    [InlineData("https://app.local:8443/", false)]              // nor another port
-    [InlineData("https://app.local.example.org/", false)]
+    [InlineData("http://app.example/", false)]                    // not the app's origin: another scheme
+    [InlineData("https://app.example:8443/", false)]              // nor another port
+    [InlineData("https://app.example.org/", false)]
     [InlineData("http://127.0.0.1:8080/", false)]               // the local network
     [InlineData("file:///etc/passwd", false)]
     [InlineData("wss://example.org/socket", false)]

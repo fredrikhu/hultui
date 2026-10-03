@@ -1272,6 +1272,60 @@ What the tests do not cover yet, each a way past a per-page request filter:
 None changes the API. Fix what the tests find, and write the result down here and in
 `docs/WEBVIEW.md`'s "Running without the sandbox (Linux)".
 
+## Local content: `ContentFolder` (decided 2026-10-03)
+
+**The owner's decision:** a folder served at `WebViewOptions.AppOrigin`, on both engines, so an
+application can show local HTML with relative files, with or without the sandbox.
+
+**Changed on the Windows side, read first: `AppOrigin` is now `https://app.example`, not
+`https://app.local`.** Measured: WebView2 took 2.0 s on every navigation to `app.local`, warm
+(`.local` is mDNS's name space, and it waited for a lookup before serving the mapping), against
+11 to 21 ms for `app.example`. `.example` is reserved and never resolves. Your code uses the
+constant, so it follows; the literal `app.local` in your tests is already replaced. Check
+whether CEF on Linux has the same delay for `.local`: it would be a reason to keep the change
+there too, not a reason to undo it.
+
+**Done on the Windows side:**
+- `WebViewOptions.ContentFolder` (per page). The controller makes it absolute when it is
+  created and throws `DirectoryNotFoundException` if the folder does not exist, so engines
+  always get an absolute path to an existing folder.
+- WebView2: `SetVirtualHostNameToFolderMapping` (`ICoreWebView2_3`, added to the generator) with
+  `DENY_CORS`: another origin may use the files as an image or script source but cannot read
+  them with `fetch`.
+- Tests: a page at `https://app.example/index.html` loads its stylesheet and fetches its JSON by
+  relative paths, and its message is accepted by default. The same address without the option
+  fails. Warm navigations to the origin take milliseconds (a guard against a `.local`-like
+  name coming back).
+- `docs/WEBVIEW.md`: a "Local content" section.
+
+**Yours:**
+1. **A scheme handler factory** for `https` and `AppOrigin`'s host, registered once like
+   `StringPages`, which serves **the requesting page's** folder: the setting is per page, so
+   look the view up by the browser's identifier. A page without a folder gets no handler, so
+   the address fails as it does on Windows.
+2. **Serving:**
+   - The URL's path, percent-decoded, resolved inside the folder. Refuse anything that leaves
+     it (`..`, its encoded forms, a symbolic link pointing out), and answer 404 for a missing
+     file. Whatever WebView2 does for a folder's own address, do the same.
+   - A MIME type by extension, enough for the web's usual files (html, css, js and mjs, json,
+     svg, png, jpeg, gif, webp, ico, woff and woff2, wasm, mp4, webm, mp3, ogg, txt), and a
+     charset for text.
+   - No CORS headers, which matches WebView2's `DENY_CORS`. Answer range requests if CEF's
+     resource handler makes it reasonable, so video can seek; write down if not.
+   - Spike question 7's handler (`spikes/CefOsr/Q7.cs`) is a starting point.
+3. **Without the sandbox:** the own-content rule already lets `AppOrigin` through. Test that
+   a page from `ContentFolder` loads, with its files, in that mode, and that its iframe to the
+   internet is still refused.
+4. **Tests:**
+   - The Windows test's twin: stylesheet, `fetch`, message accepted; without the option, the
+     address fails.
+   - Path escapes refused (`../`, `%2e%2e/`, a link pointing out).
+   - MIME types for each listed extension.
+   - Two pages with different folders, each served its own.
+5. **Docs:** `docs/WEBVIEW.md`'s "Local content" applies to both engines once this works. Take
+   out "nothing serves app.local yet" wherever it is still written, the natives README
+   included.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

@@ -66,8 +66,32 @@ web.MessageReceived += message =>                     // window.chrome.webview.p
 Messages are JSON both ways: `PostMessage(json)` reaches the page's
 `chrome.webview.addEventListener('message', e => …)` with `e.data` parsed. Only origins in
 `WebViewOptions.MessageOrigins` reach `MessageReceived` — by default just
-`WebViewOptions.AppOrigin` (`https://app.local`) and string documents — so a page from
+`WebViewOptions.AppOrigin` (`https://app.example`) and string documents — so a page from
 the internet cannot talk to the app unless it is listed. `["*"]` accepts any origin.
+
+## Local content
+
+`ContentFolder` serves a folder at `WebViewOptions.AppOrigin`, `https://app.example/`:
+
+```csharp
+var web = new WebViewController(engine, new WebViewOptions
+{
+    ContentFolder = Path.Combine(AppContext.BaseDirectory, "web"),
+});
+web.Navigate(WebViewOptions.AppOrigin + "/index.html");
+```
+
+The page finds its stylesheets, scripts, images and data by relative paths, as on a web
+server, and its messages reach the app without listing anything, since `AppOrigin` is in
+`MessageOrigins` by default. The folder must exist when the controller is created; a
+relative path is taken from the working directory then. Pages from other origins may use its
+files as an image or script source but cannot read them with `fetch`.
+
+The origin is `app.example` rather than something under `.local`: that name space belongs to
+local-network discovery, and WebView2 waited two seconds for a lookup on every navigation
+to it.
+
+On Linux the CEF engine's side is being built; until then the address serves nothing there.
 
 ## The page's menus, dialogs, downloads and permissions
 
@@ -114,6 +138,7 @@ sample saves downloads through a save dialog and shows their progress in its sta
 new WebViewController(engine, new WebViewOptions
 {
     UserDataFolder = Path.Combine(appData, "WebView"),  // cookies, cache; default is per user, per app
+    ContentFolder = Path.Combine(AppContext.BaseDirectory, "web"),  // served at https://app.example/
     DevTools = true,                                     // F12 / context menu; off by default
     UserAgent = "MyApp/1.0",
     MessageOrigins = ["https://docs.example.org"],
@@ -195,7 +220,7 @@ var engine = new CefEngine(new CefEngineOptions { Sandbox = false });
 
 **Without the sandbox, a page that exploits a browser bug runs with the user's full rights.** So
 the engine then loads only the application's own content: the pages it gives as strings
-(`NavigateToString`), `WebViewOptions.AppOrigin` (`https://app.local`; nothing serves it yet),
+(`NavigateToString`), `WebViewOptions.AppOrigin` (`https://app.example`, which `ContentFolder` serves),
 and `data:`, `blob:` and `about:blank`. Every other request, in every frame and of every kind
 (documents, frames, scripts, styles, images, `fetch`, WebSockets), is refused and logged once on
 standard error. A navigation elsewhere completes as failed, with `Error` "BlockedWithoutSandbox".

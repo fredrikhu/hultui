@@ -409,7 +409,8 @@ and input is recorded; `Raise*` injects what a page does.
 an event (the app opens the system browser or navigates in place); `file://` is
 off; local content is served through a virtual host
 (`SetVirtualHostNameToFolderMapping` / a CEF scheme handler factory) under a fixed
-`https://app.local/`; `MessageReceived` only from origins the options allow;
+`https://app.example/` (first `app.local`, which cost WebView2 two seconds a navigation:
+`.local` is mDNS's); `MessageReceived` only from origins the options allow;
 DevTools off unless `WebViewOptions.DevTools`.
 
 ## Framework seams

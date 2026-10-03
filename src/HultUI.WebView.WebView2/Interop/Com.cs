@@ -112,6 +112,14 @@ internal static unsafe class Com
             return ((delegate* unmanaged[Stdcall]<nint, char*, nint, int>)Fn(obj, slot))(obj, p, handler);
     }
 
+    /// <summary><c>(LPCWSTR, LPCWSTR, enum)</c>, as <c>SetVirtualHostNameToFolderMapping</c> takes.</summary>
+    public static int CallStrings(nint obj, int slot, string first, string second, int value)
+    {
+        fixed (char* a = first)
+        fixed (char* b = second)
+            return ((delegate* unmanaged[Stdcall]<nint, char*, char*, int, int>)Fn(obj, slot))(obj, a, b, value);
+    }
+
     /// <summary><c>add_X(handler, EventRegistrationToken*)</c>.</summary>
     public static long AddHandler(nint obj, int slot, nint handler, string what)
     {

@@ -480,6 +480,82 @@ namespace HultUI.WebView.WebView2.Interop;
     }
 
     /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2_3
+    {
+        public static readonly Guid IID = new("a0d6df20-3b92-416d-aa0c-437a9c727857");
+        public const int get_Settings = 3;
+        public const int get_Source = 4;
+        public const int Navigate = 5;
+        public const int NavigateToString = 6;
+        public const int add_NavigationStarting = 7;
+        public const int remove_NavigationStarting = 8;
+        public const int add_ContentLoading = 9;
+        public const int remove_ContentLoading = 10;
+        public const int add_SourceChanged = 11;
+        public const int remove_SourceChanged = 12;
+        public const int add_HistoryChanged = 13;
+        public const int remove_HistoryChanged = 14;
+        public const int add_NavigationCompleted = 15;
+        public const int remove_NavigationCompleted = 16;
+        public const int add_FrameNavigationStarting = 17;
+        public const int remove_FrameNavigationStarting = 18;
+        public const int add_FrameNavigationCompleted = 19;
+        public const int remove_FrameNavigationCompleted = 20;
+        public const int add_ScriptDialogOpening = 21;
+        public const int remove_ScriptDialogOpening = 22;
+        public const int add_PermissionRequested = 23;
+        public const int remove_PermissionRequested = 24;
+        public const int add_ProcessFailed = 25;
+        public const int remove_ProcessFailed = 26;
+        public const int AddScriptToExecuteOnDocumentCreated = 27;
+        public const int RemoveScriptToExecuteOnDocumentCreated = 28;
+        public const int ExecuteScript = 29;
+        public const int CapturePreview = 30;
+        public const int Reload = 31;
+        public const int PostWebMessageAsJson = 32;
+        public const int PostWebMessageAsString = 33;
+        public const int add_WebMessageReceived = 34;
+        public const int remove_WebMessageReceived = 35;
+        public const int CallDevToolsProtocolMethod = 36;
+        public const int get_BrowserProcessId = 37;
+        public const int get_CanGoBack = 38;
+        public const int get_CanGoForward = 39;
+        public const int GoBack = 40;
+        public const int GoForward = 41;
+        public const int GetDevToolsProtocolEventReceiver = 42;
+        public const int Stop = 43;
+        public const int add_NewWindowRequested = 44;
+        public const int remove_NewWindowRequested = 45;
+        public const int add_DocumentTitleChanged = 46;
+        public const int remove_DocumentTitleChanged = 47;
+        public const int get_DocumentTitle = 48;
+        public const int AddHostObjectToScript = 49;
+        public const int RemoveHostObjectFromScript = 50;
+        public const int OpenDevToolsWindow = 51;
+        public const int add_ContainsFullScreenElementChanged = 52;
+        public const int remove_ContainsFullScreenElementChanged = 53;
+        public const int get_ContainsFullScreenElement = 54;
+        public const int add_WebResourceRequested = 55;
+        public const int remove_WebResourceRequested = 56;
+        public const int AddWebResourceRequestedFilter = 57;
+        public const int RemoveWebResourceRequestedFilter = 58;
+        public const int add_WindowCloseRequested = 59;
+        public const int remove_WindowCloseRequested = 60;
+        public const int add_WebResourceResponseReceived = 61;
+        public const int remove_WebResourceResponseReceived = 62;
+        public const int NavigateWithWebResourceRequest = 63;
+        public const int add_DOMContentLoaded = 64;
+        public const int remove_DOMContentLoaded = 65;
+        public const int get_CookieManager = 66;
+        public const int get_Environment = 67;
+        public const int TrySuspend = 68;
+        public const int Resume = 69;
+        public const int get_IsSuspended = 70;
+        public const int SetVirtualHostNameToFolderMapping = 71;
+        public const int ClearVirtualHostNameToFolderMapping = 72;
+    }
+
+    /// <summary>From WebView2.h.</summary>
     internal static class ICoreWebView2_4
     {
         public static readonly Guid IID = new("20d02d59-6df2-42dc-bd06-f98a694b1302");
