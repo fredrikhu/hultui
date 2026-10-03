@@ -34,7 +34,7 @@ public class GotoRemoteTests : IDisposable
     /// <summary>The deterministic half: committing a remote path hands the work off and marks
     /// the dialog busy <i>within the key press</i>, with the pane still where it was. No
     /// pumping — if this needed a frame to become true, the UI thread did the waiting.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void ARemotePathIsHandedOffWithinTheKeyPress()
     {
         PathProbe.ConnectOverride = (_, _, ct) => Task.Delay(Timeout.Infinite, ct);
@@ -52,7 +52,7 @@ public class GotoRemoteTests : IDisposable
     /// <summary>A host that never answers still lands the pane on the share. The pane's own
     /// loader reports it offline with a Reconnect button — a better place to wait than a modal
     /// dialog, and the only place that can retry.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void AnUnreachableHostNavigatesAnywayAndClosesThePrompt()
     {
         // An instantly-cancelled dial is what a budget that ran out looks like from here.
@@ -71,7 +71,7 @@ public class GotoRemoteTests : IDisposable
     /// <summary>Escape during the probe is an answer too: the dialog closes, and the result —
     /// which arrives afterwards, because nothing can call the syscall off — must not navigate a
     /// pane the user has stopped asking about.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void EscapeDuringTheProbeAbandonsIt()
     {
         var released = new TaskCompletionSource();
@@ -119,7 +119,7 @@ public class GotoRemoteTests : IDisposable
 
     /// <summary>The command line's "cd" shares the resolution path but has no dialog to hold
     /// the outcome, so a remote target must still land rather than fall on the floor.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void CommandLineCdReachesAShareToo()
     {
         PathProbe.ConnectOverride = (_, _, _) => Task.FromException(new OperationCanceledException());
