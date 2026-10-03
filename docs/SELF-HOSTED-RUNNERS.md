@@ -257,6 +257,17 @@ with this package named in the reason — so a run that reports three skipped Sk
 runner missing this package, and the feature is going untested on Linux until it is
 installed. It is about 90 MB.
 
+The `cef natives` workflow (`native/cef/build.sh`) needs three more, besides `curl` above:
+
+```bash
+apt install -y bzip2 binutils binutils-aarch64-linux-gnu
+```
+
+`bzip2` unpacks CEF's tarball, and the two `binutils` give it a `strip` for each RID it packs:
+the host's for linux-x64, `aarch64-linux-gnu-strip` for linux-arm64 (an x64 `strip` cannot
+read an arm64 `libcef.so`). Its first run, on 2026-10-03, stopped at `curl: command not found`
+on a runner provisioned before that line had `curl` in it.
+
 Install the SDK from the Ubuntu archive:
 
 ```bash
