@@ -1058,6 +1058,10 @@ engine if it changed, but nothing more.
      the application's executable and nothing else. A tested `.deb` (profile, maintainer scripts,
      a measured `Depends` list) installs, runs, unloads and purges cleanly on both. arm64:
      untested.
+   - **Developer tools on Linux: done 2026-10-03.** CEF's own, in a native top-level window
+     (`show_dev_tools`), on Wayland and X11 alike; opened by `OpenDevTools`, F12, Ctrl+Shift+I and
+     an "Inspect" entry the engine adds to the page's menu; closed with the page. The brief's
+     decision has the details; `CefDevToolsTests` check each way on sway.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
