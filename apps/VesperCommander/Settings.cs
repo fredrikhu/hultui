@@ -105,21 +105,56 @@ public sealed class Settings
 internal partial class SettingsJsonContext : JsonSerializerContext;
 
 /// <summary>
-/// Where the app keeps its settings and session: <c>%LOCALAPPDATA%\VesperCommander</c>,
-/// or whatever <c>VESPER_CONFIG_DIR</c> names.
+/// Where the app keeps its settings and session: <c>%LOCALAPPDATA%\VesperCommander</c> on
+/// Windows, <c>$XDG_DATA_HOME/VesperCommander</c> (by default
+/// <c>~/.local/share/VesperCommander</c>) elsewhere, or whatever <c>VESPER_CONFIG_DIR</c>
+/// names.
 ///
 /// <para>The override exists for tests. They construct the real app, which loads these
 /// files and — since the diff's wrap toggle persists — writes them, so without somewhere
 /// else to point them a test run reads and rewrites the developer's own configuration.</para>
+///
+/// <para>Never a relative path. On Linux, .NET answers "" for
+/// <c>LocalApplicationData</c> while <c>~/.local/share</c> does not exist yet, as on a new
+/// account, and the settings then went to whatever directory Vesper was started in (found
+/// on fresh Debian 13 and Ubuntu 24.04 accounts). Hence <c>DoNotVerify</c>, and a fallback
+/// under the home folder when even that is empty.</para>
 /// </summary>
 public static class ConfigDir
 {
-    public static string Path =>
-        Environment.GetEnvironmentVariable("VESPER_CONFIG_DIR") is { Length: > 0 } dir
-            ? dir
-            : System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VesperCommander");
+    public static string Path => Resolve(Environment.GetEnvironmentVariable("VESPER_CONFIG_DIR"));
+
+    /// <summary>The per-user folder, ignoring <c>VESPER_CONFIG_DIR</c>.</summary>
+    internal static string Default => Resolve(null);
+
+    private static string Resolve(string? overrideDir) => Resolve(
+        overrideDir,
+        Environment.GetEnvironmentVariable("XDG_DATA_HOME"),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify),
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify),
+        OperatingSystem.IsWindows());
+
+    /// <summary>The folder, from the values the environment gives. The override wins, made
+    /// absolute against the working directory (where a relative one pointed anyway). Then the
+    /// data folder: <paramref name="xdgDataHome"/> (not on Windows, whose behaviour predates
+    /// this and stays as it was), then <paramref name="localAppData"/>, then
+    /// <c><paramref name="userProfile"/>/.local/share</c>. A value that is not a full path is
+    /// skipped: the XDG spec says to ignore a relative one, and a relative answer from .NET
+    /// is the bug this guards against. With no full path anywhere — no home folder at all —
+    /// the application's own folder, so the answer is still one fixed place.</summary>
+    internal static string Resolve(string? overrideDir, string? xdgDataHome, string? localAppData,
+                                   string? userProfile, bool isWindows)
+    {
+        if (!string.IsNullOrEmpty(overrideDir)) return System.IO.Path.GetFullPath(overrideDir);
+        var data = !isWindows && IsFull(xdgDataHome) ? xdgDataHome!
+                 : IsFull(localAppData) ? localAppData!
+                 : IsFull(userProfile) ? System.IO.Path.Combine(userProfile!, ".local", "share")
+                 : AppContext.BaseDirectory;
+        return System.IO.Path.Combine(data, "VesperCommander");
+    }
+
+    private static bool IsFull(string? path) =>
+        !string.IsNullOrEmpty(path) && System.IO.Path.IsPathFullyQualified(path);
 }
 
 /// <summary>Persists <see cref="Settings"/> to <c>settings.json</c> in

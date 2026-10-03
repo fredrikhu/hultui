@@ -16,7 +16,7 @@ public class DrivePickerTests
     /// volume's letter has to follow the other pane in rather than dropping at the root. This
     /// covers the letter key and the same-drive rule in one press, which is how they are
     /// actually used.</summary>
-    [Fact]
+    [WindowsFact("drive letters")]
     public void PickingTheDriveTheOtherPaneIsOnOpensTheFolderItIsShowing()
     {
         using var t = new DiffViewTests.Fixture();

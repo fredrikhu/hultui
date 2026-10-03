@@ -1045,7 +1045,9 @@ it. The fresh-account bug was a good find.
    (H.264, AAC) was lost in the rewrite; it is back.
 4. **Not for you:** the empty data folder on a fresh account also hits Vesper Commander, whose
    settings path has no fallback (Reel, Aperture and Junction have one). A task of its own on
-   the Windows side.
+   the Windows side. **Done:** `ConfigDir` honours `XDG_DATA_HOME`, asks with `DoNotVerify` and
+   falls back to `~/.local/share`, so it is never relative; elevation's job folder uses it too
+   (a relative one sent the root worker, started in root's home, looking in the wrong place).
 5. **Left open, and fine to leave:** arm64, GNOME and KDE sessions, and the first run of the
    `cef natives` workflow, which needs the owner's go-ahead because it publishes a prerelease.
 

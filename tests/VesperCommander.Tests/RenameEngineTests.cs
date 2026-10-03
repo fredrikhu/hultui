@@ -27,8 +27,13 @@ public class RenameEngineTests
                     !RenameEngine.UsesCounter(new O(NameMask: "[N]")));
 
     // ── Pipeline ─────────────────────────────────────────────────────────
+    // Real full paths for the platform: on Linux a "C:\" path has no folder in it, and the [P]
+    // token reads the parent folder's name.
+    private static readonly string Iceland = Path.Combine(Path.GetTempPath(), "photos", "iceland");
+    private static readonly string D = Path.Combine(Path.GetTempPath(), "d");
+
     private static RenameEngine.Preview One(string name, O o) =>
-        RenameEngine.Build([(name, $@"C:\photos\iceland\{name}")], o);
+        RenameEngine.Build([(name, Path.Combine(Iceland, name))], o);
 
     private static string NewName(string name, O o) => One(name, o).Rows[0].NewName;
 
@@ -54,7 +59,7 @@ public class RenameEngineTests
     public void Pipeline_CounterStepAndDigits()
     {
         var o = new O(NameMask: "p[C]", CounterStart: 10, CounterStep: 10, CounterDigits: 4);
-        var p = RenameEngine.Build([("a.txt", @"C:\d\a.txt"), ("b.txt", @"C:\d\b.txt"), ("c.txt", @"C:\d\c.txt")], o);
+        var p = RenameEngine.Build([("a.txt", Path.Combine(D, "a.txt")), ("b.txt", Path.Combine(D, "b.txt")), ("c.txt", Path.Combine(D, "c.txt"))], o);
         Assert.Equal(new[] { "p0010.txt", "p0020.txt", "p0030.txt" }, p.Rows.Select(r => r.NewName));
     }
 
@@ -68,13 +73,14 @@ public class RenameEngineTests
     {
         // "noext" has no extension → an empty name mask (keeping the empty ext) yields "".
         Assert.Equal(RenameEngine.Status.Empty, NewNameStatus("noext", new O(NameMask: "")));
-        Assert.Equal(RenameEngine.Status.Illegal, NewNameStatus("a.txt", new O(NameMask: "a?b")));
+        // A slash, not "?": that is a legal file name character on Linux.
+        Assert.Equal(RenameEngine.Status.Illegal, NewNameStatus("a.txt", new O(NameMask: "a/b")));
     }
 
     [Fact]
     public void Conflict_CollisionWhenResultsMatch()
     {
-        var p = RenameEngine.Build([("a.md", @"C:\d\a.md"), ("b.md", @"C:\d\b.md")], new O(NameMask: "final"));
+        var p = RenameEngine.Build([("a.md", Path.Combine(D, "a.md")), ("b.md", Path.Combine(D, "b.md"))], new O(NameMask: "final"));
         Assert.All(p.Rows, r => Assert.Equal(RenameEngine.Status.Collision, r.Status));
         Assert.Equal(2, p.Conflicts);
         Assert.Equal(0, p.WillRename);
@@ -105,7 +111,7 @@ public class RenameEngineTests
     [Fact]
     public void MalformedRegex_ReportsErrorNoRows()
     {
-        var p = RenameEngine.Build([("a.txt", @"C:\d\a.txt")], new O(Find: "([0-9", Regex: true));
+        var p = RenameEngine.Build([("a.txt", Path.Combine(D, "a.txt"))], new O(Find: "([0-9", Regex: true));
         Assert.NotNull(p.RegexError);
         Assert.Empty(p.Rows);
     }

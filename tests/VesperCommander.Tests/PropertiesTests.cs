@@ -22,7 +22,7 @@ public class PropertiesTests
     /// so. This is also the only end-to-end route available: it drives the real chord through
     /// the real key handling and dispatch, and comes back with an observable answer instead
     /// of a dialog on the developer's desktop.</summary>
-    [Fact]
+    [WindowsFact("the shell Properties sheet and context menu")]
     public void AltEnterInsideAnArchiveSaysSoInsteadOfCallingTheShell()
     {
         using var t = new DiffViewTests.Fixture();
@@ -36,7 +36,7 @@ public class PropertiesTests
     /// <summary>The context-menu key takes the same route to the same scope, so an archive
     /// member stops it in the same place. Proves the key reaches the command at all — the menu
     /// itself is the shell's and can't be asserted on.</summary>
-    [Fact]
+    [WindowsFact("the shell Properties sheet and context menu")]
     public void TheContextMenuKeyInsideAnArchiveSaysSoToo()
     {
         using var t = new DiffViewTests.Fixture();
@@ -63,7 +63,7 @@ public class PropertiesTests
 
     /// <summary>The stated priority: a marked selection is the scope, wherever the cursor
     /// happens to be sitting. Same rule F5/F6/F8 already follow.</summary>
-    [Fact]
+    [WindowsFact("the shell Properties sheet and context menu")]
     public void AMarkedSelectionIsTheScopeNotTheRowUnderTheCursor()
     {
         using var t = new DiffViewTests.Fixture();
@@ -80,7 +80,7 @@ public class PropertiesTests
             Scope(t));
     }
 
-    [Fact]
+    [WindowsFact("the shell Properties sheet and context menu")]
     public void WithNothingMarkedTheScopeIsTheRowUnderTheCursor()
     {
         using var t = new DiffViewTests.Fixture();
@@ -198,7 +198,7 @@ public class PropertiesTests
     /// the hold arms, and it remembers the row the pointer is on rather than reading the cursor
     /// when it fires. (Firing itself can't be tested — it hands off to the shell's own modal
     /// menu, which would open on whoever is running the suite.)</summary>
-    [Fact]
+    [WindowsFact("the shell Properties sheet and context menu")]
     public void ARightPressArmsTheHoldAgainstTheRowUnderThePointer()
     {
         using var t = new DiffViewTests.Fixture();
@@ -308,7 +308,7 @@ public class PropertiesTests
         Assert.True(missing.Count == 0, "not on the Keyboard page: " + string.Join(", ", missing));
     }
 
-    [Theory]
+    [WindowsTheory("the shell Properties sheet and context menu")]
     // A volume root keeps its separator: "C:" alone means the drive's current directory.
     [InlineData(@"C:\", @"C:\")]
     // Everything else loses it — "C:\dir\" doesn't bind to a shell item.

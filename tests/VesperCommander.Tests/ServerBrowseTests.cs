@@ -66,7 +66,7 @@ public class ServerBrowseTests : IDisposable
     /// <summary>What the above is standing in for. (A trailing separator is a different matter —
     /// <c>GetParent(@"\\server\share\")</c> does answer, with the share itself, which is why the
     /// listing trims before it asks.)</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void DirectoryGetParent_HasNoAnswerForAShareRoot()
         => Assert.Null(Directory.GetParent(@"\\server\share"));
 
@@ -191,7 +191,7 @@ public class ServerBrowseTests : IDisposable
     /// <c>Path.GetPathRoot</c> answers "\\server\share" because that is the volume, and the trail
     /// used to take it at its word — so the share was welded into the root and could not be
     /// clicked, even from a folder inside it.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void TheTrailRootsAtTheServerWithTheShareAsItsOwnCrumb()
     {
         using var fx = new Fixture();
@@ -200,7 +200,7 @@ public class ServerBrowseTests : IDisposable
         Assert.Equal([@"\\server", "share", "src", "core"], fx.Crumbs());
     }
 
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void AShareRootShowsServerThenShare()
     {
         using var fx = new Fixture();
@@ -220,7 +220,7 @@ public class ServerBrowseTests : IDisposable
 
     /// <summary>A local path is untouched: its leading crumb is still the volume, because for a
     /// drive letter the volume and the place are the same thing.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void ALocalTrailStillRootsAtItsDrive()
     {
         using var fx = new Fixture();
@@ -232,7 +232,7 @@ public class ServerBrowseTests : IDisposable
     /// <summary>Which share you are on is not a folder among folders. A trail too long to fit
     /// drops middle folders behind an ellipsis, and the share has to survive that — otherwise
     /// every deep path reads "\\server / … / core" and the share is gone.</summary>
-    [Fact]
+    [WindowsFact("UNC paths")]
     public void TheShareSurvivesTruncationOfADeepTrail()
     {
         using var fx = new Fixture(width: 900);

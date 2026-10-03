@@ -240,7 +240,7 @@ public class ArchiveTests : IDisposable
         var root = ArchiveVfs.ListEntries(outerPath, "inner.zip", null, sevenZip: false);
         Assert.Equal(ArchiveStatus.Ok, root.Status);
         Assert.Contains(root.Entries, e => e.Name == "deep" && e.IsDir);
-        var deep = ArchiveVfs.ListEntries(outerPath, @"inner.zip\deep", null, sevenZip: false);
+        var deep = ArchiveVfs.ListEntries(outerPath, Path.Combine("inner.zip", "deep"), null, sevenZip: false);
         Assert.Contains(deep.Entries, e => e.Name == "hello.txt");
 
         // Entry FullPaths stay virtual (outer\inner\…), so navigation is seamless.
