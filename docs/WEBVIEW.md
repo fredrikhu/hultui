@@ -91,7 +91,16 @@ The origin is `app.example` rather than something under `.local`: that name spac
 local-network discovery, and WebView2 waited two seconds for a lookup on every navigation
 to it.
 
-On Linux the CEF engine's side is being built; until then the address serves nothing there.
+Both engines serve it the same way. A path that leaves the folder is refused, on Linux a
+symbolic link pointing out of it too, and a missing file is a 404, as is the folder's own
+address (`https://app.example/`: name the file). Files are typed by extension (the web's usual
+ones; anything else is `application/octet-stream`), and a byte range is answered, so a video
+can seek. Each page serves its own folder: two pages with different folders see different
+files at the same address. On Linux a service worker's requests, which come from no page, are
+served the folder when every page that has one has the same.
+
+Without Chromium's sandbox (below), the folder is the application's own content and loads, its
+files included; its pages get the same stricter `Content-Security-Policy` as string pages.
 
 ## The page's menus, dialogs, downloads and permissions
 

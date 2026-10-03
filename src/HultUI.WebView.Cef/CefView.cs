@@ -57,6 +57,17 @@ internal sealed unsafe partial class CefView : IWebEngineView
 
     /// <summary>Whether this view loads only the application's own content.</summary>
     internal bool OwnContentOnly => _ownContentOnly;
+
+    /// <summary>The folder this page serves at <see cref="WebViewOptions.AppOrigin"/>, or null.</summary>
+    internal string? ContentFolder => _options.ContentFolder;
+
+    /// <summary>For a request with no page (a service worker's): the folder, when every live
+    /// page that has one has the same; otherwise null.</summary>
+    internal static string? SoleContentFolder()
+    {
+        var folders = ByBrowser.Values.Select(v => v.ContentFolder).OfType<string>().Distinct(StringComparer.Ordinal).Take(2).ToList();
+        return folders.Count == 1 ? folders[0] : null;
+    }
     private cef_browser_host_t* _browserHost;
     private DevToolsSession? _devTools;
     private readonly Dictionary<int, Uri?> _contextOrigins = [];

@@ -6,6 +6,8 @@ using HultUI.WebView.Cef;
 // well be unavailable (Ubuntu without a profile): before the default's check.
 var withoutSandbox = Array.IndexOf(args, "--without-sandbox");
 if (withoutSandbox >= 0) return WithoutSandbox.Run(args[withoutSandbox + 1]);
+var contentFolder = Array.IndexOf(args, "--content-folder");
+if (contentFolder >= 0) return ContentFolderProbe.Run(args[contentFolder + 1]);
 
 var engine = new CefEngine();
 if (!engine.Availability.IsAvailable)

@@ -311,6 +311,7 @@ internal static unsafe partial class CefRuntime
             }
             if (_before is { } before) RestoreSignals(before);
             StringPages.Register();
+            ContentFolder.Register();
             _started!.TrySetResult(null);
         }
         catch (Exception ex)
@@ -378,25 +379,26 @@ internal static unsafe partial class CefRuntime
     /// </summary>
     public static cef_request_context_t* ContextFor(string? childPath, bool ownContentOnly)
     {
-        if (!ownContentOnly) return ContextFor(childPath);
+        if (!ownContentOnly) return PlainContextFor(childPath);
         var key = "own content:" + childPath;
         if (Contexts.TryGetValue(key, out var existing)) return (cef_request_context_t*)existing;
         cef_request_context_t* basis;
         if (childPath is null) basis = Capi.cef_request_context_get_global_context();   // a new reference
         else
         {
-            basis = ContextFor(childPath);
+            basis = PlainContextFor(childPath);
             if (basis == null) return null;
             CefObject.AddRef(basis);   // the call takes a reference; Contexts keeps its own
         }
         var context = Capi.cef_request_context_cef_create_context_shared(basis, CefView.OwnContentContextHandler());
         if (context == null) return null;
         StringPages.RegisterOn(context);
+        ContentFolder.RegisterOn(context);
         Contexts[key] = (nint)context;
         return context;
     }
 
-    private static cef_request_context_t* ContextFor(string? childPath)
+    private static cef_request_context_t* PlainContextFor(string? childPath)
     {
         if (childPath is null) return null;
         if (Contexts.TryGetValue(childPath, out var existing)) return (cef_request_context_t*)existing;
@@ -407,6 +409,7 @@ internal static unsafe partial class CefRuntime
         CefString.Clear(&settings.cache_path);
         if (context == null) return null;
         StringPages.RegisterOn(context);
+        ContentFolder.RegisterOn(context);
         Contexts[childPath] = (nint)context;
         return context;
     }

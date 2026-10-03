@@ -1170,10 +1170,9 @@ sandbox means: a page that exploits a browser bug runs with the user's full righ
    says why (pick one in the style of the existing WebView2 names), and each refusal is logged
    once with its URL (`CefLog`).
 
-   Note: **nothing serves `app.local` today.** No folder mapping exists in `WebViewOptions`
-   on either engine, so until one does, an application without the sandbox shows only its
-   string pages. Allow it anyway, so it works the day a folder mapping exists; that is a
-   separate decision for the owner. DevTools are untouched: their window has its own client.
+   Note: when this was decided no folder mapping existed in `WebViewOptions`, on either
+   engine; the origin was allowed anyway, so it would work the day one did. Since 2026-10-03
+   `ContentFolder` serves it (and the origin is `https://app.example`). DevTools are untouched: their window has its own client.
 5. **Never silent:** log a line when CEF starts without its sandbox, and give `CefEngine` a
    `bool? IsSandboxed` (null until CEF has started; then how it actually runs, whichever engine
    started it).
@@ -1360,6 +1359,51 @@ there too, not a reason to undo it.
 5. **Docs:** `docs/WEBVIEW.md`'s "Local content" applies to both engines once this works. Take
    out "nothing serves app.local yet" wherever it is still written, the natives README
    included.
+
+**Done (Linux, 2026-10-03).** `ContentFolder` (`src/HultUI.WebView.Cef/ContentFolder.cs`),
+tested in `CefContentFolderTests` through the CEF test process (`--content-folder`), on CEF 146
+and 154.
+
+1. **The factory** is registered for `https` and `app.example` beside the string pages', on the
+   global context and on every context of the engine's own (a folder's, an own-content view's).
+   It finds the view by the browser's identifier (`CefView.ForBrowser`, the registry part 1
+   added) and serves that view's folder; a view without one gets no handler, and the address
+   fails as on WebView2 (`HostNameNotResolved`). A request with no browser (a service worker's,
+   its script included) is served the folder when every live view that has one has the same,
+   and gets no handler otherwise: the one case where "the requesting page" cannot be known.
+2. **Serving:** the URL's path is percent-decoded and resolved inside the folder; `..` in any
+   spelling, a NUL, or a path whose real location (`realpath`) is outside the folder is
+   answered 403 and logged; a missing file 404. Chromium itself folds `/%2e%2e/` and `/../`
+   before the handler sees them (the request becomes `/outside.txt`, a 404), so what reaches
+   it is `..%2f` and the like. A folder's address, the root included, is a 404: WebView2 is
+   believed to serve no index or listing either, but that is not measured here; one
+   navigation to `https://app.example/` on Windows would settle it. Types for each listed
+   extension, `charset=utf-8` for the text ones, `application/octet-stream` otherwise. No CORS
+   headers: a string document may run a folder's file as a script but its `fetch` of one is
+   refused. **Ranges: yes**, single ones (`a-b`, `a-`, `-n`), with 206 and `Content-Range`,
+   416 past the end, several ranges answered whole. CEF's own help is partial (on 146 it
+   skips to a range's start but says 200 and sends the rest, does not skip for a suffix,
+   and fails one past the end), so the handler answers the range itself and takes CEF's
+   skip as done. Files are read as they are sent, not held.
+3. **Without the sandbox:** the folder's page loads with its stylesheet and data; its iframe
+   to the internet and a WebSocket are refused by the stricter policy (its pages get the same
+   as string documents, `securitypolicyviolation` names both), and a service worker it
+   registers cannot fetch from the internet. With the policy turned off for the test, the
+   request context's filter refuses the worker's fetch by itself (logged); with that handler
+   removed as a counter-check, the worker's fetch loaded. That is review point 2's test.
+4. **Tests:** the Windows test's twin (stylesheet, `fetch`, message accepted by default; no
+   folder, the address fails); the escapes (in the rules and served); each type, as a rule and
+   as served; ranges; two views with different folders at once, each served its own; the
+   other origin's script and refused `fetch`.
+5. **Docs:** `docs/WEBVIEW.md`'s "Local content" is now both engines'; the natives README
+   names the folder; the last "nothing serves app.local" (in this brief's no-sandbox decision)
+   is a note of when that was so.
+
+**`.local` on CEF: no delay.** The same page under `app.example` and under `app.local` (the
+handler registered for both, for the test), six navigations each: 20 ms every time after the
+first, either name, on Fedora whose `nsswitch.conf` has `mdns4_minimal`. CEF's scheme handler
+answers before any name lookup. The change stays, for WebView2's sake, and
+`TheOrigin_LoadsInMilliseconds` guards it.
 
 ## When you stop
 

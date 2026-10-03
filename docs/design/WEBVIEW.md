@@ -1069,6 +1069,11 @@ engine if it changed, but nothing more.
      and on the Ubuntu VM without a profile and as root; the brief has it. Its review's gaps,
      closed the same day: WebSockets (a stricter CSP on the engine's own documents), requests
      with no page (the filter on the request context too), WebRTC's UDP (off for the process).
+   - **Local content on Linux: done 2026-10-03.** `ContentFolder` served at
+     `https://app.example` by a scheme handler factory registered once, serving the requesting
+     page's folder (found by its browser's identifier): paths kept inside the folder (403 for
+     `..` in any spelling and for links out), types by extension, single byte ranges, no CORS
+     headers. CEF has no `.local` delay; the brief has the measurements.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
