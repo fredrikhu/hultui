@@ -890,6 +890,41 @@ a few lines each.
    has two interop sources. It was mpv's first shared-image run on Mesa and Intel, and it worked;
    `WEBVIEW.md` (W7) and `HDR.md` have it.
 
+## Review of the page-and-video check, the AT-SPI name and step 5.7's first part (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there (every suite green,
+no new build warning) and the Vulkan probe's six tests run twice. **It stands**, and the
+natives package per RID is the right route: one build that flattens, strips and checks the
+SHA-1, instead of every application's packaging doing it.
+
+1. **Fixed on the Windows side: the page-and-video test on Windows.** It failed there, as you
+   expected: the bundled LGPL libmpv has no lavfi ("unrecognized file format"). The Windows
+   test now writes twelve seconds of solid magenta as Y4M, which every build reads, and passes
+   it with `--clip=`; it passes, so W7 with WebView2 and mpv in one Vulkan window is proven on
+   Windows too. The Linux test can keep lavfi.
+2. **Fixed on the Windows side: the natives' copy condition.** `Natives.targets` copied CEF
+   for any build without a RID, so a cross-platform application built on Windows carried some
+   360 MB of Linux CEF in every output folder. Now: a Linux RID, or no RID when the build runs
+   on Linux. **Re-run your throwaway application** (a RID-less build and a `-r linux-x64`
+   publish, both on this machine) to confirm it still lands.
+3. **Fixed on the Windows side: the natives README** now says what a page cannot play with
+   the bundled CEF (H.264, AAC), as this brief asked application authors to be told.
+4. **AppArmor: agree with (a), plus detection, and (c) only as an explicit opt-in.** Two
+   things to settle on the Ubuntu machine: whether the process that needs the profile is the
+   application alone or the helper too (Chromium's browser process starts the zygote in its
+   namespace; the renderers make more inside it), and that the profile names the application's
+   own executable, so an application started as `dotnet app.dll` would need one for `dotnet`.
+   Say in the docs that a bundled-CEF application ships as its own executable.
+5. **The `cef natives` workflow has never run.** Its job runs the engine suite on the
+   self-hosted runner, which is Ubuntu, so the first dispatch is also the first Ubuntu run, in
+   a container whose kernel is the Proxmox host's. Either answer, sandbox or "No usable
+   sandbox!", is worth having before 5.7's machines: run it once by hand
+   (`gh workflow run "cef natives" --ref claude/webview-component-repo-62ba8b`) and write
+   down what it said.
+6. **The Ubuntu sandbox check needs a virtual machine, not a container.** In an LXC container
+   the kernel and its AppArmor are the Proxmox host's, so whether Ubuntu's limit applies there
+   says nothing about an Ubuntu desktop. Debian can be a container, as Fedora is.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

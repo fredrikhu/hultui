@@ -107,14 +107,18 @@ public sealed class VulkanProbeTests
     {
         if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
         string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-video-{Guid.NewGuid():N}.ppm");
+        // Not the probe's lavfi colour source: the bundled LGPL libmpv has no lavfi ("unrecognized
+        // file format", seen). Every build reads Y4M.
+        string clip = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-video-{Guid.NewGuid():N}.y4m");
         try
         {
+            WriteMagentaClip(clip);
             var run = RunProbe(new()
             {
                 ["HULTUI_VULKAN_CAPTURE"] = capture,
                 ["HULTUI_VULKAN_CAPTURE_FRAME"] = "300",
                 ["HULTUI_STARTUP"] = "1",
-            }, "--page-and-video");
+            }, $"--page-and-video \"--clip={clip}\"");
 
             Assert.True(run.ExitCode == 0, run.Output);
             Assert.Contains("probe: the page and the video drew", run.Output);
@@ -129,6 +133,30 @@ public sealed class VulkanProbeTests
         finally
         {
             File.Delete(capture);
+            File.Delete(clip);
+        }
+    }
+
+    /// <summary>
+    /// Twelve seconds of solid magenta, 320x240 at two frames a second, as Y4M: longer than the
+    /// probe runs, so the capture is of a playing video rather than one that has ended. The
+    /// planes are magenta in limited-range BT.601, which mpv assumes for an untagged clip this
+    /// small: (255, 0, 255) is Y 106, Cb 202, Cr 222.
+    /// </summary>
+    private static void WriteMagentaClip(string path)
+    {
+        const int width = 320, height = 240, frames = 24;
+        using var file = File.Create(path);
+        file.Write(System.Text.Encoding.ASCII.GetBytes($"YUV4MPEG2 W{width} H{height} F2:1 Ip A1:1 C420jpeg\n"));
+        var frame = new byte[width * height * 3 / 2];
+        Array.Fill(frame, (byte)106, 0, width * height);
+        Array.Fill(frame, (byte)202, width * height, width * height / 4);
+        Array.Fill(frame, (byte)222, width * height * 5 / 4, width * height / 4);
+        var marker = System.Text.Encoding.ASCII.GetBytes("FRAME\n");
+        for (int i = 0; i < frames; i++)
+        {
+            file.Write(marker);
+            file.Write(frame);
         }
     }
 

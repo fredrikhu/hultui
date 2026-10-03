@@ -15,7 +15,8 @@ published on cef-builds.spotifycdn.com and checked against its SHA-1, laid out f
 build is `native/cef/build.sh` in the HultUI repository.
 
 **Where it lands.** In `cef/` beside the application, on build and on publish (the package's
-`buildTransitive` targets copy it there, for a build with no RID or a Linux one). The engine
+`buildTransitive` targets copy it there, for a Linux RID, or with no RID when the build runs
+on Linux; a build on Windows or macOS gets none of it). The engine
 looks in `HULTUI_CEF_DIR`, then `cef/`, then `runtimes/<rid>/native/cef/`, then the
 distribution's, so a bundled CEF wins over Fedora's.
 
@@ -25,6 +26,11 @@ On Ubuntu 23.10 and later, AppArmor stops unprivileged programs from making user
 unless a profile allows it, so an application that bundles CEF needs one, installed by its
 package. HultUI's design notes (`docs/design/WEBVIEW-LINUX-BRIEF.md`, step 5.7) give the
 options.
+
+**What a page can play.** CEF's official builds leave out the patent-encumbered codecs:
+H.264 and AAC. A page's MP4 video in those formats does not play with this package, while
+WebM, VP9, AV1 and Opus do. Fedora's CEF decodes through the system's ffmpeg instead, which
+plays whatever that ffmpeg has (RPM Fusion's has the full set).
 
 **Licences.** CEF is BSD-3-Clause; Chromium and its components are under their own licences,
 listed in `CEF-CREDITS.html` beside `libcef.so`, with `CEF-LICENSE.txt`.
