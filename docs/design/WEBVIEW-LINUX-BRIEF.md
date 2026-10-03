@@ -639,6 +639,11 @@ In this order; each ends with its tests green and the step written into
    draws, show two pages, or a page and a video, in one Vulkan window and check a
    `HULTUI_VULKAN_CAPTURE` of it, as `VulkanProbeTests` does with two WebView2 pages.
    **On Wayland only** (decided 2026-10-02): under X11 the page takes the pixel path.
+   **Done 2026-10-03** (`WEBVIEW.md` has it): copy and fence inside `on_accelerated_paint` into
+   a ring of three exported slots, imported once on HultUI's side and blitted on GL and Vulkan;
+   the popup arrives as a shared texture; the W7 check passes with two CEF pages in one
+   Vulkan window. On the way it found a crash since 5.3 (disposing a view with its `<select>`
+   list open), fixed.
 6. **Accessibility.** The Linux half of seam W8 is not what `WEBVIEW.md` sketched for
    WebKit (a socket onto someone else's tree). CEF gives a tree of plain data, so the web
    view's node grows real children that our AT-SPI bridge serves like any others. Design it
@@ -730,6 +735,10 @@ the engine's, written down where an application will read them, and accepted.
    once in about ten runs and never again. Too little to act on; if it comes back, have the
    test print what is still running (`pgrep -af type=`) and the child's standard error
    before it fails, so the next one says why.
+   **It came back during 5.5 and said why (2026-10-03):** the child was a zombie and the test
+   host's SIGCHLD was at the default. .NET installs its handler at the first `Process.Start`,
+   and that one came while CEF started, so Chromium reset it to the value saved before. Fixed
+   in the engine, which matters to applications too; see `WEBVIEW.md`, step 5.5.
 3. **Fixed on the Windows side** (pull before you start): `docs/ENVIRONMENT.md` had none of
    the web view's variables, the WebView2 ones included; it has a section now, with
    `HULTUI_CEF_SWITCHES` marked as not a supported way to configure an application.

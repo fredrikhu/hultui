@@ -261,4 +261,26 @@ public sealed class CefInputTests : IDisposable
         Assert.Contains("change three", ev);
         await Until(() => Pixel(belowX, belowY) == unchecked((int)0xFFFFFFFF));
     }
+
+    /// <summary>Found in step 5.5: closing a browser while its popup is open fails a CHECK in
+    /// CEF, which ended the process (this test's host crashed). The list is closed first now.</summary>
+    [CefFact]
+    public async Task AViewDisposedWithItsListOpen_GoesQuietly()
+    {
+        await Load();
+        int belowX = D(40), belowY = D(165);
+        Click(120, 135);
+        await Until(() => _host.Pixels.TryAcquire(out var f) && Release(f, System.Runtime.InteropServices.Marshal.ReadInt32(f.Pixels, (belowY * f.Width + belowX) * 4)) != unchecked((int)0xFFFFFFFF));
+        _view.Dispose();
+        var closed = new TaskCompletionSource();
+        await Task.Delay(1500);   // the browser is closed by now, the list's second included
+        CefRuntime.Post(() => closed.TrySetResult());
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private int Release(PixelFrame frame, int value)
+    {
+        _host.Pixels.Release(frame);
+        return value;
+    }
 }

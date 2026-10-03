@@ -65,6 +65,45 @@ if (args.Contains("--signals"))
     return 0;
 }
 
+if (args.Contains("--first-child-while-cef-starts"))
+{
+    // .NET installs its SIGCHLD handler at the first Process.Start: here that comes after the
+    // engine saved the signals and before it put Chromium's changes back.
+    var starting = CefRuntime.Start(windowSystem: null);
+    Thread.Sleep(20);
+    using (var first = System.Diagnostics.Process.Start("true")!) first.WaitForExit(5000);
+    Console.WriteLine("CEF started: " + (starting.Wait(TimeSpan.FromSeconds(20)) && CefRuntime.Error is null));
+    using (var later = System.Diagnostics.Process.Start("true")!)
+        Console.WriteLine("a process started after CEF is seen to exit: " + later.WaitForExit(5000));
+    return 0;
+}
+
+var quick = Array.IndexOf(args, "--quick-dispose");
+if (quick >= 0)
+{
+    // Pages placed and disposed at once, while CEF creates their browsers, then the process ends.
+    CefRuntime.Start(windowSystem: null).Wait(TimeSpan.FromSeconds(20));
+    int rounds = args.Length > quick + 2 ? int.Parse(args[quick + 2]) : 1;
+    for (int i = 0; i < 2 * rounds; i++)
+    {
+        using var v = engine.CreateView(new HultUI.WebView.WebViewOptions());
+        v.Attach(new Host());
+        v.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 300, 200), 1f) { WindowSystem = args[quick + 1] });
+        Thread.Sleep(Random.Shared.Next(0, 30));
+    }
+    Thread.Sleep(3000);
+    Console.WriteLine("disposed");
+    return 0;
+}
+
+var zeroCopy = Array.IndexOf(args, "--zero-copy");
+if (zeroCopy >= 0)
+{
+    var error0 = CefRuntime.Start(windowSystem: "wayland").Wait(TimeSpan.FromSeconds(20)) ? CefRuntime.Error : "timed out";
+    if (error0 is not null) { Console.WriteLine("did not start: " + error0); return 1; }
+    return ZeroCopy.Run(engine, int.Parse(args[zeroCopy + 1]), int.Parse(args[zeroCopy + 2]), int.Parse(args[zeroCopy + 3]));
+}
+
 var folders = Array.IndexOf(args, "--folders");
 if (folders >= 0) return await Folders(engine, args[folders + 1]);
 

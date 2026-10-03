@@ -236,11 +236,19 @@ internal sealed unsafe partial class CefView
     private void Painted(cef_paint_element_type_t type, ReadOnlySpan<byte> pixels, int width, int height)
     {
         if (_host is not { } host) return;
+        // On Wayland without the engine's GL, a GPU surface draws these through the renderer.
+        var sink = _frames is { Mode: GpuSinkMode.Gpu } frames ? frames.Cpu : host.Pixels;
+        try { PaintedInto(sink, type, pixels, width, height); }
+        finally { if (sink != host.Pixels) host.RequestRepaint(); }
+    }
+
+    private void PaintedInto(PixelFrameSink sink, cef_paint_element_type_t type, ReadOnlySpan<byte> pixels, int width, int height)
+    {
         if (type == cef_paint_element_type_t.PET_VIEW)
         {
             if (!_popupShown)
             {
-                host.Pixels.Write(width, height, PixelFormat.Bgra8888, pixels, width * 4);
+                sink.Write(width, height, PixelFormat.Bgra8888, pixels, width * 4);
                 return;
             }
             Keep(ref _viewCopy, pixels);
@@ -251,7 +259,7 @@ internal sealed unsafe partial class CefView
             Keep(ref _popup, pixels);
             (_popupW, _popupH) = (width, height);
         }
-        Compose(host.Pixels);
+        Compose(sink);
     }
 
     private static void Keep(ref byte[]? copy, ReadOnlySpan<byte> pixels)
@@ -283,11 +291,17 @@ internal sealed unsafe partial class CefView
 
     private void PopupShown(bool show)
     {
+        _frames?.PopupShown(show);
         _popupShown = show;
         _popup = null;
         if (!show) _viewCopy = null;
-        // A fresh view paint: kept while the popup is open, drawn alone once it closes.
-        if (_browserHost != null) _browserHost->invalidate(_browserHost, cef_paint_element_type_t.PET_VIEW);
+        // A fresh view paint: kept while the popup is open, drawn alone once it closes. Not
+        // while the browser closes, which hides an open popup (and aborted the process).
+        bool closing;
+        lock (_gate) closing = _phase == Phase.Disposed;
+        if (_browserHost != null && !closing) _browserHost->invalidate(_browserHost, cef_paint_element_type_t.PET_VIEW);
+        // A disposed view waited for its list to close (see Dispose); not from inside the callback.
+        if (!show && _closeAfterPopup) OnUi(CloseBrowser);
     }
 
     // ──── Callbacks ────
@@ -351,7 +365,13 @@ internal sealed unsafe partial class CefView
     [UnmanagedCallersOnly]
     private static void OnPopupSize(cef_render_handler_t* s, cef_browser_t* b, cef_rect_t* rect)
     {
-        try { if (Of(s) is { } v) v._popupRect = *rect; }
+        try
+        {
+            if (Of(s) is not { } v) return;
+            v._popupRect = *rect;
+            float scale = v.ScaleNow();
+            v._frames?.PopupAt((int)MathF.Round(rect->x * scale), (int)MathF.Round(rect->y * scale));
+        }
         catch (Exception ex) { CefLog.Error("on_popup_size", ex); }
         finally { CefObject.Release(b); }
     }

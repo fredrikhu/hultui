@@ -278,6 +278,40 @@ public class CefEngineTests
     }
 
     [CefFact]
+    public void PagesDisposedWhileCefMakesThem_GoQuietly()
+    {
+        // Found in step 5.5: a view disposed while CEF created its browser closed it inside
+        // on_after_created, which runs inside the creation, and the process segfaulted there
+        // (every run of this, before the fix). Eighty pages placed and disposed in turn.
+        var run = RunCefProcess(Guid.NewGuid().ToString("N"), "--quick-dispose", "x11", "40");
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("disposed", run.Output);
+        Assert.Contains("process exit: shutting down", run.Output);
+    }
+
+    [CefFact]
+    public void AFirstProcessStartedWhileCefStarts_KeepsDotNetsSigchld()
+    {
+        // The cause of the process tests' rare timeouts (review of 5.3 and 5.4, item 2): .NET's
+        // SIGCHLD handler, installed while CEF started, was overwritten by the default saved
+        // before it, and no child was reaped after.
+        var run = RunCefProcess(Guid.NewGuid().ToString("N"), "--first-child-while-cef-starts");
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("CEF started: True", run.Output);
+        Assert.Contains("a process started after CEF is seen to exit: True", run.Output);
+    }
+
+    [LinuxFact]
+    public void OnlyChromiumsChanges_ArePutBack()
+    {
+        nint libc = System.Runtime.InteropServices.NativeLibrary.GetExport(
+            System.Runtime.InteropServices.NativeLibrary.Load("libc.so.6"), "getpid");
+        Assert.True(CefRuntime.ChromiumTook(0, libc));      // a handler reset to the default
+        Assert.False(CefRuntime.ChromiumTook(libc, 0));     // someone else's since: theirs stays
+        Assert.False(CefRuntime.ChromiumTook(0, 0));
+    }
+
+    [CefFact]
     public void AnApplicationsSignalHandler_Runs_AndCefStopsCleanly()
     {
         // Chromium took SIGTERM and SIGINT for a shutdown of its own: an application's
@@ -303,7 +337,7 @@ public class CefEngineTests
     [System.Runtime.InteropServices.DllImport("libc")]
     private static extern int kill(int pid, int signal);
 
-    private static (int ExitCode, string Output) RunCefProcess(string mark, params string[] args)
+    internal static (int ExitCode, string Output) RunCefProcess(string mark, params string[] args)
         => RunCefProcess(mark, args, terminateAfterMs: null);
 
     private static (int ExitCode, string Output) RunCefProcess(string mark, string[] args, int? terminateAfterMs)
@@ -329,7 +363,7 @@ public class CefEngineTests
         if (!p.WaitForExit(60_000))
         {
             // Review of 5.3 and 5.4, item 2: say what was still running, so a timeout says why.
-            var running = string.Join("\n", ProcessesMarked(mark));
+            var running = string.Join("\n", ProcessesMarked(mark)) + "\n" + WhyNotExited(p.Id);
             p.Kill(entireProcessTree: true);
             p.WaitForExit(5000);
             // Bounded: a pipe may be held open by what the child left behind.
@@ -338,6 +372,25 @@ public class CefEngineTests
                 + "\n--- still running ---\n" + running);
         }
         return (p.ExitCode, stdout.Result + stderr.Result);
+    }
+
+    /// <summary>A child the harness gave up on: its state (Z: exited, never reaped) and this
+    /// process's signals (a SIGCHLD pending or blocked everywhere would leave it so).</summary>
+    private static string WhyNotExited(int pid)
+    {
+        string Read(string path) { try { return File.ReadAllText(path); } catch (Exception ex) { return ex.GetType().Name; } }
+        var stat = Read($"/proc/{pid}/stat");
+        var state = stat.LastIndexOf(')') is var close and > 0 && close + 2 < stat.Length ? stat[(close + 2)..(close + 3)] : stat;
+        var mine = Read("/proc/self/status").Split('\n').Where(l => l.StartsWith("Sig") || l.StartsWith("ShdPnd"));
+        int blocking = 0, threads = 0;
+        foreach (var task in Directory.GetDirectories("/proc/self/task"))
+        {
+            threads++;
+            var blk = Read(Path.Combine(task, "status")).Split('\n').FirstOrDefault(l => l.StartsWith("SigBlk:"))?[7..].Trim() ?? "0";
+            if ((Convert.ToUInt64(blk, 16) & (1UL << 16)) != 0) blocking++;
+        }
+        var handler = BitConverter.ToUInt64(CefRuntime.SaveSignal(17), 0);
+        return $"child {pid} state {state}; this process: {string.Join("; ", mine)}; {blocking} of {threads} threads block SIGCHLD; SIGCHLD handler {handler:X}";
     }
 
     private static List<string> ProcessesMarked(string mark)

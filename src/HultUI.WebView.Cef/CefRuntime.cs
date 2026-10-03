@@ -136,6 +136,7 @@ internal static unsafe partial class CefRuntime
             // any process the application starts); and SIGINT, SIGTERM and SIGHUP for a shutdown
             // of its own, so Ctrl+C or a kill skipped .NET's (no ProcessExit, no CancelKeyPress).
             // Every signal's action from before is put back once CEF is up.
+            EnsureDotNetsSigchld();
             _before = SaveSignals();
             int ok = Capi.cef_initialize(&mainArgs, &settings, CefObject.Give(_app), null);
             if (ok != 1)
@@ -398,6 +399,25 @@ internal static unsafe partial class CefRuntime
 
     private static Dictionary<int, byte[]>? _before;
 
+    /// <summary>
+    /// .NET installs its SIGCHLD handler only at an application's first <c>Process.Start</c>.
+    /// Until then the saved action is the default, and a first process started while CEF starts
+    /// installed .NET's handler only for Chromium to reset it to that same default, which then
+    /// looked untouched: no child was reaped after (the process tests' rare timeouts). So the
+    /// engine makes .NET install it first, by starting one trivial process.
+    /// </summary>
+    private static void EnsureDotNetsSigchld()
+    {
+        const int SIGCHLD = 17;
+        if (Handler(SaveSignal(SIGCHLD)) is not (0 or 1)) return;   // a handler is there already
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/bin/true") { UseShellExecute = false });
+            p?.WaitForExit(2000);
+        }
+        catch (Exception ex) { CefLog.Note(".NET's SIGCHLD handler could not be installed first: " + ex.Message); }
+    }
+
     /// <summary>Every signal's action, but those no process may change (KILL, STOP) and glibc's
     /// own two below SIGRTMIN.</summary>
     internal static Dictionary<int, byte[]> SaveSignals()
@@ -408,11 +428,47 @@ internal static unsafe partial class CefRuntime
         return saved;
     }
 
+    /// <summary>
+    /// Puts back a signal's action only where Chromium changed it: the handler there now is in
+    /// libcef, or the default stands where there had been a handler. One installed meanwhile by
+    /// anyone else stays: .NET installs its SIGCHLD handler at an application's first
+    /// <c>Process.Start</c>, which may come while CEF starts, and putting back the default saved
+    /// before it left every later child unreaped (the process tests' timeouts, review item 2).
+    /// </summary>
     internal static void RestoreSignals(Dictionary<int, byte[]> saved)
     {
         foreach (var (n, action) in saved)
-            if (!SaveSignal(n).AsSpan().SequenceEqual(action)) RestoreSignal(n, action);
+        {
+            var now = SaveSignal(n);
+            if (now.AsSpan().SequenceEqual(action)) continue;
+            if (ChromiumTook(Handler(now), Handler(action))) RestoreSignal(n, action);
+        }
     }
+
+    /// <summary>The handler a saved action holds: its first field.</summary>
+    private static nint Handler(byte[] action) => (nint)BitConverter.ToInt64(action, 0);
+
+    /// <summary>Whether the handler now there is Chromium's doing, rather than someone's since.</summary>
+    internal static bool ChromiumTook(nint now, nint before)
+    {
+        const nint SigDfl = 0, SigIgn = 1;
+        if (now is SigDfl or SigIgn) return before is not (SigDfl or SigIgn);   // a handler reset
+        return ModuleOf(now) is { } module && Path.GetFileName(module).StartsWith("libcef", StringComparison.Ordinal);
+    }
+
+    private static string? ModuleOf(nint address)
+    {
+        DlInfo info;
+        return dladdr(address, &info) != 0 && info.FileName != 0 ? Marshal.PtrToStringUTF8(info.FileName) : null;
+    }
+
+    private struct DlInfo
+    {
+        public nint FileName, Base, SymbolName, SymbolAddress;
+    }
+
+    [LibraryImport("libc")]
+    private static partial int dladdr(nint address, DlInfo* info);
 
     /// <summary>The <c>sigaction</c> of a signal, as an opaque buffer (larger than glibc's struct).</summary>
     internal static byte[] SaveSignal(int signal)

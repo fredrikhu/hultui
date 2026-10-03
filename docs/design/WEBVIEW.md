@@ -486,7 +486,10 @@ element leaves the tree. Proven by
 `VulkanProbeTests.TwoGpuSources_InOneVulkanWindow_BothReachTheScreen`: two pages side by side, captured from the swapchain, and one
 disposed afterwards gives its image back. With the second lend refused again, the
 right page's half was empty (seen). A single video on Vulkan was checked by capture.
-**Open:** the Linux fd path, which has not run with more than one slot.
+**The Linux fd path, checked in step 5.5 (2026-10-03):** two CEF pages in one Vulkan window
+under Wayland, each with its slot and its fd-exported semaphores, captured green and magenta;
+the disposed one gave its image back (`CefZeroCopyTests.TwoPages_InOneVulkanWindow_BothReachTheScreen`,
+through the same probe).
 
 **W8 — Foreign accessibility subtree (`HultUI.Core`, both bridges).** Neither
 bridge could host a subtree it did not build. **Windows half done (step 4):**
@@ -866,6 +869,69 @@ engine if it changed, but nothing more.
      and exits with CEF stopped cleanly (it fails without the fix). Plain .NET, without CEF,
      ends on SIGTERM with 143 and no `ProcessExit` too; that is .NET's default, not CEF's. A
      process test that times out now also prints what of its was still running (item 2).
+   - **5.5, zero-copy on Wayland: done 2026-10-03.** On the decided route. **CEF's side:** the
+     engine has one surfaceless EGL context (GL ES 3) for the process, current on CEF's UI
+     thread. Inside `on_accelerated_paint` the frame's dmabuf is imported as an EGLImage and
+     blitted into one of three textures the view owns, the copy fenced (CEF reuses the buffer
+     when the callback returns), and that slot published as the newest. Each slot was exported
+     once (`EGL_MESA_image_dma_buf_export`) when the ring was made at its size; a new size
+     makes a new ring. **HultUI's side:** `CefFrames` is the view's `IGpuFrameRenderer`. On
+     its first draw at a ring it imports the three slots once into the context the surface
+     runs (`eglGetCurrentDisplay`), then each frame blits the newest into the sink's target.
+     The GL renderer's context is EGL on Wayland. The Vulkan renderer's hidden GL context is
+     too, and its lent target is seam W7's shared image, so one path serves both renderers. CEF
+     writes a slot that is neither the newest nor the one HultUI last read; HultUI fences its
+     read and waits on that fence before giving the slot back. **When it registers:** at the first
+     placement, when the window system is Wayland, before the browser exists. `UseGpuRenderer`
+     may now come after `Attach`, which the contract's comment says; X11 and headless keep
+     today's pixel code, untouched. **Fallbacks:** a raster surface (Pixels mode), or a context
+     that cannot import, gets each frame read back on CEF's thread; an engine without EGL makes
+     the browser without shared textures, and its pixels are uploaded by the renderer.
+     `HULTUI_CEF_ZERO_COPY=0` turns it off; `HULTUI_CEF_LOG=info` says which path frames take.
+     **The `<select>` popup arrives as a shared texture of its own** (`PET_POPUP` through
+     `on_accelerated_paint`). It is copied into a texture the engine keeps and blitted over the
+     view, kept apart while the list is open, into the same slot, as the pixel path composes it.
+     **CPU** (the sample's `--bench`, an animating page at 1656×968, 60 page frames a second,
+     this process, sway on the Intel UHD 770; the output is 1080 tall, so the spike's 1072 did
+     not fit): zero-copy **95–100 ms/s on GL, 104–119 on Vulkan**, against **172–233 and 178–238**
+     on the pixel path. That includes HultUI redrawing the window every frame; the spike's 33
+     was the copy alone. Windows measured 62–106 (GL) and 19–94 (Vulkan) for its zero-copy.
+     **Seam W7 checked on Linux:** the Vulkan probe (`tests/HultUI.UiTests.VulkanProbe
+     --webviews`) now runs CEF on Linux. With two pages in one Vulkan window, each lent its own
+     shared image (fd-exported semaphores and all), the `HULTUI_VULKAN_CAPTURE` shows green
+     left and magenta right, both through zero-copy, and the disposed page gave its image back.
+     The probe waits a second after both pages first drew, because CEF's first frame is the
+     blank one before the document. **Found on the way, a crash since 5.3:** disposing a view
+     while its `<select>` list is open fails a CHECK inside `close_browser` (SIGTRAP), which ended
+     the process on either path. The list is closed first now (focus taken, Escape), and the
+     browser closes when the popup has gone, or after a second. **Tests:** `CefZeroCopyTests`,
+     run when CEF and a Wayland compositor are present. A process of its own runs CEF on
+     Wayland and drives the renderer from an EGL context of its own: two pages each show their
+     colour through zero-copy, a page changed by script sends its next frame, and the list is
+     drawn over the page from its shared texture. The W7 capture runs through the probe. In
+     process: a Wayland placement registers the renderer and an X11 one does not; and without
+     shared textures a GPU surface still gets the page, uploaded. Also
+     `AViewDisposedWithItsListOpen_GoesQuietly`.
+     **Two more found by the new tests running beside the old, both older than 5.5:**
+     *A segfault when a view is disposed while CEF makes its browser.* The view closed the
+     browser inside `on_after_created`, which runs inside `AlloyBrowserHostImpl::CreateInternal`,
+     and the browser was freed under it. Found by symbolizing the crash from a core dump with
+     libcef's MiniDebugInfo, since there is no debugger here. The close is posted now. 80 views
+     placed and disposed in turn crashed every run before and none after
+     (`PagesDisposedWhileCefMakesThem_GoQuietly`). *The process tests' rare timeouts (review
+     item 2) explained:* the child had exited, a zombie, and the test host's SIGCHLD was back at
+     the default. .NET installs its handler only at a process's first `Process.Start`. When
+     that came while CEF started, Chromium reset it to the default, the same as the value saved
+     before, so nothing was put back and no child was reaped again. An application starting a
+     process while its first page starts would lose `Process.WaitForExit` the same way. Now the
+     engine has .NET install its handler first, with one trivial process, before saving. It
+     puts back only what Chromium changed (a handler in libcef, or a default where a handler
+     was), never one installed meanwhile. A process test that times out now says the child's
+     state and the test host's signal state (that is how this was caught).
+     `AFirstProcessStartedWhileCefStarts_KeepsDotNetsSigchld` failed before;
+     `OnlyChromiumsChanges_ArePutBack`. The engine suite then passed 20 runs in a row with a
+     compositor, and one without (its two Wayland tests skip). Two tests whose single click
+     could be lost while every class starts pages at once now click until the page has it.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

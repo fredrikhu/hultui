@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work; zero-copy and accessibility follow. |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work, and on Wayland a page's frames stay on the GPU; accessibility follows. |
 
 An app that never shows a web page references none of these and pays nothing.
 
@@ -196,7 +196,9 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
 - On Linux, a context menu's `Target.LinkText` is always null (CEF does not give it), and
   there is no "inspect" entry.
 - On Linux, **pages under X11 take the pixel path**: GPU zero-copy needs HultUI's window on
-  Wayland (EGL; under X11 HultUI's GL context is GLX, which cannot take CEF's buffers).
+  Wayland (EGL; under X11 HultUI's GL context is GLX, which cannot take CEF's buffers). On
+  Wayland an animating page costs this process about 95–120 ms/s of CPU at 1656×968 and 60
+  frames a second, against 170–240 on the pixel path; `HULTUI_CEF_ZERO_COPY=0` turns it off.
 - The CEF engine is being built (above); `FakeWebEngine` runs anywhere.
 
 ## Testing

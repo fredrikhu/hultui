@@ -131,8 +131,10 @@ public interface IWebViewHost
     /// <summary>The page's pixels. Write whole frames, from any thread.</summary>
     PixelFrameSink Pixels { get; }
 
-    /// <summary>Registers a GPU renderer; call from <see cref="IWebEngineView.Attach"/>. The
-    /// page is then drawn through a <see cref="GpuFrameSink"/>.</summary>
+    /// <summary>Registers a GPU renderer, once, on the UI thread: from
+    /// <see cref="IWebEngineView.Attach"/>, or later but before the engine's first frame (the
+    /// Linux engine waits for the first placement, which says the window system). The page is
+    /// then drawn through a <see cref="GpuFrameSink"/>.</summary>
     void UseGpuRenderer(IGpuFrameRenderer renderer);
 
     /// <summary>

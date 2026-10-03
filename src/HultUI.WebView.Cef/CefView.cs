@@ -110,6 +110,8 @@ internal sealed unsafe partial class CefView : IWebEngineView
             if (phase == Phase.Waiting && !placement.Bounds.IsEmpty) _phase = Phase.Starting;
         }
         if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
+            UseSharedFrames(placement.WindowSystem);
+        if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
             CefRuntime.Start(placement.WindowSystem, _options.UserDataFolder).ContinueWith(t =>
             {
                 if (t.Result is { } error) Fail(WebFailure.InitializationFailed, error);
@@ -119,6 +121,26 @@ internal sealed unsafe partial class CefView : IWebEngineView
         else if (phase == Phase.Ready)
             OnUi(Resize);
     }
+
+    /// <summary>
+    /// Step 5.5: on Wayland the page's frames stay on the GPU (<see cref="CefFrames"/>), so the
+    /// view registers a GPU renderer before the browser exists; under X11, whose GL context is
+    /// GLX and cannot import them, and with no window system, frames are pixels as before.
+    /// <c>HULTUI_CEF_ZERO_COPY=0</c> keeps Wayland on pixels too. HultUI's thread.
+    /// </summary>
+    private void UseSharedFrames(string? windowSystem)
+    {
+        if (_frames is not null || _host is not { } host || windowSystem != "wayland" || !ZeroCopyAllowed) return;
+        _frames = new CefFrames(host, () => OnUi(() =>
+        {
+            if (_browserHost != null) _browserHost->invalidate(_browserHost, cef_paint_element_type_t.PET_VIEW);
+        }));
+        host.UseGpuRenderer(_frames);
+    }
+
+    private static readonly bool ZeroCopyAllowed = Environment.GetEnvironmentVariable("HULTUI_CEF_ZERO_COPY") != "0";
+
+    private CefFrames? _frames;
 
     private void Fail(WebFailure kind, string message)
     {
@@ -180,6 +202,17 @@ internal sealed unsafe partial class CefView : IWebEngineView
 
         var info = new cef_window_info_t { size = (ulong)sizeof(cef_window_info_t) };
         info.windowless_rendering_enabled = 1;
+        if (_frames is { } frames)
+        {
+            // Shared textures come only from CEF on a window system's Ozone platform (spike L0,
+            // question 8), and are taken only by an engine with GL of its own.
+            if (CefRuntime.WindowSystem == "wayland" && EngineGl.Start() is null)
+            {
+                info.shared_texture_enabled = 1;
+                _render->on_accelerated_paint = &OnAcceleratedPaint;
+            }
+            else frames.PaintsPixels();
+        }
         info.runtime_style = cef_runtime_style_t.CEF_RUNTIME_STYLE_ALLOY;
         var settings = new cef_browser_settings_t { size = (ulong)sizeof(cef_browser_settings_t) };
         settings.windowless_frame_rate = 60;
@@ -204,10 +237,17 @@ internal sealed unsafe partial class CefView : IWebEngineView
         _browser = CefObject.AddRef(browser);
         if (disposed)
         {
-            // Disposed while CEF was creating it: close it now; on_before_close releases.
-            var host = browser->get_host(browser);
-            host->close_browser(host, 1);
-            CefObject.Release(host);
+            // Disposed while CEF was creating it: close it, but after this callback. It runs
+            // inside CEF's creation of the browser, and a browser closed from here is freed under
+            // it (a segfault in AlloyBrowserHostImpl::CreateInternal, found in step 5.5 when a
+            // test placed and disposed two views at once). on_before_close releases.
+            OnUi(() =>
+            {
+                if (_browser == null) return;
+                var host = _browser->get_host(_browser);
+                host->close_browser(host, 1);
+                CefObject.Release(host);
+            });
             return;
         }
         _browserHost = browser->get_host(browser);
@@ -396,8 +436,29 @@ internal sealed unsafe partial class CefView : IWebEngineView
         {
             _devTools?.Dispose();
             _devTools = null;
-            if (_browserHost != null) _browserHost->close_browser(_browserHost, 1);
+            if (_browserHost == null) return;
+            if (!_popupShown) { CloseBrowser(); return; }
+            // Closing a browser whose popup (a <select>'s list) is open fails a CHECK inside
+            // CEF and ends the process. Close the list first, by taking the page's focus and
+            // pressing Escape; the browser closes when CEF says the list went, or after a second.
+            _closeAfterPopup = true;
+            _browserHost->set_focus(_browserHost, 0);
+            Key(cef_key_event_type_t.KEYEVENT_RAWKEYDOWN, 0x1B, CefKeys.Native(Core.Events.KeyCode.Escape, 0), 0, '\0');
+            Key(cef_key_event_type_t.KEYEVENT_KEYUP, 0x1B, CefKeys.Native(Core.Events.KeyCode.Escape, 0), 0, '\0');
+            _ = Task.Delay(1000).ContinueWith(_ => OnUi(CloseBrowser), TaskScheduler.Default);
         });
+    }
+
+    /// <summary>Set while a disposed view waits for its popup to close before its browser does.</summary>
+    private bool _closeAfterPopup;
+    private bool _closeAsked;
+
+    /// <summary>CEF's UI thread: closes the browser, once.</summary>
+    private void CloseBrowser()
+    {
+        if (_closeAsked || _browserHost == null) return;
+        _closeAsked = true;
+        _browserHost->close_browser(_browserHost, 1);
     }
 
     /// <summary>CEF's UI thread: the browser is gone; give back what this view held.</summary>
@@ -413,6 +474,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         CefObject.Release(_display); _display = null;
         CefObject.Release(_load); _load = null;
         CefObject.Release(_focus); _focus = null;
+        _frames?.Close();
         ReleasePolicyHandlers();
     }
 
@@ -482,6 +544,15 @@ internal sealed unsafe partial class CefView : IWebEngineView
             return 1;
         }
         catch (Exception ex) { CefLog.Error("get_screen_info", ex); return 0; }
+        finally { CefObject.Release(b); }
+    }
+
+    [UnmanagedCallersOnly]
+    private static void OnAcceleratedPaint(cef_render_handler_t* s, cef_browser_t* b, cef_paint_element_type_t type,
+        ulong dirtyCount, cef_rect_t* dirty, cef_accelerated_paint_info_t* info)
+    {
+        try { Of(s)?._frames?.Accelerated(type, info); }
+        catch (Exception ex) { CefLog.Error("on_accelerated_paint", ex); }
         finally { CefObject.Release(b); }
     }
 

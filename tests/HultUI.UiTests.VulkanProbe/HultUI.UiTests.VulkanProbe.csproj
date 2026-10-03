@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
     <!-- For the two-page mode: two GPU sources in one Vulkan window. -->
     <ProjectReference Include="..\..\src\HultUI.WebView.WebView2\HultUI.WebView.WebView2.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.WebView.Cef\HultUI.WebView.Cef.csproj" />
   </ItemGroup>
 
 </Project>

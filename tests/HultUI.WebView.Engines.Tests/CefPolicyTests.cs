@@ -313,7 +313,15 @@ public sealed class CefPolicyTests : IDisposable
             <title>links</title><style>body{margin:0}a{position:absolute;left:10px;top:10px;font:40px sans-serif}</style>
             <a href="https://example.invalid/away" target="_blank">away</a>
             """, "links");
-        Click(40, 30);
+        // A click the page has not yet laid out for is lost (rarely, with every test class
+        // starting pages at once): click again until the page asks, as a person would.
+        var clicked = DateTime.MinValue;
+        await Until(() =>
+        {
+            if (_events.Any(e => e is WebEngineEvent.NewWindowRequested)) return true;
+            if (DateTime.UtcNow - clicked > TimeSpan.FromMilliseconds(700)) { Click(40, 30); clicked = DateTime.UtcNow; }
+            return false;
+        }, 15_000);
         var asked = await Next<WebEngineEvent.NewWindowRequested>();
         Assert.Equal(new Uri("https://example.invalid/away"), asked.Uri);
         Assert.True(asked.IsUserInitiated);
@@ -417,8 +425,13 @@ public sealed class CefPolicyTests : IDisposable
         _view.Navigate(new Uri(_server.Root + "asks"));
         await Next<WebEngineEvent.TitleChanged>(t => t.Title == "asks");
         await Eval("addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; })");
-        Click(100, 100);   // beforeunload asks only after the person has used the page
-        await Task.Delay(200);
+        // beforeunload asks only after the person has used the page; a click can be lost while
+        // the page settles, so click until the page counts as used.
+        await Until(async () =>
+        {
+            Click(100, 100);
+            return await Eval("navigator.userActivation.hasBeenActive") == "true";
+        });
 
         _view.Navigate(new Uri(_server.Root + "next"));
         var ask = (await Next<WebEngineEvent.ScriptDialogRequested>(d => d.Request.Kind == WebScriptDialogKind.BeforeUnload)).Request;

@@ -13,6 +13,15 @@ internal static class CefLog
         catch { }   // nowhere left to say it
     }
 
+    /// <summary><c>HULTUI_CEF_LOG=info</c> or <c>verbose</c>: the engine says what it chose, too.</summary>
+    public static readonly bool Informing = Environment.GetEnvironmentVariable("HULTUI_CEF_LOG") is "info" or "verbose";
+
+    /// <summary>What the engine chose (how frames travel, say), with <see cref="Informing"/>.</summary>
+    public static void Info(string text)
+    {
+        if (Informing) Note(text);
+    }
+
     /// <summary>Something an application's developer should hear of, that is not a failure.</summary>
     public static void Note(string text)
     {
