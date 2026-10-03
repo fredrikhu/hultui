@@ -389,6 +389,6 @@ public static class AccessibilityTreeBuilder
         DatePickerElement dp => dp.Value is { } d ? dp.DisplayText : "",
         TimePickerElement tp => tp.Value is null ? "" : tp.DisplayText,
         CalendarElement cal => cal.AccessibleValueText,
-        _ => null
+        _ => element.AccessibleValue
     };
 }

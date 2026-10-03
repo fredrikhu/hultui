@@ -408,6 +408,16 @@ public abstract class Element
     /// </summary>
     internal virtual Accessibility.NativeAccessibleContent NativeAccessibleContent => default;
 
+    /// <summary>
+    /// The value a screen reader reads for an element the framework's own types do not cover:
+    /// a terminal's visible screen. Read on the UI thread when the accessibility tree is
+    /// rebuilt, which happens only while an assistive tool listens, and by the Windows bridge on
+    /// its own thread when a reader asks; null (the default) is none. An element whose value
+    /// changes calls <see cref="NotifyAccessibilityPropertyChanged"/> with
+    /// <see cref="Accessibility.AccessibilityProperties.Value"/>.
+    /// </summary>
+    internal virtual string? AccessibleValue => null;
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 

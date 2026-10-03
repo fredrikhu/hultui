@@ -51,7 +51,7 @@ spike ran the fix; "proposed" means it is design only.
 | # | Problem | Solution | Lives in | State |
 |---|---|---|---|---|
 | 1 | The cursor's own line is cut, not reflowed, on a narrowing resize, and ConPTY does not repaint it: a narrowed prompt stays cut. | `TerminalOptions.ReflowCursorLine` in the engine, on in HultUI | engine patch 0004 | measured: pwsh's prompt stays whole and typing continues it |
-| 2 | A width resize costs O(scrollback × columns): 25 ms at 10 000 × 200. | Capacity-keeping line resize (3.6 ms), plus a resize policy for big buffers | engine patch 0001; element | measured; policy proposed |
+| 2 | A width resize costs O(scrollback × columns): 25 ms at 10 000 × 200. | Capacity-keeping line resize (3.6 ms), plus a resize policy for big buffers | engine patch 0001; element | measured; policy built in step 5 |
 | 3 | Scrollback is stored full width, about 25 B per cell: 47 MiB at 10 000 × 200. | Default 5 000 lines; a byte budget converted to lines at each width; both live signals | controller | built in step 2 |
 | 4 | Porta.Pty's default Windows quoting wraps every argument: `cmd "/c" "exit 3"` exits 1. | MSVCRT quoting, passed verbatim | `HultUI.Terminal.Pty` | measured; built in step 4, and its test fails with Porta.Pty's quoting |
 | 5 | A paste written by the reader thread deadlocks for good at 256 KiB; ClosePseudoConsole then hangs too. | A writer thread with a queue; a fixed teardown order | controller | measured; built in step 2 |
@@ -64,7 +64,7 @@ spike ran the fix; "proposed" means it is design only.
 | 12 | Engine facts a renderer must know: default colours are palette 256/257, the deferred wrap is X == Cols, and a width-2 cell can end a row. | Renderer rules | element | built in step 2 |
 | 13 | HultUI has no positioned-glyph-run or offscreen-surface API for elements. | One `DrawText` per row, with a span per style. Seams T2/T3 were for the case where that was too slow, and it is not | element | measured in step 2: about 7 ms a frame for a 207 × 58 full-screen redraw |
 | 14 | HultUI has no monospace default font and no cell-metrics API. | Seam T1: `FontFamilies.Monospace`, family lists, `MeasureFont`, `HasGlyph` | framework | built in step 3 |
-| 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2; until then, role and value | framework | proposed |
+| 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2; until then, role and value | framework | role, name and value built in steps 2 and 5; A1/A2 proposed |
 | 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | **Not a problem: keep it.** Microsoft's own ConPTY targets ship both hosts for x64 ("x64 can only run on x64 and ARM64"), because the x64 `conpty.dll` checks the machine (`IsWow64Process2`) and starts the arm64 host on ARM64 Windows. Trimming it would drop an x64 app on ARM64 back to the in-box console host, silently | `HultUI.Terminal.Pty` | decided in step 4 from the package's targets and the DLL's imports |
 | 17 | A row shrink with the cursor near the top leaves the cut rows below the screen, so the scrollback keeps that many lines fewer, for good. A terminal created at 80 × 24 and sized to its pane before its first screenful is that case. | Drop the blank rows below the cursor, as xterm.js does | engine patch 0005 | measured: found in step 2; the new upstream test fails without it |
 | 18 | A symbol the monospace font lacks (Consolas lacks some arrows and maths operators) is drawn from a fallback font whose advance pushes the rest of its row off its columns. | A character the face has no glyph for is drawn on its own at its column. Step 2 used fixed code point ranges; step 3 asks the face (`HasGlyph`, seam T1) | element | measured: found in step 2 by the sample; the font check built in step 3 |
@@ -290,12 +290,15 @@ The element draws the snapshot copied at the start of its `Render`. All of it us
    - **Grid size.** Columns and rows are the element's content box divided by the cell, truncated.
      A change is applied after the frame, never inside it: it reaches the program, and ConPTY
      answers a resize synchronously.
-   - **Not yet: window queries.** `CSI 14 t` and `CSI 16 t` should be answered from the grid, not
-     the element: the strip below the last row belongs to no row.
+   - **Window queries.** `CSI 14 t`, `CSI 16 t` and `CSI 18 t` are answered from the grid in device
+     pixels, not from the element: the strip below the last row belongs to no row. The element
+     tells the controller the cell's pixel size; until it does they answer zeroes. Built in
+     step 5.
 2. **Backgrounds.** One `DrawRect` per run of equal background along a row, with default-background
    runs skipped.
 3. **Text.** One `DrawText` per **row**, with a `TextSpan` per change of style: colour (dim as
-   half alpha), weight, slant, underline, strikethrough. One call per row rather than per run,
+   half alpha), weight, slant, strikethrough (underlines are item 5). One call per row rather than
+   per run,
    because then every glyph shares the row's baseline and steps by the font's advance, which is
    the cell, with no position worked out per run.
    - A cell that would not step by the cell's advance is drawn on its own at its column, clipped
@@ -311,14 +314,23 @@ The element draws the snapshot copied at the start of its `Render`. All of it us
    eighths, shades and quadrants. This is what Windows Terminal, kitty and Ghostty do. **Not yet:**
    rounded corners (drawn square), dashed and diagonal lines (left to the font), the powerline
    triangles.
-5. **Decorations the spans do not cover.** Overline is a `DrawRect` along the top of the cell, as
-   thick as the face's underline in whole device pixels. **Not yet:** curly, dotted, dashed and double underlines (drawn single), underline
-   colour (drawn in the text colour), blink (drawn steady).
+5. **Decorations,** drawn as geometry after the text (step 5).
+   - **Underlines** in all five styles (single, double, dotted, dashed, and curly as a wave of
+     short lines, one period a cell), in the SGR 58 colour or the text's, where the face's
+     metrics put them and as thick as they say, in whole device pixels. Not the text's own
+     decoration, which has one style in the text's colour. Dot and dash patterns are laid on the
+     grid, so a colour change mid-run does not restart them.
+   - **Overline,** a `DrawRect` along the top of the cell, as thick as the underline.
+   - **Blinking text** (SGR 5) is left out in the off half of the blink.
 6. **The cursor.** A block (with the character under it in the background colour), bar or
-   underline, as the program asks (DECSCUSR). When the element is unfocused, a hollow block
-   whatever the shape. **Not yet:** blinking.
-7. **Overlays** within the element: the selection, and the IME preedit at the cursor. **Not yet:**
-   search hits (`TextSearch.Decorate`, see below) and a hovered hyperlink's underline.
+   underline, as the program asks (DECSCUSR), blinking when it asks for a blinking one. When the
+   element is unfocused, a hollow block whatever the shape.
+   - **Blinking** runs on one 530 ms clock (Windows' caret rate) shared with blinking text: a
+     no-op tween on the frame loop's time, so it advances in a headless session's virtual time
+     and costs one frame per phase, not a frame a tick. It runs only while something blinks,
+     and a key shows the cursor at once.
+7. **Overlays** within the element: search hits behind the text, the selection, the hovered
+   link's underline, and the IME preedit at the cursor.
 8. **Clipping.** The element clips to its content box; a special cell to its own cells. With
    `ReflowCursorLine` on, the engine no longer leaves a width-2 cell in the last column (the stock
    engine's cut did), but a renderer that trusts `Width` there would draw past the grid if it ever
@@ -406,7 +418,7 @@ win32-input-mode (`CSI ? 9001 h`) at startup.
   - drag selects a range;
   - a double click selects a word;
   - a triple click selects a line;
-  - **not yet:** Alt+drag selects a block.
+  - Alt+drag selects a block, the same columns on every line, copied line by line (step 5).
 
   A selection is held in absolute lines, so it stays on its text while output scrolls; typing
   and switching screens drop it.
@@ -414,8 +426,13 @@ win32-input-mode (`CSI ? 9001 h`) at startup.
   wheel's fractions. On the alternate screen it sends arrow keys. XTerm.NET does not track
   alternate scroll (`?1007`), so the element always does this there, as most terminals do by
   default.
-- **Not yet: links.** Ctrl+click opens an OSC 8 link through an app callback; the default does
-  nothing.
+- **Links (OSC 8, step 5).** Under the pointer a link is underlined, every stretch of it when the
+  program gave it an id (a link that wrapped is one link), and the pointer becomes a hand.
+  Ctrl+click raises `TerminalController.LinkActivated` with the link as the program wrote it,
+  even while the program tracks the mouse; a plain click selects. Nothing opens a link unless
+  the application does, and it should check the scheme: a `file:` link to a program would run
+  it. The sample opens `http` and `https` only. Links the program did not mark (a URL in plain
+  text) are not detected.
 
 **Clipboard.**
 
@@ -443,9 +460,11 @@ events (`?1004`), and draws a hollow cursor while unfocused. Built in step 2.
 - **Width changes are applied at once while the buffer is small.**
   - **Measured with patch 0001:** a one-column change costs 0.25 ms at 1 000 × 120, 2.3 ms at
     10 000 × 120, and 3.6 ms at 10 000 × 200 (the stock engine took 25 ms there).
-  - **Above about 20 000 lines** of effective scrollback (31 ms at 100 000 × 200) a width change
-    waits 100 ms after the last one, as VS Code's terminal does for large buffers. Meanwhile the
-    old grid is drawn clipped or padded.
+  - **Above 20 000 lines** in the normal buffer (31 ms at 100 000 × 200) a width change waits
+    until the size has been still for 100 ms, as VS Code's terminal does for large buffers: a
+    drag reflows once, at its end. Meanwhile the old grid is drawn clipped or padded. Built in
+    step 5, on the lines the buffer holds rather than its capacity: a new terminal with room for
+    100 000 lines reflows at once. A height change in the same drag still applies at once.
   - That is a hold on the reflow, not on frames: every frame of the drag still renders. The
     resize-stretch lesson was that frames must not stop inside the modal loop.
 - **The emulator and the connection resize together, always.** ConPTY reflows its own buffer and
@@ -480,31 +499,57 @@ Configurable means both at construction and while the terminal runs:
 - **Bounds.** Both are validated: a negative value throws; a line count above 1 000 000 is clamped
   and says so in the docs. At 200 columns a million lines is 4.6 GiB, and a width change there
   costs seconds even with patch 0001.
-- **The resize policy follows the effective line count** (see *Resize policy*), so raising the
-  scrollback also moves the point where width changes start to wait.
+- **The resize policy follows the lines held** (see *Resize policy*), so a big scrollback makes
+  width changes wait only once it has filled.
 - **A later engine improvement** (one more patch): store a line that scrolls off at its content
   length instead of the width. A typical shell line is short, and the 24-byte cell would stay.
 
 ## Search
 
-The find bar uses `HultUI.Core`'s `TextSearch`, so it behaves like the four apps' bars:
+Built in step 5. `TerminalElement.Search` is `HultUI.Core`'s `TextSearch`, so a query means what it
+means in the four apps' bars; the bar itself is the application's.
 
-- **The text.** `Bind(lineCount, 1, textAt)` with logical lines (wrapped rows joined) read from a
-  snapshot of the scrollback. It is re-bound, debounced, as output arrives.
-- **Hits.** They map back to rows and columns through the wrap.
-- **Painting.** It uses `Decorate`'s background tints.
-- **Known limits.** Matching is per logical line and synchronous on the UI thread. That is fine at
-  5 000 lines; **verify** at 100 000. XTerm.NET's own `BufferSearch` measured 3.7 ms per search
-  and is the fallback if it is not.
+- **The text.** `Bind(lineCount, 1, textAt)` over the current screen's buffer as logical lines
+  (wrapped rows joined, so a match across the wrap is one hit), read under the lock. It binds when
+  a query is first set and again 200 ms after output pauses, keeping the current hit by its
+  place in the buffer, which output does not move. Switching screens rebinds at once.
+- **Hits** map back to columns through each row's starting offset and the cells' text lengths,
+  so wide characters and clusters land on the right columns. They are tinted behind the text
+  (`TerminalTheme.SearchHit` and `SearchCurrent`), not through `Decorate`: the row's spans are
+  the text's.
+- **Moving** to a hit (`Search.Move`) or changing the query scrolls it into view, centred, when
+  it is off the screen.
+- **Keys.** Ctrl+Shift+F raises `TerminalElement.FindRequested` for the application's bar; while
+  nothing handles it, the key goes to the program. The sample's bar takes Enter and Shift+Enter,
+  Alt+C and Alt+R, and Esc back to the terminal, as Junction's does.
+- **Measured** (Release, this machine): reading 100 000 rows of 52 columns takes 15–25 ms
+  (50–100 ms before the read stopped allocating a string per character), and a scan a few more.
+  At the default 5 000 lines a rebind is about a millisecond. At 100 000 rows of 200 columns
+  expect about 70 ms each time output pauses with a query open: a visible hitch. Binding only
+  the lines added since the last bind is the fix if that matters; XTerm.NET's `BufferSearch`
+  (3.7 ms a search) is the other.
 
 ## Accessibility
 
 HultUI has no UIA TextPattern and no AT-SPI Text interface; text elements expose their whole text
 as a Value. It has no live-region or announcement API either.
 
-- **First version.** The element is `AccessibilityRole.Document`, named after the session's title
-  unless the app names it. Step 2 built that much. **Not yet:** the visible screen as its value,
-  so readers can read the screen; they are not told about new output either way.
+- **First version** (steps 2 and 5). The element is `AccessibilityRole.Document`, named after the
+  session's title unless the app names it, and its value is the visible screen
+  (`TerminalController.ReadScreen`).
+  - **Seam.** `Element.AccessibleValue` (internal virtual, new in step 5) lets an element the
+    framework's own types do not cover supply a value; the tree builder and the Windows host
+    bridge read it. The Windows bridge offers a document with a value the Value pattern,
+    read-only (`SetValue` answers `UIA_E_ELEMENTNOTENABLED`). Checked from outside with Windows'
+    own UI Automation client against the sample: a Document named "Demo shell", read-only,
+    whose value is the screen.
+  - **Changes** are told once the output has paused for 500 ms, or after 2 s of unbroken output:
+    one update per burst, not one a frame, and nothing is timed while no assistive tool listens.
+    A title renames the node at once.
+  - **Found:** a title that arrived before the element listened (the demo shell's first output,
+    read while the window was still being built) never named it; listening now starts by reading
+    the title.
+  - Readers are still not told what is new, and cannot move through the screen by line or word.
 - **Seams A1 and A2 (below)** give it what Windows Terminal has: a text range model a reader can
   review by line and word, and announcements of new output.
 - **TextArea benefits too.** A1 is the same work TextArea needs; its whole-text Value is the same
@@ -749,9 +794,22 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
      JIT and 1.0 s under NativeAOT, which publishes with no warnings.
    - **Not verified:** Linux and macOS ran nothing here. The forkpty half of every Pty test, and
      step 0's Linux list, wait for the Linux machine and Linux CI.
-5. **Resize policy, search, hyperlinks**, and what step 2 left as **not yet** in *Rendering* and
-   *Input*: the styled underlines and underline colour, blink, block selection, window-size
-   queries, and the screen as the accessible value.
+5. **Resize policy, search, hyperlinks, and step 2's "not yet": done 2026-10-03,** in four commits.
+   - **Rendering and input:** the five underline styles in their colours, blinking text and
+     cursor, Alt+drag block selection, the window-size reports, and the resize policy.
+   - **Links:** OSC 8 hover, underline and hand; Ctrl+click to `LinkActivated`.
+   - **Search:** `TerminalElement.Search` over the scrollback, tinted and revealed; the sample's
+     find bar.
+   - **Accessibility:** the screen as the document's value, through a new internal seam
+     (`Element.AccessibleValue`) and a read-only Value pattern on Windows.
+   - **Tests:** 115 in `HultUI.Terminal.Tests`; each feature has a negative control (the resize
+     hold, the blink, the underline colour, the link id, the kept search hit, the joined rows,
+     the reveal, the settle and its limit, the early title). The framework's Core and headless
+     suites pass unchanged.
+   - **Found on the way:** the early title above, and a search read that allocated a string per
+     character (now 3× faster).
+   - **Still not built:** rounded, dashed and diagonal box drawing and the powerline triangles;
+     URL detection in plain text; incremental search binding for very large scrollbacks.
 6. **Windows input:** win32-input-mode for the ambiguous keys, verified against Windows Terminal
    with Git's vim. Then seams **K1–K4**.
 7. **Accessibility:** seams **A1** and **A2**, and the element's text range model and output

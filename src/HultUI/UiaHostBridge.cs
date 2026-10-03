@@ -1,4 +1,4 @@
-﻿using System.Runtime.Versioning;
+using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -54,7 +54,8 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
     {
         TextInputElement input => input.Text,
         TextAreaElement area => area.Text,
-        _ => null,
+        { } element => element.AccessibleValue,
+        null => null,
     };
 
     public bool? GetToggleState(ElementId id)

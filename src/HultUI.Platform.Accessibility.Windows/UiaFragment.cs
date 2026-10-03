@@ -1,4 +1,4 @@
-﻿using System.Runtime.Versioning;
+using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
@@ -105,6 +105,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaSelectionItemProvider(_bridge, ElementId),
             AccessibilityRole.TextInput when patternId == UiaInterop.UIA_ValuePatternId
                 => new UiaValueProvider(_bridge, ElementId),
+            // A document with a value (a terminal's screen) offers it read-only: the reader
+            // reads it, and nothing writes it.
+            AccessibilityRole.Document when patternId == UiaInterop.UIA_ValuePatternId && _value is not null
+                => new UiaValueProvider(_bridge, ElementId, readOnly: true),
             // A progress bar exposes the same pattern read-only; the bridge refuses SetValue.
             (AccessibilityRole.Slider or AccessibilityRole.ProgressBar or AccessibilityRole.SpinButton) when patternId == UiaInterop.UIA_RangeValuePatternId
                 => new UiaRangeValueProvider(_bridge, ElementId),

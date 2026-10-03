@@ -96,6 +96,7 @@ public sealed partial class TerminalElement : Element
         StopResizeHold();
         StopBlink();
         StopSearchRebind();
+        StopScreenWait();
     }
 
     private void StartListening()
@@ -106,6 +107,9 @@ public sealed partial class TerminalElement : Element
         _controller.ClipboardWrite += OnClipboardWrite;
         _controller.TitleChanged += ApplyTitle;
         _listening = true;
+        // A title set before this element listened (a program's first output, read while the
+        // window was still being built) is only in the controller's signal now.
+        ApplyTitle(_controller.Title);
     }
 
     private void StopListening()
@@ -125,6 +129,7 @@ public sealed partial class TerminalElement : Element
         if (!IsHosted) { StopListening(); return; }
         MarkPaintDirty();
         ScheduleSearchRebind();
+        NoteScreenChanged();
     }
 
     private void OnScreenSwitched(bool alternate)
@@ -150,7 +155,9 @@ public sealed partial class TerminalElement : Element
         // The program's title names the element for a screen reader, unless the app named it.
         if (AccessibleName != _titleName) return;
         _titleName = string.IsNullOrEmpty(title) ? DefaultName : title;
+        if (AccessibleName == _titleName) return;
         AccessibleName = _titleName;
+        if (IsHosted) NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
     }
 
     internal override void PatchFrom(Element source)

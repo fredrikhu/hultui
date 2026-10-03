@@ -356,6 +356,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
         long dropped = Dropped, first = 0;
         var text = new StringBuilder();
         var starts = new List<int>();
+        Span<char> pair = stackalloc char[2];
 
         for (int i = 0; i < lines.Length; i++)
         {
@@ -368,9 +369,16 @@ internal sealed class XtermEmulator : ITerminalEmulator
             {
                 var cell = line[c];
                 if (cell.Width == 0) continue;
-                if (cell.Attributes.IsInvisible() || (cell.ClusterId == 0 && cell.CodePoint == 0)) text.Append(' ');
+                int cp = cell.CodePoint;
+                if (cell.ClusterId == 0 && cp is > 0 and < 0xD800 or (> 0xDFFF and < 0x10000))
+                {
+                    // The common case first, and without an allocation: one char.
+                    text.Append(cell.Attributes.IsInvisible() ? ' ' : (char)cp);
+                    continue;
+                }
+                if (cell.Attributes.IsInvisible() || (cell.ClusterId == 0 && cp == 0)) text.Append(' ');
                 else if (cell.ClusterId != 0) text.Append(cell.Content);
-                else if (Rune.IsValid(cell.CodePoint)) text.Append(new Rune(cell.CodePoint).ToString());
+                else if (Rune.IsValid(cp)) text.Append(pair[..new Rune(cp).EncodeToUtf16(pair)]);
                 else text.Append('\uFFFD');
             }
         }
