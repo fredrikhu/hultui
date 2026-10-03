@@ -16,8 +16,12 @@ namespace HultUI.WebView.Cef;
 /// <item>User namespaces off outright: <c>user.max_user_namespaces=0</c>, or Debian's old
 /// <c>kernel.unprivileged_userns_clone=0</c>.</item>
 /// </list>
-/// <para>Root, and a setuid-root <c>chrome-sandbox</c> beside <c>libcef.so</c> (CEF's other
-/// sandbox, which needs no namespace), are fine either way.</para>
+/// <para>Nor can it as root: Chromium refuses a root browser process without
+/// <c>--no-sandbox</c> ("Running as root without --no-sandbox is not supported") and ends it,
+/// seen on Debian 13 and Ubuntu 24.04, setuid sandbox or not. A setuid-root
+/// <c>chrome-sandbox</c> beside <c>libcef.so</c> (CEF's other sandbox, which needs no
+/// namespace) is fine for anyone else. An application that chose to run without the sandbox
+/// (<c>no-sandbox</c>, today through <c>HULTUI_CEF_SWITCHES</c>) needs none of this.</para>
 /// </remarks>
 internal static class CefSandbox
 {
@@ -29,14 +33,19 @@ internal static class CefSandbox
         string? UnprivilegedUsernsClone,
         bool IsRoot,
         bool HasSetuidSandbox,
-        string Executable);
+        string Executable,
+        bool NoSandbox = false);
 
     /// <summary>Why the sandbox cannot start here, or null when it can (or nothing says it cannot).</summary>
     public static string? Problem(string cefDirectory) => Judge(Read(cefDirectory));
 
     internal static string? Judge(Facts f)
     {
-        if (f.IsRoot || f.HasSetuidSandbox) return null;
+        if (f.NoSandbox) return null;   // the application chose it: nothing to start
+        if (f.IsRoot)
+            return "Chromium does not run as root with its sandbox: run the application as an ordinary " +
+                   "user (CEF would end the process: \"Running as root without --no-sandbox is not supported\").";
+        if (f.HasSetuidSandbox) return null;
         if (f.MaxUserNamespaces?.Trim() == "0" || f.UnprivilegedUsernsClone?.Trim() == "0")
             return "Chromium's sandbox needs user namespaces, and this system has them turned off " +
                    "(user.max_user_namespaces or kernel.unprivileged_userns_clone is 0). " +
@@ -62,7 +71,8 @@ internal static class CefSandbox
         ReadOrNull("/proc/sys/kernel/unprivileged_userns_clone"),
         Environment.UserName == "root" || geteuid() == 0,
         HasSetuidSandbox(Path.Combine(cefDirectory, "chrome-sandbox")),
-        Environment.ProcessPath ?? "this application");
+        Environment.ProcessPath ?? "this application",
+        CefRuntime.ExtraSwitches(Environment.GetEnvironmentVariable("HULTUI_CEF_SWITCHES")).Any(s => s.Name == "no-sandbox"));
 
     private static string? ReadOrNull(string path)
     {

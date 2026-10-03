@@ -34,11 +34,25 @@ public class CefSandboxTests
         => Assert.Contains("dotnet host", CefSandbox.Judge(Ubuntu(exe: "/usr/lib/dotnet/dotnet")));
 
     [Fact]
-    public void Root_OrASetuidSandbox_NeedNoNamespaces()
+    public void ASetuidSandbox_NeedsNoNamespaces()
+        => Assert.Null(CefSandbox.Judge(Ubuntu() with { HasSetuidSandbox = true }));
+
+    /// <summary>Chromium refuses a root browser process without --no-sandbox and ends it (seen
+    /// on Debian 13 and Ubuntu 24.04 with sudo), on any distribution, with a setuid sandbox or not.</summary>
+    [Fact]
+    public void Root_IsRefused_Everywhere_UnlessTheApplicationChoseNoSandbox()
     {
-        Assert.Null(CefSandbox.Judge(Ubuntu() with { IsRoot = true }));
-        Assert.Null(CefSandbox.Judge(Ubuntu() with { HasSetuidSandbox = true }));
+        var fedora = new CefSandbox.Facts(null, "unconfined", "63304", null, IsRoot: true, HasSetuidSandbox: false, "/opt/app/App");
+        foreach (var root in new[] { fedora, fedora with { HasSetuidSandbox = true }, Ubuntu() with { IsRoot = true },
+                     Ubuntu("app (unconfined)") with { IsRoot = true } })
+            Assert.Contains("as root", CefSandbox.Judge(root));
+        Assert.Null(CefSandbox.Judge(fedora with { NoSandbox = true }));
+        Assert.Null(CefSandbox.Judge(Ubuntu() with { IsRoot = true, NoSandbox = true }));
     }
+
+    [Fact]
+    public void NoSandbox_NeedsNoProfileEither()
+        => Assert.Null(CefSandbox.Judge(Ubuntu() with { NoSandbox = true }));
 
     [Fact]
     public void Fedora_Debian_AndAnUnrestrictedKernel_Start()

@@ -21,8 +21,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsAotCompatible>true</IsAotCompatible>
     <!-- Portable source, Linux at run time: elsewhere the engine reports itself unavailable,
-         and the package stays in the cross-platform build and docs. -->
-    <SupportedOSPlatform>linux</SupportedOSPlatform>
+         and the package stays in the cross-platform build and docs. Deliberately not marked
+         with a SupportedOSPlatform property: for a plain net10.0 project it generates nothing,
+         so the platform analyzer treats this code as every platform's. A call the analyzer
+         flags (File.GetUnixFileMode, say) gets an OperatingSystem guard where it is made. -->
     <Description>HultUI web view engine for Linux: the Chromium Embedded Framework, off-screen and composited, NativeAOT-compatible. Needs CEF 146 or later (Fedora: dnf install cef).</Description>
   </PropertyGroup>
 
