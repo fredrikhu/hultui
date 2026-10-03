@@ -658,6 +658,133 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void RecentlyAddedIsDrawnForWhomTheServerDrawsIt()
+    {
+        DiscoverSlider[] layout =
+        [
+            new(1, SliderKind.RecentlyAdded, null, null, Enabled: true, Order: 0),
+            new(2, SliderKind.PopularMovies, null, null, Enabled: true, Order: 1),
+        ];
+        foreach (var (permissions, drawn) in new[]
+        {
+            (RequestPermission.Request, false),
+            (RequestPermission.Request | RequestPermission.RecentView, true),
+            (RequestPermission.ManageRequests, true),
+        })
+        {
+            var requests = Requests(permissions);
+            requests.AddRecentlyAdded("movie:1398");
+            requests.Layout = [.. layout];
+            Host(Library(), requests, (session, app) =>
+            {
+                PumpUntilShown(session, "Films");
+                Click(session, "rail-discover");
+                PumpUntilShown(session, "Popular films");
+                Assert.True(drawn == Shows(session, "Recently added"), $"{permissions}: drawn should be {drawn}");
+            });
+        }
+    }
+
+    [Fact]
+    public void RecentlyAddedIsNeverThinnedByTheHideAvailableSwitch()
+    {
+        // Every title in it is available: the switch would leave nothing.
+        var requests = Requests(RequestPermission.ManageRequests,
+            new RequestServerInfo("http://jellyseerr.test:5055", "Jellyseerr", "2.7.3", HideAvailable: true));
+        requests.SliderPageSize = 1;
+        requests.AddMovie(1399_000, "Andrei Rublev", 1966, Availability.Available, "rublev", []);
+        requests.AddRecentlyAdded("movie:1398", "movie:1399000");
+        requests.Layout = [new DiscoverSlider(1, SliderKind.RecentlyAdded, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "Recently added");
+            Assert.NotNull(session.Window.FindByAutomationId("discover-card-movie:1398"));
+
+            // And its "See all" pages through the rest, still unthinned.
+            Click(session, "discover-row-slider-1-see-all");
+            PumpUntilShown(session, "Stalker");
+            Click(session, "see-all-view-more");
+            PumpUntilShown(session, "Andrei Rublev");
+            Assert.Contains("GetSlider(RecentlyAdded,1,p2)", requests.Calls);
+        });
+    }
+
+    [Fact]
+    public void AGenreRowTooLongForOnePageOffersEveryGenreAtOnce()
+    {
+        var requests = Requests();
+        string[] names = ["Action", "Comedy", "Drama", "Horror", "Romance", "Thriller", "Western", "War"];
+        for (int i = 0; i < names.Length; i++) requests.AddGenre(DiscoverKind.Movie, 100 + i, names[i], "movie:603");
+        requests.AddGenre(DiscoverKind.Tv, 200, "Animation", "tv:1399");   // one: fits, nothing more to see
+        requests.Layout =
+        [
+            new DiscoverSlider(1, SliderKind.MovieGenres, null, null, Enabled: true, Order: 0),
+            new DiscoverSlider(2, SliderKind.TvGenres, null, null, Enabled: true, Order: 1),
+        ];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Films by genre");
+            Assert.True(Shows(session, "Series by genre"));
+            Assert.Null(session.Window.FindByAutomationId("discover-row-genres-2-see-all"));
+            // The row shows one page of them; the others are a page turn away.
+            Assert.Null(session.Window.FindByAutomationId("genre-movie-107"));
+
+            Click(session, "discover-row-genres-1-see-all");
+            Assert.Equal(ApertureView.DiscoverGenres, app.Current.View);
+            Assert.Equal("movie", app.Current.Id);
+            PumpUntilShown(session, "War films");
+            // All eight at once, each opening its genre as on the row.
+            for (int i = 0; i < names.Length; i++)
+                Assert.NotNull(session.Window.FindByAutomationId($"genre-movie-{100 + i}"));
+            Assert.False(Shows(session, "Animation series"), "a series genre on the films page");
+            Click(session, "genre-movie-107");
+            Assert.Equal(ApertureView.DiscoverGenre, app.Current.View);
+            Assert.Equal("movie:107", app.Current.Id);
+        });
+    }
+
+    [Fact]
+    public void StudiosAndNetworksSeeAllShowsEveryOneAtOnce()
+    {
+        var requests = Requests();
+        requests.Layout =
+        [
+            new DiscoverSlider(1, SliderKind.Studios, null, null, Enabled: true, Order: 0),
+            new DiscoverSlider(2, SliderKind.Networks, null, null, Enabled: true, Order: 1),
+        ];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Studios");
+            PumpUntilShown(session, "See all of Networks");
+            // The rows show a page of logos; A24, the last studio, is a page turn away.
+            Assert.Null(session.Window.FindByAutomationId("company-movie-41077"));
+
+            Click(session, "discover-row-studios-1-see-all");
+            Assert.Equal(ApertureView.DiscoverCompanies, app.Current.View);
+            foreach (var studio in DiscoverCompanies.Studios)
+                Assert.NotNull(session.Window.FindByAutomationId($"company-movie-{studio.Id}"));
+            Assert.Null(session.Window.FindByAutomationId("company-tv-213"));   // no networks here
+            Click(session, "company-movie-41077");
+            Assert.Equal(ApertureView.DiscoverCompany, app.Current.View);
+            Assert.Equal("movie:41077", app.Current.Id);
+
+            app.GoBack();
+            app.GoBack();
+            Pump(session);
+            Click(session, "discover-row-networks-2-see-all");
+            Assert.Equal("tv", app.Current.Id);
+            foreach (var network in DiscoverCompanies.Networks)
+                Assert.NotNull(session.Window.FindByAutomationId($"company-tv-{network.Id}"));
+        });
+    }
+
+    [Fact]
     public void SeeAllForARowNoLongerInTheLayoutSaysSo()
     {
         var requests = Requests();

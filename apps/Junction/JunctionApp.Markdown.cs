@@ -530,7 +530,12 @@ public partial class JunctionApp
             return MdPicture.Broken;
         var loader = _mdPictures.For(url);
         var remote = cx.Remote;
-        loader.Load(url, () => LoadPicture(uri, remote), onLoaded: _ => _mdLayoutGen++);
+        // Arriving changes the height of a row already measured, so the rows are measured again
+        // — asked for here, not left to the loader's dependency: that is only kept by the build
+        // that last read it, and the heights are read only when the row shape changes. A build
+        // in between (a spinner's frame, a hover) dropped it, the picture landed into nobody,
+        // and the row then drew it inside the height it had without it.
+        loader.Load(url, () => LoadPicture(uri, remote), onLoaded: _ => { _mdLayoutGen++; MarkDirty(); });
         return loader.Value;
     }
 

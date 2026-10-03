@@ -310,6 +310,15 @@ public sealed class FakeRequestServer : IRequestServer
 
     public void AddToWatchlist(string key) => _watchlist.Add(key);
 
+    private readonly List<string> _recentlyAdded = [];
+
+    /// <summary>Titles the server has seen arrive, newest first — the "Recently added" row.</summary>
+    public FakeRequestServer AddRecentlyAdded(params string[] keys)
+    {
+        _recentlyAdded.AddRange(keys);
+        return this;
+    }
+
     /// <summary>A studio's films (<see cref="DiscoverKind.Movie"/>) or a network's series.</summary>
     public FakeRequestServer AddCompanyTitles(DiscoverKind kind, int companyId, params string[] keys)
     {
@@ -359,7 +368,9 @@ public sealed class FakeRequestServer : IRequestServer
             SliderKind.UpcomingTv => DiscoverShelf.UpcomingSeries,
             _ => null,
         };
-        var keys = shelf is { } s ? _shelves.GetValueOrDefault(s, []) : _customRows.GetValueOrDefault(slider.Id, []);
+        var keys = shelf is { } s ? _shelves.GetValueOrDefault(s, [])
+            : slider.Kind == SliderKind.RecentlyAdded ? _recentlyAdded
+            : _customRows.GetValueOrDefault(slider.Id, []);
         // Pages of SliderPageSize, as the server's are of twenty.
         var items = keys.Skip((Math.Max(1, page) - 1) * SliderPageSize).Take(SliderPageSize).Select(k => _titles[k].Item).ToList();
         return Done(new DiscoverPage(items, Math.Max(1, page), (keys.Count + SliderPageSize - 1) / SliderPageSize, keys.Count));

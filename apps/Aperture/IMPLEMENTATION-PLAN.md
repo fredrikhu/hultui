@@ -199,9 +199,9 @@ Traps on the way:
 3. **Removing from the watchlist takes `mediaType` from 3.2** and a 3.1 server refuses the
    parameter outright, so it is sent by version. Adding answers 409 for "already on it",
    which is success.
-4. **Left out, deliberately:** recently added (the library's Home has it, from Jellyfin) and
-   `hideRequested` (the server's web client does not apply it either). Studios, networks
-   and streaming-service rows were on this list too, until they were added (below).
+4. **Left out, deliberately:** `hideRequested` (the server's web client does not apply it
+   either). Recently added, studios, networks and streaming-service rows were on this list
+   too, until they were added (below).
 
 Verified against the lab server, read-only: the layout (all twelve built-in rows), the
 genre rows and a genre page, a person, the watchlist, and Radarr's profiles and folders
@@ -277,8 +277,12 @@ to everything (and everyone's, for someone who decides them). Home's watchlist r
 too, before its menu; both watchlist rows open a fixed route (`DiscoverAll` with id
 `watchlist`) rather than a layout row's id, since the list is the user's and opens whether
 or not the administrator's layout has a row for it. The wall is in the server's order; only
-the row's first page puts what the library has first. Genre, studio and network
-rows are whole already. The route carries only the row's id; the row itself is found in the
+the row's first page puts what the library has first. A genre row holds every
+genre already, a page at a time; its "See all" (once they do not fit on one page) is all of
+them at once as a wrap of the same cards (`ApertureView.DiscoverGenres`, id `movie` or `tv`,
+its own load so it stands without the rows). Studio and network rows got the same after:
+every studio or network at once (`ApertureView.DiscoverCompanies`, id `movie` or `tv`) —
+the lists are compiled in, so the page has nothing to load. The route carries only the row's id; the row itself is found in the
 layout as last loaded, and one no longer there says so rather than guessing. It is a real
 button, not a link-styled box: only `ButtonElement` answers Enter and Space.
 
@@ -288,8 +292,17 @@ before asking the element's `ApplyTheme` for it — so a label drew in its paren
 until something re-dirtied the button (the issue page's "Reply" drew light on gold while
 disabled, and went dark only once typing enabled it). Fixed in the resolver; see `docs/THEMES.md`.
 
-**Still open:** nothing on the Discover page; every row of the server's layout is drawn but
-"recently added", which Home has from Jellyfin.
+**Since, recently added:** the layout's "Recently added" row is drawn after all — Home's
+Latest rows are per library and from Jellyfin, this is the request server's own record of
+what arrived, across libraries, newest first (`GET /media?filter=allavailable&sort=
+mediaAdded`, twenty a page). The records carry ids only, so each title comes from the
+detail cache, with the record's own availability and Jellyfin id (the fresher); one whose
+title will not load is left out. Shown for whom the server's page shows it — managers and
+"view recently added" — and never thinned by the hide-available switch, which would empty
+it. It has "See all" like any row of titles. Live, read-only: the lab server's 28 arrivals
+read with titles, and the first page's cards open in the library.
+
+**Still open:** nothing on the Discover page; every row of the server's layout is drawn.
 
 ## Things deliberately not done
 

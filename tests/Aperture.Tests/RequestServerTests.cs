@@ -497,6 +497,36 @@ public class RequestServerTests
     }
 
     [Fact]
+    public async Task RecentlyAddedReadsTheServersRecordsAndFillsInTheirTitles()
+    {
+        var router = new Router()
+            .On("GET", "/api/v1/media", _ => Json("""
+                { "pageInfo": { "pages": 3, "pageSize": 20, "results": 45, "page": 2 },
+                  "results": [
+                    { "id": 33, "tmdbId": 603, "mediaType": "movie", "status": 5,
+                      "jellyfinMediaId": "ABCDEF01-2345-6789-ABCD-EF0123456789", "mediaAddedAt": "2026-09-25T22:11:02.505Z" },
+                    { "id": 32, "tmdbId": 1399, "mediaType": "tv", "status": 4, "jellyfinMediaId": "cab263c4245b7160752c552541fca230" },
+                    { "id": 31, "tmdbId": 999999, "mediaType": "movie", "status": 5 } ] }
+                """))
+            .On("GET", "/api/v1/movie/603", _ => Json("""{ "id": 603, "title": "The Matrix", "posterPath": "/m.jpg", "releaseDate": "1999-03-30" }"""))
+            .On("GET", "/api/v1/tv/1399", _ => Json(TvDetail));
+        // movie/999999 is not routed: a title that will not load.
+        using var server = await SessionServer(router);
+
+        var page = (await server.GetSliderAsync(new DiscoverSlider(1, SliderKind.RecentlyAdded, null, null, true, 0), page: 2)).Value;
+        var query = router.Last("/api/v1/media").Query;
+        Assert.Contains("filter=allavailable", query);
+        Assert.Contains("sort=mediaAdded", query);
+        Assert.Contains("skip=20", query);
+
+        Assert.Equal(["The Matrix", "Game of Thrones"], page.Items.Select(i => i.Title));   // the unloadable one left out
+        Assert.Equal(Availability.Available, page.Items[0].Availability);
+        Assert.Equal("abcdef0123456789abcdef0123456789", page.Items[0].JellyfinItemId);
+        Assert.Equal(Availability.PartiallyAvailable, page.Items[1].Availability);   // the record's state, not the detail's
+        Assert.True(page.HasMore);
+    }
+
+    [Fact]
     public async Task AStudiosFilmsAndANetworksSeriesHaveRoutesOfTheirOwn()
     {
         var router = new Router()

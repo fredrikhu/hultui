@@ -235,6 +235,7 @@ public sealed class SeerrServer : IRequestServer
     public Task<ApertureResult<DiscoverPage>> GetSliderAsync(DiscoverSlider slider, int page = 1, CancellationToken ct = default)
     {
         int p = Math.Max(1, page);
+        if (slider.Kind == SliderKind.RecentlyAdded) return RecentlyAddedAsync(p, ct);
         string Data() => Uri.EscapeDataString(slider.Data ?? "");
         (string Path, DiscoverKind? Kind)? route = slider.Kind switch
         {
@@ -257,6 +258,46 @@ public sealed class SeerrServer : IRequestServer
         return route is { } r
             ? PageAsync(r.Path, r.Kind, ct)
             : Task.FromResult(ApertureResult<DiscoverPage>.Success(DiscoverPage.Empty));
+    }
+
+    /// <summary>Titles the server has seen arrive in Jellyfin, newest first — what its own
+    /// "Recently added" row asks for. The records carry ids only, so each title is filled in
+    /// from the detail cache (as the request list's are), and one that will not load is left
+    /// out: a card with no title or artwork is not worth a place in the row.</summary>
+    private const int RecentlyAddedPageSize = 20;
+
+    private async Task<ApertureResult<DiscoverPage>> RecentlyAddedAsync(int page, CancellationToken ct)
+    {
+        var result = await _http.GetAsync(
+            $"media?filter=allavailable&take={RecentlyAddedPageSize}&skip={(page - 1) * RecentlyAddedPageSize}&sort=mediaAdded",
+            SeerrJson.Default.SeerrMediaPageDto, ct).ConfigureAwait(false);
+        if (!result.Ok) return result.As<DiscoverPage>();
+
+        using var gate = new SemaphoreSlim(TitleFetchParallelism);
+        var items = await Task.WhenAll((result.Value.Results ?? []).Select(async media =>
+        {
+            var kind = media.MediaType == "tv" ? DiscoverKind.Tv : DiscoverKind.Movie;
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var title = await TitleAsync(kind, media.TmdbId, ct).ConfigureAwait(false);
+                if (title is null) return null;
+                // The record's own state is the fresher: it is what just changed.
+                return title.Item with
+                {
+                    Availability = MapAvailability(media.Status),
+                    JellyfinItemId = JellyfinId(media.JellyfinMediaId) ?? title.Item.JellyfinItemId,
+                };
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+
+        var info = result.Value.PageInfo;
+        return ApertureResult<DiscoverPage>.Success(new DiscoverPage(
+            [.. items.OfType<DiscoverItem>()], page, info?.Pages ?? 1, info?.Results ?? items.Length));
     }
 
     /// <summary>
