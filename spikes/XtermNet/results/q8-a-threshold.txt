@@ -1,0 +1,14 @@
+=== q8 a 4 ===
+paste: 4104 bytes, 42 lines ending in END
+a) reader thread writes inline: write returned after 0 ms; child saw END: yes
+=== q8 a 16 ===
+paste: 16404 bytes, 165 lines ending in END
+a) reader thread writes inline: write returned after 12 ms; child saw END: yes
+=== q8 a 64 ===
+paste: 65604 bytes, 657 lines ending in END
+a) reader thread writes inline: write returned after 53 ms; child saw END: yes
+=== q8 a 256 ===
+paste: 262204 bytes, 2623 lines ending in END
+a) reader thread writes inline: write STILL BLOCKED after 15 s: deadlock; child saw END: no
+   Kill() the child: the write is STILL blocked 5 s later
+   Dispose (ClosePseudoConsole) with the reader stuck in that write: HUNG for 10 s

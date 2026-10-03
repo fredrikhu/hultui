@@ -1,0 +1,3 @@
+paste: 1048604 bytes, 10487 lines ending in END
+b) writer queue: Send() returned in 0.108 ms; child saw END after 1240 ms; reader drained 1226927 bytes meanwhile
+   GOT END after 10486 lines

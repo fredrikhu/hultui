@@ -1,0 +1,10 @@
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: oob
+
+── exit codes ──
+cmd /c exit 0 (Porta.Pty quoting): ProcessExited code 1 after 12 ms; Pty.ExitCode 1
+cmd /c exit 3 (Porta.Pty quoting): ProcessExited code 1 after 18 ms; Pty.ExitCode 1
+cmd /c exit 255 (Porta.Pty quoting): ProcessExited code 1 after 17 ms; Pty.ExitCode 1
+cmd /c exit 0 (MSVCRT quoting, verbatim): ProcessExited code 0 after 18 ms; Pty.ExitCode 0
+cmd /c exit 3 (MSVCRT quoting, verbatim): ProcessExited code 3 after 17 ms; Pty.ExitCode 3
+cmd /c exit 255 (MSVCRT quoting, verbatim): ProcessExited code 255 after 18 ms; Pty.ExitCode 255
+Kill() on an idle pwsh: ProcessExited code -1 after 8 ms

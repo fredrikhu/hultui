@@ -1,0 +1,5 @@
+managed heap held by a full scrollback (GC.GetTotalMemory after a full collect); lines are ~15 chars of text
+   80 cols x   10000 lines: empty terminal     0.3 MiB, full    20.0 MiB =    2089 B/line =  26.1 B/cell
+  200 cols x   10000 lines: empty terminal     0.6 MiB, full    47.4 MiB =    4946 B/line =  24.7 B/cell
+  200 cols x  100000 lines: empty terminal     1.2 MiB, full   471.4 MiB =    4940 B/line =  24.7 B/cell
+  300 cols x   10000 lines: empty terminal     0.8 MiB, full    68.8 MiB =    7183 B/line =  23.9 B/cell

@@ -1,0 +1,10 @@
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: oob
+
+── flood: 64 MiB of 80-column lines from a child ──
+plain pipe, no terminal: 67142433 bytes in 58 ms = 1085 MiB/s
+through ConPTY: child produced 67108864 bytes; terminal received 67142454 bytes (100.1 %) in 1079 reads
+  wall 639 ms (saw FLOOD-DONE) = 100.1 MiB/s of child output
+  time inside Write (lock held): 569 ms total = 89.0 % of wall
+  read sizes: p50 62400.00 / p95 62400.00 / max 62400.00 B (n=1079)
+  Write under lock per read: p50 0.56 / p95 0.76 / max 4.35 ms (n=1079)
+  lines in buffer 10040, last line ''

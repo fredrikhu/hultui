@@ -1,0 +1,5 @@
+throughput, 200x50 terminal, 10 000 scrollback, Write(bytes) in 64 KiB chunks, 2 s per corpus after warm-up
+  scroll-ascii    8.0 MiB/pass    138.1 MiB/s     0.000 B alloc/byte  (35 passes)
+  sgr-churn       8.0 MiB/pass    129.9 MiB/s     0.000 B alloc/byte  (33 passes)
+  alt-redraw      8.4 MiB/pass    222.4 MiB/s     0.040 B alloc/byte  (53 passes)
+  unicode         9.4 MiB/pass    102.3 MiB/s     0.753 B alloc/byte  (22 passes)

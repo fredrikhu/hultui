@@ -1,0 +1,45 @@
+105 chars at 80 cols:
+  0|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  1|xxxxxxxxxxxxxxxxxxxx$ cmd
+  2|
+  3|
+  4|
+  5|
+    cursor col 25 row 1, visible, normal buffer, 80x6
+after Resize(50, 6):
+  0|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  1|xxxxxxxxxxxxxxxxxxxx$ cmd
+  2|
+  3|
+  4|
+  5|
+    cursor col 25 row 1, visible, normal buffer, 50x6
+after writing '!' (where the shell's next echo lands):
+  0|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  1|xxxxxxxxxxxxxxxxxxxx$ cmd!
+  2|
+  3|
+  4|
+  5|
+    cursor col 26 row 1, visible, normal buffer, 50x6
+after Resize(80, 6):
+  0|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  1|xxxxxxxxxxxxxxxxxxxx$ cmd!
+  2|
+  3|
+  4|
+  5|
+    cursor col 26 row 1, visible, normal buffer, 80x6
+79 a + 東東 at 81 cols:
+  0|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa東
+  1|東
+  2|
+  3|
+    cursor col 2 row 1, visible, normal buffer, 81x4
+after Resize(80, 4):
+  0|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa東
+  1|東
+  2|
+  3|
+    cursor col 2 row 1, visible, normal buffer, 80x4
+row0 Length 80, [78] 'a' w1, [79] '東' w2

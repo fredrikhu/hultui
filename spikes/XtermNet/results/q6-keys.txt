@@ -1,0 +1,54 @@
+PASS  Enter                                \r             expected \r
+FAIL  Alt+Enter                            \r             expected \e\r
+PASS  Tab                                  ^I             expected ^I
+PASS  Shift+Tab                            \e[Z           expected \e[Z
+PASS  Backspace                            ^?             expected ^?
+FAIL  Ctrl+Backspace                       ^?             expected ^H
+FAIL  Alt+Backspace                        ^?             expected \e^?
+PASS  Escape                               \e             expected \e
+PASS  Up                                   \e[A           expected \e[A
+PASS  Shift+Up                             \e[1;2A        expected \e[1;2A
+PASS  Alt+Up                               \e[1;3A        expected \e[1;3A
+PASS  Ctrl+Up                              \e[1;5A        expected \e[1;5A
+PASS  Ctrl+Shift+Left                      \e[1;6D        expected \e[1;6D
+PASS  Up, DECCKM                           \eOA           expected \eOA
+PASS  Ctrl+Up, DECCKM                      \e[1;5A        expected \e[1;5A
+PASS  Home                                 \e[H           expected \e[H
+PASS  Home, DECCKM                         \eOH           expected \eOH
+PASS  End                                  \e[F           expected \e[F
+PASS  Ctrl+End                             \e[1;5F        expected \e[1;5F
+PASS  Insert                               \e[2~          expected \e[2~
+PASS  Delete                               \e[3~          expected \e[3~
+PASS  Shift+Delete                         \e[3;2~        expected \e[3;2~
+PASS  PageUp                               \e[5~          expected \e[5~
+PASS  Ctrl+PageDown                        \e[6;5~        expected \e[6;5~
+PASS  F1                                   \eOP           expected \eOP
+PASS  F4                                   \eOS           expected \eOS
+PASS  Shift+F1                             \e[1;2P        expected \e[1;2P
+PASS  F5                                   \e[15~         expected \e[15~
+PASS  F6                                   \e[17~         expected \e[17~
+PASS  F12                                  \e[24~         expected \e[24~
+PASS  Ctrl+F5                              \e[15;5~       expected \e[15;5~
+PASS  Ctrl+A                               ^A             expected ^A
+PASS  Ctrl+C                               ^C             expected ^C
+PASS  Ctrl+Z                               ^Z             expected ^Z
+PASS  Ctrl+Space                           ^@             expected ^@
+PASS  Ctrl+[                               \e             expected \e
+PASS  Ctrl+]                               ^]             expected ^]
+PASS  Ctrl+\                               ^\             expected ^\
+FAIL  Ctrl+/                               /              expected ^_
+PASS  Alt+a                                \ea            expected \ea
+PASS  Alt+Shift+a                          \eA            expected \eA
+PASS  Ctrl+Alt+a                           \e^A           expected \e^A
+PASS  a (text comes from TextInput)        (null)         expected (null)
+PASS  Shift+a (text comes from TextInput)  (null)         expected (null)
+PASS  Space (text comes from TextInput)    (null)         expected (null)
+PASS  kitty 1: Ctrl+C                      \e[99;5u       expected \e[99;5u
+PASS  kitty 1: Escape                      \e[27u         expected \e[27u
+PASS  kitty 1: Alt+a                       \e[97;3u       expected \e[97;3u
+PASS  kitty 1: Enter stays legacy          \r             expected \r
+45/49 passed
+
+HultUI key codes with no terminal meaning or no HultUI name:
+  no keypad codes in HultUI.KeyCode (Numpad0-9, NumpadEnter, ...): DECKPAM application keypad cannot be honoured
+  no F13-F24, no media keys; Pause/PrintScreen/Menu exist but xterm gives them nothing standard

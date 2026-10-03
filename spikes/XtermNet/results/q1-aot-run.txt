@@ -1,0 +1,30 @@
+=== AOT q2 ===
+FAIL  SGR 53 overline                                              IsOverline=False
+39/40 passed
+=== AOT q6 ===
+45/49 passed
+=== AOT q7 shell ===
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: oob
+spawn -> first byte 5 ms, -> prompt 248 ms (ok)
+keystroke -> echo in grid: p50 0.34 / p95 1.66 / max 8.19 ms (n=28)
+Enter -> output 24 ms
+104-char prompt line at 120 cols; after Term.Resize(60) alone: cut to ' 'segment0-segment1-segment2-segment3-se'
+after Pty.Resize(60): whole command on screen NEVER (cut stays)
+Resize(80,24) call 0.2 ms; shell reports 80x24: yes
+=== AOT q7 edit ===
+edit up in 15 ms; alternate buffer: True
+typed text on screen: yes; status row 29: ' [CRLF]  [UTF-8]  [Spaces:4]  1:16  *                                  [xtermnet-q7-edit-52440.txt]'
+after Resize(80,20) the status row ('[CRLF]' ...) is drawn on row 19: after 0 ms
+first keystrokes after the resize arrive: yes
+Ctrl+S, Ctrl+Q -> exit code 0 (3 ms); file says 'hello from edit after resize'; alternate buffer after: False
+=== AOT q7 exit ===
+cmd /c exit 0 (MSVCRT quoting, verbatim): ProcessExited code 0 after 18 ms; Pty.ExitCode 0
+cmd /c exit 3 (MSVCRT quoting, verbatim): ProcessExited code 3 after 20 ms; Pty.ExitCode 3
+cmd /c exit 255 (MSVCRT quoting, verbatim): ProcessExited code 255 after 22 ms; Pty.ExitCode 255
+Kill() on an idle pwsh: ProcessExited code -1 after 8 ms
+=== AOT q7 flood ===
+plain pipe, no terminal: 67142433 bytes in 28 ms = 2215 MiB/s
+through ConPTY: child produced 67108864 bytes; terminal received 67142454 bytes (100.1 %) in 1079 reads
+  wall 301 ms (saw FLOOD-DONE) = 212.5 MiB/s of child output
+  time inside Write (lock held): 212 ms total = 70.5 % of wall
+  Write under lock per read: p50 0.18 / p95 0.23 / max 1.47 ms (n=1079)

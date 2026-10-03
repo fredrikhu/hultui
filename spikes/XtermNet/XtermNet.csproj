@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Spike for an embedded terminal (HultUI.Terminal), deliberately not in HultUI.slnx: a
+       throwaway that answers whether XTerm.NET, fed by Porta.Pty, is the engine a HultUI terminal
+       element can be built on. A console program; HultUI.Core is referenced only for the key
+       types question 6 maps from (it has no dependencies, so the AOT publish stays small). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>XtermNet</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Question 1: the framework builds with zero IL2xxx/IL3xxx warnings, so whatever this
+         pulls in has to as well. The analyzers run on build; `dotnet publish -p:PublishAot=true`
+         runs the real thing. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="XTerm.NET" Version="2.0.2" />
+    <PackageReference Include="Porta.Pty" Version="2.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI.Core\HultUI.Core.csproj" />
+  </ItemGroup>
+
+</Project>
