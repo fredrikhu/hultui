@@ -1,9 +1,13 @@
 # Packs CEF for Debian and Ubuntu: HultUI.WebView.Cef.Natives.<rid>, one package per RID
-# (native/cef/README.md). Each job fetches CEF's official minimal distribution for the version
+# (native/cef/README.md). It fetches CEF's official minimal distribution for the version
 # native/cef/versions.env pins, checks its SHA-1, flattens and strips it, proves linux-x64 with
-# the engine tests running on it, packs, and publishes the package to a GitHub release, as
-# the mpv natives do (scripts/release-transport.sh: a tag run uses its own release, a dispatch
-# run the rolling "cef-natives-ci" prerelease).
+# the engine tests running on it, and only then packs both RIDs and publishes them to a GitHub
+# release, as the mpv natives do (scripts/release-transport.sh: a tag run uses its own release,
+# a dispatch run the rolling "cef-natives-ci" prerelease, from which older builds are pruned).
+#
+# One job, not a job per RID: arm64 cannot be tested here, so it waits on linux-x64's proof
+# (the same CEF version and build, another architecture). As two jobs, arm64 published from
+# runs whose linux-x64 tests had failed.
 #
 # Tags only, plus workflow_dispatch: the result changes only when versions.env does.
 name: cef natives
@@ -27,23 +31,39 @@ env:
 jobs:
   pack:
     runs-on: [self-hosted, linux, x64]
-    strategy:
-      fail-fast: false
-      max-parallel: 1   # each is a 330-420 MB download and a 360 MB tree
-      matrix:
-        rid: [linux-x64, linux-arm64]
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Fetch, check, flatten and strip CEF
-        run: native/cef/build.sh ${{ matrix.rid }}
+      - name: Fetch, check, flatten and strip CEF for linux-x64
+        run: native/cef/build.sh linux-x64
+
+      # The engine tests skip, rather than fail, where CEF cannot start, and an early run here
+      # skipped all 53 that need it while reporting success: so say what the runner lacks first,
+      # and fail afterwards if those tests did not run.
+      - name: What CEF needs that the runner lacks
+        run: |
+          missing=$(ldd native/cef/out/linux-x64/cef/libcef.so | grep 'not found' || true)
+          if [ -n "$missing" ]; then
+            echo "::warning::libcef.so cannot load on this runner; install what provides:"
+            echo "$missing"
+          fi
+          command -v cc >/dev/null || echo "::warning::No C compiler (cc): hultui-cef-helper cannot be built, and the engine reports itself unavailable."
 
       # The engine's own tests, on the packaged CEF rather than any the runner has.
       - name: Prove it with the engine tests
-        if: matrix.rid == 'linux-x64'
-        run: HULTUI_CEF_DIR="$PWD/native/cef/out/linux-x64/cef" dotnet test tests/HultUI.WebView.Engines.Tests -c Release
+        run: |
+          HULTUI_CEF_DIR="$PWD/native/cef/out/linux-x64/cef" dotnet test tests/HultUI.WebView.Engines.Tests -c Release \
+            --logger "console;verbosity=detailed" 2>&1 | tee engine-tests.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -q "Skipped HultUI.WebView.Engines.Tests.CefEngineTests.WithCef_TheEngineIsAvailable" engine-tests.log; then
+            echo "::error::The tests that need CEF were skipped, so this proved nothing about the package. The step above says what the runner lacks."
+            exit 1
+          fi
+
+      - name: Fetch, check, flatten and strip CEF for linux-arm64
+        run: native/cef/build.sh linux-arm64
 
       - name: Version
         id: version
@@ -55,15 +75,24 @@ jobs:
           fi
 
       - name: Pack
-        run: dotnet pack src/HultUI.WebView.Cef.Natives/HultUI.WebView.Cef.Natives.csproj -c Release -o artifacts/packages -p:Rid=${{ matrix.rid }} -p:Version=${{ steps.version.outputs.version }}
+        run: |
+          for rid in linux-x64 linux-arm64; do
+            dotnet pack src/HultUI.WebView.Cef.Natives/HultUI.WebView.Cef.Natives.csproj -c Release -o artifacts/packages \
+              -p:Rid=$rid -p:Version=${{ steps.version.outputs.version }}
+          done
 
-      - name: Publish the package to the release
+      # Each upload replaces an asset of the same name; a rolling release's older builds have
+      # other names (the version is in them), so they are pruned, or each run added 300 MB.
+      - name: Publish the packages to the release
         run: |
           bash scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
-          for f in artifacts/packages/HultUI.WebView.Cef.Natives.${{ matrix.rid }}.*.nupkg; do
-            bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
+          for rid in linux-x64 linux-arm64; do
+            for f in artifacts/packages/HultUI.WebView.Cef.Natives.$rid.*.nupkg; do
+              bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
+              bash scripts/release-transport.sh prune "$RELEASE_TAG" "HultUI.WebView.Cef.Natives.$rid." "$(basename "$f")"
+            done
           done
 
       - name: Free the runner's disk
         if: always()
-        run: rm -rf native/cef/out native/cef/cache artifacts/packages
+        run: rm -rf native/cef/out native/cef/cache artifacts/packages engine-tests.log

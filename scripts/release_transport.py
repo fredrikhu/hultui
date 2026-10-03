@@ -4,6 +4,9 @@
     release_transport.py ensure   <tag> [--prerelease]     create the release if missing
     release_transport.py upload   <tag> <file> <asset>     replace the asset of that name
     release_transport.py download <tag> <asset> <dest>     fetch an asset to a file
+    release_transport.py prune    <tag> <prefix> <keep>    delete the assets named <prefix>*
+                                                           but <keep>: a rolling release's
+                                                           older builds, whose names differ
 
 Nothing but the standard library: both GitHub-provided transports failed on the
 self-hosted runners (artifact storage is a small quota; actions/cache's cross-OS
@@ -50,18 +53,36 @@ def call(method, url, data=None, content_type="application/json", accept="applic
 def release(tag):
     return call("GET", f"{api}/releases/tags/{tag}")
 
+def describe(tag):
+    """The title and text a release gets, by the workflow its tag belongs to."""
+    if tag.startswith("cef-natives"):
+        return (f"CEF natives {tag}",
+                "CEF's official minimal build, flattened and stripped, as HultUI.WebView.Cef.Natives.<rid> "
+                "packages, built and proved by the cef natives workflow. See native/cef/README.md.")
+    if tag.startswith("cef-helper"):
+        return (f"CEF helper {tag}",
+                "hultui-cef-helper and the HultUI.WebView.Cef package, built by the cef helper workflow. "
+                "See native/cef-helper/README.md.")
+    return (f"libmpv natives {tag}",
+            "Trimmed LGPL-2.1 libmpv for HultUI.Media.Mpv, built by the mpv natives workflow. "
+            "See native/mpv/README.md and each LICENCE-REPORT.")
+
 verb, args = sys.argv[1], sys.argv[2:]
 
 if verb == "ensure":
     tag = args[0]
     pre = len(args) > 1 and args[1] == "--prerelease"
-    if release(tag):
+    title, text = describe(tag)
+    if rel := release(tag):
         print(f"release {tag} exists")
+        # Every release used to be titled as mpv's: put right what an earlier run wrote, and
+        # only that, so a release someone has written by hand stays as they wrote it.
+        if rel.get("name") == f"libmpv natives {tag}" and title != rel.get("name"):
+            call("PATCH", f"{api}/releases/{rel['id']}", json.dumps({"name": title, "body": text}).encode())
     else:
         body = json.dumps({
             "tag_name": tag, "target_commitish": os.environ.get("GITHUB_SHA", "main"),
-            "name": f"libmpv natives {tag}", "prerelease": pre,
-            "body": "Trimmed LGPL-2.1 libmpv for HultUI.Media.Mpv, built by the mpv natives workflow. See native/mpv/README.md and each LICENCE-REPORT.",
+            "name": title, "prerelease": pre, "body": text,
         }).encode()
         try:
             call("POST", f"{api}/releases", body)
@@ -94,5 +115,13 @@ elif verb == "download":
     call("GET", f"{api}/releases/assets/{ids[0]}", accept="application/octet-stream", out=dest)
     print(f"downloaded {name} ({os.path.getsize(dest)} bytes) from {tag}")
 
+elif verb == "prune":
+    tag, prefix, keep = args
+    rel = release(tag) or sys.exit(f"no release {tag}")
+    for asset in rel.get("assets", []):
+        if asset["name"].startswith(prefix) and asset["name"] != keep:
+            call("DELETE", f"{api}/releases/assets/{asset['id']}")
+            print(f"deleted {asset['name']} from {tag}")
+
 else:
-    sys.exit("usage: release_transport.py ensure|upload|download ...")
+    sys.exit("usage: release_transport.py ensure|upload|download|prune ...")
