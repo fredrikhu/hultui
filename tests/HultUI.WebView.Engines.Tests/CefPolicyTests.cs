@@ -353,7 +353,15 @@ public sealed class CefPolicyTests : IDisposable
         await Ready();
         await Load(Field, "field");
         await Eval("t.focus(); t.setSelectionRange(0, 5)");
-        Click(30, 35, WebPointerButtons.Right);   // on the selection, which a right click keeps
+        // On the selection, which a right click keeps. A click can be lost while every test
+        // class starts pages at once: click again until the page asks.
+        var clicked = DateTime.MinValue;
+        await Until(() =>
+        {
+            if (_events.Any(e => e is WebEngineEvent.ContextMenuRequested)) return true;
+            if (DateTime.UtcNow - clicked > TimeSpan.FromMilliseconds(700)) { Click(30, 35, WebPointerButtons.Right); clicked = DateTime.UtcNow; }
+            return false;
+        }, 15_000);
         var asked = (await Next<WebEngineEvent.ContextMenuRequested>()).Request;
         Assert.True(asked.Target.IsEditable);
         Assert.True(asked.Target.Kind.HasFlag(WebContextMenuTargetKind.SelectedText));

@@ -116,6 +116,24 @@ public interface IWebEngineView : IDisposable
     /// </summary>
     NativeAccessibleContent AccessibleContent => default;
 
+    /// <summary>
+    /// The page's accessibility tree as data, for an engine that hands it over rather than
+    /// keeping it in windows of its own (CEF; seam W11): the roots, bounds in device pixels
+    /// from the page's top-left. Empty while accessibility is off. Read on the UI thread when
+    /// the accessibility tree is built: raise <see cref="WebEngineEvent.AccessibleTreeChanged"/>
+    /// when it changes.
+    /// </summary>
+    IReadOnlyList<AccessibleContentNode> AccessibleTree => [];
+
+    /// <summary>Turns the engine's accessibility tree on or off: on only while assistive
+    /// technology listens (<see cref="AccessibilityClients"/>), because a large page's tree is
+    /// costly to keep. UI thread.</summary>
+    void SetAccessibilityEnabled(bool enabled) { }
+
+    /// <summary>Assistive technology asked something of the node of <see cref="AccessibleTree"/>
+    /// that <paramref name="key"/> names. UI thread.</summary>
+    void PerformAccessibleAction(int key, AccessibleContentAction action, string? value) { }
+
     event Action<WebEngineEvent>? Event;
 }
 

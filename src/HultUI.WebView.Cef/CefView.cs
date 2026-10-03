@@ -179,6 +179,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         _render->on_popup_size = &OnPopupSize;
         _render->on_ime_composition_range_changed = &OnImeCompositionRangeChanged;
         _render->start_dragging = &StartDragging;
+        CreateAccessibilityHandler();
         _render->update_drag_cursor = &UpdateDragCursor;
 
         _lifeSpan = CefObject.New<cef_life_span_handler_t>(this);
@@ -252,6 +253,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         }
         _browserHost = browser->get_host(browser);
         if (!_visible) _browserHost->was_hidden(_browserHost, 1);
+        if (_axWanted) ApplyAccessibilityState();
         _devTools = new DevToolsSession(_browserHost);
         _devTools.EventReceived += OnDevToolsEvent;
         _ = SetUpBridge();
@@ -478,6 +480,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         CefObject.Release(_load); _load = null;
         CefObject.Release(_focus); _focus = null;
         _frames?.Close();
+        ReleaseAccessibilityHandler();
         ReleasePolicyHandlers();
     }
 

@@ -558,8 +558,9 @@ action routing by `ElementId`. Neither bridge needs a second kind of node.
 - **New role: `Document`** (AT-SPI `document web`, UIA `Document`), for a page's root.
 - **The web view** is the first source: the element implements it from the engine view. The
   contract grows by default members, so WebView2 and the fake need nothing:
-  `IWebEngineView.SetAccessibilityEnabled(bool)`, `AccessibleContent`,
-  `PerformAccessibleAction`, and `WebEngineEvent.AccessibleContentChanged`. The controller
+  `IWebEngineView.SetAccessibilityEnabled(bool)`, `AccessibleTree`,
+  `PerformAccessibleAction`, and `WebEngineEvent.AccessibleTreeChanged` (W8's
+  `AccessibleContent` and `AccessibleContentChanged` already name WebView2's windows). The controller
   turns the engine's tree on and off with `AccessibilityClients`. On Windows the page's
   content is still WebView2's own tree (W8's `NativeContent`); this is the Linux engine's way.
   **Built:** the types, the builder, the router (with `IAccessibilityActionHost.FocusElement`,
@@ -991,8 +992,43 @@ engine if it changed, but nothing more.
      sometimes never came under load, so a resize now also asks CEF for a frame
      (`invalidate`). And the page-drag test lost its very first mouse-down, so it now clicks
      until the page has one. The engine suite then passed 15 runs in a row.
-   - **5.6, Linux accessibility: in progress.** First the seam the bridge needed, W11, designed
-     beside the others and built with its tests (see W11).
+   - **5.6, Linux accessibility: done 2026-10-03.** First the seam the bridge needed, W11,
+     designed beside the others and built with its tests (see W11). Then the engine.
+     **The mirror** (`CefAccessibleTree`): CEF's render handler gives an accessibility handler.
+     Its `cef_value_t`s are read once into dictionaries and lists, and the main frame's
+     `AXTreeUpdate`s are applied: nodes replaced, `node_id_to_clear`, what the root no longer
+     reaches swept, the focus from `tree_data`, and a new main tree (a navigation) replacing the
+     old. An iframe's tree (one with a parent tree) is not followed. What the platform reads is
+     rebuilt once per burst of updates. Ignored nodes, unnamed generic containers and
+     paragraphs give their children to their parent. Inline text boxes and list markers go, as
+     does the text inside a control named by it, and a field's insides (its text is its value).
+     Bounds are made absolute through the offset containers. **Scrolling, found when built:**
+     on a scroll CEF calls its location callback with an empty list, and neither the document's
+     scroll offset nor any node's location arrives. Newer Chromium sends scroll offsets apart
+     from locations, and CEF's conversion drops them. So each rebuild asks the page for
+     `[scrollX, scrollY]` through DevTools, and the document's scroll comes from that. Scrolling
+     inside a nested scroll container is not followed (a Linux limit). **On only while someone
+     listens:** the controller follows `AccessibilityClients` and the view calls
+     `set_accessibility_state`; off, the mirror is cleared. The wish is kept at once, so one made
+     before CEF runs is applied when the browser is made. **Actions:** by `backendDOMNodeId`,
+     through the DevTools session: focus is `DOM.focus`; invoke, toggle and select are a click,
+     `DOM.resolveNode` then `Runtime.callFunctionOn`; set-value sets the value and fires `input`
+     and `change`. **Found when built:** reading the page's scroll with reflection-based JSON
+     threw in the sample, which, like an AOT application, has it off. The engine tests allow
+     it, so only the sample showed it; it is parsed with `JsonDocument` now. **Tests:**
+     `CefAccessibleTreeTests` (13) feed the mirror what CEF sent the spike for a small form: the
+     tree, a change and locations, other frames, a new page, and the role table.
+     `CefAccessibilityTests` (4) do it live: the tree where the page draws it (each bounds equal to
+     `getBoundingClientRect` × 1.5), scrolling, the four actions, off until asked for. And
+     `WebViewAccessibleTreeTests` (3): the page's tree as the web view's children, in layout units,
+     actions by key, and on only while someone listens. **Checked with busctl** (no accerciser
+     or pyatspi here) on the sample under sway: with `org.a11y.Status.IsEnabled` set as an AT
+     sets it, the a11y bus shows the web view's panel with a `document web` child and the page's
+     heading, labels, push button and list. AT-SPI `DoAction` on the page's button made the page
+     post its message, and the app's status line read `Page said: {"clicked":1}`. With
+     IsEnabled back to false the page's nodes were gone. Noticed, not changed: HultUI's
+     application root registers with an empty name, which a screen reader announces as the
+     application's.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

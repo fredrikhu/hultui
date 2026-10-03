@@ -68,6 +68,9 @@ public abstract record WebEngineEvent
     /// </summary>
     public sealed record AccessibleContentChanged : WebEngineEvent;
 
+    /// <summary>What <see cref="IWebEngineView.AccessibleTree"/> returns has changed.</summary>
+    public sealed record AccessibleTreeChanged : WebEngineEvent;
+
     /// <summary>The page asked for a context menu. Answer it — the controller does.</summary>
     public sealed record ContextMenuRequested(WebContextMenuRequest Request) : WebEngineEvent;
 

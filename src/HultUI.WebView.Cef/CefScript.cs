@@ -28,4 +28,32 @@ internal static class CefScript
         }).ConfigureAwait(false);
         return CefView.ScriptResult(result);
     }
+
+    /// <summary>Calls <paramref name="function"/> on the DOM node a backendDOMNodeId names
+    /// (an accessibility node's id, step 5.6), with one string argument or none.</summary>
+    internal static async Task CallOnNode(DevToolsSession devTools, int key, string function, string? argument)
+    {
+        try
+        {
+            var resolved = await devTools.Send("DOM.resolveNode", w => w.WriteNumber("backendNodeId", key));
+            var objectId = resolved.GetProperty("object").GetProperty("objectId").GetString();
+            await devTools.Send("Runtime.callFunctionOn", w =>
+            {
+                w.WriteString("objectId", objectId);
+                w.WriteString("functionDeclaration", function);
+                if (argument is not null)
+                {
+                    w.WriteStartArray("arguments");
+                    w.WriteStartObject();
+                    w.WriteString("value", argument);
+                    w.WriteEndObject();
+                    w.WriteEndArray();
+                }
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+        {
+            CefLog.Info($"an accessibility action on node {key} did nothing: {ex.Message}");
+        }
+    }
 }

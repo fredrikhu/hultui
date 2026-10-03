@@ -27,7 +27,7 @@ namespace HultUI.WebView;
 /// page's first stop, Shift+Tab on its last; tabbing out of the page moves focus on to
 /// the window's next element.</para>
 /// </remarks>
-public partial class WebViewElement : Element
+public partial class WebViewElement : Element, IAccessibleContentSource
 {
     private WebViewController? _controller;
     private bool _listening;
@@ -86,6 +86,19 @@ public partial class WebViewElement : Element
     /// <summary>The page's own accessibility tree, where the engine keeps one.</summary>
     internal override NativeAccessibleContent NativeAccessibleContent => _controller?.View.AccessibleContent ?? default;
 
+    // ──── The page's tree as data (seam W11): an engine that hands it over, CEF ────
+
+    IReadOnlyList<AccessibleContentNode> IAccessibleContentSource.AccessibleContent =>
+        _controller is { } c ? c.View.AccessibleTree : [];
+
+    float IAccessibleContentSource.AccessibleContentScale => OverlayHost is Window window ? window.DisplayScale : 1f;
+
+    void IAccessibleContentSource.PerformAccessibleAction(int key, AccessibleContentAction action, string? value) =>
+        _controller?.PerformAccessibleAction(key, action, value);
+
+    private void OnAccessibleTreeChanged() =>
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.Content);
+
     private bool ForwardsKeys =>
         _controller is { } c && (c.Capabilities & WebEngineCapabilities.NativeKeyboard) == 0;
 
@@ -113,6 +126,7 @@ public partial class WebViewElement : Element
         _controller.KeyFromPage += OnKeyFromPage;
         _controller.TitleChanged += ApplyTitle;
         _controller.AccessibleContentChanged += OnAccessibleContentChanged;
+        _controller.AccessibleTreeChanged += OnAccessibleTreeChanged;
         _controller.ContextMenuToShow += ShowPageMenu;
         _controller.ScriptDialogToShow += ShowScriptDialog;
         _listening = true;
@@ -129,6 +143,7 @@ public partial class WebViewElement : Element
         c.KeyFromPage -= OnKeyFromPage;
         c.TitleChanged -= ApplyTitle;
         c.AccessibleContentChanged -= OnAccessibleContentChanged;
+        c.AccessibleTreeChanged -= OnAccessibleTreeChanged;
         c.ContextMenuToShow -= ShowPageMenu;
         c.ScriptDialogToShow -= ShowScriptDialog;
         _listening = false;

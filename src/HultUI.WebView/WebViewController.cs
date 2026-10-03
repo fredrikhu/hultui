@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
@@ -68,6 +69,8 @@ public sealed class WebViewController : IDisposable
         _view.Event += OnEngineEvent;
         _sink.FramePublished += OnFramePublished;
         _view.Attach(new Host(this));
+        AccessibilityClients.ActiveChanged += OnAccessibilityClients;
+        if (AccessibilityClients.Active) _view.SetAccessibilityEnabled(true);
     }
 
     /// <summary>The engine's view, for what only that engine offers. Cast it to the engine
@@ -138,6 +141,21 @@ public sealed class WebViewController : IDisposable
 
     /// <summary>The view's <see cref="IWebEngineView.AccessibleContent"/> changed. UI thread.</summary>
     internal event Action? AccessibleContentChanged;
+
+    /// <summary>The view's <see cref="IWebEngineView.AccessibleTree"/> changed. UI thread.</summary>
+    internal event Action? AccessibleTreeChanged;
+
+    /// <summary>Assistive technology's request for a node of the page's tree. UI thread.</summary>
+    internal void PerformAccessibleAction(int key, AccessibleContentAction action, string? value)
+    {
+        if (!_disposed) _view.PerformAccessibleAction(key, action, value);
+    }
+
+    /// <summary>The page's tree is kept only while assistive technology listens.</summary>
+    private void OnAccessibilityClients(bool active) => Dispatch(() =>
+    {
+        if (!_disposed) _view.SetAccessibilityEnabled(active);
+    });
 
     /// <summary>
     /// The page asked for a context menu. Handlers may change <see cref="WebContextMenuRequest.Items"/>
@@ -356,6 +374,10 @@ public sealed class WebViewController : IDisposable
                 TitleChanged?.Invoke(t.Title);
                 break;
 
+            case WebEngineEvent.AccessibleTreeChanged:
+                AccessibleTreeChanged?.Invoke();
+                break;
+
             case WebEngineEvent.AccessibleContentChanged:
                 AccessibleContentChanged?.Invoke();
                 break;
@@ -471,6 +493,7 @@ public sealed class WebViewController : IDisposable
         _disposed = true;
         _view.Event -= OnEngineEvent;
         _sink.FramePublished -= OnFramePublished;
+        AccessibilityClients.ActiveChanged -= OnAccessibilityClients;
         FailPending(new ObjectDisposedException(nameof(WebViewController)));
         // The GPU sink first: it has the engine free its GL objects while what they were made
         // from still exists. UI thread, where the window's GL context lives between frames.

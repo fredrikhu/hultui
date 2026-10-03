@@ -649,6 +649,9 @@ In this order; each ends with its tests green and the step written into
    view's node grows real children that our AT-SPI bridge serves like any others. Design it
    from question 9's answer; `AccessibilityNode.NativeContent` is the Windows shape and need
    not be reused.
+   **Done 2026-10-03**, through seam W11 (data children, in Core, so both bridges could host
+   them); `WEBVIEW.md` has it. One finding: CEF does not pass scroll offsets on, so the page is
+   asked for its scroll.
 7. **Debian and Ubuntu.** The natives package or download, and a run on each.
 
 ## Review of steps 5.1 and 5.2 (2026-10-02)

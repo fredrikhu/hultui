@@ -18,6 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- CEF's accessibility values as spike L0 recorded them (question 9), for the mirror's tests. -->
+    <None Include="Data\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI.WebView.WebView2\HultUI.WebView.WebView2.csproj" />
     <ProjectReference Include="..\..\src\HultUI.WebView.Cef\HultUI.WebView.Cef.csproj" />
     <!-- CEF starts once per process and stops when it exits: the lifetime tests watch a
