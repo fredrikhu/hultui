@@ -40,10 +40,30 @@ jobs:
       - name: Fetch, check, flatten and strip CEF
         run: native/cef/build.sh ${{ matrix.rid }}
 
+      # The engine tests skip, rather than fail, where CEF cannot start, and the first run here
+      # skipped all 53 that need it while reporting success: so say what the runner lacks first,
+      # and fail afterwards if those tests did not run.
+      - name: What CEF needs that the runner lacks
+        if: matrix.rid == 'linux-x64'
+        run: |
+          missing=$(ldd native/cef/out/linux-x64/cef/libcef.so | grep 'not found' || true)
+          if [ -n "$missing" ]; then
+            echo "::warning::libcef.so cannot load on this runner; install what provides:"
+            echo "$missing"
+          fi
+          command -v cc >/dev/null || echo "::warning::No C compiler (cc): hultui-cef-helper cannot be built, and the engine reports itself unavailable."
+
       # The engine's own tests, on the packaged CEF rather than any the runner has.
       - name: Prove it with the engine tests
         if: matrix.rid == 'linux-x64'
-        run: HULTUI_CEF_DIR="$PWD/native/cef/out/linux-x64/cef" dotnet test tests/HultUI.WebView.Engines.Tests -c Release
+        run: |
+          HULTUI_CEF_DIR="$PWD/native/cef/out/linux-x64/cef" dotnet test tests/HultUI.WebView.Engines.Tests -c Release \
+            --logger "console;verbosity=detailed" 2>&1 | tee engine-tests.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -q "Skipped HultUI.WebView.Engines.Tests.CefEngineTests.WithCef_TheEngineIsAvailable" engine-tests.log; then
+            echo "::error::The tests that need CEF were skipped, so this proved nothing about the package. The step above says what the runner lacks."
+            exit 1
+          fi
 
       - name: Version
         id: version
