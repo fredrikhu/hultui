@@ -42,7 +42,7 @@ public static class AccessibilityTreeBuilder
         // The root is the top-level visible region; descendants clipped out of it
         // (and out of any scroll view along the way) are marked offscreen.
         var childClip = ClipForChildren(root, node.BoundingRect, ox, oy);
-        if (!TryBuildVirtualItems(root, node, cx, cy, childClip))
+        if (!TryBuildContent(root, node, cx, cy, childClip) && !TryBuildVirtualItems(root, node, cx, cy, childClip))
             BuildChildren(root, node, focusManager, cx, cy, childClip);
         return node;
     }
@@ -114,7 +114,8 @@ public static class AccessibilityTreeBuilder
                 // expose every item to assistive tech instead. Otherwise, unless a
                 // text-only button folded its text into its own name (which would
                 // double-announce), walk the real children.
-                if (!TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
+                if (!TryBuildContent(child, childNode, cx, cy, childClip)
+                    && !TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
                     BuildChildren(child, childNode, focusManager, cx, cy, childClip);
             }
             else
@@ -123,6 +124,46 @@ public static class AccessibilityTreeBuilder
                 BuildChildren(child, parent, focusManager, cx, cy, childClip);
             }
         }
+    }
+
+    /// <summary>
+    /// An element whose content is data (seam W11): its nodes, under the element's own, in
+    /// place of its element children. Bounds come in device pixels from the element's content
+    /// box and are made layout units here, scroll-adjusted and clipped like any child's.
+    /// </summary>
+    private static bool TryBuildContent(Element element, AccessibilityNode node, float scrollX, float scrollY, Rect clip)
+    {
+        if (element is not IAccessibleContentSource source) return false;
+        var content = element.Layout.AbsoluteContentBox;
+        float scale = source.AccessibleContentScale > 0 ? source.AccessibleContentScale : 1f;
+        foreach (var root in source.AccessibleContent)
+            AddContent(element, root, node, content.X - scrollX, content.Y - scrollY, scale, clip);
+        return true;
+    }
+
+    private static void AddContent(Element owner, AccessibleContentNode data, AccessibilityNode parent,
+        float originX, float originY, float scale, Rect clip)
+    {
+        var b = data.Bounds;
+        var rect = new Rect(originX + b.X / scale, originY + b.Y / scale, b.Width / scale, b.Height / scale);
+        var node = new AccessibilityNode(
+            ContentNodeId.For(owner.Id, data.Key),
+            data.Role,
+            data.Name,
+            data.Description,
+            rect,
+            isFocusable: data.IsFocusable,
+            isFocused: data.IsFocused,
+            isEnabled: data.IsEnabled,
+            isToggled: data.IsToggled,
+            value: data.Value,
+            expanded: data.Expanded)
+        {
+            IsOffscreen = !RectsIntersect(clip, rect),
+        };
+        parent.AddChild(node);
+        foreach (var child in data.Children)
+            AddContent(owner, child, node, originX, originY, scale, clip);
     }
 
     /// <summary>

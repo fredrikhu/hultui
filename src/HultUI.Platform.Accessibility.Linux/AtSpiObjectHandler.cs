@@ -322,7 +322,8 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
                 Reply(context, "(so)", static (ref MessageWriter w) => AtSpiMarshal.WriteNullRef(ref w));
                 break;
             case "GrabFocus":
-                Reply(context, "b", static (ref MessageWriter w) => w.WriteBool(false));
+                bool focused = _tree.GrabFocus(node);
+                Reply(context, "b", (ref MessageWriter w) => w.WriteBool(focused));
                 break;
             default:
                 context.ReplyUnknownMethodError();

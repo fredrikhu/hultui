@@ -522,6 +522,53 @@ told HultUI's (spike L0: Wayland needs `WaylandFractionalScaleV1` off for the sc
 Wayland shares GPU buffers with HultUI's EGL context). So the CEF engine starts CEF at its
 first page's first placement, which carries the answer.
 
+**W11 — Accessible data children (`HultUI.Core`, `HultUI`, both bridges). Designed and built
+in step 5.6 (2026-10-03), the Linux half of W8.** An element whose content is described by data rather
+than by elements says so, and the tree builder makes nodes of that data, as it already makes
+them for a virtual list's items (`IAccessibleItemSource`, `VirtualItemId`). Everything
+downstream then works unchanged: the differ, both bridges' snapshots, their change signals,
+action routing by `ElementId`. Neither bridge needs a second kind of node.
+- **`IAccessibleContentSource`** (Core, on the element): `AccessibleContent`, the roots of a
+  tree of `AccessibleContentNode`s; `AccessibleContentScale`, the device pixels per layout unit
+  the content's bounds are in; and `PerformAccessibleAction(key, action, value)`, which runs
+  on the UI thread. An engine's tree passes through as it is. The element converts nothing,
+  because a page's tree is thousands of nodes, and the builder divides by the scale as it
+  walks.
+- **`AccessibleContentNode`**: an `int Key`, which is the source's own id (CEF's AX node id,
+  which is DevTools' `backendDOMNodeId`); `Role`, `Name`, `Description`, `Value`; `Bounds` in
+  device pixels from the element's content box; focusable, focused, enabled, toggled,
+  expanded; `DefaultAction`; `Children`. Immutable, so a source publishes a new tree as a
+  whole and the UI thread reads it without a lock.
+- **`AccessibleContentAction`**: `Invoke`, `Toggle`, `Select`, `Focus`, `SetValue`.
+- **`ContentNodeId`**: like `VirtualItemId`, an `ElementId` that marks a data node (bit 62;
+  bit 63 is the virtual item's), packing the owner's id and the key. So a node keeps its
+  identity, and its AT-SPI object path, across rebuilds while the page keeps the node.
+- **The builder** adds a source's content under the element's own node, offset and clipped
+  like any child: offscreen when outside the visible region.
+- **The router** (`AccessibilityActionRouter`, `HultUI`) decodes a `ContentNodeId` and calls
+  the source's `PerformAccessibleAction` on the UI thread, for invoke, toggle, select and
+  focus, the four the bridges already route.
+- **Asking only when someone listens: `AccessibilityClients`** (Core, static). `Active`, and
+  `ActiveChanged`, are reported by the platform bridge; the Linux bridge reads
+  `org.a11y.Status` (`IsEnabled`, `ScreenReaderEnabled`, which Orca and accerciser set) and
+  follows its changes. `Force` (or `HULTUI_ACCESSIBILITY=1`, or `0`) overrides it, for tests
+  and diagnosis. A source that is costly to describe, such as a web page, keeps its tree off
+  while `Active` is false. A page's tree is hundreds of milliseconds to read when it is large,
+  and nobody would hear it.
+- **New role: `Document`** (AT-SPI `document web`, UIA `Document`), for a page's root.
+- **The web view** is the first source: the element implements it from the engine view. The
+  contract grows by default members, so WebView2 and the fake need nothing:
+  `IWebEngineView.SetAccessibilityEnabled(bool)`, `AccessibleContent`,
+  `PerformAccessibleAction`, and `WebEngineEvent.AccessibleContentChanged`. The controller
+  turns the engine's tree on and off with `AccessibilityClients`. On Windows the page's
+  content is still WebView2's own tree (W8's `NativeContent`); this is the Linux engine's way.
+  **Built:** the types, the builder, the router (with `IAccessibilityActionHost.FocusElement`,
+  so AT-SPI's `GrabFocus` now works, where it used to answer false), `Document` on both bridges,
+  and the Linux bridge's status watch. Tests: ids, bounds, offscreen, a changed node as a
+  property change (Core); actions from another thread reach the source on the UI thread
+  (Headless); described nodes as AT-SPI objects, actions to the host, and, live on this
+  machine's bus, `IsEnabled` set with busctl seen by the bridge (Linux bridge tests).
+
 Not needed, checked: pixel-density math (`ScreenContentBox × Window.DisplayScale`
 is device pixels; use it rather than `LocalPosition`, which ignores scrolling),
 pointer capture (`CapturePointer`, released on up), wake from another thread
@@ -944,6 +991,8 @@ engine if it changed, but nothing more.
      sometimes never came under load, so a resize now also asks CEF for a frame
      (`invalidate`). And the page-drag test lost its very first mouse-down, so it now clicks
      until the page has one. The engine suite then passed 15 runs in a row.
+   - **5.6, Linux accessibility: in progress.** First the seam the bridge needed, W11, designed
+     beside the others and built with its tests (see W11).
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

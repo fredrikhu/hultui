@@ -291,6 +291,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.Alert => UiaInterop.UIA_TextControlTypeId,
         AccessibilityRole.Dialog => UiaInterop.UIA_WindowControlTypeId,
         AccessibilityRole.TabPanel => UiaInterop.UIA_PaneControlTypeId,
+        AccessibilityRole.Document => UiaInterop.UIA_DocumentControlTypeId,
         _ => UiaInterop.UIA_PaneControlTypeId,
     };
 }

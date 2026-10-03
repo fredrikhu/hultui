@@ -30,5 +30,7 @@ public enum AccessibilityRole : byte
     /// Read-only range value when determinate.</summary>
     ProgressBar,
     /// <summary>A numeric field with step buttons; a writable range value.</summary>
-    SpinButton
+    SpinButton,
+    /// <summary>A document, such as a web page's root: AT-SPI's "document web".</summary>
+    Document,
 }

@@ -24,4 +24,7 @@ public interface IAccessibilityActionHost
 
     /// <summary>Selects the element, as for a radio button or list item.</summary>
     void SelectElement(ElementId id);
+
+    /// <summary>Gives the element (or a described node, seam W11) the keyboard.</summary>
+    void FocusElement(ElementId id) { }
 }
