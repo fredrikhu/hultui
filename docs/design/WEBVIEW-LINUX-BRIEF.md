@@ -738,6 +738,64 @@ In this order; each ends with its tests green and the step written into
    engine unavailable with a reason that names option 1, rather than let CEF end the process.
    To build and confirm on Ubuntu 24.04.
 
+   **Run on Debian 13 and Ubuntu 24.04 (2026-10-03).** The sample, published NativeAOT for
+   linux-x64 here with `HultUI.WebView.Cef.Natives.linux-x64` (379 MB without symbols), copied
+   to a Debian 13 container with the Intel GPU's render node and to an Ubuntu 24.04 VM with no
+   GPU, each running sway headless.
+   - **Debian:** `--check` passed on GL and on Vulkan, **zero-copy under sway** (1916×973), with
+     **the sandbox on**: renderers and a utility process in their own user namespace, the
+     zygote's, and seccomp filters on every CEF process. (A container's kernel is the Proxmox
+     host's, so the AppArmor sysctl is 0 there.)
+   - **Found on the fresh accounts: the profile went nowhere.** With no `~/.local/share` yet,
+     .NET's `LocalApplicationData` is "" on Linux, the default profile became a path relative
+     to the working directory, and CEF would not start ("Could not find a part of the path
+     …/HultUI.Samples.WebView/CEF", the executable's own name). Fixed with
+     `SpecialFolderOption.DoNotVerify`; the folder is made when CEF starts. A test runs the
+     engine in a process whose `HOME` is an empty directory; it fails without the fix.
+   - **What the application needs installed besides itself.** Read from both, not guessed:
+     `ldd` over every binary in the tree, the libraries SDL and CEF name for loading at run
+     time, and the libraries actually mapped by the running application and every CEF process
+     on both renderers (`/proc/<pid>/maps`, then `dpkg -S`). The closure is 108 packages; what
+     an application's `.deb` declares is what its binaries link or load directly, and apt
+     brings the rest. Names as Debian 13 and Ubuntu 24.04 both have them (the `t64` ones are
+     the 64-bit-time renames; an older release has `libasound2` and so on, so an alternative
+     `libasound2t64 | libasound2` covers both):
+
+     ```
+     Depends: libc6, libgcc-s1, libstdc++6,
+      libx11-6, libx11-xcb1, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3,
+      libxrandr2, libxcursor1, libxi6, libxkbcommon0,
+      libwayland-client0, libwayland-cursor0, libwayland-egl1,
+      libegl1, libgl1, libgbm1, libvulkan1,
+      libasound2t64 | libasound2, libatk1.0-0t64 | libatk1.0-0,
+      libatk-bridge2.0-0t64 | libatk-bridge2.0-0, libatspi2.0-0t64 | libatspi2.0-0,
+      libcups2t64 | libcups2, libglib2.0-0t64 | libglib2.0-0,
+      libcairo2, libpango-1.0-0, libdbus-1-3, libexpat1, libfontconfig1, libfreetype6,
+      libnspr4, libnss3, libudev1
+     Recommends: libdecor-0-0, libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers
+     ```
+
+     CEF links NSS, ATK/AT-SPI, CUPS, ALSA, X11 and GBM whether or not it uses them, so a
+     Wayland-only desktop still needs them. A desktop has nearly all of these already; the
+     Debian container lacked NSS, ATK/AT-SPI, CUPS and four X libraries. Ubuntu's server-like VM
+     lacked the same but NSS. Both lacked `libwayland-egl1`, without which SDL's Wayland backend
+     is missing and SDL says "No available video device". `libdecor-0-0` gives windows their
+     title bars on a compositor without server-side decorations (GNOME), so it is a
+     recommendation, not a requirement. The Mesa drivers come in through a desktop; a machine
+     with another vendor's driver has its own.
+   - **Ubuntu: the limit stops CEF.** Without a profile CEF ended the process: `FATAL
+     zygote_host_impl_linux.cc:129 No usable sandbox! If you are running on Ubuntu 23.10+ …`,
+     SIGTRAP, exit 133, before the application could do anything. **The engine now says so
+     first** (`CefSandbox`): before `cef_initialize`, and in `CefEngine.Availability`, it reads
+     the AppArmor sysctl and the process's own label (`/proc/self/attr/current`), and the two
+     sysctls that turn user namespaces off outright. Restricted and unconfined, it fails with a
+     reason that names the executable needing a profile (and, under `dotnet app.dll`, says that
+     an application with a bundled CEF ships as its own executable). Root, or a setuid
+     `chrome-sandbox` beside `libcef.so`, is let through. On the Ubuntu VM the sample now reports
+     "CEF: Chromium's sandbox cannot start: … /home/dev/sample/HultUI.Samples.WebView has none …"
+     and goes on with its fake engine. No probe by `unshare`: a child process is judged by its
+     own profile, not the application's, and forking a .NET process is not safe.
+
 ## Review of steps 5.1 and 5.2 (2026-10-02)
 
 Read on the Windows side against the contract, with the whole solution built and tested on

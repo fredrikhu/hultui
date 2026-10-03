@@ -313,6 +313,22 @@ public class CefEngineTests
     }
 
     [CefFact]
+    public void OnANewAccount_TheProfileIsMadeInTheDataHome_NotBesideTheWorkingDirectory()
+    {
+        // Found on a fresh Debian: with no ~/.local/share yet, .NET's LocalApplicationData was
+        // "", the profile a relative path, and CEF would not start.
+        var home = Directory.CreateTempSubdirectory("hultui-new-home-").FullName;
+        try
+        {
+            var run = RunCefProcess(Guid.NewGuid().ToString("N"), [], terminateAfterMs: null,
+                new() { ["HOME"] = home, ["XDG_DATA_HOME"] = null });
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains($"profile: {Path.Combine(home, ".local", "share", "HultUI.WebView.Engines.Tests.CefProcess", "CEF")}", run.Output);
+        }
+        finally { Directory.Delete(home, recursive: true); }
+    }
+
+    [CefFact]
     public void AnApplicationsSignalHandler_Runs_AndCefStopsCleanly()
     {
         // Chromium took SIGTERM and SIGINT for a shutdown of its own: an application's
@@ -341,7 +357,8 @@ public class CefEngineTests
     internal static (int ExitCode, string Output) RunCefProcess(string mark, params string[] args)
         => RunCefProcess(mark, args, terminateAfterMs: null);
 
-    private static (int ExitCode, string Output) RunCefProcess(string mark, string[] args, int? terminateAfterMs)
+    private static (int ExitCode, string Output) RunCefProcess(string mark, string[] args, int? terminateAfterMs,
+        Dictionary<string, string?>? environment = null)
     {
         const string name = "HultUI.WebView.Engines.Tests.CefProcess";
         // Beside this test project: tests/<name>/bin/<config>/<tfm>/, as this assembly is.
@@ -357,6 +374,11 @@ public class CefEngineTests
             UseShellExecute = false,
         };
         start.Environment["HULTUI_TEST_MARK"] = mark;
+        foreach (var (variable, value) in environment ?? [])
+        {
+            if (value is null) start.Environment.Remove(variable);
+            else start.Environment[variable] = value;
+        }
         using var p = Process.Start(start)!;
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
