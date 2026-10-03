@@ -1033,9 +1033,11 @@ engine if it changed, but nothing more.
      sets it, the a11y bus shows the web view's panel with a `document web` child and the page's
      heading, labels, push button and list. AT-SPI `DoAction` on the page's button made the page
      post its message, and the app's status line read `Page said: {"clicked":1}`. With
-     IsEnabled back to false the page's nodes were gone. Noticed, not changed: HultUI's
-     application root registers with an empty name, which a screen reader announces as the
-     application's.
+     IsEnabled back to false the page's nodes were gone. HultUI's application root registered with
+     an empty name, which a screen reader announces as the application's. **Fixed after the
+     review (2026-10-03):** the root is named after the entry assembly, as the CEF engine names
+     its profile folder (not the executable, which is "dotnet" under `dotnet app.dll`). Checked
+     with busctl: the sample, JIT and AOT, is "HultUI.Samples.WebView" in the registry's list.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

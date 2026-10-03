@@ -81,6 +81,16 @@ internal sealed class AtSpiAccessible
     public static string PathFor(AccessibilityNode node, bool isRoot) =>
         isRoot ? AtSpiConstants.RootPath : AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
 
+    /// <summary>
+    /// The application's name on the bus, which a screen reader announces for it: the entry
+    /// assembly's, as the CEF engine names the application's profile folder. Not the
+    /// executable's, which under <c>dotnet app.dll</c> is "dotnet" for every application.
+    /// </summary>
+    public static readonly string ApplicationName =
+        System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name
+        ?? System.IO.Path.GetFileNameWithoutExtension(Environment.ProcessPath)
+        ?? "HultUI";
+
     public static AtSpiAccessible From(
         AccessibilityNode node, bool isRoot, string parentPath, int indexInParent, float scale)
     {
@@ -97,7 +107,8 @@ internal sealed class AtSpiAccessible
             Path = PathFor(node, isRoot),
             IsRoot = isRoot,
             Role = role,
-            Name = node.Name ?? "",
+            // The root is the application, named as one; the window's content is its children.
+            Name = isRoot ? ApplicationName : node.Name ?? "",
             Description = node.Description ?? "",
             Value = node.Value,
             X = (int)MathF.Round(rect.X * scale),

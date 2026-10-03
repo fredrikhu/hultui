@@ -793,6 +793,8 @@ a few lines each.
 2. **The application's AT-SPI name** (empty, as you found): worth fixing while you are in the
    bridge, since it is what a screen reader announces for the application. The entry
    assembly's name is what the profile folder already uses.
+   **Done 2026-10-03:** the application root is named so; busctl lists the sample as
+   "HultUI.Samples.WebView", JIT and AOT.
 3. **Not for you:** `ContentNodeId` keeps the owning element's id to 30 bits and
    `VirtualItemId` to 31, while element ids come from a counter every element ever built
    draws from, rebuilds included. A long-running application that rebuilds a lot would pass

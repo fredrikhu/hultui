@@ -83,6 +83,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         Path = AtSpiConstants.RootPath,
         IsRoot = true,
         Role = AtSpiConstants.RoleApplication,
+        Name = AtSpiAccessible.ApplicationName,
         IndexInParent = -1,
     };
 
