@@ -57,8 +57,9 @@ public class TransferRateTests
         SetLong(straight, "TotalBytes", 10_000);
         SetLong(straight, "TotalBytesDone", 2_000);
 
-        var heldText = Rate(held);
-        var straightText = Rate(straight);
+        // The same `now` the runs were set up with: read again, the clock may have moved.
+        var heldText = Rate(held, now);
+        var straightText = Rate(straight, now);
 
         Assert.NotEqual("", straightText);
         Assert.NotEqual(straightText, heldText);
@@ -100,8 +101,9 @@ public class TransferRateTests
     private static bool GetBool(object op, string field) =>
         (bool)OpType.GetField(field, BindingFlags.Public | BindingFlags.Instance)!.GetValue(op)!;
 
-    private static string Rate(object op) =>
+    /// <param name="now">The tick to compute at; null lets TransferRate read the clock.</param>
+    private static string Rate(object op, long? now = null) =>
         (string)typeof(CommanderApp)
             .GetMethod("TransferRate", BindingFlags.NonPublic | BindingFlags.Static)!
-            .Invoke(null, [op])!;
+            .Invoke(null, [op, now])!;
 }
