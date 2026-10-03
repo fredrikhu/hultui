@@ -7,8 +7,8 @@ natives.
 Written 2026-10-03 from the spike `spikes/XtermNet` (its README has the answers, `results/` the raw
 runs, `patches/` the engine fixes), which ran on Windows only. Every number here comes from that
 spike unless it says otherwise.
-Where a claim still needs confirming it says **verify**. Decisions that are the owner's are marked
-**TO DECIDE**, each with a recommendation.
+Where a claim still needs confirming it says **verify**. Three decisions were put to the owner and
+are marked **DECIDED** (2026-10-03).
 
 ## What an application gets
 
@@ -67,46 +67,49 @@ spike ran the fix; "proposed" means it is design only.
 | 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2; until then, role and value | framework | proposed |
 | 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | A build target that keeps only the publishing RID's copy | `HultUI.Terminal.Pty` | proposed |
 
-**TO DECIDE (engine patches).** Patches 0001–0004 are written to go upstream as they are. All
-2 238 of XTerm.NET's tests pass with them, 17 of those new. XTerm.NET is MIT, active (last commit
-2026-09-27), and Porta.Pty is by the same author. The options:
-
-1. **Offer them upstream now, and build steps 1–3 against the stock 2.0.2 package meanwhile.**
-   Problem 1 then stays visible on Windows until a release has `ReflowCursorLine`. Problem 2 is
-   covered by the resize policy alone. Problems 8 and 9: overline does not draw, and the element
-   carries the key overrides.
-2. **Offer them upstream, and build against a fork until they land:** `src/External/XTerm.NET`, a
-   subtree of upstream plus the patches, compiled into `HultUI.Terminal`. Everything works from
-   day one, but the fork has to be kept in step with upstream.
-3. **Fork for good.** Not recommended: XTerm.NET moves fast (471 commits, the last a week ago)
-   and has done the conformance work.
-
-**Recommended: 1, falling back to 2** if upstream has not released them by the time step 4
-(the pty) lands. Problem 1 is invisible until a real shell is attached.
+**DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
+therefore built from source: upstream at a pinned commit with patches 0001–0004 applied, never the
+NuGet package. All 2 238 of XTerm.NET's tests pass with the patches, 17 of them new. How the
+patched source is kept, built and updated is in *The patched engine* below. The alternative
+weighed was offering them upstream and building on the stock package meanwhile, with problem 1
+visible on Windows until a release carried `ReflowCursorLine`.
 
 ## Packages
 
 ```
+external/
+  XTerm.NET/                    upstream's src/XTerm.NET and src/XTerm.NET.Tests at the pinned
+                                commit, patches applied, plus its LICENSE; generated, committed
+  XTerm.NET.patches/            0001–0004: everything HultUI's engine differs from upstream by
+  XTerm.NET.version             upstream URL and the pinned commit
 src/
-  HultUI.Terminal/          controller, element, renderer, key mapping, emulator seam,
-                            XTerm.NET emulator, StreamConnection, fake connection — no natives
-  HultUI.Terminal.Pty/      PtyConnection: Porta.Pty (ConPTY + OpenConsole on Windows,
-                            the forkpty shim elsewhere), quoting, teardown
+  HultUI.Terminal.XTermNet/     builds external/XTerm.NET as HultUI.Terminal.XTermNet.dll
+  HultUI.Terminal/              controller, element, renderer, key mapping, emulator seam,
+                                the XTerm.NET adapter, StreamConnection, fake connection — no natives
+  HultUI.Terminal.Pty/          PtyConnection: Porta.Pty (ConPTY + OpenConsole on Windows,
+                                the forkpty shim elsewhere), quoting, teardown
 tests/
+  HultUI.Terminal.XTermNet.Tests/  XTerm.NET's own suite, from external/ (2 238 tests, ~3 s)
   HultUI.Terminal.Tests/        headless: scripted bytes through the real emulator
   HultUI.Terminal.Pty.Tests/    real shells; skipped where the shell is missing
 samples/
   HultUI.Samples.Terminal/      a shell, a find bar, an overlay over the grid
+scripts/
+  vendor-xterm-net.ps1          rebuilds external/XTerm.NET from the version file and the patches
 ```
 
-The split differs from WebView's on purpose:
+**DECIDED (packages): split** (2026-10-03). It differs from WebView's split on purpose:
 
 - **Emulator.** WebView keeps every engine out of its core package because each one is native,
   platform-specific and large. XTerm.NET is 302 KB of managed code with no natives and works
-  everywhere, so it ships inside `HultUI.Terminal`.
+  everywhere, so it comes with `HultUI.Terminal`: `HultUI.Terminal.XTermNet` is a package of its
+  own only because it is a project of its own, and `src/Directory.Build.props` turns a project
+  reference into an exact-version package dependency. An app references `HultUI.Terminal` and
+  gets both.
 - **Pseudoconsole.** This is what carries natives: `conpty.dll` + `OpenConsole.exe` (2.4 MB
   across x64 and arm64) and the Unix shims. It is the opt-in piece. An app whose terminal talks
-  SSH or a serial port never loads ConPTY.
+  SSH or a serial port never loads ConPTY. One package would have been simpler, and every app
+  with a terminal would have carried those 2.4 MB whether it ran a local process or not.
 - **libghostty-vt.** It would come later as `HultUI.Terminal.Ghostty` plus `.Natives`, behind
   the same emulator seam, once it tags a stable release (its header still says the API "is not
   yet stable and is definitely going to change").
@@ -115,12 +118,44 @@ The split differs from WebView's on purpose:
 `WantsTextInput` and `MeasureContent`, as it does for WebView and Media. Everything the package
 uses on `Window` and `Application` is public already.
 
-**TO DECIDE (packages).** The split above (recommended), or one package with Porta.Pty inside.
-One package is simpler, but every app with a terminal would carry ConPTY's 2.4 MB whether it
-runs a local process or not.
+Licences: XTerm.NET, Porta.Pty and `Microsoft.Windows.Console.ConPTY` are all MIT. XTerm.NET's
+LICENSE stays in `external/XTerm.NET/`, and the packages' third-party notices name all three.
 
-Licences: XTerm.NET, Porta.Pty and `Microsoft.Windows.Console.ConPTY` are all MIT. The package's
-third-party notices name them.
+### The patched engine
+
+- **One source of truth.** `external/XTerm.NET/` is never edited by hand: every difference from
+  upstream is a patch in `external/XTerm.NET.patches/`. So the tree is always reproducible from
+  the pinned commit plus the patches. `vendor-xterm-net.ps1 -Verify` rebuilds it in a temporary
+  folder and diffs it against what is committed; CI runs that, so a hand edit fails the build
+  rather than vanishing at the next update.
+- **Committed, not fetched.** The patched tree is in the repository, so a build needs no network,
+  no git and no `git am`. Only the script touches upstream.
+- **Its own assembly name.** The project builds `HultUI.Terminal.XTermNet.dll`, never
+  `XTerm.NET.dll`, so an app that also references the stock package does not get two assemblies of
+  one name. The namespaces stay `XTerm.*`: renaming them would make every patch and every update
+  conflict. An app referencing both and naming an `XTerm` type directly gets CS0433 and needs an
+  `extern alias`. `HultUI.Terminal`'s own API exposes no `XTerm` type, so only code reaching past
+  the emulator seam can meet that.
+- **Build settings.** It keeps upstream's dependencies (`Unicode.net`, `Wcwidth`) and is
+  `IsAotCompatible`, as the spike's publish showed it can be. The repository's `src/` props
+  (documentation file, packing) apply to it. **Verify** that it builds warning-free under them;
+  any suppression goes in its csproj, never in a vendored file.
+- **Updating upstream.** `vendor-xterm-net.ps1 -Commit <sha>`:
+  1. Clones upstream and checks out the commit.
+  2. Applies the patches with `git am --3way`. It stops on a conflict for a person to resolve,
+     and the resolved series is exported back into `XTerm.NET.patches/`.
+  3. Runs XTerm.NET's test suite.
+  4. Only on a pass, replaces `external/XTerm.NET/` and the version file.
+
+  An update is a deliberate act, not a dependency bump: it is reviewed as the diff of the
+  vendored tree.
+- **XTerm.NET's own tests run in CI** as `tests/HultUI.Terminal.XTermNet.Tests`, compiled from
+  the vendored test sources. Both use xunit v2, as the repository does, and the suite takes about
+  3 s. A patch that breaks upstream's expectations fails the build, not a user.
+- **Porta.Pty stays a NuGet package.** Its one problem (quoting, problem 4) is solved in
+  `HultUI.Terminal.Pty` without patching it.
+- **Where the patches start.** The spike's `spikes/XtermNet/patches/` is the measured original;
+  step 1 moves the series to `external/XTerm.NET.patches/`, where it is maintained from then on.
 
 ## The seams inside the package
 
@@ -226,8 +261,9 @@ The element draws the snapshot copied at the start of its `Render`. All of it us
    application asks. When the element is unfocused, a block is drawn hollow.
 7. **Overlays** within the element: the selection, search hits (`TextSearch.Decorate`, see below),
    a hovered hyperlink's underline, and the IME preedit at the cursor.
-8. **Clipping.** Each row is clipped to the grid, because the stock engine's cut (problem 1) can
-   leave a width-2 cell in the last column.
+8. **Clipping.** Each row is clipped to the grid. With `ReflowCursorLine` on, the engine no longer
+   leaves a width-2 cell in the last column (the stock engine's cut did), but a renderer that
+   trusts `Width` there would draw past the grid if it ever did.
 
 **Cost.**
 
@@ -327,12 +363,11 @@ events (`?1004`), and draws a hollow cursor while unfocused.
 
 - **Height changes are applied at once:** about 0.02 ms at any size.
 - **Width changes are applied at once while the buffer is small.**
-  - **Patched engine:** a one-column change costs 0.25 ms at 1 000 × 120, 2.3 ms at 10 000 × 120,
-    and 3.6 ms at 10 000 × 200.
-  - **Above about 20 000 lines** (31 ms at 100 000 × 200) a width change waits 100 ms after the
-    last one, as VS Code's terminal does for large buffers. Meanwhile the old grid is drawn
-    clipped or padded.
-  - **Stock 2.0.2:** the threshold is about 1 000 lines.
+  - **Measured with patch 0001:** a one-column change costs 0.25 ms at 1 000 × 120, 2.3 ms at
+    10 000 × 120, and 3.6 ms at 10 000 × 200 (the stock engine took 25 ms there).
+  - **Above about 20 000 lines** of effective scrollback (31 ms at 100 000 × 200) a width change
+    waits 100 ms after the last one, as VS Code's terminal does for large buffers. Meanwhile the
+    old grid is drawn clipped or padded.
   - That is a hold on the reflow, not on frames: every frame of the drag still renders. The
     resize-stretch lesson was that frames must not stop inside the modal loop.
 - **The emulator and the connection resize together, always.** ConPTY reflows its own buffer and
@@ -341,20 +376,34 @@ events (`?1004`), and draws a hollow cursor while unfocused.
 
 **Scrollback (problem 3).**
 
-- **The default.** `Scrollback = 5000` lines: about 24 MiB per terminal at 200 columns, 10 MiB at
-  80.
-- **The budget.** `MaxScrollbackBytes`, when set, wins over the line count: at each width the
-  element converts it to lines with the normal buffer's `TerminalBuffer.SetScrollback`, which
-  trims the oldest. **Verify** the adapter can reach the normal buffer while the alternate screen
-  is active.
-- **A later upstream improvement:** store a line that scrolls off at its content length instead
-  of the width. A typical shell line is short, and the 24-byte cell would stay.
+**DECIDED (scrollback): 5 000 lines by default, and configurable** (2026-10-03). That is about
+24 MiB per terminal at 200 columns and 10 MiB at 80. The alternatives weighed were 10 000 (Windows
+Terminal's 9 001 is close to it; 47 MiB) and 1 000 (VS Code's default; under 5 MiB, but short for
+a build log).
 
-**TO DECIDE (scrollback default).**
+Configurable means both at construction and while the terminal runs:
 
-- **5 000 lines (recommended).** About 24 MiB at 200 columns.
-- **10 000.** Windows Terminal's 9 001 is close to it; 47 MiB.
-- **1 000.** VS Code's default; under 5 MiB, but short for builds.
+- **The options.**
+  - `TerminalOptions.Scrollback`: lines, default 5 000; 0 turns scrollback off.
+  - `TerminalOptions.MaxScrollbackBytes`: an optional memory budget, default none.
+- **On the controller.** `TerminalController.Scrollback` and `TerminalController.MaxScrollbackBytes`
+  are settable signals, initialised from the options, so a settings page binds to them. A change
+  takes effect at once, under the lock, through the normal buffer's `TerminalBuffer.SetScrollback`.
+  - **Shrinking** trims the oldest lines first, the engine's rule, so the screen and the newest
+    history stay.
+  - **Growing** keeps everything and lets the next output fill the room.
+  - **Verify** the adapter can reach the normal buffer while the alternate screen is active.
+- **How the two combine.** When a byte budget is set, the effective line count is the smaller of
+  `Scrollback` and the budget divided by the measured cost of a line at the current width (about
+  24.7 B per cell, measured). It is recomputed at every width change, so a wide window keeps fewer
+  lines in the same memory, not more memory.
+- **Bounds.** Both are validated: a negative value throws; a line count above 1 000 000 is clamped
+  and says so in the docs. At 200 columns a million lines is 4.6 GiB, and a width change there
+  costs seconds even with patch 0001.
+- **The resize policy follows the effective line count** (see *Resize policy*), so raising the
+  scrollback also moves the point where width changes start to wait.
+- **A later engine improvement** (one more patch): store a line that scrolls off at its content
+  length instead of the width. A typical shell line is short, and the 24-byte cell would stay.
 
 ## Search
 
@@ -489,11 +538,15 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
 
    It runs on the Linux machine before step 4 ships there; `q7` and `q8` already pick bash, vim
    and sh off Windows.
-1. **Upstream.** Offer patches 0001–0004 to XTerm.NET, and report Porta.Pty's quoting. This is
-   the owner's call (**TO DECIDE (engine patches)**).
+1. **The patched engine:**
+   - `external/XTerm.NET` at `56ea809` with patches 0001–0004 (moved from the spike);
+   - `XTerm.NET.version`;
+   - `scripts/vendor-xterm-net.ps1` with `-Commit` and `-Verify`, the latter in CI;
+   - `src/HultUI.Terminal.XTermNet` and `tests/HultUI.Terminal.XTermNet.Tests` (2 238 tests), both
+     in the cross-platform filter.
 2. **`HultUI.Terminal`:**
-   - the emulator seam and the XTerm.NET adapter;
-   - the controller with its two threads and the teardown order;
+   - the emulator seam and the XTerm.NET adapter, with `ReflowCursorLine` on;
+   - the controller with its two threads and the teardown order, and the scrollback signals;
    - `StreamConnection` and `FakeConnection`;
    - the element: snapshot, renderer, keys, text, IME, selection, copy and paste, scrollback
      scrolling;

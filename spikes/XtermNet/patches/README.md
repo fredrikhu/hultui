@@ -1,9 +1,15 @@
 # XTerm.NET patches
 
 Four fixes the spike found XTerm.NET needs, as a `git format-patch` series against
-[tomlm/XTerm.NET](https://github.com/tomlm/XTerm.NET) `56ea809` (2.0.2 plus one merged PR). Written
-to go upstream as they are. With them, all 2 238 of XTerm.NET's own tests pass (2 221 that were
-there, 17 new in `Buffer/CursorLineReflowTests.cs`, added by 0004).
+[tomlm/XTerm.NET](https://github.com/tomlm/XTerm.NET) `56ea809` (2.0.2 plus one merged PR). With
+them, all 2 238 of XTerm.NET's own tests pass (2 221 that were there, 17 new in
+`Buffer/CursorLineReflowTests.cs`, added by 0004).
+
+**They stay HultUI's patches and are not offered upstream** (decided 2026-10-03). HultUI.Terminal
+builds XTerm.NET from upstream source at a pinned commit with this series applied
+([docs/design/TERMINAL.md](../../../docs/design/TERMINAL.md), *The patched engine*). Its step 1
+moves the series to `external/XTerm.NET.patches/`, where it is maintained from then on; this copy
+is the measured original.
 
 | Patch | Fixes | Measured |
 |---|---|---|
@@ -18,5 +24,3 @@ git checkout 56ea809
 git am ../spikes/XtermNet/patches/*.patch
 dotnet test src/XTerm.NET.Tests -c Release
 ```
-
-They have not been offered upstream yet; that is the owner's call.
