@@ -31,6 +31,8 @@ public sealed class CefEngine : IWebEngine
         {
             var probe = CefLibrary.Loaded;
             if (!probe.IsLoaded) return WebEngineAvailability.Missing(probe.Error!);
+            // Known before any page: an application can choose something else, and say why.
+            if (CefRuntime.Sandbox(probe.Directory!) is { } sandbox) return WebEngineAvailability.Missing(sandbox);
             return CefRuntime.Error is { } error ? WebEngineAvailability.Missing(error) : WebEngineAvailability.Available;
         }
     }

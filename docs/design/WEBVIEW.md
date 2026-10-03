@@ -489,7 +489,14 @@ right page's half was empty (seen). A single video on Vulkan was checked by capt
 **The Linux fd path, checked in step 5.5 (2026-10-03):** two CEF pages in one Vulkan window
 under Wayland, each with its slot and its fd-exported semaphores, captured green and magenta;
 the disposed one gave its image back (`CefZeroCopyTests.TwoPages_InOneVulkanWindow_BothReachTheScreen`,
-through the same probe).
+through the same probe). **With a video too (2026-10-03):** the probe's `--page-and-video`
+puts a CEF page and an mpv video (`av://lavfi:color=c=magenta:s=320x240`, or a VP9 file) in one
+Vulkan window. The capture shows green and magenta (254, 0, 253) at once, and the trace has two
+interop sources, mpv's 320×240 and the page's 240×240. It was the first run of mpv's shared-image
+path on Mesa and Intel, which worked (decode was software here, with no VA-API driver in the
+container; see `docs/design/HDR.md`). Tests: `CefZeroCopyTests.APageAndAVideo_…` on Linux, and
+`VulkanProbeTests.APageAndAVideo_…` on Windows (WebView2 and the bundled libmpv; it returns
+early where no libmpv is found).
 
 **W8 — Foreign accessibility subtree (`HultUI.Core`, both bridges).** Neither
 bridge could host a subtree it did not build. **Windows half done (step 4):**
@@ -1026,9 +1033,31 @@ engine if it changed, but nothing more.
      sets it, the a11y bus shows the web view's panel with a `document web` child and the page's
      heading, labels, push button and list. AT-SPI `DoAction` on the page's button made the page
      post its message, and the app's status line read `Page said: {"clicked":1}`. With
-     IsEnabled back to false the page's nodes were gone. Noticed, not changed: HultUI's
-     application root registers with an empty name, which a screen reader announces as the
-     application's.
+     IsEnabled back to false the page's nodes were gone. HultUI's application root registered with
+     an empty name, which a screen reader announces as the application's. **Fixed after the
+     review (2026-10-03):** the root is named after the entry assembly, as the CEF engine names
+     its profile folder (not the executable, which is "dotnet" under `dotnet app.dll`). Checked
+     with busctl: the sample, JIT and AOT, is "HultUI.Samples.WebView" in the registry's list.
+   - **5.7, the part this machine can do: done 2026-10-03.** A bundled CEF reaches Debian and
+     Ubuntu as `HultUI.WebView.Cef.Natives.<rid>`, one package per RID built by the
+     `cef natives` workflow from `native/cef/` (CEF's official minimal build, pinned by SHA-1,
+     flattened and stripped: 154 MB packed for linux-x64), copied to `cef/` beside the
+     application by a `buildTransitive` targets file. Not as native assets: a RID-specific
+     publish flattens those, `locales/` and all. The engine suite (119) and the sample, zero-copy
+     on both renderers, passed on the bundled CEF 154 through `HULTUI_CEF_DIR`. A scratch
+     application consuming the packed `.nupkg` found it before Fedora's 146, built and
+     published. The route against a download, and how Ubuntu's AppArmor limit on user
+     namespaces should be met (an AppArmor profile from the app's package, recommended), are in
+     the brief's step 7. Left: the runs on Debian and Ubuntu, and the engine saying why when
+     the sandbox cannot start there.
+   - **5.7 on Debian 13 and Ubuntu 24.04: done 2026-10-03** (the brief's step 7 has it all).
+     The NativeAOT sample with the bundled CEF passed `--check` on both. On Debian (container,
+     Intel GPU) it ran zero-copy under sway on GL and Vulkan; on Ubuntu (a VM, no GPU) it ran in
+     software, on pixels. Found: a new account's profile path was relative (fixed); Ubuntu's
+     AppArmor limit ended the process (now `CefSandbox` says why, first). The profile must cover
+     the application's executable and nothing else. A tested `.deb` (profile, maintainer scripts,
+     a measured `Depends` list) installs, runs, unloads and purges cleanly on both. arm64:
+     untested.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

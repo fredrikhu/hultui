@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work, on Wayland a page's frames stay on the GPU, and a page is read by screen readers through AT-SPI. |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and on Debian and Ubuntu from `HultUI.WebView.Cef.Natives.linux-x64` (or `.linux-arm64`), a package of CEF's official build that lands in `cef/` beside the application (run on Debian 13 and Ubuntu 24.04; arm64 not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work, on Wayland a page's frames stay on the GPU, and a page is read by screen readers through AT-SPI. |
 
 An app that never shows a web page references none of these and pays nothing.
 
@@ -200,6 +200,11 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
   (the page's own scrolling it follows). The tree is kept only while assistive technology is
   on (`org.a11y.Status`), so a screen reader started after the app sees the page a moment
   after it asks.
+- On Ubuntu 23.10 and later, **an application with a bundled CEF needs an AppArmor profile**,
+  which its `.deb` installs (`HultUI.WebView.Cef.Natives`' README has the profile, the
+  maintainer scripts and the `Depends` line). Without one the engine reports itself unavailable,
+  with the reason. Such an application ships as its own executable, not `dotnet app.dll`.
+- On Linux without a GPU (a virtual machine) pages are pixels, drawn in software.
 - On Linux, **pages under X11 take the pixel path**: GPU zero-copy needs HultUI's window on
   Wayland (EGL; under X11 HultUI's GL context is GLX, which cannot take CEF's buffers). On
   Wayland an animating page costs this process about 95–120 ms/s of CPU at 1656×968 and 60

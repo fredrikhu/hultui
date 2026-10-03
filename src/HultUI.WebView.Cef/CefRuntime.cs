@@ -72,6 +72,8 @@ internal static unsafe partial class CefRuntime
             _started = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
             var probe = CefLibrary.Loaded;
             if (!probe.IsLoaded) { Fail(probe.Error!); return _started.Task; }
+            // Where Chromium's sandbox cannot start, CEF ends the process: say why instead.
+            if (Sandbox(probe.Directory!) is { } why) { Fail(why); return _started.Task; }
 
             _windowSystem = windowSystem;
             _state = State.Starting;
@@ -82,6 +84,15 @@ internal static unsafe partial class CefRuntime
             return _started.Task;
         }
     }
+
+    /// <summary>Why Chromium's sandbox cannot start here, or null (asked once; see <see cref="CefSandbox"/>).</summary>
+    internal static string? Sandbox(string cefDirectory) =>
+        (_sandbox ??= new Lazy<string?>(() =>
+            // HULTUI_CEF_SANDBOX_CHECK=0: for a system where the check misjudges; CEF then
+            // decides, and ends the process where the sandbox cannot start.
+            Environment.GetEnvironmentVariable("HULTUI_CEF_SANDBOX_CHECK") == "0" ? null : CefSandbox.Problem(cefDirectory))).Value;
+
+    private static Lazy<string?>? _sandbox;
 
     /// <summary>Whether CEF has started and not stopped.</summary>
     public static bool IsRunning { get { lock (Gate) return _state == State.Running; } }
@@ -287,7 +298,14 @@ internal static unsafe partial class CefRuntime
         // every such application would share one profile.
         var app = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name
                   ?? Path.GetFileNameWithoutExtension(Environment.ProcessPath) ?? "HultUI";
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), app, "CEF");
+        // DoNotVerify: without it .NET answers "" on Linux while ~/.local/share does not exist
+        // yet, as on a new account, and the profile became a path relative to the working
+        // directory (found on a fresh Debian, where it ran into the executable's own name).
+        // The folder is made when CEF starts.
+        var data = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        if (string.IsNullOrEmpty(data))
+            data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), ".local", "share");
+        return Path.Combine(data, app, "CEF");
     }
 
     private static string? _temporaryProfile;

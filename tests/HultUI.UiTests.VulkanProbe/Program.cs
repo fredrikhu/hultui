@@ -2,6 +2,8 @@ using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Media;
+using HultUI.Media.Mpv;
 using HultUI.WebView;
 using HultUI.WebView.Cef;
 using HultUI.WebView.WebView2;
@@ -19,6 +21,11 @@ using HultUI.WebView.WebView2;
 // has to come after the pages are ready. Then it disposes the right page, whose image the window
 // should give back. The pages are WebView2's on Windows and CEF's on Linux, where they are GPU
 // sources only on Wayland (step 5.5 of the Linux engine).
+//
+// --page-and-video shows a page (green, left) and a video playing through MpvBackend
+// (magenta, right): the web engine's interop and mpv's hidden GL context sharing one Vulkan
+// window. The clip is av://lavfi:color=c=magenta:s=320x240 unless --clip=<path or URL> says
+// otherwise (any file must be one the libmpv here decodes). Exits 4 when there is no libmpv.
 
 internal static class Program
 {
@@ -28,6 +35,9 @@ internal static class Program
     {
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--webviews")) return TwoPages(renderer);
+        if (args.Contains("--page-and-video"))
+            return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
+                ?? "av://lavfi:color=c=magenta:s=320x240");
 
         int frames = args.FirstOrDefault(a => a.StartsWith("--frames=")) is { } f ? int.Parse(f["--frames=".Length..]) : 12;
 
@@ -85,6 +95,51 @@ internal static class Program
         app.SetRoot(Flex.Row().Width(480f).Height(240f).Children(WebViewElement.New(left).FlexGrow(1)));
         right.Dispose();
         for (int i = 0; i < 10; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private static int PageAndVideo(RendererKind renderer, string clip)
+    {
+        if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
+        using var app = new Application("vulkan-probe", 480, 240, renderer: renderer);
+        using IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
+        if (!engine.Availability.IsAvailable) { Console.WriteLine("probe: no engine: " + engine.Availability.Reason); return 3; }
+        var options = OperatingSystem.IsWindows()
+            ? new WebViewOptions { UserDataFolder = Path.Combine(Path.GetTempPath(), "hultui-webview2-tests") }
+            : new WebViewOptions();
+        using var page = new WebViewController(engine, options);
+        using var player = new MediaPlayer(new MpvBackend());
+        bool pageReady = false;
+        page.MessageReceived += _ => pageReady = true;
+        page.NavigateToString(Page("#00FF00"));
+        player.Open(MediaSource.FromUri(clip), autoPlay: true);
+        app.SetRoot(Flex.Row().Width(480f).Height(240f).Children(
+            WebViewElement.New(page).FlexGrow(1).FlexBasis(0),
+            VideoElement.New(player).FlexGrow(1).FlexBasis(0)));
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!(pageReady && page.Frames.IsLoaded && player.HasVideo && player.Frames.IsLoaded))
+        {
+            if (player.Error is { } error) { Console.WriteLine("probe: the video failed: " + error); return 2; }
+            if (clock.Elapsed.TotalSeconds > 20)
+            {
+                Console.WriteLine($"probe: never both drew (page ready {pageReady}, loaded {page.Frames.IsLoaded}; " +
+                    $"video {player.State}, {player.VideoSize}, loaded {player.Frames.IsLoaded})");
+                return 2;
+            }
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+        }
+        Console.WriteLine($"probe: the page and the video drew after {clock.ElapsedMilliseconds} ms " +
+            $"(video {player.VideoSize}, {player.SinkMode} mode)");
+        // As in the two-page mode: the page's own frame may come after its first.
+        clock.Restart();
+        while (clock.Elapsed.TotalSeconds < 1) app.RunFrame(TimeSpan.FromMilliseconds(16));
+
+        string? capture = Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE");
+        clock.Restart();
+        while (capture is not null && !File.Exists(capture) && clock.Elapsed.TotalSeconds < 20)
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
         Console.WriteLine("probe: done");
         return 0;

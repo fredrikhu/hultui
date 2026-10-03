@@ -16,6 +16,9 @@
     <!-- For the two-page mode: two GPU sources in one Vulkan window. -->
     <ProjectReference Include="..\..\src\HultUI.WebView.WebView2\HultUI.WebView.WebView2.csproj" />
     <ProjectReference Include="..\..\src\HultUI.WebView.Cef\HultUI.WebView.Cef.csproj" />
+    <!-- For the page-and-video mode: mpv's shared image beside a page's. -->
+    <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media.Mpv\HultUI.Media.Mpv.csproj" />
   </ItemGroup>
 
 </Project>

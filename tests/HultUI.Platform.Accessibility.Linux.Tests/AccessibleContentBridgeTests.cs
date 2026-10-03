@@ -97,6 +97,17 @@ public class AccessibleContentBridgeTests
             host.Asked);
     }
 
+    [Fact]
+    public void TheApplication_IsNamedAfterItsEntryAssembly()
+    {
+        // A screen reader announces the application by this name: it was empty.
+        var (_, _, tree, _) = Bridge();
+        var expected = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name;
+        Assert.False(string.IsNullOrEmpty(expected));
+        Assert.Equal(expected, tree.Root!.Name);
+        Assert.Equal(AtSpiConstants.RoleApplication, tree.Root.Role);
+    }
+
     /// <summary>Linux with an accessibility bus: set <c>org.a11y.Status.IsEnabled</c> as an
     /// assistive technology does, and see the bridge report it; then put it back.</summary>
     [Fact]

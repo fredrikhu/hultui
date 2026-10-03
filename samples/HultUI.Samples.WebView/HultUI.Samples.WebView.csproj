@@ -26,4 +26,17 @@
     <ProjectReference Include="..\..\src\HultUI.WebView.Cef\HultUI.WebView.Cef.csproj" />
   </ItemGroup>
 
+  <!--
+    Bundled CEF, for Debian and Ubuntu, as an application takes it: the natives package from a
+    feed. Off unless asked, so ordinary builds do not carry 360 MB:
+      dotnet pack src/HultUI.WebView.Cef.Natives -o <feed> -p:Version=<v>
+      dotnet publish samples/HultUI.Samples.WebView -r linux-x64 -p:CefNativesVersion=<v> -p:CefNativesFeed=<feed>
+  -->
+  <PropertyGroup Condition="'$(CefNativesVersion)' != ''">
+    <RestoreAdditionalProjectSources>$(CefNativesFeed)</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(CefNativesVersion)' != ''">
+    <PackageReference Include="HultUI.WebView.Cef.Natives.linux-x64" Version="$(CefNativesVersion)" />
+  </ItemGroup>
+
 </Project>

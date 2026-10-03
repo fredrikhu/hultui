@@ -22,5 +22,9 @@ native/mpv/out/
 # hultui-cef-helper builds (native/cef-helper/build.sh)
 native/cef-helper/out/
 
+# CEF for the natives packages (native/cef/build.sh): downloads and flattened trees
+native/cef/cache/
+native/cef/out/
+
 # dotnet test --blame output
 TestResults/

@@ -653,6 +653,173 @@ In this order; each ends with its tests green and the step written into
    them); `WEBVIEW.md` has it. One finding: CEF does not pass scroll offsets on, so the page is
    asked for its scroll.
 7. **Debian and Ubuntu.** The natives package or download, and a run on each.
+   **Designed, built and proved on this machine (2026-10-03); the runs on Debian and Ubuntu
+   remain.**
+
+   **The route: a natives package per RID, built by a workflow, as mpv's are.** Weighed against
+   a download made by the application's packaging:
+   - *A package* (`HultUI.WebView.Cef.Natives.linux-x64`, `.linux-arm64`): the application adds
+     one `PackageReference`, and the build and the publish both put CEF where the engine looks.
+     The CEF is pinned by version and SHA-1, the engine tests ran on exactly that tree before it
+     was packed, and a restore works offline from the package cache. The cost is size: 154 MB
+     for linux-x64 (zip, as NuGet packs; arm64's download is 30% larger, so about 200 MB), under
+     nuget.org's 250 MB limit but heavy for every restore and feed. That is why there is one RID
+     per package: no application pays for the other architecture.
+   - *A download by the application's packaging* (a script or an MSBuild target fetching CEF's
+     archive from Spotify's CDN, checking it, flattening and stripping it): no large package
+     to host, and the application picks its CEF. But every application's build needs the
+     network, `strip` for the target architecture, and the CDN's continued existence, and each
+     application repeats work the engine's maintainers could do once. The flattening and
+     stripping are exactly what question 2 showed easy to get wrong (ICU beside `libcef.so`; a
+     1.45 GB `libcef.so`).
+
+   The package wins for the same reasons mpv's did. `native/cef/build.sh` is reusable by an
+   application that wants the other route anyway: it takes a tarball, or downloads one, and
+   leaves the flat stripped tree.
+
+   **Built:**
+   - `native/cef/` holds `versions.env` (CEF 154.0.32 and both SHA-1s, from the CDN's
+     `index.json`) and `build.sh <rid>`, which fetches, checks, flattens, strips with `strip`,
+     `llvm-strip` or `aarch64-linux-gnu-strip`, and leaves out `chrome-sandbox` (see AppArmor
+     below).
+   - `src/HultUI.WebView.Cef.Natives` packs one RID (`-p:Rid=`) under `cef/` with a
+     `buildTransitive` targets file that copies the tree to `cef/` beside the application, on
+     build and on publish. **Not as native assets, found when consumed:** a RID-specific publish
+     flattens `runtimes/<rid>/native/**` into the application's directory, `locales/*.pak`
+     included, and the engine then found no CEF there.
+   - The `cef natives` workflow builds, proves (the engine suite on the packaged tree), packs
+     and publishes both, on a `cef-natives-v*` tag.
+
+   **Proved here:**
+   - The engine suite, 119 tests, passed on the bundled, stripped CEF 154 through
+     `HULTUI_CEF_DIR` (twice), as on Fedora's 146.
+   - The sample's `--check` passed on 154, zero-copy on GL and Vulkan.
+   - A scratch application referencing the packed `.nupkg` from a local feed, built
+     framework-dependent and published `-r linux-x64`, found CEF 154 in its own `cef/` before
+     Fedora's and ran a page ("Chrome/154.0.0.0").
+   - Found with 154: the zero-copy harness clicked a `<select>` without giving the page focus,
+     and 154 opens one only in a focused page (146 did either way). A web view always has
+     focus when clicked, so the harness now focuses first. 154's minimal build also has no
+     `libEGL.so` or `libGLESv2.so` beside `libcef.so` (Fedora's 146 has both), and nothing
+     missed them.
+
+   **Ubuntu's AppArmor limit on user namespaces, for a bundled CEF (not built).** Since 23.10
+   (so 24.04 LTS) Ubuntu sets `kernel.apparmor_restrict_unprivileged_userns=1`: an unconfined
+   program may not make a user namespace. Chromium's sandbox is made of them: the browser
+   process starts the zygote in a new user namespace (on Fedora, question 1 found exactly this
+   sandbox running). On Ubuntu that fails and, with no setuid `chrome-sandbox` to fall back on,
+   Chromium stops with "No usable sandbox!". The process that makes the namespace is the
+   application's own executable, not the helper. That matters for a profile, and the user of a
+   `dotnet app.dll` launch would be `dotnet` itself. Options, and what each asks of the person
+   installing the app:
+   1. **An AppArmor profile, installed by the app's package** (recommended; what Chrome,
+      VS Code and the Electron apps do). A file in `/etc/apparmor.d/` naming the app's
+      executable, `flags=(unconfined)` with `userns,`, loaded by the package's post-install
+      (`apparmor_parser -r`). Asks: installing from a `.deb` (root, which installing already
+      is). Nothing for a tarball or a `dotnet run` (see 4). The natives package can carry the
+      template; the path in it is the application's to fill.
+   2. **The setuid `chrome-sandbox`**, owned by root, mode 4755, beside `libcef.so`, where CEF
+      finds it. Asks: root at install, to set the bit (a package cannot carry it, which is why
+      the natives leave it out). Works without AppArmor's blessing, but a setuid binary is attack
+      surface, and Chromium treats this sandbox as the legacy one.
+   3. **No sandbox** (`--no-sandbox`). Asks nothing, and leaves every renderer unsandboxed:
+      acceptable only for an application that shows its own, trusted content. If offered at
+      all, as an explicit option an application turns on, never as the engine's fallback.
+   4. **The sysctl set to 0** (`kernel.apparmor_restrict_unprivileged_userns=0`). Asks root
+      and a system-wide security decision of the user, for one application. Documentable for
+      a developer machine, not requirable of users.
+   5. **Snap or Flatpak.** A snap with the `browser-support` plug gets user namespaces. Flatpak
+      allows none, and Chromium there uses `zypak`, which CEF would need integrating. Asks:
+      installing from that store, and more engineering per format.
+
+   Whatever the route, the engine should **say so instead of dying**: read
+   `/proc/sys/kernel/apparmor_restrict_unprivileged_userns`, and when it is 1 and no profile
+   covers the executable (a test `unshare(CLONE_NEWUSER)` in a forked child fails), report the
+   engine unavailable with a reason that names option 1, rather than let CEF end the process.
+   To build and confirm on Ubuntu 24.04.
+
+   **Run on Debian 13 and Ubuntu 24.04 (2026-10-03).** The sample, published NativeAOT for
+   linux-x64 here with `HultUI.WebView.Cef.Natives.linux-x64` (379 MB without symbols), copied
+   to a Debian 13 container with the Intel GPU's render node and to an Ubuntu 24.04 VM with no
+   GPU, each running sway headless.
+   - **Debian:** `--check` passed on GL and on Vulkan, **zero-copy under sway** (1916×973), with
+     **the sandbox on**: renderers and a utility process in their own user namespace, the
+     zygote's, and seccomp filters on every CEF process. (A container's kernel is the Proxmox
+     host's, so the AppArmor sysctl is 0 there.)
+   - **Found on the fresh accounts: the profile went nowhere.** With no `~/.local/share` yet,
+     .NET's `LocalApplicationData` is "" on Linux, the default profile became a path relative
+     to the working directory, and CEF would not start ("Could not find a part of the path
+     …/HultUI.Samples.WebView/CEF", the executable's own name). Fixed with
+     `SpecialFolderOption.DoNotVerify`; the folder is made when CEF starts. A test runs the
+     engine in a process whose `HOME` is an empty directory; it fails without the fix.
+   - **What the application needs installed besides itself.** Read from both, not guessed:
+     `ldd` over every binary in the tree, the libraries SDL and CEF name for loading at run
+     time, and the libraries actually mapped by the running application and every CEF process
+     on both renderers (`/proc/<pid>/maps`, then `dpkg -S`). The closure is 108 packages; what
+     an application's `.deb` declares is what its binaries link or load directly, and apt
+     brings the rest. Names as Debian 13 and Ubuntu 24.04 both have them (the `t64` ones are
+     the 64-bit-time renames; an older release has `libasound2` and so on, so an alternative
+     `libasound2t64 | libasound2` covers both):
+
+     ```
+     Depends: libc6, libgcc-s1, libstdc++6,
+      libx11-6, libx11-xcb1, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3,
+      libxrandr2, libxcursor1, libxi6, libxkbcommon0,
+      libwayland-client0, libwayland-cursor0, libwayland-egl1,
+      libegl1, libgl1, libgbm1, libvulkan1,
+      libasound2t64 | libasound2, libatk1.0-0t64 | libatk1.0-0,
+      libatk-bridge2.0-0t64 | libatk-bridge2.0-0, libatspi2.0-0t64 | libatspi2.0-0,
+      libcups2t64 | libcups2, libglib2.0-0t64 | libglib2.0-0,
+      libcairo2, libpango-1.0-0, libdbus-1-3, libexpat1, libfontconfig1, libfreetype6,
+      libnspr4, libnss3, libudev1
+     Recommends: libdecor-0-0, libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers
+     ```
+
+     CEF links NSS, ATK/AT-SPI, CUPS, ALSA, X11 and GBM whether or not it uses them, so a
+     Wayland-only desktop still needs them. A desktop has nearly all of these already; the
+     Debian container lacked NSS, ATK/AT-SPI, CUPS and four X libraries. Ubuntu's server-like VM
+     lacked the same but NSS. Both lacked `libwayland-egl1`, without which SDL's Wayland backend
+     is missing and SDL says "No available video device". `libdecor-0-0` gives windows their
+     title bars on a compositor without server-side decorations (GNOME), so it is a
+     recommendation, not a requirement. The Mesa drivers come in through a desktop; a machine
+     with another vendor's driver has its own.
+   - **Ubuntu: the limit stops CEF.** Without a profile CEF ended the process: `FATAL
+     zygote_host_impl_linux.cc:129 No usable sandbox! If you are running on Ubuntu 23.10+ …`,
+     SIGTRAP, exit 133, before the application could do anything. **The engine now says so
+     first** (`CefSandbox`): before `cef_initialize`, and in `CefEngine.Availability`, it reads
+     the AppArmor sysctl and the process's own label (`/proc/self/attr/current`), and the two
+     sysctls that turn user namespaces off outright. Restricted and unconfined, it fails with a
+     reason that names the executable needing a profile (and, under `dotnet app.dll`, says that
+     an application with a bundled CEF ships as its own executable). Root, or a setuid
+     `chrome-sandbox` beside `libcef.so`, is let through. On the Ubuntu VM the sample now reports
+     "CEF: Chromium's sandbox cannot start: … /home/dev/sample/HultUI.Samples.WebView has none …"
+     and goes on with its fake engine. No probe by `unshare`: a child process is judged by its
+     own profile, not the application's, and forking a .NET process is not safe.
+   - **The profile, tested on the Ubuntu VM.** The shape Ubuntu's own profiles for Chrome,
+     VS Code and Edge have: `profile <app> /opt/<app>/<executable> flags=(unconfined) { userns,
+     include if exists <local/<app>> }`. **It must cover the application's executable, and
+     that is enough.** With it, `--check` passed with the sandbox fully on (renderers and a
+     utility process in their own user namespace, seccomp filters), and every CEF process
+     carried the application's label (`hultui-sample (unconfined)`): an unconfined-mode
+     profile is inherited across `exec`, so the helper runs under it. A profile on the helper
+     alone, with the application unconfined (the engine's check off, `HULTUI_CEF_SANDBOX_CHECK=0`,
+     new for exactly this), still died "No usable sandbox!": the browser process makes the
+     namespace. So the check judges the right process, and an application launched as
+     `dotnet app.dll` would need a profile on `dotnet`: **a bundled-CEF application ships as its
+     own executable** (NativeAOT or apphost).
+   - **How the application's `.deb` installs it, tested end to end.** The profile is a conffile
+     in `/etc/apparmor.d/<app>`. `postinst configure` makes the empty
+     `/etc/apparmor.d/local/<app>` and, when `aa-enabled` says AppArmor is on, loads the profile
+     (`apparmor_parser --replace --write-cache --skip-read-cache`), as debhelper's
+     `dh_apparmor` snippet does. `prerm remove` unloads it, and `postrm purge` removes the local
+     file. `native/cef/deb/build-sample-deb.sh` builds the sample's package that way: 128 MB,
+     with the `Depends` above. On Ubuntu `apt install` resolved the dependencies, loaded the
+     profile, and `hultui-sample --check` passed. `apt remove` unloaded it and kept the conffile,
+     and `purge` removed both. On Debian the same package installed (no AppArmor tools there,
+     so the scripts did nothing) and passed zero-copy on GL and Vulkan.
+   - **Not tested: arm64.** The package and the workflow build linux-arm64, and nothing has run
+     on it. Also not run: a desktop session (GNOME, KDE) on either distribution; both machines
+     ran sway headless.
 
 ## Review of steps 5.1 and 5.2 (2026-10-02)
 
@@ -793,6 +960,8 @@ a few lines each.
 2. **The application's AT-SPI name** (empty, as you found): worth fixing while you are in the
    bridge, since it is what a screen reader announces for the application. The entry
    assembly's name is what the profile folder already uses.
+   **Done 2026-10-03:** the application root is named so; busctl lists the sample as
+   "HultUI.Samples.WebView", JIT and AOT.
 3. **Not for you:** `ContentNodeId` keeps the owning element's id to 30 bits and
    `VirtualItemId` to 31, while element ids come from a counter every element ever built
    draws from, rebuilds included. A long-running application that rebuilds a lot would pass
@@ -800,6 +969,85 @@ a few lines each.
    it), so it is a task of its own on the Windows side.
 4. **5.5's page-and-video check** still wants a libmpv: the owner can install Fedora's
    `mpv-libs` as root in the container, and the check can run then. Not a blocker.
+   **Done 2026-10-03** with `mpv-libs` installed: both halves show their colour, and the trace
+   has two interop sources. It was mpv's first shared-image run on Mesa and Intel, and it worked;
+   `WEBVIEW.md` (W7) and `HDR.md` have it.
+
+## Review of the page-and-video check, the AT-SPI name and step 5.7's first part (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there (every suite green,
+no new build warning) and the Vulkan probe's six tests run twice. **It stands**, and the
+natives package per RID is the right route: one build that flattens, strips and checks the
+SHA-1, instead of every application's packaging doing it.
+
+1. **Fixed on the Windows side: the page-and-video test on Windows.** It failed there, as you
+   expected: the bundled LGPL libmpv has no lavfi ("unrecognized file format"). The Windows
+   test now writes twelve seconds of solid magenta as Y4M, which every build reads, and passes
+   it with `--clip=`; it passes, so W7 with WebView2 and mpv in one Vulkan window is proven on
+   Windows too. The Linux test can keep lavfi.
+2. **Fixed on the Windows side: the natives' copy condition.** `Natives.targets` copied CEF
+   for any build without a RID, so a cross-platform application built on Windows carried some
+   360 MB of Linux CEF in every output folder. Now: a Linux RID, or no RID when the build runs
+   on Linux. **Re-run your throwaway application** (a RID-less build and a `-r linux-x64`
+   publish, both on this machine) to confirm it still lands.
+   **Re-run 2026-10-03, with the package repacked:** the RID-less build and the
+   `-r linux-x64` publish both found CEF 154 in their own `cef/` and ran a page; a
+   `-r win-x64` build of the same application now has no `cef/`.
+3. **Fixed on the Windows side: the natives README** now says what a page cannot play with
+   the bundled CEF (H.264, AAC), as this brief asked application authors to be told.
+4. **AppArmor: agree with (a), plus detection, and (c) only as an explicit opt-in.** Two
+   things to settle on the Ubuntu machine: whether the process that needs the profile is the
+   application alone or the helper too (Chromium's browser process starts the zygote in its
+   namespace; the renderers make more inside it), and that the profile names the application's
+   own executable, so an application started as `dotnet app.dll` would need one for `dotnet`.
+   Say in the docs that a bundled-CEF application ships as its own executable.
+5. **The `cef natives` workflow has never run.** Its job runs the engine suite on the
+   self-hosted runner, which is Ubuntu, so the first dispatch is also the first Ubuntu run, in
+   a container whose kernel is the Proxmox host's. Either answer, sandbox or "No usable
+   sandbox!", is worth having before 5.7's machines: run it once by hand
+   (`gh workflow run "cef natives" --ref claude/webview-component-repo-62ba8b`) and write
+   down what it said.
+   **Not run from here:** this machine has no `gh`, and the repository's API needs a token it
+   does not have. The Ubuntu VM gives the same answer for a real Ubuntu kernel (step 7).
+6. **The Ubuntu sandbox check needs a virtual machine, not a container.** In an LXC container
+   the kernel and its AppArmor are the Proxmox host's, so whether Ubuntu's limit applies there
+   says nothing about an Ubuntu desktop. Debian can be a container, as Fedora is.
+
+## Review of step 5.7 on Debian and Ubuntu (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there. **It stands**: the
+dependency list measured rather than guessed, the profile proven necessary and sufficient on
+the application's executable alone, and a real `.deb` that installs, loads, removes and purges
+it. The fresh-account bug was a good find.
+
+1. **Root is not fine.** `CefSandbox.Judge` passes a process running as root, but Chromium
+   refuses root without `--no-sandbox` and ends the process ("Running as root without
+   --no-sandbox is not supported"), the very thing the check exists to prevent. Confirm with
+   `sudo` on either machine, and report root the way the other cases are reported (unless the
+   application chose to run without the sandbox).
+   **Done 2026-10-03.** Confirmed with `sudo` on both machines: CEF logs "Running as root
+   without --no-sandbox is not supported" and the process ends (exit 1) before the
+   application's own code goes on. With `HULTUI_CEF_SWITCHES=no-sandbox` the same root run
+   passed `--check` on Debian. `CefSandbox` now refuses root with a reason ("run the
+   application as an ordinary user"), on any distribution and whether or not a setuid
+   `chrome-sandbox` is there, unless the application chose no sandbox (`no-sandbox` among the
+   switches), which also lifts the AppArmor case. Rule tests for both.
+2. **Fixed on the Windows side:** `File.GetUnixFileMode` in `CefSandbox` was the branch's one
+   new build warning (CA1416): the csproj's `<SupportedOSPlatform>linux</SupportedOSPlatform>`
+   generates nothing for a plain `net10.0` project, so the analyzer treats the code as every
+   platform's. It has an `OperatingSystem.IsWindows()` guard now. The property is inert:
+   remove it, or keep it only as a comment, so nobody relies on it.
+   **Done:** removed from `HultUI.WebView.Cef.csproj`, with a comment saying why it is not
+   there and what guards the code instead. Three other projects carry the same property
+   (`HultUI.Platform.Accessibility.Linux`, `HultUI.WebView.WebView2`,
+   `HultUI.Platform.Accessibility.Windows`); not touched here.
+3. **Fixed on the Windows side:** the natives README's paragraph on what a page cannot play
+   (H.264, AAC) was lost in the rewrite; it is back.
+4. **Not for you:** the empty data folder on a fresh account also hits Vesper Commander, whose
+   settings path has no fallback (Reel, Aperture and Junction have one). A task of its own on
+   the Windows side.
+5. **Left open, and fine to leave:** arm64, GNOME and KDE sessions, and the first run of the
+   `cef natives` workflow, which needs the owner's go-ahead because it publishes a prerelease.
 
 ## When you stop
 
