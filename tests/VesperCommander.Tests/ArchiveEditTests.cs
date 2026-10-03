@@ -110,7 +110,7 @@ public class ArchiveEditTests
         using var t = new DiffViewTests.Fixture();
         var zip = MakeZip(t.Left, "assets.zip", ("docs/readme.txt", "before"));
         t.Open();
-        var temp = TakeOutForEditing(t, zip, @"docs\readme.txt", "readme.txt");
+        var temp = TakeOutForEditing(t, zip, Path.Combine("docs", "readme.txt"), "readme.txt");
 
         File.WriteAllText(temp, "after");
         ReturnToVesper(t);
