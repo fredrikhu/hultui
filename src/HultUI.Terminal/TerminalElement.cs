@@ -49,6 +49,7 @@ public sealed partial class TerminalElement : Element
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<PointerLeaveEvent>(OnPointerLeave);
         OnOwn<ScrollEvent>(OnScroll);
         OnOwn<FocusEvent>(_ => OnFocusChanged(true));
         OnOwn<BlurEvent>(_ => OnFocusChanged(false));
@@ -362,6 +363,8 @@ public sealed partial class TerminalElement : Element
         e.StopPropagation = true;
         var (col, row) = CellAt(e.Position);
 
+        if (ActivateLink(e, col, row)) return;
+
         if (ProgramTakesMouse(e.Modifiers))
         {
             _mouseButton = ButtonOf(e.Button);
@@ -392,6 +395,7 @@ public sealed partial class TerminalElement : Element
     private void OnPointerMove(PointerMoveEvent e)
     {
         if (_controller is null) return;
+        TrackHover(e.Position);
         var (col, row) = CellAt(e.Position);
 
         if (_mouseButton != TerminalMouseButton.None || (!_selecting && ProgramTakesMouse(e.Modifiers)))

@@ -319,7 +319,7 @@ public sealed class DemoShell
         Write($"  {Esc}[1mbold{Esc}[0m  {Esc}[2mdim{Esc}[0m  {Esc}[3mitalic{Esc}[0m  {Esc}[1;3mbold italic{Esc}[0m\r\n" +
               $"  {Esc}[4munderline{Esc}[0m  {Esc}[4:3mcurly{Esc}[0m  {Esc}[58;5;196m{Esc}[4mred underline{Esc}[0m  {Esc}[9mstrikethrough{Esc}[0m  {Esc}[53moverline{Esc}[0m\r\n" +
               $"  {Esc}[7minverse{Esc}[0m  {Esc}[8mhidden{Esc}[0m (hidden)  {Esc}[1;31mbold red{Esc}[0m  {Esc}[2;34mdim blue{Esc}[0m\r\n" +
-              $"  {Esc}]8;;https://github.com/tomlm/XTerm.NET{Esc}\\a hyperlink{Esc}]8;;{Esc}\\\r\n");
+              $"  {Esc}]8;;https://github.com/tomlm/XTerm.NET{Esc}\\a hyperlink (Ctrl+click){Esc}]8;;{Esc}\\\r\n");
     }
 
     private void Boxes()

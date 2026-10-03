@@ -162,6 +162,15 @@ public sealed class TerminalController : IDisposable
     /// </summary>
     public event Action<TerminalClipboardRequest>? ClipboardWriteRequested;
 
+    /// <summary>
+    /// The user Ctrl+clicked an OSC 8 link the program wrote. Nothing opens it unless the
+    /// application does: the link is whatever the program said, so check its scheme before
+    /// handing it to the system (a <c>file:</c> link to a program would run it).
+    /// </summary>
+    public event Action<TerminalLink>? LinkActivated;
+
+    internal void RaiseLinkActivated(TerminalLink link) => LinkActivated?.Invoke(link);
+
     // ──── Element plumbing (UI thread) ────
 
     /// <summary>The screen changed. Coalesced: at most one per frame however much arrived.</summary>
@@ -560,6 +569,12 @@ public sealed class TerminalController : IDisposable
         lock (_gate) _emulator.Dispose();
     }
 }
+
+/// <summary>An OSC 8 link: the target the program gave, and its id, which joins the stretches of
+/// one link (a link that wrapped onto the next row).</summary>
+/// <param name="Url">The target, exactly as the program wrote it; not checked or resolved.</param>
+/// <param name="Id">The <c>id=</c> parameter, or null when the program gave none.</param>
+public sealed record TerminalLink(string Url, string? Id);
 
 /// <summary>A program's request to put text on the clipboard (OSC 52).</summary>
 public sealed class TerminalClipboardRequest(string text)

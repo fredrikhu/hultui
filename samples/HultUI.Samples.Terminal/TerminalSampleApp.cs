@@ -87,7 +87,25 @@ public sealed class TerminalSampleApp : IDisposable
 
         var controller = new TerminalController(connection, new TerminalOptions { Scrollback = 5_000 });
         controller.Bell += () => Bells.Value++;
+        controller.LinkActivated += OpenLink;
         return controller;
+    }
+
+    /// <summary>
+    /// Ctrl+click on a link the program wrote. Web addresses only: the link is whatever the
+    /// program said, and handed to the system a <c>file:</c> link to a program would run it.
+    /// </summary>
+    private static void OpenLink(TerminalLink link)
+    {
+        if (!Uri.TryCreate(link.Url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            else
+                System.Diagnostics.Process.Start(OperatingSystem.IsMacOS() ? "open" : "xdg-open", uri.AbsoluteUri);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }
 
     /// <summary>Ends the program, if it is still running, and starts <see cref="Program"/> in its place.</summary>

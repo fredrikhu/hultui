@@ -37,6 +37,9 @@ internal sealed class TerminalSnapshot
     /// <summary>Lines the normal screen's buffer holds, scrollback and screen: what a width
     /// change reflows, whichever screen is showing.</summary>
     public int NormalLines { get; set; }
+
+    /// <summary>The OSC 8 links on the visible rows, left to right, top to bottom.</summary>
+    public List<LinkSpan> Links { get; } = [];
     public int ViewportTop { get; set; }
     public bool AtBottom { get; set; }
 
@@ -136,6 +139,19 @@ internal enum TerminalModes : ushort
 
 /// <summary>A place in the terminal's text: a line counted from the first line the terminal ever
 /// had (see <see cref="TerminalSnapshot.LinesDropped"/>) and a column.</summary>
+/// <summary>One stretch of an OSC 8 link on a visible row: columns [<paramref name="Start"/>,
+/// <paramref name="End"/>). Spans with the same <paramref name="Id"/> are one link, as a link that
+/// wrapped onto the next row is.</summary>
+internal readonly record struct LinkSpan(int Row, int Start, int End, string Url, string? Id)
+{
+    public bool Covers(int column, int row) => row == Row && column >= Start && column < End;
+
+    /// <summary>Whether <paramref name="other"/> is part of the same link: the same id, or with
+    /// no id, the same stretch.</summary>
+    public bool SameLinkAs(LinkSpan other) =>
+        Url == other.Url && (Id is not null ? Id == other.Id : this == other);
+}
+
 internal readonly record struct TerminalPosition(long Line, int Column) : IComparable<TerminalPosition>
 {
     public int CompareTo(TerminalPosition other) =>

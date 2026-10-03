@@ -73,6 +73,8 @@ public sealed partial class TerminalElement
                 run = h;
             }
         }
+
+        DrawLinkUnderline(ctx, s, row, left, y, underlineY, t, scale);
     }
 
     /// <summary>One underline under columns [from, to) of a row.</summary>

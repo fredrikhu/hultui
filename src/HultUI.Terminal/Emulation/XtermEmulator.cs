@@ -166,6 +166,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
         int cols = _term.Cols, rows = _term.Rows;
         s.Resize(cols, rows);
 
+        s.Links.Clear();
         var colors = _term.Colors.Take();
         int defaultFg = colors.Foreground, defaultBg = colors.Background;
         s.DefaultForeground = defaultFg;
@@ -185,6 +186,10 @@ internal sealed class XtermEmulator : ITerminalEmulator
 
             int n = Math.Min(cols, line.Length);
             bool hasLinks = line.HasLinks;
+            if (hasLinks)
+                foreach (var link in line.Links)
+                    if (link.Column < cols)
+                        s.Links.Add(new LinkSpan(r, link.Column, Math.Min(link.EndColumn, cols), link.Url, link.Id));
             for (int c = 0; c < n; c++)
             {
                 var cell = line[c];
