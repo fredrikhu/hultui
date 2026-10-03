@@ -79,7 +79,17 @@ internal sealed unsafe partial class CefView : IWebEngineView
     /// <summary>What a string document's address reads as, as on WebView2 and the fake engine.</summary>
     private static readonly Uri AboutBlank = new("about:blank");
 
-    public CefView(WebViewOptions options) => _options = options;
+    public CefView(WebViewOptions options) : this(options, new CefEngineOptions()) { }
+
+    public CefView(WebViewOptions options, CefEngineOptions engine)
+    {
+        _options = options;
+        _wantsSandbox = CefRuntime.WantsSandbox(engine);
+        _ownContentOnly = !_wantsSandbox && !engine.AllowUntrustedContentWithoutSandbox;
+    }
+
+    /// <summary>Whether this view's engine runs its pages in Chromium's sandbox.</summary>
+    private readonly bool _wantsSandbox;
 
     /// <summary>Developer tools in a native window of their own, on Wayland and X11 alike (and
     /// harmlessly invisible on the headless platform). Keys are forwarded by the element.</summary>
@@ -114,9 +124,11 @@ internal sealed unsafe partial class CefView : IWebEngineView
         if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
             UseSharedFrames(placement.WindowSystem);
         if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
-            CefRuntime.Start(placement.WindowSystem, _options.UserDataFolder).ContinueWith(t =>
+            CefRuntime.Start(placement.WindowSystem, _options.UserDataFolder, _wantsSandbox).ContinueWith(t =>
             {
                 if (t.Result is { } error) Fail(WebFailure.InitializationFailed, error);
+                // CEF runs in the mode the engine that started it chose: another cannot be had.
+                else if (CefRuntime.ModeConflict(CefRuntime.IsSandboxed, _wantsSandbox) is { } conflict) Fail(WebFailure.InitializationFailed, conflict);
                 else if (CefRuntime.ResolveFolder(_options.UserDataFolder) is { Error: { } refused }) Fail(WebFailure.InitializationFailed, refused);
                 else CreateBrowser();
             }, TaskScheduler.Default);

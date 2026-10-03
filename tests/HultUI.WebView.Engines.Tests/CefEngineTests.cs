@@ -357,6 +357,9 @@ public class CefEngineTests
     internal static (int ExitCode, string Output) RunCefProcess(string mark, params string[] args)
         => RunCefProcess(mark, args, terminateAfterMs: null);
 
+    internal static (int ExitCode, string Output) RunCefProcessWith(string mark, string[] args, Dictionary<string, string?>? environment)
+        => RunCefProcess(mark, args, terminateAfterMs: null, environment);
+
     private static (int ExitCode, string Output) RunCefProcess(string mark, string[] args, int? terminateAfterMs,
         Dictionary<string, string?>? environment = null)
     {

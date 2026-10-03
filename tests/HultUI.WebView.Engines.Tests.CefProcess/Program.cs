@@ -2,6 +2,11 @@ using HultUI.WebView.Cef;
 
 // Starts CEF and returns from Main, so the test can watch the process exit. Prints what it
 // sees for the test to check; exit code 3 means there is no CEF here.
+// Without the sandbox, the engine is made with options of its own, and a default engine may
+// well be unavailable (Ubuntu without a profile): before the default's check.
+var withoutSandbox = Array.IndexOf(args, "--without-sandbox");
+if (withoutSandbox >= 0) return WithoutSandbox.Run(args[withoutSandbox + 1]);
+
 var engine = new CefEngine();
 if (!engine.Availability.IsAvailable)
 {

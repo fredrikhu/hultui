@@ -1062,6 +1062,10 @@ engine if it changed, but nothing more.
      (`show_dev_tools`), on Wayland and X11 alike; opened by `OpenDevTools`, F12, Ctrl+Shift+I and
      an "Inspect" entry the engine adds to the page's menu; closed with the page. The brief's
      decision has the details; `CefDevToolsTests` check each way on sway.
+   - **Running without the sandbox: done 2026-10-03.** `CefEngineOptions.Sandbox = false`,
+     enforced to the application's own content unless `AllowUntrustedContentWithoutSandbox`;
+     one mode per process, the first engine deciding; `CefEngine.IsSandboxed`. Tested on Fedora
+     and on the Ubuntu VM without a profile and as root; the brief has it.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

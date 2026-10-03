@@ -63,17 +63,20 @@ internal static unsafe partial class CefRuntime
     /// decides the window system for the process. Completes, on CEF's UI thread, with null once
     /// the context is ready, or with why it is not.
     /// </summary>
-    public static Task<string?> Start(string? windowSystem, string? userDataFolder = null)
+    public static Task<string?> Start(string? windowSystem, string? userDataFolder = null, bool sandbox = true)
     {
         lock (Gate)
         {
             if (_started is not null) return _started.Task;
+            _sandboxed = sandbox;
             _preferredRoot = Normalize(userDataFolder ?? DefaultRootCachePath());
             _started = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
             var probe = CefLibrary.Loaded;
             if (!probe.IsLoaded) { Fail(probe.Error!); return _started.Task; }
             // Where Chromium's sandbox cannot start, CEF ends the process: say why instead.
-            if (Sandbox(probe.Directory!) is { } why) { Fail(why); return _started.Task; }
+            if (Sandbox(probe.Directory!, sandbox) is { } why) { Fail(why); return _started.Task; }
+            // Never silent: a process whose pages run without Chromium's sandbox says so.
+            if (!sandbox) CefLog.Note("CEF starts without Chromium's sandbox: pages load only the application's own content, unless it allows untrusted content.");
 
             _windowSystem = windowSystem;
             _state = State.Starting;
@@ -85,14 +88,37 @@ internal static unsafe partial class CefRuntime
         }
     }
 
-    /// <summary>Why Chromium's sandbox cannot start here, or null (asked once; see <see cref="CefSandbox"/>).</summary>
-    internal static string? Sandbox(string cefDirectory) =>
-        (_sandbox ??= new Lazy<string?>(() =>
-            // HULTUI_CEF_SANDBOX_CHECK=0: for a system where the check misjudges; CEF then
-            // decides, and ends the process where the sandbox cannot start.
-            Environment.GetEnvironmentVariable("HULTUI_CEF_SANDBOX_CHECK") == "0" ? null : CefSandbox.Problem(cefDirectory))).Value;
+    /// <summary>Why Chromium's sandbox cannot start here for an engine that wants it (or why
+    /// CEF cannot run as asked), or null. See <see cref="CefSandbox"/>.</summary>
+    internal static string? Sandbox(string cefDirectory, bool sandbox) =>
+        // HULTUI_CEF_SANDBOX_CHECK=0: for a system where the check misjudges; CEF then
+        // decides, and ends the process where the sandbox cannot start.
+        Environment.GetEnvironmentVariable("HULTUI_CEF_SANDBOX_CHECK") == "0" ? null : CefSandbox.Problem(cefDirectory, noSandbox: !sandbox);
 
-    private static Lazy<string?>? _sandbox;
+    /// <summary>Whether an engine with <paramref name="options"/> runs its pages in the sandbox:
+    /// its option, unless the diagnostic <c>HULTUI_CEF_SWITCHES=no-sandbox</c> turns it off.
+    /// One rule either way, the content limits included.</summary>
+    internal static bool WantsSandbox(CefEngineOptions options) =>
+        options.Sandbox && !ExtraSwitches(Environment.GetEnvironmentVariable("HULTUI_CEF_SWITCHES")).Any(s => s.Name == "no-sandbox");
+
+    private static bool? _sandboxed;
+
+    /// <summary>How CEF runs in this process: null until it has been started, then whether in
+    /// Chromium's sandbox.</summary>
+    public static bool? IsSandboxed { get { lock (Gate) return _started is null ? null : _sandboxed; } }
+
+    /// <summary>
+    /// CEF runs once per process, in one mode, which the engine that started it chose. Why an
+    /// engine wanting <paramref name="wanted"/> cannot have it, or null.
+    /// </summary>
+    internal static string? ModeConflict(bool? running, bool wanted) => running switch
+    {
+        true when !wanted => "CEF already runs in this process with Chromium's sandbox, as the engine that started it " +
+                             "asked: an engine without the sandbox cannot run beside it. Give every CefEngine the same Sandbox option.",
+        false when wanted => "CEF already runs in this process without Chromium's sandbox, as the engine that started it " +
+                             "asked: an engine with the sandbox cannot run beside it. Give every CefEngine the same Sandbox option.",
+        _ => null,
+    };
 
     /// <summary>Whether CEF has started and not stopped.</summary>
     public static bool IsRunning { get { lock (Gate) return _state == State.Running; } }
@@ -125,7 +151,8 @@ internal static unsafe partial class CefRuntime
             var settings = new cef_settings_t { size = (ulong)sizeof(cef_settings_t) };
             settings.windowless_rendering_enabled = 1;
             settings.multi_threaded_message_loop = 1;
-            settings.no_sandbox = 0;
+            // Without the sandbox when the starting engine asked; CEF hands it to its processes.
+            settings.no_sandbox = _sandboxed == false ? 1 : 0;
             settings.log_severity = LogSeverity();
             // .NET's own signal handlers must survive CEF. Chromium otherwise resets SIGSEGV,
             // SIGILL, SIGFPE, SIGBUS, SIGABRT and SIGQUIT to their defaults, and .NET turns a

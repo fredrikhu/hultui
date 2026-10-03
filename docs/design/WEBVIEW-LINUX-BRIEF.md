@@ -1200,6 +1200,47 @@ sandbox means: a page that exploits a browser bug runs with the user's full righ
 - The natives README: option (c) of the Ubuntu list becomes this setting.
 - `docs/ENVIRONMENT.md`: `HULTUI_CEF_SWITCHES=no-sandbox` is enforced the same way.
 
+**Done 2026-10-03, as written.**
+- **The API:** `CefEngineOptions` (a public sealed record; `Sandbox`, default true;
+  `AllowUntrustedContentWithoutSandbox`, default false), `new CefEngine(options)` beside the
+  parameterless constructor, and `CefEngine.IsSandboxed`.
+- **The mode:** the engine whose page starts CEF passes its mode, and `cef_settings.no_sandbox` follows
+  it. A later engine in the other mode gets `Availability` false and its pages
+  `InitializationFailed`, both with a reason that names the conflict (`CefRuntime.ModeConflict`).
+  The diagnostic `HULTUI_CEF_SWITCHES=no-sandbox` turns an engine's wish off through the same
+  `CefRuntime.WantsSandbox`, so its pages are limited the same way. The sandbox check takes
+  `NoSandbox` from the mode.
+- **The enforcement** (`CefView.OwnContent.cs`): with the sandbox off and untrusted content not
+  allowed, the request handler's `get_resource_request_handler` returns a resource handler whose
+  `on_before_resource_load` cancels (`RV_CANCEL`) every URL that is not the application's own, and
+  whose `on_resource_redirect` sends a redirect elsewhere to `data:,`. `on_before_browse` refuses a
+  main-frame navigation first and completes it with "BlockedWithoutSandbox". Each refused URL is
+  logged once per page. The rule (`CefView.IsOwnContent`) passes the string pages' origin,
+  `AppOrigin` (scheme, host and port all), and `data:`, `blob:`, `about:blank`, `about:srcdoc`.
+  It refuses the rest, the local network and `file:` included. The DevTools window has its own
+  client and is not limited.
+- **Never silent:** "CEF starts without Chromium's sandbox: …" on standard error at start.
+- **Found when testing:** an `http` resource inside the `https` string page is mixed content,
+  which Chromium refuses with or without the sandbox. So the enforcement test's foreign content
+  is the internet's, over `https` (example.org, wikipedia.org, cdnjs). The test that needs it
+  loaded returns early offline. On Fedora (an LXC container) every process carries the
+  container's own seccomp filter, so "no seccomp" is read as "no filter Chromium added"
+  (`Seccomp_filters` equal to the process's own). Chromium does not pass the environment on
+  to its renderers, so they are found by parentage.
+- **Tests:**
+  - Rules: the option lifts root and AppArmor; the mode conflicts; 17 URLs through the own-content
+    rule.
+  - Processes on Fedora: the renderers really run without the sandbox (in the application's user
+    namespace, no filter of Chromium's; with the sandbox, namespaces of their own and one filter
+    more). Only the own content loads: image, script, fetch and frame refused, the navigation
+    failed and named. The diagnostic switch is enforced the same way. Untrusted allowed loads
+    all of it. A second engine in the other mode is unavailable, and its page fails.
+  - On the Ubuntu VM, no profile, the same probe (self-contained, on the bundled CEF 154): the
+    default engine is unavailable with the AppArmor reason. `Sandbox = false` draws the string
+    page with the same refusals, and its renderers have `Seccomp_filters: 0` in the
+    application's namespace. Untrusted, the conflict and the switch behave as on Fedora. As
+    root, the default is refused and `Sandbox = false` draws.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

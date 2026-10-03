@@ -181,6 +181,34 @@ an X11 one under X11 (the engine starts CEF on the window's own platform). F12 a
 Ctrl+Shift+I open them, as in a browser; **Inspect** opens them at the element under the
 pointer. A second call shows the window already open, and the tools close with their page.
 
+## Running without the sandbox (Linux)
+
+Chromium's sandbox keeps a page that exploits a browser bug away from the rest of the system.
+On Linux it cannot start as root, on Ubuntu 23.10 and later without the AppArmor profile the
+application's package installs, or where user namespaces are turned off; there the engine reports
+itself unavailable, with the reason (`web.Error`, or `CefEngine.Availability` before any page).
+An application that shows only its own content may run there without the sandbox instead:
+
+```csharp
+var engine = new CefEngine(new CefEngineOptions { Sandbox = false });
+```
+
+**Without the sandbox, a page that exploits a browser bug runs with the user's full rights.** So
+the engine then loads only the application's own content: the pages it gives as strings
+(`NavigateToString`), `WebViewOptions.AppOrigin` (`https://app.local`; nothing serves it yet),
+and `data:`, `blob:` and `about:blank`. Every other request, in every frame and of every kind
+(documents, frames, scripts, styles, images, `fetch`, WebSockets), is refused and logged once on
+standard error. A navigation elsewhere completes as failed, with `Error` "BlockedWithoutSandbox".
+`AllowUntrustedContentWithoutSandbox = true` lifts that, for an application that knowingly shows
+untrusted content without a sandbox; it is ignored while the sandbox is on.
+
+CEF runs once per process, in one mode: the engine whose page starts it decides. A later engine
+asking for the other mode is unavailable, and its pages fail (`InitializationFailed`), saying why.
+`CefEngine.IsSandboxed` tells, once CEF has started, how it actually runs, and CEF says so on
+standard error when it starts without the sandbox. The diagnostic
+`HULTUI_CEF_SWITCHES=no-sandbox` turns the sandbox off the same way, enforcement included. On
+Windows there is nothing of this: WebView2's sandbox always starts.
+
 ## What it costs
 
 A still page costs nothing: frames come only when the page changes. A page that animates

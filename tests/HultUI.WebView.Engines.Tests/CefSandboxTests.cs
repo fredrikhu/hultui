@@ -72,5 +72,5 @@ public class CefSandboxTests
 
     [LinuxFact]
     public void OnThisMachine_TheSandboxCanStart()
-        => Assert.Null(CefSandbox.Problem("/nonexistent"));   // the engine tests run CEF here
+        => Assert.Null(CefSandbox.Problem("/nonexistent", noSandbox: false));   // the engine tests run CEF here
 }
