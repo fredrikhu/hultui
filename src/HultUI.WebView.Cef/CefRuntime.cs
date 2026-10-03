@@ -398,6 +398,24 @@ internal static unsafe partial class CefRuntime
     private static partial int gethostname(byte* name, nuint length);
 
     private static Dictionary<int, byte[]>? _before;
+    private static int _restoredAfterFirstPage;
+
+    /// <summary>
+    /// The first page's first frame, in this process (CEF's UI thread): put back once more what
+    /// Chromium changed since the context came up. The browser and its GPU process come up
+    /// only with the first page, and a handler either installs then would otherwise stand
+    /// (review of 5.5, item 1).
+    /// </summary>
+    internal static void FirstPageDrew()
+    {
+        if (Interlocked.Exchange(ref _restoredAfterFirstPage, 1) != 0) return;
+        var restored = _before is { } before ? RestoreSignals(before) : [];
+        if (restored.Count > 0) CefLog.Info("put back after the first page: signals " + string.Join(", ", restored));
+        FirstPageRestored?.Invoke(restored);
+    }
+
+    /// <summary>For tests: the restore after the first page has run, and what it put back.</summary>
+    internal static event Action<List<int>>? FirstPageRestored;
 
     /// <summary>
     /// .NET installs its SIGCHLD handler only at an application's first <c>Process.Start</c>.
@@ -435,14 +453,20 @@ internal static unsafe partial class CefRuntime
     /// <c>Process.Start</c>, which may come while CEF starts, and putting back the default saved
     /// before it left every later child unreaped (the process tests' timeouts, review item 2).
     /// </summary>
-    internal static void RestoreSignals(Dictionary<int, byte[]> saved)
+    internal static List<int> RestoreSignals(Dictionary<int, byte[]> saved)
     {
+        var restored = new List<int>();
         foreach (var (n, action) in saved)
         {
             var now = SaveSignal(n);
             if (now.AsSpan().SequenceEqual(action)) continue;
-            if (ChromiumTook(Handler(now), Handler(action))) RestoreSignal(n, action);
+            if (ChromiumTook(Handler(now), Handler(action)))
+            {
+                RestoreSignal(n, action);
+                restored.Add(n);
+            }
         }
+        return restored;
     }
 
     /// <summary>The handler a saved action holds: its first field.</summary>

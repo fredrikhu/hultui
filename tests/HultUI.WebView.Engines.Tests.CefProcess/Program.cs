@@ -52,10 +52,17 @@ if (args.Contains("--signals"))
     var started = CefRuntime.Start(windowSystem: null).Wait(TimeSpan.FromSeconds(20));
     Console.WriteLine("after CEF:  " + Names(Caught()) + (started ? "" : " (did not start)"));
     Compare("by CEF's start");
-    var view = engine.CreateView(new HultUI.WebView.WebViewOptions());   // a renderer starts too
-    view.Attach(new Host());
+    // A page, drawn: its browser, renderer and GPU process are all up, and the engine's restore
+    // after the first frame has run (review of 5.5, item 1).
+    using var restored = new ManualResetEventSlim();
+    CefRuntime.FirstPageRestored += put => { Console.WriteLine("put back after the first page: " + (put.Count == 0 ? "nothing" : string.Join(" ", put.Select(Name)))); restored.Set(); };
+    var host = new Host();
+    var view = engine.CreateView(new HultUI.WebView.WebViewOptions());
+    view.Attach(host);
     view.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 200, 100), 1f));
-    Thread.Sleep(1500);
+    for (int i = 0; i < 1000 && !host.Pixels.IsLoaded; i++) Thread.Sleep(20);
+    Console.WriteLine("a page drew: " + host.Pixels.IsLoaded + ", the restore after it ran: " + restored.Wait(5000));
+    Thread.Sleep(1000);   // and whatever the page's processes do after their first frame
     Compare("by a page");
     using (var p = System.Diagnostics.Process.Start("true")!)
         Console.WriteLine("a process started after CEF is seen to exit: " + p.WaitForExit(5000));

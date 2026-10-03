@@ -772,6 +772,9 @@ put back, judged by `dladdr` against libcef, after .NET has installed its `SIGCH
    (Fedora's `mpv-libs`): it is the one place the mpv backend's hidden-context interop and
    CEF's share a Vulkan window. Not a blocker.
 
+**Done 2026-10-03:** item 1 as asked (it found nothing to put back, on headless or Wayland);
+item 2 not run, for want of a libmpv here. See `WEBVIEW.md`.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

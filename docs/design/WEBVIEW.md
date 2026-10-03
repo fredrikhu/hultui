@@ -932,6 +932,18 @@ engine if it changed, but nothing more.
      `OnlyChromiumsChanges_ArePutBack`. The engine suite then passed 20 runs in a row with a
      compositor, and one without (its two Wayland tests skip). Two tests whose single click
      could be lost while every class starts pages at once now click until the page has it.
+   - **The review of 5.5: done 2026-10-03.** *Item 1:* the restore also runs once per process
+     after the first page's first frame (`CefRuntime.FirstPageDrew`, from `on_paint` or
+     `on_accelerated_paint`). By then the browser, its renderer and its GPU process are up. The
+     signal test compares handlers only after a page has drawn and that restore has run. Measured:
+     it puts back nothing, on the headless platform and on Wayland alike. Chromium sets nothing
+     after `on_context_initialized` here, so it is a guard, and it says what it restored with
+     `HULTUI_CEF_LOG=info`. *Item 2,* the page-and-video W7 check, not run: no libmpv on this
+     machine (no `mpv-libs`, no rights to install it, and the natives' release is private).
+     Also, as the suite grew, two rare timeouts: a still page's repaint after a new scale
+     sometimes never came under load, so a resize now also asks CEF for a frame
+     (`invalidate`). And the page-drag test lost its very first mouse-down, so it now clicks
+     until the page has one. The engine suite then passed 15 runs in a row.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

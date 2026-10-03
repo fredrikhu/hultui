@@ -631,6 +631,14 @@ public sealed class CefPolicyTests : IDisposable
     {
         await Ready();
         await Load(Drops, "drops");
+        // Input sent while every test class starts pages at once can be lost before the page
+        // takes any: click on the zone until the page has seen one, then drag.
+        await Until(async () =>
+        {
+            Click(450, 200);
+            return await Eval("__ev.some(e => e.startsWith('mousedown'))") == "true";
+        });
+        await Eval("__ev.splice(0)");
         _view.SendPointer(new WebPointerInput(WebPointerAction.Move, D(60), D(70)));
         _view.SendPointer(new WebPointerInput(WebPointerAction.Down, D(60), D(70), WebPointerButtons.Left, WebPointerButtons.Left, 1));
         await Task.Delay(50);

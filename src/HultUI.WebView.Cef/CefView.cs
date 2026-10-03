@@ -303,6 +303,9 @@ internal sealed unsafe partial class CefView : IWebEngineView
             _browserHost->notify_screen_info_changed(_browserHost);
         }
         _browserHost->was_resized(_browserHost);
+        // And a frame at the new size, asked for: a still page's repaint after a new scale
+        // occasionally never came under load (CefViewTests.ANewScale_RepaintsAtIt, 1 run in ~13).
+        _browserHost->invalidate(_browserHost, cef_paint_element_type_t.PET_VIEW);
     }
 
     public void SetVisible(bool visible)
@@ -551,7 +554,11 @@ internal sealed unsafe partial class CefView : IWebEngineView
     private static void OnAcceleratedPaint(cef_render_handler_t* s, cef_browser_t* b, cef_paint_element_type_t type,
         ulong dirtyCount, cef_rect_t* dirty, cef_accelerated_paint_info_t* info)
     {
-        try { Of(s)?._frames?.Accelerated(type, info); }
+        try
+        {
+            Of(s)?._frames?.Accelerated(type, info);
+            CefRuntime.FirstPageDrew();
+        }
         catch (Exception ex) { CefLog.Error("on_accelerated_paint", ex); }
         finally { CefObject.Release(b); }
     }
@@ -563,7 +570,10 @@ internal sealed unsafe partial class CefView : IWebEngineView
         try
         {
             if (Of(s) is { } view && width > 0 && height > 0)
+            {
                 view.Painted(type, new ReadOnlySpan<byte>(buffer, width * height * 4), width, height);
+                CefRuntime.FirstPageDrew();
+            }
         }
         catch (Exception ex) { CefLog.Error("on_paint", ex); }
         finally { CefObject.Release(b); }

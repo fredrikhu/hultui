@@ -271,6 +271,7 @@ public class CefEngineTests
         // Every handler .NET had (SIGRTMIN for the collector's suspensions, TERM, INT and QUIT
         // for a clean exit, the faults for exceptions) is still .NET's.
         Assert.Contains("handlers changed by CEF's start: none", run.Output);
+        Assert.Contains("a page drew: True, the restore after it ran: True", run.Output);
         Assert.Contains("handlers changed by a page: none", run.Output);
         Assert.Matches(@"handlers changed by a page: none \(of \d+: .*\bSEGV\b.*\bTERM\b.*\bCHLD\b", run.Output);
         Assert.Contains("a process started after CEF is seen to exit: True", run.Output);
