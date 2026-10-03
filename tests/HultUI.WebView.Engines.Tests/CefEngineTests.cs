@@ -82,6 +82,8 @@ public class CefEngineTests
         Assert.Equal([("ozone-platform", "wayland"), ("disable-features", "WaylandFractionalScaleV1")], CefRuntime.Switches("wayland"));
         Assert.Equal([("ozone-platform", "x11")], CefRuntime.Switches("x11"));
         Assert.Equal([("ozone-platform", "headless"), ("use-angle", "gl-egl")], CefRuntime.Switches(null));
+        // Without the sandbox, WebRTC's UDP is off for the process.
+        Assert.Equal([("ozone-platform", "x11"), ("webrtc-ip-handling-policy", "disable_non_proxied_udp")], CefRuntime.Switches("x11", sandbox: false));
         Assert.Equal([("ozone-platform", "x11"), ("use-fake-device-for-media-stream", null), ("v", "1")],
             CefRuntime.Switches("x11", " --use-fake-device-for-media-stream  v=1 "));
     }

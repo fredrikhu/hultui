@@ -1272,6 +1272,41 @@ What the tests do not cover yet, each a way past a per-page request filter:
 None changes the API. Fix what the tests find, and write the result down here and in
 `docs/WEBVIEW.md`'s "Running without the sandbox (Linux)".
 
+**Done (Linux, 2026-10-03).** The probe (`--without-sandbox`) gained a second string document
+that tries each way out, and a `data:` document of the application's own; measured on CEF 146
+(Fedora's) and 154, with the sandbox and without:
+
+| | with the sandbox | without, before | without, now |
+|---|---|---|---|
+| `new WebSocket('wss://…')` from a string document | open | **open** | error (CSP) |
+| the same from a `data:` frame inside it | open | — | error (inherits the CSP) |
+| a dedicated worker's `fetch` | loaded | blocked (the page's filter) | blocked |
+| `RTCPeerConnection` with a STUN server | host, srflx | **host, srflx** | none, gathering complete |
+| a `fetch` from the application's `data:` document | loaded | blocked | blocked (the filter alone) |
+
+1. **WebSockets: not seen.** No handler of CEF's is asked for the handshake; the socket opened.
+   Point 4's policy is what stops them, in the document and in its local-scheme frames, which
+   inherit it. A `data:` document the application navigates to itself has no policy of ours;
+   that is the application's own document, and `NavigateToString` is the way to show untrusted
+   HTML (written in `docs/WEBVIEW.md`).
+2. **Requests with no page:** a view limited to own content now gets a request context of its
+   own, sharing its profile's storage (`cef_create_context_shared`, over the global context or
+   the folder's), whose handler (`get_resource_request_handler`) returns the same filter. A
+   dedicated worker's requests were already the page's (blocked before the change). A
+   service worker needs an origin of its own, which no own content had until `ContentFolder`;
+   its test is there (below).
+3. **WebRTC:** `webrtc-ip-handling-policy=disable_non_proxied_udp` for the whole process when it
+   runs without the sandbox, and a peer connection gathers no candidates (146 and 154).
+   `force-webrtc-ip-handling-policy` changed nothing. It holds for an engine that allows
+   untrusted content too: the mode is the process's.
+4. **Stricter policy:** without the sandbox, a string document comes with
+   `sandbox …; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self'
+   data: blob:`. Inline script and style stay allowed (a string document is mostly that), which
+   the brief's `default-src 'self' data: blob:` alone would have refused. Not for a view that
+   allows untrusted content: the string pages' handler now finds the view by its browser's
+   identifier (a registry the content folder uses too). `ContentFolder`'s files get the same
+   policy (below).
+
 ## Local content: `ContentFolder` (decided 2026-10-03)
 
 **The owner's decision:** a folder served at `WebViewOptions.AppOrigin`, on both engines, so an

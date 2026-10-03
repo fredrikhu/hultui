@@ -13,6 +13,19 @@ namespace HultUI.WebView.Cef;
 /// <c>on_before_browse</c>, and completes as failed. The developer tools' window has its own
 /// client and is not limited.
 /// </summary>
+/// <remarks>
+/// What a page's handler does not see (the review of 2026-10-03, measured on 146 and 154):
+/// <list type="bullet">
+/// <item>Requests with no page, a service worker's: CEF asks the request context instead, so
+/// such views get a context of their own with <see cref="OwnContentContextHandler"/>, the same
+/// filter (<see cref="CefRuntime.ContextFor"/>). A dedicated worker's requests are the page's.</item>
+/// <item>WebSockets: the handshake passes no handler, and one opened. The pages refuse them
+/// themselves: without the sandbox their documents come with a stricter
+/// <c>Content-Security-Policy</c> (<see cref="StringPages.WithoutSandbox"/>).</item>
+/// <item>WebRTC, over UDP: the process runs with <c>webrtc-ip-handling-policy=disable_non_proxied_udp</c>
+/// (<see cref="CefRuntime.Switches"/>), and a peer connection gathers no candidates.</item>
+/// </list>
+/// </remarks>
 internal sealed unsafe partial class CefView
 {
     /// <summary>The error a navigation refused for this reason completes with.</summary>
@@ -23,8 +36,13 @@ internal sealed unsafe partial class CefView
 
     private cef_resource_request_handler_t* _resources;
 
-    /// <summary>Each refused URL is logged once per view.</summary>
-    private readonly ConcurrentDictionary<string, byte> _refused = new();
+    /// <summary>Each refused URL is logged once.</summary>
+    private static readonly ConcurrentDictionary<string, byte> RefusedOnce = new();
+
+    /// <summary>The request contexts' handler and its filter, one for the process.</summary>
+    private static cef_request_context_handler_t* _contextHandler;
+    private static cef_resource_request_handler_t* _contextResources;
+    private static readonly object ContextHandlerGate = new();
 
     /// <summary>
     /// The application's own content: <see cref="WebViewOptions.AppOrigin"/>, the string pages'
@@ -49,9 +67,9 @@ internal sealed unsafe partial class CefView
         && string.Equals(uri.Host, origin.Host, StringComparison.OrdinalIgnoreCase)
         && uri.Port == origin.Port;
 
-    private void Refused(string url)
+    private static void Refused(string url)
     {
-        if (_refused.TryAdd(url, 0))
+        if (RefusedOnce.TryAdd(url, 0))
             CefLog.Note($"refused without Chromium's sandbox (not the application's own content): {url}");
     }
 
@@ -68,6 +86,26 @@ internal sealed unsafe partial class CefView
     {
         CefObject.Release(_resources);
         _resources = null;
+    }
+
+    /// <summary>
+    /// A new reference to the handler for the request contexts of views that load only own
+    /// content. CEF asks it for requests no page's client answers: a service worker's, say.
+    /// </summary>
+    internal static cef_request_context_handler_t* OwnContentContextHandler()
+    {
+        lock (ContextHandlerGate)
+        {
+            if (_contextHandler == null)
+            {
+                _contextResources = CefObject.New<cef_resource_request_handler_t>();
+                _contextResources->on_before_resource_load = &OnBeforeResourceLoad;
+                _contextResources->on_resource_redirect = &OnResourceRedirect;
+                _contextHandler = CefObject.New<cef_request_context_handler_t>();
+                _contextHandler->get_resource_request_handler = &ContextResourceRequestHandler;
+            }
+            return CefObject.Give(_contextHandler);
+        }
     }
 
     // ──── Callbacks: on CEF's IO thread ────
@@ -87,6 +125,21 @@ internal sealed unsafe partial class CefView
     }
 
     [UnmanagedCallersOnly]
+    private static cef_resource_request_handler_t* ContextResourceRequestHandler(cef_request_context_handler_t* s,
+        cef_browser_t* b, cef_frame_t* f, cef_request_t* request, int isNavigation, int isDownload,
+        cef_string_utf16_t* initiator, int* disableDefault)
+    {
+        try { return CefObject.Give(_contextResources); }
+        catch (Exception ex) { CefLog.Error("request context: get_resource_request_handler", ex); return null; }
+        finally
+        {
+            CefObject.Release(b);
+            CefObject.Release(f);
+            CefObject.Release(request);
+        }
+    }
+
+    [UnmanagedCallersOnly]
     private static cef_return_value_t OnBeforeResourceLoad(cef_resource_request_handler_t* s, cef_browser_t* b,
         cef_frame_t* f, cef_request_t* request, cef_callback_t* callback)
     {
@@ -94,7 +147,7 @@ internal sealed unsafe partial class CefView
         {
             var url = CefString.Take(request->get_url(request));
             if (IsOwnContent(url)) return cef_return_value_t.RV_CONTINUE;
-            Of(s)?.Refused(url);
+            Refused(url);
             return cef_return_value_t.RV_CANCEL;
         }
         catch (Exception ex)
@@ -120,7 +173,7 @@ internal sealed unsafe partial class CefView
         {
             var url = CefString.Read(newUrl);
             if (IsOwnContent(url)) return;
-            Of(s)?.Refused(url);
+            Refused(url);
             CefString.Set(newUrl, "data:,");
         }
         catch (Exception ex) { CefLog.Error("on_resource_redirect", ex); }

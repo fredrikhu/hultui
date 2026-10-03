@@ -83,10 +83,49 @@ internal static class WithoutSandbox
         Console.WriteLine("sandboxed: " + engine.IsSandboxed);
         Renderers();
 
+        // The ways past a page's request filter (the review of 2026-10-03): a WebSocket, a
+        // worker's fetch, and WebRTC's candidates, which travel over UDP to a STUN server.
+        view.NavigateToString("""
+            <title>holes</title><script>
+            window.h = { socket: 'waiting', worker: 'waiting', candidates: [], gathering: 'waiting' };
+            try {
+              const ws = new WebSocket('wss://ws.postman-echo.com/raw');
+              ws.onopen = () => { h.socket = 'open'; ws.close(); };
+              ws.onerror = () => h.socket = 'error';
+            } catch (e) { h.socket = 'threw ' + e.name; }
+            try {
+              const w = new Worker(URL.createObjectURL(new Blob([
+                "fetch('https://example.org/', { mode: 'no-cors' }).then(() => postMessage('loaded'), () => postMessage('blocked'))"])));
+              w.onmessage = e => h.worker = e.data;
+              w.onerror = e => h.worker = 'error ' + e.message;
+            } catch (e) { h.worker = 'threw ' + e.name; }
+            try {
+              const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+              pc.createDataChannel('x');
+              pc.onicecandidate = e => { if (e.candidate && e.candidate.candidate) h.candidates.push(e.candidate.type); };
+              pc.onicegatheringstatechange = () => h.gathering = pc.iceGatheringState;
+              pc.createOffer().then(o => pc.setLocalDescription(o)).catch(e => h.gathering = 'failed ' + e.name);
+            } catch (e) { h.gathering = 'threw ' + e.name; }
+            h.frameSocket = 'waiting';
+            addEventListener('message', e => h.frameSocket = e.data);
+            </script>
+            <iframe src="data:text/html,<script>try { const ws = new WebSocket('wss://ws.postman-echo.com/raw'); ws.onopen = () => parent.postMessage('open', '*'); ws.onerror = () => parent.postMessage('error', '*'); } catch (e) { parent.postMessage('threw ' + e.name, '*'); }</script>"></iframe>
+            """);
+        Until(() => events.OfType<WebEngineEvent.TitleChanged>().Any(t => t.Title == "holes"));
+        Thread.Sleep(4000);
+        Console.WriteLine("holes saw: " + view.ExecuteScriptAsync("JSON.stringify(h)").Result);
+
+        // A document of the application's own with no policy of ours: the filter alone.
+        view.Navigate(new Uri("""data:text/html,<title>bare</title><script>window.b = { fetch: 'waiting' }; fetch('https://example.org/bare', { mode: 'no-cors' }).then(() => b.fetch = 'loaded', () => b.fetch = 'blocked');</script>"""));
+        Until(() => events.OfType<WebEngineEvent.TitleChanged>().Any(t => t.Title == "bare"));
+        Thread.Sleep(1500);
+        Console.WriteLine("bare page saw: " + view.ExecuteScriptAsync("JSON.stringify(b)").Result);
+
         // The main frame sent elsewhere: refused without the sandbox, loaded with untrusted allowed.
         var target = "https://example.org/";
+        var before = events.OfType<WebEngineEvent.NavigationCompleted>().Max(c => c.NavigationId);
         view.Navigate(new Uri(target));
-        Until(() => events.OfType<WebEngineEvent.NavigationCompleted>().Any(c => c.NavigationId > 1));
+        Until(() => events.OfType<WebEngineEvent.NavigationCompleted>().Any(c => c.NavigationId > before));
         var completed = events.OfType<WebEngineEvent.NavigationCompleted>().LastOrDefault();
         Console.WriteLine($"navigation to {target}: " + (completed is null ? "nothing" : completed.IsSuccess ? "loaded" : "failed " + completed.Error));
         view.Dispose();

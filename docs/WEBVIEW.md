@@ -222,10 +222,17 @@ var engine = new CefEngine(new CefEngineOptions { Sandbox = false });
 the engine then loads only the application's own content: the pages it gives as strings
 (`NavigateToString`), `WebViewOptions.AppOrigin` (`https://app.example`, which `ContentFolder` serves),
 and `data:`, `blob:` and `about:blank`. Every other request, in every frame and of every kind
-(documents, frames, scripts, styles, images, `fetch`, WebSockets), is refused and logged once on
-standard error. A navigation elsewhere completes as failed, with `Error` "BlockedWithoutSandbox".
-`AllowUntrustedContentWithoutSandbox = true` lifts that, for an application that knowingly shows
-untrusted content without a sandbox; it is ignored while the sandbox is on.
+(documents, frames, scripts, styles, images, `fetch`, a worker's requests, a service worker's
+included), is refused and logged once on standard error. A navigation elsewhere completes as
+failed, with `Error` "BlockedWithoutSandbox". The pages the engine serves itself also come with
+a stricter `Content-Security-Policy` (`default-src 'self' 'unsafe-inline' 'unsafe-eval' data:
+blob:`), so they refuse an outside connection before it is a request; it is what stops a
+WebSocket, which no request filter of CEF's sees. A `data:` document the application navigates
+to itself has no such policy: show untrusted HTML with `NavigateToString`. WebRTC may not use
+UDP except through a proxy, for the whole process, so a peer connection finds no route.
+`AllowUntrustedContentWithoutSandbox = true` lifts the limits on content (not WebRTC's), for an
+application that knowingly shows untrusted content without a sandbox; it is ignored while the
+sandbox is on.
 
 CEF runs once per process, in one mode: the engine whose page starts it decides. A later engine
 asking for the other mode is unavailable, and its pages fail (`InitializationFailed`), saying why.

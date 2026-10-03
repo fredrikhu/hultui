@@ -111,10 +111,27 @@ public class CefWithoutSandboxTests
         Assert.True(run.ExitCode == 0, run.Output);
         Assert.Contains("own page: loaded", run.Output);
         Assert.Contains("""page saw: "{\"img\":\"blocked\",\"script\":\"blocked\",\"fetch\":\"blocked\"}""", run.Output);
-        Assert.Contains("refused without Chromium's sandbox (not the application's own content): https://example.org/frame", run.Output);
         Assert.Contains("navigation to https://example.org/: failed " + CefView.BlockedWithoutSandbox, run.Output);
-        // Each refusal logged once.
-        Assert.Single(run.Output.Split('\n'), l => l.EndsWith("https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"));
+        // A string document's own policy stops those before they are requests; a document with
+        // none of ours (the application's data: URL) shows the filter alone, which logs each once.
+        Assert.Contains("""bare page saw: "{\"fetch\":\"blocked\"}""", run.Output);
+        Assert.Single(run.Output.Split('\n'), l => l.EndsWith("refused without Chromium's sandbox (not the application's own content): https://example.org/bare"));
+    }
+
+    /// <summary>The review of 2026-10-03: what a page's request filter does not see. A WebSocket
+    /// (the string document's policy refuses it, in a data: frame inside it too), a worker's
+    /// fetch, and WebRTC's candidates (UDP, turned off for the process).</summary>
+    [CefFact]
+    public void WithoutTheSandbox_WebSocketsWorkersAndWebRtcGetNowhere()
+    {
+        var run = Run("page");
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("""holes saw: "{\"socket\":\"error\",\"worker\":\"blocked\",\"candidates\":[],\"gathering\":\"complete\",\"frameSocket\":\"error\"}""", run.Output);
+        if (!Online()) return;
+        // The same page with the sandbox reaches the internet each way: the probe can tell.
+        var on = Run("sandboxed");
+        Assert.Contains("""holes saw: "{\"socket\":\"open\",\"worker\":\"loaded\",\"candidates\":[\"host\",""", on.Output);
+        Assert.Contains("""\"frameSocket\":\"open\"}""", on.Output);
     }
 
     [CefFact]
@@ -137,6 +154,8 @@ public class CefWithoutSandboxTests
         Assert.Contains("""page saw: "{\"img\":\"loaded\",\"script\":\"loaded\",\"fetch\":\"loaded\"}""", run.Output);
         Assert.Contains("navigation to https://example.org/: loaded", run.Output);
         Assert.DoesNotContain("refused without Chromium's sandbox", run.Output);
+        // No stricter policy for its pages; WebRTC's UDP stays off, as it is for the process.
+        Assert.Contains("""holes saw: "{\"socket\":\"open\",\"worker\":\"loaded\",\"candidates\":[],""", run.Output);
     }
 
     [CefFact]

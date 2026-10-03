@@ -237,7 +237,11 @@ internal static unsafe partial class CefRuntime
     /// questions 1, 3 and 8): Wayland needs fractional scaling off, or the scale the engine
     /// gives is ignored; with no window system, headless, with ANGLE on GL for the GPU.
     /// </summary>
-    internal static IEnumerable<(string Name, string? Value)> Switches(string? windowSystem, string? extra = null)
+    /// <remarks>Without the sandbox, WebRTC may not use UDP unless through a proxy: its STUN and TURN
+    /// traffic passes no request filter, and a peer connection then gathers no candidates
+    /// (measured on 146 and 154, where <c>force-webrtc-ip-handling-policy</c> changed
+    /// nothing).</remarks>
+    internal static IEnumerable<(string Name, string? Value)> Switches(string? windowSystem, string? extra = null, bool sandbox = true)
     {
         IEnumerable<(string Name, string? Value)> own = windowSystem switch
         {
@@ -245,6 +249,7 @@ internal static unsafe partial class CefRuntime
             "x11" => [("ozone-platform", "x11")],
             _ => [("ozone-platform", "headless"), ("use-angle", "gl-egl")],
         };
+        if (!sandbox) own = own.Append(("webrtc-ip-handling-policy", "disable_non_proxied_udp"));
         return own.Concat(ExtraSwitches(extra));
     }
 
@@ -268,7 +273,7 @@ internal static unsafe partial class CefRuntime
         try
         {
             if (CefString.Read(processType) != "") return;   // the browser process only
-            foreach (var (name, value) in Switches(_windowSystem, Environment.GetEnvironmentVariable("HULTUI_CEF_SWITCHES")))
+            foreach (var (name, value) in Switches(_windowSystem, Environment.GetEnvironmentVariable("HULTUI_CEF_SWITCHES"), _sandboxed != false))
             {
                 var n = CefString.Make(name);
                 if (value is null) cl->append_switch(cl, &n);
@@ -368,8 +373,30 @@ internal static unsafe partial class CefRuntime
     /// <summary>
     /// CEF's UI thread: the request context for a folder inside the profile, made the first time
     /// and kept for the process (string documents served in it too); null for the profile itself.
+    /// A view that loads only own content gets one sharing that storage, with the filter on
+    /// requests that have no page (<see cref="CefView.OwnContentContextHandler"/>).
     /// </summary>
-    public static cef_request_context_t* ContextFor(string? childPath)
+    public static cef_request_context_t* ContextFor(string? childPath, bool ownContentOnly)
+    {
+        if (!ownContentOnly) return ContextFor(childPath);
+        var key = "own content:" + childPath;
+        if (Contexts.TryGetValue(key, out var existing)) return (cef_request_context_t*)existing;
+        cef_request_context_t* basis;
+        if (childPath is null) basis = Capi.cef_request_context_get_global_context();   // a new reference
+        else
+        {
+            basis = ContextFor(childPath);
+            if (basis == null) return null;
+            CefObject.AddRef(basis);   // the call takes a reference; Contexts keeps its own
+        }
+        var context = Capi.cef_request_context_cef_create_context_shared(basis, CefView.OwnContentContextHandler());
+        if (context == null) return null;
+        StringPages.RegisterOn(context);
+        Contexts[key] = (nint)context;
+        return context;
+    }
+
+    private static cef_request_context_t* ContextFor(string? childPath)
     {
         if (childPath is null) return null;
         if (Contexts.TryGetValue(childPath, out var existing)) return (cef_request_context_t*)existing;

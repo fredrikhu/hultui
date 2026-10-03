@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -44,6 +45,18 @@ internal sealed unsafe partial class CefView : IWebEngineView
     private cef_load_handler_t* _load;
     private cef_focus_handler_t* _focus;
     private cef_browser_t* _browser;
+
+    /// <summary>Each live page by its browser's identifier: for handlers CEF calls with the
+    /// browser alone (the content folder's, the string pages').</summary>
+    private static readonly ConcurrentDictionary<int, CefView> ByBrowser = new();
+    private int _browserId;
+
+    /// <summary>The view a browser of CEF's is, or null (none, the developer tools', a closed one).</summary>
+    internal static CefView? ForBrowser(cef_browser_t* browser) =>
+        browser == null ? null : ByBrowser.GetValueOrDefault(browser->get_identifier(browser));
+
+    /// <summary>Whether this view loads only the application's own content.</summary>
+    internal bool OwnContentOnly => _ownContentOnly;
     private cef_browser_host_t* _browserHost;
     private DevToolsSession? _devTools;
     private readonly Dictionary<int, Uri?> _contextOrigins = [];
@@ -236,7 +249,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         settings.background_color = 0xFFFFFFFF;
         var url = CefString.Make("about:blank");
         _appliedScale = ScaleNow();
-        var context = CefRuntime.ContextFor(CefRuntime.ResolveFolder(_options.UserDataFolder).ChildPath);
+        var context = CefRuntime.ContextFor(CefRuntime.ResolveFolder(_options.UserDataFolder).ChildPath, _ownContentOnly);
         if (context != null) CefObject.AddRef(context);   // the call takes a reference; the runtime keeps its own
         int ok = Capi.cef_browser_host_create_browser(&info, CefObject.Give(_client), &url, &settings, null, context);
         CefString.Clear(&url);
@@ -250,6 +263,8 @@ internal sealed unsafe partial class CefView : IWebEngineView
         lock (_gate) disposed = _phase == Phase.Disposed;
         if (_browser != null) return;
         _browser = CefObject.AddRef(browser);
+        _browserId = browser->get_identifier(browser);
+        ByBrowser[_browserId] = this;
         if (disposed)
         {
             // Disposed while CEF was creating it: close it, but after this callback. It runs
@@ -487,7 +502,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         _devTools?.Dispose();
         _devTools = null;
         if (_browserHost != null) { CefObject.Release(_browserHost); _browserHost = null; }
-        if (_browser != null) { CefObject.Release(_browser); _browser = null; }
+        if (_browser != null) { ByBrowser.TryRemove(_browserId, out _); CefObject.Release(_browser); _browser = null; }
         CefObject.Release(_client); _client = null;
         ReleaseDevToolsWindow();
         CefObject.Release(_render); _render = null;
