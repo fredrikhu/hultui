@@ -9,6 +9,35 @@ if (withoutSandbox >= 0) return WithoutSandbox.Run(args[withoutSandbox + 1]);
 var contentFolder = Array.IndexOf(args, "--content-folder");
 if (contentFolder >= 0) return ContentFolderProbe.Run(args[contentFolder + 1]);
 
+// A view hidden before CEF has started, as an element's first frame can do: the call has no
+// browser to reach yet, and the page must come up hidden all the same (the review of 2026-10-03).
+if (args.Contains("--hidden-before-start"))
+{
+    using var hiddenEngine = new CefEngine();
+    var profile = Path.Combine(Path.GetTempPath(), $"hultui-hidden-{Environment.ProcessId}");
+    CefRuntime.ShutDown += _ => { try { Directory.Delete(profile, recursive: true); } catch (IOException) { } };
+    var events = new System.Collections.Concurrent.ConcurrentQueue<HultUI.WebView.WebEngineEvent>();
+    var view = (CefView)hiddenEngine.CreateView(new HultUI.WebView.WebViewOptions { UserDataFolder = profile });
+    view.Event += events.Enqueue;
+    view.Event += e => { if (e is HultUI.WebView.WebEngineEvent.NavigationStarting s) s.Request.Complete(); };
+    view.Attach(new Host());
+    view.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 300, 200), 1f));
+    view.SetVisible(false);   // CEF is starting: no browser yet
+    Console.WriteLine("CEF running when hidden: " + CefRuntime.IsRunning);
+    var end = DateTime.UtcNow.AddSeconds(20);
+    while (!events.Any(e => e is HultUI.WebView.WebEngineEvent.Ready) && DateTime.UtcNow < end) Thread.Sleep(20);
+    view.NavigateToString("<title>t</title>");
+    while (!events.OfType<HultUI.WebView.WebEngineEvent.TitleChanged>().Any() && DateTime.UtcNow < end) Thread.Sleep(20);
+    Console.WriteLine("at start: " + view.ExecuteScriptAsync("document.visibilityState").Result);
+    view.SetVisible(true);
+    Thread.Sleep(500);
+    Console.WriteLine("shown: " + view.ExecuteScriptAsync("document.visibilityState").Result);
+    view.Dispose();
+    Thread.Sleep(500);
+    Console.Out.Flush();
+    return 0;
+}
+
 var engine = new CefEngine();
 if (!engine.Availability.IsAvailable)
 {

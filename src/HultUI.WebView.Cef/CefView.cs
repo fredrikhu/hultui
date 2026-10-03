@@ -169,7 +169,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
     private void UseSharedFrames(string? windowSystem)
     {
         if (_frames is not null || _host is not { } host || windowSystem != "wayland" || !ZeroCopyAllowed) return;
-        _frames = new CefFrames(host, () => OnUi(() =>
+        _frames = new CefFrames(host, () => OnUiIfBrowser(() =>
         {
             if (_browserHost != null) _browserHost->invalidate(_browserHost, cef_paint_element_type_t.PET_VIEW);
         }));
@@ -198,6 +198,20 @@ internal sealed unsafe partial class CefView : IWebEngineView
                 catch (Exception ex) { CefLog.Error("posted work", ex); }
             }))
             CefLog.Note("CEF is not running; a call to the page was dropped.");
+    }
+
+    /// <summary>
+    /// <see cref="OnUi"/> for a call whose state the view has already kept, which the browser
+    /// takes up when it is made: before CEF runs there is no browser to tell, and nothing is
+    /// dropped (visibility, applied in <see cref="Created"/>; the frames' mode, in which the
+    /// first frame is painted). The sample's first frame comes while CEF is still starting.
+    /// </summary>
+    private void OnUiIfBrowser(Action work)
+    {
+        bool early;
+        lock (_gate) early = _phase is Phase.Waiting or Phase.Starting;
+        if (early && !CefRuntime.IsRunning) return;
+        OnUi(work);
     }
 
     private void CreateBrowser() => OnUi(() =>
@@ -353,7 +367,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
     public void SetVisible(bool visible)
     {
         lock (_gate) _visible = visible;
-        OnUi(() =>
+        OnUiIfBrowser(() =>
         {
             if (_browserHost != null) _browserHost->was_hidden(_browserHost, visible ? 0 : 1);
         });
