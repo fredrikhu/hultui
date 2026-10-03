@@ -751,6 +751,27 @@ the engine's, written down where an application will read them, and accepted.
    `[LinuxFact]`.** Windows CI runs the whole solution, so this is the second time it would
    have gone red at the next merge.
 
+## Review of step 5.5 (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there: every suite green,
+the real-window GPU tests too (23, among them the Vulkan probe's two WebView2 pages after its
+change), and no build warning the branch added. **It stands.** Checked in particular: the ring
+(CEF writes neither the newest slot nor the one being read, and HultUI moves its read to
+another slot only after the GPU has finished the last one, so with three slots a write never
+waits and never overtakes a read); the late `UseGpuRenderer`, which works because the element
+reads `Frames` on every draw; and the signal fix (every action saved, only Chromium's changes
+put back, judged by `dladdr` against libcef, after .NET has installed its `SIGCHLD` handler).
+
+1. **Signals Chromium sets after start-up would not be put back.** The restore runs once, at
+   `on_context_initialized`, and the test compares handlers right after `Start`, before any
+   page. If Chromium installs a handler when the first browser or its GPU process comes up,
+   nothing restores it and the comparison does not see it; only the behaviour checks, which do
+   run after a page, would. Run the restore again once the first page has drawn, and take the
+   test's "after" after a page has drawn too.
+2. **The page-and-video variant of the W7 check** is worth one run if a libmpv is to hand
+   (Fedora's `mpv-libs`): it is the one place the mpv backend's hidden-context interop and
+   CEF's share a Vulkan window. Not a blocker.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
