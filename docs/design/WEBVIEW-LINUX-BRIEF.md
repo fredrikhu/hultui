@@ -1241,6 +1241,37 @@ sandbox means: a page that exploits a browser bug runs with the user's full righ
     application's namespace. Untrusted, the conflict and the switch behave as on Fedora. As
     root, the default is refused and `Sandbox = false` draws.
 
+## Review of running without the sandbox (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there. **It stands**: the
+filter fails closed (an error while deciding cancels), a redirect cannot leave own content,
+the mode is one per process and says so, and the Fedora and Ubuntu runs prove the renderers
+really run unsandboxed rather than that a check was skipped.
+
+What the tests do not cover yet, each a way past a per-page request filter:
+
+1. **WebSockets.** The brief listed them; the tests load an image, a script, a `fetch` and an
+   iframe. Whether CEF hands a WebSocket handshake to `get_resource_request_handler` is not
+   certain. Test a `new WebSocket('wss://…')` from a string page. If it opens, the filter
+   does not see WebSockets, and the next items matter more.
+2. **Requests with no page.** Service workers, shared workers and the like make requests that
+   CEF hands to the *request context's* handler (no browser), not to the page's client. With
+   one mode per process, put the same filter on the request context handler
+   (`cef_request_context_handler_t::get_resource_request_handler`) as well, so worker traffic
+   is covered. Test with a service worker registered by own content that fetches from the
+   internet.
+3. **WebRTC** reaches its STUN and TURN servers over UDP, which no request filter sees.
+   Without the sandbox, turn it off for the process with Chromium's own switches (find the
+   right ones for 146 and 154: a policy that forbids non-proxied UDP, or WebRTC's features
+   disabled), and test that an `RTCPeerConnection` gathers no candidates.
+4. **Defence in depth for string pages:** without the sandbox, serve them with a stricter
+   `Content-Security-Policy` beside the `sandbox` directive (`default-src 'self' data: blob:`;
+   `connect-src` the same), so the page refuses outside connections before any request
+   exists. The same applies to `app.local` the day it serves anything.
+
+None changes the API. Fix what the tests find, and write the result down here and in
+`docs/WEBVIEW.md`'s "Running without the sandbox (Linux)".
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
