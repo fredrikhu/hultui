@@ -549,8 +549,12 @@ action routing by `ElementId`. Neither bridge needs a second kind of node.
   whole and the UI thread reads it without a lock.
 - **`AccessibleContentAction`**: `Invoke`, `Toggle`, `Select`, `Focus`, `SetValue`.
 - **`ContentNodeId`**: like `VirtualItemId`, an `ElementId` that marks a data node (bit 62;
-  bit 63 is the virtual item's), packing the owner's id and the key. So a node keeps its
+  bit 63 is the virtual item's), packing the owner's slot and the key. So a node keeps its
   identity, and its AT-SPI object path, across rebuilds while the page keeps the node.
+  The slot (`AccessibleOwnerSlots`, 2026-10-03) stands in for the owner's own id, which
+  first went in truncated to 30 bits: element ids count every element ever built, and an
+  application running for months outgrows that. An owner takes a slot when it first
+  publishes nodes and gives it back when it unmounts; slots are never reused.
 - **The builder** adds a source's content under the element's own node, offset and clipped
   like any child: offscreen when outside the visible region.
 - **The router** (`AccessibilityActionRouter`, `HultUI`) decodes a `ContentNodeId` and calls
