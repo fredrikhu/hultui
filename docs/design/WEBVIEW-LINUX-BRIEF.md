@@ -907,6 +907,9 @@ SHA-1, instead of every application's packaging doing it.
    360 MB of Linux CEF in every output folder. Now: a Linux RID, or no RID when the build runs
    on Linux. **Re-run your throwaway application** (a RID-less build and a `-r linux-x64`
    publish, both on this machine) to confirm it still lands.
+   **Re-run 2026-10-03, with the package repacked:** the RID-less build and the
+   `-r linux-x64` publish both found CEF 154 in their own `cef/` and ran a page; a
+   `-r win-x64` build of the same application now has no `cef/`.
 3. **Fixed on the Windows side: the natives README** now says what a page cannot play with
    the bundled CEF (H.264, AAC), as this brief asked application authors to be told.
 4. **AppArmor: agree with (a), plus detection, and (c) only as an explicit opt-in.** Two
@@ -921,6 +924,8 @@ SHA-1, instead of every application's packaging doing it.
    sandbox!", is worth having before 5.7's machines: run it once by hand
    (`gh workflow run "cef natives" --ref claude/webview-component-repo-62ba8b`) and write
    down what it said.
+   **Not run from here:** this machine has no `gh`, and the repository's API needs a token it
+   does not have. The Ubuntu VM gives the same answer for a real Ubuntu kernel (step 7).
 6. **The Ubuntu sandbox check needs a virtual machine, not a container.** In an LXC container
    the kernel and its AppArmor are the Proxmox host's, so whether Ubuntu's limit applies there
    says nothing about an Ubuntu desktop. Debian can be a container, as Fedora is.
