@@ -57,8 +57,9 @@ public enum TerminalConnectionTraits
 
     /// <summary>
     /// The other end reads keys more reliably as win32-input-mode events (<c>CSI ? 9001 h</c>)
-    /// than as VT bytes — ConPTY, where a bare ESC races with the key after it. Honoured once
-    /// the element speaks that mode (docs/design/TERMINAL.md, step 6).
+    /// than as VT bytes — ConPTY, where a bare ESC races with the key after it. While the
+    /// program has that mode on, Escape, Alt with a key, Ctrl+Space and Ctrl+Backspace are sent
+    /// that way; everything else stays VT, and typed text UTF-8.
     /// </summary>
     WantsWin32Input = 2,
 }

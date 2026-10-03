@@ -45,6 +45,7 @@ public sealed class TerminalController : IDisposable
     internal const int BytesPerCell = 25;
 
     private readonly ITerminalConnection _connection;
+    private readonly bool _win32Input;
     private readonly ITerminalEmulator _emulator;
     private readonly object _gate = new();
     private readonly BlockingCollection<byte[]> _outbox = new();
@@ -74,6 +75,7 @@ public sealed class TerminalController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(connection);
         _connection = connection;
+        _win32Input = (connection.Traits & TerminalConnectionTraits.WantsWin32Input) != 0;
         Options = options ?? new TerminalOptions();
         _scrollback = new(Options.Scrollback);
         _maxScrollbackBytes = new(Options.MaxScrollbackBytes);
@@ -319,7 +321,7 @@ public sealed class TerminalController : IDisposable
 
     internal string? EncodeKey(in TerminalKey key)
     {
-        lock (_gate) return _disposed ? null : _emulator.EncodeKey(key);
+        lock (_gate) return _disposed ? null : _emulator.EncodeKey(key, _win32Input);
     }
 
     internal string? EncodeMouse(in TerminalMouse mouse)

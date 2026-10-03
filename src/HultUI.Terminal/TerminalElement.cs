@@ -18,9 +18,14 @@ namespace HultUI.Terminal;
 /// scrollback. A shortcut — Ctrl, Alt or Super held, or F1–F12 — is offered to the element's
 /// ancestors first, as a web view does; an application handler that stops it keeps it from the
 /// program. Typed characters arrive as text, through the layout and the input method.</para>
-/// <para><b>AltGr.</b> Windows reports AltGr as Ctrl+Alt, and HultUI cannot yet tell the two
-/// apart. So a Ctrl+Alt key that types a character (<c>@</c> on a Swedish keyboard) sends that
-/// character, and a Ctrl+Alt key that types nothing sends its Ctrl+Alt sequence.</para>
+/// <para><b>Layouts.</b> A chord is the layout's character with Ctrl or Alt, so Ctrl+Z is the
+/// key labelled Z on QWERTZ. AltGr, and Ctrl+Alt (which Windows takes for AltGr), send the
+/// character they type (<c>@</c> on a Swedish keyboard); one that types nothing sends its Ctrl+Alt
+/// sequence. A key sent as itself never also types its text (Ctrl+Space, a keypad key in
+/// application keypad mode).</para>
+/// <para><b>Windows.</b> When the connection is ConPTY and the program asked for
+/// win32-input-mode, Escape, Alt with a key, Ctrl+Space and Ctrl+Backspace go as Windows key
+/// events, which ConPTY cannot misread; the rest stays VT.</para>
 /// <para><b>Pointer.</b> When the program tracks the mouse, presses, drags and the wheel go to
 /// it; Shift held keeps them for selection. Otherwise a drag selects, a double click selects a
 /// word, a triple click a line, and the wheel scrolls the scrollback — or, on a full-screen
@@ -171,37 +176,63 @@ public sealed partial class TerminalElement : Element
 
     // ──── Keys and text ────
 
-    /// <summary>A Ctrl+Alt key held back until the frame's events are in: AltGr arrives as
-    /// Ctrl+Alt with the character it typed right behind it, and then the character wins.</summary>
+    /// <summary>A Ctrl+Alt key held back until the frame's events are in, on a platform that
+    /// cannot say whether a key typed text: AltGr arrives there as Ctrl+Alt with the character it
+    /// typed right behind it, and then the character wins.</summary>
     private string? _heldChord;
+
+    /// <summary>The text of a key that was sent as itself (or taken by the application), which
+    /// arrives next as text input and must not be typed as well.</summary>
+    private string? _keyText;
 
     private void OnKeyDown(KeyDownEvent e)
     {
         if (_controller is null) return;
         e.StopPropagation = true;
+        _keyText = null;
         var mods = e.Modifiers & (KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super);
 
-        if (HandleOwnKey(e.Key, mods)) return;
+        if (HandleOwnKey(e, mods)) { _keyText = e.Text; return; }
 
         if (IsShortcut(e.Key, mods) && Parent is { } parent)
         {
-            var offered = new KeyDownEvent { Key = e.Key, Modifiers = e.Modifiers, IsRepeat = e.IsRepeat, ScanCode = e.ScanCode };
+            var offered = e.CopyUnhandled();
             EventDispatcher.Dispatch(offered, parent);
-            if (offered.StopPropagation || offered.Handled) return;
+            // Taken by the application: the program gets neither the key nor what it typed.
+            if (offered.StopPropagation || offered.Handled) { _keyText = e.Text; return; }
         }
 
-        var bytes = _controller.EncodeKey(new TerminalKey(e.Key, mods, e.IsRepeat, e.ScanCode));
+        bool ctrlAlt = (mods & (KeyModifiers.Ctrl | KeyModifiers.Alt)) == (KeyModifiers.Ctrl | KeyModifiers.Alt);
+        bool altGr = (e.ModifierKeys & ModifierKeys.AltGr) != 0;
+        // AltGr, or Ctrl+Alt, which Windows takes for AltGr, typed a character: the character is
+        // what was meant, and it comes as text.
+        if (e.Text is { Length: > 0 } && (altGr || ctrlAlt)) return;
+
+        var key = new TerminalKey(e.Key, e.Modifiers, e.IsRepeat, e.ScanCode, e.LayoutKey, e.ModifierKeys);
+        var bytes = _controller.EncodeKey(key);
         if (bytes is null) return;
 
-        if ((mods & (KeyModifiers.Ctrl | KeyModifiers.Alt)) == (KeyModifiers.Ctrl | KeyModifiers.Alt)
-            && TerminalKeys.IsPrintable(e.Key))
+        if (e.Text is { Length: > 0 })
         {
-            // Possibly AltGr. Events are dispatched before posted work runs, so the text this key
-            // typed (if any) arrives before the flush below.
-            bool queued = _heldChord is not null;
-            _heldChord = bytes;
-            if (!queued) Application.InvokeOnMainThread(FlushHeldChord);
-            return;
+            // The key is sent as itself (Ctrl+Space, a keypad key, Alt+key where Alt types):
+            // what it typed would send it twice.
+            _keyText = e.Text;
+        }
+        else if (e.Text is null && TerminalKeys.TypesText(key))
+        {
+            // The platform cannot say whether text follows.
+            if ((ctrlAlt || altGr) && !TerminalKeys.IsKeypad(e.Key))
+            {
+                // Possibly AltGr. Events are dispatched before posted work runs, so the text this
+                // key typed (if any) arrives before the flush below.
+                bool queued = _heldChord is not null;
+                _heldChord = bytes;
+                if (!queued) Application.InvokeOnMainThread(FlushHeldChord);
+                return;
+            }
+            // A keypad key that types: its text is on the way, and is what it sends anyway
+            // outside application keypad mode, which needs the platform to say.
+            if (TerminalKeys.IsKeypad(e.Key) && (mods & (KeyModifiers.Ctrl | KeyModifiers.Alt)) == 0) return;
         }
 
         SendInput(bytes);
@@ -219,6 +250,11 @@ public sealed partial class TerminalElement : Element
         e.StopPropagation = true;
         _heldChord = null; // the key typed a character: it was AltGr, not a chord
         _preedit = null;
+        if (_keyText is { } sent)
+        {
+            _keyText = null;
+            if (sent == e.Text) return;
+        }
         if (!string.IsNullOrEmpty(e.Text)) SendInput(e.Text);
     }
 
@@ -240,22 +276,30 @@ public sealed partial class TerminalElement : Element
         c.Send(bytes);
     }
 
-    /// <summary>The element's own keys: copy, paste, and scrolling the scrollback.</summary>
-    private bool HandleOwnKey(KeyCode key, KeyModifiers mods)
+    /// <summary>The element's own keys: copy, paste, find, and scrolling the scrollback. The
+    /// letters are the layout's, so Ctrl+Shift+C is the key labelled C on Dvorak too.</summary>
+    private bool HandleOwnKey(KeyDownEvent e, KeyModifiers mods)
     {
         const KeyModifiers CtrlShift = KeyModifiers.Ctrl | KeyModifiers.Shift;
-        switch (key)
+        switch (LetterOf(e))
         {
-            case KeyCode.C when mods == CtrlShift:
+            case 'c' when mods == CtrlShift:
+                Copy();
+                return true;
+            case 'v' when mods == CtrlShift:
+                PasteFromClipboard();
+                return true;
+            case 'f' when mods == CtrlShift && FindRequested is not null:
+                FindRequested();
+                return true;
+        }
+        switch (e.Key)
+        {
             case KeyCode.Insert when mods == KeyModifiers.Ctrl:
                 Copy();
                 return true;
-            case KeyCode.V when mods == CtrlShift:
             case KeyCode.Insert when mods == KeyModifiers.Shift:
                 PasteFromClipboard();
-                return true;
-            case KeyCode.F when mods == CtrlShift && FindRequested is not null:
-                FindRequested();
                 return true;
             case KeyCode.PageUp when mods == KeyModifiers.Shift:
                 _controller!.ScrollViewport(-Math.Max(1, _snapshot.Rows - 1));
@@ -267,6 +311,16 @@ public sealed partial class TerminalElement : Element
                 return false;
         }
     }
+
+    /// <summary>The Latin letter a key types, lower case: the layout's when the platform said,
+    /// else the one at its position on a US keyboard. 0 for any other key.</summary>
+    private static char LetterOf(KeyDownEvent e) => e.LayoutKey switch
+    {
+        >= 'a' and <= 'z' => (char)e.LayoutKey,
+        >= 'A' and <= 'Z' => (char)(e.LayoutKey + 32),
+        0 when e.Key is >= KeyCode.A and <= KeyCode.Z => (char)('a' + (e.Key - KeyCode.A)),
+        _ => '\0',
+    };
 
     /// <summary>Keys an application might bind: offered to it before the program sees them.</summary>
     private static bool IsShortcut(KeyCode key, KeyModifiers mods) =>

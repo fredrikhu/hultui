@@ -21,6 +21,7 @@ internal static class CefKeys
         KeyCode.CtrlLeft => "ControlLeft", KeyCode.CtrlRight => "ControlRight",
         KeyCode.SuperLeft => "MetaLeft", KeyCode.SuperRight => "MetaRight",
         KeyCode.Equals => "Equal", KeyCode.Backtick => "Backquote", KeyCode.Menu => "ContextMenu",
+        KeyCode.NumpadEquals => "NumpadEqual",
         KeyCode.Unknown => null,
         _ => key.ToString(),   // Home, End, PageUp, Backspace, Enter, Tab, Escape, Space, ShiftLeft, Comma, …
     };
@@ -34,8 +35,8 @@ internal static class CefKeys
 
     /// <summary>
     /// The Windows virtual key. Modifiers are given without their side (VK_SHIFT, not
-    /// VK_LSHIFT), as cefclient does; the side goes in the flags. A key HultUI has no name for
-    /// is looked up by its DOM code (the keypad, F13 and up, the international keys).
+    /// VK_LSHIFT), as cefclient does; the side goes in the flags. The keypad, F13 and up and a
+    /// key HultUI has no name for (the international keys) are looked up by their DOM code.
     /// </summary>
     public static int WindowsKeyCode(KeyCode key, ushort scanCode) => key switch
     {
@@ -55,7 +56,7 @@ internal static class CefKeys
         KeyCode.Minus => 0xBD, KeyCode.Equals => 0xBB, KeyCode.Backtick => 0xC0,
         KeyCode.CapsLock => 0x14, KeyCode.NumLock => 0x90, KeyCode.ScrollLock => 0x91,
         KeyCode.PrintScreen => 0x2C, KeyCode.Pause => 0x13, KeyCode.Menu => 0x5D,
-        _ => WindowsKeyCode(DomCodes.Code(scanCode)),
+        _ => WindowsKeyCode(scanCode != 0 ? DomCodes.Code(scanCode) : DomCode(key)),
     };
 
     private static int WindowsKeyCode(string? code) => code switch
@@ -78,6 +79,7 @@ internal static class CefKeys
         KeyCode.Tab => '\t',
         KeyCode.Backspace => '\b',
         KeyCode.Escape => '\x1b',
+        KeyCode.NumpadEnter => '\r',
         _ when DomCodes.Code(scanCode) == "NumpadEnter" => '\r',
         _ => '\0',
     };

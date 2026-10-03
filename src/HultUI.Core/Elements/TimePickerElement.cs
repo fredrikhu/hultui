@@ -330,9 +330,9 @@ public class TimePickerElement : Element
     {
         if (!_focused) return;
 
-        if (evt.Key is >= KeyCode.Digit0 and <= KeyCode.Digit9)
+        if (evt.Digit is { } digit)
         {
-            TypeDigit(evt.Key - KeyCode.Digit0);
+            TypeDigit(digit);
             evt.StopPropagation = true;
             return;
         }

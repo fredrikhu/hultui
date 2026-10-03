@@ -7,6 +7,8 @@ using System.Text;
 //   echo         prints READY, counts the lines it reads until one is END, prints the count
 //   flood N      writes N MiB of 80-column lines, then FLOOD-DONE
 //   wait         prints READY and reads until its input ends
+//   events       (Windows) prints READY, then each console input record it reads: "SIZE c r INFO c r"
+//                for a resize, "KEY vk scan char state" for a key press; ends at q
 Console.OutputEncoding = Encoding.UTF8;
 Console.InputEncoding = Encoding.UTF8;
 var output = Console.Out;
@@ -66,7 +68,10 @@ switch (args.FirstOrDefault())
         while (Console.In.ReadLine() is not null) { }
         return 0;
 
+    case "events" when OperatingSystem.IsWindows():
+        return ConsoleEvents.Run(output);
+
     default:
-        Console.Error.WriteLine("usage: args|exit|size|echo|flood|wait");
+        Console.Error.WriteLine("usage: args|exit|size|echo|flood|wait|events");
         return 2;
 }

@@ -987,6 +987,17 @@ public sealed class Window : IOverlayHost, IDisposable
         return overlayTarget ?? (_root is null ? null : HitTester.HitTest(_root, pos));
     }
 
+    private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key) => new()
+    {
+        Key = key.KeyCode,
+        Modifiers = key.Modifiers,
+        IsRepeat = key.IsRepeat,
+        ScanCode = key.ScanCode,
+        LayoutKey = key.LayoutKey,
+        ModifierKeys = key.ModifierKeys,
+        Text = key.Text,
+    };
+
     private void HandleInputEvent(InputEvent evt)
     {
         if (_root is null) return;
@@ -1499,7 +1510,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
                     var tabTarget = _focusManager.FocusedElement ?? _root;
-                    var tabEvent = new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat, ScanCode = key.ScanCode };
+                    var tabEvent = NewKeyDown(key);
                     EventDispatcher.Dispatch(tabEvent, tabTarget);
                     if (tabEvent.StopPropagation)
                         break;
@@ -1529,9 +1540,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     // changes the highlight on labels other than the focused one — so the
                     // whole realized group repaints, exactly as it does after a drag.
                     int before = _activeTextGroup?.Version ?? 0;
-                    EventDispatcher.Dispatch(
-                        new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat, ScanCode = key.ScanCode },
-                        target);
+                    EventDispatcher.Dispatch(NewKeyDown(key), target);
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
                 }

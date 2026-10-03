@@ -42,11 +42,12 @@ internal sealed class Term : IDisposable
     /// <summary>The element filling a <paramref name="width"/> × <paramref name="height"/> window,
     /// its grid sized from it, and focused.</summary>
     public static Term Shown(TerminalOptions? options = null, int width = 400, int height = 300,
-        bool recording = false, Func<TerminalElement, Element>? around = null)
+        bool recording = false, Func<TerminalElement, Element>? around = null,
+        TerminalConnectionTraits traits = TerminalConnectionTraits.None)
     {
         var session = HeadlessSession.Create(width, height,
             options: recording ? new HeadlessOptions { RecordDrawCalls = true } : null);
-        var connection = new FakeConnection();
+        var connection = new FakeConnection(traits);
         var controller = new TerminalController(connection, options);
         var element = TerminalElement.New(controller).FlexGrow(1);
         session.Window.SetRoot(around?.Invoke(element) ?? Flex.Column().Children(element));

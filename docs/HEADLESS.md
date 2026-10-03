@@ -92,7 +92,13 @@ window.Drag(from, to, steps: 8);          // fires drag threshold + per-move eve
 window.Wheel(x, y, 0, -3);                // negative deltaY scrolls down
 window.PressKey(KeyCode.Tab, KeyModifiers.Shift);
 window.TypeText("hello");                 // into the focused element
+// A key as SDL describes it on a QWERTZ keyboard: the layout's character, which Ctrl key,
+// and the text it typed (empty: none). Text that is not empty is also sent after the key.
+window.PressKey(KeyCode.Y, KeyModifiers.Ctrl, layoutKey: 'z', modifierKeys: ModifierKeys.CtrlLeft, text: "");
 ```
+
+`PressKey` without those leaves them unknown (0, `None`, null), which is what the WinForms
+host gives; code that reads them must fall back, and a test of that code should cover both.
 
 Events enter through the same single funnel as real SDL input, so hit-testing, capture, hover enter/leave, focus-on-click, drag thresholds, and click synthesis all exercise production code paths. `window.Clipboard` and `window.TextInputHost` are in-memory recorders — Ctrl+C lands in `Clipboard.Text`, and `TextInputHost.IsTextInputActive` asserts the IME was armed on focus.
 

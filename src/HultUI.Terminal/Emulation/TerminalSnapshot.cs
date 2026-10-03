@@ -181,8 +181,10 @@ internal readonly record struct TerminalPosition(long Line, int Column) : ICompa
     public static bool operator >=(TerminalPosition a, TerminalPosition b) => a.CompareTo(b) >= 0;
 }
 
-/// <summary>A key as the element hands it over: HultUI's key event, unchanged.</summary>
-internal readonly record struct TerminalKey(KeyCode Key, KeyModifiers Modifiers, bool IsRepeat = false, ushort ScanCode = 0);
+/// <summary>A key as the element hands it over: HultUI's key event, unchanged, its lock
+/// modifiers (NumLock) included.</summary>
+internal readonly record struct TerminalKey(KeyCode Key, KeyModifiers Modifiers, bool IsRepeat = false, ushort ScanCode = 0,
+    int LayoutKey = 0, ModifierKeys ModifierKeys = ModifierKeys.None);
 
 internal enum TerminalMouseAction : byte { Down, Up, Move, WheelUp, WheelDown }
 
@@ -222,7 +224,11 @@ internal interface ITerminalEmulator : IDisposable
 
     /// <summary>The bytes a key sends, or null for none: printable keys without Ctrl or Alt send
     /// their text through <c>TextInput</c> instead.</summary>
-    string? EncodeKey(in TerminalKey key);
+    /// <param name="key">The key.</param>
+    /// <param name="win32Input">The connection asked for win32-input-mode keys
+    /// (<see cref="TerminalConnectionTraits.WantsWin32Input"/>): used for the keys whose VT bytes
+    /// it must guess at, while the program has the mode on.</param>
+    string? EncodeKey(in TerminalKey key, bool win32Input);
 
     /// <summary>The bytes a pointer event sends when the program tracks the mouse; null otherwise.</summary>
     string? EncodeMouse(in TerminalMouse mouse);

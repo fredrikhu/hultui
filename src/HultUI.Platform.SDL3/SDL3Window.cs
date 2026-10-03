@@ -480,6 +480,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // Register in the static window registry
         WindowId = SDL_GetWindowID(_window);
         _registry[WindowId] = this;
+        EventTranslator.Window = _window;
 
         // Register event watcher for live resize rendering.
         // SDL_AddEventWatch fires even during the modal resize loop
@@ -1684,6 +1685,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         if (_window != null)
         {
+            EventTranslator.Window = null;
             SDL_DestroyWindow(_window);
             _window = null;
         }

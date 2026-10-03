@@ -1,13 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The SDL3 platform's pure decisions, tested without a window or a GPU. Anything that
-       needs either belongs in HultUI.UiTests. -->
+  <!-- The SDL3 platform's pure decisions, tested without a window or a GPU, and its event
+       translation against SDL's dummy video driver, which needs no display. Anything that
+       needs a real window or a GPU belongs in HultUI.UiTests. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

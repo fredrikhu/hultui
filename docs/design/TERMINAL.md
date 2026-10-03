@@ -59,8 +59,8 @@ spike ran the fix; "proposed" means it is design only.
 | 7 | The engine has no damage tracking. | Copy the viewport out under the lock every frame and draw all of it. No row cache: step 2 measured drawing fast enough without one | element | built in step 2; the copy costs 12.6 µs |
 | 8 | SGR 53/55 (overline) never reach a cell. | Two switch cases | engine patch 0002 | measured |
 | 9 | Alt+Enter and Alt+Backspace drop the Alt; Ctrl+/ sends `/`; Ctrl+Backspace equals Backspace. | Fixed in the legacy encoder | engine patch 0003 | measured: 49/49 |
-| 10 | HultUI's key event is a scancode position: Ctrl+letter is wrong on AZERTY/QWERTZ; there are no keypad codes; AltGr looks like Ctrl+Alt. | Seams K1–K4 | framework | proposed |
-| 11 | A bare ESC through the out-of-band ConPTY races: the first key after a resize was lost in 2–9 runs of 10. | Send ESC (and the other ambiguous keys) as win32-input-mode events when ConPTY asks for them | element, Windows | measured for ESC: 10/10 |
+| 10 | HultUI's key event is a scancode position: Ctrl+letter is wrong on AZERTY/QWERTZ; there are no keypad codes; AltGr cannot be told from Alt (through SDL, Windows' AltGr is right Alt alone). | Seams K1–K4: the layout key, the modifier keys' sides and AltGr, keypad and F13–F24 codes, and the text a key typed | framework; element | built in step 6; AltGr+2 sent `ESC 2 @` through SDL until then, and each piece's test fails without it |
+| 11 | Through ConPTY, Ctrl+Space reaches a console program as the wrong key (virtual key 0x40, no character), and Escape, Alt+key and Ctrl+Backspace each arrive after a bare press of their modifier. (The spike also blamed a bare ESC for the first key lost after a resize; step 6 found that is Git for Windows' runtime, problem 22.) | Send Escape, Alt+key, Ctrl+Space and Ctrl+Backspace as win32-input-mode events when ConPTY asks for them | element, Windows | built in step 6: a native console program reads all four exactly, and its test fails without them |
 | 12 | Engine facts a renderer must know: default colours are palette 256/257, the deferred wrap is X == Cols, and a width-2 cell can end a row. | Renderer rules | element | built in step 2 |
 | 13 | HultUI has no positioned-glyph-run or offscreen-surface API for elements. | One `DrawText` per row, with a span per style. Seams T2/T3 were for the case where that was too slow, and it is not | element | measured in step 2: about 7 ms a frame for a 207 × 58 full-screen redraw |
 | 14 | HultUI has no monospace default font and no cell-metrics API. | Seam T1: `FontFamilies.Monospace`, family lists, `MeasureFont`, `HasGlyph` | framework | built in step 3 |
@@ -71,6 +71,7 @@ spike ran the fix; "proposed" means it is design only.
 | 19 | ConPTY keeps the output open after its program exits, until the pseudoconsole is closed, so the controller, which reports an exit when the output ends, never would. | The connection closes the pseudoconsole once the output has been quiet for 100 ms after the exit | `HultUI.Terminal.Pty` | measured in step 4: the output stayed open in 5 of 5 programs; with the fix the exit is reported within 0.7 s of the last output, and the test fails without it |
 | 20 | A quick program can end before anyone listens: `cmd /c echo hi` is gone in 60 ms, before Porta.Pty's exit event has a handler or the controller exists. A plain event loses that exit for good. | `ConnectionExit`: raised once, and a handler added after the end is called at once. Every connection in the packages uses it; `PtyConnection` also asks Porta.Pty whether the program already ended | `HultUI.Terminal`, `HultUI.Terminal.Pty` | found in step 4 (an exit reported with no code); the test fails without it |
 | 21 | A background process a program started can hold a pseudoterminal open after the program exits (`sleep 60 &` then `exit 4`). | The controller reports the exit anyway one second after it, and leaves the input open to whatever still reads it | controller | built in step 4; the test fails without it |
+| 22 | Git for Windows' MSYS2 runtime (3.6.6 in Git 2.53; unchanged in 3.6.11 and in Cygwin's `main`) misses about one resize in six until the next input arrives, and throws away that input's first character: bash runs `cho` for `echo`, vim loses a `:`. Both ConPTYs alike, so Windows Terminal very likely too. | **None in the terminal.** A race in the runtime's console code: one thread drops its lock to send SIGWINCH, the other takes the resize, and the first then blocks in a read that discards the next input record. Every sacrificial record a terminal could send fails: key-ups and modifier presses never reach that queue (the program reads VT input); a same-size resize is no event; a focus report reaches only programs that asked for one, and leaves `[I` behind as a command; a real resize re-arms the race | upstream (msys2-runtime), not reported | measured in step 6: 5 of 30 resizes with bash, twice; a native console program lost none of 40. An opt-in test re-measures it |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
 therefore built from source: upstream at a pinned commit with patches 0001–0005 applied, never the
@@ -363,15 +364,46 @@ The render loop already paces to the display.
 
 **Keys.** `KeyDownEvent` → `TerminalKey` → `emulator.EncodeKey` → the writer queue. This is the
 spike's `TerminalKeys` mapping, and it matched xterm's encodings on 45 of 49 keys, 49 of 49 with
-patch 0003:
+patch 0003. Step 6 gave it the framework's layout key, the modifier keys' sides, the keypad and the
+text a key typed (seams K1–K4):
 
 - **Printables.** Printable keys without Ctrl or Alt send nothing on KeyDown; their text comes
   from `TextInputEvent`, as UTF-8. That way layouts, dead keys and IMEs work, and nothing is typed
   twice.
+- **Chords are the layout's** (K1). A Ctrl or Alt chord is the character
+  `KeyDownEvent.LayoutKey` says, Shift applied:
+  - Ctrl+Z is the key labelled Z on QWERTZ, which sent Ctrl+Y before;
+  - Alt+Shift+comma is `ESC <` (readline's M-<), which sent `ESC ,`;
+  - Alt on the ISO key beside the left Shift (`<` on a Swedish keyboard), which `KeyCode` has no
+    name for, sends `ESC <`; it sent nothing.
+
+  The element's own Ctrl+Shift+C, V and F are the layout's letters too. Where the platform gives
+  no layout key (the WinForms host, headless input), the character at the key's US position.
+- **A key and its text are one** (K4). A key the element sends as itself never also types the
+  text it produced: Ctrl+Space (Windows types a space for it) sends NUL alone, and a keypad key in
+  application keypad mode its sequence alone. A shortcut an application takes types nothing either.
+- **AltGr** (K2). AltGr, and Ctrl+Alt (which Windows takes for AltGr), send the character they
+  typed (`@` on a Swedish keyboard); one that typed nothing sends its Ctrl+Alt sequence at once.
+  Where the platform cannot say whether text follows (the WinForms host), step 2's hold stays: a
+  Ctrl+Alt key is held back and flushed by work posted to the UI thread, which runs after the
+  frame's input events, so the text a key typed arrives first and drops it.
+  - **Found in step 6:** through SDL, Windows' AltGr never looked like Ctrl+Alt. SDL drops the
+    left Ctrl that Windows fakes ahead of AltGr, so AltGr arrived as right Alt alone, and AltGr+2
+    sent `ESC 2` and then `@`. Step 2's hold, written for Ctrl+Alt, never ran there: its test
+    drove the window with Ctrl+Alt, which is what Windows' own key messages say, not what SDL says.
+- **The keypad** (K3). With NumLock on, the keypad's own keys, which follow application keypad
+  mode (DECKPAM: `ESC O p` to `ESC O y`, `ESC O M` for Enter, `ESC O X` for `=`). With it off,
+  their navigation twins: Home, Up, PageUp, Left, Begin (`CSI E`), Right, End, Down, PageDown,
+  Insert and Delete. The operators and Enter are the keypad's either way. Where the platform cannot
+  say what a key typed, a keypad key that types leaves it to its text, so application keypad mode
+  needs a platform that says (SDL does).
+- **F13 to F20** send VT220's codes (`CSI 25~` to `CSI 34~`); F21 to F24 have none in xterm and
+  send nothing.
 - **Everything else.** Ctrl and Alt combinations, navigation keys, F-keys and Escape are encoded
   from the key.
 - **Kitty.** The kitty keyboard protocol is used when the application pushes it; the engine
-  tracks the flags.
+  tracks the flags. Its encoder reads a web page's key and code, which are `LayoutKey` and
+  `KeyCode`.
 - **Tab** reaches KeyDown before focus traversal (FOCUS.md); the element stops it.
 - **Shortcuts.** Ctrl+Shift+C and Ctrl+Insert (copy), Ctrl+Shift+V and Shift+Insert (paste), and
   Shift+PageUp/PageDown (scroll the scrollback) are the element's own; Ctrl+Shift+F comes with
@@ -379,35 +411,31 @@ patch 0003:
   offered to the ancestors first; a handler that stops one keeps it from the terminal. Built in
   step 2.
 
-**Escape and win32-input-mode on Windows (problem 11).** The out-of-band ConPTY asks for
-win32-input-mode (`CSI ? 9001 h`) at startup.
+**win32-input-mode on Windows (problem 11). Built in step 6.** ConPTY asks for it
+(`CSI ? 9001 h`) at startup. A key sent that way reaches a console program as the input record
+Windows itself would have made.
 
-- **The race.** A bare ESC byte is ambiguous to ConPTY: it may start a sequence. Through Git's
-  vim, the first key after a resize was lost in 2 to 9 runs of 10. Sent as a win32-input-mode key
-  press, ESC was clean 10 of 10.
-- **The plan.** While the connection says `WantsWin32Input` and the emulator's mode is on, send
-  as win32-input-mode events the keys whose VT encodings are ambiguous or lossy: Escape, Alt+key,
-  Ctrl+Space, Ctrl+Backspace. Keep text as UTF-8.
-- **What it needs.** A virtual-key code and a scan code. The scan code is already on
-  `KeyDownEvent` (as a USB HID usage). On Windows the element maps it to a set-1 scan code and
-  then through `MapVirtualKeyW(MAPVK_VSC_TO_VK_EX)`.
-- **Verify** against Windows Terminal (which sends every key this way) with the same vim, before
-  widening it to all keys.
-
-**The framework's key model (problem 10).**
-
-- **Today.** `KeyCode` is translated from the SDL scancode, and nothing reads SDL's layout keycode.
-- **Why that breaks Ctrl+letter.** The element sends what the key's US position types. On QWERTZ,
-  Ctrl+Z (suspend, undo) arrives as Ctrl+Y. AZERTY and Dvorak are worse.
-- **Why it breaks AltGr.** Left and right Alt are one modifier, so AltGr (which Windows reports as
-  Ctrl+Alt) cannot be told from Ctrl+Alt. On a Swedish keyboard `@ $ { [ ] } \ | ~` are all AltGr.
-- **The interim rule,** until K2 lands: when a `TextInputEvent` follows a Ctrl+Alt key, the text
-  wins and the key sends nothing. Seams K1–K4 below.
-  - **How step 2 built it.** A Ctrl+Alt key that would type a character is held back and flushed
-    by work posted to the UI thread. A frame dispatches all of its input events before it runs
-    posted work, so the text a key typed (if any) arrives first and drops the held key. A
-    Ctrl+Alt key that types nothing is sent one pass of the loop late.
-  - The test fails without the hold: AltGr+2 sent the chord's bytes and then `@`.
+- **What goes that way:** Escape, Alt with a key that types (or with Backspace, Enter or Space),
+  Ctrl+Space and Ctrl+Backspace, while the connection says `WantsWin32Input` and the program has
+  the mode on. Everything else stays VT, and text UTF-8.
+- **The event** (`Win32Keys`) is pressed and released at once, and carries:
+  - the virtual key: a letter key's letter, Windows' answer for the scan code on the current
+    layout otherwise (`MapVirtualKeyW`), a US keyboard's off Windows;
+  - the set-1 scan code, from the key's HID usage through the translation Windows' keyboard driver
+    makes; a test runs every key no layout moves through `MapVirtualKeyW` and finds Windows'
+    own key;
+  - the character Windows' layout gives for the key with its modifiers (0x7F for Ctrl+Backspace,
+    none for Ctrl+Alt, which Windows takes for AltGr);
+  - the modifier state with left and right apart (AltGr as right Alt plus left Ctrl, as Windows
+    reports it), NumLock, CapsLock and the enhanced-key flag.
+- **Measured** with a native console program reading input records (the Pty test child's
+  `events` mode), through the element. As win32 events all four keys arrive exactly. As VT bytes,
+  Ctrl+Space arrives as virtual key 0x40 with no character, a key no program binds; Ctrl+Backspace,
+  Alt+A and Escape arrive right, each after a bare press of its modifier.
+- **Not the key lost after a resize.** The spike lost the first key after a resize in Git's vim
+  and blamed the bare ESC sent before it. Step 6 lost it with no ESC sent at all, through both
+  ConPTYs and with bash too, while a native program lost none: problem 22, Git for Windows'
+  runtime, which the terminal cannot work around.
 
 **Mouse.**
 
@@ -595,8 +623,8 @@ the first frame.
 ## Framework seams
 
 Each is useful beyond the terminal. No terminal package may need anything not listed here; if
-implementation finds another, it goes here first. Step 2 needed none; step 3 built T1. K1–K4
-and A1–A2 make later steps right rather than possible.
+implementation finds another, it goes here first. Step 2 needed none; step 3 built T1; step 6
+built K1–K4. A1–A2 make later steps right rather than possible.
 
 **T1: monospace cell metrics and a default monospace family (`HultUI.Core`, `HultUI.Text`,
 `HultUI.Rendering.Skia`). Built in step 3.**
@@ -639,30 +667,53 @@ draw at a point, with no rectangle, layout or wrapping.
 `IRenderContext.DrawCached(key, Size, Action<IRenderContext>)`: replay a recorded picture for a key
 seen before, record it otherwise. A content hash makes a scroll redraw one row.
 
-**K1: the layout key on `KeyDownEvent` (`HultUI.Platform.SDL3`, `HultUI.Core`).**
+**K1–K4: what a key is, beyond its position (`HultUI.Core`, `HultUI.Platform.SDL3`). Built in
+step 6.** `KeyCode` names a position, translated from SDL's scancode; nothing read SDL's layout
+keycode, left and right modifiers were one, the keypad had no names, and a key and the text it
+typed were unrelated events. All four are new members, so no existing code changes meaning.
 
-- **What to add.** `KeyDownEvent.LayoutKey`: the code point SDL's layout keycode (`evt->key.key`)
-  names, for keys that have one.
-- **Why.** Ctrl+letter and Alt+letter use it, so the terminal sends what the keycap says on QWERTZ,
-  AZERTY or Dvorak. Shortcut matching in every app has the same need.
-
-**K2: left/right modifiers and AltGr.**
-
-- **What to add.** `KeyModifiers.AltRight`, `CtrlRight` (or a `Location`), plus an `AltGr` flag
-  from `SDL_KMOD_MODE` where SDL sets it, and from right-Alt + left-Ctrl on Windows (Windows
-  Terminal's heuristic).
-- **Why.** Without it a terminal cannot tell `@` on a Swedish keyboard from Ctrl+Alt+2.
-
-**K3: keypad and F13–F24 key codes.** `KeyCode.Numpad0`…`NumpadEnter`, `F13`…`F24`. Today they
-arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) cannot be honoured.
-
-**K4: the text a keystroke produced (`HultUI.Platform.SDL3`).**
-
-- **What to add.** `KeyDownEvent.Text`: the `TEXT_INPUT` that follows the `KEY_DOWN` in the same
-  pump, found with `SDL_PeepEvents`.
-- **Why.** A key and its character can then be handled as one. Win32-input-mode needs the
-  character in the key event, and K2's AltGr rule needs to know that text is coming.
-- **Verify** that SDL queues the two in the same pump on Windows, X11 and Wayland, IME excluded.
+- **K1: `KeyDownEvent.LayoutKey`.** The character the key types on the layout, as a code point,
+  with Shift, CapsLock and AltGr applied and Ctrl and Alt ignored: a web page's `key` where
+  `KeyCode` is its `code`. Ctrl+Z on QWERTZ is `'z'` on the key `KeyCode.Y` names; Shift+comma is
+  `'<'`. Letter keys on a non-Latin layout give their Latin letter and the French number row its
+  digits, as SDL's own key code does, so shortcuts work there. SDL's key code applies no modifier,
+  so the SDL backend reads the shifted and AltGr levels from its keymap.
+- **K2: `KeyDownEvent.ModifierKeys`,** a new flags enum: the modifier keys held, left and right
+  apart, and `AltGr`. A separate value, not new `KeyModifiers` bits, because code compares
+  `KeyModifiers` with `==` (a drag in `Window`, a click in Junction).
+  - **AltGr** is not Alt: with it set, neither `AltRight` nor `KeyModifiers.Alt` is.
+  - **X11 and Wayland** report AltGr as ISO_Level3_Shift, SDL's `MODE`.
+  - **Windows** does not: SDL drops the left Ctrl Windows fakes ahead of AltGr, so AltGr is right
+    Alt alone, as a US keyboard's right Alt is. What tells them apart is the text. With Alt held
+    Windows sends `WM_SYSCHAR`, which SDL makes no text of, so a right Alt that typed something was
+    AltGr. AltGr on a key that types nothing stays right Alt.
+  - **The WinForms host** sees Windows' own key messages, where AltGr is Ctrl+Alt, and sets
+    neither.
+- **K3: keypad and F13–F24 key codes.** `Numpad0`…`Numpad9`, `NumpadDecimal`, `NumpadAdd`,
+  `NumpadSubtract`, `NumpadMultiply`, `NumpadDivide`, `NumpadEnter`, `NumpadEquals`, `F13`…`F24`,
+  added at the end of the enum. A keypad key keeps its name with NumLock off, where it means Home or
+  Up; `KeyModifiers.NumLock` says which. The SDL, WinForms and WebView2 backends and CEF's key
+  tables name them; WinForms and WebView2 used to report the keypad's digits as the number row's.
+  `KeyDownEvent.Digit` gives 0–9 for the number row and, with NumLock on, the keypad; the time
+  picker and the video player use it, so the keypad types there on every backend.
+- **K4: `KeyDownEvent.Text`.** The text the keystroke typed, which still follows as a
+  `TextInputEvent`: a look ahead, so a key and its character can be handled as one. Empty when the
+  key types nothing (a chord, an arrow, a dead key, text input off); null when the platform cannot
+  say, or an input method has the key.
+  - **The SDL backend** peeks at the head of SDL's queue (`SDL_PeepEvents`). SDL queues a key's
+    text right behind it, in the same pump, on Windows (`WM_CHAR`, posted by `TranslateMessage`),
+    X11 and Wayland, read from SDL 3's source. A type-filtered peek would find the next key's text;
+    the test fails with one.
+  - **The edge:** on Windows a pump that has already taken more than three new messages stops, and
+    the character lands in the next one; the key then reads as typing nothing.
+  - **Ctrl and Alt:** SDL filters control characters, so Ctrl+letter types nothing; Windows types
+    nothing for Alt+letter (`WM_SYSCHAR`), and X11 and Wayland send no text with Ctrl or Alt held.
+- **The headless window** takes all four on `KeyDown` and `PressKey`; a key given `text` also sends
+  it as text input after the key, as SDL does.
+- **Tests:** `EventTranslatorKeyTests` runs real SDL on its dummy video driver with the events a
+  backend would queue; one negative control each for the peek, the type-filtered peek, the shifted
+  layout key and the Windows AltGr rule. `CefKeysTests`, `WebView2MappingTests`, `KeyMapTests` and
+  a time picker test cover the backends' new names.
 
 **A1: a text range model for screen readers (`HultUI.Core`, both bridges).**
 
@@ -702,6 +753,12 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
   - **Shells:** the default shell works something out, prints it and exits with 7; with pwsh on
     Windows, the narrowed prompt stays whole and typing continues it (problem 1, through real
     ConPTY). On Windows a test checks the out-of-band `OpenConsole.exe` runs.
+  - **Keys through ConPTY** (step 6, Windows), driven through the element: the child's `events`
+    mode reports every console input record, so a test reads the ambiguous keys exactly as a
+    native program gets them, and another sees 20 resizes and the key after each. Git's vim, when
+    installed, leaves insert mode on Escape. `GitsPrograms_LoseNoKeyAfterAResize` measures
+    problem 22 with Git's bash, only when `HULTUI_TERMINAL_MEASURE=1`: it fails until the runtime
+    is fixed.
 - **Real-window UI tests,** for IME placement and the drag-resize cost.
 - **Linux CI** runs both test projects; `[HanFontsFact]`'s pattern applies to wide-glyph rendering
   tests.
@@ -810,8 +867,31 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
      character (now 3× faster).
    - **Still not built:** rounded, dashed and diagonal box drawing and the powerline triangles;
      URL detection in plain text; incremental search binding for very large scrollbacks.
-6. **Windows input:** win32-input-mode for the ambiguous keys, verified against Windows Terminal
-   with Git's vim. Then seams **K1–K4**.
+6. **Windows input and seams K1–K4: done on Windows 2026-10-04** (see *Input* and *Framework
+   seams*).
+   - **The framework:** `KeyDownEvent.LayoutKey`, `ModifierKeys` with AltGr, `Text`, `Digit`, and
+     the keypad and F13–F24 key codes, in the SDL, WinForms, WebView2 and CEF backends and the
+     headless window. The time picker and the video player take the keypad's digits.
+   - **The terminal:** chords by the layout's character, the exact AltGr rule, a key's own text
+     never typed twice, the keypad with NumLock and application keypad mode, F13–F20,
+     win32-input-mode for the four ambiguous keys on ConPTY, and Windows' Alt codes.
+   - **Tests:** 136 in `HultUI.Terminal.Tests` (21 new), 9 in `EventTranslatorKeyTests` on real
+     SDL, 4 new on ConPTY in `HultUI.Terminal.Pty.Tests`, and new cases in the CEF, WebView2,
+     WinForms and time picker tests. Each mechanism has a negative control (the peek, the
+     type-filtered peek, the shifted layout key, the Windows AltGr rule, the key's text, the win32
+     path, the layout's chords and own keys, the hold, NumLock, Alt codes, CEF's names, the time
+     picker's keypad). The whole solution passes.
+   - **Found on the way:**
+     - Through SDL, Windows' AltGr was right Alt alone, so AltGr+2 sent `ESC 2 @`; step 2's
+       Ctrl+Alt hold never ran there (problem 10).
+     - Alt+Shift+comma sent `ESC ,`, and Alt on a key `KeyCode` has no name for sent nothing.
+     - Ctrl+Space typed NUL and then the space Windows types for it.
+     - The spike's lost key after a resize is Git for Windows' runtime, not the ESC (problem 22).
+       Verifying "against Windows Terminal" became a native console program reading the input
+       records, which says exactly what a program gets; driving Windows Terminal would need
+       keystrokes sent to a real window.
+   - **Not verified:** X11 and Wayland ran nothing here; the SDL behaviour there (AltGr as
+     `MODE`, a key's text in the same pump) is read from SDL 3's source.
 7. **Accessibility:** seams **A1** and **A2**, and the element's text range model and output
    announcements.
 8. **Later:**

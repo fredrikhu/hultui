@@ -132,7 +132,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
 
     public string? EncodeFocus(bool focused) => NullIfEmpty(_term.GenerateFocusEvent(focused));
 
-    public string? EncodeKey(in TerminalKey key) => TerminalKeys.Encode(_term, key);
+    public string? EncodeKey(in TerminalKey key, bool win32Input) => TerminalKeys.Encode(_term, key, win32Input);
 
     public string? EncodeMouse(in TerminalMouse mouse)
     {

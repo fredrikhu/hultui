@@ -326,11 +326,11 @@ public class WebViewElementTests
         using var page = Show();
         page.Window.Click(page.Element);
 
-        page.Window.KeyDown(KeyCode.Unknown, scanCode: 0x59);   // the keypad's 1, which KeyCode has no name for
-        page.Window.KeyUp(KeyCode.Unknown, scanCode: 0x59);
+        page.Window.KeyDown(KeyCode.Unknown, scanCode: 0x64);   // the ISO key beside the left Shift, which KeyCode has no name for
+        page.Window.KeyUp(KeyCode.Unknown, scanCode: 0x64);
 
-        Assert.Equal([new WebKeyInput(true, KeyCode.Unknown, KeyModifiers.None, ScanCode: 0x59),
-                      new WebKeyInput(false, KeyCode.Unknown, KeyModifiers.None, ScanCode: 0x59)], page.View.Keys);
+        Assert.Equal([new WebKeyInput(true, KeyCode.Unknown, KeyModifiers.None, ScanCode: 0x64),
+                      new WebKeyInput(false, KeyCode.Unknown, KeyModifiers.None, ScanCode: 0x64)], page.View.Keys);
     }
 
     [Fact]

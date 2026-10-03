@@ -61,6 +61,27 @@ to the root. Handle keys on the element with `On<KeyDownEvent>` and set
 
 ---
 
+## What a key event says
+
+`KeyDownEvent.Key` is a **position**: the key where that letter sits on a US keyboard,
+whatever the layout prints on it. The rest says what the key means:
+
+| Member | What it is |
+|---|---|
+| `Key` | The position (`KeyCode.Y` is QWERTZ's Z key). Keypad keys are `Numpad0`…`NumpadEquals`, with NumLock on or off. |
+| `LayoutKey` | The character the key types on the layout, Shift and AltGr applied, Ctrl and Alt ignored: `'z'` for that QWERTZ key. **Match shortcuts against this.** 0 for keys that type nothing, or when the platform did not say. |
+| `Modifiers` | Shift, Ctrl, Alt, Super, and the CapsLock and NumLock states. |
+| `ModifierKeys` | The same with left and right apart, and `AltGr`. AltGr is not Alt: with it held, `Modifiers` has no Alt, so an Alt+2 shortcut does not fire when a Swede types `@`. |
+| `Text` | The text the keystroke typed, which still arrives next as a `TextInputEvent`. Empty for a key that types nothing; null when the platform cannot say. |
+| `Digit` | 0–9 for the number row and, with NumLock on, the keypad; null otherwise. |
+| `ScanCode` | The physical key as SDL reports it (the USB HID usage), for keys `KeyCode` has no name for. |
+
+A Ctrl+Z binding written as `e.Key == KeyCode.Z` fires on QWERTZ's Y key; write
+`e.LayoutKey is 'z' or 'Z'` and fall back to `Key` when `LayoutKey` is 0 (the WinForms
+host and synthesized keys give none).
+
+---
+
 ## Traps
 
 ### "The first Tab does nothing"

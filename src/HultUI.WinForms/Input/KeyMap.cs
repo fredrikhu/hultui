@@ -82,10 +82,16 @@ internal static class KeyMap
     {
         >= Keys.A and <= Keys.Z => (KeyCode)((int)KeyCode.A + (key - Keys.A)),
         >= Keys.D0 and <= Keys.D9 => (KeyCode)((int)KeyCode.Digit0 + (key - Keys.D0)),
-        // The numeric keypad's digits are the same characters; the framework has no
-        // separate keypad vocabulary, so they land on the same codes.
-        >= Keys.NumPad0 and <= Keys.NumPad9 => (KeyCode)((int)KeyCode.Digit0 + (key - Keys.NumPad0)),
+        // The keypad with NumLock on. With it off Windows reports the keys as Home, Up and so
+        // on, and without the scan code they cannot be told from those, so they are named so.
+        >= Keys.NumPad0 and <= Keys.NumPad9 => (KeyCode)((int)KeyCode.Numpad0 + (key - Keys.NumPad0)),
+        Keys.Decimal => KeyCode.NumpadDecimal,
+        Keys.Add => KeyCode.NumpadAdd,
+        Keys.Subtract => KeyCode.NumpadSubtract,
+        Keys.Multiply => KeyCode.NumpadMultiply,
+        Keys.Divide => KeyCode.NumpadDivide,
         >= Keys.F1 and <= Keys.F12 => (KeyCode)((int)KeyCode.F1 + (key - Keys.F1)),
+        >= Keys.F13 and <= Keys.F24 => (KeyCode)((int)KeyCode.F13 + (key - Keys.F13)),
 
         Keys.Up => KeyCode.Up,
         Keys.Down => KeyCode.Down,

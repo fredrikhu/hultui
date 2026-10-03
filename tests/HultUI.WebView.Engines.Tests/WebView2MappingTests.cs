@@ -108,6 +108,9 @@ public class WebView2MappingTests
     [InlineData(0x31, 0x02, KeyCode.Digit1)]
     [InlineData(0x26, 0x48, KeyCode.Up)]         // extended: by virtual key
     [InlineData(0xBD, 0x0C, KeyCode.Minus)]
+    [InlineData(0x61, 0x4F, KeyCode.Numpad1)]    // the keypad with NumLock on
+    [InlineData(0x6B, 0x4E, KeyCode.NumpadAdd)]
+    [InlineData(0x7C, 0x64, KeyCode.F13)]
     public void WindowsKeys_AreNamedByPosition(uint vk, uint scan, KeyCode expected) =>
         Assert.Equal(expected, Win32Keys.ToKeyCode(vk, scan));
 
