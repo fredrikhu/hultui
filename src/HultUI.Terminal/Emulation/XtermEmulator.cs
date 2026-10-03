@@ -21,6 +21,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
     private long _linesDropped;
     private long _generation;
     private int? _pendingScrollback;
+    private double _cellPixelWidth, _cellPixelHeight;
 
     public XtermEmulator(int columns, int rows, int scrollback, TerminalTheme theme, string termName)
     {
@@ -35,6 +36,9 @@ internal sealed class XtermEmulator : ITerminalEmulator
             ReflowCursorLine = true,
             TermName = termName,
             Theme = ThemeOf(theme),
+            // The size reports a program reads to fit images or a layout to the grid. Answered
+            // from the grid, not the element: the strip below the last row belongs to no row.
+            WindowOptions = new WindowOptions { GetWinSizePixels = true, GetCellSizePixels = true, GetWinSizeChars = true },
         });
         // The buffers are made once, in the constructor; RIS clears them in place. Held here so
         // the scrollback can be changed while the alternate screen is up, and its trims counted.
@@ -49,6 +53,22 @@ internal sealed class XtermEmulator : ITerminalEmulator
         {
             if (e.MimeType.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase))
                 Raise(new TerminalEvent.ClipboardWrite(Encoding.UTF8.GetString(e.Data)));
+        };
+        _term.WindowInfoRequested += (_, e) =>
+        {
+            switch (e.Request)
+            {
+                case WindowInfoRequest.SizePixels:
+                    e.WidthPixels = (int)Math.Round(_term.Cols * _cellPixelWidth);
+                    e.HeightPixels = (int)Math.Round(_term.Rows * _cellPixelHeight);
+                    e.Handled = true;
+                    break;
+                case WindowInfoRequest.CellSizePixels:
+                    e.CellWidth = (int)Math.Round(_cellPixelWidth);
+                    e.CellHeight = (int)Math.Round(_cellPixelHeight);
+                    e.Handled = true;
+                    break;
+            }
         };
         _term.BufferChanged += (_, _) =>
         {
@@ -87,6 +107,12 @@ internal sealed class XtermEmulator : ITerminalEmulator
         _pendingScrollback = null;
         _normal.SetScrollback(lines);
         _generation++;
+    }
+
+    public void SetCellPixels(double width, double height)
+    {
+        _cellPixelWidth = width;
+        _cellPixelHeight = height;
     }
 
     public void ScrollViewport(int lines)
@@ -192,6 +218,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
 
         bool alternate = _term.IsAlternateBufferActive;
         s.ScrollbackLines = buffer.YBase;
+        s.NormalLines = _normal.Lines.Length;
         s.ViewportTop = buffer.YDisp;
         s.AtBottom = buffer.IsAtBottom;
         s.LinesDropped = alternate ? 0 : _linesDropped;

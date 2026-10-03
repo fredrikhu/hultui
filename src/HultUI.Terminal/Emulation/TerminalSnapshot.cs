@@ -33,6 +33,10 @@ internal sealed class TerminalSnapshot
     /// <summary>Lines above the screen; the viewport's first line, in the same count (0 is the
     /// oldest line kept); whether the viewport is at the bottom.</summary>
     public int ScrollbackLines { get; set; }
+
+    /// <summary>Lines the normal screen's buffer holds, scrollback and screen: what a width
+    /// change reflows, whichever screen is showing.</summary>
+    public int NormalLines { get; set; }
     public int ViewportTop { get; set; }
     public bool AtBottom { get; set; }
 
@@ -199,6 +203,10 @@ internal interface ITerminalEmulator : IDisposable
     /// <summary>Lines kept above the screen. Applied to the normal screen; set while the
     /// alternate screen is up, it is applied when the program returns.</summary>
     void SetScrollback(int lines);
+
+    /// <summary>The cell's size in device pixels, which the window-size reports answer with
+    /// (CSI 14 t, CSI 16 t). Until it is set they answer zeroes.</summary>
+    void SetCellPixels(double width, double height);
 
     /// <summary>Moves the viewport by <paramref name="lines"/> (negative is up, into the
     /// scrollback); 0 moves nothing.</summary>

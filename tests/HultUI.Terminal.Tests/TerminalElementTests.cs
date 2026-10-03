@@ -47,6 +47,57 @@ public class TerminalElementTests
         Assert.Equal((t.Controller.Columns, t.Controller.Rows), t.Connection.Resizes[^1]);
     }
 
+    [Fact]
+    public void AWidthChange_OverABigBuffer_WaitsForTheSizeToSettle()
+    {
+        using var t = Term.Shown(new TerminalOptions { Scrollback = 50_000 });
+        t.Emit(Lines(TerminalElement.WideReflowLines + 2_000));
+        var before = (t.Controller.Columns, t.Controller.Rows);
+
+        // A drag: three narrower sizes a frame apart. Nothing reflows yet.
+        foreach (int width in new[] { 380, 360, 340 })
+        {
+            t.Window.SetClientSize(width, 300);
+            t.Session.PumpFrames(2);
+            Assert.Equal(before, (t.Controller.Columns, t.Controller.Rows));
+        }
+
+        // Still for longer than the settle time: one reflow, to the last size.
+        t.Session.PumpFrame(TerminalElement.WideReflowSettle + TimeSpan.FromMilliseconds(20));
+        t.Session.PumpFrames(2);
+        Assert.True(t.Controller.Columns < before.Columns);
+        Assert.Equal((t.Controller.Columns, t.Controller.Rows), t.Connection.Resizes[^1]);
+        Assert.Single(t.Connection.Resizes, r => r.Columns < before.Columns);
+    }
+
+    [Fact]
+    public void AHeightChange_OverABigBuffer_IsAtOnce()
+    {
+        using var t = Term.Shown(new TerminalOptions { Scrollback = 50_000 });
+        t.Emit(Lines(TerminalElement.WideReflowLines + 2_000));
+        var before = (t.Controller.Columns, t.Controller.Rows);
+
+        t.Window.SetClientSize(400, 200);
+        t.Session.PumpFrames(2);
+        Assert.Equal(before.Columns, t.Controller.Columns);
+        Assert.True(t.Controller.Rows < before.Rows);
+    }
+
+    [Fact]
+    public void TheSizeReports_AnswerFromTheGrid()
+    {
+        using var t = Term.Shown();
+        var (w, h) = t.Element!.CellSize;
+        int cols = t.Controller.Columns, rows = t.Controller.Rows;
+
+        t.Emit("\x1b[16t");
+        Assert.Equal(Escape($"\x1b[6;{Math.Round((double)h)};{Math.Round((double)w)}t"), Escape(t.Expect("t")));
+        t.Emit("\x1b[14t");
+        Assert.Equal(Escape($"\x1b[4;{Math.Round(rows * (double)h)};{Math.Round(cols * (double)w)}t"), Escape(t.Expect("t")));
+        t.Emit("\x1b[18t");
+        Assert.Equal(Escape($"\x1b[8;{rows};{cols}t"), Escape(t.Expect("t")));
+    }
+
     // ──── Keys and text ────
 
     [Fact]
@@ -179,6 +230,18 @@ public class TerminalElementTests
         t.Window.PressKey(KeyCode.C, KeyModifiers.Ctrl | KeyModifiers.Shift);
         Assert.Equal("world\nsecond", t.Window.Clipboard.GetText());
         Assert.Equal("", t.Settle()); // copying sends nothing
+    }
+
+    [Fact]
+    public void AnAltDrag_SelectsABlock()
+    {
+        using var t = Term.Shown();
+        t.Emit("abcdef\r\nghijkl\r\nmnopqr");
+        Drag(t, (1, 0), (3, 2), KeyModifiers.Alt);
+        Assert.Equal("bcd\nhij\nnop", t.Element!.SelectedText);
+
+        t.Window.PressKey(KeyCode.C, KeyModifiers.Ctrl | KeyModifiers.Shift);
+        Assert.Equal("bcd\nhij\nnop", t.Window.Clipboard.GetText());
     }
 
     [Fact]

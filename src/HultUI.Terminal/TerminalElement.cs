@@ -90,6 +90,8 @@ public sealed partial class TerminalElement : Element
         base.OnUnmounted();
         StopListening();
         StopSyncHold();
+        StopResizeHold();
+        StopBlink();
     }
 
     private void StartListening()
@@ -216,6 +218,7 @@ public sealed partial class TerminalElement : Element
         var c = _controller!;
         if (!_snapshot.AtBottom) c.ScrollToBottom();
         if (_selection is not null) { _selection = null; MarkPaintDirty(); }
+        RestartBlink();
         c.Send(bytes);
     }
 
@@ -253,8 +256,7 @@ public sealed partial class TerminalElement : Element
     public bool Copy()
     {
         if (_controller is null || _selection is not { } s || OverlayHost is not Window window) return false;
-        var (start, end) = s.Ordered;
-        var text = _controller.GetText(start, end);
+        var text = TextOf(s);
         if (text.Length == 0) return false;
         window.Clipboard.SetText(text);
         return true;
@@ -273,7 +275,7 @@ public sealed partial class TerminalElement : Element
 
     /// <summary>The selected text, or null when nothing is selected.</summary>
     public string? SelectedText =>
-        _controller is not null && _selection is { } s ? _controller.GetText(s.Ordered.Start, s.Ordered.End) : null;
+        _controller is not null && _selection is { } s ? TextOf(s) : null;
 
     // ──── Focus ────
 
@@ -289,17 +291,38 @@ public sealed partial class TerminalElement : Element
 
     private enum SelectionUnit : byte { Character, Word, Line }
 
-    private readonly record struct Selection(TerminalPosition Anchor, TerminalPosition Active, SelectionUnit Unit)
+    /// <summary>A selection between two cells. A block (Alt+drag) is the rectangle they span, the
+    /// same columns on every line, as Windows Terminal's.</summary>
+    private readonly record struct Selection(TerminalPosition Anchor, TerminalPosition Active, SelectionUnit Unit,
+        bool Block = false)
     {
-        /// <summary>Start inclusive, end exclusive, in reading order, widened to whole words or lines.</summary>
+        /// <summary>Start inclusive, end exclusive. A range in reading order, widened to whole
+        /// words or lines; a block from its top-left cell to past its bottom-right one.</summary>
         public (TerminalPosition Start, TerminalPosition End) Ordered
         {
             get
             {
+                if (Block)
+                    return (new TerminalPosition(Math.Min(Anchor.Line, Active.Line), Math.Min(Anchor.Column, Active.Column)),
+                        new TerminalPosition(Math.Max(Anchor.Line, Active.Line), Math.Max(Anchor.Column, Active.Column) + 1));
                 var (a, b) = Anchor <= Active ? (Anchor, Active) : (Active, Anchor);
                 return (a, b with { Column = b.Column + 1 });
             }
         }
+    }
+
+    /// <summary>The selected text: a range as it reads, wrapped lines joined; a block line by line.</summary>
+    private string TextOf(Selection s)
+    {
+        var (start, end) = s.Ordered;
+        if (!s.Block) return _controller!.GetText(start, end);
+        var sb = new System.Text.StringBuilder();
+        for (long line = start.Line; line <= end.Line; line++)
+        {
+            if (line > start.Line) sb.Append('\n');
+            sb.Append(_controller!.GetText(new TerminalPosition(line, start.Column), new TerminalPosition(line, end.Column)));
+        }
+        return sb.ToString();
     }
 
     private Selection? _selection;
@@ -352,7 +375,8 @@ public sealed partial class TerminalElement : Element
         var unit = e.ClickCount switch { >= 3 => SelectionUnit.Line, 2 => SelectionUnit.Word, _ => SelectionUnit.Character };
         if (unit == SelectionUnit.Character)
         {
-            _selection = new Selection(at, at, unit);
+            // Alt makes it a block, as in Windows Terminal and most others.
+            _selection = new Selection(at, at, unit, Block: (e.Modifiers & KeyModifiers.Alt) != 0);
             _selectionUnitAnchor = null;
         }
         else

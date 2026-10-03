@@ -299,6 +299,15 @@ public sealed class TerminalController : IDisposable
     // Each of these is answered under the lock, and answers nothing once disposed: the element can
     // outlive its controller by a frame.
 
+    /// <summary>The cell in device pixels, for the window-size reports.</summary>
+    internal void SetCellPixels(double width, double height)
+    {
+        lock (_gate)
+        {
+            if (!_disposed) _emulator.SetCellPixels(width, height);
+        }
+    }
+
     internal string? EncodeKey(in TerminalKey key)
     {
         lock (_gate) return _disposed ? null : _emulator.EncodeKey(key);
