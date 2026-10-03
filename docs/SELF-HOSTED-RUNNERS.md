@@ -268,6 +268,18 @@ the host's for linux-x64, `aarch64-linux-gnu-strip` for linux-arm64 (an x64 `str
 read an arm64 `libcef.so`). Its first run, on 2026-10-03, stopped at `curl: command not found`
 on a runner provisioned before that line had `curl` in it.
 
+Its test step then runs the engine suite on the CEF it packed, which needs CEF's own libraries
+(the ones an application's `.deb` declares; `src/HultUI.WebView.Cef.Natives/README.md`) and
+Mesa for software rendering:
+
+```bash
+apt install -y libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libasound2t64 libglib2.0-0t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxkbcommon0 libpango-1.0-0 libcairo2 libgbm1 libegl1 libgl1 libegl-mesa0 libgl1-mesa-dri
+```
+
+Without them every test that needs CEF skips, and the step fails on purpose: its second run
+published both packages with all 53 of those tests skipped, which proved nothing. The step
+before it lists what `libcef.so` cannot find.
+
 Install the SDK from the Ubuntu archive:
 
 ```bash
