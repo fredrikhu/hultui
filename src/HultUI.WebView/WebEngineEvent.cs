@@ -68,6 +68,9 @@ public abstract record WebEngineEvent
     /// </summary>
     public sealed record AccessibleContentChanged : WebEngineEvent;
 
+    /// <summary>What <see cref="IWebEngineView.AccessibleTree"/> returns has changed.</summary>
+    public sealed record AccessibleTreeChanged : WebEngineEvent;
+
     /// <summary>The page asked for a context menu. Answer it — the controller does.</summary>
     public sealed record ContextMenuRequested(WebContextMenuRequest Request) : WebEngineEvent;
 
@@ -82,6 +85,14 @@ public abstract record WebEngineEvent
     /// <summary>The page asked for a permission, which waits for an answer. The controller
     /// sees it answered — denied, unless the application allows it.</summary>
     public sealed record PermissionRequested(WebPermissionRequest Request) : WebEngineEvent;
+
+    /// <summary>
+    /// Where the page's text caret or input-method composition is, in device pixels from the
+    /// page's top-left: the window's input method puts its candidate window there. Only from
+    /// engines without <see cref="WebEngineCapabilities.NativeKeyboard"/>, whose input method
+    /// is the window's.
+    /// </summary>
+    public sealed record InputAreaChanged(PixelRect Area) : WebEngineEvent;
 
     /// <summary>The page's process died. <see cref="WebViewController.Reload"/> recovers
     /// when <paramref name="CanReload"/>.</summary>

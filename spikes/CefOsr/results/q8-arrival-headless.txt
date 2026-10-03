@@ -1,0 +1,2 @@
+[29570:29597:1001/220901.205673:ERROR:components/viz/service/frame_sinks/video_capture/frame_sink_video_capturer_impl.cc:939] Unable to allocate frame for first frame capture: OOM?
+[  3174.7 ms main          ] 3 s animating: 0 on_accelerated_paint, 0 on_paint; 0 distinct buffers (dmabuf inodes) in the pool

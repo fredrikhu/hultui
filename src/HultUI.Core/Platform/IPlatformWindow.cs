@@ -47,6 +47,14 @@ public interface IPlatformWindow : IDisposable
     /// </summary>
     float RefreshRate { get; }
 
+    /// <summary>
+    /// The window system the window is on, as the platform names it: "wayland", "x11",
+    /// "windows", "cocoa"; null when there is none (headless) or the platform does not say. For
+    /// something that must match it before it starts, as a browser engine picks its own
+    /// display backend.
+    /// </summary>
+    string? WindowSystem => null;
+
     WindowStyle Style { get; }
     bool IsOpen { get; }
     bool IsMaximized { get; }

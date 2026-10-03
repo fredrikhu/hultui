@@ -1,0 +1,23 @@
+[    52.5 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    60.8 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   190.3 ms main          ] cef_initialize = 1
+[   207.6 ms CrBrowserMain (33772)] on_context_initialized
+[   214.6 ms main          ] create_browser = 1
+[   214.7 ms main          ] create_browser = 1
+[   217.2 ms CrBrowserMain (33772)] on_after_created: browser 1
+[   220.2 ms CrBrowserMain (33772)] get_screen_info #1: struct size 56, answering scale 1
+[   224.8 ms CrBrowserMain (33772)] on_after_created: browser 2
+[   225.2 ms CrBrowserMain (33772)] get_screen_info #2: struct size 56, answering scale 1
+[   248.0 ms CrBrowserMain (33772)] get_screen_info #3: struct size 56, answering scale 1
+[  2756.6 ms main          ] two browsers (1, 2): browser 1: 61/s, browser 2: 61/s; processes: 1 gpu-process, 4 renderer, 2 utility, 3 zygote
+[  2759.5 ms CrBrowserMain (33772)] on_before_close: browser 1
+[  2763.5 ms main          ] close_browser(force 0) on browser 1: on_before_close after 6 ms
+[  4773.2 ms main          ] one left: browser 2: 61/s; processes: 1 gpu-process, 3 renderer, 2 utility, 3 zygote
+[  4775.6 ms CrBrowserMain (33772)] on_before_close: browser 2
+[  4783.6 ms main          ] close_browser(force 0) on browser 2: on_before_close after 10 ms
+[  4783.6 ms main          ] keeping our reference to it through cef_shutdown (--hold-ref)
+[  5788.4 ms main          ] none left: processes: 1 gpu-process, 2 renderer, 2 utility, 3 zygote
+[  5806.8 ms main          ] cef_shutdown returned after 15 ms; refs: app=0, browser_process_handler=0, client=1, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[  5808.4 ms main          ] threads in our process: 28; processes: 2 (no type), 3 zygote
+[  5808.4 ms main          ] returning from Main
+exit status 0; wall 5846 ms; helper processes 0.3 s after exit: 0, 3 s after: 0

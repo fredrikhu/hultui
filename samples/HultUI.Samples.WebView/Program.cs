@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HultUI.WebView;
 using HultUI.WebView.Testing;
+using HultUI.WebView.Cef;
 using HultUI.WebView.WebView2;
 
 namespace HultUI.Samples.WebView;
@@ -66,19 +67,21 @@ internal static class Program
     }
 
     /// <summary>
-    /// WebView2 where it runs; otherwise the fake engine, whose pages are solid colours: the
-    /// window still works — navigation, history, focus, the menu over the page — but shows
-    /// no web content. <c>--fake</c> asks for the fake anywhere.
+    /// WebView2 on Windows and CEF on Linux, where they are installed; otherwise the fake
+    /// engine, whose pages are solid colours: the window still works — navigation, history,
+    /// focus, the menu over the page — but shows no web content. <c>--fake</c> asks for the
+    /// fake anywhere.
     /// </summary>
     private static IWebEngine CreateEngine()
     {
-        if (!System.Environment.GetCommandLineArgs().Contains("--fake") && OperatingSystem.IsWindows())
-        {
-            var webView2 = new WebView2Engine();
-            if (webView2.Availability.IsAvailable) return webView2;
-            Console.Error.WriteLine("WebView2: " + webView2.Availability.Reason + " Using the fake engine.");
-            webView2.Dispose();
-        }
+        if (System.Environment.GetCommandLineArgs().Contains("--fake")) return new FakeWebEngine();
+        IWebEngine? engine = OperatingSystem.IsWindows() ? new WebView2Engine()
+            : OperatingSystem.IsLinux() ? new CefEngine()
+            : null;
+        if (engine is null) return new FakeWebEngine();
+        if (engine.Availability.IsAvailable) return engine;
+        Console.Error.WriteLine($"{engine.Name}: {engine.Availability.Reason} Using the fake engine.");
+        engine.Dispose();
         return new FakeWebEngine();
     }
 

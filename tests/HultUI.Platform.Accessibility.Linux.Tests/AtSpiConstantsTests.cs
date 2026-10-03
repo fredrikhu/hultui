@@ -28,6 +28,7 @@ public class AtSpiConstantsTests
     [InlineData(AccessibilityRole.Separator, 50u, "separator")]
     [InlineData(AccessibilityRole.List, 31u, "list")]
     [InlineData(AccessibilityRole.ListItem, 32u, "list item")]
+    [InlineData(AccessibilityRole.Document, 95u, "document web")]
     [InlineData(AccessibilityRole.Dialog, 16u, "dialog")]
     [InlineData(AccessibilityRole.Alert, 2u, "alert")]
     [InlineData(AccessibilityRole.Heading, 83u, "heading")]

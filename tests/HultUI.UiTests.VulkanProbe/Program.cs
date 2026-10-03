@@ -3,6 +3,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.WebView;
+using HultUI.WebView.Cef;
 using HultUI.WebView.WebView2;
 
 // Opens a window the way an app asks for Vulkan, in code, so a start that fails may fall back to
@@ -16,7 +17,8 @@ using HultUI.WebView.WebView2;
 // — each a GPU source of its own in one Vulkan window (seam W7). It waits for both to draw, then
 // forces frames until HULTUI_VULKAN_CAPTURE has been written, so the capture's frame number only
 // has to come after the pages are ready. Then it disposes the right page, whose image the window
-// should give back.
+// should give back. The pages are WebView2's on Windows and CEF's on Linux, where they are GPU
+// sources only on Wayland (step 5.5 of the Linux engine).
 
 internal static class Program
 {
@@ -44,8 +46,11 @@ internal static class Program
     private static int TwoPages(RendererKind renderer)
     {
         using var app = new Application("vulkan-probe", 480, 240, renderer: renderer);
-        using var engine = new WebView2Engine();
-        var options = new WebViewOptions { UserDataFolder = Path.Combine(Path.GetTempPath(), "hultui-webview2-tests") };
+        using IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
+        if (!engine.Availability.IsAvailable) { Console.WriteLine("probe: no engine: " + engine.Availability.Reason); return 3; }
+        var options = OperatingSystem.IsWindows()
+            ? new WebViewOptions { UserDataFolder = Path.Combine(Path.GetTempPath(), "hultui-webview2-tests") }
+            : new WebViewOptions();
         using var left = new WebViewController(engine, options);
         using var right = new WebViewController(engine, options);
         var ready = new HashSet<string>();
@@ -66,6 +71,10 @@ internal static class Program
             app.RunFrame(TimeSpan.FromMilliseconds(16));
         }
         Console.WriteLine($"probe: both pages drew after {clock.ElapsedMilliseconds} ms");
+        // A page's first frame can be the blank one before its document (CEF's is): a second of
+        // frames as the pages ask for them lets their own arrive before the capture is forced.
+        clock.Restart();
+        while (clock.Elapsed.TotalSeconds < 1) app.RunFrame(TimeSpan.FromMilliseconds(16));
 
         string? capture = Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE");
         clock.Restart();

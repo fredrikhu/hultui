@@ -1,0 +1,155 @@
+[
+  {
+    "ax_tree_id": "6F5715D1BDC4D68A6461E9C9D8CEA655",
+    "events": [
+      {
+        "event_from": "page",
+        "event_type": "checkedStateChanged",
+        "id": 18
+      }
+    ],
+    "updates": [
+      {
+        "nodes": [
+          {
+            "attributes": {
+              "color": "0xFF000000",
+              "display": "block",
+              "fontSize": 32,
+              "fontWeight": 700,
+              "hierarchicalLevel": 1,
+              "htmlId": "h",
+              "htmlTag": "h1",
+              "isLineBreakingObject": true,
+              "name": "Preferences",
+              "nameFrom": "contents",
+              "text-align": "left",
+              "textDirection": "ltr",
+              "textStyle": [
+                "italic",
+                "underline"
+              ]
+            },
+            "child_ids": [
+              35
+            ],
+            "id": 26,
+            "location": {
+              "height": 65,
+              "width": 1176,
+              "x": 12,
+              "y": 32.15625
+            },
+            "offset_container_id": 20,
+            "role": "heading",
+            "state": []
+          },
+          {
+            "attributes": {
+              "color": "0xFF000000",
+              "fontSize": 32,
+              "fontWeight": 700,
+              "name": "Preferences",
+              "nameFrom": "contents",
+              "textDirection": "ltr",
+              "textStyle": [
+                "italic",
+                "underline"
+              ]
+            },
+            "child_ids": [
+              -1000000022
+            ],
+            "id": 35,
+            "location": {
+              "height": 65,
+              "width": 284.078125,
+              "x": 12,
+              "y": 32.15625
+            },
+            "offset_container_id": 20,
+            "role": "staticText",
+            "state": []
+          },
+          {
+            "attributes": {
+              "characterOffsets": [
+                30,
+                50,
+                79,
+                98,
+                126,
+                147,
+                175,
+                207,
+                231,
+                260,
+                284
+              ],
+              "nameFrom": "contents",
+              "textDirection": "ltr",
+              "wordEnds": [
+                11
+              ],
+              "wordStarts": [
+                0
+              ]
+            },
+            "id": -1000000022,
+            "location": {
+              "height": 65,
+              "width": 284.078125,
+              "x": 0,
+              "y": 0
+            },
+            "offset_container_id": 35,
+            "role": "inlineTextBox",
+            "state": []
+          }
+        ]
+      },
+      {
+        "nodes": [
+          {
+            "attributes": {
+              "checkedState": "true",
+              "color": "0xFF000000",
+              "defaultActionVerb": "uncheck",
+              "display": "inline-block",
+              "fontFamily": "Noto Sans",
+              "fontSize": 13.333333015441895,
+              "fontWeight": 400,
+              "htmlId": "cb",
+              "htmlTag": "input",
+              "inputType": "checkbox",
+              "invalidState": "false",
+              "name": "Remember me",
+              "nameFrom": "relatedElement",
+              "nextOnLineId": 12,
+              "text-align": "left",
+              "textDirection": "ltr"
+            },
+            "id": 18,
+            "location": {
+              "height": 19.5,
+              "width": 19.5,
+              "x": 406.171875,
+              "y": 135.8125
+            },
+            "offset_container_id": 20,
+            "role": "checkBox",
+            "state": [
+              "focusable",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

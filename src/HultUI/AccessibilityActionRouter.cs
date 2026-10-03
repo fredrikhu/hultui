@@ -49,8 +49,17 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     // ──── IAccessibilityActionHost — the actions the platform bridges route to.
 
+    /// <summary>A described node's action goes to its source (seam W11). True if it was one.</summary>
+    private bool ToContent(ElementId id, AccessibleContentAction action, string? value = null)
+    {
+        if (!ContentNodeId.TryDecode(id, out var owner, out var key)) return false;
+        if (FindElement(owner) is IAccessibleContentSource source) source.PerformAccessibleAction(key, action, value);
+        return true;
+    }
+
     public void InvokeElement(ElementId id) => _pendingActions.Enqueue(() =>
     {
+        if (ToContent(id, AccessibleContentAction.Invoke)) return;
         // A virtualized-list item has no element of its own; route its activation
         // back to the owning list by index (works even for off-screen items).
         if (VirtualItemId.TryDecode(id, out var listId, out var index))
@@ -65,6 +74,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     public void ToggleElement(ElementId id) => _pendingActions.Enqueue(() =>
     {
+        if (ToContent(id, AccessibleContentAction.Toggle)) return;
         // Toggling a virtualized item is its activation: a menu choice is turned on by
         // being chosen, and the menu owns what that means.
         if (VirtualItemId.TryDecode(id, out var listId, out var index))
@@ -82,6 +92,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     public void SelectElement(ElementId id) => _pendingActions.Enqueue(() =>
     {
+        if (ToContent(id, AccessibleContentAction.Select)) return;
         // Selecting a virtualized-list item is its activation (single-select).
         if (VirtualItemId.TryDecode(id, out var listId, out var index))
         {
@@ -100,6 +111,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     public void SetValue(ElementId id, string value) => _pendingActions.Enqueue(() =>
     {
+        if (ToContent(id, AccessibleContentAction.SetValue, value)) return;
         switch (FindElement(id))
         {
             case TextInputElement input: input.Text = value; input.TextChanged?.Invoke(value); break;
@@ -107,5 +119,11 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         }
     });
 
-    public void RequestFocus(ElementId id) => _pendingActions.Enqueue(() => FindElement(id)?.Focus());
+    public void FocusElement(ElementId id) => RequestFocus(id);
+
+    public void RequestFocus(ElementId id) => _pendingActions.Enqueue(() =>
+    {
+        if (ToContent(id, AccessibleContentAction.Focus)) return;
+        FindElement(id)?.Focus();
+    });
 }

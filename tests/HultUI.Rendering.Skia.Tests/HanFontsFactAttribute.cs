@@ -26,6 +26,17 @@ public sealed class HanFontsFactAttribute : FactAttribute
     }
 }
 
+/// <summary><see cref="HanFontsFactAttribute"/> for a theory: the same precondition, the same skip.</summary>
+public sealed class HanFontsTheoryAttribute : TheoryAttribute
+{
+    public HanFontsTheoryAttribute()
+    {
+        if (!HanFonts.Installed)
+            Skip = "No installed font covers Han ideographs, so there is no fallback to choose between. "
+                 + "Install a CJK font set — on Debian/Ubuntu: apt install fonts-noto-cjk.";
+    }
+}
+
 internal static class HanFonts
 {
     /// <summary>The two ideographs the fallback tests use: 東 (U+6771) and 說 (U+8AAA).

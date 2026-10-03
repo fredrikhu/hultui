@@ -22,4 +22,7 @@ public static class AccessibilityProperties
     /// node's children are different — and a bridge that joins foreign trees treats it so.
     /// </summary>
     public const string NativeContent = "NativeContent";
+
+    /// <summary>An <see cref="IAccessibleContentSource"/>'s content changed (seam W11).</summary>
+    public const string Content = "Content";
 }

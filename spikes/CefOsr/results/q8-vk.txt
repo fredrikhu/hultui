@@ -1,0 +1,15 @@
+[    64.8 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    73.1 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   205.2 ms main          ] cef_initialize = 1
+[   224.7 ms CrBrowserMain (31463)] on_context_initialized
+[   228.4 ms main          ] create_browser = 1
+[   232.6 ms CrBrowserMain (31463)] on_after_created: browser 1
+[   234.8 ms CrBrowserMain (31463)] get_screen_info #1: struct size 56, answering scale 1.5
+[   256.3 ms CrBrowserMain (31463)] get_screen_info #2: struct size 56, answering scale 1.5
+[   263.5 ms CrBrowserMain (31463)] get_screen_info #3: struct size 56, answering scale 1.5
+[   321.0 ms CrBrowserMain (31463)] first frame: Vulkan on Intel(R) UHD Graphics 770 (ADL-S GT1), device extensions VK_KHR_external_memory_fd, VK_EXT_external_memory_dma_buf, VK_EXT_image_drm_format_modifier; import + copy + wait 30.99 ms (includes device creation)
+[  2740.9 ms main          ] read back from our image 1200x900: (10,10) BGRA 00 00 FF FF; (149,149) BGRA 00 00 FF FF; (150,150) BGRA FF FF FF FF; (1190,890) BGRA FF 00 00 FF; (1049,749) BGRA FF FF FF FF
+[  2740.9 ms main          ] 148 frames copied, 0 failed; import + copy + wait avg 0.73 ms, max 1.11 ms
+[  2742.0 ms CrBrowserMain (31463)] on_before_close: browser 1
+[  2765.2 ms main          ] cef_shutdown returned after 15 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[  3276.8 ms main          ] children left: 31457 zygote; 31458 zygote; 31461 zygote; 31514 (no type); 31526 (no type); 31527 (no type)

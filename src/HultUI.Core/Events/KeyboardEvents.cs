@@ -5,12 +5,23 @@ public sealed class KeyDownEvent : ElementEvent
     public KeyCode Key { get; init; }
     public KeyModifiers Modifiers { get; init; }
     public bool IsRepeat { get; init; }
+
+    /// <summary>
+    /// The physical key as the platform reports it, for keys <see cref="Key"/> has no name for
+    /// (the keypad, F13 and up, media and international keys) and for anything that must tell
+    /// the key to another system: SDL's scancode, which is the USB HID usage on the keyboard
+    /// page. 0 when the platform gave none (headless input, a synthesized key).
+    /// </summary>
+    public ushort ScanCode { get; init; }
 }
 
 public sealed class KeyUpEvent : ElementEvent
 {
     public KeyCode Key { get; init; }
     public KeyModifiers Modifiers { get; init; }
+
+    /// <summary>The physical key; see <see cref="KeyDownEvent.ScanCode"/>.</summary>
+    public ushort ScanCode { get; init; }
 }
 
 public sealed class TextInputEvent : ElementEvent

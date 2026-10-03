@@ -1,0 +1,24 @@
+[    55.2 ms main      ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    63.6 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   166.3 ms main      ] on_context_initialized
+[   166.4 ms main      ] cef_initialize = 1
+[   171.1 ms main      ] on_after_created: browser 1
+[   191.5 ms main      ] get_screen_info #1: struct size 56, answering scale 1.5
+[   197.3 ms main      ] create_browser_sync = 64bd24677370
+[16451:16451:1001/213645.806456:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7
+[   220.6 ms main      ] get_screen_info #2: struct size 56, answering scale 1.5
+[   223.6 ms main      ] get_screen_info #3: struct size 56, answering scale 1.5
+[   256.3 ms main      ] first on_paint: 1200x900, 1 dirty rect(s) (0,0 1200x900)
+[   258.8 ms main      ] create_browser → first frame 85 ms (load end seen: True)
+[   576.1 ms main      ] frame 1200x900; (10,10) BGRA 00 00 FF FF; (149,149) BGRA 00 00 FF FF; (150,150) BGRA FF FF FF FF; (1190,890) BGRA FF 00 00 FF; (1049,749) BGRA FF FF FF FF; (1050,750) BGRA FF 00 00 FF
+[16413:16413:1001/213647.819231:ERROR:cef/libcef/browser/browser_info_manager.cc:858] Timeout of new browser info response for frame 8-1FD98112ADE564D284A6513BF5C6E056 (has_rfh=1)
+[  2576.9 ms main      ] still page: 0 paints in 2 s after settling
+[16413:16413:1001/213650.178125:ERROR:cef/libcef/browser/browser_info_manager.cc:858] Timeout of new browser info response for frame 7-34985FC4816E3B11DCA6A0E80B8BF2EB (has_rfh=0)
+[  6606.4 ms main      ] animating, windowless_frame_rate 60 (reads back 60): 60.0 paints/s, 1200x900, dirty 100% of the view per paint
+[ 10107.4 ms main      ] animating, windowless_frame_rate 30 (reads back 30): 30.0 paints/s, 1200x900, dirty 100% of the view per paint
+[ 13610.5 ms main      ] animating, windowless_frame_rate 120 (reads back 120): 120.0 paints/s, 1200x900, dirty 100% of the view per paint
+[ 17110.6 ms main      ] animating, windowless_frame_rate 1 (reads back 1): 0.7 paints/s, 1200x900, dirty 100% of the view per paint
+[ 17110.9 ms main      ] on_paint threads: main; popup paints 0
+[ 17112.9 ms main      ] on_before_close: browser 1
+[ 17139.2 ms main      ] cef_shutdown returned after 16 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[ 17650.7 ms main      ] children left: 16423 zygote; 16424 zygote; 16427 zygote; 16495 (no type); 16540 (no type)

@@ -20,6 +20,7 @@ internal static class AtSpiConstants
     public const string A11yBusService = "org.a11y.Bus";
     public const string A11yBusPath = "/org/a11y/bus";
     public const string A11yBusInterface = "org.a11y.Bus";
+    public const string StatusInterface = "org.a11y.Status";
 
     // ── Registry on the a11y bus. Applications Embed their root here.
     public const string RegistryService = "org.a11y.atspi.Registry";
@@ -86,6 +87,7 @@ internal static class AtSpiConstants
     public const uint RoleLink = 88;
     public const uint RoleApplication = 75;
     public const uint RoleHeading = 83;
+    public const uint RoleDocumentWeb = 95;
 
     public static uint MapRole(AccessibilityRole role) => role switch
     {
@@ -114,6 +116,7 @@ internal static class AtSpiConstants
         AccessibilityRole.Tree => RoleTree,
         AccessibilityRole.TreeItem => RoleListItem,
         AccessibilityRole.Application => RoleApplication,
+        AccessibilityRole.Document => RoleDocumentWeb,
         _ => RolePanel,
     };
 
@@ -146,6 +149,7 @@ internal static class AtSpiConstants
         RoleLink => "link",
         RoleApplication => "application",
         RoleHeading => "heading",
+        RoleDocumentWeb => "document web",
         _ => "unknown",
     };
 

@@ -43,6 +43,20 @@ same as leaving the variable unset. The few that ignore case or accept more say 
 | `HULTUI_MPV_LOG` | an mpv log level (`warn`, `info`, `v`, `debug`) | Forwards mpv's own log to stderr at that level. |
 | `HULTUI_MPV_OPTIONS` | `name=value;name=value` | Extra mpv options, set before initialisation. Pairs are separated by `;`, and only a pair's first `=` splits, so values may contain their own. It is diagnostic: it is how a test clip is told what it is when its container cannot say. A Y4M of BT.2020 colour bars (`spikes/HdrInterop/make-bars.cs`) needs `vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq`. A pair mpv refuses is reported on stderr and skipped. |
 
+## Web view (`HultUI.WebView.*`)
+
+| Variable | Value | Effect |
+|---|---|---|
+| `HULTUI_WEBVIEW2_LOADER` | a file or a directory | Windows: first place `WebView2Loader.dll` is looked for, as the file itself or a directory holding it. After that: beside the application, its `runtimes/<rid>/native`, then the host's own probing. |
+| `HULTUI_WEBVIEW2_INTEROP` | `0` | Windows: turns off the in-place GPU path, in which a page's captured frame is read by GL through `WGL_NV_DX_interop2`, and uploads every frame instead, at about 220 ms/s of CPU against 60–100 for an animating page. For a driver that mishandles the interop, as `HULTUI_VULKAN_INTEROP` is for video. |
+| `HULTUI_CEF_DIR` | a directory | Linux: the CEF to use, looked for first: a directory holding `libcef.so` with its resources beside it (`icudtl.dat`, the `.pak` files, `locales/`), laid out flat. After it: `cef/` beside the application, its `runtimes/<rid>/native/cef`, then the distribution's (`/usr/lib64/cef` on Fedora, `/usr/lib/cef` on Arch). The engine also sets it, in the native environment, for its helper process. |
+| `HULTUI_CEF_HELPER` | a file | Linux: the subprocess executable (`hultui-cef-helper`) to give CEF, looked for first. After it: beside the application, then its `runtimes/<rid>/native`. |
+| `HULTUI_CEF_LOG` | `verbose`, `info`, `warning`, `error` or `disable` | Linux: CEF's log level, on standard error. CEF's own default otherwise. With `info` or `verbose` the engine also says what it chose, such as how a page's frames travel (`page frames: zero-copy`, or `read back`, or `pixels`). |
+| `HULTUI_CEF_ZERO_COPY` | `0` | Linux: keeps a page's frames on the pixel path under Wayland too. By default, on Wayland, CEF hands each frame over on the GPU and HultUI blits it without a pixel crossing the CPU: about 95–120 ms/s of this process's CPU for an animating page at 1656×968, 60 frames a second, against 170–240 for pixels (GL and Vulkan alike). Under X11 pages are always pixels. For a driver that mishandles the dmabuf hand-over, as `HULTUI_WEBVIEW2_INTEROP` is on Windows. |
+| `HULTUI_ACCESSIBILITY` | `1` or `0` | Whether assistive technology listens, overriding what the platform says (on Linux, `org.a11y.Status`'s `IsEnabled` and `ScreenReaderEnabled`, which Orca and accerciser set). Content that is costly to describe, a web page's tree on Linux, is kept only while it does. For tests and diagnosis; `AccessibilityClients.Force` does the same in code. |
+| `HULTUI_CEF_SWITCHES` | `name[=value]` separated by spaces | Linux: more Chromium switches for the browser process, after the engine's own. For diagnosis and tests (the engine tests use it for a fake camera and microphone); not a supported way to configure an application. |
+| `HULTUI_CEF_API_VERSION` | — | Set by the engine for its helper process, with `HULTUI_CEF_DIR`. Not for setting by hand. |
+
 ## App conventions (not read by the framework)
 
 | Variable | Where | Effect |

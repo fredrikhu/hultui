@@ -1,0 +1,70 @@
+[    52.6 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    60.9 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   187.8 ms main          ] cef_initialize = 1
+[   192.3 ms CrBrowserMain (25859)] on_context_initialized
+[   211.3 ms main          ] create_browser = 1
+[   214.7 ms CrBrowserMain (25859)] on_after_created: browser 1
+[   217.3 ms CrBrowserMain (25859)] get_screen_info #1: struct size 56, answering scale 1.5
+[   244.8 ms CrBrowserMain (25859)] get_screen_info #2: struct size 56, answering scale 1.5
+[   246.8 ms CrBrowserMain (25859)] get_screen_info #3: struct size 56, answering scale 1.5
+[   248.9 ms main          ] add_dev_tools_message_observer → registration 5f1498725ce0
+[   248.9 ms main          ] --- Runtime.evaluate (returnByValue, awaitPromise)
+      1 + 2                                            → {"result":{"type":"number","value":3,"description":"3"}}  (34.1 ms)
+      document.title                                   → {"result":{"type":"string","value":"start"}}  (5.2 ms)
+      ({ a: [1, 'two', null], b: { c: true } })        → {"result":{"type":"object","value":{"a":[1,"two",null],"b":{"c":true}}}}  (6.2 ms)
+      undefined                                        → {"result":{"type":"undefined"}}  (5.0 ms)
+      new Promise(r => setTimeout(() => r('later'), 50)) → {"result":{"type":"string","value":"later"}}  (50.9 ms)
+      throw new Error('boom')                          → {"result":{"type":"object","subtype":"error","className":"Error","description":"Error: boom\n    at <anonymous>:1:7","objectId":"-4009423457143217758.1.1"},"exc…  (5.4 ms)
+      window                                           → FAILED {"code":-32000,"message":"Object reference chain is too long"}  (15.5 ms)
+[   632.3 ms main          ] round trip, 50 × Runtime.evaluate: send on CEF's thread → result callback median 0.29 ms, max 0.46 ms; as our thread sees it (posting, and polling every 5 ms) median 5.14 ms
+[   632.3 ms main          ] --- Runtime.addBinding('__hultuiPost') without Runtime.enable
+[   639.5 ms main          ] addBinding → {}
+      [event] Runtime.bindingCalled: {"name":"__hultuiPost","payload":"{\"from\":\"existing page\"}","executionContextId":1} (on CrBrowserMain (25859))
+[   946.6 ms main          ] --- Page.addScriptToEvaluateOnNewDocument(shim), Runtime.enable, navigate
+[   952.9 ms main          ] addScript → {"identifier":"1"}
+[   958.3 ms main          ] Page.enable → {}
+[   963.4 ms main          ] Runtime.enable → {}
+      [event] Runtime.executionContextCreated: id 1, origin ://, frame 00F5ED84…, default True
+      [event] Page.frameStartedNavigating: {"frameId":"00F5ED847FDEC03A290921CA5D526A96","url":"data:text/html;charset=utf-8;base64,PHRpdGxlPnBvc3RlcjwvdGl0bGU+PGJvZHk+Cgo8c2NyaXB0PgogIGNocm9tZS53ZWJ2aWV3LmFkZEV2ZW50TGlzdGVuZXIoJ21lc3NhZ2UnLCBlID0+IGNvbnNvbGUubG9…
+      [event] Page.frameStartedLoading: {"frameId":"00F5ED847FDEC03A290921CA5D526A96"}
+      [event] Runtime.executionContextsCleared: {}
+      [event] Runtime.executionContextsCleared: {}
+      [event] Page.frameNavigated: {"frame":{"id":"00F5ED847FDEC03A290921CA5D526A96","loaderId":"B64EA13B77116E41B56FBA6B70243DDB","url":"data:text/html;charset=utf-8;base64,PHRpdGxlPnBvc3RlcjwvdGl0bGU+PGJvZHk+Cgo8c2NyaXB0PgogIGNocm9tZS53ZWJ2aWV3LmFkZEV2Z…
+      [event] Runtime.executionContextCreated: id 1, origin ://, frame 00F5ED84…, default True
+      [event] Runtime.bindingCalled: {"name":"__hultuiPost","payload":"{\"from\":\"main frame\",\"n\":1}","executionContextId":1} (on CrBrowserMain (25859))
+      [event] Page.domContentEventFired: {"timestamp":22047870.569344}
+      [event] Page.loadEventFired: {"timestamp":22047870.569827}
+      [event] Page.frameStoppedLoading: {"frameId":"00F5ED847FDEC03A290921CA5D526A96"}
+[  1691.8 ms main          ] --- host → page: Runtime.evaluate(chrome.webview.__deliver(json))
+      [console] page got {"hello":"from host"}
+[  1898.1 ms main          ] --- https://example.com, a post from it, then an iframe from https://example.org (network)
+      [event] Page.frameStartedNavigating: {"frameId":"00F5ED847FDEC03A290921CA5D526A96","url":"https://example.com/","loaderId":"FCBFD81BAA51D1A1C68181C707045F0C","navigationType":"differentDocument"}
+      [event] Page.frameStartedLoading: {"frameId":"00F5ED847FDEC03A290921CA5D526A96"}
+      [event] Runtime.executionContextsCleared: {}
+      [event] Runtime.executionContextsCleared: {}
+      [event] Page.frameNavigated: {"frame":{"id":"00F5ED847FDEC03A290921CA5D526A96","loaderId":"FCBFD81BAA51D1A1C68181C707045F0C","url":"https://example.com/","domainAndRegistry":"example.com","securityOrigin":"https://example.com","securityOriginDetails…
+      [event] Runtime.executionContextCreated: id 1, origin https://example.com, frame 00F5ED84…, default True
+      [event] Page.domContentEventFired: {"timestamp":22047871.627261}
+      [event] Page.loadEventFired: {"timestamp":22047871.629836}
+      [event] Page.frameStoppedLoading: {"frameId":"00F5ED847FDEC03A290921CA5D526A96"}
+      [event] Runtime.bindingCalled: {"name":"__hultuiPost","payload":"{\"from\":\"example.com\"}","executionContextId":1} (on CrBrowserMain (25859))
+[  3544.5 ms main          ] add the iframe → {"result":{"type":"string","value":"added"}}
+[  4400.3 ms main          ] iframe in the DOM: {"result":{"type":"string","value":"https://example.org/ 304x154"}}
+[  4405.5 ms main          ] frame tree: {"frameTree":{"frame":{"id":"00F5ED847FDEC03A290921CA5D526A96","loaderId":"FCBFD81BAA51D1A1C68181C707045F0C","url":"https://example.com/","domainAndRegistry":"example.com","securityOrigin":"https://example.com","securityOriginDetails":{"isLocalhost":false},"mimeType":"text/html","adFrameStatus":{"adFrameType":"none"},"secureContextType":"Secure","crossOriginIsolatedContextType":"NotIsolated","gatedAPIFeatures":[]}}}
+[  4405.5 ms main          ] after the iframe loaded, events in our (top-level) session:
+      [event] Page.frameAttached: {"frameId":"A136974E8E2C6C16A987D966AADFDB98","parentFrameId":"00F5ED847FDEC03A290921CA5D526A96","stack":{"callFrames":[{"functionName":"","scriptId":"8","url":"","lineNumber":1,"columnNumber":63},{"functionName":"","scr…
+      [event] Page.frameRequestedNavigation: {"frameId":"A136974E8E2C6C16A987D966AADFDB98","reason":"initialFrameNavigation","url":"https://example.org/","disposition":"currentTab"}
+      [event] Page.frameStartedNavigating: {"frameId":"A136974E8E2C6C16A987D966AADFDB98","url":"https://example.org/","loaderId":"7180AB03DBD228CD75F95707BA44E4E3","navigationType":"differentDocument"}
+      [event] Page.frameStartedLoading: {"frameId":"A136974E8E2C6C16A987D966AADFDB98"}
+      [event] Page.frameDetached: {"frameId":"A136974E8E2C6C16A987D966AADFDB98","reason":"swap"}
+      [console] iframe loaded
+[  4405.6 ms main          ] --- Target.setAutoAttach(flatten): the iframe as its own target
+[  4412.3 ms main          ] setAutoAttach → {}
+      attachedToTarget: type iframe, url https://example.org/, session CE4F15B4…
+      [event] Target.attachedToTarget: {"sessionId":"CE4F15B414FCB0C4C412441CAC18E17F","targetInfo":{"targetId":"A136974E8E2C6C16A987D966AADFDB98","type":"iframe","title":"https://example.org/","url":"https://example.org/","attached":true,"canAccessOpener":fa…
+[  4924.6 ms main          ] in the iframe's session: typeof chrome.webview → [session] {"id":70,"result":{"result":{"type":"string","value":"undefined"}},"sessionId":"CE4F15B414FCB0C4C412441CAC18E17F"}
+[  4924.6 ms main          ] addBinding + the shim in that session, then a post from the iframe:
+      [event] [session raw]: {"method":"Runtime.bindingCalled","params":{"name":"__hultuiPost","payload":"{\"from\":\"example.org iframe\"}","executionContextId":1},"sessionId":"CE4F15B414FCB0C4C412441CAC18E17F"}
+[  5238.7 ms CrBrowserMain (25859)] on_before_close: browser 1
+[  5259.4 ms main          ] cef_shutdown returned after 13 ms; our refs: app=0, browser_process_handler=0, client=0, devtools_observer=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0, ui_task=0
+[  5770.7 ms main          ] children left: 25853 zygote; 25854 zygote; 25857 zygote; 25900 (no type); 25978 (no type)

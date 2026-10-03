@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Linux engine for HultUI.WebView: the Chromium Embedded Framework rendered off-screen,
+    its frames drawn by the page's element. Every call is CEF's C API through generated
+    structs (Interop/Capi.g.cs, from scripts/generate-cef-interop.py); nothing of CEF's C++
+    wrapper. CEF itself is not in the package: Fedora ships it (`dnf install cef`), and an
+    application elsewhere brings its own directory.
+
+    The one native file is hultui-cef-helper (native/cef-helper), the executable CEF starts
+    its child processes from. It has to be native: Chromium's zygote must be single-threaded
+    and cannot be a .NET process (spike L0, question 1). On a Linux build machine with a C
+    compiler it is built here, for the machine's RID, and travels as runtimes/<rid>/native;
+    the natives workflow builds the others. See docs/design/WEBVIEW-LINUX-BRIEF.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.WebView.Cef</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Portable source, Linux at run time: elsewhere the engine reports itself unavailable,
+         and the package stays in the cross-platform build and docs. -->
+    <SupportedOSPlatform>linux</SupportedOSPlatform>
+    <Description>HultUI web view engine for Linux: the Chromium Embedded Framework, off-screen and composited, NativeAOT-compatible. Needs CEF 146 or later (Fedora: dnf install cef).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests" />
+    <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests.CefProcess" />
+    <InternalsVisibleTo Include="HultUI.UiTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.WebView\HultUI.WebView.csproj" />
+  </ItemGroup>
+
+  <!-- hultui-cef-helper. Built from native/cef-helper when the build runs on Linux and a C
+       compiler is there; a prebuilt one in native/cef-helper/out/<rid>/ (the workflow's) is
+       used as it is. Either way it is copied beside every application that references this
+       project, and packed, under runtimes/<rid>/native/. -->
+  <PropertyGroup>
+    <CefHelperDir>$(MSBuildThisFileDirectory)..\..\native\cef-helper\</CefHelperDir>
+    <CefHelperRid Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</CefHelperRid>
+    <CefHelperRid Condition="'$(CefHelperRid)' == ''">linux-x64</CefHelperRid>
+    <CefHelperOut>$(CefHelperDir)out\$(CefHelperRid)\hultui-cef-helper</CefHelperOut>
+  </PropertyGroup>
+
+  <Target Name="BuildCefHelper" BeforeTargets="AssignTargetPaths"
+          Condition="$([MSBuild]::IsOSPlatform('Linux'))"
+          Inputs="$(CefHelperDir)hultui-cef-helper.c" Outputs="$(CefHelperOut)">
+    <MakeDir Directories="$(CefHelperDir)out\$(CefHelperRid)" />
+    <Exec Command="cc -O2 -Wall -o &quot;$(CefHelperOut)&quot; &quot;$(CefHelperDir)hultui-cef-helper.c&quot; -ldl"
+          ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="CefHelperExit" />
+    </Exec>
+    <Warning Condition="'$(CefHelperExit)' != '0'"
+             Text="hultui-cef-helper was not built (no C compiler?): CefEngine will report itself unavailable. See native/cef-helper." />
+  </Target>
+
+  <Target Name="IncludeCefHelper" BeforeTargets="AssignTargetPaths;_GetPackageFiles" DependsOnTargets="BuildCefHelper">
+    <ItemGroup>
+      <None Include="$(CefHelperDir)out\linux-x64\hultui-cef-helper" Condition="Exists('$(CefHelperDir)out\linux-x64\hultui-cef-helper')"
+            Link="runtimes\linux-x64\native\hultui-cef-helper" CopyToOutputDirectory="PreserveNewest"
+            Pack="true" PackagePath="runtimes\linux-x64\native" />
+      <None Include="$(CefHelperDir)out\linux-arm64\hultui-cef-helper" Condition="Exists('$(CefHelperDir)out\linux-arm64\hultui-cef-helper')"
+            Link="runtimes\linux-arm64\native\hultui-cef-helper" CopyToOutputDirectory="PreserveNewest"
+            Pack="true" PackagePath="runtimes\linux-arm64\native" />
+    </ItemGroup>
+  </Target>
+
+</Project>

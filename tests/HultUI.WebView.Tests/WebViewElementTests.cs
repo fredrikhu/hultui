@@ -83,6 +83,7 @@ public class WebViewElementTests
         Assert.Equal(new PixelRect(0, 60, 600, 390), placement.Bounds);
         Assert.Equal(1.5f, placement.Scale);
         Assert.Equal(0, placement.Window);        // headless: no native window
+        Assert.Null(placement.WindowSystem);      // and no window system (seam W10)
         Assert.True(engine.Views[0].IsVisible);
     }
 
@@ -289,6 +290,60 @@ public class WebViewElementTests
             page.View.Keys);
         Assert.Equal(["h", "é"], page.View.Texts.Select(t => t.Text));
         Assert.True(page.Element.IsFocused);    // the page decides when Tab leaves it
+    }
+
+    [Fact]
+    public void AForwardedShortcut_IsTheAppsFirst_AndOneItTakesNeverReachesThePage()
+    {
+        // An engine without its own keyboard (CEF): the element sees every key, and offers a
+        // shortcut to the app before sending it on, as WebView2's keys are offered (W5).
+        var seen = new List<(KeyCode, KeyModifiers)>();
+        using var page = Show(around: element =>
+            Flex.Column().Children(element).OnKeyDown(e =>
+            {
+                seen.Add((e.Key, e.Modifiers));
+                if (e.Key == KeyCode.L) e.StopPropagation = true;    // the app's "go to address"
+            }));
+        page.Window.Click(page.Element);
+
+        page.Window.PressKey(KeyCode.L, KeyModifiers.Ctrl);   // taken
+        page.Window.PressKey(KeyCode.A, KeyModifiers.Ctrl);   // left to the page
+        page.Window.PressKey(KeyCode.Left);                   // never the app's
+        page.Window.PressKey(KeyCode.F5);                     // a function key is offered
+
+        Assert.Equal([(KeyCode.L, KeyModifiers.Ctrl), (KeyCode.A, KeyModifiers.Ctrl), (KeyCode.F5, KeyModifiers.None)], seen);
+        Assert.Equal(
+            [new WebKeyInput(true, KeyCode.A, KeyModifiers.Ctrl), new WebKeyInput(false, KeyCode.A, KeyModifiers.Ctrl),
+             new WebKeyInput(true, KeyCode.Left, KeyModifiers.None), new WebKeyInput(false, KeyCode.Left, KeyModifiers.None),
+             new WebKeyInput(true, KeyCode.F5, KeyModifiers.None), new WebKeyInput(false, KeyCode.F5, KeyModifiers.None)],
+            page.View.Keys);
+    }
+
+    [Fact]
+    public void AKeysScanCode_TravelsToTheEngine()
+    {
+        // Seam W6: the physical key, which CEF needs for a page's KeyboardEvent.code.
+        using var page = Show();
+        page.Window.Click(page.Element);
+
+        page.Window.KeyDown(KeyCode.Unknown, scanCode: 0x59);   // the keypad's 1, which KeyCode has no name for
+        page.Window.KeyUp(KeyCode.Unknown, scanCode: 0x59);
+
+        Assert.Equal([new WebKeyInput(true, KeyCode.Unknown, KeyModifiers.None, ScanCode: 0x59),
+                      new WebKeyInput(false, KeyCode.Unknown, KeyModifiers.None, ScanCode: 0x59)], page.View.Keys);
+    }
+
+    [Fact]
+    public void ThePagesInputArea_PlacesTheWindowsInputMethod()
+    {
+        using var page = Show(scale: 1.5f);
+        page.Window.Click(page.Element);
+
+        // The caret 30 device pixels in and 90 down the page, 3×27 pixels: under a 40-unit toolbar.
+        page.View.RaiseInputArea(new PixelRect(30, 90, 3, 27));
+        page.Session.PumpFrames(2);
+
+        Assert.Equal(new Rect(20, 40 + 60, 2, 18), page.Window.TextInputHost.LastInputArea);
     }
 
     [Fact]

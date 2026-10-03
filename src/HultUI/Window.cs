@@ -253,6 +253,13 @@ public sealed class Window : IOverlayHost, IDisposable
     public nint NativeHandle => PlatformWindow is IWin32WindowHandle win32 ? win32.Hwnd : 0;
 
     /// <summary>
+    /// The window system this window is on: "wayland", "x11", "windows", "cocoa"; null in a
+    /// headless session. A browser engine on Linux needs it before it starts, to draw for the
+    /// same display server and, on Wayland, to share GPU buffers with this window.
+    /// </summary>
+    public string? WindowSystem => PlatformWindow.WindowSystem;
+
+    /// <summary>
     /// Where <paramref name="element"/>'s content box is in this window, in layout units:
     /// <see cref="Element.ScreenContentBox"/> — every ancestor scroll applied — plus the
     /// position of the overlay the element is in, if it is in one. An overlay's content is
@@ -1492,7 +1499,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
                     var tabTarget = _focusManager.FocusedElement ?? _root;
-                    var tabEvent = new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat };
+                    var tabEvent = new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat, ScanCode = key.ScanCode };
                     EventDispatcher.Dispatch(tabEvent, tabTarget);
                     if (tabEvent.StopPropagation)
                         break;
@@ -1523,7 +1530,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     // whole realized group repaints, exactly as it does after a drag.
                     int before = _activeTextGroup?.Version ?? 0;
                     EventDispatcher.Dispatch(
-                        new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat },
+                        new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat, ScanCode = key.ScanCode },
                         target);
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
@@ -1531,7 +1538,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 else
                 {
                     EventDispatcher.Dispatch(
-                        new KeyUpEvent { Key = key.KeyCode, Modifiers = key.Modifiers },
+                        new KeyUpEvent { Key = key.KeyCode, Modifiers = key.Modifiers, ScanCode = key.ScanCode },
                         target);
                 }
                 break;

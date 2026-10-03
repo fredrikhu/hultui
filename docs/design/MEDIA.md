@@ -416,7 +416,7 @@ CI without natives stays green and a machine with them proves the real thing.
    workflow's first successful run packed both into `HultUI.Media.Mpv.Natives`,
    published on the rolling `mpv-natives-ci` prerelease; a `mpv-natives-v*` tag
    does the same onto its own release. Outputs move between jobs as release
-   assets (`native/mpv/release-transport.sh`, Python only): artifact storage hit
+   assets (`scripts/release-transport.sh`, Python only): artifact storage hit
    its quota and `actions/cache` cross-OS archives fail on the Windows runner.
    osx-arm64 has no runner and is not started.
 7. `LibVlc` only if an application asks for something mpv lacks (Chromecast, DVD

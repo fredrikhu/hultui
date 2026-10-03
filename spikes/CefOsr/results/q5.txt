@@ -1,0 +1,187 @@
+[    54.2 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    62.6 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   172.1 ms main          ] cef_initialize = 1
+[   176.6 ms CrBrowserMain (21106)] on_context_initialized
+[   180.2 ms main          ] create_browser = 1
+[   201.6 ms CrBrowserMain (21106)] on_after_created: browser 1
+[   204.2 ms CrBrowserMain (21106)] get_screen_info #1: struct size 56, answering scale 1.5
+[   226.5 ms CrBrowserMain (21106)] get_screen_info #2: struct size 56, answering scale 1.5
+[   232.3 ms CrBrowserMain (21106)] get_screen_info #3: struct size 56, answering scale 1.5
+--- loaded
+      ready dpr 1.5 inner 800 600 hasFocus true
+--- set_focus(1)
+--- move + left click at (60, 85) in view coordinates
+      [host] cursor CT_POINTER
+      mousemove 60 85 buttons 0
+      mousedown button 0 at 60 85 detail 1 on b
+      focus b
+      mouseup button 0 at 60 85 detail 1 on b
+      click button 0 at 60 85 detail 1 on b
+[21090:21106:1001/215022.705271:ERROR:cef/libcef/browser/native/menu_runner_views_aura.cc:31] Window handle is required for default OSR context menu.
+[21090:21106:1001/215022.705280:ERROR:cef/libcef/browser/menu_manager.cc:223] Default context menu implementation is not available; canceling the menu
+--- right click at (60, 85)
+      mousedown button 2 at 60 85 detail 1 on b
+      contextmenu button 2 at 60 85 detail 0 on b
+      mouseup button 2 at 60 85 detail 1 on b
+      auxclick button 2 at 60 85 detail 1 on b
+--- double click: click_count 1 then 2
+      mousedown button 0 at 60 85 detail 1 on b
+      mouseup button 0 at 60 85 detail 1 on b
+      click button 0 at 60 85 detail 1 on b
+      mousedown button 0 at 60 85 detail 2 on b
+      mouseup button 0 at 60 85 detail 2 on b
+      click button 0 at 60 85 detail 2 on b
+      dblclick button 0 at 60 85 detail 2 on b
+--- wheel delta_y -120 (one notch down)
+      wheel dx 0 dy 120 mode 0
+      scroll 0 2
+      scroll 0 8
+      scroll 0 18.66666603088379
+      scroll 0 33.33333206176758
+      scroll 0 50.66666793823242
+      scroll 0 70
+      scroll 0 87.33333587646484
+      scroll 0 102
+      scroll 0 112
+      scroll 0 118
+      scroll 0 120
+--- wheel delta_y +120
+      wheel dx 0 dy -120 mode 0
+      scroll 0 118
+      scroll 0 111.33333587646484
+      scroll 0 99.33333587646484
+      scroll 0 83.33333587646484
+      scroll 0 64.66666412353516
+      scroll 0 44.66666793823242
+      scroll 0 27.33333396911621
+      scroll 0 13.333333015441895
+      scroll 0 4.666666507720947
+      scroll 0 0.6666666865348816
+      scroll 0 0
+--- click into the text field
+      mousedown button 0 at 120 35 detail 1 on t
+      blur b
+      focus t
+      mouseup button 0 at 120 35 detail 1 on t
+      click button 0 at 120 35 detail 1 on t
+      [host] cursor CT_IBEAM
+--- 'a' as cefclient sends it: RAWKEYDOWN, CHAR, KEYUP; wkc 0x41, native 38 (XKB), character 'a'
+      keydown key "a" code KeyA keyCode 65 which 65 repeat false on t
+      [host] on_key_event (unhandled by page) KEYEVENT_RAWKEYDOWN wkc 0x41 native 38
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x41 native 38
+      keypress key "a" code KeyA keyCode 97 which 97 repeat false on t
+      input "a" inputType insertText composing false
+      keyup key "a" code KeyA keyCode 65 which 65 repeat false on t
+--- 'b' with native_key_code 0
+      [host] on_key_event (unhandled by page) KEYEVENT_RAWKEYDOWN wkc 0x42 native 0
+      keydown key "b" code "" keyCode 66 which 66 repeat false on t
+      keypress key "b" code "" keyCode 98 which 98 repeat false on t
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x42 native 0
+      input "ab" inputType insertText composing false
+      keyup key "b" code "" keyCode 66 which 66 repeat false on t
+--- 'c' as HultUI has it: keydown from the key code (no character), the text as a CHAR on its own, keyup
+      [host] on_key_event (unhandled by page) KEYEVENT_RAWKEYDOWN wkc 0x43 native 54
+      keydown key "c" code KeyC keyCode 67 which 67 repeat false on t
+      keypress key "3" code "" keyCode 99 which 99 repeat false on t
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x43 native 54
+      input "abc" inputType insertText composing false
+      keyup key "c" code KeyC keyCode 67 which 67 repeat false on t
+--- CHAR alone: 'é' and '日' (text input with no key)
+      keypress key "\u0000" code "" keyCode 233 which 233 repeat false on t
+      input "abcé" inputType insertText composing false
+      keypress key "\u0000" code "" keyCode 26085 which 26085 repeat false on t
+      input "abcé日" inputType insertText composing false
+--- ArrowLeft (wkc 0x25, native 113), then 'X' as text: the caret moved if X lands before the last character
+      keydown key "ArrowLeft" code ArrowLeft keyCode 37 which 37 repeat false on t
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x25 native 113
+      keyup key "ArrowLeft" code ArrowLeft keyCode 37 which 37 repeat false on t
+      keypress key "x" code "" keyCode 88 which 88 repeat false on t
+      input "abcéX日" inputType insertText composing false
+--- Enter (wkc 0x0D, native 36, character \r)
+      [host] on_key_event (unhandled by page) KEYEVENT_RAWKEYDOWN wkc 0x0D native 36
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x0D native 36
+      keydown key "Enter" code Enter keyCode 13 which 13 repeat false on t
+      keypress key "Enter" code Enter keyCode 13 which 13 repeat false on t
+      keyup key "Enter" code Enter keyCode 13 which 13 repeat false on t
+--- Tab (wkc 0x09, native 23): focus to the button
+      keydown key "Tab" code Tab keyCode 9 which 9 repeat false on t
+      blur t
+      focus b
+      keyup key "Tab" code Tab keyCode 9 which 9 repeat false on b
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x09 native 23
+--- Tab: to the select
+      keydown key "Tab" code Tab keyCode 9 which 9 repeat false on b
+      blur b
+      focus s
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x09 native 23
+      keyup key "Tab" code Tab keyCode 9 which 9 repeat false on s
+--- Tab past the last element
+      keydown key "Tab" code Tab keyCode 9 which 9 repeat false on s
+      blur s
+      blur window
+      [host] on_take_focus next=True on CrBrowserMain (21106)
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x09 native 23
+      keyup key "Tab" code Tab keyCode 9 which 9 repeat false on BODY
+--- Shift+Tab
+      keydown key "Tab" code Tab keyCode 9 which 9 repeat false on BODY
+      focus window
+      focus s
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x09 native 23
+      keyup key "Tab" code Tab keyCode 9 which 9 repeat false on s
+--- click on the select
+      mousedown button 0 at 120 135 detail 1 on s
+      [host] on_popup_show True on CrBrowserMain (21106)
+      [host] on_popup_size (20,150 200x106)
+      mouseup button 0 at 120 135 detail 1 on s
+      click button 0 at 120 135 detail 1 on s
+      [host] first PET_POPUP paint 300x159
+--- click in the popup at (40, 216), view coordinates
+      [host] on_popup_show False on CrBrowserMain (21106)
+      change select three
+      mouseup button 0 at 20 120 detail 0 on s
+      click button -1 at 20 120 detail 0 on s
+      [host] cursor CT_POINTER
+--- 'd': CHAR carries the key's own wkc 0x44 and native 40 with the character
+      mousedown button 0 at 120 35 detail 1 on t
+      blur s
+      focus t
+      [host] on_key_event (unhandled by page) KEYEVENT_RAWKEYDOWN wkc 0x44 native 40
+      mouseup button 0 at 120 35 detail 1 on t
+      click button 0 at 120 35 detail 1 on t
+      keydown key "d" code KeyD keyCode 68 which 68 repeat false on t
+      keypress key "d" code KeyD keyCode 100 which 100 repeat false on t
+      input "abcéX日d" inputType insertText composing false
+      keyup key "d" code KeyD keyCode 68 which 68 repeat false on t
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x44 native 40
+      [host] cursor CT_IBEAM
+--- Shift+E the same way, with EVENTFLAG_SHIFT_DOWN
+      [host] on_key_event (unhandled by page) KEYEVENT_RAWKEYDOWN wkc 0x45 native 26
+      keydown key "E" code KeyE keyCode 69 which 69 repeat false on t
+      keypress key "E" code KeyE keyCode 69 which 69 repeat false on t
+      [host] on_key_event (unhandled by page) KEYEVENT_KEYUP wkc 0x45 native 26
+      input "abcéX日dE" inputType insertText composing false
+      keyup key "E" code KeyE keyCode 69 which 69 repeat false on t
+--- CHAR 'é' with wkc 0 and native 0 (text with no key)
+      keypress key "\u0000" code "" keyCode 233 which 233 repeat false on t
+      input "abcéX日dEé" inputType insertText composing false
+--- ime_commit_text("ü") with no composition (text with no key)
+      input "abcéX日dEéü" inputType insertText composing false
+--- click into the text field again
+      mousedown button 0 at 120 35 detail 1 on t
+      mouseup button 0 at 120 35 detail 1 on t
+      click button 0 at 120 35 detail 1 on t
+--- ime_set_composition("にほん", caret at 3)
+      compositionstart ""
+      compositionupdate "にほん"
+      [host] on_ime_composition_range_changed 10-13: (100,26 8x18) (108,26 8x18) (116,26 8x18)
+      input "abcéX日dEéüにほん" inputType insertCompositionText composing true
+--- ime_commit_text("日本")
+      compositionupdate "日本"
+      input "abcéX日dEéü日本" inputType insertCompositionText composing true
+      compositionend "日本"
+--- set_focus(0)
+      blur t
+      blur window
+[  8084.0 ms CrBrowserMain (21106)] on_before_close: browser 1
+[  8111.8 ms main          ] cef_shutdown returned after 17 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[  8623.2 ms main          ] children left: 21100 zygote; 21101 zygote; 21104 zygote; 21144 (no type); 21155 (no type)

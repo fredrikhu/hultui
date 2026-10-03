@@ -1,0 +1,14 @@
+[    54.0 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    62.1 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   218.4 ms main          ] cef_initialize = 1
+[   237.9 ms CrBrowserMain (34086)] on_context_initialized
+[   248.0 ms main          ] create_browser = 1
+[   248.1 ms main          ] create_browser = 1
+[   249.7 ms CrBrowserMain (34086)] on_after_created: browser 1
+[   252.5 ms CrBrowserMain (34086)] get_screen_info #1: struct size 56, answering scale 1
+[   260.1 ms CrBrowserMain (34086)] on_after_created: browser 2
+[   260.7 ms CrBrowserMain (34086)] get_screen_info #2: struct size 56, answering scale 1
+[   281.8 ms CrBrowserMain (34086)] get_screen_info #3: struct size 56, answering scale 1
+[  2788.5 ms main          ] two browsers (1, 2): browser 1: 61/s, browser 2: 61/s; processes: 1 gpu-process, 4 renderer, 2 utility, 3 zygote
+[  2788.5 ms main          ] SIGKILL to ourselves (pid 34070) with both open
+exit status 137; wall 2820 ms; helper processes 0.3 s after exit: 0, 3 s after: 0

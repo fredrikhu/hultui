@@ -97,9 +97,9 @@ jobs:
           }
           if (-not $py) { throw 'no working python found' }
 
-          & $py native/mpv/release_transport.py download $env:MPV_TAG libmpv-2.dll "$publish/libmpv-2.dll"
+          & $py scripts/release_transport.py download $env:MPV_TAG libmpv-2.dll "$publish/libmpv-2.dll"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $py native/mpv/release_transport.py download $env:MPV_TAG LICENCE-REPORT-win-x64.txt "$publish/LICENCE-mpv.txt"
+          & $py scripts/release_transport.py download $env:MPV_TAG LICENCE-REPORT-win-x64.txt "$publish/LICENCE-mpv.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Compile installer

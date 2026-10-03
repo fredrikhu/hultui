@@ -302,7 +302,10 @@ COPRs**, and on Debian and Ubuntu too.
   it is question 2 of the spike.
 - **What it costs**: accessibility is ours to build from CEF's raw tree updates, where WebKit
   would have spoken AT-SPI itself; a helper process; and zero-copy on NVIDIA waits on
-  cef#4237, which is still open.
+  cef#4237, which is still open. **Spike L0 found (question 1) that the helper must be
+  native**: Chromium's zygote has to be single-threaded to sandbox itself and cannot fork a
+  .NET process, so neither the app run again nor a .NET helper (NativeAOT included) works
+  with the sandbox on. A 20-line C executable does, and is the engine's one native piece.
 - **What it gains**: the same engine as Windows, so a page renders alike on both.
 
 The spike, the machine and the build order are in `docs/design/WEBVIEW-LINUX-BRIEF.md`,
@@ -460,10 +463,14 @@ WinForms host already translates virtual keys through scan codes to `KeyCode`
 (`KeyMap`); the missing piece is an internal `Window.DispatchKey(...)` the
 package can call.
 
-**W6 — Raw scan code on key events (`HultUI.Core`).** For Linux engines that take
+**W6 — Raw scan code on key events (`HultUI.Core`). Shipped in step 5.3.** For Linux engines that take
 forwarded keys. `KeyCode` is physical but maps the keypad, F13+, media and
 international keys to `Unknown`; CEF's key event wants the native key code beside
 the Windows one (what exactly is question 5 of the Linux spike). Add `KeyDownEvent.ScanCode`/`KeyUpEvent.ScanCode`.
+**Spike L0 answered it:** CEF's `native_key_code` is the XKB keycode (evdev + 8), and it is
+what fills `KeyboardEvent.code` (empty without it); `key` and `keyCode` come from the
+Windows code. So `ScanCode` carries SDL's scancode (the USB HID usage), and the engine maps it
+through one table generated from Chromium's `dom_code_data.inc` (USB, evdev and XKB per key).
 
 **W7 — Per-source interop images on Vulkan (`HultUI.Platform.SDL3`,
 `HultUI.Rendering.Skia`). Done (2026-09-30).** The Vulkan surface lent *one* interop
@@ -479,7 +486,10 @@ element leaves the tree. Proven by
 `VulkanProbeTests.TwoGpuSources_InOneVulkanWindow_BothReachTheScreen`: two pages side by side, captured from the swapchain, and one
 disposed afterwards gives its image back. With the second lend refused again, the
 right page's half was empty (seen). A single video on Vulkan was checked by capture.
-**Open:** the Linux fd path, which has not run with more than one slot.
+**The Linux fd path, checked in step 5.5 (2026-10-03):** two CEF pages in one Vulkan window
+under Wayland, each with its slot and its fd-exported semaphores, captured green and magenta;
+the disposed one gave its image back (`CefZeroCopyTests.TwoPages_InOneVulkanWindow_BothReachTheScreen`,
+through the same probe).
 
 **W8 — Foreign accessibility subtree (`HultUI.Core`, both bridges).** Neither
 bridge could host a subtree it did not build. **Windows half done (step 4):**
@@ -497,7 +507,68 @@ engine's side is `IWebEngineView.AccessibleContent` plus
 tree on someone else's bus. CEF off-screen gives the embedder a tree of plain data
 (`cef_accessibility_handler_t`), so the web view's node grows real children that our
 AT-SPI bridge serves like any others; `NativeContent` is the Windows shape and need not be
-reused. Designed in step 5, from what the spike's question 9 shows.
+reused. Designed in step 5, from what the spike's question 9 shows. **Question 9 showed**
+(2026-10-01): CEF hands over Chromium's `AXTreeUpdate` as data (nodes with role, name, states,
+attributes, children, device-pixel bounds), full once and incremental after (a small form 32
+nodes, a Wikipedia article ~5,100 nodes and 5 MB); nothing reaches AT-SPI by itself; CEF cannot
+act on a node, but its node ids are DevTools' `backendDOMNodeId`, so actions go through the
+DevTools session the engine already has for messages.
+
+**W10 — The window system (`HultUI.Core`, `HultUI.Platform.SDL3`, `HultUI`). Shipped in step
+5.2** as `IPlatformWindow.WindowSystem` (SDL's video driver: "wayland", "x11", "windows";
+null headless), `Window.WindowSystem`, and `WebViewPlacement.WindowSystem`, which the element
+fills. CEF draws for a display server of its own choosing, once per process: it has to be
+told HultUI's (spike L0: Wayland needs `WaylandFractionalScaleV1` off for the scale, and only
+Wayland shares GPU buffers with HultUI's EGL context). So the CEF engine starts CEF at its
+first page's first placement, which carries the answer.
+
+**W11 — Accessible data children (`HultUI.Core`, `HultUI`, both bridges). Designed and built
+in step 5.6 (2026-10-03), the Linux half of W8.** An element whose content is described by data rather
+than by elements says so, and the tree builder makes nodes of that data, as it already makes
+them for a virtual list's items (`IAccessibleItemSource`, `VirtualItemId`). Everything
+downstream then works unchanged: the differ, both bridges' snapshots, their change signals,
+action routing by `ElementId`. Neither bridge needs a second kind of node.
+- **`IAccessibleContentSource`** (Core, on the element): `AccessibleContent`, the roots of a
+  tree of `AccessibleContentNode`s; `AccessibleContentScale`, the device pixels per layout unit
+  the content's bounds are in; and `PerformAccessibleAction(key, action, value)`, which runs
+  on the UI thread. An engine's tree passes through as it is. The element converts nothing,
+  because a page's tree is thousands of nodes, and the builder divides by the scale as it
+  walks.
+- **`AccessibleContentNode`**: an `int Key`, which is the source's own id (CEF's AX node id,
+  which is DevTools' `backendDOMNodeId`); `Role`, `Name`, `Description`, `Value`; `Bounds` in
+  device pixels from the element's content box; focusable, focused, enabled, toggled,
+  expanded; `DefaultAction`; `Children`. Immutable, so a source publishes a new tree as a
+  whole and the UI thread reads it without a lock.
+- **`AccessibleContentAction`**: `Invoke`, `Toggle`, `Select`, `Focus`, `SetValue`.
+- **`ContentNodeId`**: like `VirtualItemId`, an `ElementId` that marks a data node (bit 62;
+  bit 63 is the virtual item's), packing the owner's id and the key. So a node keeps its
+  identity, and its AT-SPI object path, across rebuilds while the page keeps the node.
+- **The builder** adds a source's content under the element's own node, offset and clipped
+  like any child: offscreen when outside the visible region.
+- **The router** (`AccessibilityActionRouter`, `HultUI`) decodes a `ContentNodeId` and calls
+  the source's `PerformAccessibleAction` on the UI thread, for invoke, toggle, select and
+  focus, the four the bridges already route.
+- **Asking only when someone listens: `AccessibilityClients`** (Core, static). `Active`, and
+  `ActiveChanged`, are reported by the platform bridge; the Linux bridge reads
+  `org.a11y.Status` (`IsEnabled`, `ScreenReaderEnabled`, which Orca and accerciser set) and
+  follows its changes. `Force` (or `HULTUI_ACCESSIBILITY=1`, or `0`) overrides it, for tests
+  and diagnosis. A source that is costly to describe, such as a web page, keeps its tree off
+  while `Active` is false. A page's tree is hundreds of milliseconds to read when it is large,
+  and nobody would hear it.
+- **New role: `Document`** (AT-SPI `document web`, UIA `Document`), for a page's root.
+- **The web view** is the first source: the element implements it from the engine view. The
+  contract grows by default members, so WebView2 and the fake need nothing:
+  `IWebEngineView.SetAccessibilityEnabled(bool)`, `AccessibleTree`,
+  `PerformAccessibleAction`, and `WebEngineEvent.AccessibleTreeChanged` (W8's
+  `AccessibleContent` and `AccessibleContentChanged` already name WebView2's windows). The controller
+  turns the engine's tree on and off with `AccessibilityClients`. On Windows the page's
+  content is still WebView2's own tree (W8's `NativeContent`); this is the Linux engine's way.
+  **Built:** the types, the builder, the router (with `IAccessibilityActionHost.FocusElement`,
+  so AT-SPI's `GrabFocus` now works, where it used to answer false), `Document` on both bridges,
+  and the Linux bridge's status watch. Tests: ids, bounds, offscreen, a changed node as a
+  property change (Core); actions from another thread reach the source on the UI thread
+  (Headless); described nodes as AT-SPI objects, actions to the host, and, live on this
+  machine's bus, `IsEnabled` set with busctl seen by the bridge (Linux bridge tests).
 
 Not needed, checked: pixel-density math (`ScreenContentBox × Window.DisplayScale`
 is device pixels; use it rather than `LocalPosition`, which ignores scrolling),
@@ -650,6 +721,314 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
+   - **5.1, find and start CEF: done 2026-10-02** (`src/HultUI.WebView.Cef`). The C API's
+     structs, enums and exports are generated from the `capi` headers at API version 14600
+     (`scripts/generate-cef-interop.py`, `Interop/Capi.g.cs`: 170 structs, offsets measured
+     by the C compiler). `CefEngine.Availability` finds a CEF directory in the brief's order
+     (`HULTUI_CEF_DIR`, the app's `cef/`, its `runtimes/<rid>/native/cef/`, `/usr/lib64/cef`,
+     `/usr/lib/cef`), insists on the resources beside the library (and says when the official
+     distribution's `Resources/` was not merged), loads it, and makes the API handshake: an
+     unsupported version answers null rather than aborting, and `cef_version_info` works
+     before it, so a too-old CEF is reported, not fatal. The helper,
+     `native/cef-helper/hultui-cef-helper.c`, is built by the engine's own Linux build when a
+     C compiler is there and copied beside every application as `runtimes/<rid>/native/`; a
+     workflow builds both RIDs and packs them. It reads the CEF directory and API version
+     from the environment the engine sets, so it is tied to neither.
+     **CEF is a per-process singleton** (`CefRuntime`): it starts at the first page, on a
+     thread of its own that makes `cef_initialize` and, at `ProcessExit`, `cef_shutdown`
+     (CEF wants both on one thread; an application's UI thread may come and go). Engines are
+     handles onto it, so a second `CefEngine` after the first is disposed works. With
+     `multi_threaded_message_loop`, CEF's callbacks arrive on `CrBrowserMain`; work for it is
+     posted with `cef_post_task`. Ozone follows the window system (`wayland` with
+     `WaylandFractionalScaleV1` disabled, `x11`, or `headless` with ANGLE on GL), merging
+     CEF's own `disable-features`. 11 tests in `HultUI.WebView.Engines.Tests` (the CEF ones
+     skip without CEF), one through a process of its own
+     (`HultUI.WebView.Engines.Tests.CefProcess`): it starts CEF, returns from `Main`, and is
+     seen to shut CEF down on its startup thread with no process carrying its environment
+     left behind.
+     Found while building it: **the profile is named after the entry assembly**, not the
+     executable (under `dotnet app.dll` every application was "dotnet"); **a second instance
+     of an application cannot share its profile** (Chromium's `SingletonLock`: the second
+     `cef_initialize` hands over to the first, "Opening in existing browser session", and
+     fails), so the engine checks the lock and starts a second instance on a temporary
+     profile, deleted when it exits, which a test shows; and a distribution's .NET reports
+     its own RID (`fedora.44-x64`), so natives are looked for under the portable one
+     (`linux-x64`).
+   - **5.2, pixels: done 2026-10-02.** `CefView`: the page is created at its first placement
+     in a window (CEF starting then, for that window's system, seam W10), asynchronously on
+     `CrBrowserMain`; `on_paint` writes each whole frame, premultiplied BGRA at the placement's
+     scale, into `IWebViewHost.Pixels`. The view rectangle is the placement's device pixels
+     over its scale, rounded up so the frame covers the element; a new scale is
+     `notify_screen_info_changed`, a new size `was_resized`; hidden is `was_hidden`. Every
+     call into CEF is posted to `CrBrowserMain` and every callback arrives there, so HultUI's
+     thread never waits for CEF. The sample's `--check` needs script and messages as well, so
+     their route (decided after the spike) is built now and step 5.4 completes it: each
+     page's DevTools session (`DevToolsSession`, raw JSON both ways) turns on `Page` and
+     `Runtime`, adds the `__hultuiPost` binding and registers the `window.chrome.webview` shim
+     for every new document before `Ready` is raised; `ExecuteScriptAsync` is
+     `Runtime.evaluate` (the value as JSON, `null` for undefined, a throw faults the task);
+     `PostMessage` is a `MessageEvent` the shim dispatches; `bindingCalled` is
+     `MessageReceived`, with the origin of its execution context. `NavigateToString` serves
+     the document from `https://hultui-string.invalid/` with `Content-Security-Policy:
+     sandbox allow-scripts allow-forms allow-popups allow-modals`, and reports
+     `about:blank` as its address, as WebView2 and the fake do.
+     **The review's sandbox holds** (it asked to verify): the document's origin is opaque
+     (`self.origin` is "null"; `location.origin` still shows the URL's, which is how a sandbox
+     behaves, and fooled the first test), its cookies are out of reach, its messages arrive
+     with a null origin, and a `srcdoc` iframe in it loads (in a `data:` page it crashed the
+     renderer). CSP from a scheme handler is honoured in general: `script-src 'none'` blocked
+     scripts in the spike's `app.local`.
+     **`external_begin_frame_enabled` is not needed** (the review asked to try it): the idle
+     cost the spike measured (17–20 ms/s) was the spike's own harness. The sample, NativeAOT,
+     idle on its home page: 4 ms/s with CEF and 4 ms/s with the fake engine, all on HultUI's
+     thread; CEF's threads idle. It changed nothing in the spike either (frame rate 60, 1, or
+     external begin frames: 20 ms/s each), and it would need a "the page wants a frame" signal
+     CEF does not give.
+     **Measured:** `--check` passes on Linux under JIT (772 ms) and NativeAOT (470 ms; no trim
+     or AOT warnings, the helper published beside the executable), at window scale 1 and 1.5
+     (the page sharp at 1.5, matching HultUI's own text), with no CEF process left after
+     exit; `--bench` (the animated page at 1916×945, 60 page frames a second, pixel path):
+     185–228 ms/s in the process, against Windows' ~300 for its pixel path at 1650×1072. 5
+     view tests in `HultUI.WebView.Engines.Tests` (`CefViewTests`): pixels at the placement's
+     scale, a new scale, script, the opaque string document, messages both ways.
+   - **The review of 5.1 and 5.2, fixed 2026-10-02.** String documents are kept per view, the
+     newest eight (`StringPages.KeptPerView`); older ones get the "no longer available" page.
+     The placement is applied again when the view becomes ready; the loss the review expected
+     did not show here (CEF reads the view's size again before it paints, so a test that moves
+     the placement right after CEF's first read finds the new size with or without the fix),
+     but the fix makes it ours rather than CEF's to get right. The profile lock is read
+     against `gethostname`'s whole name, not `Environment.MachineName`, which stops at a dot.
+     Every `[UnmanagedCallersOnly]` method catches, reports on standard error (`CefLog`) and
+     answers CEF with its default; a test reflects over the assembly and fails on any callback
+     without a catch clause. `SDL3Window.WindowSystem` reads SDL's driver once. The mpv
+     backend also looks under the portable RID (`runtimes/linux-x64/native`) when the runtime
+     names its own (`fedora.44-x64`), checked on this machine. The helper workflow publishes
+     through the release transport, now shared in `scripts/release-transport.sh`.
+     **`UserDataFolder`, the owner's rule:** the first page's folder (or the application's
+     default) is the process's profile, `root_cache_path`; a page naming it or none shares it;
+     a folder inside it gets a request context of its own (with the string documents' handler
+     registered on it, which a new context does not inherit); any other folder fails the page
+     with a message naming the folder in use. A second instance's temporary profile takes the
+     root's place, and folders inside the preferred root are placed inside it. Tested by rule
+     and in a process of its own. The limits an application meets on Linux are in
+     `docs/WEBVIEW.md`.
+     **Found while fixing it: CEF took .NET's signal handlers.** The engine suite hung when its
+     process tests ran after CEF had started in the test host: their children had exited and
+     were zombies, because .NET's `Process` learns of an exit only through its own `SIGCHLD`
+     handler, and Chromium takes `SIGCHLD` while it starts. Measured with `SigCgt` before and
+     after `cef_initialize`: Chromium also reset `SIGSEGV`, `SIGILL`, `SIGFPE`, `SIGBUS`,
+     `SIGABRT` and `SIGQUIT` to their defaults, and .NET turns a null dereference into a
+     `NullReferenceException` through its `SIGSEGV` handler, so **an application's first
+     `NullReferenceException` after its first page ended the process** (5.1 and 5.2 shipped
+     that way). Now `disable_signal_handlers` is set, which keeps every handler but
+     `SIGCHLD`, and .NET's `SIGCHLD` is saved before `cef_initialize` and put back when the
+     context is up; Chromium does not take it again (checked after a page's renderer started).
+     A test runs a process of its own and checks every handler .NET had before CEF is there
+     after, that a process is seen to exit, and that a null dereference throws.
+   - **5.3, input, focus, the input method, the `<select>` popup: done 2026-10-02.** CEF has
+     no keyboard or input method off-screen, so the element forwards both (no
+     `NativeKeyboard`), the path only the fake engine had used. **Pointer:** view coordinates
+     (device pixels over the scale); held buttons as flags; a wheel notch is 120, positive up;
+     the side buttons go back and forward in the page's history. **Keys:** `RAWKEYDOWN` and
+     `KEYUP` with the Windows key code (`key`, `keyCode`) and the XKB keycode
+     (`KeyboardEvent.code`); the text a key types, which SDL sends apart, goes as a `CHAR`
+     carrying that key's codes; Enter, Tab, Backspace and Escape get their `CHAR` with the key,
+     as Windows' WM_CHAR gives it (Enter's `keypress`, a form's submission); text from no key
+     is committed (`insertText`, no `keypress`). **Seam W6, shipped:**
+     `KeyDownEvent.ScanCode` / `KeyUpEvent.ScanCode` (and `InputEvent.KeyInput`,
+     `WebKeyInput`) carry SDL's scancode, the USB HID usage; `scripts/generate-cef-keys.py`
+     turns Chromium's `dom_code_data.inc` into the usage → XKB → DOM code table
+     (`Interop/DomCodes.g.cs`), so a key `KeyCode` has no name for (the keypad's 1) reaches a
+     page as `Numpad1`. **Shortcuts:** the element offers Ctrl, Alt and F1–F12 keys to its
+     ancestors before the page sees them, by the rule WebView2's keys are offered (now
+     `WebKeys.IsShortcut`); one an app takes, and its release, never reach the page.
+     **Input method:** composition is `ime_set_composition`, its commit `ime_commit_text`; the
+     composition's character bounds come back as a new event,
+     `WebEngineEvent.InputAreaChanged` (device pixels in the page), which the element turns
+     into `TextInputHost.SetInputArea` while it has focus. **Focus:** in by Tab starts at the
+     page's first stop, by Shift+Tab at its last: CEF has no call for it, so the page's
+     sequential-focus starting point is moved to the document's start (or end) and a Tab sent;
+     Tab past the end is `on_take_focus`, `FocusLeaving`. **Cursor:** `on_cursor_change`,
+     mapped to the nearest of HultUI's. **`<select>`:** its list is CEF's `PET_POPUP` buffer;
+     while it is open the view's last frame and the popup are both kept and composited into
+     one frame at the popup's rectangle, and clicks inside it choose. Found on the way: a page
+     with no background was transparent (CEF's off-screen default); it is white now, as on
+     WebView2. And script results came back with every non-ASCII character escaped
+     (`"\u65e5"`), as DevTools writes them; they are written again, as WebView2 gives them
+     (`"日本"`). 7 engine tests (`CefInputTests`) and 3 element tests (shortcuts, the scan
+     code, the input area).
+   - **5.4, navigation, policy, the four requests, drags: done 2026-10-02.**
+     **Navigation:** `on_before_browse` (main frame) raises `NavigationStarting` and CEF's
+     thread waits for the controller's answer, the allowed direction; a redirect is asked
+     again under the same id, with `IsRedirect`. `on_load_end` completes it with the status,
+     `on_load_error` with WebView2's error names (`HostNameNotResolved`, `CannotConnect`,
+     `Cancelled`, the certificate ones; `Unknown` for the rest); a 4xx or 5xx page completes
+     unsuccessful with its status, as WebView2's does. A refused navigation completes
+     `Cancelled` once, and CEF's own `ERR_ABORTED` for it is swallowed. Each navigation is kept
+     with its address, so one replaced while still loading ends `Cancelled` and the
+     newer one completes for itself. A string document's
+     navigation reads `about:blank`, as its address does. **Nothing left waiting:** every
+     answer CEF is owed is kept with its default; disposal and process exit
+     (`CefRuntime.ShuttingDown`) give each its default, so a navigation still waiting is
+     cancelled and CEF's thread freed. **New windows:** `on_before_popup` refuses and raises
+     `NewWindowRequested` with the address and the user gesture. **The page's process:**
+     `on_render_process_terminated` is `ProcessFailed` (`CanReload`), and the next navigation
+     brings a new renderer. **Context menu:** `run_context_menu` keeps the callback; CEF's
+     model becomes the engine items under WebView2's names (`cut`, `copy`, `paste`,
+     `pasteAndMatchStyle`, `selectAll`, the spelling ones as `spellCheck`; back, reload,
+     print and view source under names the standard menu leaves out), the point is CEF's
+     view coordinates times the scale (device pixels, as WebView2's needed), and a choice is
+     `cont` with its command id. CEF gives no link text (`Target.LinkText` stays null) and,
+     off-screen, no "inspect". **Script dialogs:** `on_jsdialog` and
+     `on_before_unload_dialog`; the origin is the page's (null for a string document); left
+     unanswered at disposal, a dialog gets "no" (leave, for before-unload). **Downloads:**
+     `on_before_download` raises `DownloadRequested` and keeps the callback; not answered,
+     nothing is saved; `SaveTo` continues to that path without CEF's dialog, and
+     `on_download_updated` reports progress and the end on the UI thread (`IWebViewHost.Post`);
+     a cancel waits for the item's callback if CEF has not given it yet. **Permissions:**
+     found when built, CEF's off-screen (Alloy-style) browsers have no permission prompts:
+     notifications, geolocation, the clipboard and the rest are denied before the application
+     hears of them, and `on_show_permission_prompt` is never called (it is wired, for a CEF
+     that does). The camera and microphone are asked through
+     `on_request_media_access_permission`, one `PermissionRequested` per device, and given
+     only if every one asked is allowed (CEF takes all or none). A Linux limit, in
+     `docs/WEBVIEW.md`. Tests get a fake camera and microphone through a new
+     `HULTUI_CEF_SWITCHES` (Chromium switches, for diagnosis). **Drags in:** `SendDrag`
+     builds a drag data object from the files and text and calls the drag-target functions;
+     whether the page takes it is CEF's last `update_drag_cursor`, which comes after the step
+     (HultUI's thread does not wait), so the answer lags one step. SDL names a drag's files
+     only at the drop, so a drop carrying what the enter did not enters again with them, and
+     steps twice before dropping: Blink fires `dragenter` when the target changes and
+     `dragover` only at the step after, and a drop with no `dragover` taken is a navigation to
+     the file. **Drags the page starts:** `start_dragging` is taken (1) and the drag carried
+     inside the page by the pointer events that follow (moves are `drag_target_drag_over`, the
+     button's release the drop, then `drag_source_ended_at` and `system_drag_ended`); it cannot
+     leave the page for another application, which needs an operating-system drag source the
+     Linux side does not have (a Linux limit). Tests answer `NavigationStarting` as the
+     controller does (an internals-visible hook). 21 engine tests (`CefPolicyTests`).
+   - **The review of 5.3 and 5.4, item 1, found a real loss: done 2026-10-03.** Comparing each
+     signal's handler, not only whether it is caught, showed Chromium also takes **SIGINT and
+     SIGTERM** (and installs SIGHUP) for a shutdown of its own: an application's
+     `PosixSignalRegistration` or `Console.CancelKeyPress` never ran, and Ctrl+C or a `kill`
+     ended the process Chromium's way. Every signal's action is now saved before
+     `cef_initialize` and put back when the context is up (SIGCHLD's save was the special case
+     of it). Tests: the handler of every signal .NET had caught is the same after CEF's start
+     and after a page's renderer starts; an application's SIGTERM handler, made before CEF, runs
+     and exits with CEF stopped cleanly (it fails without the fix). Plain .NET, without CEF,
+     ends on SIGTERM with 143 and no `ProcessExit` too; that is .NET's default, not CEF's. A
+     process test that times out now also prints what of its was still running (item 2).
+   - **5.5, zero-copy on Wayland: done 2026-10-03.** On the decided route. **CEF's side:** the
+     engine has one surfaceless EGL context (GL ES 3) for the process, current on CEF's UI
+     thread. Inside `on_accelerated_paint` the frame's dmabuf is imported as an EGLImage and
+     blitted into one of three textures the view owns, the copy fenced (CEF reuses the buffer
+     when the callback returns), and that slot published as the newest. Each slot was exported
+     once (`EGL_MESA_image_dma_buf_export`) when the ring was made at its size; a new size
+     makes a new ring. **HultUI's side:** `CefFrames` is the view's `IGpuFrameRenderer`. On
+     its first draw at a ring it imports the three slots once into the context the surface
+     runs (`eglGetCurrentDisplay`), then each frame blits the newest into the sink's target.
+     The GL renderer's context is EGL on Wayland. The Vulkan renderer's hidden GL context is
+     too, and its lent target is seam W7's shared image, so one path serves both renderers. CEF
+     writes a slot that is neither the newest nor the one HultUI last read; HultUI fences its
+     read and waits on that fence before giving the slot back. **When it registers:** at the first
+     placement, when the window system is Wayland, before the browser exists. `UseGpuRenderer`
+     may now come after `Attach`, which the contract's comment says; X11 and headless keep
+     today's pixel code, untouched. **Fallbacks:** a raster surface (Pixels mode), or a context
+     that cannot import, gets each frame read back on CEF's thread; an engine without EGL makes
+     the browser without shared textures, and its pixels are uploaded by the renderer.
+     `HULTUI_CEF_ZERO_COPY=0` turns it off; `HULTUI_CEF_LOG=info` says which path frames take.
+     **The `<select>` popup arrives as a shared texture of its own** (`PET_POPUP` through
+     `on_accelerated_paint`). It is copied into a texture the engine keeps and blitted over the
+     view, kept apart while the list is open, into the same slot, as the pixel path composes it.
+     **CPU** (the sample's `--bench`, an animating page at 1656×968, 60 page frames a second,
+     this process, sway on the Intel UHD 770; the output is 1080 tall, so the spike's 1072 did
+     not fit): zero-copy **95–100 ms/s on GL, 104–119 on Vulkan**, against **172–233 and 178–238**
+     on the pixel path. That includes HultUI redrawing the window every frame; the spike's 33
+     was the copy alone. Windows measured 62–106 (GL) and 19–94 (Vulkan) for its zero-copy.
+     **Seam W7 checked on Linux:** the Vulkan probe (`tests/HultUI.UiTests.VulkanProbe
+     --webviews`) now runs CEF on Linux. With two pages in one Vulkan window, each lent its own
+     shared image (fd-exported semaphores and all), the `HULTUI_VULKAN_CAPTURE` shows green
+     left and magenta right, both through zero-copy, and the disposed page gave its image back.
+     The probe waits a second after both pages first drew, because CEF's first frame is the
+     blank one before the document. **Found on the way, a crash since 5.3:** disposing a view
+     while its `<select>` list is open fails a CHECK inside `close_browser` (SIGTRAP), which ended
+     the process on either path. The list is closed first now (focus taken, Escape), and the
+     browser closes when the popup has gone, or after a second. **Tests:** `CefZeroCopyTests`,
+     run when CEF and a Wayland compositor are present. A process of its own runs CEF on
+     Wayland and drives the renderer from an EGL context of its own: two pages each show their
+     colour through zero-copy, a page changed by script sends its next frame, and the list is
+     drawn over the page from its shared texture. The W7 capture runs through the probe. In
+     process: a Wayland placement registers the renderer and an X11 one does not; and without
+     shared textures a GPU surface still gets the page, uploaded. Also
+     `AViewDisposedWithItsListOpen_GoesQuietly`.
+     **Two more found by the new tests running beside the old, both older than 5.5:**
+     *A segfault when a view is disposed while CEF makes its browser.* The view closed the
+     browser inside `on_after_created`, which runs inside `AlloyBrowserHostImpl::CreateInternal`,
+     and the browser was freed under it. Found by symbolizing the crash from a core dump with
+     libcef's MiniDebugInfo, since there is no debugger here. The close is posted now. 80 views
+     placed and disposed in turn crashed every run before and none after
+     (`PagesDisposedWhileCefMakesThem_GoQuietly`). *The process tests' rare timeouts (review
+     item 2) explained:* the child had exited, a zombie, and the test host's SIGCHLD was back at
+     the default. .NET installs its handler only at a process's first `Process.Start`. When
+     that came while CEF started, Chromium reset it to the default, the same as the value saved
+     before, so nothing was put back and no child was reaped again. An application starting a
+     process while its first page starts would lose `Process.WaitForExit` the same way. Now the
+     engine has .NET install its handler first, with one trivial process, before saving. It
+     puts back only what Chromium changed (a handler in libcef, or a default where a handler
+     was), never one installed meanwhile. A process test that times out now says the child's
+     state and the test host's signal state (that is how this was caught).
+     `AFirstProcessStartedWhileCefStarts_KeepsDotNetsSigchld` failed before;
+     `OnlyChromiumsChanges_ArePutBack`. The engine suite then passed 20 runs in a row with a
+     compositor, and one without (its two Wayland tests skip). Two tests whose single click
+     could be lost while every class starts pages at once now click until the page has it.
+   - **The review of 5.5: done 2026-10-03.** *Item 1:* the restore also runs once per process
+     after the first page's first frame (`CefRuntime.FirstPageDrew`, from `on_paint` or
+     `on_accelerated_paint`). By then the browser, its renderer and its GPU process are up. The
+     signal test compares handlers only after a page has drawn and that restore has run. Measured:
+     it puts back nothing, on the headless platform and on Wayland alike. Chromium sets nothing
+     after `on_context_initialized` here, so it is a guard, and it says what it restored with
+     `HULTUI_CEF_LOG=info`. *Item 2,* the page-and-video W7 check, not run: no libmpv on this
+     machine (no `mpv-libs`, no rights to install it, and the natives' release is private).
+     Also, as the suite grew, two rare timeouts: a still page's repaint after a new scale
+     sometimes never came under load, so a resize now also asks CEF for a frame
+     (`invalidate`). And the page-drag test lost its very first mouse-down, so it now clicks
+     until the page has one. The engine suite then passed 15 runs in a row.
+   - **5.6, Linux accessibility: done 2026-10-03.** First the seam the bridge needed, W11,
+     designed beside the others and built with its tests (see W11). Then the engine.
+     **The mirror** (`CefAccessibleTree`): CEF's render handler gives an accessibility handler.
+     Its `cef_value_t`s are read once into dictionaries and lists, and the main frame's
+     `AXTreeUpdate`s are applied: nodes replaced, `node_id_to_clear`, what the root no longer
+     reaches swept, the focus from `tree_data`, and a new main tree (a navigation) replacing the
+     old. An iframe's tree (one with a parent tree) is not followed. What the platform reads is
+     rebuilt once per burst of updates. Ignored nodes, unnamed generic containers and
+     paragraphs give their children to their parent. Inline text boxes and list markers go, as
+     does the text inside a control named by it, and a field's insides (its text is its value).
+     Bounds are made absolute through the offset containers. **Scrolling, found when built:**
+     on a scroll CEF calls its location callback with an empty list, and neither the document's
+     scroll offset nor any node's location arrives. Newer Chromium sends scroll offsets apart
+     from locations, and CEF's conversion drops them. So each rebuild asks the page for
+     `[scrollX, scrollY]` through DevTools, and the document's scroll comes from that. Scrolling
+     inside a nested scroll container is not followed (a Linux limit). **On only while someone
+     listens:** the controller follows `AccessibilityClients` and the view calls
+     `set_accessibility_state`; off, the mirror is cleared. The wish is kept at once, so one made
+     before CEF runs is applied when the browser is made. **Actions:** by `backendDOMNodeId`,
+     through the DevTools session: focus is `DOM.focus`; invoke, toggle and select are a click,
+     `DOM.resolveNode` then `Runtime.callFunctionOn`; set-value sets the value and fires `input`
+     and `change`. **Found when built:** reading the page's scroll with reflection-based JSON
+     threw in the sample, which, like an AOT application, has it off. The engine tests allow
+     it, so only the sample showed it; it is parsed with `JsonDocument` now. **Tests:**
+     `CefAccessibleTreeTests` (13) feed the mirror what CEF sent the spike for a small form: the
+     tree, a change and locations, other frames, a new page, and the role table.
+     `CefAccessibilityTests` (4) do it live: the tree where the page draws it (each bounds equal to
+     `getBoundingClientRect` × 1.5), scrolling, the four actions, off until asked for. And
+     `WebViewAccessibleTreeTests` (3): the page's tree as the web view's children, in layout units,
+     actions by key, and on only while someone listens. **Checked with busctl** (no accerciser
+     or pyatspi here) on the sample under sway: with `org.a11y.Status.IsEnabled` set as an AT
+     sets it, the a11y bus shows the web view's panel with a `document web` child and the page's
+     heading, labels, push button and list. AT-SPI `DoAction` on the page's button made the page
+     post its message, and the app's status line read `Page said: {"clicked":1}`. With
+     IsEnabled back to false the page's nodes were gone. Noticed, not changed: HultUI's
+     application root registers with an empty name, which a screen reader announces as the
+     application's.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

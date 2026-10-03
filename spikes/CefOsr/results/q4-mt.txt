@@ -1,0 +1,24 @@
+[    55.8 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    63.8 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   176.0 ms main          ] cef_initialize = 1
+[   199.8 ms CrBrowserMain (18997)] on_context_initialized
+[   206.9 ms main          ] create_browser = 1
+[   208.6 ms CrBrowserMain (18997)] on_after_created: browser 1
+[   212.5 ms CrBrowserMain (18997)] get_screen_info #1: struct size 56, answering scale 1.5
+[   235.3 ms CrBrowserMain (18997)] get_screen_info #2: struct size 56, answering scale 1.5
+[   238.5 ms CrBrowserMain (18997)] get_screen_info #3: struct size 56, answering scale 1.5
+[   273.2 ms main          ] navigated: title 'second', on_before_browse for 2 url(s)
+[ 11826.1 ms main          ] idle 5 s: our process 17 ms/s CPU, CEF's children 0 ms/s; pump asked 0/s, run 0/s
+[ 11826.2 ms main          ] animating 3 s at 60: 60.0 paints/s; our process 48 ms/s CPU, CEF's children 157 ms/s; pump asked 0/s, run 0/s
+[ 11829.5 ms CrBrowserMain (18997)] on_before_close: browser 1
+[ 11832.0 ms main          ] on_before_close 5 ms after close_browser
+[ 11832.1 ms main          ] callbacks by thread:
+    on_after_created                 CrBrowserMain (18997) ×1
+    on_before_browse                 CrBrowserMain (18997) ×3
+    on_before_close                  CrBrowserMain (18997) ×1
+    on_load_end                      CrBrowserMain (18997) ×3
+    on_paint                         CrBrowserMain (18997) ×213
+    on_title_change                  CrBrowserMain (18997) ×6
+[ 11857.2 ms main          ] cef_shutdown returned after 16 ms on main; refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[ 14800.6 ms main          ] after 3 s, children left: 18991 zygote S; 18992 zygote S; 18995 zygote S; 19045 (no type) Z; 19120 (no type) Z
+[ 14900.9 ms main          ] threads in our process now: 27

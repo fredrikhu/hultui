@@ -1,0 +1,25 @@
+[    53.9 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    62.2 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   188.3 ms main          ] cef_initialize = 1
+[   211.4 ms CrBrowserMain (33560)] on_context_initialized
+[   217.7 ms main          ] create_browser = 1
+[   217.8 ms main          ] create_browser = 1
+[   220.2 ms CrBrowserMain (33560)] on_after_created: browser 1
+[   223.2 ms CrBrowserMain (33560)] get_screen_info #1: struct size 56, answering scale 1
+[   228.0 ms CrBrowserMain (33560)] on_after_created: browser 2
+[   228.5 ms CrBrowserMain (33560)] get_screen_info #2: struct size 56, answering scale 1
+[   249.2 ms CrBrowserMain (33560)] get_screen_info #3: struct size 56, answering scale 1
+[  2761.1 ms main          ] two browsers (1, 2): browser 1: 61/s, browser 2: 61/s; processes: 1 gpu-process, 4 renderer, 2 utility, 3 zygote
+[  2763.4 ms CrBrowserMain (33560)] on_before_close: browser 1
+[  2767.9 ms main          ] close_browser(force 0) on browser 1: on_before_close after 6 ms
+[  4777.1 ms main          ] one left: browser 2: 60/s; processes: 1 gpu-process, 3 renderer, 2 utility, 3 zygote
+[  4778.7 ms CrBrowserMain (33560)] on_before_close: browser 2
+[  4782.4 ms main          ] close_browser(force 0) on browser 2: on_before_close after 5 ms
+[  5786.0 ms main          ] none left: processes: 1 gpu-process, 2 renderer, 2 utility, 3 zygote
+[  5805.1 ms main          ] cef_shutdown returned after 15 ms; refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[  5806.6 ms main          ] threads in our process: 29; processes: 2 (no type), 3 zygote
+[  6809.7 ms main          ] 1 s after cef_shutdown: processes: 2 (no type), 3 zygote; zombies: 2
+[  8812.7 ms main          ] 3 s after cef_shutdown: processes: 2 (no type), 3 zygote; zombies: 2
+[ 15817.8 ms main          ] 10 s after cef_shutdown: processes: 2 (no type), 3 zygote; zombies: 2
+[ 15817.8 ms main          ] returning from Main
+exit status 0; wall 15852 ms; helper processes 0.3 s after exit: 0, 3 s after: 0

@@ -1,0 +1,50 @@
+[    55.9 ms main      ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    64.6 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<build>/helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland
+[   205.3 ms main      ] on_context_initialized
+[   205.3 ms main      ] cef_initialize = 1
+[   205.8 ms main      ] context ready 205 ms after start
+[   210.1 ms main      ] on_after_created: browser 1
+[8409:8409:1001/212338.784418:ERROR:media/gpu/vaapi/vaapi_wrapper.cc:1640] vaInitialize failed: unknown libva error
+[   232.0 ms main      ] create_browser_sync = 5a615886cc60
+[8412:8412:1001/212338.807571:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7
+[   261.6 ms main      ] on_load_end: HTTP 200
+[   285.7 ms main      ] first on_paint: PET_VIEW 800x600
+[   287.8 ms main      ] page loaded and painted 82 ms after create_browser; title 'Q1'
+[   312.2 ms main      ] on_load_end: HTTP 200
+[8369:8369:1001/212340.808109:ERROR:cef/libcef/browser/browser_info_manager.cc:858] Timeout of new browser info response for frame 8-DDFBC9CE1C169C094D4ABF4A61C7EDC5 (has_rfh=1)
+Warning: maxDynamicUniformBuffersPerPipelineLayout artificially reduced from 507904 to 16 to fit dynamic offset allocation limit.
+Warning: maxDynamicStorageBuffersPerPipelineLayout artificially reduced from 507904 to 16 to fit dynamic offset allocation limit.
+[8409:8409:1001/212340.875666:ERROR:ui/gl/egl_util.cc:92] EGL Driver message (Error) eglCreateContext: Requested version is not supported
+Warning: eglCreateContext failed with EGL_BAD_ATTRIBUTE
+ - While trying to discover a BackendType::OpenGL adapter.
+    at CheckEGL (../../third_party/dawn/src/dawn/native/opengl/UtilsEGL.cpp:100)
+
+Warning: maxDynamicUniformBuffersPerPipelineLayout artificially reduced from 72 to 16 to fit dynamic offset allocation limit.
+Warning: maxDynamicStorageBuffersPerPipelineLayout artificially reduced from 64 to 16 to fit dynamic offset allocation limit.
+[  2817.1 ms main      ] Pump: timed out after 2500 ms
+[ 12817.9 ms main      ] Pump: timed out after 10000 ms
+[ 12819.1 ms main      ] chrome://gpu (0 chars):
+[ 12819.8 ms main      ] children launched:
+    <build>/helper-c --type=zygote --no-zygote-sandbox --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=zygote --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=storage.mojom.StorageService --lang=en-US --service-sandbox-type=utility --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+[ 12820.4 ms main      ] children now:
+    pid 8379 (parent 8369) zygote: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 8380 (parent 8369) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 8383 (parent 8380) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 8409 (parent 8379) gpu-process: exe chelper, seccomp 2, no_new_privs 1, our namespaces, --ozone-platform=wayland, maps libgallium libEGL_mesa libwayland-client libX11.so libxcb.so libGLESv2.so
+    pid 8412 (parent 8369) utility: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 8414 (parent 8383) utility: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 8453 (parent 8383) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+    pid 8455 (parent 8383) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+    pid 8485 (parent 8383) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+[ 12843.8 ms main      ] on_before_close: browser 1
+[ 12867.1 ms main      ] cef_shutdown returned after 16 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0, string_visitor=0
+[ 13369.8 ms main      ] children left: 8379 zygote; 8380 zygote; 8383 zygote; 8455 (no type); 8485 (no type)

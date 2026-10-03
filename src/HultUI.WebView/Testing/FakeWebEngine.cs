@@ -120,6 +120,28 @@ public sealed class FakeWebEngineView : IWebEngineView
         }
     }
 
+    /// <summary>The page's tree as data (seam W11); empty by default. Setting it says so.</summary>
+    public IReadOnlyList<HultUI.Core.Accessibility.AccessibleContentNode> AccessibleTree
+    {
+        get;
+        set
+        {
+            field = value;
+            Raise(new WebEngineEvent.AccessibleTreeChanged());
+        }
+    } = [];
+
+    /// <summary>Whether the controller has the page's tree on, as assistive technology listens.</summary>
+    public bool AccessibilityEnabled { get; private set; }
+
+    public void SetAccessibilityEnabled(bool enabled) => AccessibilityEnabled = enabled;
+
+    /// <summary>What assistive technology asked of the page's nodes, in order.</summary>
+    public List<(int Key, HultUI.Core.Accessibility.AccessibleContentAction Action, string? Value)> AccessibleActions { get; } = [];
+
+    public void PerformAccessibleAction(int key, HultUI.Core.Accessibility.AccessibleContentAction action, string? value) =>
+        AccessibleActions.Add((key, action, value));
+
     /// <summary>What <see cref="ExecuteScriptAsync"/> answers; returns <c>"null"</c> when unset.</summary>
     public Func<string, string>? Script { get; set; }
 
@@ -315,6 +337,7 @@ public sealed class FakeWebEngineView : IWebEngineView
     public void RaiseNewWindow(Uri uri, bool userInitiated = true) => Raise(new WebEngineEvent.NewWindowRequested(uri, userInitiated));
     public void RaiseCursor(CursorType cursor) => Raise(new WebEngineEvent.CursorChanged(cursor));
     public void RaiseFocusLeaving(bool forward) => Raise(new WebEngineEvent.FocusLeaving(forward));
+    public void RaiseInputArea(PixelRect area) => Raise(new WebEngineEvent.InputAreaChanged(area));
 
     /// <summary>A shortcut pressed in the page, as an engine with its own keyboard offers it.
     /// Returns the request, whose <see cref="WebKeyRequest.Handled"/> says whether the app took it.</summary>

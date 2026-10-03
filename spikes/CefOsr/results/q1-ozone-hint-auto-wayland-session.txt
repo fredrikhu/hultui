@@ -1,0 +1,38 @@
+[    54.6 ms main      ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    62.3 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<build>/helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform-hint=auto
+[   209.8 ms main      ] on_context_initialized
+[   209.8 ms main      ] cef_initialize = 1
+[   210.3 ms main      ] context ready 210 ms after start
+[   214.8 ms main      ] on_after_created: browser 1
+[10902:10902:1001/212641.273227:ERROR:media/gpu/vaapi/vaapi_wrapper.cc:1640] vaInitialize failed: unknown libva error
+[   236.9 ms main      ] create_browser_sync = 632fba02c820
+[10905:10905:1001/212641.300279:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7
+[   266.9 ms main      ] on_load_end: HTTP 200
+[   305.5 ms main      ] first on_paint: PET_VIEW 800x600
+[   307.7 ms main      ] page loaded and painted 97 ms after create_browser; title 'Q1'
+[   334.4 ms main      ] WebGL probe: GL: Google Inc. (Intel) | ANGLE (Intel, Mesa Intel(R) UHD Graphics 770 (ADL-S GT1), OpenGL ES 3.2)
+[   334.5 ms main      ] children launched:
+    <build>/helper-c --type=zygote --no-zygote-sandbox --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=zygote --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=storage.mojom.StorageService --lang=en-US --service-sandbox-type=utility --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+[   335.2 ms main      ] children now:
+    pid 10872 (parent 10861) zygote: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10873 (parent 10861) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 10876 (parent 10873) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 10902 (parent 10872) gpu-process: exe chelper, seccomp 2, no_new_privs 1, our namespaces, --ozone-platform=wayland, maps libgallium libEGL_mesa libwayland-client libX11.so libxcb.so libGLESv2.so
+    pid 10905 (parent 10861) utility: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10907 (parent 10876) utility: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 10950 (parent 10876) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+    pid 10983 (parent 10876) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+    pid 10989 (parent 10876) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+[   360.7 ms main      ] on_before_close: browser 1
+[   384.6 ms main      ] cef_shutdown returned after 16 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[   887.2 ms main      ] children left: 10872 zygote; 10873 zygote; 10876 zygote; 10950 (no type); 10989 (no type)

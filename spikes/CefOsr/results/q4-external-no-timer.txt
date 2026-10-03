@@ -1,0 +1,29 @@
+[    53.1 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    61.1 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   148.5 ms main          ] on_schedule_message_pump_work(0)
+[   188.2 ms main          ] on_context_initialized
+[   188.3 ms main          ] cef_initialize = 1
+[   191.4 ms main          ] create_browser = 1
+[   198.1 ms main          ] on_after_created: browser 1
+[   210.6 ms main          ] get_screen_info #1: struct size 56, answering scale 1.5
+[ 15196.0 ms main          ] Pump: timed out after 15000 ms
+[ 15200.2 ms main          ] on_load_error: ERR_ABORTED ERR_ABORTED data:text/html;charset=utf-8;base64,PHRpdGxlPmZpcnN0PC90aXRsZT48Ym9keT5maXJzdDwvYm9keT4=
+[ 25204.3 ms main          ] Pump: timed out after 10000 ms
+[ 25205.4 ms main          ] navigated: title '', on_before_browse for 2 url(s)
+[ 33239.9 ms main          ] on_load_error: ERR_ABORTED ERR_ABORTED data:text/html;charset=utf-8;base64,PHRpdGxlPnNlY29uZDwvdGl0bGU+PGJvZHk+c2Vjb25kPC9ib2R5Pg==
+[ 43242.3 ms main          ] Pump: timed out after 10000 ms
+[ 46746.7 ms main          ] idle 5 s: our process 18 ms/s CPU, CEF's children 4 ms/s; pump asked 0/s, run 0/s
+[ 46746.8 ms main          ] animating 3 s at 60: 0.0 paints/s; our process 29 ms/s CPU, CEF's children 0 ms/s; pump asked 0/s, run 0/s
+[ 46748.1 ms main          ] on_load_error: ERR_ABORTED ERR_ABORTED data:text/html;charset=utf-8;base64,PGh0bWw+PGhlYWQ+PHRpdGxlPkJlbmNoPC90aXRsZT48c3R5bGU+CmJvZHkgeyBtYXJnaW46MDsgaGVpZ2h0OjEwMHZoOyBvdmVyZmxvdzpoaWRkZW47CiAgICAgICBiYWNrZ3JvdW5kOiBsaW5lYXItZ3JhZGllbnQoOTBkZWcsICMyMDMwNDAsICM0MDYwODAsICMyMDMwNDApOyBiYWNrZ3JvdW5kLXNpemU6IDQwMCUgMTAwJTsKICAgICAgIGFuaW1hdGlvbjogcGFuIDNzIGxpbmVhciBpbmZpbml0ZTsgfQouc3BpbiB7IHBvc2l0aW9uOmFic29sdXRlOyBsZWZ0OjQwJTsgdG9wOjMwJTsgd2lkdGg6MjAwcHg7IGhlaWdodDoyMDBweDsgYmFja2dyb3VuZDojZTBhMDIwOwogICAgICAgIGFuaW1hdGlvbjogc3BpbiAxcyBsaW5lYXIgaW5maW5pdGU7IH0KQGtleWZyYW1lcyBwYW4geyBmcm9tIHsgYmFja2dyb3VuZC1wb3NpdGlvbjogMCUgMCB9IHRvIHsgYmFja2dyb3VuZC1wb3NpdGlvbjogNDAwJSAwIH0gfQpAa2V5ZnJhbWVzIHNwaW4geyB0byB7IHRyYW5zZm9ybTogcm90YXRlKDM2MGRlZykgfSB9Cjwvc3R5bGU+PC9oZWFkPjxib2R5PjxkaXYgY2xhc3M9InNwaW4iPjwvZGl2PjwvYm9keT48L2h0bWw+
+[ 46748.5 ms main          ] on_before_close: browser 1
+[ 46749.0 ms main          ] on_before_close 2 ms after close_browser
+[ 46749.0 ms main          ] callbacks by thread:
+    on_after_created                 main ×1
+    on_before_browse                 main ×3
+    on_before_close                  main ×1
+[20161:20161:1001/214728.884704:ERROR:content/browser/network_service_instance_impl.cc:608] Network service crashed or was terminated, restarting service.
+[ 46775.8 ms main          ] on_schedule_message_pump_work(0)
+[ 46776.5 ms ThreadPoolForeg (20188)] on_schedule_message_pump_work(0)
+[ 46847.2 ms main          ] cef_shutdown returned after 88 ms on main; refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[ 49791.2 ms main          ] after 3 s, children left: 20171 zygote S; 20172 zygote S; 20175 zygote S; 20211 (no type) Z; 20365 (no type) Z
+[ 49891.4 ms main          ] threads in our process now: 28

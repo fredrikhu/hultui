@@ -87,7 +87,7 @@ whatever `out/` holds and puts it under `runtimes/<rid>/native/`.
 In CI, `.github/workflows/mpv-natives.yml` runs this on both self-hosted runners,
 proves each library with the backend tests (`HULTUI_MPV_EXPECT_LGPL=1`), and packs.
 Binaries move between jobs as assets of a GitHub release through
-`release-transport.sh` — a dispatch run fills the rolling `mpv-natives-ci`
+`scripts/release-transport.sh` (shared with the CEF helper workflow) — a dispatch run fills the rolling `mpv-natives-ci`
 prerelease, a `mpv-natives-v*` tag fills its own release, `.nupkg` included.
 
 ## Complete corresponding source

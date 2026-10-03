@@ -183,6 +183,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <inheritdoc />
     public float RefreshRate { get; private set; }
 
+    /// <inheritdoc />
+    /// <remarks>SDL's video driver: one per process, so it is read once (the element asks on
+    /// every layout, and the binding allocates a string per call).</remarks>
+    public string? WindowSystem => s_videoDriver ??= SDL_GetCurrentVideoDriver();
+
+    private static string? s_videoDriver;
+
     /// <summary>What the OS asks for on its own, before the user's zoom.</summary>
     private float _osDisplayScale = 1f;
     private float _userScale = 1f;

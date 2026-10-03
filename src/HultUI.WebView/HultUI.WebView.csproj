@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.WebView.Tests" />
+    <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests" />
+    <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests.CefProcess" />
   </ItemGroup>
 
   <ItemGroup>

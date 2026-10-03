@@ -1,0 +1,24 @@
+[    55.2 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    63.7 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless --use-angle=gl-egl
+[   174.8 ms main          ] on_context_initialized
+[   174.8 ms main          ] cef_initialize = 1
+[   177.8 ms main          ] create_browser = 1
+[   184.0 ms main          ] on_after_created: browser 1
+[   198.1 ms main          ] get_screen_info #1: struct size 56, answering scale 1.5
+[   230.8 ms main          ] get_screen_info #2: struct size 56, answering scale 1.5
+[   239.4 ms main          ] get_screen_info #3: struct size 56, answering scale 1.5
+[   279.8 ms main          ] navigated: title 'second', on_before_browse for 2 url(s)
+[ 11830.4 ms main          ] idle 5 s: our process 21 ms/s CPU, CEF's children 0 ms/s; pump asked 0/s, run 481/s
+[ 11830.4 ms main          ] animating 3 s at 60: 60.3 paints/s; our process 56 ms/s CPU, CEF's children 163 ms/s; pump asked 0/s, run 476/s
+[ 11832.7 ms main          ] on_before_close: browser 1
+[ 11833.3 ms main          ] on_before_close 2 ms after close_browser
+[ 11833.4 ms main          ] callbacks by thread:
+    on_after_created                 main ×1
+    on_before_browse                 main ×3
+    on_before_close                  main ×1
+    on_load_end                      main ×3
+    on_paint                         main ×213
+    on_title_change                  main ×6
+[ 11862.9 ms main          ] cef_shutdown returned after 18 ms on main; refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[ 14809.7 ms main          ] after 3 s, children left: 19168 zygote S; 19169 zygote S; 19172 zygote S; 19234 (no type) Z; 19303 (no type) Z
+[ 14910.0 ms main          ] threads in our process now: 28

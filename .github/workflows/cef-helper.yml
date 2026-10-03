@@ -1,0 +1,76 @@
+# Builds hultui-cef-helper (native/cef-helper/README.md) for linux-x64 and linux-arm64 and
+# packs HultUI.WebView.Cef with both under runtimes/<rid>/native.
+#
+# The helper is forty lines of C that change only when its source does, so this runs on
+# changes to it, on a cef-helper-v* tag, and by hand. A Linux build of the engine compiles its
+# own machine's helper anyway; this is for a package that carries both architectures.
+#
+# Outputs go to a GitHub release through scripts/release-transport.sh, as mpv-natives.yml's
+# do: artifact storage is full. A tag run uses the release for its tag, anything else a
+# rolling "cef-helper-ci" prerelease whose assets are replaced each time.
+#
+# Runs on the self-hosted Linux runner (docs/SELF-HOSTED-RUNNERS.md). linux-arm64 needs a
+# cross compiler (Ubuntu: gcc-aarch64-linux-gnu); without one the job says so and packs
+# linux-x64 alone.
+
+name: cef helper
+
+on:
+  push:
+    paths: ['native/cef-helper/**', 'src/HultUI.WebView.Cef/HultUI.WebView.Cef.csproj']
+    tags: ['cef-helper-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cef-helper-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/cef-helper-v') && github.ref_name || 'cef-helper-ci' }}
+  RELEASE_KIND: ${{ startsWith(github.ref, 'refs/tags/cef-helper-v') && '' || '--prerelease' }}
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build linux-x64
+        run: native/cef-helper/build.sh linux-x64
+
+      - name: Build linux-arm64
+        run: |
+          if command -v aarch64-linux-gnu-gcc >/dev/null; then
+            native/cef-helper/build.sh linux-arm64 aarch64-linux-gnu-gcc
+          else
+            echo "::warning::No aarch64-linux-gnu-gcc on this runner: the package carries linux-x64 only."
+          fi
+
+      # Tag cef-helper-v1.2.0 -> 1.2.0; anything else gets a prerelease stamp.
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/cef-helper-v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/cef-helper-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-ci.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack HultUI.WebView.Cef
+        run: dotnet pack src/HultUI.WebView.Cef/HultUI.WebView.Cef.csproj -c Release -o artifacts/packages -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Publish the helpers and the package to the release
+        run: |
+          bash scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
+          for rid in linux-x64 linux-arm64; do
+            f=native/cef-helper/out/$rid/hultui-cef-helper
+            [ -f "$f" ] && bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "hultui-cef-helper-$rid"
+          done
+          for f in artifacts/packages/*.nupkg; do
+            bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
+          done

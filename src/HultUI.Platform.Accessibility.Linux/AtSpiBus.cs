@@ -87,6 +87,64 @@ internal sealed class AtSpiBus : IDisposable
 
     public void AddMethodHandler(IPathMethodHandler handler) => _a11y.AddMethodHandler(handler);
 
+    // ──── org.a11y.Status: whether assistive technology is on (seam W11). Orca and
+    // accerciser set IsEnabled (and Orca ScreenReaderEnabled) on the session bus.
+
+    /// <summary>Whether <c>org.a11y.Status</c> says assistive technology is on.</summary>
+    public bool ReadStatus() => ReadStatusProperty("IsEnabled") || ReadStatusProperty("ScreenReaderEnabled");
+
+    private bool ReadStatusProperty(string name)
+    {
+        try
+        {
+            using var writer = _session.GetMessageWriter();
+            writer.WriteMethodCallHeader(
+                destination: AtSpiConstants.A11yBusService,
+                path: AtSpiConstants.A11yBusPath,
+                @interface: "org.freedesktop.DBus.Properties",
+                member: "Get",
+                signature: "ss",
+                flags: MessageFlags.None);
+            writer.WriteString(AtSpiConstants.StatusInterface);
+            writer.WriteString(name);
+            return _session.CallMethodAsync(
+                writer.CreateMessage(),
+                static (Message message, object? _) => message.GetBodyReader().ReadVariantValue().GetBool(),
+                null).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return false;   // no status to read: nobody said assistive technology is on
+        }
+    }
+
+    /// <summary>Calls <paramref name="changed"/> with the status, on a thread-pool thread,
+    /// whenever <c>org.a11y.Status</c>'s properties change.</summary>
+    public void WatchStatus(Action<bool> changed)
+    {
+        try
+        {
+            var rule = new MatchRule
+            {
+                Type = MessageType.Signal,
+                Interface = "org.freedesktop.DBus.Properties",
+                Member = "PropertiesChanged",
+                Path = AtSpiConstants.A11yBusPath,
+            };
+            _session.AddMatchAsync(rule,
+                static (Message _, object? _) => true,
+                (Exception? ex, bool _, object? _, object? _) =>
+                {
+                    if (ex is null) ThreadPool.QueueUserWorkItem(_ => changed(ReadStatus()));
+                },
+                ObserverFlags.None, null, null, false).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Without the signal the status read at start stands.
+        }
+    }
+
     /// <summary>
     /// Registers the application root with the AT-SPI registry via
     /// <c>org.a11y.atspi.Socket.Embed</c>, passing our root reference and

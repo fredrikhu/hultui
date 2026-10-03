@@ -34,4 +34,8 @@ internal interface IAtSpiTree
     /// wired or the node exposes no action.
     /// </summary>
     bool DoAction(AtSpiAccessible node);
+
+    /// <summary>Gives the node the keyboard (Component.GrabFocus), through the action host.
+    /// False when it cannot take focus or nothing routes the request.</summary>
+    bool GrabFocus(AtSpiAccessible node);
 }

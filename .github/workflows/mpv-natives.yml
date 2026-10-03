@@ -6,7 +6,7 @@
 # (default C:\msys64). The Ubuntu runner needs the apt packages the README lists.
 #
 # Outputs travel between jobs as assets of a GitHub release, through
-# native/mpv/release-transport.sh: a tag run uses the release for its tag, a
+# scripts/release-transport.sh: a tag run uses the release for its tag, a
 # dispatch run a rolling "mpv-natives-ci" prerelease whose assets are replaced each
 # time. Neither artifact storage (a small quota) nor actions/cache (its cross-OS
 # archive fails on the Windows runner) survived contact with these machines.
@@ -62,7 +62,7 @@ jobs:
         run: |
           $env:MSYSTEM = 'MINGW64'
           $env:CHERE_INVOKING = '1'
-          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && bash ./release-transport.sh ensure '$env:RELEASE_TAG' $env:RELEASE_KIND && bash ./release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/libmpv-2.dll libmpv-2.dll && bash ./release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/LICENCE-REPORT.txt LICENCE-REPORT-win-x64.txt"
+          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && bash ../../scripts/release-transport.sh ensure '$env:RELEASE_TAG' $env:RELEASE_KIND && bash ../../scripts/release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/libmpv-2.dll libmpv-2.dll && bash ../../scripts/release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/LICENCE-REPORT.txt LICENCE-REPORT-win-x64.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   linux:
@@ -100,9 +100,9 @@ jobs:
       - name: Publish the binary to the release
         run: |
           cd native/mpv
-          bash ./release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
-          bash ./release-transport.sh upload "$RELEASE_TAG" out/linux-x64/libmpv.so.2 libmpv.so.2
-          bash ./release-transport.sh upload "$RELEASE_TAG" out/linux-x64/LICENCE-REPORT.txt LICENCE-REPORT-linux-x64.txt
+          bash ../../scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
+          bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/linux-x64/libmpv.so.2 libmpv.so.2
+          bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/linux-x64/LICENCE-REPORT.txt LICENCE-REPORT-linux-x64.txt
 
   package:
     needs: [windows, linux]
@@ -115,10 +115,10 @@ jobs:
       - name: Fetch both binaries from the release
         run: |
           cd native/mpv
-          bash ./release-transport.sh download "$RELEASE_TAG" libmpv-2.dll out/win-x64/libmpv-2.dll
-          bash ./release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-win-x64.txt out/win-x64/LICENCE-REPORT.txt
-          bash ./release-transport.sh download "$RELEASE_TAG" libmpv.so.2 out/linux-x64/libmpv.so.2
-          bash ./release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-linux-x64.txt out/linux-x64/LICENCE-REPORT.txt
+          bash ../../scripts/release-transport.sh download "$RELEASE_TAG" libmpv-2.dll out/win-x64/libmpv-2.dll
+          bash ../../scripts/release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-win-x64.txt out/win-x64/LICENCE-REPORT.txt
+          bash ../../scripts/release-transport.sh download "$RELEASE_TAG" libmpv.so.2 out/linux-x64/libmpv.so.2
+          bash ../../scripts/release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-linux-x64.txt out/linux-x64/LICENCE-REPORT.txt
 
       # Tag mpv-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp.
       - name: Version
@@ -136,7 +136,7 @@ jobs:
       - name: Publish the package to the release
         run: |
           for f in artifacts/packages/*.nupkg; do
-            bash native/mpv/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
+            bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
           done
 
       - uses: actions/upload-artifact@v4

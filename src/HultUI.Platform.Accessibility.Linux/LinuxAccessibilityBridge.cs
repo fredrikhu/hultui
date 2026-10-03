@@ -45,11 +45,15 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// Routes AT-triggered actions (button click, checkbox toggle) back onto the
     /// live element on the UI thread. When null, <c>DoAction</c> is a no-op.
     /// </param>
-    public LinuxAccessibilityBridge(IAccessibilityActionHost? actionHost = null)
+    public LinuxAccessibilityBridge(IAccessibilityActionHost? actionHost = null) : this(actionHost, connect: true) { }
+
+    /// <summary>For tests: a bridge that does not connect, whose tree is set by <see cref="Publish"/>.</summary>
+    internal LinuxAccessibilityBridge(IAccessibilityActionHost? actionHost, bool connect)
     {
         _actionHost = actionHost;
         // The windowing layer's host implements both capabilities on one object.
         _geometryHost = actionHost as IAccessibilityGeometryHost;
+        if (!connect) return;
         // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
         // "is anyone listening" contract the null bridge expresses everywhere.
         _bus = AtSpiBus.Open();
@@ -66,6 +70,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         _snapshot = new Snapshot { ByPath = new() { [SeedRoot.Path] = SeedRoot }, Root = SeedRoot };
 
         _registered = _bus.RegisterApplication();
+
+        // Whether anyone listens, for content costly to describe (seam W11).
+        AccessibilityClients.Report(_bus.ReadStatus());
+        _bus.WatchStatus(AccessibilityClients.Report);
     }
 
     /// <summary>A childless application root, valid from Embed until the first build.</summary>
@@ -97,6 +105,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     {
         get => _applicationId;
         set => _applicationId = value;
+    }
+
+    bool IAtSpiTree.GrabFocus(AtSpiAccessible node)
+    {
+        if (_actionHost is null || !node.Focusable) return false;
+        _actionHost.FocusElement(node.ElementId);
+        return true;
     }
 
     bool IAtSpiTree.DoAction(AtSpiAccessible node)
@@ -261,6 +276,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 return false;
         }
     }
+
+    /// <summary>For tests: publishes the snapshot of <paramref name="root"/>, as a rebuild would.</summary>
+    internal void Publish(AccessibilityNode root, float scale = 1f) => _snapshot = Build(root, scale);
 
     private static Snapshot Build(AccessibilityNode root, float scale)
     {

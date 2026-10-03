@@ -154,6 +154,7 @@ internal static partial class UiaInterop
     public const int UIA_ComboBoxControlTypeId = 50003;
     public const int UIA_EditControlTypeId = 50004;
     public const int UIA_GroupControlTypeId = 50026;
+    public const int UIA_DocumentControlTypeId = 50030;
     public const int UIA_HyperlinkControlTypeId = 50005;
     public const int UIA_ImageControlTypeId = 50006;
     public const int UIA_ListControlTypeId = 50008;
