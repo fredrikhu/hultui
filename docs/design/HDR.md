@@ -156,6 +156,15 @@ stay off, because they bridge at 8 bits. So AMD and Intel on Windows decode on t
 (`d3d11va-copy`). The natives build refuses to link `nvcuda` at load time, so the DLL still loads on
 a machine without NVIDIA's driver.
 
+**First run on Mesa and Intel (2026-10-03,** Fedora 44, Intel UHD 770, Mesa 26.2.3, Fedora's
+`mpv-libs` 0.41 with `ffmpeg-free` 8.1, the Vulkan renderer on sway/Wayland): the shared image
+works. mpv's hidden GL context imported its RGBA16F image with semaphore ordering ("vulkan interop
+ready … (semaphore ordering)"), and a magenta clip (lavfi, and a VP9 file) read back from the
+swapchain as (254, 0, 253), beside a CEF page in a second shared image (seam W7, the Vulkan probe's
+`--page-and-video`). Decode was software here: `hwdec` asked `auto-safe` and used `no`, because
+this container has no VA-API driver (`vaInitialize failed`). Intel's own VA-API path is not
+measured. The GL renderer played the same clip.
+
 ### mpv's threads
 
 **The UI thread is mpv's render thread, and it never waits on mpv's core.** After every load and

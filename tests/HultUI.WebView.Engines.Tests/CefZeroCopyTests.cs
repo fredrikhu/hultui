@@ -80,6 +80,35 @@ public sealed class CefZeroCopyTests
     /// placement here must not be the first.</summary>
     private static void HeadlessFirst() => Assert.True(CefRuntime.Start(windowSystem: null).Wait(TimeSpan.FromSeconds(30)));
 
+    /// <summary>
+    /// Seam W7 with both kinds of GPU source: a page (CEF's zero-copy) and a video (mpv's
+    /// hidden GL context), each in a shared image of its own in one Vulkan window. Returns
+    /// without checking where there is no libmpv.
+    /// </summary>
+    [WaylandCefFact]
+    public void APageAndAVideo_InOneVulkanWindow_BothReachTheScreen()
+    {
+        if (!NativeLibrary.TryLoad("libvulkan.so.1", out var vulkan)) return;
+        NativeLibrary.Free(vulkan);
+        var capture = Path.Combine(Path.GetTempPath(), $"hultui-cef-video-{Guid.NewGuid():N}.ppm");
+        try
+        {
+            var run = RunProbe(capture, "--page-and-video");
+            if (run.Output.Contains("probe: no libmpv")) return;
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.True(File.Exists(capture), "no capture was written:\n" + run.Output);
+            var (width, _, pixels) = ReadPpm(capture);
+            var page = Pixel(pixels, width, 120, 120);
+            var video = Pixel(pixels, width, 360, 120);   // the clip, letterboxed in the right half
+            Assert.True(page is { R: < 60, G: > 200, B: < 60 }, $"the page was {page}, expected green\n{run.Output}");
+            Assert.True(video is { R: > 200, G: < 60, B: > 200 }, $"the video was {video}, expected magenta\n{run.Output}");
+            Assert.Contains("vulkan interop: source 2 of this window", run.Output);
+            Assert.Contains("page frames: zero-copy", run.Output);
+            Assert.Contains("probe: done", run.Output);
+        }
+        finally { File.Delete(capture); }
+    }
+
     [CefFact]
     public void AWaylandPlacement_RegistersTheGpuRenderer_AndX11KeepsPixels()
     {
@@ -123,14 +152,14 @@ public sealed class CefZeroCopyTests
         Assert.False(host.Pixels.IsLoaded);   // the page's own sink is for a surface that wants pixels
     }
 
-    private static (int ExitCode, string Output) RunProbe(string capture)
+    private static (int ExitCode, string Output) RunProbe(string capture, string mode = "--webviews")
     {
         var tfm = new DirectoryInfo(AppContext.BaseDirectory);
         var config = tfm.Parent!;
         var tests = config.Parent!.Parent!.Parent!;
         var probe = Path.Combine(tests.FullName, "HultUI.UiTests.VulkanProbe", "bin", config.Name, tfm.Name, "HultUI.UiTests.VulkanProbe");
         Assert.True(File.Exists(probe), "not built: " + probe);
-        var start = new ProcessStartInfo(probe, "--webviews") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo(probe, mode) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var name in new[] { "HULTUI_RENDERER", "HULTUI_CEF_ZERO_COPY", "HULTUI_CEF_SWITCHES" }) start.Environment.Remove(name);
         start.Environment["HULTUI_VULKAN_CAPTURE"] = capture;
         start.Environment["HULTUI_VULKAN_CAPTURE_FRAME"] = "300";

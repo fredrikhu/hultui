@@ -800,6 +800,9 @@ a few lines each.
    it), so it is a task of its own on the Windows side.
 4. **5.5's page-and-video check** still wants a libmpv: the owner can install Fedora's
    `mpv-libs` as root in the container, and the check can run then. Not a blocker.
+   **Done 2026-10-03** with `mpv-libs` installed: both halves show their colour, and the trace
+   has two interop sources. It was mpv's first shared-image run on Mesa and Intel, and it worked;
+   `WEBVIEW.md` (W7) and `HDR.md` have it.
 
 ## When you stop
 

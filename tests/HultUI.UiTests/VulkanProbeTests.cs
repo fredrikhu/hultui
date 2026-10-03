@@ -98,6 +98,41 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A page and a video side by side in one Vulkan window: WebView2's capture and mpv's
+    /// hidden GL context, each in a shared image of its own (seam W7). The clip is mpv's own
+    /// lavfi colour source, so the capture is checked by pixel. Skipped where no libmpv is found.
+    /// </summary>
+    [VulkanUiFact]
+    public void APageAndAVideo_InOneVulkanWindow_BothReachTheScreen()
+    {
+        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
+        string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-video-{Guid.NewGuid():N}.ppm");
+        try
+        {
+            var run = RunProbe(new()
+            {
+                ["HULTUI_VULKAN_CAPTURE"] = capture,
+                ["HULTUI_VULKAN_CAPTURE_FRAME"] = "300",
+                ["HULTUI_STARTUP"] = "1",
+            }, "--page-and-video");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: the page and the video drew", run.Output);
+            Assert.True(File.Exists(capture), "no capture was written:\n" + run.Output);
+            var (width, height, pixels) = ReadPpm(capture);
+            var page = Pixel(pixels, width, width / 4, height / 2);
+            var video = Pixel(pixels, width, width * 3 / 4, height / 2);
+            Assert.True(page is { R: < 60, G: > 200, B: < 60 }, $"the page was {page}, expected green\n{run.Output}");
+            Assert.True(video is { R: > 200, G: < 60, B: > 200 }, $"the video was {video}, expected magenta\n{run.Output}");
+            Assert.Contains("vulkan interop: source 2 of this window", run.Output);
+        }
+        finally
+        {
+            File.Delete(capture);
+        }
+    }
+
+    /// <summary>
     /// A driver that cannot give a device here, as in a remote session, a VM or a filtered loader.
     /// SDL creates the Vulkan window without complaint, and the renderer then fails to start.
     /// </summary>

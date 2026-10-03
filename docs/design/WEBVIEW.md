@@ -489,7 +489,14 @@ right page's half was empty (seen). A single video on Vulkan was checked by capt
 **The Linux fd path, checked in step 5.5 (2026-10-03):** two CEF pages in one Vulkan window
 under Wayland, each with its slot and its fd-exported semaphores, captured green and magenta;
 the disposed one gave its image back (`CefZeroCopyTests.TwoPages_InOneVulkanWindow_BothReachTheScreen`,
-through the same probe).
+through the same probe). **With a video too (2026-10-03):** the probe's `--page-and-video`
+puts a CEF page and an mpv video (`av://lavfi:color=c=magenta:s=320x240`, or a VP9 file) in one
+Vulkan window. The capture shows green and magenta (254, 0, 253) at once, and the trace has two
+interop sources, mpv's 320×240 and the page's 240×240. It was the first run of mpv's shared-image
+path on Mesa and Intel, which worked (decode was software here, with no VA-API driver in the
+container; see `docs/design/HDR.md`). Tests: `CefZeroCopyTests.APageAndAVideo_…` on Linux, and
+`VulkanProbeTests.APageAndAVideo_…` on Windows (WebView2 and the bundled libmpv; it returns
+early where no libmpv is found).
 
 **W8 — Foreign accessibility subtree (`HultUI.Core`, both bridges).** Neither
 bridge could host a subtree it did not build. **Windows half done (step 4):**
