@@ -778,6 +778,29 @@ put back, judged by `dladdr` against libcef, after .NET has installed its `SIGCH
 **Done 2026-10-03:** item 1 as asked (it found nothing to put back, on headless or Wayland);
 item 2 not run, for want of a libmpv here. See `WEBVIEW.md`.
 
+## Review of step 5.6 (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there: every suite green,
+and all 31 real-window tests, among them the UIA tests and `WebViewAccessibilityTests`, which
+WebView2's tree still passes now that the element is an `IAccessibleContentSource` with an
+empty tree on Windows. **It stands.** Seam W11 in core rather than in a bridge is the better
+place: it is the virtual items' pattern, so both bridges and the action router took it with
+a few lines each.
+
+1. **Fixed on the Windows side:** an ambiguous `cref` (`FromCef`, which has two overloads) in
+   `CefAccessibleTree.cs`, the branch's one new build warning; the docs job builds with
+   warnings as errors.
+2. **The application's AT-SPI name** (empty, as you found): worth fixing while you are in the
+   bridge, since it is what a screen reader announces for the application. The entry
+   assembly's name is what the profile folder already uses.
+3. **Not for you:** `ContentNodeId` keeps the owning element's id to 30 bits and
+   `VirtualItemId` to 31, while element ids come from a counter every element ever built
+   draws from, rebuilds included. A long-running application that rebuilds a lot would pass
+   that and route actions to the wrong element. Older than this step (the virtual items have
+   it), so it is a task of its own on the Windows side.
+4. **5.5's page-and-video check** still wants a libmpv: the owner can install Fedora's
+   `mpv-libs` as root in the container, and the check can run then. Not a blocker.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

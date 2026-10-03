@@ -14,7 +14,7 @@ namespace HultUI.WebView.Cef;
 /// </summary>
 /// <remarks>
 /// <para><b>Shape.</b> Values arrive as <c>cef_value_t</c> trees and are read once into
-/// dictionaries, lists, strings and numbers (<see cref="FromCef"/>); tests feed the same shape
+/// dictionaries, lists, strings and numbers (<see cref="FromCef(Interop.cef_value_t*)"/>); tests feed the same shape
 /// from JSON (<see cref="FromJson"/>), as the spike recorded it.</para>
 /// <para><b>What is kept out.</b> Chromium's tree carries every layout box. Ignored nodes,
 /// unnamed generic containers and paragraphs give their children to their parent; inline
