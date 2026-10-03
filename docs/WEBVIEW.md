@@ -158,6 +158,29 @@ ancestors, so an app's `OnKeyDown` on the root sees Ctrl+L or F11 as usual. A ha
 sets `StopPropagation` takes the key, and the page never sees it; otherwise the page gets it
 too. Typing, arrows, Tab and Escape are the page's alone.
 
+## Developer tools
+
+Off by default, because a page from the internet should not hand anyone its inner workings by
+accident. With `DevTools = true`, the engine's own developer tools open in a native window of
+their own, three ways:
+
+- **F12** in the page. It is a function key, so the app is offered it first (above); a handler
+  that takes it keeps it from the page and from the tools.
+- **Inspect** on the page's context menu, at the element under the pointer.
+- **From code**: `web.OpenDevTools()`, for a menu item or a button. It waits for the engine if
+  it is not ready, throws `InvalidOperationException` when the options leave developer tools
+  off, and `NotSupportedException` on an engine without `WebEngineCapabilities.DevTools`.
+
+On Windows these are WebView2's own (Edge's) developer tools. The tools are not drawn by
+HultUI: they are a window like any other application's, on the desktop, not in the app's
+window. The sample's `--devtools` switch turns them on and adds a toolbar button.
+
+On Linux these are CEF's (Chromium's) developer tools, in a native top-level window of their
+own on the desktop, on Wayland and on X11 alike: a Wayland window when the app runs on Wayland,
+an X11 one under X11 (the engine starts CEF on the window's own platform). F12 and
+Ctrl+Shift+I open them, as in a browser; **Inspect** opens them at the element under the
+pointer. A second call shows the window already open, and the tools close with their page.
+
 ## What it costs
 
 A still page costs nothing: frames come only when the page changes. A page that animates
@@ -193,8 +216,7 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
   have no permission prompts: notifications, location, the clipboard, MIDI, window placement
   and the rest are denied without `PermissionRequested`. The camera and microphone are asked
   one request per device, and given only if all asked are allowed.
-- On Linux, a context menu's `Target.LinkText` is always null (CEF does not give it), and
-  there is no "inspect" entry.
+- On Linux, a context menu's `Target.LinkText` is always null (CEF does not give it).
 - On Linux, **a page's accessibility tree is the main frame's**: an iframe's content is not
   in it. And a node's position does not follow scrolling inside a scrolled part of the page
   (the page's own scrolling it follows). The tree is kept only while assistive technology is

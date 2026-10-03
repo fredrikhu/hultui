@@ -478,6 +478,14 @@ internal sealed unsafe partial class WebView2View : IWebEngineView
         Com.Check(Com.CallString(_webview, ICoreWebView2.NavigateToString, html), "NavigateToString");
     }
 
+    /// <summary>WebView2's own DevTools window, as its F12 opens it. Needs
+    /// <c>AreDevToolsEnabled</c>, which <see cref="WebViewOptions.DevTools"/> sets.</summary>
+    public void OpenDevTools()
+    {
+        RequireReady();
+        Com.Check(Com.Call(_webview, ICoreWebView2.OpenDevToolsWindow), "OpenDevToolsWindow");
+    }
+
     public void GoBack() { RequireReady(); Com.Call(_webview, ICoreWebView2.GoBack); }
     public void GoForward() { RequireReady(); Com.Call(_webview, ICoreWebView2.GoForward); }
     public void Reload() { RequireReady(); Com.Call(_webview, ICoreWebView2.Reload); }

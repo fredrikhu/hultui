@@ -81,7 +81,9 @@ internal sealed unsafe partial class CefView : IWebEngineView
 
     public CefView(WebViewOptions options) => _options = options;
 
-    public WebEngineCapabilities Capabilities => WebEngineCapabilities.None;
+    /// <summary>Developer tools in a native window of their own, on Wayland and X11 alike (and
+    /// harmlessly invisible on the headless platform). Keys are forwarded by the element.</summary>
+    public WebEngineCapabilities Capabilities => WebEngineCapabilities.DevTools;
 
     public event Action<WebEngineEvent>? Event;
 
@@ -442,6 +444,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
             _devTools?.Dispose();
             _devTools = null;
             if (_browserHost == null) return;
+            CloseDevToolsWindow();
             if (!_popupShown) { CloseBrowser(); return; }
             // Closing a browser whose popup (a <select>'s list) is open fails a CHECK inside
             // CEF and ends the process. Close the list first, by taking the page's focus and
@@ -474,6 +477,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         if (_browserHost != null) { CefObject.Release(_browserHost); _browserHost = null; }
         if (_browser != null) { CefObject.Release(_browser); _browser = null; }
         CefObject.Release(_client); _client = null;
+        ReleaseDevToolsWindow();
         CefObject.Release(_render); _render = null;
         CefObject.Release(_lifeSpan); _lifeSpan = null;
         CefObject.Release(_display); _display = null;

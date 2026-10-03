@@ -103,6 +103,75 @@ if (quick >= 0)
     return 0;
 }
 
+var devToolsWindow = Array.IndexOf(args, "--devtools-window");
+if (devToolsWindow >= 0)
+{
+    // The developer tools in a native window of their own, on the platform given ("wayland",
+    // "x11"), opened <how>: "call" (OpenDevTools), "f12", "ctrl-shift-i", "f12-off" (F12 with the
+    // option off: nothing should open), or "inspect" (the context menu's entry). Then held for
+    // a look at the compositor's windows, then the page goes, then held again.
+    var system = args[devToolsWindow + 1];
+    var how = args[devToolsWindow + 2];
+    int held = args.Length > devToolsWindow + 3 ? int.Parse(args[devToolsWindow + 3]) : 4000;
+    // A profile of its own: the lifetime tests, run beside these, need the default one free.
+    var profile = Path.Combine(Path.GetTempPath(), $"hultui-devtools-{Environment.ProcessId}");
+    // Removed once CEF has shut down and let go of it, as the engine's own temporary profile is.
+    CefRuntime.ShutDown += _ => { try { Directory.Delete(profile, recursive: true); } catch (IOException) { } };
+    var started = CefRuntime.Start(windowSystem: system, profile).Wait(TimeSpan.FromSeconds(20)) ? CefRuntime.Error : "timed out";
+    if (started is not null) { Console.WriteLine("did not start: " + started); return 1; }
+    var page = (CefView)engine.CreateView(new HultUI.WebView.WebViewOptions { DevTools = how != "f12-off", UserDataFolder = profile });
+    var ready = new ManualResetEventSlim();
+    var menu = new ManualResetEventSlim();
+    page.Event += e =>
+    {
+        if (e is HultUI.WebView.WebEngineEvent.Ready) ready.Set();
+        if (e is HultUI.WebView.WebEngineEvent.ContextMenuRequested m)
+        {
+            Console.WriteLine("menu: " + string.Join(", ", m.Request.Items.Select(i => i.Name)));
+            if (m.Request.Items.FirstOrDefault(i => i.Name == "inspectElement") is { } inspect) m.Request.Select(inspect);
+            else m.Request.Dismiss();
+            menu.Set();
+        }
+    };
+    page.Attach(new Host());
+    page.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 400, 300), 1f) { WindowSystem = system });
+    Console.WriteLine("ready: " + ready.Wait(20_000));
+    page.Focus(HultUI.Core.Events.FocusReason.Pointer);
+    Thread.Sleep(300);
+    void Press(HultUI.Core.Events.KeyCode key, HultUI.Core.Events.KeyModifiers modifiers)
+    {
+        page.SendKey(new HultUI.WebView.WebKeyInput(true, key, modifiers));
+        page.SendKey(new HultUI.WebView.WebKeyInput(false, key, modifiers));
+    }
+    switch (how)
+    {
+        case "call": page.OpenDevTools(); break;
+        case "f12" or "f12-off": Press(HultUI.Core.Events.KeyCode.F12, HultUI.Core.Events.KeyModifiers.None); break;
+        case "ctrl-shift-i": Press(HultUI.Core.Events.KeyCode.I, HultUI.Core.Events.KeyModifiers.Ctrl | HultUI.Core.Events.KeyModifiers.Shift); break;
+        case "inspect":
+            page.SendPointer(new HultUI.WebView.WebPointerInput(HultUI.WebView.WebPointerAction.Move, 50, 50));
+            page.SendPointer(new HultUI.WebView.WebPointerInput(HultUI.WebView.WebPointerAction.Down, 50, 50,
+                HultUI.WebView.WebPointerButtons.Right, HultUI.WebView.WebPointerButtons.Right, 1));
+            page.SendPointer(new HultUI.WebView.WebPointerInput(HultUI.WebView.WebPointerAction.Up, 50, 50,
+                HultUI.WebView.WebPointerButtons.Right, HultUI.WebView.WebPointerButtons.None, 1));
+            Console.WriteLine("menu asked: " + menu.Wait(10_000));
+            break;
+    }
+    Thread.Sleep(held / 2);
+    var open = new TaskCompletionSource<bool>();
+    CefRuntime.Post(() => open.TrySetResult(page.HasDevToolsWindow));
+    Console.WriteLine("devtools open: " + (open.Task.Wait(5000) && open.Task.Result));
+    Console.WriteLine("holding");
+    Console.Out.Flush();
+    Thread.Sleep(held / 2);
+    page.Dispose();
+    Thread.Sleep(1500);
+    Console.WriteLine("disposed");
+    Console.Out.Flush();
+    Thread.Sleep(held / 2);
+    return 0;
+}
+
 var zeroCopy = Array.IndexOf(args, "--zero-copy");
 if (zeroCopy >= 0)
 {

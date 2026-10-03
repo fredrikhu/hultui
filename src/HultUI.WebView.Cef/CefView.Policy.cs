@@ -229,6 +229,9 @@ internal sealed unsafe partial class CefView
         _ => "other",
     };
 
+    /// <summary>The "Inspect" entry's command: the first id CEF leaves to the embedder.</summary>
+    private const int InspectCommand = (int)cef_menu_id_t.MENU_ID_USER_FIRST;
+
     private static List<WebContextMenuItem> MenuItems(cef_menu_model_t* model)
     {
         var items = new List<WebContextMenuItem>();
@@ -284,14 +287,28 @@ internal sealed unsafe partial class CefView
         };
         // CEF's point is in view coordinates (CSS pixels); the contract's in device pixels.
         float scale = ScaleNow();
-        int x = (int)MathF.Round(p->get_xcoord(p) * scale), y = (int)MathF.Round(p->get_ycoord(p) * scale);
+        int cssX = p->get_xcoord(p), cssY = p->get_ycoord(p);
+        int x = (int)MathF.Round(cssX * scale), y = (int)MathF.Round(cssY * scale);
+        var items = MenuItems(model);
+        // CEF's menu has no "Inspect"; with developer tools on, the page's menu gets one, named
+        // as WebView2 names it, which opens the tools at the menu's point.
+        if (_options.DevTools)
+        {
+            if (items.Count > 0) items.Add(WebContextMenuItem.Separator());
+            items.Add(new WebContextMenuItem("inspectElement", "Inspect", WebContextMenuItemKind.Command, InspectCommand));
+        }
         long owed = Owe(() => OnUi(() => { callback->cancel(callback); CefObject.Release(callback); }));
-        var request = new WebContextMenuRequest(x, y, target, MenuItems(model), chosen =>
+        var request = new WebContextMenuRequest(x, y, target, items, chosen =>
         {
             if (!Settle(owed)) return;
             OnUi(() =>
             {
-                if (chosen is { CommandId: var id and not 0 }) callback->cont(callback, id, 0);
+                if (chosen is { CommandId: InspectCommand })
+                {
+                    callback->cancel(callback);
+                    OpenDevToolsAt((cssX, cssY));
+                }
+                else if (chosen is { CommandId: var id and not 0 }) callback->cont(callback, id, 0);
                 else callback->cancel(callback);
                 CefObject.Release(callback);
             });

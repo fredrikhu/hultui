@@ -50,6 +50,39 @@ public class WebViewControllerTests
     }
 
     [Fact]
+    public void DevTools_OpenOnlyWhereTheOptionsAllowThem_AndWaitForTheEngine()
+    {
+        using var session = HeadlessSession.Create();
+        var engine = new FakeWebEngine { Capabilities = WebEngineCapabilities.DevTools };
+
+        // Off by default: a page from the internet must not get developer tools by accident.
+        var (closed, closedView) = Ready(engine);
+        Assert.Throws<InvalidOperationException>(closed.OpenDevTools);
+        Assert.DoesNotContain("OpenDevTools", closedView.Calls);
+        closed.Dispose();
+
+        // On, before the engine is ready: held, then sent, as every command is.
+        using var web = new WebViewController(engine, new WebViewOptions { DevTools = true });
+        var view = engine.Views[^1];
+        web.OpenDevTools();
+        Assert.DoesNotContain("OpenDevTools", view.Calls);
+        view.RaiseReady();
+        Assert.Contains("OpenDevTools", view.Calls);
+    }
+
+    [Fact]
+    public void DevTools_OnAnEngineThatHasNone_SayItIsNotSupported()
+    {
+        using var session = HeadlessSession.Create();
+        var (web, view) = Ready(new FakeWebEngine(), new WebViewOptions { DevTools = true });
+        using (web)
+        {
+            Assert.Throws<NotSupportedException>(web.OpenDevTools);
+            Assert.DoesNotContain("OpenDevTools", view.Calls);
+        }
+    }
+
+    [Fact]
     public async Task AScript_AwaitedBeforeReady_CompletesOnceTheEngineIs()
     {
         using var session = HeadlessSession.Create();

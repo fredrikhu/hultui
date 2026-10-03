@@ -1051,6 +1051,73 @@ it. The fresh-account bug was a good find.
 5. **Left open, and fine to leave:** arm64, GNOME and KDE sessions, and the first run of the
    `cef natives` workflow, which needs the owner's go-ahead because it publishes a prerelease.
 
+## Developer tools on Linux (decided 2026-10-03)
+
+**The owner's decision:** developer tools open in **a native window of their own**, CEF's
+`show_dev_tools` with an ordinary window: not drawn by HultUI. F12 opens them on both
+platforms when `WebViewOptions.DevTools` is on, and so does code.
+
+**Done on the Windows side:**
+- The contract: `IWebEngineView.OpenDevTools()` (a default that does nothing) and
+  `WebViewController.OpenDevTools()`. The controller throws `InvalidOperationException` when the
+  options leave developer tools off, and `NotSupportedException` on an engine without
+  `WebEngineCapabilities.DevTools`; otherwise it holds the call until the engine is ready, as
+  every command is.
+- WebView2: `OpenDevToolsWindow`. F12 and Inspect were WebView2's own already.
+- `WebView2Tests`: the call opens a DevTools window; F12 does with the option on and does
+  not with it off. Found on the way: the DevTools window belongs to another `msedgewebview2`
+  process than the page's focus window, so the tests find it by title and process name.
+- The sample: `--devtools` turns them on and adds a toolbar button that calls
+  `OpenDevTools()`.
+- `docs/WEBVIEW.md`: a "Developer tools" section.
+
+**Yours:**
+1. **`CefView.OpenDevTools`:** on CEF's UI thread, `show_dev_tools` with a windowed
+   `cef_window_info_t` (no parent: a top-level window), a client of its own for the DevTools
+   browser, and no point to inspect. A second call shows the open one. The tools close with
+   their page (`close_dev_tools` when the view goes) and are released before `cef_shutdown`.
+2. **Find out first whether CEF can make that window on the Ozone platform the engine
+   started**: Wayland, with fractional scaling off, or X11. The platform is CEF's for the
+   whole process, so it cannot change for one window. If Wayland cannot, stop and report what
+   does, with what it costs, before choosing.
+3. **The capability:** add `WebEngineCapabilities.DevTools` to `CefView.Capabilities` once it
+   works, and not before: the controller relies on it.
+4. **F12** (and Ctrl+Shift+I, which WebView2 also answers): in `SendKey`, with the option on,
+   the key opens the tools instead of reaching the page. The element forwards only what the
+   app did not take, so an app's own F12 still wins.
+5. **Inspect on the context menu:** CEF's menu has no such entry. Add one named
+   `inspectElement` (the menu code keeps it under that name when the option is on) whose choice
+   opens the tools at the menu's point (`inspect_element_at`).
+6. **Tests** on sway: the call, F12 and Inspect each open a window titled like DevTools (sway's
+   tree shows it), F12 opens nothing with the option off, and disposing the page closes it.
+7. **Docs:** the Linux paragraph of `docs/WEBVIEW.md`'s "Developer tools", and take "there is
+   no 'inspect' entry" out of the Linux limits.
+
+**Done 2026-10-03, all seven.**
+- **Point 2 first:** CEF made the window on both platforms the engine starts. Under Wayland
+  (fractional scaling off) it is an xdg-shell window, "DevTools - about:blank", app id
+  `chromium-browser`; under X11 (Xwayland here) an X11 window of the same title. On the headless
+  platform (no window system, tests only) the tools open invisibly and do no harm. Nothing to
+  stop for.
+- **`CefView.OpenDevTools`** (`CefView.DevToolsWindow.cs`): on CEF's UI thread,
+  `show_dev_tools` with a windowed, parentless `cef_window_info_t`, a client of its own (no
+  handlers), and a point only for Inspect. A second call shows the open window. The page's
+  disposal calls `close_dev_tools` before `close_browser`, and the client is released with the
+  page's other objects, before `cef_shutdown`.
+- **`WebEngineCapabilities.DevTools`** always: the capability is read before the platform is
+  known, and every platform the engine starts works.
+- **F12 and Ctrl+Shift+I** (no other modifier) open the tools in `SendKey` when the option is
+  on; the page sees neither the press nor its release. The element offers keys to the app
+  first, so an app's own F12 still wins.
+- **Inspect:** with the option on, the page's menu ends with a separator and `inspectElement`
+  ("Inspect", the first command id CEF leaves to the embedder). Chosen, it cancels CEF's menu
+  and opens the tools at the menu's point (CSS pixels, as `show_dev_tools` takes them).
+- **Tests** (`CefDevToolsTests`, on sway): each runs the engine in a process of its own on
+  Wayland and asks sway's tree for that process's windows. The call, F12, Ctrl+Shift+I and
+  Inspect each open a window titled "DevTools…" that is gone once the page is disposed; F12
+  with the option off opens none. Plus the key rule. Not checked: which element Inspect
+  selects inside the tools.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

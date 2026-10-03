@@ -93,6 +93,14 @@ internal sealed unsafe partial class CefView
     public void SendKey(in WebKeyInput input)
     {
         var i = input;
+        // F12 and Ctrl+Shift+I open the developer tools, as in a browser and in WebView2, when
+        // they are on; the page sees neither the press nor its release. The element offers keys
+        // to the application first, so an application's own F12 still wins.
+        if (_options.DevTools && IsDevToolsKey(i.Key, i.Modifiers))
+        {
+            if (i.IsDown && !i.IsRepeat) OpenDevTools();
+            return;
+        }
         OnUi(() =>
         {
             if (_browserHost == null) return;
@@ -115,6 +123,10 @@ internal sealed unsafe partial class CefView
             }
         });
     }
+
+    internal static bool IsDevToolsKey(KeyCode key, KeyModifiers modifiers) =>
+        (key == KeyCode.F12 && (modifiers & (KeyModifiers.Ctrl | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Super)) == 0)
+        || (key == KeyCode.I && (modifiers & (KeyModifiers.Ctrl | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Super)) == (KeyModifiers.Ctrl | KeyModifiers.Shift));
 
     private void Key(cef_key_event_type_t type, int wkc, int native, uint flags, char character)
     {

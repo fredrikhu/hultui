@@ -109,6 +109,14 @@ public interface IWebEngineView : IDisposable
     void Blur();
 
     /// <summary>
+    /// Opens the engine's developer tools for the page, in a native window of their own. Called
+    /// only for a page whose <see cref="WebViewOptions.DevTools"/> is on, by an engine with
+    /// <see cref="WebEngineCapabilities.DevTools"/>; such an engine also opens them for F12. UI
+    /// thread.
+    /// </summary>
+    void OpenDevTools() { }
+
+    /// <summary>
     /// Where the page's own accessibility tree lives, for the platform bridge to join to the
     /// app's at the element; empty when the engine has none, or not yet. Read on the UI thread
     /// when the accessibility tree is built, which is only when something changed: raise
@@ -183,7 +191,9 @@ public enum WebEngineCapabilities
     /// </summary>
     NativeKeyboard = 1 << 0,
 
-    /// <summary>The engine can open developer tools for the page.</summary>
+    /// <summary>The engine can open developer tools for the page, in a native window:
+    /// <see cref="IWebEngineView.OpenDevTools"/>, and F12 in the page, when
+    /// <see cref="WebViewOptions.DevTools"/> is on.</summary>
     DevTools = 1 << 1,
 }
 

@@ -109,11 +109,11 @@ public sealed class WebView2Tests
         }
     }
 
-    private static Page Open(string html)
+    private static Page Open(string html, bool devTools = false)
     {
         var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
         var engine = new WebView2Engine();
-        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile });
+        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
         app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
         web.NavigateToString(html);
         var page = new Page { App = app, Engine = engine, Web = web };
@@ -281,6 +281,101 @@ public sealed class WebView2Tests
         Assert.True(page.PumpUntil(() => pressed.Contains(HultUI.Core.Events.KeyCode.F2), seconds: 5),
             $"the app never saw F2; it saw [{string.Join(", ", pressed)}]");
     });
+
+    [WebView2UiFact]
+    public void DevTools_OpenFromTheApp_InANativeWindowOfTheirOwn() => OnSta(() =>
+    {
+        using var page = Open("<html><body>devtools</body></html>", devTools: true);
+        Assert.True(page.PumpUntil(() => !page.Web.IsLoading && page.Web.Frames.IsLoaded));
+        var before = DevToolsWindows();
+
+        page.Web.OpenDevTools();
+
+        nint devTools = 0;
+        try
+        {
+            Assert.True(page.PumpUntil(() => (devTools = NewDevToolsWindow(before)) != 0, seconds: 10),
+                "no DevTools window opened");
+        }
+        finally { CloseWindow(page, devTools); }
+    });
+
+    [WebView2UiFact]
+    public void F12InThePage_OpensDevTools_OnlyWhereTheOptionsAllowThem() => OnSta(() =>
+    {
+        // On: the browser's own F12, which reaches the app first (a function key is a shortcut)
+        // and the page after, since nothing here takes it.
+        Assert.True(PressF12(devTools: true, out nint opened), "F12 opened no DevTools window with DevTools on");
+        // Off, the default: the same key, and no window.
+        Assert.False(PressF12(devTools: false, out _), "F12 opened DevTools although the options turn them off");
+
+        bool PressF12(bool devTools, out nint window)
+        {
+            window = 0;
+            var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+            var engine = new WebView2Engine();
+            var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
+            var element = WebViewElement.New(web).FlexGrow(1);
+            app.SetRoot(Flex.Column().Children(element));
+            web.NavigateToString("<html><body><input autofocus></body></html>");
+            using var page = new Page { App = app, Engine = engine, Web = web };
+            Assert.True(page.PumpUntil(() => web.State == WebViewState.Ready && !web.IsLoading && web.Frames.IsLoaded));
+            element.Focus();
+            page.PumpUntil(() => false, seconds: 0.3);
+            nint focusWindow = FocusWindowOf(app.PrimaryWindow.NativeHandle);
+            Assert.NotEqual(0, focusWindow);
+            var before = DevToolsWindows();
+
+            const uint WM_KEYDOWN = 0x100, WM_KEYUP = 0x101;
+            const nint VK_F12 = 0x7B;
+            nint down = 1 | (0x58 << 16), up = unchecked((nint)(1 | (0x58 << 16) | (1 << 30) | (1u << 31)));
+            PostMessage(focusWindow, WM_KEYDOWN, VK_F12, down);
+            PostMessage(focusWindow, WM_KEYUP, VK_F12, up);
+
+            nint found = 0;
+            bool opened = page.PumpUntil(() => (found = NewDevToolsWindow(before)) != 0, seconds: devTools ? 10 : 3);
+            window = found;
+            CloseWindow(page, found);
+            return opened;
+        }
+    });
+
+    /// <summary>
+    /// WebView2's visible DevTools windows. Found by title and by process name, not by the
+    /// process of the page's focus window: the DevTools window belongs to another
+    /// <c>msedgewebview2</c> process than that one (seen: pid 16124 against 42336).
+    /// </summary>
+    private static HashSet<nint> DevToolsWindows()
+    {
+        var found = new HashSet<nint>();
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd)) return true;
+            var title = new System.Text.StringBuilder(256);
+            GetWindowText(hwnd, title, title.Capacity);
+            if (!title.ToString().Contains("DevTools", StringComparison.Ordinal)) return true;
+            GetWindowThreadProcessId(hwnd, out uint process);
+            try
+            {
+                using var owner = Process.GetProcessById((int)process);
+                if (owner.ProcessName.Equals("msedgewebview2", StringComparison.OrdinalIgnoreCase)) found.Add(hwnd);
+            }
+            catch (ArgumentException) { }   // gone meanwhile
+            return true;
+        }, 0);
+        return found;
+    }
+
+    /// <summary>A DevTools window that was not there in <paramref name="before"/>, or 0.</summary>
+    private static nint NewDevToolsWindow(HashSet<nint> before) =>
+        DevToolsWindows().FirstOrDefault(w => !before.Contains(w));
+
+    private static void CloseWindow(Page page, nint hwnd)
+    {
+        if (hwnd == 0) return;
+        PostMessage(hwnd, 0x0010 /* WM_CLOSE */, 0, 0);
+        page.PumpUntil(() => !IsWindowVisible(hwnd), seconds: 5);
+    }
 
     [WebView2UiFact]
     public void ASelectsList_OpensUnderItsField_AndStillDoesAfterTheWindowMoves() => OnSta(() =>
@@ -562,4 +657,5 @@ public sealed class WebView2Tests
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumProc proc, nint lParam);
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetClassName(nint hwnd, System.Text.StringBuilder name, int max);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder text, int max);
 }

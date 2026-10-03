@@ -1058,6 +1058,10 @@ engine if it changed, but nothing more.
      the application's executable and nothing else. A tested `.deb` (profile, maintainer scripts,
      a measured `Depends` list) installs, runs, unloads and purges cleanly on both. arm64:
      untested.
+   - **Developer tools on Linux: done 2026-10-03.** CEF's own, in a native top-level window
+     (`show_dev_tools`), on Wayland and X11 alike; opened by `OpenDevTools`, F12, Ctrl+Shift+I and
+     an "Inspect" entry the engine adds to the page's menu; closed with the page. The brief's
+     decision has the details; `CefDevToolsTests` check each way on sway.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
@@ -1073,3 +1077,12 @@ engine if it changed, but nothing more.
    browser's guard against automatic downloads; `Element.Focus()` does nothing inside an
    overlay (overlay content has no focus manager), so the dialog focuses its field through
    the window's. **Drag and drop**: option 2 below, chosen by the owner.
+
+7. **Developer tools — Windows done 2026-10-03, Linux next.** The owner chose native
+   windows: the engine's own developer tools, not drawn by HultUI. One contract member,
+   `IWebEngineView.OpenDevTools()` (a default that does nothing), behind
+   `WebViewController.OpenDevTools()`, which needs `WebViewOptions.DevTools` and
+   `WebEngineCapabilities.DevTools`. WebView2 calls `OpenDevToolsWindow`, and its F12 and
+   Inspect were already there; proven by `WebView2Tests` (the call; F12 with the option on
+   and, as the control, off). CEF's `show_dev_tools` in a native window, F12 and an Inspect
+   entry are the Linux session's, in `WEBVIEW-LINUX-BRIEF.md`.
