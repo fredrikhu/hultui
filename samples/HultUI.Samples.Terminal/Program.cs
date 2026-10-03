@@ -2,6 +2,7 @@ using System.Diagnostics;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Rendering;
+using HultUI.Terminal;
 
 namespace HultUI.Samples.Terminal;
 
@@ -15,8 +16,14 @@ internal static class Program
             ? new Application("HultUI - Terminal bench", 1500, 960)
             : new Application("HultUI - Terminal", 980, 640);
         app.Theme = HultUI.Core.Styling.Theme.Dark;
-        using var sample = new TerminalSampleApp();
+        // The bench measures drawing, so it runs the demo shell, whose output is the same every time.
+        using var sample = new TerminalSampleApp(bench || args.Contains("--demo") ? SampleProgram.Demo : SampleProgram.Shell);
         var root = sample.Mount();
+        if (args.Contains("--check"))
+        {
+            app.SetRoot(root);
+            return Check(app, sample);
+        }
         if (bench)
         {
             var probe = new FrameProbe(app);
@@ -66,7 +73,7 @@ internal static class Program
         probe.Samples.Clear();
         var process = Process.GetCurrentProcess();
         var cpu0 = process.TotalProcessorTime;
-        long bytes0 = sample.Shell.BytesWritten;
+        long bytes0 = sample.Demo!.BytesWritten;
         var clock = Stopwatch.StartNew();
         probe.Recording = true;
         await Task.Delay(TimeSpan.FromSeconds(seconds));
@@ -74,7 +81,7 @@ internal static class Program
         process.Refresh();
         double elapsed = clock.Elapsed.TotalSeconds;
         double cpu = (process.TotalProcessorTime - cpu0).TotalMilliseconds / elapsed;
-        double mbps = (sample.Shell.BytesWritten - bytes0) / elapsed / (1024 * 1024);
+        double mbps = (sample.Demo!.BytesWritten - bytes0) / elapsed / (1024 * 1024);
 
         var render = probe.Samples.Select(s => (double)s.Render).Order().ToArray();
         var flush = probe.Samples.Select(s => (double)s.Flush).Order().ToArray();
@@ -82,6 +89,55 @@ internal static class Program
             $"Render median {Pct(render, 0.5):F2} ms, p95 {Pct(render, 0.95):F2} ms; " +
             $"Flush median {Pct(flush, 0.5):F2} ms, p95 {Pct(flush, 0.95):F2} ms; " +
             $"{mbps:F1} MB/s of output; CPU {cpu:F0} ms/s at scale {app.PrimaryWindow.DisplayScale:0.##}");
+    }
+
+    /// <summary>
+    /// <c>--check</c>: shows the window, starts the user's shell under a pseudoterminal, has it
+    /// work something out and print it, then exit with 7, and exits 0 when all of that showed
+    /// up on the screen and as the exit code — or 1 with what did not. For proving a build
+    /// (NativeAOT included) works end to end without anyone looking at it.
+    /// </summary>
+    private static int Check(Application app, TerminalSampleApp sample)
+    {
+        var clock = Stopwatch.StartNew();
+        var c = sample.Session.Value;
+        bool Pump(Func<bool> done)
+        {
+            while (!done())
+            {
+                if (clock.Elapsed > TimeSpan.FromSeconds(30)) return false;
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+                Thread.Sleep(1);
+            }
+            return true;
+        }
+        int Fail(string what)
+        {
+            Console.Error.WriteLine($"check failed after {clock.ElapsedMilliseconds} ms: {what}\n--- screen ---\n{c.ReadScreen()}");
+            return 1;
+        }
+
+        if (sample.Shell is not { } shell) return Fail(sample.Problem.Value ?? "no shell started");
+        var name = Path.GetFileNameWithoutExtension(shell.Program).ToLowerInvariant();
+        var (command, answer) = name switch
+        {
+            "pwsh" or "powershell" => ("'hultui-' + (6*7)", "hultui-42"),
+            "cmd" => ("set /a 6*7", "\n42"),
+            "fish" => ("echo hultui-(math 6 \\* 7)", "hultui-42"),
+            _ => ("echo hultui-$((6*7))", "hultui-42"),
+        };
+
+        if (!Pump(() => c.ReadScreen().Length > 0)) return Fail($"{name} printed nothing");
+        if (!Pump(() => c.Columns != 80 || c.Rows != 24)) return Fail("the grid was never sized to the window");
+        c.Send(command + "\r");
+        if (!Pump(() => c.ReadScreen().Contains(answer))) return Fail($"{name} never answered '{command}'");
+        c.Send("exit 7\r");
+        if (!Pump(() => c.State == TerminalState.Exited)) return Fail($"{name} did not exit");
+        if (c.ExitCode != 7) return Fail($"{name} exited with {c.ExitCode?.ToString() ?? "no code"}, not 7");
+
+        Console.WriteLine($"check passed in {clock.ElapsedMilliseconds} ms: {shell.Program} ran under a " +
+            $"{c.Columns}×{c.Rows} pseudoterminal, answered, and exited with 7");
+        return 0;
     }
 
     private static double Pct(double[] sorted, double p) =>

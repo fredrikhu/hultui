@@ -264,6 +264,82 @@ public class TerminalControllerTests
     }
 
     [Fact]
+    public void AnExit_WhileSomethingHoldsTheOutputOpen_IsReportedAnyway()
+    {
+        // `sleep 60 &` then `exit 4`: the shell is gone, the background job still holds the
+        // pseudoterminal, and the output never ends.
+        using var t = Term.Headless();
+        var codes = new List<int?>();
+        t.Controller.Exited += codes.Add;
+        var clock = Stopwatch.StartNew();
+
+        t.Connection.ExitKeepingOutputOpen(4);
+        t.Session.PumpUntil(() => t.Controller.State == TerminalState.Exited, TimeSpan.FromSeconds(10));
+
+        Assert.Equal(4, t.Controller.ExitCode);
+        Assert.Equal([4], codes);
+        Assert.True(clock.Elapsed >= TerminalController.OpenOutputGrace - TimeSpan.FromMilliseconds(50));
+        // The input stays open to whatever still reads it.
+        t.Controller.Send("still there");
+        t.Expect("still there");
+
+        t.Connection.End(4); // the job ends too: no second report
+        t.Session.PumpFrames(5);
+        Assert.Equal([4], codes);
+    }
+
+    [Fact]
+    public void AProgramThatEndedBeforeItsController_StillReportsItsExit()
+    {
+        // `cmd /c echo hi` is gone in 60 ms, before the controller made for it listens.
+        using var session = Headless.HeadlessSession.Create(200, 100);
+        var connection = new FakeConnection();
+        connection.Emit("hi");
+        connection.End(5);
+
+        using var controller = new TerminalController(connection);
+        session.PumpUntil(() => controller.State == TerminalState.Exited, TimeSpan.FromSeconds(10));
+        Assert.Equal(5, controller.ExitCode);
+    }
+
+    [Fact]
+    public void ConnectionExit_IsRaisedOnce_AndALateHandlerHearsIt()
+    {
+        var exit = new ConnectionExit();
+        var heard = new List<int?>();
+        exit.Add(heard.Add);
+        Assert.True(exit.Raise(3));
+        Assert.False(exit.Raise(4));
+        exit.Add(heard.Add); // after the end: called at once
+        Assert.Equal([3, 3], heard);
+        Assert.True(exit.HasExited);
+        Assert.Equal(3, exit.ExitCode);
+    }
+
+    [Fact]
+    public void ADisposedController_ReportsNoExit()
+    {
+        using var session = Headless.HeadlessSession.Create(200, 100);
+        var connection = new FakeConnection();
+        var controller = new TerminalController(connection);
+        int exits = 0;
+        controller.Exited += _ => exits++;
+        controller.Dispose(); // ends the program, whose exit the application already knows of
+        session.PumpFrames(5);
+        Thread.Sleep(100);
+        session.PumpFrames(5);
+        Assert.Equal(0, exits);
+    }
+
+    [Fact]
+    public void ReadScreen_IsTheVisibleText()
+    {
+        using var t = Term.Headless(columns: 10, rows: 5);
+        t.Emit("abc   \r\n\r\n日本x\x1b[1mbold\x1b[0m");
+        Assert.Equal("abc\n\n日本xbold", t.Controller.ReadScreen());
+    }
+
+    [Fact]
     public void OutputEndingWithoutAnExitCode_EndsTheSession_WithNoCode()
     {
         using var session = Headless.HeadlessSession.Create(200, 100);

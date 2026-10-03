@@ -19,6 +19,7 @@
       "tests/HultUI.Samples.WebView.Tests/HultUI.Samples.WebView.Tests.csproj",
       "tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj",
       "tests/HultUI.Terminal.Tests/HultUI.Terminal.Tests.csproj",
+      "tests/HultUI.Terminal.Pty.Tests/HultUI.Terminal.Pty.Tests.csproj",
       "tests/HultUI.Terminal.XTermNet.Tests/HultUI.Terminal.XTermNet.Tests.csproj"
     ]
   }

@@ -437,7 +437,7 @@ Element MountProcedural()
 Element MountTerminal()
 {
     session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
-    var a = new HultUI.Samples.Terminal.TerminalSampleApp();
+    var a = new HultUI.Samples.Terminal.TerminalSampleApp(HultUI.Samples.Terminal.SampleProgram.Demo);
     instance = a;
     var root = a.Mount();
     HultUI.Application.InvokeOnMainThread(() => a.Terminal.Focus());

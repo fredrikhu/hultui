@@ -15,7 +15,7 @@ public sealed class StreamConnection : ITerminalConnection
 {
     private readonly Action<int, int>? _resize;
     private readonly Action? _terminate;
-    private int _exited;
+    private readonly ConnectionExit _exit = new();
     private int _disposed;
 
     /// <param name="output">What the program writes; the terminal reads it.</param>
@@ -40,7 +40,11 @@ public sealed class StreamConnection : ITerminalConnection
     public Stream Input { get; }
     public TerminalConnectionTraits Traits { get; }
 
-    public event Action<int?>? Exited;
+    public event Action<int?>? Exited
+    {
+        add => _exit.Add(value);
+        remove => _exit.Remove(value);
+    }
 
     public void Resize(int columns, int rows) => _resize?.Invoke(columns, rows);
 
@@ -57,10 +61,7 @@ public sealed class StreamConnection : ITerminalConnection
     }
 
     /// <summary>The program ended. Raises <see cref="Exited"/> once; later calls do nothing.</summary>
-    public void ReportExit(int? exitCode)
-    {
-        if (Interlocked.Exchange(ref _exited, 1) == 0) Exited?.Invoke(exitCode);
-    }
+    public void ReportExit(int? exitCode) => _exit.Raise(exitCode);
 
     public void Dispose()
     {

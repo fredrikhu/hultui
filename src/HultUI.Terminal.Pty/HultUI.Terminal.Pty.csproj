@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A local program under a pseudoterminal, as a HultUI.Terminal connection: ConPTY on Windows,
+    forkpty on Linux and macOS, through Porta.Pty (MIT). This is the package that carries natives:
+    Microsoft's out-of-band ConPTY (conpty.dll and OpenConsole.exe, Microsoft.Windows.Console.ConPTY,
+    MIT) and Porta.Pty's fork/exec shims. An application whose terminal talks SSH or a serial port
+    needs only HultUI.Terminal. See docs/design/TERMINAL.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Terminal.Pty</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI terminal connection to a local program under a pseudoterminal: ConPTY on Windows (Microsoft's out-of-band build), forkpty on Linux and macOS, through Porta.Pty. NativeAOT-compatible.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Terminal.Pty.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Terminal\HultUI.Terminal.csproj" />
+    <PackageReference Include="Porta.Pty" Version="2.2.3" />
+  </ItemGroup>
+
+</Project>

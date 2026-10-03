@@ -35,7 +35,9 @@ public interface ITerminalConnection : IDisposable
     void Terminate();
 
     /// <summary>The program ended, with its exit code when the connection knows one. Raised at
-    /// most once, on any thread.</summary>
+    /// most once, on any thread, and a handler added after the end is called at once: a quick
+    /// program can end before the controller made for it listens. <see cref="ConnectionExit"/>
+    /// does both.</summary>
     event Action<int?>? Exited;
 }
 

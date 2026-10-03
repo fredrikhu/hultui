@@ -422,6 +422,24 @@ public class TerminalElementTests
     }
 
     [Fact]
+    public void ACharacterAboveTheBmp_IsDrawnWhole()
+    {
+        // 𝐀 is one column wide and two UTF-16 units long. Cast to a char it became U+D400, a
+        // Hangul syllable, in faces that have it.
+        var style = TextMeasure.StyleFor(13f, FontFamilies.Monospace);
+        using var t = Term.Shown(recording: true);
+        bool has = TextMeasure.HasGlyph(style, 0x1D400) == true;
+
+        t.Window.RenderLog.Clear();
+        t.Emit("a𝐀b");
+        var ops = t.Window.RenderLog.Named("DrawText").Select(o => o.Args).ToList();
+
+        Assert.Contains(ops, a => a.StartsWith(has ? "\"a𝐀b\"" : "\"a b\""));
+        Assert.Equal(!has, ops.Any(a => a.StartsWith("\"𝐀\"")));
+        Assert.DoesNotContain(ops, a => a.Contains('퐀'));
+    }
+
+    [Fact]
     public void ARightToLeftLetter_IsDrawnAtItsColumn_EvenWhenTheFaceHasIt()
     {
         // In the row's text bidi would reorder it; the program placed it, so it stays put.

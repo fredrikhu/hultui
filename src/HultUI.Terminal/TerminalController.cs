@@ -31,9 +31,11 @@ public enum TerminalState
 /// program reading its input. The spike measured both rules: a paste written by the reader
 /// deadlocked for good at 256 KiB, and one written on the UI thread froze it for 0.9 s.</para>
 /// <para><b>Ending.</b> <see cref="Exited"/> is raised once, after the program's output has
-/// ended, with the exit code when the connection knows one. <see cref="Dispose"/> ends the program
-/// first, in the order that cannot hang: the writer stops, the program is ended, its output is read
-/// to the end, and only then is the connection closed.</para>
+/// ended, with the exit code when the connection knows one — or, when the program has exited and
+/// something else holds its output open (a background job on a pseudoterminal), a second after
+/// the exit. <see cref="Dispose"/> ends the program first, in the order that cannot hang: the
+/// writer stops, the program is ended, its output is read to the end, and only then is the
+/// connection closed. A controller disposed by its application reports no exit.</para>
 /// <para><b>One element per controller.</b> The element sets the grid's size from its own;
 /// two elements would fight over it.</para>
 /// </remarks>
@@ -206,6 +208,38 @@ public sealed class TerminalController : IDisposable
         DrainUiEvents();
     }
 
+    /// <summary>
+    /// The visible screen as text: one line per row, with trailing blanks and the blank rows at
+    /// the bottom dropped, and a wide character once. What a check that a program ran, or a
+    /// screen reader, reads. Any thread; empty once disposed.
+    /// </summary>
+    public string ReadScreen()
+    {
+        var snapshot = new TerminalSnapshot();
+        if (!CopySnapshot(snapshot)) return "";
+
+        var sb = new StringBuilder();
+        int lastLine = 0;
+        for (int row = 0; row < snapshot.Rows; row++)
+        {
+            if (row > 0) sb.Append('\n');
+            int lineStart = sb.Length;
+            foreach (var cell in snapshot.Row(row))
+            {
+                if (cell.Width == 0) continue; // the second half of a wide character
+                if (cell.Cluster is { } cluster) sb.Append(cluster);
+                else if (cell.CodePoint == 0) sb.Append(' ');
+                else sb.Append((Rune.IsValid(cell.CodePoint) ? new Rune(cell.CodePoint) : Rune.ReplacementChar).ToString());
+            }
+            int end = sb.Length;
+            while (end > lineStart && sb[end - 1] == ' ') end--;
+            sb.Length = end;
+            if (end > lineStart) lastLine = sb.Length;
+        }
+        sb.Length = lastLine;
+        return sb.ToString();
+    }
+
     private void Enqueue(byte[] bytes)
     {
         if (_disposed) return;
@@ -361,10 +395,22 @@ public sealed class TerminalController : IDisposable
         OnOutputEnded();
     }
 
+    /// <summary>How long the output may stay open after the program has exited before the exit is
+    /// reported anyway: a background process it started can hold a pseudoterminal open.</summary>
+    internal static readonly TimeSpan OpenOutputGrace = TimeSpan.FromSeconds(1);
+
     private void OnConnectionExited(int? code)
     {
         _exitCodeFromConnection = code;
         _exitKnown.Set();
+        // Normally the output ends right after and the reader reports the exit. When something
+        // else still holds the output open (`sleep 60 &` in a shell that then exits), report it
+        // anyway, and leave the input open to whatever still reads it.
+        _ = Task.Delay(OpenOutputGrace).ContinueWith(static (_, state) =>
+        {
+            var self = (TerminalController)state!;
+            if (!self._disposed) self.ReportExit(self._exitCodeFromConnection);
+        }, this, TaskScheduler.Default);
     }
 
     /// <summary>
@@ -375,11 +421,18 @@ public sealed class TerminalController : IDisposable
     private void OnOutputEnded()
     {
         if (!_disposed) _exitKnown.Wait(TimeSpan.FromMilliseconds(500));
+        _outbox.CompleteAdding(); // nothing reads the input any more
+        ReportExit(_exitKnown.IsSet ? _exitCodeFromConnection : null);
+    }
+
+    /// <summary>Reports the end of the session once, on the UI thread, unless the controller
+    /// was disposed first: an application that closed the session has seen its end.</summary>
+    private void ReportExit(int? code)
+    {
         if (Interlocked.Exchange(ref _exitReported, 1) != 0) return;
-        int? code = _exitKnown.IsSet ? _exitCodeFromConnection : null;
-        _outbox.CompleteAdding();
         Post(() =>
         {
+            if (_disposed) return;
             ReactiveRuntime.Batch(() =>
             {
                 _exitCode.Value = code;

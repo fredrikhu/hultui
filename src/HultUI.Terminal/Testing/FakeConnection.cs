@@ -13,7 +13,7 @@ public sealed class FakeConnection : ITerminalConnection
     private readonly TerminalPipe _output = new();
     private readonly RecordingStream _input;
     private readonly List<(int Columns, int Rows)> _resizes = [];
-    private int _exited;
+    private readonly ConnectionExit _exit = new();
 
     public FakeConnection(TerminalConnectionTraits traits = TerminalConnectionTraits.None)
     {
@@ -25,7 +25,11 @@ public sealed class FakeConnection : ITerminalConnection
     public Stream Input => _input;
     public TerminalConnectionTraits Traits { get; }
 
-    public event Action<int?>? Exited;
+    public event Action<int?>? Exited
+    {
+        add => _exit.Add(value);
+        remove => _exit.Remove(value);
+    }
 
     /// <summary>Raised on the controller's writer thread after each write reaches the program.</summary>
     public event Action? InputArrived;
@@ -41,7 +45,15 @@ public sealed class FakeConnection : ITerminalConnection
     public void End(int? exitCode = 0)
     {
         _output.Complete();
-        if (Interlocked.Exchange(ref _exited, 1) == 0) Exited?.Invoke(exitCode);
+        _exit.Raise(exitCode);
+    }
+
+    /// <summary>The program exits with <paramref name="exitCode"/> while something else keeps its
+    /// output open, as a background job it started can hold a pseudoterminal. <see cref="End"/>
+    /// still ends the output.</summary>
+    public void ExitKeepingOutputOpen(int? exitCode = 0)
+    {
+        _exit.Raise(exitCode);
     }
 
     /// <summary>Everything the terminal has sent the program, decoded as UTF-8.</summary>

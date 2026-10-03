@@ -37,6 +37,7 @@
     <Project Path="samples/HultUI.Samples.WinFormsHost/HultUI.Samples.WinFormsHost.csproj" />
     <Project Path="samples/HultUI.Samples.VideoPlayer/HultUI.Samples.VideoPlayer.csproj" />
     <Project Path="samples/HultUI.Samples.ProceduralVideo/HultUI.Samples.ProceduralVideo.csproj" />
+    <Project Path="samples/HultUI.Samples.Terminal/HultUI.Samples.Terminal.csproj" />
     <Project Path="samples/HultUI.Samples.WebView/HultUI.Samples.WebView.csproj" />
   </Folder>
   <Folder Name="/src/">
@@ -59,6 +60,7 @@
     <Project Path="src/HultUI.WebView.Cef/HultUI.WebView.Cef.csproj" />
     <Project Path="src/HultUI.WebView.WebView2/HultUI.WebView.WebView2.csproj" />
     <Project Path="src/HultUI.Terminal/HultUI.Terminal.csproj" />
+    <Project Path="src/HultUI.Terminal.Pty/HultUI.Terminal.Pty.csproj" />
     <Project Path="src/HultUI.Terminal.XTermNet/HultUI.Terminal.XTermNet.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -87,6 +89,8 @@
     <Project Path="tests/HultUI.Samples.WebView.Tests/HultUI.Samples.WebView.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.Tests/HultUI.Terminal.Tests.csproj" />
+    <Project Path="tests/HultUI.Terminal.Pty.Tests/HultUI.Terminal.Pty.Tests.csproj" />
+    <Project Path="tests/HultUI.Terminal.Pty.Tests.Child/HultUI.Terminal.Pty.Tests.Child.csproj" />
     <Project Path="tests/HultUI.Terminal.XTermNet.Tests/HultUI.Terminal.XTermNet.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
     <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />

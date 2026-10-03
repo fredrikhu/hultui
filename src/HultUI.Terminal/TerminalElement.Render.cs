@@ -263,7 +263,7 @@ public sealed partial class TerminalElement
             if (cell.IsBlank) _rowText.Append(' ');
             else
             {
-                _rowText.Append((char)cell.CodePoint);
+                AppendCodePoint(_rowText, cell.CodePoint);
                 lastInk = _rowText.Length;
             }
             if (cell.Underline != TerminalUnderline.None || (cell.Flags & CellFlags.Strikethrough) != 0)
@@ -290,6 +290,16 @@ public sealed partial class TerminalElement
                 float thickness = MathF.Max(1f, MathF.Round(_font.UnderlineThickness * scale)) / scale;
                 ctx.DrawRect(new Rect(r.X, y, r.Width, thickness), Rgb(cells[col].Foreground));
             }
+    }
+
+    /// <summary>A code point as UTF-16: one char, or a surrogate pair above the BMP; U+FFFD for a
+    /// value that is not a scalar (a lone surrogate would throw, or reach the shaper broken).</summary>
+    private static void AppendCodePoint(StringBuilder sb, int cp)
+    {
+        if (cp is < 0xD800 or (> 0xDFFF and < 0x10000)) { sb.Append((char)cp); return; }
+        var rune = Rune.IsValid(cp) ? new Rune(cp) : Rune.ReplacementChar;
+        Span<char> utf16 = stackalloc char[2];
+        sb.Append(utf16[..rune.EncodeToUtf16(utf16)]);
     }
 
     private List<TextSpan> TrimSpans(int length)
@@ -350,7 +360,7 @@ public sealed partial class TerminalElement
         if (cell.Cluster is null && BoxDrawing.TryDraw(ctx, cell.CodePoint, SnapRect(rect, scale), color, scale))
             return;
 
-        var text = cell.Cluster ?? char.ConvertFromUtf32(cell.CodePoint);
+        var text = cell.Cluster ?? (Rune.IsValid(cell.CodePoint) ? new Rune(cell.CodePoint) : Rune.ReplacementChar).ToString();
         var glyphStyle = style with
         {
             TextColor = color,
@@ -409,7 +419,9 @@ public sealed partial class TerminalElement
                         TextColor = (cell.Flags & CellFlags.DefaultBackground) != 0 ? Rgb(s.DefaultBackground) : Rgb(cell.Background),
                         FontWeight = (cell.Flags & CellFlags.Bold) != 0 ? FontWeight.Bold : FontWeight.Regular,
                     };
-                    ctx.DrawText(((char)cell.CodePoint).ToString(), rect with { Width = rect.Width + _cellWidth }, under, TextOverflow.Clip, 1);
+                    var glyph = new StringBuilder(2);
+                    AppendCodePoint(glyph, cell.CodePoint);
+                    ctx.DrawText(glyph.ToString(), rect with { Width = rect.Width + _cellWidth }, under, TextOverflow.Clip, 1);
                 }
                 break;
         }

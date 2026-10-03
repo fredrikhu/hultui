@@ -14,7 +14,7 @@ are marked **DECIDED** (2026-10-03).
 
 ```csharp
 var shell = new TerminalController(
-    new PtyConnection(PtyLaunch.DefaultShell(workingDirectory: repoRoot)),
+    PtyConnection.Start(PtyLaunch.DefaultShell(workingDirectory: repoRoot)),
     new TerminalOptions { Scrollback = 5000 });
 
 Box.New().Children(
@@ -53,7 +53,7 @@ spike ran the fix; "proposed" means it is design only.
 | 1 | The cursor's own line is cut, not reflowed, on a narrowing resize, and ConPTY does not repaint it: a narrowed prompt stays cut. | `TerminalOptions.ReflowCursorLine` in the engine, on in HultUI | engine patch 0004 | measured: pwsh's prompt stays whole and typing continues it |
 | 2 | A width resize costs O(scrollback × columns): 25 ms at 10 000 × 200. | Capacity-keeping line resize (3.6 ms), plus a resize policy for big buffers | engine patch 0001; element | measured; policy proposed |
 | 3 | Scrollback is stored full width, about 25 B per cell: 47 MiB at 10 000 × 200. | Default 5 000 lines; a byte budget converted to lines at each width; both live signals | controller | built in step 2 |
-| 4 | Porta.Pty's default Windows quoting wraps every argument: `cmd "/c" "exit 3"` exits 1. | MSVCRT quoting, passed verbatim | `HultUI.Terminal.Pty` | measured |
+| 4 | Porta.Pty's default Windows quoting wraps every argument: `cmd "/c" "exit 3"` exits 1. | MSVCRT quoting, passed verbatim | `HultUI.Terminal.Pty` | measured; built in step 4, and its test fails with Porta.Pty's quoting |
 | 5 | A paste written by the reader thread deadlocks for good at 256 KiB; ClosePseudoConsole then hangs too. | A writer thread with a queue; a fixed teardown order | controller | measured; built in step 2 |
 | 6 | A reader that wakes the UI while holding the engine lock is the THREADING.md live-resize deadlock. | Wake only after releasing the lock | controller | built in step 2 |
 | 7 | The engine has no damage tracking. | Copy the viewport out under the lock every frame and draw all of it. No row cache: step 2 measured drawing fast enough without one | element | built in step 2; the copy costs 12.6 µs |
@@ -65,9 +65,12 @@ spike ran the fix; "proposed" means it is design only.
 | 13 | HultUI has no positioned-glyph-run or offscreen-surface API for elements. | One `DrawText` per row, with a span per style. Seams T2/T3 were for the case where that was too slow, and it is not | element | measured in step 2: about 7 ms a frame for a 207 × 58 full-screen redraw |
 | 14 | HultUI has no monospace default font and no cell-metrics API. | Seam T1: `FontFamilies.Monospace`, family lists, `MeasureFont`, `HasGlyph` | framework | built in step 3 |
 | 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2; until then, role and value | framework | proposed |
-| 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | A build target that keeps only the publishing RID's copy | `HultUI.Terminal.Pty` | proposed |
+| 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | **Not a problem: keep it.** Microsoft's own ConPTY targets ship both hosts for x64 ("x64 can only run on x64 and ARM64"), because the x64 `conpty.dll` checks the machine (`IsWow64Process2`) and starts the arm64 host on ARM64 Windows. Trimming it would drop an x64 app on ARM64 back to the in-box console host, silently | `HultUI.Terminal.Pty` | decided in step 4 from the package's targets and the DLL's imports |
 | 17 | A row shrink with the cursor near the top leaves the cut rows below the screen, so the scrollback keeps that many lines fewer, for good. A terminal created at 80 × 24 and sized to its pane before its first screenful is that case. | Drop the blank rows below the cursor, as xterm.js does | engine patch 0005 | measured: found in step 2; the new upstream test fails without it |
 | 18 | A symbol the monospace font lacks (Consolas lacks some arrows and maths operators) is drawn from a fallback font whose advance pushes the rest of its row off its columns. | A character the face has no glyph for is drawn on its own at its column. Step 2 used fixed code point ranges; step 3 asks the face (`HasGlyph`, seam T1) | element | measured: found in step 2 by the sample; the font check built in step 3 |
+| 19 | ConPTY keeps the output open after its program exits, until the pseudoconsole is closed, so the controller, which reports an exit when the output ends, never would. | The connection closes the pseudoconsole once the output has been quiet for 100 ms after the exit | `HultUI.Terminal.Pty` | measured in step 4: the output stayed open in 5 of 5 programs; with the fix the exit is reported within 0.7 s of the last output, and the test fails without it |
+| 20 | A quick program can end before anyone listens: `cmd /c echo hi` is gone in 60 ms, before Porta.Pty's exit event has a handler or the controller exists. A plain event loses that exit for good. | `ConnectionExit`: raised once, and a handler added after the end is called at once. Every connection in the packages uses it; `PtyConnection` also asks Porta.Pty whether the program already ended | `HultUI.Terminal`, `HultUI.Terminal.Pty` | found in step 4 (an exit reported with no code); the test fails without it |
+| 21 | A background process a program started can hold a pseudoterminal open after the program exits (`sleep 60 &` then `exit 4`). | The controller reports the exit anyway one second after it, and leaves the input open to whatever still reads it | controller | built in step 4; the test fails without it |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
 therefore built from source: upstream at a pinned commit with patches 0001–0005 applied, never the
@@ -88,15 +91,15 @@ src/
   HultUI.Terminal.XTermNet/     builds external/XTerm.NET as HultUI.Terminal.XTermNet.dll
   HultUI.Terminal/              controller, element, renderer, key mapping, emulator seam,
                                 the XTerm.NET adapter, StreamConnection, fake connection — no natives
-  HultUI.Terminal.Pty/          PtyConnection: Porta.Pty (ConPTY + OpenConsole on Windows,
-                                the forkpty shim elsewhere), quoting, teardown
+  HultUI.Terminal.Pty/          PtyLaunch, PtyConnection: Porta.Pty (ConPTY + OpenConsole on
+                                Windows, the forkpty shim elsewhere), quoting, ending
 tests/
   HultUI.Terminal.XTermNet.Tests/  XTerm.NET's own suite, from external/ (2 240 tests, ~3 s)
   HultUI.Terminal.Tests/        headless: scripted bytes through the real emulator
-  HultUI.Terminal.Pty.Tests/    real shells; skipped where the shell is missing
+  HultUI.Terminal.Pty.Tests/    real pseudoterminals: a child program of its own, and the shells
+  HultUI.Terminal.Pty.Tests.Child/  that child: prints its arguments, size, input count, a flood
 samples/
-  HultUI.Samples.Terminal/      an in-process demo shell now; a real shell, a find bar and an
-                                overlay over the grid with the steps that bring them
+  HultUI.Samples.Terminal/      the user's shell, or an in-process demo shell; --check, --bench
 scripts/
   vendor-xterm-net.ps1          rebuilds external/XTerm.NET from the version file and the patches
 ```
@@ -121,8 +124,10 @@ scripts/
 `WantsTextInput` and `MeasureContent`, as it does for WebView and Media. Everything the package
 uses on `Window` and `Application` is public already.
 
-Licences: XTerm.NET, Porta.Pty and `Microsoft.Windows.Console.ConPTY` are all MIT. XTerm.NET's
-LICENSE stays in `external/XTerm.NET/`, and the packages' third-party notices name all three.
+Licences: XTerm.NET, Porta.Pty and `Microsoft.Windows.Console.ConPTY` are all MIT. XTerm.NET is
+built into a package of ours, so `HultUI.Terminal.XTermNet` carries its LICENSE
+(`licenses/XTerm.NET/`). Porta.Pty and ConPTY are package dependencies of `HultUI.Terminal.Pty`
+and come with their own.
 
 ### The patched engine
 
@@ -253,6 +258,13 @@ The shape is the spike's `Session`, which measured every rule below.
   The Avalonia host found EOF can beat the reap and read a false 0, so at EOF the controller waits
   up to 500 ms for the code rather than report a wrong one; a connection that never reports one
   (a plain `StreamConnection`) ends with none.
+  - **Output held open.** When the program has exited but something else holds its output open
+    (a background job on a pseudoterminal), the exit is reported one second after it anyway, and
+    the input stays open (problem 21).
+  - **Early exits.** A connection's `Exited` calls a handler added after the end at once
+    (`ConnectionExit`), so a controller made after a quick program has ended still hears of it
+    (problem 20).
+  - **After `Dispose`** nothing is reported: the application ended the session itself.
 - **Synchronized output (mode 2026).** While it is set, the element keeps drawing its last
   complete snapshot, for at most 150 ms (terminals use 100–200 ms). This stops editors tearing
   mid-redraw. The limit's clock is a tween, so it runs on the frame loop's time (virtual under a
@@ -498,20 +510,42 @@ as a Value. It has no live-region or announcement API either.
 - **TextArea benefits too.** A1 is the same work TextArea needs; its whole-text Value is the same
   limitation.
 
-## Windows process launch (`HultUI.Terminal.Pty`)
+## Process launch (`HultUI.Terminal.Pty`)
 
-- **Default shell:** pwsh, then powershell, then cmd on Windows; `$SHELL`, then `/bin/bash`,
-  elsewhere.
+Built in step 4. `PtyConnection.Start(PtyLaunch, columns, rows)` starts a program under a
+pseudoterminal; `StartAsync` is the same without blocking. The element resizes it to its grid on
+the first frame.
+
+- **What to run.** `new PtyLaunch(program, args…) { WorkingDirectory, Environment }`. The program
+  is a path, or a name looked up on `PATH` (with `PATHEXT` on Windows, so `pwsh` finds
+  `pwsh.exe`); the current directory is not searched. One that is not found throws
+  `FileNotFoundException` on every platform, before anything starts. `PtyLaunch.FindProgram` is
+  that lookup, for an app that wants to ask first.
+- **Default shell** (`PtyLaunch.DefaultShell`): on Windows `pwsh -NoLogo` when it is on `PATH`,
+  then Windows PowerShell, then `cmd.exe`; elsewhere `$SHELL`, then `/bin/bash`, then `/bin/sh`,
+  as a login shell on macOS, as Terminal starts it.
 - **The command line** is built with the MSVCRT rules and passed with `VerbatimCommandLine`
-  (problem 4).
-- **Environment:** `TERM=xterm-256color`, `COLORTERM=truecolor`, plus the app's own variables.
+  (problem 4). Arguments with spaces, quotes, trailing backslashes, `&|<>` and non-ASCII
+  characters arrive exactly as given. `cmd.exe` parses its own command line and is the exception,
+  as it is for every program that starts it.
+- **Environment:** the app's own, plus `TERM=xterm-256color` and `COLORTERM=truecolor`, plus the
+  launch's variables; a null value removes one.
 - **ConPTY.** The connection reports `WantsWin32Input` and `ReflowsItself`. Out-of-band ConPTY 1.24
-  is the default, with Porta.Pty's fallback to the in-box one. `PORTAPTY_CONPTY` stays the override.
-- **Packaging.** A build target removes the other architecture's `OpenConsole.exe` from a
-  RID-specific publish (problem 16). Porta.Pty already answers ConPTY's startup DA1 query and
-  hides it from the stream; without that the first output waits 3 s.
-- **AOT.** Porta.Pty and XTerm.NET publish with no IL2xxx/IL3xxx warnings; the spike's executable
-  was 3.76 MB.
+  is used, with Porta.Pty's fallback to the in-box one. `PORTAPTY_CONPTY` stays the override. A test
+  checks that the test build really runs its own `OpenConsole.exe`, and the AOT sample was seen
+  running its `x64\OpenConsole.exe`.
+- **Ending.** Porta.Pty's exit event carries the code; `Terminate` kills the program and what
+  shares its console (a job object on Windows), with exit code -1. ConPTY keeps the output open
+  after the program exits, so the connection closes the pseudoconsole once the output has been
+  quiet for 100 ms, counted from the exit too (problem 19). Porta.Pty's `Dispose` closes the pipe
+  we read along with the pseudoconsole, which is why it waits for quiet rather than closing at the
+  exit: what is still in the pipe would be lost.
+- **Packaging.** Both `OpenConsole.exe` hosts stay in an x64 build, as Microsoft's targets ship
+  them (problem 16). Porta.Pty answers ConPTY's startup DA1 query and hides it from the stream;
+  without that the first output waits 3 s.
+- **AOT.** The sample publishes for win-x64 with no IL2xxx/IL3xxx warnings: a 4.9 MB executable
+  beside `conpty.dll`, the two hosts, SDL3, Skia and HarfBuzz. Its `--check` passes under AOT in
+  about a second.
 
 ## Framework seams
 
@@ -612,11 +646,17 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
     titles, and what it draws, through the recorded render log.
   - Still to add from the spike: question 3's reflow checks, and the resize policy when it is
     built.
-- **`HultUI.Terminal.Pty.Tests`:**
-  - Real shells: pwsh or cmd on Windows, sh or bash elsewhere; skipped when missing.
-  - Exit codes, resize seen by the shell, the narrowed-prompt check, and a 1 MiB paste through
-    the writer queue.
-  - A teardown that must not hang (a time limit on the test, not a sleep).
+- **`HultUI.Terminal.Pty.Tests`** (built in step 4; real pseudoterminals, about 10 s):
+  - **A child program of its own** (`HultUI.Terminal.Pty.Tests.Child`, run as `dotnet <dll>`)
+    prints its arguments, its window size, how many lines it read, a flood, and the exit code it
+    is told. So most tests depend on no shell's behaviour and run the same on every platform.
+  - Arguments arriving exactly, exit codes, the resize seen by the program, a 1 MiB paste through
+    the writer queue, a flood, the environment and working directory, a missing program, an exit
+    while a background process holds the terminal, and two teardowns that must not hang (time
+    limits on the test, not sleeps) and must end the process.
+  - **Shells:** the default shell works something out, prints it and exits with 7; with pwsh on
+    Windows, the narrowed prompt stays whole and typing continues it (problem 1, through real
+    ConPTY). On Windows a test checks the out-of-band `OpenConsole.exe` runs.
 - **Real-window UI tests,** for IME placement and the drag-resize cost.
 - **Linux CI** runs both test projects; `[HanFontsFact]`'s pattern applies to wide-glyph rendering
   tests.
@@ -691,11 +731,24 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
      The Linux behaviour rests on Skia's fontconfig manager: a family match drops fontconfig's
      weak defaults, so an unknown name matches nothing and `monospace` keeps its preferred
      aliases. Linux CI is the first real check; macOS has no runner.
-4. **`HultUI.Terminal.Pty`:**
-   - `PtyConnection` on Windows and Linux, with quoting, exit and teardown;
-   - the arm64/x64 `OpenConsole.exe` trim;
-   - real-shell tests;
-   - the sample's shell, and NativeAOT `--check` as the WebView sample does.
+4. **`HultUI.Terminal.Pty`: done on Windows 2026-10-03** (see *Process launch*).
+   - **The package:** `PtyLaunch` (the program found on `PATH`, the default shell, the
+     environment) and `PtyConnection` over Porta.Pty 2.2.3, with MSVCRT quoting, the exit code, and
+     the close after quiet that ConPTY needs (problem 19).
+   - **The controller** gained `ReadScreen()` (the visible text, for a check or a reader), an exit
+     reported when the output stays open (problem 21), no report after `Dispose`, and connections
+     whose exit a late listener still hears (`ConnectionExit`, problem 20). Code points above the
+     BMP are drawn whole; a cast to `char` had made 𝐀 a Hangul syllable in faces that have it.
+   - **The OpenConsole trim was not built:** Microsoft's rule keeps both hosts (problem 16).
+   - **Tests:** 23 in `HultUI.Terminal.Pty.Tests`, stable over six runs of the suite; 81 in
+     `HultUI.Terminal.Tests`. Negative controls: Porta.Pty's own quoting fails the argument test;
+     without the close after quiet, the prompt-exit test fails; without the late listener, two
+     tests fail; without the exit fallback, its test times out.
+   - **The sample** runs the user's shell (the header switches to the demo shell, and `--demo`
+     starts with it); `--check` drives the real shell end to end and passes in about 0.9 s under
+     JIT and 1.0 s under NativeAOT, which publishes with no warnings.
+   - **Not verified:** Linux and macOS ran nothing here. The forkpty half of every Pty test, and
+     step 0's Linux list, wait for the Linux machine and Linux CI.
 5. **Resize policy, search, hyperlinks**, and what step 2 left as **not yet** in *Rendering* and
    *Input*: the styled underlines and underline colour, blink, block selection, window-size
    queries, and the screen as the accessible value.

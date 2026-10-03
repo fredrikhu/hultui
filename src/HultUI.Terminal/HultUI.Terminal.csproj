@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Terminal.Tests" />
+    <InternalsVisibleTo Include="HultUI.Terminal.Pty.Tests" />
   </ItemGroup>
 
   <ItemGroup>
