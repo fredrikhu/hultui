@@ -210,12 +210,16 @@ public static class Elevation
     }
 
     /// <summary>A per-user staging directory for job files, locked down to this account so
-    /// no other user can influence what the elevated worker reads.</summary>
+    /// no other user can influence what the elevated worker reads.
+    ///
+    /// <para>Always a full path (<see cref="ConfigDir.Default"/>): on a fresh Linux account
+    /// .NET used to answer "" for the data folder, the job went to a folder relative to
+    /// wherever Vesper was started, and the worker — which pkexec starts in root's home —
+    /// looked for it there and found nothing. A relative folder in a shared directory such as
+    /// <c>/tmp</c> would also have let another user swap the job a root worker runs.</para></summary>
     private static string JobDirectory()
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VesperCommander", "elevated");
+        var dir = Path.Combine(ConfigDir.Default, "elevated");
         Directory.CreateDirectory(dir);
         if (OperatingSystem.IsWindows()) TryRestrictToCurrentUser(dir);
         return dir;
