@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
@@ -123,10 +124,100 @@ public sealed class TerminalSampleApp : IDisposable
     {
         Terminal = TerminalElement.New(Session.Value).FlexGrow(1).FlexBasis(0);
         Terminal.AutomationId = "terminal";
+        Terminal.FindRequested += OpenFind;
+        Terminal.SearchChanged += () => SearchVersion.Value++;
         return Flex.Column().Background(new Color(12, 12, 12)).Children(
             new Header(this).Mount().FlexShrink(0),
+            new FindBar(this).Mount().FlexShrink(0),
             // A little room around the grid, as terminal windows have.
             Flex.Column().Padding(new Thickness(6f, 8f)).FlexGrow(1).FlexBasis(0).Children(Terminal));
+    }
+
+    // ──── Find ────
+
+    /// <summary>Whether the find bar shows.</summary>
+    public Signal<bool> FindOpen { get; } = new(false);
+
+    /// <summary>Bumped when the terminal's search changes, so the bar's count follows.</summary>
+    private Signal<int> SearchVersion { get; } = new(0);
+
+    private readonly Ref<TextInputElement> _findField = new();
+    private bool _focusFind;
+
+    /// <summary>Ctrl+Shift+F: opens the bar, searching for the selection when there is one, and
+    /// puts the keyboard in it.</summary>
+    public void OpenFind()
+    {
+        if (TextSearch.QueryFromSelection(Terminal.SelectedText) is { } query) Terminal.Search.SetQuery(query);
+        FindOpen.Value = true;
+        _focusFind = true;
+        SearchVersion.Value++;
+    }
+
+    public void CloseFind()
+    {
+        Terminal.Search.SetQuery("");
+        FindOpen.Value = false;
+        Terminal.Focus();
+    }
+
+    private sealed class FindBar(TerminalSampleApp app) : Component
+    {
+        public override Element Build()
+        {
+            _ = app.SearchVersion.Value;
+            if (!app.FindOpen.Value) return Box.New().Height(0f);
+            var search = app.Terminal.Search;
+
+            // An explicit height: a flex-only TextInput collapses its content box.
+            var field = TextInput.New(search.Query).Width(260).Height(28f);
+            field.PlaceholderText("Find in the scrollback");
+            field.AccessibleName = "Find";
+            field.OnTextChanged(search.SetQuery);
+            field.OnKeyDown(e =>
+            {
+                bool alt = (e.Modifiers & KeyModifiers.Alt) != 0;
+                switch (e.Key)
+                {
+                    case KeyCode.Enter: search.Move((e.Modifiers & KeyModifiers.Shift) != 0 ? -1 : 1); break;
+                    case KeyCode.Escape: app.CloseFind(); break;
+                    case KeyCode.C when alt: search.ToggleMatchCase(); break;
+                    case KeyCode.R when alt: search.ToggleRegex(); break;
+                    default: return;
+                }
+                e.StopPropagation = true;
+            });
+            field.WithRef(app._findField);
+
+            bool bad = search.Error is not null || (search.Query.Length > 0 && !search.HasHits);
+            string status = search.Query.Length == 0 ? ""
+                : search.Error ?? (!search.HasHits ? "no matches"
+                    : $"{search.Index + 1:N0} of {(search.Capped ? $"{TextSearch.MaxHits:N0}+" : search.Hits.Count.ToString("N0"))}");
+
+            return Flex.Row(gap: 8).Padding(new Thickness(5f, 10f)).AlignItems(AlignItems.Center)
+                .Background(new Color(24, 24, 24))
+                .Children(
+                    field,
+                    Text.New(status).FontSize(12f).TextColor(bad ? new Color(231, 72, 86) : Muted).MaxLines(1).FlexGrow(1),
+                    Toggle("Aa", search.MatchCase, "Match case (Alt+C)", search.ToggleMatchCase),
+                    Toggle(".*", search.UseRegex, "Regular expression (Alt+R)", search.ToggleRegex),
+                    Button.New("↑", ButtonVariant.Secondary).OnClick(_ => search.Move(-1)).AccessibleName("Previous (Shift+Enter)").Tooltip("Previous (Shift+Enter)"),
+                    Button.New("↓", ButtonVariant.Secondary).OnClick(_ => search.Move(1)).AccessibleName("Next (Enter)").Tooltip("Next (Enter)"),
+                    Button.New("×", ButtonVariant.Secondary).OnClick(_ => app.CloseFind()).AccessibleName("Close (Esc)").Tooltip("Close (Esc)"));
+        }
+
+        private static Element Toggle(string label, bool on, string name, Action toggle) =>
+            Button.New(label, on ? ButtonVariant.Primary : ButtonVariant.Secondary).OnClick(_ => toggle()).AccessibleName(name).Tooltip(name);
+
+        protected override void OnAfterBuild()
+        {
+            // The field exists only once the bar has been built: focus it now, the query
+            // selected whole, so typing replaces it.
+            if (!app._focusFind || app._findField.Current is not { } field) return;
+            app._focusFind = false;
+            field.Focus();
+            field.SelectAll();
+        }
     }
 
     public void Dispose() => Session.Value.Dispose();

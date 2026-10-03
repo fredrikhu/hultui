@@ -64,6 +64,8 @@ public sealed partial class TerminalElement : Element
             StopListening();
             _controller = value;
             _selection = null;
+            _searchBound = false;
+            if (value is not null && _search is { Query.Length: > 0 }) Rebind();
             if (value is not null) ApplyTitle(value.Title);
             StartListening();
             if (IsHosted) MarkPaintDirty();
@@ -93,6 +95,7 @@ public sealed partial class TerminalElement : Element
         StopSyncHold();
         StopResizeHold();
         StopBlink();
+        StopSearchRebind();
     }
 
     private void StartListening()
@@ -121,13 +124,20 @@ public sealed partial class TerminalElement : Element
         // Left behind without an unmount: the root swapped by SetRoot.
         if (!IsHosted) { StopListening(); return; }
         MarkPaintDirty();
+        ScheduleSearchRebind();
     }
 
     private void OnScreenSwitched(bool alternate)
     {
-        // A selection names lines of the screen it was made on.
+        // A selection names lines of the screen it was made on, and the search searched it.
         _selection = null;
         MarkPaintDirty();
+        if (_search is { Query.Length: > 0 })
+        {
+            StopSearchRebind();
+            Rebind();
+            SearchChanged?.Invoke();
+        }
     }
 
     private void OnClipboardWrite(string text)
@@ -236,6 +246,9 @@ public sealed partial class TerminalElement : Element
             case KeyCode.V when mods == CtrlShift:
             case KeyCode.Insert when mods == KeyModifiers.Shift:
                 PasteFromClipboard();
+                return true;
+            case KeyCode.F when mods == CtrlShift && FindRequested is not null:
+                FindRequested();
                 return true;
             case KeyCode.PageUp when mods == KeyModifiers.Shift:
                 _controller!.ScrollViewport(-Math.Max(1, _snapshot.Rows - 1));

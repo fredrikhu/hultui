@@ -97,6 +97,7 @@ public sealed partial class TerminalElement
             float y = box.Y + row * _cellHeight;
             if (y >= box.Y + box.Height) break;
             DrawBackgrounds(ctx, s, row, box.X, y, scale);
+            DrawSearchHits(ctx, s, row, box.X, y, scale, controller.Options.Theme);
             if (_selection is { } sel) DrawSelection(ctx, s, row, sel, selectionColor, box.X, y, scale);
             DrawRowText(ctx, s, row, box.X, y, style, scale);
         }

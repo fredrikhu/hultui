@@ -352,6 +352,11 @@ public sealed class TerminalController : IDisposable
         ContentChanged?.Invoke();
     }
 
+    internal List<LogicalLine> ReadLogicalLines()
+    {
+        lock (_gate) return _disposed ? [] : _emulator.ReadLogicalLines();
+    }
+
     internal string GetText(TerminalPosition start, TerminalPosition end)
     {
         lock (_gate) return _disposed ? "" : _emulator.GetText(start, end);

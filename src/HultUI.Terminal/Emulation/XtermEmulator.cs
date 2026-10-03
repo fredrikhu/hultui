@@ -348,6 +348,45 @@ internal sealed class XtermEmulator : ITerminalEmulator
         return (new TerminalPosition(first, 0), new TerminalPosition(last, width));
     }
 
+    public List<LogicalLine> ReadLogicalLines()
+    {
+        var result = new List<LogicalLine>();
+        var lines = _term.Buffer.Lines;
+        int cols = _term.Cols;
+        long dropped = Dropped, first = 0;
+        var text = new StringBuilder();
+        var starts = new List<int>();
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (starts.Count > 0 && line?.IsWrapped != true) Flush();
+            if (starts.Count == 0) first = dropped + i;
+            starts.Add(text.Length);
+            if (line is null) continue;
+            for (int c = 0, n = Math.Min(cols, line.Length); c < n; c++)
+            {
+                var cell = line[c];
+                if (cell.Width == 0) continue;
+                if (cell.Attributes.IsInvisible() || (cell.ClusterId == 0 && cell.CodePoint == 0)) text.Append(' ');
+                else if (cell.ClusterId != 0) text.Append(cell.Content);
+                else if (Rune.IsValid(cell.CodePoint)) text.Append(new Rune(cell.CodePoint).ToString());
+                else text.Append('\uFFFD');
+            }
+        }
+        if (starts.Count > 0) Flush();
+        return result;
+
+        void Flush()
+        {
+            int end = text.Length;
+            while (end > 0 && text[end - 1] == ' ') end--;
+            result.Add(new LogicalLine(first, [.. starts], text.ToString(0, end)));
+            text.Clear();
+            starts.Clear();
+        }
+    }
+
     // Windows Terminal's default delimiters, plus box drawing: what a double click should stop at.
     private static bool IsWordCell(BufferLine line, int col)
     {

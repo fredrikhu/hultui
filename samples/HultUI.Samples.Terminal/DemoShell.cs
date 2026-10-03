@@ -274,7 +274,8 @@ public sealed class DemoShell
         foreach (var (name, what) in commands)
             Write($"  {Esc}[36m{name,-16}{Esc}[0m {what}\r\n");
         Write($"\r\n  Select with the mouse (double-click a word, triple-click a line), copy with\r\n" +
-              $"  Ctrl+Shift+C, paste with Ctrl+Shift+V. Shift selects even when a program has the mouse.\r\n");
+              $"  Ctrl+Shift+C, paste with Ctrl+Shift+V. Shift selects even when a program has the mouse.\r\n" +
+              $"  Alt+drag selects a block. Ctrl+Shift+F finds in the scrollback.\r\n");
     }
 
     private void Colours()

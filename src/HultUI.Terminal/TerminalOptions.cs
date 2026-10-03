@@ -95,6 +95,12 @@ public sealed record TerminalTheme(
     Color Selection,
     IReadOnlyList<Color> Ansi)
 {
+    /// <summary>The tint behind a search hit.</summary>
+    public Color SearchHit { get; init; } = new(255, 191, 0, 61);
+
+    /// <summary>The tint behind the current search hit.</summary>
+    public Color SearchCurrent { get; init; } = new(255, 191, 0, 158);
+
     /// <summary>Windows Terminal's Campbell scheme: what most Windows users' consoles look like.</summary>
     public static TerminalTheme Dark { get; } = new(
         Foreground: Color.FromHex("#CCCCCC"),

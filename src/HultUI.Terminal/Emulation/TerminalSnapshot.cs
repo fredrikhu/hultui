@@ -98,6 +98,12 @@ internal struct TerminalCell
     public int UnderlineColor;
 
     public readonly bool IsBlank => CodePoint is 0 or 32 && Cluster is null;
+
+    /// <summary>How many UTF-16 units of the search's text (<see cref="LogicalLine"/>) the cell
+    /// stands for: its cluster, its code point, or one space.</summary>
+    public readonly int TextLength => Width == 0 ? 0
+        : Cluster is { } cluster ? cluster.Length
+        : CodePoint > 0xFFFF ? 2 : 1;
 }
 
 [Flags]
@@ -139,6 +145,18 @@ internal enum TerminalModes : ushort
 
 /// <summary>A place in the terminal's text: a line counted from the first line the terminal ever
 /// had (see <see cref="TerminalSnapshot.LinesDropped"/>) and a column.</summary>
+/// <summary>
+/// One logical line of the buffer, its wrapped rows joined, as the search reads it: each cell's
+/// text in turn (a cluster, a code point, a space for a blank or hidden cell), trailing blanks
+/// dropped at the end. <paramref name="RowStarts"/> holds where each row begins in
+/// <paramref name="Text"/>; within a row, the cells' texts are consecutive, so an offset maps
+/// back to a column by walking the row (<c>TerminalCell.TextLength</c>).
+/// </summary>
+internal sealed record LogicalLine(long FirstLine, int[] RowStarts, string Text)
+{
+    public int RowCount => RowStarts.Length;
+}
+
 /// <summary>One stretch of an OSC 8 link on a visible row: columns [<paramref name="Start"/>,
 /// <paramref name="End"/>). Spans with the same <paramref name="Id"/> are one link, as a link that
 /// wrapped onto the next row is.</summary>
@@ -223,6 +241,10 @@ internal interface ITerminalEmulator : IDisposable
     /// <summary>The cell's size in device pixels, which the window-size reports answer with
     /// (CSI 14 t, CSI 16 t). Until it is set they answer zeroes.</summary>
     void SetCellPixels(double width, double height);
+
+    /// <summary>The current screen's buffer as logical lines, scrollback included: what search
+    /// binds to.</summary>
+    List<LogicalLine> ReadLogicalLines();
 
     /// <summary>Moves the viewport by <paramref name="lines"/> (negative is up, into the
     /// scrollback); 0 moves nothing.</summary>
