@@ -63,7 +63,7 @@ internal sealed class Session : IDisposable
     public static Session Start(string app, string[] args, int cols, int rows, int scrollback = 5000, string? cwd = null,
         Action<Session, ReadOnlyMemory<byte>>? onChunk = null, bool portaQuoting = false)
     {
-        var term = new Terminal(new TerminalOptions { Cols = cols, Rows = rows, Scrollback = scrollback });
+        var term = new Terminal(Probe.Options(cols, rows, scrollback));
         var verbatim = OperatingSystem.IsWindows() && !portaQuoting;
         var pty = PtyProvider.SpawnAsync(new PtyOptions
         {

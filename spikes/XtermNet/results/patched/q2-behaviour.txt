@@ -1,0 +1,41 @@
+PASS  plain text, cursor after it                                  'hello' x=5
+PASS  pending wrap: a full row leaves X == Cols (renderer clamps)  after 80: x=80 y=0; after 'b': row1='b' IsWrapped=True
+PASS  pending wrap cancelled by CR                                 row0[0]='Z' y=0
+PASS  CUP + ED + EL                                                (4,9)='X' row0='long'
+PASS  scroll region (DECSTBM) keeps rows outside it                top | 2 | 3 | 4 | 5 | bottom
+PASS  IL / DL / ICH / DCH / ECH                                    row0='b  cde' IL:/row1 DL:row1/row2
+PASS  SGR bold/italic/dim/inverse/strike                           bold=True italic=True dim=True inverse=True strike=True
+PASS  SGR 53 overline                                              IsOverline=True
+PASS  SGR 4:3 curly underline + 58:2 colour                        style=Curly colour=FF0080 mode 1
+PASS  default colours are palette 256 / 257                        fg 0/256, bg 0/257
+PASS  16-colour and 256-colour are palette, truecolour is mode 1   A: fg 0/1 bg 0/101; B: fg 0/C4 bg 0/101; C: fg 0/C4 bg 1/10203
+PASS  CJK is width 2 + a width-0 spacer                            widths 2,0,1 'x' x=3
+PASS  CJK at the last column wraps whole                           row0[79]=' ' w1; row1[0]='東' w2
+PASS  combining mark joins its base cell                           cell0='é' (2 chars) cell1='x'
+PASS  ZWJ family is one cell of width 2                            cell0 11 chars w2, cell2='x'
+PASS  UTF-8 split across two Write(bytes) calls                    cell0='東'
+PASS  alt screen 1049: saves, switches, restores                   inAlt=True back='MAIN' x=4 events=Alternate,Normal
+PASS  DECTCEM hides the cursor                                     after ?25l visible=False, after ?25h visible=True
+PASS  DECSCUSR 5 = blinking bar, raises CursorStyleChanged         event Bar/True
+PASS  OSC 0 and OSC 2 raise TitleChanged                           one,two
+PASS  OSC 7 raises DirectoryChanged                                '/home/me/src' CurrentDirectory='/home/me/src'
+PASS  OSC 8 hyperlink lands on the line                            https://example.com@4+4 (col 10 linked: False)
+PASS  OSC 52 raises ClipboardWriteRequested                        'copied'
+PASS  OSC 133 A/B/C/D marks + exit code                            PromptStart,CommandStart,CommandExecuted,CommandFinished(2) LastCommandExitCode=2
+PASS  BEL raises BellRang                                          1
+PASS  synchronized output 2026 is a property + event               on=True events=True,False
+PASS  DA1 reply                                                    \e[?65;4;1;2;6;9;15;16;17;18;21;22;28;29c
+PASS  DSR 6 cursor position report                                 \e[3;7R
+PASS  DECRQM 2026 is reported as supported                         \e[?2026;2$y
+PASS  kitty keyboard query after push                              active=True reply \e[?1u
+PASS  DECCKM switches arrow encoding                               normal \e[A, application \eOA
+PASS  bracketed paste wraps Paste()                                \e[200~ls -la\e[201~
+PASS  paste strips ESC unless AllowPasteControls                   \e[200~evil[201~rm -rf\e[201~
+PASS  mouse 1000+1006: SGR press at (col 4,row 2)                  VT200/SGR \e[<0;5;3M
+PASS  no mouse mode: GenerateMouseEvent sends nothing              ''
+PASS  focus 1004 gates GenerateFocusEvent                          off '', on '\e[I'
+PASS  win32-input-mode 9001 is tracked (ConPTY asks for it)        Win32InputMode=True; GenerateKeyInput(Up) still \e[A
+PASS  scrollback fills to its limit, viewport follows              Lines.Length=74 YBase=50 YDisp=50 top='line 77'
+PASS  ScrollLines moves the viewport, not the cursor               YDisp=40 IsAtBottom=False cursor y=23
+PASS  output while scrolled back does not yank the viewport        YDisp 12 -> 12 (YBase 18); the host decides whether to follow
+40/40 passed

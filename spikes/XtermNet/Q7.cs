@@ -89,6 +89,11 @@ internal static class Q7
         s.Pty.Resize(60, 30);
         var repainted = s.WaitFor(t => Joined(t).Contains(longCmd), 2000);
         Log($"after Pty.Resize(60): whole command on screen {(repainted < 0 ? "NEVER (cut stays)" : $"{swp.Elapsed.TotalMilliseconds:0} ms after the call")}");
+        // The next keystrokes land where the PSEUDOCONSOLE's cursor is; they read as the command's
+        // continuation only if the engine put its cursor in the same place.
+        s.Send("XYZ");
+        var continued = s.WaitFor(t => Joined(t).Contains(longCmd + "XYZ"), 2000);
+        Log($"typing after the narrowing continues the command: {(continued < 0 ? "NO" : "yes")}");
         Log(s.Screen());
         s.Send("\x03");   // Ctrl+C: abandon the line
         s.WaitFor(_ => false, 300);
@@ -134,14 +139,14 @@ internal static class Q7
 
         // A command before the resize, as a control for the one after it.
         s.Send(":echo 'before'\r");
-        var before = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 29).TrimEnd() == "before", 3000);
+        var before = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 29).StartsWith("before "), 3000);
         Log($":echo before the resize answered: {(before >= 0 ? "yes" : "NO")}");
 
         s.Resize(80, 20);
         var redrawnRows = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 19).TrimEnd() != "~", 3000);
         s.WaitFor(_ => false, 300);
         s.Send(":echo &columns &lines\r");
-        var redrawn = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 19).TrimEnd() == "80 20", 3000);
+        var redrawn = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 19).StartsWith("80 20 "), 3000);
         Log($"after Resize(80,20): last row repainted {(redrawnRows < 0 ? "NO" : $"after {redrawnRows:0} ms")}; :echo &columns &lines answered '80 20': {(redrawn >= 0 ? "yes" : "NO")}");
         if (redrawn < 0)
         {
@@ -149,7 +154,7 @@ internal static class Q7
             s.Send(win32Esc ? Win32InputGenerator.GenerateKeyPress(0x1B, 0x01, '\x1b', Win32InputGenerator.ControlKeyState.None) : E);
             s.WaitFor(_ => false, 300);
             s.Send(":echo &columns &lines\r");
-            var again = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 19).TrimEnd() == "80 20", 3000);
+            var again = s.WaitFor(t => t.GetLine(t.Buffer.YDisp + 19).StartsWith("80 20 "), 3000);
             Log($"  second attempt: {(again >= 0 ? "answered" : "NO")}");
         }
         Log(s.Screen());

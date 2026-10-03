@@ -1,0 +1,14 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <!-- A build against a local XTerm.NET checkout (-p:XtermNetSource=..., see the csproj) goes to
+       bin\patched\ beside the package build, not over it. Set here rather than on the command
+       line: a global -p:BaseIntermediateOutputPath flows into every referenced project too, where
+       it made HultUI.Core compile another build's generated sources. -->
+  <PropertyGroup Condition="'$(XtermNetSource)' != ''">
+    <BaseOutputPath>bin\patched\</BaseOutputPath>
+    <BaseIntermediateOutputPath>bin\patched\obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+</Project>

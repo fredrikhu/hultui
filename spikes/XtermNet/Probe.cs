@@ -27,10 +27,21 @@ internal static class Probe
         return sb.ToString();
     }
 
+    /// <summary>The options every terminal here is built with: what HultUI.Terminal would set.</summary>
+    public static TerminalOptions Options(int cols, int rows, int scrollback) => new()
+    {
+        Cols = cols,
+        Rows = rows,
+        Scrollback = scrollback,
+#if XTERM_PATCHED
+        ReflowCursorLine = true,
+#endif
+    };
+
     /// <summary>A terminal with every reply it sends captured, as a pty host would forward them.</summary>
     public static (Terminal Term, List<string> Replies) NewTerminal(int cols = 80, int rows = 24, int scrollback = 1000)
     {
-        var t = new Terminal(new TerminalOptions { Cols = cols, Rows = rows, Scrollback = scrollback });
+        var t = new Terminal(Options(cols, rows, scrollback));
         var replies = new List<string>();
         t.DataReceived += (_, e) => replies.Add(e.Data);
         return (t, replies);
