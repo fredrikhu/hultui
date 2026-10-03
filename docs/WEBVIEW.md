@@ -92,8 +92,10 @@ local-network discovery, and WebView2 waited two seconds for a lookup on every n
 to it.
 
 Both engines serve it the same way. A path that leaves the folder is refused, on Linux a
-symbolic link pointing out of it too, and a missing file is a 404, as is the folder's own
-address (`https://app.example/`: name the file). Files are typed by extension (the web's usual
+symbolic link pointing out of it too. A missing file fails as a navigation (a 404 on Linux),
+and so does the folder's own address, `https://app.example/`: neither engine serves an index
+file, so name the file (WebView2 reports the folder's address as `ConnectionAborted`, with no
+HTTP status). Files are typed by extension (the web's usual
 ones; anything else is `application/octet-stream`), and a byte range is answered, so a video
 can seek. Each page serves its own folder: two pages with different folders see different
 files at the same address. On Linux a service worker's requests, which come from no page, are

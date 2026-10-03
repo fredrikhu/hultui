@@ -1405,6 +1405,30 @@ first, either name, on Fedora whose `nsswitch.conf` has `mdns4_minimal`. CEF's s
 answers before any name lookup. The change stays, for WebView2's sake, and
 `TheOrigin_LoadsInMilliseconds` guards it.
 
+## Review of the sandbox gaps and Linux's ContentFolder (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there. **Both stand.** The
+probe table is the right evidence: each way out shown open first and closed after, and the
+request-context handler shown necessary by taking it out. The path check is sound: decoded
+first, NUL and `..` refused, the full path required inside the folder, and symbolic links
+compared where they really point. `ContentFolder.ExtraHosts` is a test hook only, empty in
+an application.
+
+1. **Settled on Windows: the folder's own address.** WebView2 serves no index file either.
+   `https://app.example/`, the bare origin and a subfolder each fail as a navigation
+   (`ConnectionAborted` or `Unknown`, no HTTP status). CEF's 404 is also a failed navigation,
+   so the outcome is the same on both: link to `index.html` by name. Written into "Local
+   content" on the Windows side.
+2. **Follow-up: the two "CEF is not running; a call to the page was dropped" lines** the
+   sample prints at start. A dropped call is harmless only if its state is put back later, as
+   visibility is (`was_hidden` when the browser is created). Find which calls they are (focus
+   or blur from the element at start would be the likely ones), and keep each one's state for
+   when the page exists, as 5.6 did for the accessibility switch, or show it to be harmless.
+   Not a blocker.
+3. **Noted, and fine:** WebRTC goes for the whole process once one engine runs without the
+   sandbox; a `data:` document the application navigates to itself gets no policy (the docs
+   say to use `NavigateToString` for untrusted HTML); the Ubuntu VM was not run again.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
