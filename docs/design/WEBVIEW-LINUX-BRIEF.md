@@ -1118,6 +1118,88 @@ platforms when `WebViewOptions.DevTools` is on, and so does code.
   with the option off opens none. Plus the key rule. Not checked: which element Inspect
   selects inside the tools.
 
+## Running without the sandbox (decided 2026-10-03)
+
+**The owner's decision:** a proper option to run CEF without Chromium's sandbox, **enforced**:
+without the sandbox, the engine loads only the application's own content, unless the
+application says, with a second and separate setting, that it accepts untrusted content
+without a sandbox. Today the only way is the diagnostic `HULTUI_CEF_SWITCHES=no-sandbox`.
+
+**Why it is needed:** the sandbox cannot start as root, on Ubuntu 23.10 and later without the
+AppArmor profile, or where user namespaces are off. In each case the engine reports itself
+unavailable (`CefSandbox`). An application that shows only its own trusted content may prefer
+to run there without the sandbox, and should be able to say so in code.
+
+**The API** (Linux only: WebView2's sandbox always works on Windows, so it gets nothing):
+
+```csharp
+new CefEngine(new CefEngineOptions
+{
+    Sandbox = false,                              // default true
+    AllowUntrustedContentWithoutSandbox = false,  // default false; ignored while Sandbox is on
+});
+```
+
+Keep the parameterless constructor. `CefEngineOptions` is a public sealed record with init
+properties, like `WebViewOptions`, and its documentation says plainly what running without the
+sandbox means: a page that exploits a browser bug runs with the user's full rights.
+
+**What to build:**
+
+1. **Start CEF without its sandbox** (`cef_settings.no_sandbox = 1`) when the engine that starts
+   CEF asks for it. CEF hands the switch on to its children, so the helper needs nothing.
+2. **The first engine decides.** CEF starts once per process, so the engine whose page starts
+   it fixes the mode for the process. A later engine asking for the other mode reports itself
+   unavailable (`Availability`), and its pages fail with `InitializationFailed`, with a reason
+   that names the conflict rather than silently running in the wrong mode.
+3. **The sandbox check:** with the sandbox off, root and the AppArmor limit no longer make the
+   engine unavailable. `CefSandbox.Facts.NoSandbox` already exists; feed it from the option.
+   The diagnostic `HULTUI_CEF_SWITCHES=no-sandbox` keeps working and goes through the same
+   path, **enforcement included**: one rule, no sandbox means only the application's own
+   content, unless the API's second setting says otherwise.
+4. **The enforcement.** With the sandbox off and untrusted content not allowed, every network
+   request of the page, in every frame and of every kind (documents, iframes, scripts, styles,
+   images, `fetch`, WebSockets), is cancelled unless its URL is the application's own:
+   - `WebViewOptions.AppOrigin` (`https://app.local`);
+   - the string pages' host (`StringPages.Host`);
+   - `data:`, `blob:` and `about:blank`.
+
+   Put it in the request handler (`get_resource_request_handler` and
+   `on_before_resource_load` returning `RV_CANCEL`), so nothing slips past the navigation
+   check. A refused main-frame navigation also completes as failed, with an error name that
+   says why (pick one in the style of the existing WebView2 names), and each refusal is logged
+   once with its URL (`CefLog`).
+
+   Note: **nothing serves `app.local` today.** No folder mapping exists in `WebViewOptions`
+   on either engine, so until one does, an application without the sandbox shows only its
+   string pages. Allow it anyway, so it works the day a folder mapping exists; that is a
+   separate decision for the owner. DevTools are untouched: their window has its own client.
+5. **Never silent:** log a line when CEF starts without its sandbox, and give `CefEngine` a
+   `bool? IsSandboxed` (null until CEF has started; then how it actually runs, whichever engine
+   started it).
+
+**Tests:**
+- **Rule tests:** the option lifts the root and AppArmor cases; two engines asking for
+  different modes conflict. The request rule: which URLs pass, for each kind of URL above.
+- **Process tests:**
+  - **Ubuntu VM, no profile:** the default reports unavailable; `Sandbox = false` draws a string
+    page.
+  - **Fedora:** with the option off, the renderer processes really run unsandboxed (no user
+    namespace of their own, `Seccomp: 0` in `/proc/<pid>/status`), so the option is shown to
+    do what it says rather than only skip the check.
+  - **Enforcement, with the sandbox off:** a string page loads; a navigation to
+    `https://example.org` is refused and reported; an `<img>`, a `<script>` and an `<iframe>`
+    from the internet inside a string page do not load (the page can report each with
+    `onerror`); with `AllowUntrustedContentWithoutSandbox`, the same page loads them.
+- Every test that runs on Windows builds its expected paths with `Path.Combine` or is
+  `[LinuxFact]`/`[CefFact]`.
+
+**Docs:**
+- `docs/WEBVIEW.md`: a "Running without the sandbox" part of the Linux text, with the warning
+  and the enforcement.
+- The natives README: option (c) of the Ubuntu list becomes this setting.
+- `docs/ENVIRONMENT.md`: `HULTUI_CEF_SWITCHES=no-sandbox` is enforced the same way.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
