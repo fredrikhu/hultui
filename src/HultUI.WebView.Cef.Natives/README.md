@@ -49,6 +49,15 @@ and the maintainer scripts that load it (`postinst configure`: make the empty
 writes the same. A tested example builds the whole package: `native/cef/deb/build-sample-deb.sh`
 in the HultUI repository. On a system without AppArmor (Debian, Fedora) the scripts do nothing.
 
+**Or without the sandbox, for an application's own content only.** Where no profile can be
+installed (an application run from a folder, a container, root), an application that shows only
+its own content can run CEF without Chromium's sandbox: `new CefEngine(new CefEngineOptions {
+Sandbox = false })`. A page that exploits a browser bug would then run with the user's full
+rights, so the engine then loads only the application's own content (its string pages, its
+`ContentFolder` at `WebViewOptions.AppOrigin`, `data:`, `blob:`, `about:blank`) and refuses everything else, the
+internet included, unless the application also sets `AllowUntrustedContentWithoutSandbox`. See
+"Running without the sandbox" in HultUI's `docs/WEBVIEW.md`.
+
 The setuid `chrome-sandbox` CEF also ships is left out of this package: no package can install
 a file setuid root. `HULTUI_CEF_SANDBOX_CHECK=0` skips the engine's check, for a system it
 misjudges.

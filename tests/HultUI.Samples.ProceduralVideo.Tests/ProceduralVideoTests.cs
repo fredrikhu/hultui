@@ -118,12 +118,17 @@ public class ProceduralVideoTests
         backend.FrameRate = 0;
         Assert.Equal(ProceduralBackend.MinFrameRate, backend.FrameRate);
 
-        // Generous bounds: this is a worker thread sleeping on a real clock. On Windows a sleep
-        // rounds up to the 15.6 ms timer tick, so "100" runs at about 64 a second, 32 frames
-        // here, and 24 on a loaded machine (seen). What is pinned is that the rate takes
-        // effect: four times the slow rate's ceiling, below.
-        Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 100), 12, 80);
-        Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 4), 0, 6);
+        // A worker thread sleeping on a real clock, so no absolute count holds on every machine:
+        // on Windows a sleep rounds up to the 15.6 ms timer tick, so "100" runs at about 64 a
+        // second, 32 frames here; a loaded machine gave 24, and during a whole-solution run 9
+        // (both seen). What is pinned is that the rate takes effect: the fast rate publishes
+        // well over twice what the slow one does, measured in the same run, under the same
+        // load. The ceilings still hold everywhere: nothing publishes faster than asked.
+        long fast = FramesInHalfASecond(session, player, backend, fps: 100);
+        long slow = FramesInHalfASecond(session, player, backend, fps: 4);
+        Assert.InRange(fast, 1, 80);
+        Assert.InRange(slow, 0, 6);
+        Assert.True(fast > 2 * slow, $"100 fps published {fast} frames and 4 fps {slow}");
     }
 
     private static long FramesInHalfASecond(HeadlessSession session, MediaPlayer player, ProceduralBackend backend, double fps)

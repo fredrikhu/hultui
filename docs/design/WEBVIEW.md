@@ -409,7 +409,8 @@ and input is recorded; `Raise*` injects what a page does.
 an event (the app opens the system browser or navigates in place); `file://` is
 off; local content is served through a virtual host
 (`SetVirtualHostNameToFolderMapping` / a CEF scheme handler factory) under a fixed
-`https://app.local/`; `MessageReceived` only from origins the options allow;
+`https://app.example/` (first `app.local`, which cost WebView2 two seconds a navigation:
+`.local` is mDNS's); `MessageReceived` only from origins the options allow;
 DevTools off unless `WebViewOptions.DevTools`.
 
 ## Framework seams
@@ -1062,6 +1063,17 @@ engine if it changed, but nothing more.
      (`show_dev_tools`), on Wayland and X11 alike; opened by `OpenDevTools`, F12, Ctrl+Shift+I and
      an "Inspect" entry the engine adds to the page's menu; closed with the page. The brief's
      decision has the details; `CefDevToolsTests` check each way on sway.
+   - **Running without the sandbox: done 2026-10-03.** `CefEngineOptions.Sandbox = false`,
+     enforced to the application's own content unless `AllowUntrustedContentWithoutSandbox`;
+     one mode per process, the first engine deciding; `CefEngine.IsSandboxed`. Tested on Fedora
+     and on the Ubuntu VM without a profile and as root; the brief has it. Its review's gaps,
+     closed the same day: WebSockets (a stricter CSP on the engine's own documents), requests
+     with no page (the filter on the request context too), WebRTC's UDP (off for the process).
+   - **Local content on Linux: done 2026-10-03.** `ContentFolder` served at
+     `https://app.example` by a scheme handler factory registered once, serving the requesting
+     page's folder (found by its browser's identifier): paths kept inside the folder (403 for
+     `..` in any spelling and for links out), types by extension, single byte ranges, no CORS
+     headers. CEF has no `.local` delay; the brief has the measurements.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

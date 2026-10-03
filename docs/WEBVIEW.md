@@ -66,8 +66,43 @@ web.MessageReceived += message =>                     // window.chrome.webview.p
 Messages are JSON both ways: `PostMessage(json)` reaches the page's
 `chrome.webview.addEventListener('message', e => …)` with `e.data` parsed. Only origins in
 `WebViewOptions.MessageOrigins` reach `MessageReceived` — by default just
-`WebViewOptions.AppOrigin` (`https://app.local`) and string documents — so a page from
+`WebViewOptions.AppOrigin` (`https://app.example`) and string documents — so a page from
 the internet cannot talk to the app unless it is listed. `["*"]` accepts any origin.
+
+## Local content
+
+`ContentFolder` serves a folder at `WebViewOptions.AppOrigin`, `https://app.example/`:
+
+```csharp
+var web = new WebViewController(engine, new WebViewOptions
+{
+    ContentFolder = Path.Combine(AppContext.BaseDirectory, "web"),
+});
+web.Navigate(WebViewOptions.AppOrigin + "/index.html");
+```
+
+The page finds its stylesheets, scripts, images and data by relative paths, as on a web
+server, and its messages reach the app without listing anything, since `AppOrigin` is in
+`MessageOrigins` by default. The folder must exist when the controller is created; a
+relative path is taken from the working directory then. Pages from other origins may use its
+files as an image or script source but cannot read them with `fetch`.
+
+The origin is `app.example` rather than something under `.local`: that name space belongs to
+local-network discovery, and WebView2 waited two seconds for a lookup on every navigation
+to it.
+
+Both engines serve it the same way. A path that leaves the folder is refused, on Linux a
+symbolic link pointing out of it too. A missing file fails as a navigation (a 404 on Linux),
+and so does the folder's own address, `https://app.example/`: neither engine serves an index
+file, so name the file (WebView2 reports the folder's address as `ConnectionAborted`, with no
+HTTP status). Files are typed by extension (the web's usual
+ones; anything else is `application/octet-stream`), and a byte range is answered, so a video
+can seek. Each page serves its own folder: two pages with different folders see different
+files at the same address. On Linux a service worker's requests, which come from no page, are
+served the folder when every page that has one has the same.
+
+Without Chromium's sandbox (below), the folder is the application's own content and loads, its
+files included; its pages get the same stricter `Content-Security-Policy` as string pages.
 
 ## The page's menus, dialogs, downloads and permissions
 
@@ -114,6 +149,7 @@ sample saves downloads through a save dialog and shows their progress in its sta
 new WebViewController(engine, new WebViewOptions
 {
     UserDataFolder = Path.Combine(appData, "WebView"),  // cookies, cache; default is per user, per app
+    ContentFolder = Path.Combine(AppContext.BaseDirectory, "web"),  // served at https://app.example/
     DevTools = true,                                     // F12 / context menu; off by default
     UserAgent = "MyApp/1.0",
     MessageOrigins = ["https://docs.example.org"],
@@ -180,6 +216,41 @@ own on the desktop, on Wayland and on X11 alike: a Wayland window when the app r
 an X11 one under X11 (the engine starts CEF on the window's own platform). F12 and
 Ctrl+Shift+I open them, as in a browser; **Inspect** opens them at the element under the
 pointer. A second call shows the window already open, and the tools close with their page.
+
+## Running without the sandbox (Linux)
+
+Chromium's sandbox keeps a page that exploits a browser bug away from the rest of the system.
+On Linux it cannot start as root, on Ubuntu 23.10 and later without the AppArmor profile the
+application's package installs, or where user namespaces are turned off; there the engine reports
+itself unavailable, with the reason (`web.Error`, or `CefEngine.Availability` before any page).
+An application that shows only its own content may run there without the sandbox instead:
+
+```csharp
+var engine = new CefEngine(new CefEngineOptions { Sandbox = false });
+```
+
+**Without the sandbox, a page that exploits a browser bug runs with the user's full rights.** So
+the engine then loads only the application's own content: the pages it gives as strings
+(`NavigateToString`), `WebViewOptions.AppOrigin` (`https://app.example`, which `ContentFolder` serves),
+and `data:`, `blob:` and `about:blank`. Every other request, in every frame and of every kind
+(documents, frames, scripts, styles, images, `fetch`, a worker's requests, a service worker's
+included), is refused and logged once on standard error. A navigation elsewhere completes as
+failed, with `Error` "BlockedWithoutSandbox". The pages the engine serves itself also come with
+a stricter `Content-Security-Policy` (`default-src 'self' 'unsafe-inline' 'unsafe-eval' data:
+blob:`), so they refuse an outside connection before it is a request; it is what stops a
+WebSocket, which no request filter of CEF's sees. A `data:` document the application navigates
+to itself has no such policy: show untrusted HTML with `NavigateToString`. WebRTC may not use
+UDP except through a proxy, for the whole process, so a peer connection finds no route.
+`AllowUntrustedContentWithoutSandbox = true` lifts the limits on content (not WebRTC's), for an
+application that knowingly shows untrusted content without a sandbox; it is ignored while the
+sandbox is on.
+
+CEF runs once per process, in one mode: the engine whose page starts it decides. A later engine
+asking for the other mode is unavailable, and its pages fail (`InitializationFailed`), saying why.
+`CefEngine.IsSandboxed` tells, once CEF has started, how it actually runs, and CEF says so on
+standard error when it starts without the sandbox. The diagnostic
+`HULTUI_CEF_SWITCHES=no-sandbox` turns the sandbox off the same way, enforcement included. On
+Windows there is nothing of this: WebView2's sandbox always starts.
 
 ## What it costs
 

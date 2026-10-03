@@ -21,7 +21,8 @@ namespace HultUI.WebView.Cef;
 /// seen on Debian 13 and Ubuntu 24.04, setuid sandbox or not. A setuid-root
 /// <c>chrome-sandbox</c> beside <c>libcef.so</c> (CEF's other sandbox, which needs no
 /// namespace) is fine for anyone else. An application that chose to run without the sandbox
-/// (<c>no-sandbox</c>, today through <c>HULTUI_CEF_SWITCHES</c>) needs none of this.</para>
+/// (<see cref="CefEngineOptions.Sandbox"/>, or <c>HULTUI_CEF_SWITCHES=no-sandbox</c>) needs none
+/// of this.</para>
 /// </remarks>
 internal static class CefSandbox
 {
@@ -37,7 +38,7 @@ internal static class CefSandbox
         bool NoSandbox = false);
 
     /// <summary>Why the sandbox cannot start here, or null when it can (or nothing says it cannot).</summary>
-    public static string? Problem(string cefDirectory) => Judge(Read(cefDirectory));
+    public static string? Problem(string cefDirectory, bool noSandbox) => Judge(Read(cefDirectory) with { NoSandbox = noSandbox });
 
     internal static string? Judge(Facts f)
     {
@@ -71,8 +72,7 @@ internal static class CefSandbox
         ReadOrNull("/proc/sys/kernel/unprivileged_userns_clone"),
         Environment.UserName == "root" || geteuid() == 0,
         HasSetuidSandbox(Path.Combine(cefDirectory, "chrome-sandbox")),
-        Environment.ProcessPath ?? "this application",
-        CefRuntime.ExtraSwitches(Environment.GetEnvironmentVariable("HULTUI_CEF_SWITCHES")).Any(s => s.Name == "no-sandbox"));
+        Environment.ProcessPath ?? "this application");
 
     private static string? ReadOrNull(string path)
     {

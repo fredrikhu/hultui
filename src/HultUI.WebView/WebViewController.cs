@@ -49,10 +49,20 @@ public sealed class WebViewController : IDisposable
 
     /// <param name="engine">The engine to create the page in.</param>
     /// <param name="options">Fixed for the page's life; null takes the defaults.</param>
+    /// <exception cref="DirectoryNotFoundException"><see cref="WebViewOptions.ContentFolder"/>
+    /// names a folder that does not exist.</exception>
     public WebViewController(IWebEngine engine, WebViewOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         Options = options ?? new WebViewOptions();
+        // Engines get an absolute path, fixed now: the working directory may change later.
+        if (Options.ContentFolder is { } folder)
+        {
+            var full = Path.GetFullPath(folder);
+            if (!Directory.Exists(full))
+                throw new DirectoryNotFoundException($"WebViewOptions.ContentFolder does not exist: {full}");
+            Options = Options with { ContentFolder = full };
+        }
 
         var availability = engine.Availability;
         if (availability.IsAvailable)

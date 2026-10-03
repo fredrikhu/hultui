@@ -71,6 +71,26 @@ public class WebViewControllerTests
     }
 
     [Fact]
+    public void AContentFolder_MustExist_AndReachesTheEngineAsAnAbsolutePath()
+    {
+        using var session = HeadlessSession.Create();
+        var missing = Path.Combine(Path.GetTempPath(), "hultui-no-such-folder-" + Guid.NewGuid().ToString("N"));
+        Assert.Throws<DirectoryNotFoundException>(() =>
+            new WebViewController(new FakeWebEngine(), new WebViewOptions { ContentFolder = missing }));
+
+        var folder = Directory.CreateTempSubdirectory("hultui-content-").FullName;
+        try
+        {
+            var engine = new FakeWebEngine();
+            using var web = new WebViewController(engine,
+                new WebViewOptions { ContentFolder = Path.GetRelativePath(Environment.CurrentDirectory, folder) });
+            Assert.Equal(Path.GetFullPath(folder), web.Options.ContentFolder);
+            Assert.Equal(web.Options.ContentFolder, engine.Views[^1].Options.ContentFolder);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [Fact]
     public void DevTools_OnAnEngineThatHasNone_SayItIsNotSupported()
     {
         using var session = HeadlessSession.Create();
@@ -231,7 +251,7 @@ public class WebViewControllerTests
         view.RaiseMessage("1", new Uri("https://evil.test"));
         view.RaiseMessage("2", new Uri(WebViewOptions.AppOrigin + "/page.html"));
         view.RaiseMessage("3", origin: null);                         // a string document
-        view.RaiseMessage("4", new Uri("http://app.local"));          // wrong scheme
+        view.RaiseMessage("4", new Uri("http://app.example"));          // wrong scheme
 
         Assert.Equal(["2", "3"], received.Select(m => m.Json));
     }

@@ -22,6 +22,22 @@ namespace HultUI.WebView.Cef;
 public sealed class CefEngine : IWebEngine
 {
     private bool _disposed;
+    private readonly CefEngineOptions _options;
+
+    public CefEngine() : this(new CefEngineOptions()) { }
+
+    /// <param name="options">How CEF runs; the engine whose page starts CEF decides for the process.</param>
+    public CefEngine(CefEngineOptions options) => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+    /// <summary>Whether this engine's pages run in Chromium's sandbox: its option, unless the
+    /// diagnostic <c>HULTUI_CEF_SWITCHES=no-sandbox</c> turns it off.</summary>
+    internal bool WantsSandbox => CefRuntime.WantsSandbox(_options);
+
+    /// <summary>
+    /// Whether CEF runs in Chromium's sandbox: null until CEF has started, then how it actually
+    /// runs in this process, whichever engine started it.
+    /// </summary>
+    public bool? IsSandboxed => CefRuntime.IsSandboxed;
 
     public string Name => "CEF";
 
@@ -31,8 +47,10 @@ public sealed class CefEngine : IWebEngine
         {
             var probe = CefLibrary.Loaded;
             if (!probe.IsLoaded) return WebEngineAvailability.Missing(probe.Error!);
+            // CEF runs once per process, in one mode: a later engine asking for the other cannot have it.
+            if (CefRuntime.ModeConflict(CefRuntime.IsSandboxed, WantsSandbox) is { } conflict) return WebEngineAvailability.Missing(conflict);
             // Known before any page: an application can choose something else, and say why.
-            if (CefRuntime.Sandbox(probe.Directory!) is { } sandbox) return WebEngineAvailability.Missing(sandbox);
+            if (CefRuntime.Sandbox(probe.Directory!, WantsSandbox) is { } sandbox) return WebEngineAvailability.Missing(sandbox);
             return CefRuntime.Error is { } error ? WebEngineAvailability.Missing(error) : WebEngineAvailability.Available;
         }
     }
@@ -46,7 +64,7 @@ public sealed class CefEngine : IWebEngine
     public IWebEngineView CreateView(WebViewOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return new CefView(options);
+        return new CefView(options, _options);
     }
 
     /// <summary>Releases this handle. CEF itself runs until the process exits.</summary>
