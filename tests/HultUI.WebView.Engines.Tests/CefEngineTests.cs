@@ -476,4 +476,20 @@ public class CefCallbackTests
             .ToList();
         Assert.True(without.Count == 0, "no catch in: " + string.Join(", ", without));
     }
+
+    /// <summary>
+    /// A view hidden while CEF is still starting (the sample's first frame does it): there is no
+    /// browser to tell yet, so nothing is posted and nothing logged, and the page comes up hidden
+    /// because the view kept the wish (the review of 2026-10-03).
+    /// </summary>
+    [CefFact]
+    public void HiddenBeforeCefStarts_ThePageComesUpHidden_WithNoDroppedCall()
+    {
+        var run = CefEngineTests.RunCefProcessWith(Guid.NewGuid().ToString("N"), ["--hidden-before-start"], null);
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("CEF running when hidden: False", run.Output);
+        Assert.Contains("at start: \"hidden\"", run.Output);
+        Assert.Contains("shown: \"visible\"", run.Output);
+        Assert.DoesNotContain("a call to the page was dropped", run.Output);
+    }
 }

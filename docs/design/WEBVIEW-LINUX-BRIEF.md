@@ -1429,6 +1429,17 @@ an application.
    sandbox; a `data:` document the application navigates to itself gets no policy (the docs
    say to use `NavigateToString` for untrusted HTML); the Ubuntu VM was not run again.
 
+**Item 2, done (Linux, 2026-10-03).** The two lines are `SetVisible`, from the element's first
+`FlushPlacement`, and `CefFrames.OnModeDecided`'s request for a frame, from the first frame
+drawn: both come while CEF is still starting, with no browser yet. Both were harmless: the
+view keeps `_visible` (applied with `was_hidden` when the browser is created) and the frames
+keep their mode, in which the browser's first frame is painted. Shown, not assumed: a view
+hidden before CEF ran came up `document.visibilityState == "hidden"` with the old code too.
+Now neither is posted while there is no browser and CEF is not running
+(`CefView.OnUiIfBrowser`), so the warning is left for calls really dropped (after CEF has
+stopped). `HiddenBeforeCefStarts_ThePageComesUpHidden_WithNoDroppedCall` checks it in a
+process of its own; the sample's `--check` prints neither line.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
