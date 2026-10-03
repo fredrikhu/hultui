@@ -90,6 +90,19 @@ Override either from the command line:
 dotnet build -c Release -p:HultUIStrictLifetime=true
 ```
 
+## Build output trimming
+
+A build with no runtime identifier (every `dotnet build` and `dotnet test` here) leaves
+out the native assets of platforms HultUI does not run on (Android, iOS, Mac Catalyst,
+musl and bionic Linux, 32-bit and exotic CPUs) and native debug symbols. That took each
+test and app output folder from 574 MB to 89 MB. A build or publish for one RID is not
+touched. Both switches live in `Directory.Build.targets`:
+
+| Property | Effect |
+|---|---|
+| `HultUIKeepNativeSymbols=true` | Keeps the native `.pdb` files (SkiaSharp's and HarfBuzz's, 105 MB per Windows RID), for symbolising a native crash. |
+| `HultUIKeepAllRuntimes=true` | Copies every RID's natives, as the SDK does by default. |
+
 ## Related application settings
 
 Not environment variables, but the switches people look for alongside them:
