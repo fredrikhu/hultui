@@ -1073,3 +1073,12 @@ engine if it changed, but nothing more.
    browser's guard against automatic downloads; `Element.Focus()` does nothing inside an
    overlay (overlay content has no focus manager), so the dialog focuses its field through
    the window's. **Drag and drop**: option 2 below, chosen by the owner.
+
+7. **Developer tools — Windows done 2026-10-03, Linux next.** The owner chose native
+   windows: the engine's own developer tools, not drawn by HultUI. One contract member,
+   `IWebEngineView.OpenDevTools()` (a default that does nothing), behind
+   `WebViewController.OpenDevTools()`, which needs `WebViewOptions.DevTools` and
+   `WebEngineCapabilities.DevTools`. WebView2 calls `OpenDevToolsWindow`, and its F12 and
+   Inspect were already there; proven by `WebView2Tests` (the call; F12 with the option on
+   and, as the control, off). CEF's `show_dev_tools` in a native window, F12 and an Inspect
+   entry are the Linux session's, in `WEBVIEW-LINUX-BRIEF.md`.

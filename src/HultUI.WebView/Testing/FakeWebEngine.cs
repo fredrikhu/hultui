@@ -248,6 +248,8 @@ public sealed class FakeWebEngineView : IWebEngineView
         Calls.Add("Blur");
     }
 
+    public void OpenDevTools() => Calls.Add("OpenDevTools");
+
     public void Dispose()
     {
         IsDisposed = true;

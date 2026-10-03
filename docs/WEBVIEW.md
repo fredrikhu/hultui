@@ -158,6 +158,27 @@ ancestors, so an app's `OnKeyDown` on the root sees Ctrl+L or F11 as usual. A ha
 sets `StopPropagation` takes the key, and the page never sees it; otherwise the page gets it
 too. Typing, arrows, Tab and Escape are the page's alone.
 
+## Developer tools
+
+Off by default, because a page from the internet should not hand anyone its inner workings by
+accident. With `DevTools = true`, the engine's own developer tools open in a native window of
+their own, three ways:
+
+- **F12** in the page. It is a function key, so the app is offered it first (above); a handler
+  that takes it keeps it from the page and from the tools.
+- **Inspect** on the page's context menu, at the element under the pointer.
+- **From code**: `web.OpenDevTools()`, for a menu item or a button. It waits for the engine if
+  it is not ready, throws `InvalidOperationException` when the options leave developer tools
+  off, and `NotSupportedException` on an engine without `WebEngineCapabilities.DevTools`.
+
+On Windows these are WebView2's own (Edge's) developer tools. The tools are not drawn by
+HultUI: they are a window like any other application's, on the desktop, not in the app's
+window. The sample's `--devtools` switch turns them on and adds a toolbar button.
+
+On Linux, CEF's developer tools come in a native window the same way: being built (step 5 of
+the design); until then `OpenDevTools` there throws `NotSupportedException`, and F12 does
+nothing.
+
 ## What it costs
 
 A still page costs nothing: frames come only when the page changes. A page that animates
