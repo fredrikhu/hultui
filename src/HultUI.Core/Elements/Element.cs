@@ -855,6 +855,9 @@ public abstract class Element
         {
             _mounted = false;
             OnUnmounted();
+            // Its synthetic accessibility nodes (list items, described content) go with it:
+            // their ids stop resolving rather than ever naming a newer element.
+            Accessibility.AccessibleOwnerSlots.Release(Id);
         }
         if (_children is null) return;
         for (int i = 0; i < _children.Count; i++) // by index: see Mount
