@@ -1038,6 +1038,18 @@ engine if it changed, but nothing more.
      review (2026-10-03):** the root is named after the entry assembly, as the CEF engine names
      its profile folder (not the executable, which is "dotnet" under `dotnet app.dll`). Checked
      with busctl: the sample, JIT and AOT, is "HultUI.Samples.WebView" in the registry's list.
+   - **5.7, the part this machine can do: done 2026-10-03.** A bundled CEF reaches Debian and
+     Ubuntu as `HultUI.WebView.Cef.Natives.<rid>`, one package per RID built by the
+     `cef natives` workflow from `native/cef/` (CEF's official minimal build, pinned by SHA-1,
+     flattened and stripped: 154 MB packed for linux-x64), copied to `cef/` beside the
+     application by a `buildTransitive` targets file. Not as native assets: a RID-specific
+     publish flattens those, `locales/` and all. The engine suite (119) and the sample, zero-copy
+     on both renderers, passed on the bundled CEF 154 through `HULTUI_CEF_DIR`. A scratch
+     application consuming the packed `.nupkg` found it before Fedora's 146, built and
+     published. The route against a download, and how Ubuntu's AppArmor limit on user
+     namespaces should be met (an AppArmor profile from the app's package, recommended), are in
+     the brief's step 7. Left: the runs on Debian and Ubuntu, and the engine saying why when
+     the sandbox cannot start there.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

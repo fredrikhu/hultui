@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and bundled on Debian and Ubuntu (not yet). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work, on Wayland a page's frames stay on the GPU, and a page is read by screen readers through AT-SPI. |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora (`sudo dnf install cef`; CEF 146 or later) and on Debian and Ubuntu from `HultUI.WebView.Cef.Natives.linux-x64` (or `.linux-arm64`), a package of CEF's official build that lands in `cef/` beside the application (built; not yet run on either). Brings `hultui-cef-helper`, the small executable CEF starts its own processes from. **Being built:** pages, script, messages, input, focus, the input method, navigation and its policy, context menus, dialogs, downloads, permissions and drags work, on Wayland a page's frames stay on the GPU, and a page is read by screen readers through AT-SPI. |
 
 An app that never shows a web page references none of these and pays nothing.
 

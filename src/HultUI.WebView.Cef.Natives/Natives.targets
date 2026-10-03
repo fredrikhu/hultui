@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    HultUI.WebView.Cef.Natives.<rid>: CEF's directory, copied as it is to cef/ beside the
+    application on build and on publish, where HultUI.WebView.Cef looks for it. Only for a
+    build with no RID or a Linux one (a Windows or macOS publish has nothing to copy it for;
+    a package for the wrong architecture is the application's to choose).
+  -->
+  <PropertyGroup>
+    <_HultUICefDir>$(MSBuildThisFileDirectory)..\cef\</_HultUICefDir>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' or $(RuntimeIdentifier.StartsWith('linux-'))">
+    <None Include="$(_HultUICefDir)**\*"
+          Link="cef\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+</Project>

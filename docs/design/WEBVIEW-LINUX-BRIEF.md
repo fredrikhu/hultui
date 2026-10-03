@@ -653,6 +653,90 @@ In this order; each ends with its tests green and the step written into
    them); `WEBVIEW.md` has it. One finding: CEF does not pass scroll offsets on, so the page is
    asked for its scroll.
 7. **Debian and Ubuntu.** The natives package or download, and a run on each.
+   **Designed, built and proved on this machine (2026-10-03); the runs on Debian and Ubuntu
+   remain.**
+
+   **The route: a natives package per RID, built by a workflow, as mpv's are.** Weighed against
+   a download made by the application's packaging:
+   - *A package* (`HultUI.WebView.Cef.Natives.linux-x64`, `.linux-arm64`): the application adds
+     one `PackageReference`, and the build and the publish both put CEF where the engine looks.
+     The CEF is pinned by version and SHA-1, the engine tests ran on exactly that tree before it
+     was packed, and a restore works offline from the package cache. The cost is size: 154 MB
+     for linux-x64 (zip, as NuGet packs; arm64's download is 30% larger, so about 200 MB), under
+     nuget.org's 250 MB limit but heavy for every restore and feed. That is why there is one RID
+     per package: no application pays for the other architecture.
+   - *A download by the application's packaging* (a script or an MSBuild target fetching CEF's
+     archive from Spotify's CDN, checking it, flattening and stripping it): no large package
+     to host, and the application picks its CEF. But every application's build needs the
+     network, `strip` for the target architecture, and the CDN's continued existence, and each
+     application repeats work the engine's maintainers could do once. The flattening and
+     stripping are exactly what question 2 showed easy to get wrong (ICU beside `libcef.so`; a
+     1.45 GB `libcef.so`).
+
+   The package wins for the same reasons mpv's did. `native/cef/build.sh` is reusable by an
+   application that wants the other route anyway: it takes a tarball, or downloads one, and
+   leaves the flat stripped tree.
+
+   **Built:**
+   - `native/cef/` holds `versions.env` (CEF 154.0.32 and both SHA-1s, from the CDN's
+     `index.json`) and `build.sh <rid>`, which fetches, checks, flattens, strips with `strip`,
+     `llvm-strip` or `aarch64-linux-gnu-strip`, and leaves out `chrome-sandbox` (see AppArmor
+     below).
+   - `src/HultUI.WebView.Cef.Natives` packs one RID (`-p:Rid=`) under `cef/` with a
+     `buildTransitive` targets file that copies the tree to `cef/` beside the application, on
+     build and on publish. **Not as native assets, found when consumed:** a RID-specific publish
+     flattens `runtimes/<rid>/native/**` into the application's directory, `locales/*.pak`
+     included, and the engine then found no CEF there.
+   - The `cef natives` workflow builds, proves (the engine suite on the packaged tree), packs
+     and publishes both, on a `cef-natives-v*` tag.
+
+   **Proved here:**
+   - The engine suite, 119 tests, passed on the bundled, stripped CEF 154 through
+     `HULTUI_CEF_DIR` (twice), as on Fedora's 146.
+   - The sample's `--check` passed on 154, zero-copy on GL and Vulkan.
+   - A scratch application referencing the packed `.nupkg` from a local feed, built
+     framework-dependent and published `-r linux-x64`, found CEF 154 in its own `cef/` before
+     Fedora's and ran a page ("Chrome/154.0.0.0").
+   - Found with 154: the zero-copy harness clicked a `<select>` without giving the page focus,
+     and 154 opens one only in a focused page (146 did either way). A web view always has
+     focus when clicked, so the harness now focuses first. 154's minimal build also has no
+     `libEGL.so` or `libGLESv2.so` beside `libcef.so` (Fedora's 146 has both), and nothing
+     missed them.
+
+   **Ubuntu's AppArmor limit on user namespaces, for a bundled CEF (not built).** Since 23.10
+   (so 24.04 LTS) Ubuntu sets `kernel.apparmor_restrict_unprivileged_userns=1`: an unconfined
+   program may not make a user namespace. Chromium's sandbox is made of them: the browser
+   process starts the zygote in a new user namespace (on Fedora, question 1 found exactly this
+   sandbox running). On Ubuntu that fails and, with no setuid `chrome-sandbox` to fall back on,
+   Chromium stops with "No usable sandbox!". The process that makes the namespace is the
+   application's own executable, not the helper. That matters for a profile, and the user of a
+   `dotnet app.dll` launch would be `dotnet` itself. Options, and what each asks of the person
+   installing the app:
+   1. **An AppArmor profile, installed by the app's package** (recommended; what Chrome,
+      VS Code and the Electron apps do). A file in `/etc/apparmor.d/` naming the app's
+      executable, `flags=(unconfined)` with `userns,`, loaded by the package's post-install
+      (`apparmor_parser -r`). Asks: installing from a `.deb` (root, which installing already
+      is). Nothing for a tarball or a `dotnet run` (see 4). The natives package can carry the
+      template; the path in it is the application's to fill.
+   2. **The setuid `chrome-sandbox`**, owned by root, mode 4755, beside `libcef.so`, where CEF
+      finds it. Asks: root at install, to set the bit (a package cannot carry it, which is why
+      the natives leave it out). Works without AppArmor's blessing, but a setuid binary is attack
+      surface, and Chromium treats this sandbox as the legacy one.
+   3. **No sandbox** (`--no-sandbox`). Asks nothing, and leaves every renderer unsandboxed:
+      acceptable only for an application that shows its own, trusted content. If offered at
+      all, as an explicit option an application turns on, never as the engine's fallback.
+   4. **The sysctl set to 0** (`kernel.apparmor_restrict_unprivileged_userns=0`). Asks root
+      and a system-wide security decision of the user, for one application. Documentable for
+      a developer machine, not requirable of users.
+   5. **Snap or Flatpak.** A snap with the `browser-support` plug gets user namespaces. Flatpak
+      allows none, and Chromium there uses `zypak`, which CEF would need integrating. Asks:
+      installing from that store, and more engineering per format.
+
+   Whatever the route, the engine should **say so instead of dying**: read
+   `/proc/sys/kernel/apparmor_restrict_unprivileged_userns`, and when it is 1 and no profile
+   covers the executable (a test `unshare(CLONE_NEWUSER)` in a forked child fails), report the
+   engine unavailable with a reason that names option 1, rather than let CEF end the process.
+   To build and confirm on Ubuntu 24.04.
 
 ## Review of steps 5.1 and 5.2 (2026-10-02)
 

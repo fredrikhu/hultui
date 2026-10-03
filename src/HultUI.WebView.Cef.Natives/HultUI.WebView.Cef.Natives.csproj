@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CEF for HultUI.WebView.Cef, one package per RID: whatever native/cef/build.sh left in
+    native/cef/out/<rid>/cef/ (CEF's official minimal distribution, flattened and stripped),
+    packed under cef/ with a buildTransitive targets file that copies the tree to cef/ beside
+    the application, on build and on publish, where the engine looks. Not as native assets
+    (runtimes/<rid>/native/): a RID-specific publish flattens those into the application's
+    directory, and CEF's locales/ with them (tried). One RID per package because CEF is
+    large: about 150 MB packed for linux-x64.
+
+      dotnet pack -p:Rid=linux-x64      (the default)
+      dotnet pack -p:Rid=linux-arm64
+
+    No managed code. Licence: CEF is BSD-3-Clause; Chromium's components are under their own
+    licences, listed in CEF-CREDITS.html beside libcef.so.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Rid Condition="'$(Rid)' == ''">linux-x64</Rid>
+    <PackageId>HultUI.WebView.Cef.Natives.$(Rid)</PackageId>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+    <Description>CEF (Chromium Embedded Framework) for HultUI.WebView.Cef on $(Rid), for distributions that do not package CEF (Debian, Ubuntu): CEF's official minimal build, flattened and stripped. Add it beside HultUI.WebView.Cef.</Description>
+    <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <NativesDir>$(MSBuildThisFileDirectory)..\..\native\cef\out\$(Rid)\cef\</NativesDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\README.md" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <!-- A folder PackagePath keeps each file's directory under it (locales/). -->
+    <None Include="$(NativesDir)**\*" Pack="true" PackagePath="cef" />
+    <None Include="Natives.targets" Pack="true" PackagePath="buildTransitive\$(PackageId).targets" />
+  </ItemGroup>
+
+  <Target Name="SayWhatIsPacked" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(NativesDir)libcef.so')"
+           Text="No CEF for $(Rid) in $(NativesDir): run native/cef/build.sh $(Rid) first." />
+    <Message Importance="high" Text="$(PackageId): CEF $([System.IO.File]::ReadAllText('$(NativesDir)CEF-VERSION').Trim()) from $(NativesDir)" />
+  </Target>
+
+</Project>

@@ -110,6 +110,10 @@ internal static unsafe class ZeroCopy
         Console.WriteLine("after a change by script: " + (Pump(() => Shows(first, (0xff, 0x80, 0x00)), 5000) ? "shows it" : $"shows {At(first, first.Width - 5, first.Height - 5)}"));
 
         // The <select>'s list: CEF's popup, drawn over the page in the same frame.
+        // The page has the keyboard first, as a clicked web view would: CEF 154 opens a
+        // <select> only in a focused page (146 opened it either way).
+        first.View.Focus(HultUI.Core.Events.FocusReason.Pointer);
+        Thread.Sleep(100);
         first.View.SendPointer(new WebPointerInput(WebPointerAction.Move, 30, 20));
         first.View.SendPointer(new WebPointerInput(WebPointerAction.Down, 30, 20, WebPointerButtons.Left, WebPointerButtons.Left, 1));
         first.View.SendPointer(new WebPointerInput(WebPointerAction.Up, 30, 20, WebPointerButtons.Left, WebPointerButtons.None, 1));
