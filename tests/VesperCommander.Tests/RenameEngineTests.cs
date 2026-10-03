@@ -73,7 +73,8 @@ public class RenameEngineTests
     {
         // "noext" has no extension → an empty name mask (keeping the empty ext) yields "".
         Assert.Equal(RenameEngine.Status.Empty, NewNameStatus("noext", new O(NameMask: "")));
-        Assert.Equal(RenameEngine.Status.Illegal, NewNameStatus("a.txt", new O(NameMask: "a?b")));
+        // A slash, not "?": that is a legal file name character on Linux.
+        Assert.Equal(RenameEngine.Status.Illegal, NewNameStatus("a.txt", new O(NameMask: "a/b")));
     }
 
     [Fact]
