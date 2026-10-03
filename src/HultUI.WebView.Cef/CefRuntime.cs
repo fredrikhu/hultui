@@ -87,7 +87,10 @@ internal static unsafe partial class CefRuntime
 
     /// <summary>Why Chromium's sandbox cannot start here, or null (asked once; see <see cref="CefSandbox"/>).</summary>
     internal static string? Sandbox(string cefDirectory) =>
-        (_sandbox ??= new Lazy<string?>(() => CefSandbox.Problem(cefDirectory))).Value;
+        (_sandbox ??= new Lazy<string?>(() =>
+            // HULTUI_CEF_SANDBOX_CHECK=0: for a system where the check misjudges; CEF then
+            // decides, and ends the process where the sandbox cannot start.
+            Environment.GetEnvironmentVariable("HULTUI_CEF_SANDBOX_CHECK") == "0" ? null : CefSandbox.Problem(cefDirectory))).Value;
 
     private static Lazy<string?>? _sandbox;
 

@@ -1050,6 +1050,14 @@ engine if it changed, but nothing more.
      namespaces should be met (an AppArmor profile from the app's package, recommended), are in
      the brief's step 7. Left: the runs on Debian and Ubuntu, and the engine saying why when
      the sandbox cannot start there.
+   - **5.7 on Debian 13 and Ubuntu 24.04: done 2026-10-03** (the brief's step 7 has it all).
+     The NativeAOT sample with the bundled CEF passed `--check` on both. On Debian (container,
+     Intel GPU) it ran zero-copy under sway on GL and Vulkan; on Ubuntu (a VM, no GPU) it ran in
+     software, on pixels. Found: a new account's profile path was relative (fixed); Ubuntu's
+     AppArmor limit ended the process (now `CefSandbox` says why, first). The profile must cover
+     the application's executable and nothing else. A tested `.deb` (profile, maintainer scripts,
+     a measured `Depends` list) installs, runs, unloads and purges cleanly on both. arm64:
+     untested.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and

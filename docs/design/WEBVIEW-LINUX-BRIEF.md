@@ -795,6 +795,31 @@ In this order; each ends with its tests green and the step written into
      "CEF: Chromium's sandbox cannot start: … /home/dev/sample/HultUI.Samples.WebView has none …"
      and goes on with its fake engine. No probe by `unshare`: a child process is judged by its
      own profile, not the application's, and forking a .NET process is not safe.
+   - **The profile, tested on the Ubuntu VM.** The shape Ubuntu's own profiles for Chrome,
+     VS Code and Edge have: `profile <app> /opt/<app>/<executable> flags=(unconfined) { userns,
+     include if exists <local/<app>> }`. **It must cover the application's executable, and
+     that is enough.** With it, `--check` passed with the sandbox fully on (renderers and a
+     utility process in their own user namespace, seccomp filters), and every CEF process
+     carried the application's label (`hultui-sample (unconfined)`): an unconfined-mode
+     profile is inherited across `exec`, so the helper runs under it. A profile on the helper
+     alone, with the application unconfined (the engine's check off, `HULTUI_CEF_SANDBOX_CHECK=0`,
+     new for exactly this), still died "No usable sandbox!": the browser process makes the
+     namespace. So the check judges the right process, and an application launched as
+     `dotnet app.dll` would need a profile on `dotnet`: **a bundled-CEF application ships as its
+     own executable** (NativeAOT or apphost).
+   - **How the application's `.deb` installs it, tested end to end.** The profile is a conffile
+     in `/etc/apparmor.d/<app>`. `postinst configure` makes the empty
+     `/etc/apparmor.d/local/<app>` and, when `aa-enabled` says AppArmor is on, loads the profile
+     (`apparmor_parser --replace --write-cache --skip-read-cache`), as debhelper's
+     `dh_apparmor` snippet does. `prerm remove` unloads it, and `postrm purge` removes the local
+     file. `native/cef/deb/build-sample-deb.sh` builds the sample's package that way: 128 MB,
+     with the `Depends` above. On Ubuntu `apt install` resolved the dependencies, loaded the
+     profile, and `hultui-sample --check` passed. `apt remove` unloaded it and kept the conffile,
+     and `purge` removed both. On Debian the same package installed (no AppArmor tools there,
+     so the scripts did nothing) and passed zero-copy on GL and Vulkan.
+   - **Not tested: arm64.** The package and the workflow build linux-arm64, and nothing has run
+     on it. Also not run: a desktop session (GNOME, KDE) on either distribution; both machines
+     ran sway headless.
 
 ## Review of steps 5.1 and 5.2 (2026-10-02)
 
