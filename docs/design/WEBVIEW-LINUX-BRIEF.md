@@ -1013,6 +1013,31 @@ SHA-1, instead of every application's packaging doing it.
    the kernel and its AppArmor are the Proxmox host's, so whether Ubuntu's limit applies there
    says nothing about an Ubuntu desktop. Debian can be a container, as Fedora is.
 
+## Review of step 5.7 on Debian and Ubuntu (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there. **It stands**: the
+dependency list measured rather than guessed, the profile proven necessary and sufficient on
+the application's executable alone, and a real `.deb` that installs, loads, removes and purges
+it. The fresh-account bug was a good find.
+
+1. **Root is not fine.** `CefSandbox.Judge` passes a process running as root, but Chromium
+   refuses root without `--no-sandbox` and ends the process ("Running as root without
+   --no-sandbox is not supported"), the very thing the check exists to prevent. Confirm with
+   `sudo` on either machine, and report root the way the other cases are reported (unless the
+   application chose to run without the sandbox).
+2. **Fixed on the Windows side:** `File.GetUnixFileMode` in `CefSandbox` was the branch's one
+   new build warning (CA1416): the csproj's `<SupportedOSPlatform>linux</SupportedOSPlatform>`
+   generates nothing for a plain `net10.0` project, so the analyzer treats the code as every
+   platform's. It has an `OperatingSystem.IsWindows()` guard now. The property is inert:
+   remove it, or keep it only as a comment, so nobody relies on it.
+3. **Fixed on the Windows side:** the natives README's paragraph on what a page cannot play
+   (H.264, AAC) was lost in the rewrite; it is back.
+4. **Not for you:** the empty data folder on a fresh account also hits Vesper Commander, whose
+   settings path has no fallback (Reel, Aperture and Junction have one). A task of its own on
+   the Windows side.
+5. **Left open, and fine to leave:** arm64, GNOME and KDE sessions, and the first run of the
+   `cef natives` workflow, which needs the owner's go-ahead because it publishes a prerelease.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

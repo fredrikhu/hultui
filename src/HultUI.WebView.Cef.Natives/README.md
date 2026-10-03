@@ -70,5 +70,10 @@ Depends: libc6, libgcc-s1, libstdc++6,
 Recommends: libdecor-0-0, libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers
 ```
 
+**What a page can play.** CEF's official builds leave out the patent-encumbered codecs:
+H.264 and AAC. A page's MP4 video in those formats does not play with this package, while
+WebM, VP9, AV1 and Opus do. Fedora's CEF decodes through the system's ffmpeg instead, which
+plays whatever that ffmpeg has (RPM Fusion's has the full set).
+
 **Licences.** CEF is BSD-3-Clause; Chromium and its components are under their own licences,
 listed in `CEF-CREDITS.html` beside `libcef.so`, with `CEF-LICENSE.txt`.

@@ -74,6 +74,8 @@ internal static class CefSandbox
     /// (.NET reads no owner); a setuid file a user owns would only fail later, as before.</summary>
     private static bool HasSetuidSandbox(string path)
     {
+        // The guard is for the platform analyzer: this assembly builds for every OS.
+        if (OperatingSystem.IsWindows()) return false;
         try { return File.Exists(path) && (File.GetUnixFileMode(path) & UnixFileMode.SetUser) != 0; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
