@@ -1,7 +1,7 @@
-From 5eba4d6e0133da4daa96041393082adfe2f8a7d4 Mon Sep 17 00:00:00 2001
+From 60bf99f819b9b532b06c07824431097582fa584c Mon Sep 17 00:00:00 2001
 From: Fredrik Hult <fredrik.hult@outlook.com>
 Date: Sat, 3 Oct 2026 20:28:18 +0200
-Subject: [PATCH 4/4] ReflowCursorLine: the wrapped line holding the cursor can
+Subject: [PATCH 4/5] ReflowCursorLine: the wrapped line holding the cursor can
  reflow too
 
 Off by default, which keeps xterm.js's rule: the cursor's wrapped group is left to the
@@ -452,6 +452,3 @@ index 66693d9..e23964d 100644
          _normalBuffer?.Resize(cols, rows);
          _altBuffer?.Resize(cols, rows);
  
--- 
-2.53.0.windows.3
-

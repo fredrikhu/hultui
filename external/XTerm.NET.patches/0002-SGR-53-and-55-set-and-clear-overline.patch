@@ -1,7 +1,7 @@
-From ed57d963a88d3266785a559d826b83213049224c Mon Sep 17 00:00:00 2001
+From 72fdc37064ef7ff60208d5682051b63ac677862c Mon Sep 17 00:00:00 2001
 From: Fredrik Hult <fredrik.hult@outlook.com>
 Date: Sat, 3 Oct 2026 20:28:17 +0200
-Subject: [PATCH 2/4] SGR 53 and 55 set and clear overline
+Subject: [PATCH 2/5] SGR 53 and 55 set and clear overline
 
 AttributeData has had IsOverline and SetOverline, but the SGR switch had no case for either, so
 overline never reached a cell.
@@ -28,6 +28,3 @@ index 1e15eb9..e5edaf4 100644
                  case >= 30 and <= 37: // Foreground color
                      _curAttr.SetFgColor(param - 30);
                      break;
--- 
-2.53.0.windows.3
-

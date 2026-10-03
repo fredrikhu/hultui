@@ -1,4 +1,4 @@
-﻿#:project ../../../src/HultUI.Headless/HultUI.Headless.csproj
+#:project ../../../src/HultUI.Headless/HultUI.Headless.csproj
 #:project ../../../apps/Junction/Junction.csproj
 #:project ../../../apps/VesperCommander/VesperCommander.csproj
 #:project ../../../apps/Meridian/Meridian/Meridian.csproj
@@ -7,6 +7,7 @@
 #:project ../../../samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj
 #:project ../../../samples/HultUI.Samples.VideoPlayer/HultUI.Samples.VideoPlayer.csproj
 #:project ../../../samples/HultUI.Samples.ProceduralVideo/HultUI.Samples.ProceduralVideo.csproj
+#:project ../../../samples/HultUI.Samples.Terminal/HultUI.Samples.Terminal.csproj
 
 // Drives a HultUI app off-screen and writes PNGs of what it drew.
 //
@@ -107,7 +108,8 @@ try
         "fluent" => MountFluent(),
         "player" => MountPlayer(),
         "procedural" => MountProcedural(),
-        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | aperture | reel | fluent | player | procedural)"),
+        "terminal" => MountTerminal(),
+        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | aperture | reel | fluent | player | procedural | terminal)"),
     };
     session.Application.SetRoot(root);
     session.PumpFrames(3);
@@ -428,6 +430,18 @@ Element MountProcedural()
     var a = new HultUI.Samples.ProceduralVideo.ProceduralVideoApp(session.Application, session.Window.Window);
     instance = a;
     return a.Mount();
+}
+
+// The terminal sample: a terminal on its in-process demo shell, focused, so `type:` reaches the
+// shell. Its output arrives from the shell's own threads in real time, so `settle` before a shot.
+Element MountTerminal()
+{
+    session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
+    var a = new HultUI.Samples.Terminal.TerminalSampleApp();
+    instance = a;
+    var root = a.Mount();
+    HultUI.Application.InvokeOnMainThread(() => a.Terminal.Focus());
+    return root;
 }
 
 void Run(string step)

@@ -168,6 +168,55 @@ public class ResizeEdgeCaseTests
     }
 
     /// <summary>
+    /// The same with the cursor near the top, where the shift cannot help: it stops at the cursor.
+    /// The blank rows below the cursor are dropped instead, as xterm.js drops them.
+    /// </summary>
+    /// <remarks>
+    /// A terminal created at 80x24 and sized to its pane before its first screenful is exactly this.
+    /// The rows left below the screen each held a slot of the ring, so the scrollback kept 19 lines
+    /// fewer than asked for, for the life of the terminal, and every scroll reported a trim the user
+    /// never saw.
+    /// </remarks>
+    [Fact]
+    public void ShrinkingRows_WithTheCursorNearTheTop_LeavesNothingStrandedBelowTheScreen()
+    {
+        var terminal = new Terminal(new TerminalOptions { Cols = 20, Rows = 24, Scrollback = 50 });
+        var trimmed = 0;
+        terminal.Buffer.Trimmed += n => trimmed += n;
+        terminal.Write("$ ");
+
+        terminal.Resize(20, 5);
+
+        Assert.Equal(terminal.Buffer.Lines.Length, terminal.Buffer.YBase + terminal.Rows);
+        Assert.Equal(2, terminal.Buffer.X);
+        Assert.Equal(0, terminal.Buffer.YBase + terminal.Buffer.Y);
+
+        for (var i = 0; i < 100; i++)
+            terminal.Write($"\r\nline {i}");
+
+        // The whole scrollback, and only the lines that left it counted as trimmed.
+        Assert.Equal(50, terminal.Buffer.YBase);
+        Assert.Equal(101 - 5 - 50, trimmed);
+    }
+
+    /// <summary>Only blank rows go: a row with text below the cursor stays.</summary>
+    [Fact]
+    public void ShrinkingRows_KeepsContentBelowTheCursor()
+    {
+        var terminal = new Terminal(new TerminalOptions { Cols = 20, Rows = 10, Scrollback = 50 });
+        terminal.Write("\u001b[8;1Hbelow\u001b[1;1Htop");
+
+        terminal.Resize(20, 5);
+
+        var lines = Enumerable.Range(0, terminal.Buffer.Lines.Length)
+            .Select(i => terminal.Buffer.Lines[i]!.TranslateToString(trimRight: true))
+            .ToList();
+        Assert.Equal("top", lines[0]);
+        Assert.Contains("below", lines);
+        Assert.Equal(0, terminal.Buffer.YBase + terminal.Buffer.Y);
+    }
+
+    /// <summary>
     /// A zero-row resize has no viewport to overflow out of, and must not scroll the buffer.
     /// </summary>
     /// <remarks>

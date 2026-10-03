@@ -1055,6 +1055,21 @@ public class TerminalBuffer
         // resize that has no viewport at all.
         var newBottom = Math.Max(0, newRows - 1);
 
+        // Blank rows the shrink cut off below the cursor are dropped, as xterm.js does. The shift
+        // below cannot move them: it stops at the cursor, so with the cursor near the top -- a new
+        // terminal sized down before its first screenful -- they stayed below the screen for good.
+        // Each one took a slot of the ring, so the scrollback kept that many lines fewer than asked,
+        // and every scroll trimmed one line more than it showed. A row with content, or a picture,
+        // stays.
+        while (_lines.Length > _yBase + newRows
+               && _lines.Length - 1 > _yBase + _y
+               && _lines[_lines.Length - 1] is var last
+               && IsBlankLine(last)
+               && last is not { HasImages: true })
+        {
+            _lines.Pop();
+        }
+
         // The screen is the last `rows` lines of the buffer, so a shrink has to move the difference
         // into scrollback. Shifting only enough to bring the cursor on screen left lines stranded
         // BELOW the screen, where scrolling cannot reach them -- the viewport tops out at _yBase.

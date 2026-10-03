@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A terminal as an element. This package holds the reactive TerminalController (the emulator,
+    the connection, and the reader and writer threads between them), the TerminalElement that
+    draws it and turns input into bytes, StreamConnection for any pair of streams, and a scripted
+    FakeConnection for tests. The emulator is XTerm.NET with HultUI's patches
+    (HultUI.Terminal.XTermNet). A local process under a pseudoconsole is HultUI.Terminal.Pty —
+    see docs/design/TERMINAL.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Terminal</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI terminal: the reactive TerminalController, the TerminalElement, StreamConnection and a fake connection for tests. A local shell needs HultUI.Terminal.Pty.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Terminal.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\HultUI.Terminal.XTermNet\HultUI.Terminal.XTermNet.csproj" />
+  </ItemGroup>
+
+</Project>
