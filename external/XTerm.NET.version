@@ -1,0 +1,4 @@
+# The upstream XTerm.NET that external/XTerm.NET is built from, before HultUI's patches
+# (external/XTerm.NET.patches). Changed only by scripts/vendor-xterm-net.ps1 -Commit.
+url=https://github.com/tomlm/XTerm.NET
+commit=56ea809d79e2ccb33031ee661ceae7b16605226e

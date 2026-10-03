@@ -136,10 +136,12 @@ LICENSE stays in `external/XTerm.NET/`, and the packages' third-party notices na
   conflict. An app referencing both and naming an `XTerm` type directly gets CS0433 and needs an
   `extern alias`. `HultUI.Terminal`'s own API exposes no `XTerm` type, so only code reaching past
   the emulator seam can meet that.
-- **Build settings.** It keeps upstream's dependencies (`Unicode.net`, `Wcwidth`) and is
-  `IsAotCompatible`, as the spike's publish showed it can be. The repository's `src/` props
-  (documentation file, packing) apply to it. **Verify** that it builds warning-free under them;
-  any suppression goes in its csproj, never in a vendored file.
+- **Build settings.** At the pinned commit upstream has no package dependencies. The project is
+  `IsAotCompatible`, as the spike's publish showed it can be, and builds with no warnings. The
+  repository's `src/` props apply to it, except the XML documentation file: upstream never builds
+  one, and its comments produce 51 doc-comment warnings, so it is off for this project. Every
+  such setting lives in the csproj, never in a vendored file. The package carries upstream's
+  licence as `licenses/XTerm.NET/LICENSE`.
 - **Updating upstream.** `vendor-xterm-net.ps1 -Commit <sha>`:
   1. Clones upstream and checks out the commit.
   2. Applies the patches with `git am --3way`. It stops on a conflict for a person to resolve,
@@ -538,12 +540,25 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
 
    It runs on the Linux machine before step 4 ships there; `q7` and `q8` already pick bash, vim
    and sh off Windows.
-1. **The patched engine:**
-   - `external/XTerm.NET` at `56ea809` with patches 0001–0004 (moved from the spike);
-   - `XTerm.NET.version`;
-   - `scripts/vendor-xterm-net.ps1` with `-Commit` and `-Verify`, the latter in CI;
-   - `src/HultUI.Terminal.XTermNet` and `tests/HultUI.Terminal.XTermNet.Tests` (2 238 tests), both
-     in the cross-platform filter.
+1. **The patched engine: done 2026-10-03.**
+   - **`external/`:** `XTerm.NET` holds upstream `56ea809` with patches 0001–0004 (moved from the
+     spike): 167 files. Beside it are `XTerm.NET.version`, a README, and a `.gitattributes` that
+     keeps git from converting the vendored bytes. Upstream's `Charsets.cs` carries CR bytes that a
+     line-ending conversion would corrupt.
+   - **`scripts/vendor-xterm-net.ps1`.** It generated that tree from a fresh shallow clone, after
+     upstream's suite passed on the patched source. It has three further modes:
+     - `-Commit <sha>`: move to a new upstream commit.
+     - `-FromClone <dir>`: finish an update whose patch a person resolved.
+     - `-Verify`: rebuilds in a temporary folder and compares bytes. It was seen to fail on an
+       edited file and on an extra file, and to pass again once both were undone. CI's Windows job
+       runs it before the build, because that runner has pwsh and git.
+   - **`src/HultUI.Terminal.XTermNet`:** `HultUI.Terminal.XTermNet.dll`, no warnings.
+   - **`tests/HultUI.Terminal.XTermNet.Tests`:** upstream's suite against it, 2 238 passing and one
+     skipped, as upstream. It is in the solution and the cross-platform filter.
+   - **Found on the way:** upstream's
+     `SelectionTests.SelectionText_UsesLineFeedLineEndings` has no `[Fact]` and has never run.
+     xUnit1013 is suppressed in the test project rather than the file edited; a fix would be a
+     patch of its own.
 2. **`HultUI.Terminal`:**
    - the emulator seam and the XTerm.NET adapter, with `ReflowCursorLine` on;
    - the controller with its two threads and the teardown order, and the scrollback signals;
