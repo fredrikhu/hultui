@@ -161,6 +161,10 @@ public sealed class RecordingRenderContext : IRenderContext
         float maxWidth, int? maxLines)
         => _inner.LayoutTextLines(text, style, maxWidth, maxLines);
 
+    public FontMetrics MeasureFont(ResolvedInheritedStyle style) => _inner.MeasureFont(style);
+
+    public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => _inner.HasGlyph(style, codePoint);
+
     // ──── State stack ────
     // Each push records at the current depth then indents; Pop outdents first,
     // so a push/pop pair brackets its children in the log.

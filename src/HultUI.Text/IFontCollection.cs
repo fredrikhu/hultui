@@ -4,6 +4,12 @@ namespace HultUI.Text;
 
 public interface IFontCollection
 {
+    /// <summary>
+    /// The face for <paramref name="familyName"/>: one family, or a comma-separated list of
+    /// which the first installed wins, where the generic <see cref="FontFamilies.Monospace"/>
+    /// names the platform's monospace face. A collection that cannot tell what is installed
+    /// may take the first name.
+    /// </summary>
     IResolvedFont Resolve(string familyName, FontWeight weight, FontSlant slant);
 
     /// <summary>
@@ -35,4 +41,15 @@ public interface IResolvedFont : IDisposable
     /// Returns a platform-specific handle (e.g., SKTypeface) for use by the shaper/renderer.
     /// </summary>
     object NativeHandle { get; }
+
+    /// <summary>Whether the font says every glyph has the same advance.</summary>
+    bool IsFixedPitch => false;
+
+    /// <summary>The underline the font asks for, per unit of font size: where its stroke starts
+    /// below the baseline (positive down) and how thick it is. Null when the font does not say.</summary>
+    (float Position, float Thickness)? Underline => null;
+
+    /// <summary>The strikeout the font asks for, per unit of font size, as <see cref="Underline"/>
+    /// (its position is negative: above the baseline). Null when the font does not say.</summary>
+    (float Position, float Thickness)? Strikeout => null;
 }

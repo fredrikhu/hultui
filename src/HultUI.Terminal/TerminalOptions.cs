@@ -1,4 +1,5 @@
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 
 namespace HultUI.Terminal;
 
@@ -39,8 +40,13 @@ public sealed class TerminalOptions
         init => _maxScrollbackBytes = ValidateBudget(value);
     }
 
-    /// <summary>The font family. Null takes the platform's monospace font: Consolas on Windows,
-    /// fontconfig's <c>monospace</c> on Linux, Menlo on macOS.</summary>
+    /// <summary>
+    /// The font family, or a list of them (<c>"JetBrains Mono, Fira Code"</c>) of which the first
+    /// installed is used. Null takes the platform's monospace face
+    /// (<see cref="FontFamilies.Monospace"/>: Cascadia Mono, then Consolas, on Windows; Menlo on
+    /// macOS; fontconfig's <c>monospace</c> on Linux), and so does a family that is not
+    /// installed: the terminal always ends the list with it.
+    /// </summary>
     public string? FontFamily { get; init; }
 
     /// <summary>The font size, in layout units. Must be positive.</summary>
@@ -70,12 +76,11 @@ public sealed class TerminalOptions
         ? throw new ArgumentOutOfRangeException(nameof(MaxScrollbackBytes), bytes, "The scrollback budget cannot be negative.")
         : bytes;
 
-    internal string ResolvedFontFamily => FontFamily ?? DefaultFontFamily;
-
-    internal static string DefaultFontFamily =>
-        OperatingSystem.IsWindows() ? "Consolas"
-        : OperatingSystem.IsMacOS() ? "Menlo"
-        : "monospace";
+    /// <summary>The family string the terminal draws with: a missing family would otherwise draw
+    /// in the platform's default face, which is proportional.</summary>
+    internal string ResolvedFontFamily => string.IsNullOrWhiteSpace(FontFamily)
+        ? FontFamilies.Monospace
+        : $"{FontFamily}, {FontFamilies.Monospace}";
 }
 
 /// <summary>

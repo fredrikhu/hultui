@@ -45,4 +45,21 @@ public interface IMeasureContext
     float MinContentTextWidth(string text, ResolvedInheritedStyle style,
         IReadOnlyList<TextSpan>? spans = null)
         => MeasureText(text, style, 0f, null, TextOverflow.Clip, spans).Width;
+
+    /// <summary>
+    /// The metrics of the font <paramref name="style"/> names, at its size and in its weight and
+    /// slant. The default estimates them from a measured <c>"0"</c>
+    /// (<see cref="FontMetrics.Estimate"/>); contexts backed by the real pipeline read the font.
+    /// </summary>
+    FontMetrics MeasureFont(ResolvedInheritedStyle style)
+        => FontMetrics.Estimate(style, MeasureText("0", style, float.PositiveInfinity, 1));
+
+    /// <summary>
+    /// Whether the face <paramref name="style"/> resolves to has its own glyph for
+    /// <paramref name="codePoint"/>, without falling back to another font. Text draws a missing
+    /// character from a fallback font, whose advance need not match: a grid that steps by
+    /// <see cref="FontMetrics.CharacterWidth"/> draws such a character on its own. The default,
+    /// for contexts that cannot read a font, says yes.
+    /// </summary>
+    bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => true;
 }

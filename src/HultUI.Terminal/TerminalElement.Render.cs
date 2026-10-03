@@ -14,16 +14,18 @@ namespace HultUI.Terminal;
 /// for 200 × 60 in the spike) and draws from the copy with the lock released.
 /// </summary>
 /// <remarks>
-/// <para><b>Cells.</b> The cell is as wide as the font's advance and as tall as its line, the
-/// height rounded up to whole device pixels so rows land on pixel edges. Columns and rows are the
-/// content box divided by the cell, truncated; the strip left over belongs to no cell.</para>
+/// <para><b>Cells.</b> The cell is as wide as the font's character width and as tall as its line
+/// (<see cref="IRenderContext.MeasureFont"/>), the height rounded up to whole device pixels so rows
+/// land on pixel edges. Columns and rows are the content box divided by the cell, truncated; the
+/// strip left over belongs to no cell.</para>
 /// <para><b>Text.</b> Each row is one <c>DrawText</c> with a span per change of style, so its
-/// glyphs share a baseline and step by the font's own advance, which is the cell. A character the
-/// primary font may not have — a wide one, a cluster, anything outside the ranges every terminal
-/// font covers (<c>InEveryTerminalFont</c>) — is drawn on its own at its column, with a
-/// space in its place in the row, so its advance cannot push the rest of the row off its columns. (Its baseline is its own font's, which
-/// can sit up to about a pixel off the row's: seam T2 in docs/design/TERMINAL.md.) Box drawing
-/// and block elements are geometry.</para>
+/// glyphs share a baseline and step by the font's own advance, which is the cell. A character
+/// that would not step by it is drawn on its own at its column, with a space in its place in the
+/// row: a wide one, a cluster, and one the face has no glyph for
+/// (<see cref="IRenderContext.HasGlyph"/>), whose fallback glyph's advance would push the rest of
+/// the row off its columns. (Its baseline is its own font's, which can sit up to about a pixel off
+/// the row's: seam T2 in docs/design/TERMINAL.md.) Right-to-left letters are drawn on their own
+/// too, so they are never reordered. Box drawing and block elements are geometry.</para>
 /// <para><b>Synchronized output.</b> While a program holds an update open (DECSET 2026) the last
 /// complete screen stays up, for at most 150 ms.</para>
 /// </remarks>
@@ -41,6 +43,10 @@ public sealed partial class TerminalElement
 
     private float _cellWidth = 8, _cellHeight = 16;
     private (string Family, float Size, float Scale) _metricsKey;
+    private FontMetrics _font;
+
+    /// <summary>Whether the face has each non-ASCII code point met so far; cleared with the font.</summary>
+    private readonly Dictionary<int, bool> _glyphs = [];
     private bool _resizeQueued;
     private string? _preedit;
 
@@ -102,15 +108,16 @@ public sealed partial class TerminalElement
         var key = (style.FontFamily, style.FontSize, scale);
         if (_metricsKey == key) return;
         _metricsKey = key;
+        _glyphs.Clear();
 
-        // Ten of a glyph, so a fractional advance is not rounded away.
-        float width = ctx.MeasureText("MMMMMMMMMM", style).Width / 10f;
-        float height = ctx.MeasureText("M", style).Height;
-        if (width <= 0) width = style.FontSize * 0.6f;
-        if (height <= 0) height = style.FontSize * 1.2f;
-        _cellWidth = width;
+        _font = ctx.MeasureFont(style);
+        _cellWidth = _font.CharacterWidth > 0 ? _font.CharacterWidth : style.FontSize * 0.6f;
+        float height = _font.LineHeight > 0 ? _font.LineHeight : style.FontSize * 1.2f;
         _cellHeight = MathF.Ceiling(height * scale) / scale;
     }
+
+    /// <summary>The face the terminal draws with, as the last frame measured it.</summary>
+    internal FontMetrics Font => _font;
 
     /// <summary>The grid the content box holds. A change is applied after the frame, never inside
     /// it: the resize reaches the program, and ConPTY answers it synchronously.</summary>
@@ -246,7 +253,7 @@ public sealed partial class TerminalElement
                 current = key;
             }
 
-            if (IsSpecial(cell))
+            if (IsSpecial(ctx, style, cell))
             {
                 _specials.Add(col);
                 _rowText.Append(' ', Math.Max(1, (int)cell.Width));
@@ -280,7 +287,8 @@ public sealed partial class TerminalElement
             if ((cells[col].Flags & CellFlags.Overline) != 0)
             {
                 var r = Span(left, y, col, col + Math.Max(1, (int)cells[col].Width), scale);
-                ctx.DrawRect(new Rect(r.X, y, r.Width, MathF.Max(1f, 1f / scale)), Rgb(cells[col].Foreground));
+                float thickness = MathF.Max(1f, MathF.Round(_font.UnderlineThickness * scale)) / scale;
+                ctx.DrawRect(new Rect(r.X, y, r.Width, thickness), Rgb(cells[col].Foreground));
             }
     }
 
@@ -305,20 +313,32 @@ public sealed partial class TerminalElement
             Slant: (k.Flags & CellFlags.Italic) != 0 ? FontSlant.Italic : null);
     }
 
-    /// <summary>A cell drawn on its own: one the primary font may not have, whose fallback glyph's
-    /// advance would push the rest of the row off its columns.</summary>
-    private static bool IsSpecial(in TerminalCell cell) =>
-        cell.Cluster is not null || cell.Width > 1 || !InEveryTerminalFont(cell.CodePoint);
-
     /// <summary>
-    /// Code points every font <see cref="TerminalOptions.FontFamily"/> defaults to has (Consolas,
-    /// Menlo, and DejaVu Sans Mono as Linux's usual "monospace"): Latin, IPA, Greek, Cyrillic, and the dashes, quotes,
-    /// bullet and ellipsis tools print. Arrows and maths operators are not among them: Consolas
-    /// lacks some, and the first sample run showed a row of them drifting half a cell. Hebrew and
-    /// Arabic start right after, and drawn on their own they are never reordered either.
+    /// A cell drawn on its own rather than in its row's text: a wide character, a cluster, box
+    /// drawing (geometry), a right-to-left letter (never reordered), and a character the face has
+    /// no glyph for. Text would draw that from a fallback font, whose advance need not be the
+    /// cell's: Consolas and Cascadia Mono lack some arrows and maths operators, and a row of them
+    /// drifted half a cell before this asked the font.
     /// </summary>
-    private static bool InEveryTerminalFont(int cp) =>
-        cp < 0x0590 || cp is >= 0x2010 and <= 0x2027 || cp == 0x20AC;
+    private bool IsSpecial(IRenderContext ctx, ResolvedInheritedStyle style, in TerminalCell cell)
+    {
+        if (cell.Cluster is not null || cell.Width > 1) return true;
+        int cp = cell.CodePoint;
+        if (cp < 0x80) return false;
+        if (BoxDrawing.Handles(cp) || IsRightToLeft(cp)) return true;
+        if (!_glyphs.TryGetValue(cp, out bool has))
+            _glyphs[cp] = has = ctx.HasGlyph(style, cp);
+        return !has;
+    }
+
+    /// <summary>The blocks of the strongly right-to-left scripts: Hebrew, Arabic, Syriac, Thaana,
+    /// N'Ko and their presentation forms, and the historic and Arabic blocks above the BMP.</summary>
+    private static bool IsRightToLeft(int cp) =>
+        cp is >= 0x0590 and <= 0x08FF
+            or >= 0xFB1D and <= 0xFDFF
+            or >= 0xFE70 and <= 0xFEFF
+            or >= 0x10800 and <= 0x10FFF
+            or >= 0x1E800 and <= 0x1EFFF;
 
     private void DrawSpecial(IRenderContext ctx, in TerminalCell cell, float x, float y,
         ResolvedInheritedStyle style, float scale)
@@ -382,7 +402,7 @@ public sealed partial class TerminalElement
             default:
                 ctx.DrawRect(rect, color);
                 // The character under a block cursor, in the background colour.
-                if (!cell.IsBlank && !IsSpecial(cell))
+                if (!cell.IsBlank && !IsSpecial(ctx, style, cell))
                 {
                     var under = style with
                     {

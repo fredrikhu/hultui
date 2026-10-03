@@ -23,12 +23,65 @@ public sealed class SkiaFontCollection : IFontCollection
         if (_fontCache.TryGetValue(key, out var cached))
             return cached;
 
-        var typeface = SKTypeface.FromFamilyName(familyName, ToSkWeight(weight), SKFontStyleWidth.Normal, ToSkSlant(slant))
-            ?? SKTypeface.Default;
-
-        var resolved = new SkiaResolvedFont(typeface);
+        var resolved = new SkiaResolvedFont(Match(familyName, ToSkWeight(weight), ToSkSlant(slant)));
         _fontCache[key] = resolved;
         return resolved;
+    }
+
+    /// <summary>
+    /// The face for a family string.
+    /// <list type="bullet">
+    /// <item>A single name is asked for as it always was, so one that is not installed becomes
+    /// the platform's default face.</item>
+    /// <item>A list takes the first family installed, as CSS's <c>font-family</c> does, and the
+    /// first name's answer when none is.</item>
+    /// <item>The generic <see cref="FontFamilies.Monospace"/> names the platform's monospace
+    /// face. DirectWrite does not know the name, and answered Segoe UI, a proportional face.</item>
+    /// </list>
+    /// "Installed" is the font manager's family match, which knows every localized name of a
+    /// family and, unlike the legacy lookup, says when there is none.
+    /// </summary>
+    private SKTypeface Match(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant)
+    {
+        if (!familyName.Contains(',') && !IsMonospace(familyName))
+            return Legacy(familyName, weight, slant);
+
+        using var style = new SKFontStyle(weight, SKFontStyleWidth.Normal, slant);
+        string? first = null;
+        foreach (var part in familyName.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var name = part.Trim('"', '\'');
+            first ??= name;
+            var typeface = IsMonospace(name) ? MatchMonospace(style, weight, slant) : _fontManager.MatchFamily(name, style);
+            if (typeface is not null) return typeface;
+        }
+        return Legacy(first ?? "", weight, slant);
+    }
+
+    private static SKTypeface Legacy(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant) =>
+        SKTypeface.FromFamilyName(familyName, weight, SKFontStyleWidth.Normal, slant) ?? SKTypeface.Default;
+
+    private static bool IsMonospace(string name) =>
+        string.Equals(name, FontFamilies.Monospace, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The faces <see cref="FontFamilies.Monospace"/> tries, in order.</summary>
+    private static readonly string[] MonospaceFaces =
+        OperatingSystem.IsWindows() ? ["Cascadia Mono", "Consolas", "Courier New"]
+        : OperatingSystem.IsMacOS() ? ["Menlo", "Monaco", "Courier New"]
+        : ["DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"];
+
+    private SKTypeface? MatchMonospace(SKFontStyle style, SKFontStyleWeight weight, SKFontStyleSlant slant)
+    {
+        // Fontconfig knows "monospace" itself, and a user may have configured what it means.
+        // Its answer is taken when it is a fixed-pitch face; otherwise the alias is missing.
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()
+            && SKTypeface.FromFamilyName(FontFamilies.Monospace, weight, SKFontStyleWidth.Normal, slant) is { IsFixedPitch: true } alias)
+            return alias;
+
+        foreach (var name in MonospaceFaces)
+            if (_fontManager.MatchFamily(name, style) is { } typeface)
+                return typeface;
+        return null;
     }
 
     public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant)
@@ -91,6 +144,7 @@ internal sealed class SkiaResolvedFont : IResolvedFont
     private readonly SKFont _font;
     private bool _metricsComputed;
     private float _ascent, _descent, _leading;
+    private (float, float)? _underline, _strikeout;
 
     public string FamilyName => _typeface.FamilyName;
     public object NativeHandle => _typeface;
@@ -99,6 +153,10 @@ internal sealed class SkiaResolvedFont : IResolvedFont
     public float Descent { get { EnsureMetrics(); return _descent; } }
     public float Leading { get { EnsureMetrics(); return _leading; } }
     public float LineHeight => Math.Abs(Ascent) + Descent + Leading;
+
+    public bool IsFixedPitch => _typeface.IsFixedPitch;
+    public (float Position, float Thickness)? Underline { get { EnsureMetrics(); return _underline; } }
+    public (float Position, float Thickness)? Strikeout { get { EnsureMetrics(); return _strikeout; } }
 
     public SkiaResolvedFont(SKTypeface typeface)
     {
@@ -119,6 +177,14 @@ internal sealed class SkiaResolvedFont : IResolvedFont
         _ascent = metrics.Ascent;    // negative in Skia (above baseline)
         _descent = metrics.Descent;  // positive (below baseline)
         _leading = metrics.Leading;  // positive
+        // IResolvedFont measures both from the baseline, positive down, to the top of the stroke.
+        // Skia's underline position is that; its strikeout position is to the BOTTOM of the
+        // stroke (SkFontMetrics.h), so the thickness comes off it. Null where the font leaves
+        // them out.
+        if (metrics.UnderlinePosition is { } up && metrics.UnderlineThickness is { } ut)
+            _underline = (up, ut);
+        if (metrics.StrikeoutPosition is { } sp && metrics.StrikeoutThickness is { } st)
+            _strikeout = (sp - st, st);
         _metricsComputed = true;
     }
 

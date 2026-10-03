@@ -63,11 +63,11 @@ spike ran the fix; "proposed" means it is design only.
 | 11 | A bare ESC through the out-of-band ConPTY races: the first key after a resize was lost in 2–9 runs of 10. | Send ESC (and the other ambiguous keys) as win32-input-mode events when ConPTY asks for them | element, Windows | measured for ESC: 10/10 |
 | 12 | Engine facts a renderer must know: default colours are palette 256/257, the deferred wrap is X == Cols, and a width-2 cell can end a row. | Renderer rules | element | built in step 2 |
 | 13 | HultUI has no positioned-glyph-run or offscreen-surface API for elements. | One `DrawText` per row, with a span per style. Seams T2/T3 were for the case where that was too slow, and it is not | element | measured in step 2: about 7 ms a frame for a 207 × 58 full-screen redraw |
-| 14 | HultUI has no monospace default font and no cell-metrics API. | Seam T1 | framework | proposed |
+| 14 | HultUI has no monospace default font and no cell-metrics API. | Seam T1: `FontFamilies.Monospace`, family lists, `MeasureFont`, `HasGlyph` | framework | built in step 3 |
 | 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2; until then, role and value | framework | proposed |
 | 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | A build target that keeps only the publishing RID's copy | `HultUI.Terminal.Pty` | proposed |
 | 17 | A row shrink with the cursor near the top leaves the cut rows below the screen, so the scrollback keeps that many lines fewer, for good. A terminal created at 80 × 24 and sized to its pane before its first screenful is that case. | Drop the blank rows below the cursor, as xterm.js does | engine patch 0005 | measured: found in step 2; the new upstream test fails without it |
-| 18 | A symbol the monospace font lacks (Consolas lacks some arrows and maths operators) is drawn from a fallback font whose advance pushes the rest of its row off its columns. | Only code points every default terminal font has go into a row's text; the rest are drawn one at a time at their own columns. Seam T1 would let the element ask the font instead | element | measured: found in step 2 by the sample |
+| 18 | A symbol the monospace font lacks (Consolas lacks some arrows and maths operators) is drawn from a fallback font whose advance pushes the rest of its row off its columns. | A character the face has no glyph for is drawn on its own at its column. Step 2 used fixed code point ranges; step 3 asks the face (`HasGlyph`, seam T1) | element | measured: found in step 2 by the sample; the font check built in step 3 |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
 therefore built from source: upstream at a pinned commit with patches 0001–0005 applied, never the
@@ -262,14 +262,18 @@ The shape is the spike's `Session`, which measured every rule below.
 ## Rendering
 
 The element draws the snapshot copied at the start of its `Render`. All of it uses public
-`IRenderContext` calls. This is what step 2 built; what it left for later says so.
+`IRenderContext` calls. This is what steps 2 and 3 built; what they left for later says so.
 
 1. **Metrics.**
-   - **Cell width** is the font's own advance, measured over ten `M`s so a fractional advance is
-     kept, and **not** rounded. A row's glyphs step by that advance (item 3), so a rounded cell
-     would drift from the text by up to half a pixel a column. Background and selection edges are
-     snapped to device pixels instead, so neighbouring fills meet without a seam.
-   - **Cell height** is the font's line height, rounded up to whole device pixels, so rows land
+   - **The face** is `TerminalOptions.FontFamily` followed by `FontFamilies.Monospace`, so a
+     family that is not installed falls back to the platform's monospace face rather than its
+     proportional default (seam T1).
+   - **Cell width** is the face's `CharacterWidth` from `ctx.MeasureFont` (seam T1): the shaped
+     advance of `0`, and **not** rounded. A row's glyphs step by that advance (item 3), so a
+     rounded cell would drift from the text by up to half a pixel a column. Background and
+     selection edges are snapped to device pixels instead, so neighbouring fills meet without a
+     seam.
+   - **Cell height** is the face's line height, rounded up to whole device pixels, so rows land
      on pixel edges.
    - **Grid size.** Columns and rows are the element's content box divided by the cell, truncated.
      A change is applied after the frame, never inside it: it reaches the program, and ConPTY
@@ -282,21 +286,21 @@ The element draws the snapshot copied at the start of its `Render`. All of it us
    half alpha), weight, slant, underline, strikethrough. One call per row rather than per run,
    because then every glyph shares the row's baseline and steps by the font's advance, which is
    the cell, with no position worked out per run.
-   - A cell the primary font may not have is drawn on its own at its column, clipped to it, with
-     a space in its place in the row: a wide character, a grapheme cluster, and anything outside
-     the ranges every default terminal font covers (Latin, IPA, Greek, Cyrillic, and the common
-     dashes, quotes, bullet and ellipsis). Problem 18 is why the ranges are that narrow.
+   - A cell that would not step by the cell's advance is drawn on its own at its column, clipped
+     to it, with a space in its place in the row: a wide character, a grapheme cluster, and a
+     character the face has no glyph for (`ctx.HasGlyph`, seam T1, cached per code point). Text
+     would draw that from a fallback font whose advance need not be the cell's (problem 18).
    - Such a glyph sits on its own font's baseline, which can be up to about a pixel off the row's.
      Seam T2 would fix that; nothing else needs it.
-   - Right-to-left letters fall outside the ranges, so they are drawn one cell at a time and never
-     reordered, which is what a terminal must do.
+   - Right-to-left letters are drawn one cell at a time too, even when the face has them, so they
+     are never reordered, which is what a terminal must do.
 4. **Box drawing and blocks** (U+2500–259F) are drawn as geometry with `DrawRect`, not from the
    font, so lines meet across cells: light, heavy and double lines with device-pixel thickness,
    eighths, shades and quadrants. This is what Windows Terminal, kitty and Ghostty do. **Not yet:**
    rounded corners (drawn square), dashed and diagonal lines (left to the font), the powerline
    triangles.
-5. **Decorations the spans do not cover.** Overline is a `DrawRect` one layout unit thick along the
-   top of the cell. **Not yet:** curly, dotted, dashed and double underlines (drawn single), underline
+5. **Decorations the spans do not cover.** Overline is a `DrawRect` along the top of the cell, as
+   thick as the face's underline in whole device pixels. **Not yet:** curly, dotted, dashed and double underlines (drawn single), underline
    colour (drawn in the text colour), blink (drawn steady).
 6. **The cursor.** A block (with the character under it in the background colour), bar or
    underline, as the program asks (DECSCUSR). When the element is unfocused, a hollow block
@@ -512,23 +516,40 @@ as a Value. It has no live-region or announcement API either.
 ## Framework seams
 
 Each is useful beyond the terminal. No terminal package may need anything not listed here; if
-implementation finds another, it goes here first. Step 2 needed none. T1 is needed by step 3;
-K1–K4 and A1–A2 make later steps right rather than possible.
+implementation finds another, it goes here first. Step 2 needed none; step 3 built T1. K1–K4
+and A1–A2 make later steps right rather than possible.
 
-**T1: monospace cell metrics and a default monospace family (`HultUI.Core`,
-`HultUI.Rendering.Skia`).**
+**T1: monospace cell metrics and a default monospace family (`HultUI.Core`, `HultUI.Text`,
+`HultUI.Rendering.Skia`). Built in step 3.**
 
-- **What is missing.** `SkiaFontCollection` resolves a family name with `SKTypeface.FromFamilyName`
-  and falls back to the default typeface, so `"monospace"` works only where fontconfig maps it, and
-  not on Windows. Apps pick concrete fonts themselves (Junction: Consolas, Menlo, …).
-- **What to add:**
-  - `FontFamilies.Monospace`, resolved per platform: Cascadia Mono, then Consolas on Windows;
-    fontconfig's `monospace` on Linux; Menlo on macOS.
-  - `TextMeasure.Monospace(family, size)`, returning advance, ascent, descent, line gap, and
-    underline position and thickness.
-  - Whether the family has a glyph for a code point. `IFontCollection.HasGlyph` exists inside the
-    text pipeline; the element cannot reach it, which is why problem 18 is solved with fixed
-    ranges.
+- **What was missing.** `SkiaFontCollection` resolved a family name with
+  `SKTypeface.FromFamilyName`, which never says a family is missing: it answers the platform's
+  default face. So `"monospace"` worked only where fontconfig maps it; on Windows it drew in Segoe
+  UI, a proportional face, wherever it was used (the DevTools overlay, two samples, three headless
+  tests). Apps pick concrete fonts themselves (Junction: Consolas, Menlo, …). Nothing outside the
+  text pipeline could read a font's metrics or glyph coverage.
+- **What was built:**
+  - **`FontFamilies.Monospace`** (`"monospace"`), resolved by the font collection: Cascadia Mono,
+    then Consolas, then Courier New on Windows; Menlo, then Monaco on macOS; on Linux fontconfig's
+    own `monospace` when it answers a fixed-pitch face, else DejaVu Sans Mono, Liberation Mono or
+    Noto Sans Mono. `FontFamilies.SansSerif` names the default.
+  - **Family lists,** as CSS's `font-family`: the first family installed wins, judged by the font
+    manager's family match (which, unlike the legacy lookup, says when there is none). A single
+    name resolves exactly as before. A list chooses the face only; fallback for missing characters
+    is unchanged.
+  - **`FontMetrics`** from `MeasureFont(style)` on `IMeasureContext` and `IRenderContext`, and
+    `TextMeasure.MeasureFont` at build time: the face actually used, ascent, descent, line gap,
+    `LineHeight`, `CharacterWidth` (the shaped advance of `0`), `IsFixedPitch`, and the underline
+    and strikeout position and thickness the font gives (estimated when it gives none).
+  - **`HasGlyph(style, codePoint)`** on the same three: whether the face itself has the glyph.
+  - Both are default interface methods, so measure contexts that cannot read a font (test stubs,
+    the headless fixed-metrics context) keep compiling and answer estimates. The headless
+    recording context forwards them to the real one.
+  - **Not done:** the renderer's own underline and strikeout still use its size-based estimates,
+    not the font's; the apps' own `Fonts.Mono` constants are unchanged.
+- **Measured on this Windows machine:** Cascadia Mono 13 px has a 7.62 advance, ascent 12.06,
+  descent 3.05, underline 0.63 below the baseline and 0.63 thick. Consolas and Cascadia Mono both
+  lack `∀` and `⇒`; DejaVu Sans Mono has them.
 
 **T2: positioned text runs (`HultUI.Core`). Step 2 measured no need for speed** (see
 *Rendering*); what is left for it is the baseline of a glyph drawn on its own.
@@ -580,7 +601,9 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
 
 - **`HultUI.Terminal.Tests`** (headless; built in step 2):
   - The real XTerm.NET emulator fed scripted bytes through a `FakeConnection`, which records what
-    was sent; the controller's real reader and writer threads run against it.
+    was sent; the controller's real reader and writer threads run against it. They draw with the
+    platform's real monospace face, so a check that depends on glyph coverage asks the face
+    (`TextMeasure.HasGlyph`) rather than assuming one.
   - Waiting is deterministic: the controller counts the bytes it has fed and whether a wake is
     pending, so a test waits for exactly its own output and the UI thread's handling of it,
     never for a time.
@@ -651,7 +674,23 @@ arrive as `Unknown` with only a scan code, so DECKPAM (application keypad) canno
        takes a capacity now.
      - A disposed controller left the element swapping in a stale frame; it now keeps its last
        screen.
-3. **Seam T1,** then the renderer's default font and cell metrics on all three platforms.
+3. **Seam T1: done 2026-10-03** (see *Framework seams*).
+   - **The framework:** `FontFamilies.Monospace`, family lists, `FontMetrics` through `MeasureFont`
+     and `HasGlyph` on the measure context, the render context and `TextMeasure`. Tests: 8 in
+     `HultUI.Rendering.Skia.Tests` against the platform's real fonts, 3 in `HultUI.Core.Tests` for
+     the estimates, 2 in `HultUI.Headless.Tests` that build time and draw time agree, recorded or
+     not. Negative controls: without the generic name, `monospace` resolved to Segoe UI and two
+     tests failed; without the recording context's forwarding, the headless test failed.
+   - **The terminal:** its face is the configured family followed by `FontFamilies.Monospace`; the
+     cell comes from `MeasureFont`; a missing glyph is found with `HasGlyph` instead of step 2's
+     fixed ranges (the test fails if the element assumes every glyph is there); right-to-left
+     letters are still drawn on their own. 75 tests.
+   - **On this Windows machine** the default face moved from Consolas to Cascadia Mono, so the
+     sample's 980 × 640 window holds 126 columns instead of 134.
+   - **Not verified:** Linux and macOS ran nothing here (no WSL distribution on this machine).
+     The Linux behaviour rests on Skia's fontconfig manager: a family match drops fontconfig's
+     weak defaults, so an unknown name matches nothing and `monospace` keeps its preferred
+     aliases. Linux CI is the first real check; macOS has no runner.
 4. **`HultUI.Terminal.Pty`:**
    - `PtyConnection` on Windows and Linux, with quoting, exit and teardown;
    - the arm64/x64 `OpenConsole.exe` trim;

@@ -61,6 +61,26 @@ These propagate to child elements unless overridden.
 | `Inherited.TextColor` | `.TextColor(color)` | `Color` |
 | `Inherited.Cursor` | `.Cursor(CursorType.Pointer)` | `CursorType` |
 
+### Font families and metrics
+
+- **One family or a list.** `.FontFamily("JetBrains Mono, Consolas, monospace")` uses the first
+  family that is installed, as CSS's `font-family` does. A list chooses the face; a character that
+  face lacks still falls back to another installed font. A single name that is not installed
+  draws in the platform's default face, so end a list with a generic name to say what happens
+  instead.
+- **Generic names.** `FontFamilies.Monospace` (`"monospace"`) is the platform's monospace face:
+  Cascadia Mono, then Consolas, on Windows; Menlo on macOS; fontconfig's `monospace` on Linux.
+  `FontFamilies.SansSerif` is the default interface face.
+- **Metrics.** `TextMeasure.MeasureFont(style)` at build time, and `ctx.MeasureFont(style)` while
+  drawing, return a `FontMetrics`: the ascent, descent and line gap, `LineHeight`, the
+  `CharacterWidth` (the advance of `0`, which in a monospace face is the cell width), whether the
+  face is fixed-pitch, the face actually used, and where an underline and a strikeout go.
+- **Glyph coverage.** `HasGlyph(style, codePoint)` says whether the face itself has a glyph, not a
+  fallback font. A character grid draws a missing one on its own, since a fallback glyph's advance
+  need not be the cell's.
+- **Measure contexts that cannot read a font** (test stubs, the headless fixed-metrics context)
+  answer with estimates from a measured `"0"`, and say every glyph is there.
+
 ### Events
 
 | Fluent | Handler type |

@@ -1,4 +1,4 @@
-﻿using HultUI.Core.Layout;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -901,6 +901,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         var layout = _pipeline.Layout(text, style, float.PositiveInfinity, maxLines: 1);
         return layout.Size;
     }
+
+    public FontMetrics MeasureFont(ResolvedInheritedStyle style) =>
+        _pipeline?.MeasureFont(style) ?? FontMetrics.Estimate(style, Size.Zero);
+
+    public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) =>
+        _pipeline?.HasGlyph(style, codePoint) ?? true;
 
     public IReadOnlyList<TextLineBox> LayoutTextLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
     {

@@ -3,6 +3,8 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Headless;
 using HultUI.Terminal.Emulation;
 using Xunit;
@@ -398,17 +400,54 @@ public class TerminalElementTests
     }
 
     [Fact]
-    public void ASymbolTheMonospaceFontMayLack_IsDrawnAtItsColumn()
+    public void ACharacterTheFaceLacks_IsDrawnAtItsColumn_AndOneItHas_StaysInTheRow()
     {
-        // Consolas has no ∀: in the row's text its fallback glyph's advance pushed the rest of
-        // the row off its columns (the first sample run showed ≥ landing on the ★ after it).
+        // In the row's text a missing glyph is drawn from a fallback font, whose advance pushed
+        // the rest of the row off its columns (the first sample run showed ≥ landing on the ★
+        // after it). The face is asked, so this holds for whichever monospace face the platform
+        // has: Cascadia Mono and Consolas lack ∀, DejaVu Sans Mono has it. No monospace face
+        // has Tibetan.
+        var style = TextMeasure.StyleFor(13f, FontFamilies.Monospace);
+        using var t = Term.Shown(recording: true);
+        bool hasForAll = TextMeasure.HasGlyph(style, '∀') == true;
+        Assert.False(TextMeasure.HasGlyph(style, 'ༀ'));
+
+        t.Window.RenderLog.Clear();
+        t.Emit("x ∀ ༀ y — ok…");
+        var ops = t.Window.RenderLog.Named("DrawText").Select(o => o.Args).ToList();
+
+        Assert.Contains(ops, a => a.StartsWith(hasForAll ? "\"x ∀   y — ok…\"" : "\"x     y — ok…\""));
+        Assert.Contains(ops, a => a.StartsWith("\"ༀ\""));
+        Assert.Equal(!hasForAll, ops.Any(a => a.StartsWith("\"∀\"")));
+    }
+
+    [Fact]
+    public void ARightToLeftLetter_IsDrawnAtItsColumn_EvenWhenTheFaceHasIt()
+    {
+        // In the row's text bidi would reorder it; the program placed it, so it stays put.
         using var t = Term.Shown(recording: true);
         t.Window.RenderLog.Clear();
-        t.Emit("x ∀ ⇒ y — ok…");
+        t.Emit("aשb");
         var ops = t.Window.RenderLog.Named("DrawText").Select(o => o.Args).ToList();
-        Assert.Contains(ops, a => a.StartsWith("\"x     y — ok…\"")); // dashes and the ellipsis stay
-        Assert.Contains(ops, a => a.StartsWith("\"∀\""));
-        Assert.Contains(ops, a => a.StartsWith("\"⇒\""));
+        Assert.Contains(ops, a => a.StartsWith("\"a b\""));
+        Assert.Contains(ops, a => a.StartsWith("\"ש\""));
+    }
+
+    [Fact]
+    public void TheCell_IsTheFacesCharacterWidth_AndLineHeight()
+    {
+        using var t = Term.Shown();
+        var font = t.Element!.Font;
+        Assert.True(font.IsFixedPitch, font.FamilyName);
+        Assert.Equal(font.CharacterWidth, t.Element.CellSize.Width);
+        Assert.True(t.Element.CellSize.Height >= font.LineHeight && t.Element.CellSize.Height < font.LineHeight + 1);
+    }
+
+    [Fact]
+    public void AFamilyThatIsNotInstalled_FallsBackToMonospace()
+    {
+        using var t = Term.Shown(new TerminalOptions { FontFamily = "No Such Font 4711" });
+        Assert.True(t.Element!.Font.IsFixedPitch, t.Element.Font.FamilyName);
     }
 
     [Fact]
