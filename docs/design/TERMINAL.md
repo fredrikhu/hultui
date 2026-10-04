@@ -27,7 +27,8 @@ shell.Send("git status\r");                  // through the writer queue; any th
 
 - **The connection is what the bytes travel over.**
   - `PtyConnection` (in `HultUI.Terminal.Pty`) runs a local process under a pseudoconsole: ConPTY on Windows, forkpty on Linux and macOS.
-  - `StreamConnection` (in the core package) wraps any pair of streams: a serial port, an SSH shell channel, a test script.
+  - `SshConnection` (in `HultUI.Terminal.Ssh`) runs a shell on another machine.
+  - `StreamConnection` (in the core package) wraps any pair of streams: a serial port, a test script.
 - **The controller owns the emulator, the connection, and the two threads between them.**
 - **The element draws the controller and turns input into bytes.**
 
@@ -40,7 +41,6 @@ unreachable by its short name, the `Text` trap WebView also avoided.
 - Tabs and splits (that is the app's layout).
 - Ligatures.
 - Shell integration UI beyond what the engine already reports.
-- SSH (a later `HultUI.Terminal.Ssh`).
 
 ## Problems found, and what solves each
 
@@ -75,6 +75,12 @@ spike ran the fix; "proposed" means it is design only.
 | 24 | The engine lays a picture out against a 10 × 20 pixel cell unless told otherwise, so a picture took the wrong number of cells: one 30 pixels wide took three whatever the font. | The element sets the engine's cell to its own, in device pixels, rounded | element | built in step 8; the test fails without it |
 | 25 | Kitty graphics: a placement sent again under the same ids, and an image sent again under the same id, both left the old picture on screen; `d=f` deleted nothing; and the registry's byte count fell below zero as animated images were deleted, which switches its budget off. | Replace as the specification says; delete a frame as kitty does; the registry records what it charged each image | engine patch 0006 | measured in step 8: 14 new upstream tests, and each fix's test fails without it |
 | 26 | The engine counts an animation as running for as long as it holds it, shown or not, so a cleared animation kept the element drawing four times a second. | A frame clock only while a picture on screen animates | element | built in step 8; the test fails without it |
+| 27 | SSH.NET trusts every host key unless a handler says otherwise (`HostKeyEventArgs.CanTrust` starts true). | The connection always decides: known connects, revoked never, unknown and changed only on the app's decision, none without one | `HultUI.Terminal.Ssh` | built in step 8b; without the handler four tests fail |
+| 28 | SSH.NET gives a shell no exit status: `ShellStream` keeps its channel private, and `SshCommand`, which reads the status, cannot ask for a terminal. | Listen on the channel's internal request event (`UnsafeAccessor`, and one constant-name field read), against SSH.NET pinned exactly; a version that moves it reports no code | `HultUI.Terminal.Ssh` | built in step 8b; three tests fail without it, and it works under NativeAOT |
+| 29 | SSH.NET acknowledges data as it arrives, not as it is read, so a program writing faster than the terminal draws fills memory without limit. | Past a cap of unread output, hold SSH.NET's receiving thread until the reader catches up: TCP then stops the server | `HultUI.Terminal.Ssh` | built in step 8b: 32 MiB flood held at 256 KiB; the test fails without it |
+| 30 | A connection reset leaves SSH.NET's shell stream open, and a reader waits on it forever. | Close the session on the shell stream's error | `HultUI.Terminal.Ssh` | built in step 8b; without it the test times out |
+| 31 | SSH.NET opens an encrypted PKCS#8 key with an empty passphrase instead of asking for one (the decryption's error comes out), and with the right passphrase cannot read an encrypted PKCS#8 EC key as .NET writes it (an ASN.1 error: it expects the public key where the optional curve comes). A key handed to it ready-made it offers only as `ssh-rsa` (SHA-1), which OpenSSH refuses since 8.8. | Read PKCS#8 with .NET, and offer an RSA key as `rsa-sha2-512` and `-256` first | `HultUI.Terminal.Ssh` | built in step 8b; two tests fail without it |
+| 32 | SSH.NET's password sign-in takes the password before connecting, so an app would ask for one the server may not take, and could not ask again. | A sign-in way that asks when the server takes passwords, and again while wrong | `HultUI.Terminal.Ssh` | built in step 8b; two tests fail with one attempt |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
 therefore built from source: upstream at a pinned commit with patches 0001–0006 applied, never the
@@ -97,11 +103,13 @@ src/
                                 the XTerm.NET adapter, StreamConnection, fake connection — no natives
   HultUI.Terminal.Pty/          PtyLaunch, PtyConnection: Porta.Pty (ConPTY + OpenConsole on
                                 Windows, the forkpty shim elsewhere), quoting, ending
+  HultUI.Terminal.Ssh/          SshConnection over SSH.NET, KnownHostsFile, the ways to sign in
 tests/
   HultUI.Terminal.XTermNet.Tests/  XTerm.NET's own suite, from external/ (2 254 tests, ~3 s)
   HultUI.Terminal.Tests/        headless: scripted bytes through the real emulator
   HultUI.Terminal.Pty.Tests/    real pseudoterminals: a child program of its own, and the shells
   HultUI.Terminal.Pty.Tests.Child/  that child: prints its arguments, size, input count, a flood
+  HultUI.Terminal.Ssh.Tests/    against an SSH server and an agent in the test process
 samples/
   HultUI.Samples.Terminal/      the user's shell, or an in-process demo shell; --check, --bench
 scripts/
@@ -677,6 +685,57 @@ the first frame.
   beside `conpty.dll`, the two hosts, SDL3, Skia and HarfBuzz. Its `--check` passes under AOT in
   about a second.
 
+## SSH (`HultUI.Terminal.Ssh`)
+
+Built in step 8b. A shell on another machine, through SSH.NET 2026.0.0 (MIT) and SshNet.Agent
+(MIT): managed code only, no natives, so an app that never opens one carries neither.
+
+```csharp
+var connection = await SshConnection.ConnectAsync(new SshConnectOptions
+{
+    Host = "build.example.com", User = "fredrik",
+    Authentication = [SshAuthentication.Agent(), SshAuthentication.KeyFile(keyPath, AskPassphrase),
+                      SshAuthentication.Password(AskPassword)],
+    VerifyHostKey = (key, ct) => ShowTrustDialog(key, ct),   // Unknown or Changed only
+});
+var shell = new TerminalController(connection);
+```
+
+- **Trust.** The host's key is checked before anything is sent, against OpenSSH's `known_hosts`
+  (`KnownHostsFile`; the user's `~/.ssh/known_hosts` by default, so a host trusted with `ssh` is
+  trusted here and the other way round). A known key connects; a revoked one never does; an unknown
+  or changed one only on `VerifyHostKey`'s decision (`Reject`, `AcceptOnce`, `Trust`), and without a
+  verifier never (problem 27). `SshHostKey` carries the SHA-256 fingerprint as `ssh` prints it and,
+  for a changed key, the fingerprints on file: what Vesper's SFTP brief asks its two dialogs to
+  show. Trusting a changed key replaces that host's keys of that type; every other line is kept.
+  The file reader takes hashed names, patterns, negation, `[host]:port` and `@revoked`;
+  `@cert-authority` lines are skipped, so a host certificate is asked about by its key.
+- **Signing in.** The ways given are tried in order among those the server accepts:
+  - `Password`: asked for only when the server takes passwords, again while wrong (problem 32).
+  - `KeyFile`: OpenSSH, PEM, PuTTY and PKCS#8 files. The passphrase is asked for only when the
+    file has one, and again while wrong. PKCS#8 is read by .NET (problem 31).
+  - `Agent`: `SSH_AUTH_SOCK`, else on Windows the OpenSSH agent's pipe and then Pageant.
+  - `KeyboardInteractive`: the server's own questions, as it wrote them.
+  Prompts are called on a background thread that waits for the answer; nothing is stored, so
+  keeping a password (in the keyring, as the brief says) is the app's choice. A null answer skips
+  that way. A missing key file, or no agent, is skipped too.
+- **The shell** gets a pseudoterminal of `TerminalName` (`xterm-256color`) with `IUTF8` and DEL as
+  erase, follows the element's grid with `window-change`, and keeps the session alive every 30 s.
+  Windows' OpenSSH server (`OpenSSH_for_Windows` in its version) runs the shell under ConPTY, so
+  such a connection reports ConPTY's traits and gets win32-input-mode keys. Not verified against
+  one.
+- **Ending.** `Exited` carries the remote exit status, or 128 plus a signal's number (problem 28).
+  It is null when the connection was lost or closed here, and when the program ended within the
+  last round trip of connecting, before the status could be listened for. A lost connection ends
+  the session (problem 30); `Terminate` closes the channel and the connection.
+- **Flow.** Past `MaxBufferedBytes` (4 MiB) of unread output the connection stops reading from the
+  network until the terminal catches up (problem 29).
+- **AOT.** The package has no trim or AOT warnings; the sample publishes with it for win-x64 with
+  none. A NativeAOT client was run against the test server in another process: it connected, read
+  the shell's output and got its exit code.
+- **Not done:** port forwarding, X11 and agent forwarding, jump hosts, host certificates, a
+  password change the server demands at sign-in, reconnecting.
+
 ## Framework seams
 
 Each is useful beyond the terminal. No terminal package may need anything not listed here; if
@@ -840,6 +899,19 @@ typed were unrelated events. All four are new members, so no existing code chang
     installed, leaves insert mode on Escape. `GitsPrograms_LoseNoKeyAfterAResize` measures
     problem 22 with Git's bash, only when `HULTUI_TERMINAL_MEASURE=1`: it fails until the runtime
     is fixed.
+- **`HultUI.Terminal.Ssh.Tests`** (built in step 8b; about 25 s):
+  - **A real SSH server in the test process:** Microsoft's Dev Tunnels SSH library (MIT) on a
+    loopback port, whose shell answers `exit N`, `kill SIG`, `size`, `flood N` and `drop` (a TCP
+    reset). Nothing is installed or configured on the machine, and loopback asks no firewall.
+  - **An SSH agent of its own** on a private pipe (Windows) or socket, answering the key list and
+    signatures, so the user's agent is never asked.
+  - Host keys (unknown, trusted and recorded, changed and rejected or replaced, revoked, no
+    verifier), every way to sign in (wrong passwords and passphrases asked again, SEC1, PKCS#8 and
+    encrypted RSA keys, an `ssh-keygen` key with a passphrase when `ssh-keygen` is found), the
+    terminal's type, size and modes, resizes, the exit status and signals, a lost connection,
+    `Terminate`, flow control, and a `TerminalController` running the shell to its exit code.
+  - `known_hosts` on its own: names, ports, hashes, patterns, negation, revocation, and writes
+    that keep every other line.
 - **Real-window UI tests,** for IME placement and the drag-resize cost.
 - **Linux CI** runs both test projects; `[HanFontsFact]`'s pattern applies to wide-glyph rendering
   tests.
@@ -1009,5 +1081,20 @@ typed were unrelated events. All four are new members, so no existing code chang
      - **Seen in the sample** through the headless driver: the four pictures, and the animation
        stepping.
      - **Found on the way:** problems 23 to 26.
-   - **8b:** `HultUI.Terminal.Ssh` (Vesper's SFTP brief makes SSH the next transport).
+   - **8b, SSH: done on Windows 2026-10-04** (see *SSH*).
+     - **The package:** `HultUI.Terminal.Ssh` on SSH.NET 2026.0.0 and SshNet.Agent: `SshConnection`,
+       `KnownHostsFile`, `SshAuthentication`'s four ways, host-key decisions, the exit status, flow
+       control.
+     - **The sample** takes `--ssh user@host[:port]`, signing in with the agent or a key file in
+       `~/.ssh` without a passphrase, and trusting a new host only with `--accept-new`.
+     - **Tests:** 36 in `HultUI.Terminal.Ssh.Tests`, against a real SSH server and agent in the test
+       process. Negative controls: the host-key handler, the password's second attempt, the PKCS#8
+       reader, the exit-status hook, flow control, closing on error, replacing a changed key,
+       revocation, the terminal modes, and negation in `known_hosts`.
+     - **Found on the way:** problems 27 to 32, all in SSH.NET and solved in the package; none
+       reported upstream. The Pty environment test timed out once in a full-solution run beside
+       Junction's suite and passes alone; ConPTY's 100 ms close after the exit (problem 19) is the
+       likely cause under load, and it is a task of its own.
+     - **Not verified:** a real OpenSSH server (none here, and installing one changes the machine:
+       the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits, Linux.
    - **8c:** libghostty-vt as a second emulator once it tags a release.

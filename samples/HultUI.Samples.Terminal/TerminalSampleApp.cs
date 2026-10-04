@@ -38,14 +38,19 @@ public sealed class TerminalSampleApp : IDisposable
     /// <param name="program">What runs.</param>
     /// <param name="launch">For <see cref="SampleProgram.Shell"/>: a program to run instead of the
     /// user's shell (the sample's <c>--run</c>).</param>
-    public TerminalSampleApp(SampleProgram program = SampleProgram.Shell, PtyLaunch? launch = null)
+    /// <param name="remote">For <see cref="SampleProgram.Shell"/>: a shell elsewhere instead, over
+    /// SSH (the sample's <c>--ssh</c>).</param>
+    public TerminalSampleApp(SampleProgram program = SampleProgram.Shell, PtyLaunch? launch = null,
+        Func<ITerminalConnection>? remote = null)
     {
         _launch = launch;
+        _remote = remote;
         Program = new Signal<SampleProgram>(program);
         Session = new Signal<TerminalController>(Start(program));
     }
 
     private readonly PtyLaunch? _launch;
+    private readonly Func<ITerminalConnection>? _remote;
 
     /// <summary>What the next <see cref="Restart"/> runs.</summary>
     public Signal<SampleProgram> Program { get; }
@@ -77,10 +82,12 @@ public sealed class TerminalSampleApp : IDisposable
             try
             {
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                connection = Shell = PtyConnection.Start(_launch ?? PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null));
+                connection = _remote?.Invoke()
+                    ?? (Shell = PtyConnection.Start(_launch ?? PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null)));
                 Problem.Value = null;
             }
-            catch (Exception ex) when (ex is FileNotFoundException or InvalidOperationException or IOException)
+            catch (Exception ex) when (ex is FileNotFoundException or InvalidOperationException or IOException
+                || (_remote is not null && ex is not OutOfMemoryException))
             {
                 // No pseudoterminal here: show what the terminal can do anyway, and say why.
                 Problem.Value = "No shell: " + ex.Message;

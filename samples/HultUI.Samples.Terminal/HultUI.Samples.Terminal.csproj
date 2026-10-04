@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Terminal\HultUI.Terminal.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Terminal.Pty\HultUI.Terminal.Pty.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Terminal.Ssh\HultUI.Terminal.Ssh.csproj" />
   </ItemGroup>
 
 </Project>

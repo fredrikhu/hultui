@@ -22,8 +22,11 @@ internal static class Program
         int run = Array.IndexOf(args, "--run");
         var launch = run >= 0 && run + 1 < args.Length ? new PtyLaunch(args[run + 1], args[(run + 2)..]) : null;
         if (run >= 0) args = args[..run];
+        // --ssh user@host[:port] [--accept-new]: a shell on another machine (SshTarget).
+        var remote = SshTarget.From(args);
         // The bench measures drawing, so it runs the demo shell, whose output is the same every time.
-        using var sample = new TerminalSampleApp(bench || args.Contains("--demo") ? SampleProgram.Demo : SampleProgram.Shell, launch);
+        using var sample = new TerminalSampleApp(bench || args.Contains("--demo") ? SampleProgram.Demo : SampleProgram.Shell,
+            launch, remote);
         var root = sample.Mount();
         if (args.Contains("--check"))
         {

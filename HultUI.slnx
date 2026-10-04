@@ -61,6 +61,7 @@
     <Project Path="src/HultUI.WebView.WebView2/HultUI.WebView.WebView2.csproj" />
     <Project Path="src/HultUI.Terminal/HultUI.Terminal.csproj" />
     <Project Path="src/HultUI.Terminal.Pty/HultUI.Terminal.Pty.csproj" />
+    <Project Path="src/HultUI.Terminal.Ssh/HultUI.Terminal.Ssh.csproj" />
     <Project Path="src/HultUI.Terminal.XTermNet/HultUI.Terminal.XTermNet.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -91,6 +92,7 @@
     <Project Path="tests/HultUI.Terminal.Tests/HultUI.Terminal.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.Pty.Tests/HultUI.Terminal.Pty.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.Pty.Tests.Child/HultUI.Terminal.Pty.Tests.Child.csproj" />
+    <Project Path="tests/HultUI.Terminal.Ssh.Tests/HultUI.Terminal.Ssh.Tests.csproj" />
     <Project Path="tests/HultUI.Terminal.XTermNet.Tests/HultUI.Terminal.XTermNet.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
     <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />

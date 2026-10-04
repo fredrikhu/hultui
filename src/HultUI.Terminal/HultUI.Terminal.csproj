@@ -20,6 +20,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Terminal.Tests" />
     <InternalsVisibleTo Include="HultUI.Terminal.Pty.Tests" />
+    <InternalsVisibleTo Include="HultUI.Terminal.Ssh.Tests" />
   </ItemGroup>
 
   <ItemGroup>
