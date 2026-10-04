@@ -172,26 +172,75 @@ public class DiffWrapTests
             for (int frame = 1; frame <= 12; frame++)
             {
                 session.PumpFrames(1);
-                // Re-read every frame: the wrap rebuild replaces the list rather than
-                // patching it, so a reference from an earlier frame describes a detached tree.
-                foreach (var row in Body(app).Children)
-                {
-                    var label = LayoutProbe.Descendants<TextElement>(row,
-                        t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
-                    if (label is null) continue;
-                    float drawn = LayoutProbe.DrawnText(label).Height;
-                    if (drawn <= 0) continue;
-                    seen++;
-                    float rowHeight = row.Layout.AbsoluteBorderBox.Height;
-                    Assert.True(drawn <= rowHeight + 0.5f,
-                        $"{frame} frame(s) after wrapping, {drawn:0}px of text sits in a {rowHeight:0}px row");
-                }
+                seen += AssertEveryRowHoldsItsText(app, $"{frame} frame(s) after wrapping");
             }
             // Counted across the frames rather than within each one: right after the toggle
             // the list has just been replaced and has realized nothing yet, so an early frame
             // legitimately has no rows to check — as the build runner showed.
             Assert.True(seen > 2, $"only {seen} row observations — this proves nothing");
         });
+    }
+
+    /// <summary>
+    /// A build between the toggle and the next layout measures at the width the list had.
+    /// <para>
+    /// Wrapping drops the pan's scrollbar from around the list, so the list is replaced rather
+    /// than patched, and the new one has no layout until the frame lays it out. A build in
+    /// that gap used to find no width on it and guess the window's instead, several times the
+    /// pane: every wrapped row was measured a line or two short, and the frame drew each line
+    /// over its neighbour before the settle put it right. The test above only met such a build
+    /// when some earlier test in the same process had left the app a reason to rebuild there,
+    /// so it failed run alone and passed in most full runs. This one makes the build happen.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void ABuildBeforeTheWrappedListIsLaidOutMeasuresAtTheWidthItHad()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            session.Window.CapturePixels().Dispose();
+            Body(app).Focus();
+            session.Window.PressKey(KeyCode.W);
+            float measuredAt = HeightShapeWidth(app);
+
+            // Any MarkDirty before the frame: a deferred rebuild, a completion, a timer.
+            typeof(HultUI.Core.Components.Component)
+                .GetMethod("MarkDirty", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);
+
+            Assert.Equal(measuredAt, HeightShapeWidth(app));
+            session.PumpFrames(1);
+            Assert.True(AssertEveryRowHoldsItsText(app, "the frame after the rebuild") > 0,
+                "no wrapped row was on screen to check");
+        });
+    }
+
+    /// <summary>The code width the wrapped rows' heights were last measured at.</summary>
+    private static float HeightShapeWidth(JunctionApp app)
+    {
+        var shape = typeof(JunctionApp).GetField("_diffHeightShape", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!;
+        return (float)shape.GetType().GetField("Item3")!.GetValue(shape)!;
+    }
+
+    /// <summary>Fails if any realized row is shorter than the text drawn in it; returns how
+    /// many rows had text to check. Reads the list afresh: the wrap rebuild replaces it, so a
+    /// reference from an earlier frame describes a detached tree.</summary>
+    private static int AssertEveryRowHoldsItsText(JunctionApp app, string when)
+    {
+        int seen = 0;
+        foreach (var row in Body(app).Children)
+        {
+            var label = LayoutProbe.Descendants<TextElement>(row,
+                t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
+            if (label is null) continue;
+            float drawn = LayoutProbe.DrawnText(label).Height;
+            if (drawn <= 0) continue;
+            seen++;
+            float rowHeight = row.Layout.AbsoluteBorderBox.Height;
+            Assert.True(drawn <= rowHeight + 0.5f,
+                $"{when}, {drawn:0}px of text sits in a {rowHeight:0}px row");
+        }
+        return seen;
     }
 
     /// <summary>
