@@ -42,8 +42,9 @@ namespace HultUI;
 /// must not touch elements or reactive state. Everything else — <see cref="Load"/>,
 /// the reads, and <c>onLoaded</c> — is UI-thread only. Under a headless session the
 /// hop is deterministic instead of pooled — the producer runs during the next
-/// <c>PumpFrame</c> and the result still lands a frame after the <see cref="Load"/>
-/// (see <see cref="AsyncWork"/>).</para>
+/// <c>PumpFrame</c>, still off the test thread and alongside the other producers that
+/// frame runs, and the result lands a frame after the <see cref="Load"/>, in the order
+/// the loads were requested (see <see cref="AsyncWork"/>).</para>
 ///
 /// <example>
 /// <code>
@@ -125,7 +126,7 @@ public sealed class AsyncLoader<T>
             }
             catch
             {
-                Application.InvokeOnMainThread(() =>
+                return () =>
                 {
                     if (gen != _generation)
                         return; // superseded by a newer Load — it owns the retries now
@@ -135,11 +136,10 @@ public sealed class AsyncLoader<T>
                     _loading.Value = false;
                     if (attempt < MaxAttempts)
                         RetryAfter(key, produce, onLoaded, attempt, gen);
-                });
-                return;
+                };
             }
 
-            Application.InvokeOnMainThread(() =>
+            return () =>
             {
                 if (gen != _generation)
                     return; // superseded by a newer Load — drop the stale result
@@ -151,7 +151,7 @@ public sealed class AsyncLoader<T>
                     _loading.Value = false;
                     onLoaded?.Invoke(result);
                 });
-            });
+            };
         });
     }
 
