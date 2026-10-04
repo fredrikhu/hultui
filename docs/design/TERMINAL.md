@@ -85,6 +85,10 @@ spike ran the fix; "proposed" means it is design only.
 | 34 | A controller needs its connection when it is made, and an SSH connection asks its questions (host key, password) on the UI thread while it connects: made there, it waits for itself. The sample did exactly that. | `DeferredConnection`: the terminal shows at once and connects in the background; the controller reads traits when it uses them | `HultUI.Terminal` | built after step 8b; each of its parts fails a test without it, and the sample's whole sign-in was run headless against the test server |
 | 35 | `Element.Focus()` did nothing inside an overlay (its content had no focus manager), so a dialog's field took the keyboard only when clicked; and closing a dialog that held the focus left it on elements that had gone. | Overlay content gets the window's focus manager; closing hands the focus back to what had it | framework (`Window`) | built after step 8b; both tests fail without it. `docs/FOCUS.md` |
 | 36 | A user's keys are often chosen per host in `~/.ssh/config` (the owner's are), which nothing read, so only the agent and the default key files could be offered. | `SshConfigFile` | `HultUI.Terminal.Ssh` | built after step 8b; two tests fail when the last value wins |
+| 37 | A glyph from a fallback font can be wider than its cells, and was cut at their edge: the owner saw an emoji's right edge cut off. One-cell fallback symbols (`⇒`, `★`) are often wider than a cell too. | A glyph wider than its cells is drawn smaller, centred, to fit them. A one-cell glyph with a blank cell after it spills into that cell at its own size instead, so a symbol before a space keeps its size | element | built after step 8; each rule's test fails without it (not shrunk; never spilling; always spilling) |
+| 38 | Font fallback split joined emoji: the zero-width joiner is in most text faces, so 👨‍👩‍👧 became three people from the emoji font, joined by the text face's joiners and never shaped as one. 53.5 px wide for its two cells, problem 37's fit drew it as dots. | A character that only extends the one before it stays in that one's font: joiners, variation selectors, emoji tags, and a skin tone or combining mark the font has; so does a character after a joiner that the font has | framework (`FontItemizer`) | built after step 8; 16.3 px wide since. Four tests in `FallbackSequenceTests`, each failing without it. All text was affected, not only the terminal's |
+| 39 | Prompts (oh-my-posh, Starship, pwsh themes) use the Powerline separators U+E0B0–E0BF, which are in the Private Use Area: only patched faces have them (Nerd Fonts, Cascadia's PL and NF variants), so the owner's pwsh prompt showed boxes. | Drawn as shapes filling the cell, like box drawing (item 4), whether the face has them or not, as kitty and Ghostty do. Two new render calls, `FillPolygon` and `DrawPolyline` (seam R1) | element; framework | built after step 8; the test fails when they are left to the font |
+| 40 | The rounded corners ╭╮╯╰ were drawn square (step 2 left them so), so a rounded box was not round. | A quarter arc whose arms meet the cell's edges where the straight lines run on | element | built after step 8; the test fails with square corners |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
 therefore built from source: upstream at a pinned commit with patches 0001–0006 applied, never the
@@ -325,13 +329,23 @@ The element draws the snapshot copied at the start of its `Render`. All of it us
      would draw that from a fallback font whose advance need not be the cell's (problem 18).
    - Such a glyph sits on its own font's baseline, which can be up to about a pixel off the row's.
      Seam T2 would fix that; nothing else needs it.
+   - **Fitting** (problem 37). A glyph wider than its cells (measured once per text, weight and
+     slant) is drawn smaller, centred in them, and lowered by half the height it lost. A one-cell
+     glyph followed by a blank one-cell cell is not shrunk: it is clipped to both cells instead,
+     at its own size.
    - Right-to-left letters are drawn one cell at a time too, even when the face has them, so they
      are never reordered, which is what a terminal must do.
-4. **Box drawing and blocks** (U+2500–259F) are drawn as geometry with `DrawRect`, not from the
-   font, so lines meet across cells: light, heavy and double lines with device-pixel thickness,
-   eighths, shades and quadrants. This is what Windows Terminal, kitty and Ghostty do. **Not yet:**
-   rounded corners (drawn square), dashed and diagonal lines (left to the font), the powerline
-   triangles.
+4. **Box drawing, blocks and Powerline separators** (U+2500–259F, U+E0B0–E0BF) are drawn as
+   geometry, not from the font, so lines meet across cells: light, heavy and double lines with
+   device-pixel thickness, eighths, shades and quadrants. This is what Windows Terminal, kitty and
+   Ghostty do.
+   - **Rounded corners** ╭╮╯╰ are a quarter arc, radius half the cell's width, whose arms meet the
+     cell's edges on the line's snapped centre, where the straight lines go on (problem 40).
+   - **Powerline separators** (problem 39) fill the cell: solid and thin triangles, half-circles
+     (24 segments a side), and the corner triangles and diagonals, with `FillPolygon` and
+     `DrawPolyline` (seam R1). A face that has them is not used for them: its shapes are sized to
+     its own metrics, not the cell.
+   - **Not yet:** dashed and diagonal lines (left to the font).
 5. **Decorations,** drawn as geometry after the text (step 5).
    - **Underlines** in all five styles (single, double, dotted, dashed, and curly as a wave of
      short lines, one period a cell), in the SGR 58 colour or the text's, where the face's
@@ -803,7 +817,7 @@ re-checked when a release is tagged.
 
 Each is useful beyond the terminal. No terminal package may need anything not listed here; if
 implementation finds another, it goes here first. Step 2 needed none; step 3 built T1; step 6
-built K1–K4; step 7 built A1 and A2.
+built K1–K4; step 7 built A1 and A2; the glyph fixes after step 8 built R1.
 
 **T1: monospace cell metrics and a default monospace family (`HultUI.Core`, `HultUI.Text`,
 `HultUI.Rendering.Skia`). Built in step 3.**
@@ -923,6 +937,20 @@ typed were unrelated events. All four are new members, so no existing code chang
 - **Who uses it.** The terminal, for new output, and toasts, for their message (an error
   assertively): the docs said a toast's alert was announced unprompted, and nothing announced it.
 
+**R1: polygons and polylines (`HultUI.Core`, `HultUI.Rendering.Skia`, the headless recorder).
+Built after step 8.**
+
+- **The API.** `IRenderContext.FillPolygon(points, fill)`, closed and antialiased, and
+  `DrawPolyline(points, color, strokeWidth)`, open, with round joins and flat ends. Both take a
+  `ReadOnlySpan<Point>` and draw nothing with too few points (three, two) or a transparent colour.
+  Neither is pixel-snapped (`docs/ELEMENTS.md`, *Pixel snapping*).
+- **Default interface methods** that do nothing, so other render contexts keep compiling. The
+  recorder logs both with their points.
+- **Who uses it.** The terminal's Powerline separators (problem 39). `DrawLine` was not enough: a
+  triangle drawn from lines leaves seams along its slope, and a solid one would be a scanline per
+  pixel row.
+- **Tests:** `PolygonTests` (4) in `HultUI.Rendering.Skia.Tests`, at scale 1 and 1.5.
+
 ## Testing
 
 - **`HultUI.Terminal.Tests`** (headless; built in step 2):
@@ -976,21 +1004,25 @@ typed were unrelated events. All four are new members, so no existing code chang
   - `known_hosts` on its own: names, ports, hashes, patterns, negation, revocation, and writes
     that keep every other line.
 - **Real-window UI tests,** for IME placement and the drag-resize cost.
-- **Linux CI** runs both test projects; `[HanFontsFact]`'s pattern applies to wide-glyph rendering
-  tests.
+- **Linux CI** runs the four terminal test projects (the cross-platform filter). Its first run, on
+  2026-10-04 (run 37194792589, `main` at `a743ad5`), passed all of them: 162 in
+  `HultUI.Terminal.Tests` with fontconfig's faces, 48 in `HultUI.Terminal.Ssh.Tests` with the
+  agent on a Unix socket, 21 in `HultUI.Terminal.Pty.Tests` through forkpty (the other 6 are
+  Windows-only: ConPTY's keys, Git for Windows' programs, the pwsh prompt, OpenConsole), and the
+  engine's 2 254. `[HanFontsFact]`'s pattern applies to wide-glyph rendering tests.
 
 ## Implementation order
 
 0. **Spike: done on Windows 2026-10-03** (`spikes/XtermNet`), with the four engine patches measured.
-   The Linux half is open:
-   - forkpty through Porta.Pty's shim;
-   - the cut on a raw pty, and whether bash's SIGWINCH redraw agrees with `ReflowCursorLine`;
-   - tmux, htop and vttest byte streams;
-   - the paste-deadlock threshold (the N_TTY buffer is 4 KiB);
-   - linux-x64 AOT.
+   The Linux half, as of Linux CI's first run of the terminal suites (2026-10-04):
+   - forkpty through Porta.Pty's shim: **works**, 21 Pty tests pass through it;
+   - the paste deadlock: a 1 MiB paste through the writer queue reaches the program on a Linux
+     pty, past the 4 KiB N_TTY buffer;
+   - still open: the cut on a raw pty, and whether bash's SIGWINCH redraw agrees with
+     `ReflowCursorLine` (the narrowed-prompt test uses pwsh, so it runs only on Windows); tmux,
+     htop and vttest byte streams; linux-x64 AOT.
 
-   It runs on the Linux machine before step 4 ships there; `q7` and `q8` already pick bash, vim
-   and sh off Windows.
+   `q7` and `q8` already pick bash, vim and sh off Windows.
 1. **The patched engine: done 2026-10-03.**
    - **`external/`:** `XTerm.NET` holds upstream `56ea809` with patches 0001–0004 (moved from the
      spike): 167 files. Beside it are `XTerm.NET.version`, a README, and a `.gitattributes` that
@@ -1045,10 +1077,11 @@ typed were unrelated events. All four are new members, so no existing code chang
      letters are still drawn on their own. 75 tests.
    - **On this Windows machine** the default face moved from Consolas to Cascadia Mono, so the
      sample's 980 × 640 window holds 126 columns instead of 134.
-   - **Not verified:** Linux and macOS ran nothing here (no WSL distribution on this machine).
-     The Linux behaviour rests on Skia's fontconfig manager: a family match drops fontconfig's
-     weak defaults, so an unknown name matches nothing and `monospace` keeps its preferred
-     aliases. Linux CI is the first real check; macOS has no runner.
+   - **Linux: verified by Linux CI** (2026-10-04): the font tests in `HultUI.Rendering.Skia.Tests`
+     and all of `HultUI.Terminal.Tests` pass with fontconfig's faces. The behaviour rests on Skia's
+     fontconfig manager: a family match drops fontconfig's weak defaults, so an unknown name
+     matches nothing and `monospace` keeps its preferred aliases. **Not verified:** macOS, which
+     has no runner.
 4. **`HultUI.Terminal.Pty`: done on Windows 2026-10-03** (see *Process launch*).
    - **The package:** `PtyLaunch` (the program found on `PATH`, the default shell, the
      environment) and `PtyConnection` over Porta.Pty 2.2.3, with MSVCRT quoting, the exit code, and
@@ -1065,8 +1098,11 @@ typed were unrelated events. All four are new members, so no existing code chang
    - **The sample** runs the user's shell (the header switches to the demo shell, and `--demo`
      starts with it); `--check` drives the real shell end to end and passes in about 0.9 s under
      JIT and 1.0 s under NativeAOT, which publishes with no warnings.
-   - **Not verified:** Linux and macOS ran nothing here. The forkpty half of every Pty test, and
-     step 0's Linux list, wait for the Linux machine and Linux CI.
+   - **Linux: verified by Linux CI** (2026-10-04), through forkpty: a program's output and exit
+     code, arguments, a resize, a 1 MiB paste, a flood, a background job holding the terminal,
+     both teardowns, a missing program, the environment, the working directory, and the default
+     shell. **Not verified:** macOS (no runner); on Linux, the narrowed prompt with bash, and AOT;
+     the rest of step 0's Linux list.
 5. **Resize policy, search, hyperlinks, and step 2's "not yet": done 2026-10-03,** in four commits.
    - **Rendering and input:** the five underline styles in their colours, blinking text and
      cursor, Alt+drag block selection, the window-size reports, and the resize policy.
@@ -1081,8 +1117,9 @@ typed were unrelated events. All four are new members, so no existing code chang
      suites pass unchanged.
    - **Found on the way:** the early title above, and a search read that allocated a string per
      character (now 3× faster).
-   - **Still not built:** rounded, dashed and diagonal box drawing and the powerline triangles;
-     URL detection in plain text; incremental search binding for very large scrollbacks.
+   - **Still not built:** dashed and diagonal box drawing (rounded corners and the Powerline
+     separators were built after step 8); URL detection in plain text; incremental search binding
+     for very large scrollbacks.
 6. **Windows input and seams K1–K4: done on Windows 2026-10-04** (see *Input* and *Framework
    seams*).
    - **The framework:** `KeyDownEvent.LayoutKey`, `ModifierKeys` with AltGr, `Text`, `Digit`, and
@@ -1159,7 +1196,9 @@ typed were unrelated events. All four are new members, so no existing code chang
        Junction's suite and passes alone; ConPTY's 100 ms close after the exit (problem 19) is the
        likely cause under load, and it is a task of its own.
      - **Not verified:** a real OpenSSH server (none here, and installing one changes the machine:
-       the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits, Linux.
+       the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits. Linux:
+       all of `HultUI.Terminal.Ssh.Tests` passes on Linux CI since 2026-10-04, the agent over a
+       Unix socket and the `ssh-keygen` key included.
      - **After the first real host (2026-10-04).** The owner's `--ssh root@jellyfin.home` showed
        "Permission denied (publickey)" and fell back to the demo shell. OpenSSH's `none` method
        showed the server took passwords too; the owner's keys are chosen per host in
@@ -1180,3 +1219,12 @@ typed were unrelated events. All four are new members, so no existing code chang
      input encoding, selection, scrolling and most of the snapshot are covered; win32-input-mode,
      kitty animation, Sixel, iTerm2 pictures and OSC 8 link ids are not, and would stay with the
      host. The seam keeps its members and stays internal until a release is tagged.
+   - **Glyphs, after the owner's screenshots (2026-10-04).** An emoji cut at its right edge,
+     rounded box corners drawn square, and a pwsh prompt's Powerline separators shown as boxes:
+     problems 37 to 40. Fitting glyphs to their cells, fallback keeping a joined sequence in one
+     font (a framework fix: the family emoji had been three people), rounded corners as arcs, the
+     separators drawn, and seam R1 for them. The demo shell's `boxes` command shows the
+     separators. Tests: 4 new in `HultUI.Terminal.Tests` (166), 4 in `HultUI.Text.Tests`, 4 in
+     `HultUI.Rendering.Skia.Tests`. Negative controls: square corners, separators left to the
+     font, no shrinking, a one-cell glyph never and always spilling, and fallback without the
+     sequence rule. Seen in the sample through the headless driver at scale 1.5.

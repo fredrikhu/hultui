@@ -109,6 +109,25 @@ public sealed class RecordingRenderContext : IRenderContext
         _inner.DrawLine(from, to, color, strokeWidth);
     }
 
+    public void FillPolygon(ReadOnlySpan<Point> points, Color fill)
+    {
+        Record("FillPolygon", $"{Points(points)} {Fmt(fill)}");
+        _inner.FillPolygon(points, fill);
+    }
+
+    public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
+    {
+        Record("DrawPolyline", $"{Points(points)} {Fmt(color)} width={F(strokeWidth)}");
+        _inner.DrawPolyline(points, color, strokeWidth);
+    }
+
+    private static string Points(ReadOnlySpan<Point> points)
+    {
+        var parts = new string[points.Length];
+        for (int i = 0; i < points.Length; i++) parts[i] = Fmt(points[i]);
+        return "[" + string.Join(" ", parts) + "]";
+    }
+
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
     {
         // Image identity isn't exposed through IImageSource, so record the
