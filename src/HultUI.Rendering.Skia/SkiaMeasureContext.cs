@@ -40,4 +40,8 @@ public sealed class SkiaMeasureContext : IMeasureContext
     public float MinContentTextWidth(string text, ResolvedInheritedStyle style,
         IReadOnlyList<TextSpan>? spans = null)
         => _pipeline.MinContentWidth(text, style, spans);
+
+    public FontMetrics MeasureFont(ResolvedInheritedStyle style) => _pipeline.MeasureFont(style);
+
+    public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => _pipeline.HasGlyph(style, codePoint);
 }

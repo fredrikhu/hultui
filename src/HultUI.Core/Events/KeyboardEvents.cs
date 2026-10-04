@@ -13,6 +13,56 @@ public sealed class KeyDownEvent : ElementEvent
     /// page. 0 when the platform gave none (headless input, a synthesized key).
     /// </summary>
     public ushort ScanCode { get; init; }
+
+    /// <summary>
+    /// The character the key types on the user's layout, as a code point, with Shift, CapsLock
+    /// and AltGr applied and Ctrl and Alt ignored: <c>'z'</c> for the key <see cref="Key"/> calls
+    /// <see cref="KeyCode.Y"/> on a German keyboard, <c>'Z'</c> with Shift, <c>'&lt;'</c> for
+    /// Shift and the comma key on a US one. This is a web page's <c>key</c> where
+    /// <see cref="Key"/> is its <c>code</c>: match a shortcut such as Ctrl+Z against this (a
+    /// letter in either case), not against the position. Letter keys on a non-Latin layout
+    /// (Russian, Greek) give their Latin letter, and the French number row its digits, as SDL
+    /// names them, so shortcuts work there too. 0 for a key that types no character (arrows,
+    /// Enter, the keypad) and when the platform did not say.
+    /// </summary>
+    public int LayoutKey { get; init; }
+
+    /// <summary>
+    /// The modifier keys held, left and right apart, and AltGr; <see cref="KeyModifiers"/> for
+    /// a key the platform did not say which of.
+    /// </summary>
+    public ModifierKeys ModifierKeys { get; init; }
+
+    /// <summary>
+    /// The text this keystroke typed, which arrives next as a <see cref="TextInputEvent"/> (it is
+    /// still sent; this is a look ahead, so a key and its character can be handled as one). Empty
+    /// when the key types nothing: a Ctrl or Alt chord, an arrow, a dead key. Null when the
+    /// platform cannot tell, or the text comes some other way, as through an input method:
+    /// then a <see cref="TextInputEvent"/> may or may not follow.
+    /// </summary>
+    public string? Text { get; init; }
+
+    /// <summary>The digit key pressed, 0 to 9: the number row's, or the keypad's while NumLock is
+    /// on. Null for any other key.</summary>
+    public int? Digit => Key switch
+    {
+        >= KeyCode.Digit0 and <= KeyCode.Digit9 => Key - KeyCode.Digit0,
+        >= KeyCode.Numpad0 and <= KeyCode.Numpad9 when (Modifiers & KeyModifiers.NumLock) != 0 => Key - KeyCode.Numpad0,
+        _ => null,
+    };
+
+    /// <summary>The same key as a new event, nothing handled or stopped: what an element that
+    /// takes keys for itself offers its ancestors first (a terminal, a web view).</summary>
+    internal KeyDownEvent CopyUnhandled() => new()
+    {
+        Key = Key,
+        Modifiers = Modifiers,
+        IsRepeat = IsRepeat,
+        ScanCode = ScanCode,
+        LayoutKey = LayoutKey,
+        ModifierKeys = ModifierKeys,
+        Text = Text,
+    };
 }
 
 public sealed class KeyUpEvent : ElementEvent

@@ -48,8 +48,12 @@ internal static class Win32Keys
     {
         >= 0x41 and <= 0x5A => (KeyCode)((int)KeyCode.A + (int)(vk - 0x41)),
         >= 0x30 and <= 0x39 => (KeyCode)((int)KeyCode.Digit0 + (int)(vk - 0x30)),
-        >= 0x60 and <= 0x69 => (KeyCode)((int)KeyCode.Digit0 + (int)(vk - 0x60)),   // keypad digits
+        // The keypad with NumLock on; with it off Windows reports Home, Up and so on.
+        >= 0x60 and <= 0x69 => (KeyCode)((int)KeyCode.Numpad0 + (int)(vk - 0x60)),
+        0x6A => KeyCode.NumpadMultiply, 0x6B => KeyCode.NumpadAdd, 0x6D => KeyCode.NumpadSubtract,
+        0x6E => KeyCode.NumpadDecimal, 0x6F => KeyCode.NumpadDivide,
         >= 0x70 and <= 0x7B => (KeyCode)((int)KeyCode.F1 + (int)(vk - 0x70)),
+        >= 0x7C and <= 0x87 => (KeyCode)((int)KeyCode.F13 + (int)(vk - 0x7C)),
 
         0x26 => KeyCode.Up, 0x28 => KeyCode.Down, 0x25 => KeyCode.Left, 0x27 => KeyCode.Right,
         0x24 => KeyCode.Home, 0x23 => KeyCode.End, 0x21 => KeyCode.PageUp, 0x22 => KeyCode.PageDown,

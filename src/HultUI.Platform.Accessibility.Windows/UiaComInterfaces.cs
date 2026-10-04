@@ -17,3 +17,12 @@ internal struct UiaRect
     public double Width;
     public double Height;
 }
+
+/// <summary>Native UIA point (two doubles), passed by value to <c>RangeFromPoint</c>.</summary>
+[SupportedOSPlatform("windows")]
+[StructLayout(LayoutKind.Sequential)]
+internal struct UiaPoint
+{
+    public double X;
+    public double Y;
+}

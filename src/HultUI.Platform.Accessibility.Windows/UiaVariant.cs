@@ -40,6 +40,9 @@ internal struct UiaVariant
     public static UiaVariant FromBool(bool v) =>
         new() { Vt = VT_BOOL, ShortValue = v ? (short)-1 : (short)0 };
 
+    /// <summary>A COM object; the VARIANT holds the reference the caller passes in.</summary>
+    public static UiaVariant FromUnknown(IntPtr unknown) => new() { Vt = VT_UNKNOWN, PointerValue = unknown };
+
     public static UiaVariant FromBStr(string s) =>
         new() { Vt = VT_BSTR, PointerValue = Marshal.StringToBSTR(s) };
 

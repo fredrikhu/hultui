@@ -1,0 +1,592 @@
+From 4adee5ed1009a0d1be19a42b891315b1a186d8e9 Mon Sep 17 00:00:00 2001
+From: Fredrik Hult <fredrik.hult@outlook.com>
+Date: Sun, 4 Oct 2026 12:00:00 +0200
+Subject: [PATCH 6/6] Kitty replaces what is sent again, deletes frames, and keeps its byte count true
+
+Four places where Kitty's graphics did not do what the specification (or, where it is silent,
+kitty) does.
+
+A placement sent again under the same image and placement ids replaces the first ("the second one
+will replace the first"); it was added beside it, so a client moving or resizing a picture left
+the old one behind. Image data transmitted again under an id takes the old image's placements off
+the screen, as the specification asks; they stayed. An image number still makes a new image and
+leaves the older ones shown.
+
+d=f and d=F deleted nothing, from when no frames were stored. They now delete one frame as kitty
+does: r, the first by default, the last at most. The frames after it move down a number, the
+current one with them; with one left the animation stops, and that last frame is the picture, which
+d=f keeps and d=F deletes with the image.
+
+The registry gave back an image's size at the time it was removed, not what it was charged. An
+animated image counted its root twice (the root frame shares the image's array) and an edited root
+was a copy never charged, so each one removed left the total lower -- below zero in the end, where
+the budget no longer evicts anything. The registry now records each image's charge, a deleted
+frame's bytes are refunded, and an animation no longer counts a shared root.
+---
+ src/XTerm.NET.Tests/Graphics/KittyDeleteTests.cs | 4 ++--
+ src/XTerm.NET.Tests/Graphics/KittyReplacementTests.cs | 313 ++++++++++++++++++++++++++++++++++++++++
+ src/XTerm.NET/Graphics/ImageAnimation.cs | 40 +++++++++++++++++++++++++++++++++++++++-
+ src/XTerm.NET/Graphics/ImageRegistry.cs | 30 ++++++++++++++++++++++++++++--
+ src/XTerm.NET/InputHandler.KittyGraphics.cs | 44 ++++++++++++++++++++++++++++++++++++++++---
+ 5 files changed, 423 insertions(+), 8 deletions(-)
+ create mode 100644 src/XTerm.NET.Tests/Graphics/KittyReplacementTests.cs
+
+diff --git a/src/XTerm.NET.Tests/Graphics/KittyDeleteTests.cs b/src/XTerm.NET.Tests/Graphics/KittyDeleteTests.cs
+index c84cb4e..48fe8be 100644
+--- a/src/XTerm.NET.Tests/Graphics/KittyDeleteTests.cs
++++ b/src/XTerm.NET.Tests/Graphics/KittyDeleteTests.cs
+@@ -330,8 +330,8 @@ public class KittyDeleteTests
+     }
+ 
+     /// <summary>
+-    /// Nothing here stores animation frames, so there are none to remove. That is a request already
+-    /// satisfied rather than one this terminal cannot honour, so it is not an error.
++    /// A still picture's one frame is the picture itself, which lower case keeps. That is a request
++    /// already satisfied rather than one this terminal cannot honour, so it is not an error.
+     /// </summary>
+     [Fact]
+     public void Deleting_animation_frames_succeeds_having_nothing_to_do()
+diff --git a/src/XTerm.NET.Tests/Graphics/KittyReplacementTests.cs b/src/XTerm.NET.Tests/Graphics/KittyReplacementTests.cs
+new file mode 100644
+index 0000000..35027eb
+--- /dev/null
++++ b/src/XTerm.NET.Tests/Graphics/KittyReplacementTests.cs
+@@ -0,0 +1,313 @@
++using XTerm.Graphics;
++using XTerm.Options;
++
++namespace XTerm.Tests.Graphics;
++
++/// <summary>
++/// What replaces what in Kitty: a placement sent again under the same ids, an image transmitted
++/// again under the same id, a deleted animation frame -- and the registry's byte count staying true
++/// through all of it.
++///
++/// <para>The byte count matters more than it looks. It is the only thing bounding what a program
++/// can make the terminal hold, and it is never read directly, so a drift shows only as the budget
++/// no longer evicting. The tests here check it the same way: by what is evicted.</para>
++/// </summary>
++public class KittyReplacementTests
++{
++    private const string Esc = "\u001b";
++    private const string St = Esc + "\\";
++
++    /// <summary>A 4x4 picture is 64 bytes.</summary>
++    private const int Picture = 4 * 4 * TerminalImage.BytesPerPixel;
++
++    private static Terminal Fresh(long registryBudget = 0)
++    {
++        var options = new TerminalOptions
++        {
++            Cols = 30,
++            Rows = 12,
++            CellWidthPixels = 2,
++            CellHeightPixels = 3
++        };
++        if (registryBudget > 0)
++            options.MaxImageRegistryBytes = registryBudget;
++        return new Terminal(options);
++    }
++
++    private static string Apc(string control, string payload = "")
++        => payload.Length == 0 ? $"{Esc}_G{control}{St}" : $"{Esc}_G{control};{payload}{St}";
++
++    private static string Rgba(int width, int height, byte r, byte g, byte b)
++    {
++        var bytes = new byte[width * height * 4];
++        for (int i = 0; i < width * height; i++)
++            (bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2], bytes[i * 4 + 3]) = (r, g, b, 255);
++        return Convert.ToBase64String(bytes);
++    }
++
++    private static void MoveTo(Terminal terminal, int col, int row) => terminal.Write($"{Esc}[{row + 1};{col + 1}H");
++
++    /// <summary>Cells on screen showing a picture. A 4x6 picture at 2x3 cells takes four.</summary>
++    private static int Tiles(Terminal terminal) => ImageAssertions.VisibleImageCells(terminal);
++
++    private static List<string> Replies(Terminal terminal)
++    {
++        var replies = new List<string>();
++        terminal.DataReceived += (_, e) => replies.Add(e.Data);
++        return replies;
++    }
++
++    /// <summary>Whether an id still resolves: a put of it is answered OK, not ENOENT.</summary>
++    private static bool IsHeld(Terminal terminal, uint id)
++    {
++        var replies = Replies(terminal);
++        MoveTo(terminal, 20, 10);
++        terminal.Write(Apc($"a=p,i={id},C=1"));
++        return replies.Any(r => r.Contains("OK"));
++    }
++
++    // ---- placements -------------------------------------------------------------------------------
++
++    [Fact]
++    public void A_placement_sent_again_under_the_same_ids_moves_rather_than_copies()
++    {
++        var terminal = Fresh();
++        terminal.Write(Apc("a=t,i=7,f=32,s=4,v=6,q=2", Rgba(4, 6, 255, 0, 0)));
++
++        MoveTo(terminal, 0, 0);
++        terminal.Write(Apc("a=p,i=7,p=1,C=1,q=2"));
++        MoveTo(terminal, 10, 5);
++        terminal.Write(Apc("a=p,i=7,p=1,C=1,q=2"));
++
++        Assert.Equal(4, Tiles(terminal));
++        Assert.False(ImageAssertions.IsImageAt(terminal, 0, 0));
++        Assert.True(ImageAssertions.IsImageAt(terminal, 10, 5));
++    }
++
++    [Fact]
++    public void Another_placement_id_or_none_adds_a_picture()
++    {
++        var terminal = Fresh();
++        terminal.Write(Apc("a=t,i=7,f=32,s=4,v=6,q=2", Rgba(4, 6, 255, 0, 0)));
++
++        MoveTo(terminal, 0, 0);
++        terminal.Write(Apc("a=p,i=7,p=1,C=1,q=2"));
++        MoveTo(terminal, 10, 0);
++        terminal.Write(Apc("a=p,i=7,p=2,C=1,q=2"));
++        MoveTo(terminal, 20, 0);
++        terminal.Write(Apc("a=p,i=7,C=1,q=2"));
++        MoveTo(terminal, 0, 5);
++        terminal.Write(Apc("a=p,i=7,C=1,q=2"));
++
++        Assert.Equal(16, Tiles(terminal));
++    }
++
++    [Fact]
++    public void The_same_placement_id_on_another_image_is_another_placement()
++    {
++        var terminal = Fresh();
++        terminal.Write(Apc("a=t,i=7,f=32,s=4,v=6,q=2", Rgba(4, 6, 255, 0, 0)));
++        terminal.Write(Apc("a=t,i=8,f=32,s=4,v=6,q=2", Rgba(4, 6, 0, 255, 0)));
++
++        MoveTo(terminal, 0, 0);
++        terminal.Write(Apc("a=p,i=7,p=1,C=1,q=2"));
++        MoveTo(terminal, 10, 0);
++        terminal.Write(Apc("a=p,i=8,p=1,C=1,q=2"));
++
++        Assert.Equal(8, Tiles(terminal));
++    }
++
++    // ---- images -----------------------------------------------------------------------------------
++
++    [Fact]
++    public void Transmitting_an_id_again_takes_the_old_pictures_off_the_screen()
++    {
++        var terminal = Fresh();
++        MoveTo(terminal, 0, 0);
++        terminal.Write(Apc("a=T,i=7,f=32,s=4,v=6,C=1,q=2", Rgba(4, 6, 255, 0, 0)));
++        Assert.Equal(4, Tiles(terminal));
++
++        // Only transmitted: the new data is not shown until it is placed.
++        terminal.Write(Apc("a=t,i=7,f=32,s=4,v=6,q=2", Rgba(4, 6, 0, 255, 0)));
++
++        Assert.Equal(0, Tiles(terminal));
++        Assert.True(IsHeld(terminal, 7));
++    }
++
++    [Fact]
++    public void Transmitting_a_number_again_keeps_the_older_image_on_screen()
++    {
++        var terminal = Fresh();
++        MoveTo(terminal, 0, 0);
++        terminal.Write(Apc("a=T,I=3,f=32,s=4,v=6,C=1,q=2", Rgba(4, 6, 255, 0, 0)));
++        MoveTo(terminal, 10, 0);
++        terminal.Write(Apc("a=T,I=3,f=32,s=4,v=6,C=1,q=2", Rgba(4, 6, 0, 255, 0)));
++
++        Assert.Equal(8, Tiles(terminal));
++    }
++
++    // ---- animation frames -------------------------------------------------------------------------
++
++    /// <summary>Image 1, 4x4: frame 1 red, 2 green, 3 blue; placed at the top left.</summary>
++    private static (Terminal Terminal, TerminalImage Image) ThreeFrames(long registryBudget = 0)
++    {
++        var terminal = Fresh(registryBudget);
++        terminal.Write(Apc("a=t,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 255, 0, 0)));
++        terminal.Write(Apc("a=f,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 255, 0)));
++        terminal.Write(Apc("a=f,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 0, 255)));
++        MoveTo(terminal, 0, 0);
++        terminal.Write(Apc("a=p,i=1,C=1,q=2"));
++        var image = ImageAssertions.ImageAt(terminal, 0, 0);
++        Assert.NotNull(image);
++        Assert.Equal(3, image!.Animation!.FrameCount);
++        return (terminal, image);
++    }
++
++    /// <summary>A frame's colour as (R, G, B); the buffer is BGRA.</summary>
++    private static (byte, byte, byte) Colour(TerminalImage image, int frame)
++    {
++        Assert.True(image.Animation!.TryGetFrame(frame, out var f));
++        var span = f.Pixels.Span;
++        return (span[2], span[1], span[0]);
++    }
++
++    [Fact]
++    public void Deleting_a_frame_by_number_moves_the_later_ones_down()
++    {
++        var (terminal, image) = ThreeFrames();
++
++        terminal.Write(Apc("a=d,d=f,i=1,r=2,q=2"));
++
++        Assert.Equal(2, image.Animation!.FrameCount);
++        Assert.Equal(((byte)255, (byte)0, (byte)0), Colour(image, 1));
++        Assert.Equal(((byte)0, (byte)0, (byte)255), Colour(image, 2));
++    }
++
++    [Fact]
++    public void Deleting_a_frame_without_a_number_deletes_the_first()
++    {
++        var (terminal, image) = ThreeFrames();
++        var serial = image.FrameSerial;
++
++        terminal.Write(Apc("a=d,d=f,i=1,q=2"));
++
++        Assert.Equal(2, image.Animation!.FrameCount);
++        Assert.Equal(((byte)0, (byte)255, (byte)0), Colour(image, 1));
++        Assert.NotEqual(serial, image.FrameSerial); // what is shown changed
++    }
++
++    [Fact]
++    public void Deleting_the_current_frame_shows_the_one_that_took_its_place()
++    {
++        var (terminal, image) = ThreeFrames();
++        terminal.Write(Apc("a=a,i=1,c=3,q=2"));
++        Assert.Equal(3, image.Animation!.CurrentFrame);
++
++        terminal.Write(Apc("a=d,d=f,i=1,r=3,q=2")); // the last: the new last shows
++        Assert.Equal(2, image.Animation.CurrentFrame);
++
++        terminal.Write(Apc("a=a,i=1,c=1,q=2"));
++        terminal.Write(Apc("a=d,d=f,i=1,r=1,q=2")); // the first: the next moves into its place
++        Assert.Equal(1, image.Animation.CurrentFrame);
++        Assert.Equal(((byte)0, (byte)255, (byte)0), Colour(image, 1));
++    }
++
++    [Fact]
++    public void An_animation_down_to_one_frame_stops()
++    {
++        var (terminal, image) = ThreeFrames();
++        terminal.Write(Apc("a=a,i=1,s=3,q=2"));
++        Assert.True(terminal.HasRunningAnimations());
++
++        terminal.Write(Apc("a=d,d=f,i=1,q=2"));
++        Assert.True(terminal.HasRunningAnimations());
++        terminal.Write(Apc("a=d,d=f,i=1,q=2"));
++
++        Assert.Equal(1, image.Animation!.FrameCount);
++        Assert.False(terminal.HasRunningAnimations());
++    }
++
++    [Fact]
++    public void The_last_frame_is_the_picture_lower_case_keeps_it_upper_case_deletes_it()
++    {
++        var (terminal, image) = ThreeFrames();
++        terminal.Write(Apc("a=d,d=f,i=1,r=99,q=2")); // past the end: the last
++        terminal.Write(Apc("a=d,d=f,i=1,q=2"));
++        Assert.Equal(1, image.Animation!.FrameCount);
++
++        terminal.Write(Apc("a=d,d=f,i=1,q=2"));
++        Assert.Equal(1, image.Animation.FrameCount);
++        Assert.Equal(4, Tiles(terminal));
++
++        terminal.Write(Apc("a=d,d=F,i=1,q=2"));
++        Assert.Equal(0, Tiles(terminal));
++        Assert.False(IsHeld(terminal, 1));
++    }
++
++    // ---- the registry's byte count ----------------------------------------------------------------
++
++    /// <summary>
++    /// An animated image deleted gives back what it was charged, no more.
++    /// </summary>
++    /// <remarks>
++    /// It used to give back its size at the time, which counted the root frame twice: a picture
++    /// more than it was charged. Three images then fit in two pictures' budget, and every animated
++    /// image deleted bought room for one more.
++    /// </remarks>
++    [Fact]
++    public void Deleting_an_animated_image_leaves_the_budget_as_it_found_it()
++    {
++        var terminal = Fresh(registryBudget: 3 * Picture);
++        terminal.Write(Apc("a=t,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 255, 0, 0)));
++        terminal.Write(Apc("a=f,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 255, 0)));
++        terminal.Write(Apc("a=d,d=I,i=1,q=2"));
++
++        // Four pictures in a budget of three: the oldest has to go.
++        for (uint id = 2; id <= 5; id++)
++            terminal.Write(Apc($"a=t,i={id},f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 0, 255)));
++
++        Assert.False(IsHeld(terminal, 2));
++        Assert.True(IsHeld(terminal, 3));
++    }
++
++    /// <summary>
++    /// Editing the root copies it off the image, so the image grows after it was charged. Deleting
++    /// it still gives back only what was charged.
++    /// </summary>
++    [Fact]
++    public void Deleting_an_image_whose_root_was_edited_leaves_the_budget_as_it_found_it()
++    {
++        var terminal = Fresh(registryBudget: 3 * Picture);
++        terminal.Write(Apc("a=t,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 255, 0, 0)));
++        terminal.Write(Apc("a=f,i=1,r=1,f=32,s=2,v=2,q=2", Rgba(2, 2, 0, 255, 0)));
++        terminal.Write(Apc("a=d,d=I,i=1,q=2"));
++
++        for (uint id = 2; id <= 5; id++)
++            terminal.Write(Apc($"a=t,i={id},f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 0, 255)));
++
++        Assert.False(IsHeld(terminal, 2));
++        Assert.True(IsHeld(terminal, 3));
++    }
++
++    [Fact]
++    public void A_deleted_frame_gives_its_bytes_back()
++    {
++        var terminal = Fresh(registryBudget: 3 * Picture);
++        terminal.Write(Apc("a=t,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 255, 0, 0)));
++        terminal.Write(Apc("a=f,i=1,f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 255, 0)));
++        terminal.Write(Apc("a=d,d=f,i=1,r=2,q=2"));
++
++        // Image 1 is one picture again, so two more fit beside it.
++        terminal.Write(Apc("a=t,i=2,f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 0, 255)));
++        terminal.Write(Apc("a=t,i=3,f=32,s=4,v=4,q=2", Rgba(4, 4, 0, 0, 255)));
++
++        Assert.True(IsHeld(terminal, 1));
++    }
++
++    [Fact]
++    public void An_animated_image_counts_each_frame_once()
++    {
++        var (_, image) = ThreeFrames();
++        Assert.Equal(3 * Picture, image.ByteCount);
++    }
++}
+diff --git a/src/XTerm.NET/Graphics/ImageAnimation.cs b/src/XTerm.NET/Graphics/ImageAnimation.cs
+index 150ed78..c1a2a59 100644
+--- a/src/XTerm.NET/Graphics/ImageAnimation.cs
++++ b/src/XTerm.NET/Graphics/ImageAnimation.cs
+@@ -100,13 +100,21 @@ public sealed class ImageAnimation
+     public int Serial { get; private set; }
+ 
+     /// <summary>Total size of every frame, for accounting against an image budget.</summary>
++    /// <remarks>
++    /// Not the root while it is still the image's own array: <see cref="TerminalImage.ByteCount"/>
++    /// counts that already, and counting it here too made an animated image look a picture larger
++    /// than it is.
++    /// </remarks>
+     public long ByteCount
+     {
+         get
+         {
+             long total = 0;
+             foreach (var frame in _frames)
+-                total += frame.Data.LongLength;
++            {
++                if (!ReferenceEquals(frame.Data, Image.PixelArray))
++                    total += frame.Data.LongLength;
++            }
+             return total;
+         }
+     }
+@@ -154,6 +162,36 @@ public sealed class ImageAnimation
+         return frame.Data;
+     }
+ 
++    /// <summary>
++    /// Deletes a frame, never the last one left, and returns the bytes that released.
++    /// </summary>
++    /// <remarks>
++    /// <para>The frames after it move down a number, the current one with them. Deleting the
++    /// current frame shows the one that took its place, or the new last one. With one frame left
++    /// the animation stops: nothing can move, and a host would otherwise keep a clock running for
++    /// it.</para>
++    /// <para>The root still shared with the image releases nothing: the image holds those pixels
++    /// either way.</para>
++    /// </remarks>
++    internal long RemoveFrame(int number)
++    {
++        if (number < 1 || number > _frames.Count || _frames.Count < 2)
++            return 0;
++
++        var frame = _frames[number - 1];
++        _frames.RemoveAt(number - 1);
++
++        if (number < CurrentFrame || CurrentFrame > _frames.Count)
++            CurrentFrame--;
++
++        if (_frames.Count < 2)
++            State = AnimationState.Stopped;
++
++        _elapsedMilliseconds = 0;
++        Serial++;
++        return ReferenceEquals(frame.Data, Image.PixelArray) ? 0 : frame.Data.LongLength;
++    }
++
+     internal void SetGap(int number, int gapMilliseconds)
+     {
+         if (number >= 1 && number <= _frames.Count)
+diff --git a/src/XTerm.NET/Graphics/ImageRegistry.cs b/src/XTerm.NET/Graphics/ImageRegistry.cs
+index 71f08ab..d77cd9f 100644
+--- a/src/XTerm.NET/Graphics/ImageRegistry.cs
++++ b/src/XTerm.NET/Graphics/ImageRegistry.cs
+@@ -24,6 +24,16 @@ internal sealed class ImageRegistry
+ 
+     private long _bytes;
+ 
++    /// <summary>What each image was charged, so removing it gives back exactly that.</summary>
++    /// <remarks>
++    /// Removal used to subtract the image's size at that moment. An image changes size after it is
++    /// stored (an animation gains and loses frames, and its root is copied when edited), so the
++    /// two disagreed: an animated image counted its root twice and gave back a picture more than it
++    /// was charged, and every one removed left the total that much lower -- below zero in the end,
++    /// where nothing is ever trimmed.
++    /// </remarks>
++    private readonly Dictionary<uint, long> _charged = new();
++
+     /// <summary>Total size of everything held.</summary>
+     public long ByteCount => _bytes;
+ 
+@@ -57,6 +67,7 @@ internal sealed class ImageRegistry
+ 
+         _byId[id] = image;
+         _nodes[id] = _order.AddLast(id);
++        _charged[id] = image.ByteCount;
+         _bytes += image.ByteCount;
+ 
+         if (number != 0)
+@@ -76,16 +87,29 @@ internal sealed class ImageRegistry
+     /// and removing a grown image later subtracted its CURRENT size from a counter that had never
+     /// been credited it, driving the total negative and disabling trimming entirely.
+     /// </remarks>
+-    public bool TryCharge(long delta, long budget)
++    public bool TryCharge(uint id, long delta, long budget)
+     {
+         if (budget > 0 && _bytes + delta > budget)
+             return false;
+ 
+         _bytes += delta;
++        if (_charged.TryGetValue(id, out var charged))
++            _charged[id] = charged + delta;
+         Trim(budget);
+         return true;
+     }
+ 
++    /// <summary>Gives back bytes an image no longer holds, a deleted frame's, say.</summary>
++    public void Refund(uint id, long bytes)
++    {
++        if (bytes <= 0 || !_charged.TryGetValue(id, out var charged))
++            return;
++
++        var refund = Math.Min(bytes, charged);
++        _charged[id] = charged - refund;
++        _bytes -= refund;
++    }
++
+     public bool TryGet(uint id, out TerminalImage image) => _byId.TryGetValue(id, out image!);
+ 
+     /// <summary>Resolves a client image number to the newest image stored under it.</summary>
+@@ -124,7 +148,8 @@ internal sealed class ImageRegistry
+         if (!_byId.TryGetValue(id, out var existing))
+             return false;
+ 
+-        _bytes -= existing.ByteCount;
++        _bytes -= _charged.TryGetValue(id, out var charged) ? charged : existing.ByteCount;
++        _charged.Remove(id);
+         _byId.Remove(id);
+ 
+         if (_nodes.TryGetValue(id, out var node))
+@@ -157,6 +182,7 @@ internal sealed class ImageRegistry
+         _order.Clear();
+         _nodes.Clear();
+         _idByNumber.Clear();
++        _charged.Clear();
+         _bytes = 0;
+     }
+ 
+diff --git a/src/XTerm.NET/InputHandler.KittyGraphics.cs b/src/XTerm.NET/InputHandler.KittyGraphics.cs
+index 5f79858..2ec1f06 100644
+--- a/src/XTerm.NET/InputHandler.KittyGraphics.cs
++++ b/src/XTerm.NET/InputHandler.KittyGraphics.cs
+@@ -406,6 +406,13 @@ public partial class InputHandler
+ 
+         // A client that sent only a number gets an id chosen here, and is told what it was.
+         var id = command.ImageId != 0 ? command.ImageId : _kittyImages.NextAssignedId();
++
++        // New data for an id takes the old image's placements with it, as the specification asks:
++        // a program reusing an id another one used must not leave that one's pictures on screen.
++        // A number is different: it names the newest of several images, and the older ones stay.
++        if (command.ImageId != 0 && _kittyImages.TryGet(id, out var replaced))
++            _terminal.DropImage(replaced);
++
+         _kittyImages.Store(id, image, _terminal.Options.MaxImageRegistryBytes, command.ImageNumber);
+ 
+         if (command.Action == Graphics.KittyAction.TransmitAndDisplay)
+@@ -481,7 +488,7 @@ public partial class InputHandler
+             // Charged to the REGISTRY, not measured against this animation alone: several
+             // animations could otherwise each grow to the whole budget, and the registry's counter
+             // would still hold the size each image was first stored at.
+-            if (!_kittyImages.TryCharge(frameBytes, _terminal.Options.MaxImageRegistryBytes))
++            if (!_kittyImages.TryCharge(id, frameBytes, _terminal.Options.MaxImageRegistryBytes))
+             {
+                 ReplyToKitty(command, Graphics.KittyError.TooLarge);
+                 return;
+@@ -715,6 +722,11 @@ public partial class InputHandler
+             stretched ? Graphics.ImageScaling.Stretched : Graphics.ImageScaling.Natural,
+             command.ZIndex, command.OffsetX, command.OffsetY);
+ 
++        // The same image and placement id again replaces the first, which is how a client moves or
++        // resizes a picture without flicker. Left alone, the old one stayed where it was.
++        if (command.PlacementId != 0)
++            _terminal.DropPlacements(p => p.ImageId == image.Id && p.PlacementId == command.PlacementId);
++
+         PlaceImage(placement, Graphics.PlacementKind.Kitty, command.KeepCursor);
+     }
+ 
+@@ -784,8 +796,7 @@ public partial class InputHandler
+                 break;
+ 
+             case 'f':
+-                // Animation frames. Nothing here stores any, so there is nothing to remove -- but
+-                // saying "unsupported" would be wrong, since the requested state is the state.
++                DeleteKittyFrame(command, alsoFree);
+                 break;
+ 
+             default:
+@@ -833,6 +844,33 @@ public partial class InputHandler
+             _kittyImages.Remove(id);
+     }
+ 
++    /// <summary>
++    /// Deletes one animation frame: <c>r</c>, the first when it is not given, the last at most.
++    /// </summary>
++    /// <remarks>
++    /// The specification names the target and says no more; this is what kitty does. The last frame
++    /// left is the picture itself, so lower case leaves it and upper case deletes the image.
++    /// </remarks>
++    private void DeleteKittyFrame(Graphics.KittyCommand command, bool alsoFree)
++    {
++        if (!TryResolveKittyImage(command, out var id, out var image))
++            return;
++
++        var animation = image.Animation;
++        if (animation is null || animation.FrameCount < 2)
++        {
++            if (alsoFree)
++            {
++                _terminal.DropImage(image);
++                _kittyImages.Remove(id);
++            }
++            return;
++        }
++
++        var number = Math.Clamp(command.EditFrame, 1, animation.FrameCount);
++        _kittyImages.Refund(id, animation.RemoveFrame(number));
++    }
++
+     /// <summary>Removes every placement covering one screen cell.</summary>
+     private void DropPlacementsAt(int col, int row, bool alsoFree)
+         => DropPlacementsWhere(null, (c, r) => c == col && r == row, alsoFree);

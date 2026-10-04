@@ -31,8 +31,8 @@ public enum ToastSeverity : byte
 /// <para>With an action the whole pill is the button — the verb is drawn at the end,
 /// but a target the size of the pill is easier to hit in the second or two the toast is
 /// up, and it gives assistive technology one invokable node named by the verb, with the
-/// message as its description. Without one it is an alert, which is what a reader
-/// announces unprompted.</para>
+/// message as its description. Without one it is an alert. Either way the message is
+/// announced (<see cref="Element.Announce"/>) as the toast appears.</para>
 /// </remarks>
 public class ToastElement : BoxElement
 {
@@ -169,9 +169,26 @@ public class ToastElement : BoxElement
     {
         base.PatchFrom(source);
         if (source is not ToastElement t) return;
+        bool replaced = _message != t._message;
         OnAction = t.OnAction;
         Message = t._message;
         ActionLabel = t._actionLabel;
         Severity = t._severity;
+        if (replaced && IsHosted) AnnounceMessage();
+    }
+
+    protected override void OnMounted()
+    {
+        base.OnMounted();
+        AnnounceMessage();
+    }
+
+    /// <summary>A toast appears where the user is not looking, and a reader would not find it in
+    /// the second or two it is up: it is spoken, an error at once, anything else when the reader
+    /// is done with what it is saying.</summary>
+    private void AnnounceMessage()
+    {
+        if (_message.Length > 0)
+            Announce(_message, _severity == ToastSeverity.Error ? AnnouncementPoliteness.Assertive : AnnouncementPoliteness.Polite);
     }
 }

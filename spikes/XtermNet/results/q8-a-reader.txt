@@ -1,0 +1,4 @@
+paste: 1048604 bytes, 10487 lines ending in END
+a) reader thread writes inline: write STILL BLOCKED after 15 s: deadlock; child saw END: no
+   Kill() the child: the write is STILL blocked 5 s later
+   Dispose (ClosePseudoConsole) with the reader stuck in that write: HUNG for 10 s

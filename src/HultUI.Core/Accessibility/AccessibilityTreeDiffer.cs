@@ -103,6 +103,14 @@ public static class AccessibilityTreeDiffer
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
         if (prev.NativeContent != curr.NativeContent)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
+        if (!ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
+        {
+            var (a, b) = (prev.Text, curr.Text);
+            if (a?.Text != b?.Text)
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Text, prev));
+            if (a?.Caret != b?.Caret || a?.SelectionStart != b?.SelectionStart || a?.SelectionEnd != b?.SelectionEnd)
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
+        }
         // Skip bounding-rect changes for nodes that are off-screen before and
         // after: assistive tech doesn't use an off-screen node's exact bounds, and
         // emitting them floods the AT with events. A virtualized list materializes

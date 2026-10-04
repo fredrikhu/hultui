@@ -108,6 +108,46 @@ internal interface INativeScroll
     int GetVerticallyScrollable(out int pRetVal);
 }
 
+/// <summary>ITextProvider and ITextProvider2 (whose vtable extends it), as one interface: the
+/// text pattern. Ranges come back as AddRef'd ITextRangeProvider* pointers.</summary>
+[SupportedOSPlatform("windows")]
+internal interface INativeTextProvider
+{
+    int GetSelection(out IntPtr pRetVal);
+    int GetVisibleRanges(out IntPtr pRetVal);
+    int RangeFromChild(IntPtr childElement, out IntPtr pRetVal);
+    int RangeFromPoint(UiaPoint point, out IntPtr pRetVal);
+    int GetDocumentRange(out IntPtr pRetVal);
+    int GetSupportedTextSelection(out int pRetVal);
+    int RangeFromAnnotation(IntPtr annotationElement, out IntPtr pRetVal);
+    int GetCaretRange(out int isActive, out IntPtr pRetVal);
+}
+
+/// <summary>ITextRangeProvider. A range handed back by UIA (<c>Compare</c>, the endpoint
+/// moves) is one of ours; <see cref="NativeProvider.LogicOf"/> recovers it.</summary>
+[SupportedOSPlatform("windows")]
+internal interface INativeTextRange
+{
+    int Clone(out IntPtr pRetVal);
+    int Compare(IntPtr range, out int pRetVal);
+    int CompareEndpoints(int endpoint, IntPtr targetRange, int targetEndpoint, out int pRetVal);
+    int ExpandToEnclosingUnit(int unit);
+    int FindAttribute(int attributeId, UiaVariant value, int backward, out IntPtr pRetVal);
+    int FindText(IntPtr text, int backward, int ignoreCase, out IntPtr pRetVal);
+    int GetAttributeValue(int attributeId, out UiaVariant pRetVal);
+    int GetBoundingRectangles(out IntPtr pRetVal);
+    int GetEnclosingElement(out IntPtr pRetVal);
+    int GetText(int maxLength, out IntPtr pRetVal);
+    int Move(int unit, int count, out int pRetVal);
+    int MoveEndpointByUnit(int endpoint, int unit, int count, out int pRetVal);
+    int MoveEndpointByRange(int endpoint, IntPtr targetRange, int targetEndpoint);
+    int Select();
+    int AddToSelection();
+    int RemoveFromSelection();
+    int ScrollIntoView(int alignToTop);
+    int GetChildren(out IntPtr pRetVal);
+}
+
 /// <summary>
 /// Wraps a managed provider logic object in a genuine native COM object —
 /// unmanaged memory holding one tear-off per supported interface, each with a
@@ -164,6 +204,9 @@ internal static unsafe class NativeProvider
     private static readonly Guid IID_RangeValue = new("36dc7aef-33e6-4691-afe1-2be7274b3d33");
     private static readonly Guid IID_Selection = new("fb8b03af-3bdf-48d4-bd36-1a65793be168");
     private static readonly Guid IID_ItemContainer = new("e747770b-39ce-4382-ab30-d8fb3f336f24");
+    private static readonly Guid IID_TextProvider = new("3589c92c-63f3-4367-99bb-ada653b77cf2");
+    private static readonly Guid IID_TextProvider2 = new("0dc5e6ed-3e16-4bf1-8f9a-a979878bc195");
+    private static readonly Guid IID_TextRange = new("5347ad7b-c355-46f8-aff5-909033582f63");
 
     // Prebuilt shared vtables (one per interface), allocated once.
     private static readonly IntPtr VtSimple;
@@ -180,6 +223,8 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtSelection;
     private static readonly IntPtr VtItemContainer;
     private static readonly IntPtr VtServiceProvider;
+    private static readonly IntPtr VtText;
+    private static readonly IntPtr VtTextRange;
 
     static NativeProvider()
     {
@@ -257,6 +302,37 @@ internal static unsafe class NativeProvider
 
         VtItemContainer = BuildVtable(
             (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, int, UiaVariant, IntPtr*, int>)&IC_FindItemByProperty);
+
+        // ITextProvider's six methods, then ITextProvider2's two: one table for both.
+        VtText = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&Text_GetSelection,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&Text_GetVisibleRanges,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr*, int>)&Text_RangeFromChild,
+            (IntPtr)(delegate* unmanaged<IntPtr, UiaPoint, IntPtr*, int>)&Text_RangeFromPoint,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&Text_GetDocumentRange,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Text_GetSupportedTextSelection,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr*, int>)&Text_RangeFromAnnotation,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, IntPtr*, int>)&Text_GetCaretRange);
+
+        VtTextRange = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&TR_Clone,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, int*, int>)&TR_Compare,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, IntPtr, int, int*, int>)&TR_CompareEndpoints,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, int>)&TR_ExpandToEnclosingUnit,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, UiaVariant, int, IntPtr*, int>)&TR_FindAttribute,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, int, int, IntPtr*, int>)&TR_FindText,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, void*, int>)&TR_GetAttributeValue,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&TR_GetBoundingRectangles,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&TR_GetEnclosingElement,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, IntPtr*, int>)&TR_GetText,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, int, int*, int>)&TR_Move,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, int, int, int*, int>)&TR_MoveEndpointByUnit,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, IntPtr, int, int>)&TR_MoveEndpointByRange,
+            (IntPtr)(delegate* unmanaged<IntPtr, int>)&TR_Select,
+            (IntPtr)(delegate* unmanaged<IntPtr, int>)&TR_AddToSelection,
+            (IntPtr)(delegate* unmanaged<IntPtr, int>)&TR_RemoveFromSelection,
+            (IntPtr)(delegate* unmanaged<IntPtr, int, int>)&TR_ScrollIntoView,
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&TR_GetChildren);
     }
 
     private static IntPtr BuildVtable(params IntPtr[] methods)
@@ -309,6 +385,12 @@ internal static unsafe class NativeProvider
         if (logic is INativeRangeValue) { vt[n] = VtRangeValue; iids[n] = IID_RangeValue; n++; }
         if (logic is INativeSelection) { vt[n] = VtSelection; iids[n] = IID_Selection; n++; }
         if (logic is INativeItemContainer) { vt[n] = VtItemContainer; iids[n] = IID_ItemContainer; n++; }
+        if (logic is INativeTextProvider)
+        {
+            vt[n] = VtText; iids[n] = IID_TextProvider; n++;
+            vt[n] = VtText; iids[n] = IID_TextProvider2; n++;
+        }
+        if (logic is INativeTextRange) { vt[n] = VtTextRange; iids[n] = IID_TextRange; n++; }
         if (n == 0) return IntPtr.Zero;
         // Every provider also exposes IServiceProvider (see IID note) so UIA
         // caches the "no extra service" answer instead of re-QIing constantly.
@@ -496,4 +578,39 @@ internal static unsafe class NativeProvider
     [UnmanagedCallersOnly] private static int Sel2_GetCanSelectMultiple(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetCanSelectMultiple(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
     [UnmanagedCallersOnly] private static int Sel2_GetIsSelectionRequired(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetIsSelectionRequired(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
     [UnmanagedCallersOnly] private static int IC_FindItemByProperty(IntPtr t, IntPtr startAfter, int propertyId, UiaVariant value, IntPtr* p) { try { return ((INativeItemContainer)Target(t)!).FindItemByProperty(startAfter, propertyId, value, out *p); } catch { *p = IntPtr.Zero; return 0; } }
+
+    // ── ITextProvider / ITextProvider2 ──
+    [UnmanagedCallersOnly] private static int Text_GetSelection(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetSelection(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_GetVisibleRanges(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetVisibleRanges(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_RangeFromChild(IntPtr t, IntPtr c, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromChild(c, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_RangeFromPoint(IntPtr t, UiaPoint pt, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromPoint(pt, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_GetDocumentRange(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetDocumentRange(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_GetSupportedTextSelection(IntPtr t, int* p) { try { int hr = ((INativeTextProvider)Target(t)!).GetSupportedTextSelection(out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_RangeFromAnnotation(IntPtr t, IntPtr a, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromAnnotation(a, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_GetCaretRange(IntPtr t, int* active, IntPtr* p) { try { int hr = ((INativeTextProvider)Target(t)!).GetCaretRange(out int a, out *p); *active = a; return hr; } catch { *active = 0; *p = IntPtr.Zero; return Failed; } }
+
+    // ── ITextRangeProvider ──
+    [UnmanagedCallersOnly] private static int TR_Clone(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).Clone(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_Compare(IntPtr t, IntPtr r, int* p) { try { int hr = ((INativeTextRange)Target(t)!).Compare(r, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_CompareEndpoints(IntPtr t, int e, IntPtr r, int te, int* p) { try { int hr = ((INativeTextRange)Target(t)!).CompareEndpoints(e, r, te, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_ExpandToEnclosingUnit(IntPtr t, int u) { try { return ((INativeTextRange)Target(t)!).ExpandToEnclosingUnit(u); } catch { return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_FindAttribute(IntPtr t, int id, UiaVariant v, int back, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).FindAttribute(id, v, back, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_FindText(IntPtr t, IntPtr s, int back, int ic, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).FindText(s, back, ic, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_GetAttributeValue(IntPtr t, int id, void* p) { try { int hr = ((INativeTextRange)Target(t)!).GetAttributeValue(id, out var v); *(UiaVariant*)p = v; return hr; } catch { *(UiaVariant*)p = UiaVariant.Empty; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_GetBoundingRectangles(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetBoundingRectangles(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_GetEnclosingElement(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetEnclosingElement(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_GetText(IntPtr t, int max, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetText(max, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_Move(IntPtr t, int u, int c, int* p) { try { int hr = ((INativeTextRange)Target(t)!).Move(u, c, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_MoveEndpointByUnit(IntPtr t, int e, int u, int c, int* p) { try { int hr = ((INativeTextRange)Target(t)!).MoveEndpointByUnit(e, u, c, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_MoveEndpointByRange(IntPtr t, int e, IntPtr r, int te) { try { return ((INativeTextRange)Target(t)!).MoveEndpointByRange(e, r, te); } catch { return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_Select(IntPtr t) { try { return ((INativeTextRange)Target(t)!).Select(); } catch { return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_AddToSelection(IntPtr t) { try { return ((INativeTextRange)Target(t)!).AddToSelection(); } catch { return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_RemoveFromSelection(IntPtr t) { try { return ((INativeTextRange)Target(t)!).RemoveFromSelection(); } catch { return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_ScrollIntoView(IntPtr t, int top) { try { return ((INativeTextRange)Target(t)!).ScrollIntoView(top); } catch { return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_GetChildren(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetChildren(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+
+    /// <summary>E_FAIL. The text pattern's thunks answer it for an exception, where the older
+    /// ones answer S_OK with an empty result: a reader told a text call failed asks again or
+    /// gives up, where one told "nothing" reads nothing.</summary>
+    private const int Failed = unchecked((int)0x80004005);
 }

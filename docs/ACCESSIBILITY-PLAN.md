@@ -33,9 +33,10 @@ macOS (NSAccessibility) is deferred.
 
 1. **Linux D-Bus library:** add `Tmds.DBus.Protocol` as a dependency of
    `HultUI.Platform.Accessibility.Linux`. MIT, AOT-compatible, ~100KB.
-2. **`ITextProvider` (UIA text pattern):** deferred to a follow-up. Text inputs
-   will announce and expose value via `IValueProvider`; word-by-word screen
-   reader navigation comes later.
+2. **`ITextProvider` (UIA text pattern):** deferred at first; text inputs expose
+   their value through `IValueProvider`. **Built 2026-10-04** as the terminal's seam
+   A1 (below, *Text and announcements*): any element can offer text a reader moves
+   through by character, word and line. Text inputs and TextArea do not offer it yet.
 3. **Project layout:** separate per-platform projects
    (`HultUI.Platform.Accessibility.Windows`, `.Linux`), matching the existing
    `HultUI.Platform.SDL3` pattern. No `#if` shared project.
@@ -275,12 +276,42 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 Not yet wired (candidates): container-level `Selection` (needs a SAFEARRAY of
 providers), a UIA `ItemContainer` on virtualized lists.
 
+## Text and announcements (built 2026-10-04, the terminal's seams A1 and A2)
+
+- **Text (A1).** An element offers `AccessibleText` through the internal
+  `Element.AccessibleTextSource`: the text, its lines, a caret, a selection, the
+  visible part, and where each character is (`AccessibleTextGeometry`). The node carries
+  the snapshot the tree was built with, and the source, which the bridges read on their
+  own threads between rebuilds. The differ compares snapshots and tells `Text` (with the
+  previous node, so a bridge can describe the change) and `TextSelection`.
+  - **Windows:** the text pattern, `ITextProvider2` and `ITextRangeProvider`, as native
+    vtables like the other patterns. Units: character (a surrogate pair whole), word (a
+    run with the blanks after it), line; format, paragraph and page take the next larger
+    one, as UIA asks. Ranges never move onto the empty end. Selecting from a reader is
+    refused (`UIA_E_INVALIDOPERATION`). Text changes raise `Text_TextChanged`, caret and
+    selection moves `Text_TextSelectionChanged`.
+  - **Linux:** `org.a11y.atspi.Text`, its answers in `AtSpiText` (plain functions,
+    tested without a bus), and `TextChanged` insert/delete, `TextCaretMoved` and
+    `TextSelectionChanged` signals. Not run against a real AT-SPI client yet.
+  - **Who offers it:** the terminal. Text inputs and TextArea are the next candidates.
+- **Announcements (A2).** `Element.Announce(text, politeness)`: a UIA notification
+  (`UiaRaiseNotificationEvent`, activity `HultUI.Announcement`; polite is
+  `NotificationProcessing_All`, assertive `ImportantAll`), an AT-SPI 2.46
+  `Object:Announcement`. Given to the bridge after the frame's tree is applied, from the
+  element's node; nothing is kept while no reader listens; an element not in a window
+  yet says it once a window takes it. Toasts announce their message (an error
+  assertively); the terminal announces new output.
+- **Found on the way:** the Windows bridge never told `AccessibilityClients` that a reader
+  listened (only the Linux bridge did), so content that describes itself only while one
+  listens never did on Windows; it reports from `UiaClientsAreListening` now. The Linux
+  bridge advertised `org.a11y.atspi.Value` for every string value, with no handler behind
+  it; AT-SPI's Value is a number, and it is no longer advertised.
+
 ## Out of scope (follow-ups)
 
-- `ITextProvider` for rich text-pattern navigation (UIA).
-- `org.a11y.atspi.Text` / `EditableText` for AT-SPI.
+- `EditableText` for AT-SPI; the text pattern on text inputs and TextArea.
 - macOS `NSAccessibility`.
-- UIA `LiveRegion` / AT-SPI live regions.
+- UIA `LiveRegion` (`Element.Announce` covers what live regions were wanted for).
 - ~~Accessibility for overlays, tooltips, context menus.~~ **Done 2026-09-22.** The
   window's snapshot now includes every hit-testable overlay — context menus, dropdown
   lists, dialogs — built with the overlay's own origin, since overlay content is positioned

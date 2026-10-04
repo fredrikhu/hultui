@@ -525,8 +525,8 @@ public sealed class VideoPlayer : Component
             case KeyCode.F: FullscreenRequested?.Invoke(); break;
             case KeyCode.Home: player.Seek(TimeSpan.Zero); break;
             case KeyCode.End when player.Duration is { } end: player.Seek(end); break;
-            case >= KeyCode.Digit0 and <= KeyCode.Digit9 when player.Duration is { } total:
-                player.Seek(total * ((e.Key - KeyCode.Digit0) / 10.0));
+            case var _ when e.Digit is { } digit && player.Duration is { } total:
+                player.Seek(total * (digit / 10.0));
                 break;
             default: return;
         }

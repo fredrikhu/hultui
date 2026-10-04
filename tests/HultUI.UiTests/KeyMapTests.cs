@@ -85,8 +85,13 @@ public class KeyMapTests
     [InlineData(Keys.Delete, KeyCode.Delete)]
     [InlineData(Keys.F1, KeyCode.F1)]
     [InlineData(Keys.F12, KeyCode.F12)]
-    [InlineData(Keys.NumPad0, KeyCode.Digit0)]
-    [InlineData(Keys.NumPad9, KeyCode.Digit9)]
+    [InlineData(Keys.F13, KeyCode.F13)]
+    [InlineData(Keys.F24, KeyCode.F24)]
+    [InlineData(Keys.NumPad0, KeyCode.Numpad0)]
+    [InlineData(Keys.NumPad9, KeyCode.Numpad9)]
+    [InlineData(Keys.Decimal, KeyCode.NumpadDecimal)]
+    [InlineData(Keys.Add, KeyCode.NumpadAdd)]
+    [InlineData(Keys.Divide, KeyCode.NumpadDivide)]
     public void LayoutIndependentKeys_MapExactly(Keys key, KeyCode expected)
         => Assert.Equal(expected, KeyMap.ToKeyCode(key));
 

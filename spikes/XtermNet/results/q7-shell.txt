@@ -1,0 +1,98 @@
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: oob
+
+── pwsh ──
+spawn -> first byte 1 ms, -> prompt 246 ms (ok)
+keystroke -> echo in grid: p50 0.32 / p95 1.55 / max 8.52 ms (n=28)
+Enter -> output 23 ms
+104-char prompt line at 120 cols; after Term.Resize(60) alone: cut to ' 'segment0-segment1-segment2-segment3-se'
+  0|PS C:\> Write-Output 'latency probe'
+  1|latency probe
+  2|PS C:\> Write-Output 'segment0-segment1-segment2-segment3-se
+  3|
+  4|
+  5|
+  6|
+  7|
+  8|
+  9|
+ 10|
+ 11|
+ 12|
+ 13|
+ 14|
+ 15|
+ 16|
+ 17|
+ 18|
+ 19|
+ 20|
+ 21|
+ 22|
+ 23|
+ 24|
+ 25|
+ 26|
+ 27|
+ 28|
+ 29|
+    cursor col 59 row 2, visible, normal buffer, 60x30
+after Pty.Resize(60): whole command on screen NEVER (cut stays)
+typing after the narrowing continues the command: yes
+  0|PS C:\> Write-Output 'latency probe'
+  1|latency probe
+  2|PS C:\> Write-Output 'segment0-segment1-segment2-segment3-se
+  3|gment4-segment5-segment6-segment7-segment8-'XYZ
+  4|
+  5|
+  6|
+  7|
+  8|
+  9|
+ 10|
+ 11|
+ 12|
+ 13|
+ 14|
+ 15|
+ 16|
+ 17|
+ 18|
+ 19|
+ 20|
+ 21|
+ 22|
+ 23|
+ 24|
+ 25|
+ 26|
+ 27|
+ 28|
+ 29|
+    cursor col 47 row 3, visible, normal buffer, 60x30
+Resize(80,24) call 2.2 ms; shell reports 80x24: yes
+  0|PS C:\> Write-Output 'latency probe'
+  1|latency probe
+  2|PS C:\> Write-Output 'segment0-segment1-segment2-segment3-segment4-segment5-segm
+  3|ent6-segment7-segment8-'XYZ^C
+  4|PS C:\> $Host.UI.RawUI.WindowSize.Width; $Host.UI.RawUI.WindowSize.Height
+  5|80
+  6|24
+  7|
+  8|
+  9|
+ 10|
+ 11|
+ 12|
+ 13|
+ 14|
+ 15|
+ 16|
+ 17|
+ 18|
+ 19|
+ 20|
+ 21|
+ 22|
+ 23|
+    cursor col 0 row 7, visible, normal buffer, 80x24
+reads: 402, 7299 bytes; Write under lock p50 0.00 / p95 0.03 / max 4.91 ms (n=402)

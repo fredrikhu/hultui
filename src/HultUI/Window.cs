@@ -13,7 +13,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI;
 
-public sealed class Window : IOverlayHost, IDisposable
+public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -106,6 +106,9 @@ public sealed class Window : IOverlayHost, IDisposable
     // force the next frame to rebuild+diff the tree — that regenerates the node
     // snapshots (Name, bounds, …) and emits precise property-changed events.
     private bool _a11yPropertyDirty;
+    /// <summary>Announcements made since the last frame, handed to the bridge once the tree
+    /// holding their elements is applied (<see cref="Element.Announce"/>).</summary>
+    private readonly List<(Element Source, string Text, AnnouncementPoliteness Politeness)> _announcements = [];
     // Layout-only changes (resize, scroll) refresh the a11y tree's bounds, but
     // rebuilding the whole snapshot every frame of a drag floods assistive tech
     // and is O(total items) for a virtualized list. These changes are coalesced:
@@ -813,6 +816,14 @@ public sealed class Window : IOverlayHost, IDisposable
             _previousA11yTree = null;
             _a11yLayoutRefreshPending = false;
         }
+        if (_announcements.Count > 0)
+        {
+            // After the rebuild, so an element that announces as it appears has its node.
+            if (a11yActive)
+                foreach (var (source, text, politeness) in _announcements)
+                    _accessibilityBridge.Announce(FindA11yNode(source), text, politeness);
+            _announcements.Clear();
+        }
         _a11yPropertyDirty = false;
         _a11yWasActive = a11yActive;
         // Note: the Children flag is cleared with everything else by
@@ -986,6 +997,17 @@ public sealed class Window : IOverlayHost, IDisposable
         var (overlayTarget, _) = HitTestOverlays(pos);
         return overlayTarget ?? (_root is null ? null : HitTester.HitTest(_root, pos));
     }
+
+    private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key) => new()
+    {
+        Key = key.KeyCode,
+        Modifiers = key.Modifiers,
+        IsRepeat = key.IsRepeat,
+        ScanCode = key.ScanCode,
+        LayoutKey = key.LayoutKey,
+        ModifierKeys = key.ModifierKeys,
+        Text = key.Text,
+    };
 
     private void HandleInputEvent(InputEvent evt)
     {
@@ -1499,7 +1521,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
                     var tabTarget = _focusManager.FocusedElement ?? _root;
-                    var tabEvent = new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat, ScanCode = key.ScanCode };
+                    var tabEvent = NewKeyDown(key);
                     EventDispatcher.Dispatch(tabEvent, tabTarget);
                     if (tabEvent.StopPropagation)
                         break;
@@ -1529,9 +1551,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     // changes the highlight on labels other than the focused one — so the
                     // whole realized group repaints, exactly as it does after a drag.
                     int before = _activeTextGroup?.Version ?? 0;
-                    EventDispatcher.Dispatch(
-                        new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat, ScanCode = key.ScanCode },
-                        target);
+                    EventDispatcher.Dispatch(NewKeyDown(key), target);
                     if (_activeTextGroup is { } keyed && keyed.Version != before)
                         RepaintGroup(keyed);
                 }
@@ -2245,10 +2265,14 @@ public sealed class Window : IOverlayHost, IDisposable
             DismissOnOutsideClick = dismissOnOutsideClick,
             IsHitTestable = hitTestable,
             OnDismissed = onDismissed,
+            FocusBefore = _focusManager.FocusedElement,
         };
 
         // Set overlay host so elements inside the overlay can show/close overlays
         content.OverlayHost = this;
+        // And the window's focus, as the root has it, so Focus() works inside: a dialog's field
+        // can take the keyboard. (Style resolution hands it down to the content's children.)
+        content.FocusManager = _focusManager;
 
         // Resolve style and layout immediately so we can clamp to viewport
         var theme = Application.Theme;
@@ -2277,10 +2301,35 @@ public sealed class Window : IOverlayHost, IDisposable
         {
             if (_overlays[i].Id == handle.Id)
             {
-                _overlays.RemoveAt(i);
+                RemoveOverlayAt(i);
                 _root?.MarkPaintDirty();
                 return;
             }
+        }
+    }
+
+    /// <summary>
+    /// Removes an overlay. If the focus was inside it, it goes back to what had it when the
+    /// overlay opened, while that is still in the window; otherwise nowhere. Left on an element
+    /// that has gone, the keys would go to it and reach nothing.
+    /// </summary>
+    private void RemoveOverlayAt(int index)
+    {
+        var entry = _overlays[index];
+        _overlays.RemoveAt(index);
+        if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
+        _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);
+
+        static Element TopOf(Element element)
+        {
+            while (element.Parent is { } parent) element = parent;
+            return element;
+        }
+
+        bool IsInWindow(Element element)
+        {
+            var top = TopOf(element);
+            return top == _root || _overlays.Exists(o => o.Content == top);
         }
     }
 
@@ -2400,7 +2449,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     _contextSubmenuElement = null;
                 }
                 var dismissed = _overlays[i].OnDismissed;
-                _overlays.RemoveAt(i);
+                RemoveOverlayAt(i);
                 _root?.MarkPaintDirty();
                 dismissed?.Invoke();
             }
@@ -2830,6 +2879,14 @@ public sealed class Window : IOverlayHost, IDisposable
     /// button's name-from-content stay correct) and the diff emits exactly the
     /// property-changed events that platforms forward to assistive tech.
     /// </summary>
+    void IAccessibilityAnnouncer.Announce(Element source, string text, AnnouncementPoliteness politeness)
+    {
+        // Nobody to hear it: nothing is kept for a reader that starts later.
+        if (!_accessibilityBridge.IsActive) return;
+        _announcements.Add((source, text, politeness));
+        _a11yPropertyDirty = true; // a frame, and a tree that holds the element
+    }
+
     private sealed class AccessibilityObserverAdapter(Window window) : IElementPropertyObserver
     {
         public void OnElementPropertyChanged(Element element, string propertyName)

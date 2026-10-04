@@ -273,9 +273,34 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             case AccessibilityProperties.IsSelected:
                 _bus!.EmitStateChanged(path, "selected", change.Node.IsToggled == true);
                 return true;
+            case AccessibilityProperties.Text:
+            {
+                var (deleted, inserted) = AtSpiText.Difference(change.Previous?.Text?.Text ?? "", change.Node.Text?.Text ?? "");
+                if (deleted is { } d) _bus!.EmitTextChanged(path, insert: false, d.Offset, d.Text);
+                if (inserted is { } i) _bus!.EmitTextChanged(path, insert: true, i.Offset, i.Text);
+                return deleted is not null || inserted is not null;
+            }
+            case AccessibilityProperties.TextSelection:
+            {
+                var (before, after) = (change.Previous?.Text, change.Node.Text);
+                if (after is not null && after.Caret >= 0 && before?.Caret != after.Caret)
+                    _bus!.EmitTextCaretMoved(path, after.Caret);
+                if (before?.SelectionStart != after?.SelectionStart || before?.SelectionEnd != after?.SelectionEnd)
+                    _bus!.EmitTextSelectionChanged(path);
+                return true;
+            }
             default:
                 return false;
         }
+    }
+
+    /// <summary>An AT-SPI announcement from the element's object, or the application's.</summary>
+    public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
+    {
+        if (!_registered || _bus is null) return;
+        _bus.EmitAnnouncement(source is null ? AtSpiConstants.RootPath : PathOf(source), text,
+            politeness == AnnouncementPoliteness.Assertive ? AtSpiConstants.LiveAssertive : AtSpiConstants.LivePolite);
+        DebugSignalsEmitted++;
     }
 
     /// <summary>For tests: publishes the snapshot of <paramref name="root"/>, as a rebuild would.</summary>

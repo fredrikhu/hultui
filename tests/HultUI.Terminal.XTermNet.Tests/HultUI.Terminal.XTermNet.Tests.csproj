@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- XTerm.NET's own test suite, compiled from external/XTerm.NET as it is, against the patched
+       engine HultUI builds (src/HultUI.Terminal.XTermNet). A patch that breaks upstream's
+       expectations fails here, not in a user's terminal. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- xUnit1013: upstream's SelectionTests.SelectionText_UsesLineFeedLineEndings is public with
+         no [Fact], so it has never run, upstream either. Vendored files are not edited; a fix
+         would be a patch of its own. -->
+    <NoWarn>$(NoWarn);xUnit1013</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\external\XTerm.NET\src\XTerm.NET.Tests\**\*.cs" />
+    <Using Include="Xunit" />
+    <!-- Read from the working directory as Fixtures/..., which is the output folder under dotnet test. -->
+    <None Include="..\..\external\XTerm.NET\src\XTerm.NET.Tests\Fixtures\**" LinkBase="Fixtures" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI.Terminal.XTermNet\HultUI.Terminal.XTermNet.csproj" />
+  </ItemGroup>
+
+</Project>

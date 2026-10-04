@@ -20,7 +20,14 @@ public abstract record InputEvent
     /// <param name="IsRepeat">The key held down, repeating.</param>
     /// <param name="ScanCode">The physical key as the platform reports it: SDL's scancode, which
     /// is the USB HID usage on the keyboard page. 0 when the platform gave none.</param>
-    public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat, ushort ScanCode = 0) : InputEvent;
+    /// <param name="LayoutKey">The character the key types on the layout; see
+    /// <see cref="KeyDownEvent.LayoutKey"/>. 0 for none, or not known.</param>
+    /// <param name="ModifierKeys">The modifier keys held, left and right apart; see
+    /// <see cref="KeyDownEvent.ModifierKeys"/>.</param>
+    /// <param name="Text">The text this keystroke typed, which the platform sends next as a
+    /// <see cref="TextInputInput"/>; see <see cref="KeyDownEvent.Text"/>. Null when not known.</param>
+    public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat, ushort ScanCode = 0,
+        int LayoutKey = 0, ModifierKeys ModifierKeys = ModifierKeys.None, string? Text = null) : InputEvent;
     public record TextInputInput(string Text) : InputEvent;
     public record TextEditingInput(string Text, int SegmentStart, int SegmentLength) : InputEvent;
     /// <summary>An OS drag entered the window.</summary>

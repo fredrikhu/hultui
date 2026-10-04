@@ -67,7 +67,24 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         _originalWndProc = UiaInterop.SetWindowLongPtr(hwnd, UiaInterop.GWLP_WNDPROC, (IntPtr)proc);
     }
 
-    public bool IsActive => UiaInterop.UiaClientsAreListening();
+    public bool IsActive
+    {
+        get
+        {
+            bool listening = UiaInterop.UiaClientsAreListening();
+            // Content that describes itself only while something listens (a terminal's screen
+            // notices, a web page's tree) reads AccessibilityClients; the Linux bridge reports
+            // there from the bus, and this one from UIA. Polled every frame, told on change.
+            if (listening != _reportedListening)
+            {
+                _reportedListening = listening;
+                AccessibilityClients.Report(listening);
+            }
+            return listening;
+        }
+    }
+
+    private bool _reportedListening;
 
     // Raise UIA events (structure/property/focus changed) so an assistive tech
     // refreshes live as the tree changes. This used to fast-fail on the
@@ -451,6 +468,32 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         finally { Marshal.Release(prov); }
     }
 
+    /// <summary>
+    /// A UIA notification (seam A2): the reader speaks the text without moving. From the
+    /// announcing element's node, or the window's root when it has none. Polite queues behind
+    /// what the reader is saying; assertive is "important", spoken at once.
+    /// </summary>
+    public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
+    {
+        if (!RaiseEvents) return;
+        IntPtr provider = source is not null ? NativeFragmentSimple(source.ElementId) : IntPtr.Zero;
+        if (provider == IntPtr.Zero) provider = NativeRootSimple();
+        if (provider == IntPtr.Zero) return;
+        try
+        {
+            UiaInterop.RaiseNotification(provider, UiaInterop.NotificationKind_Other,
+                politeness == AnnouncementPoliteness.Assertive
+                    ? UiaInterop.NotificationProcessing_ImportantAll
+                    : UiaInterop.NotificationProcessing_All,
+                text, NotificationActivity);
+        }
+        finally { Marshal.Release(provider); }
+    }
+
+    /// <summary>What a reader is told the announcements are: one kind, so it can treat a run of
+    /// them alike.</summary>
+    private const string NotificationActivity = "HultUI.Announcement";
+
     private void RaiseStructureChanged(ElementId? parentId, int changeType)
     {
         if (!RaiseEvents) return;
@@ -463,6 +506,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     private void RaisePropertyChanged(UiaFragment wrapper, string propertyName)
     {
         if (!RaiseEvents) return;
+        if (propertyName is AccessibilityProperties.Text or AccessibilityProperties.TextSelection)
+        {
+            // Events, not property changes: a reader re-reads the text, or reads at the caret.
+            IntPtr source = NativeFragmentSimple(wrapper.ElementId);
+            if (source == IntPtr.Zero) return;
+            try
+            {
+                UiaInterop.UiaRaiseAutomationEvent(source, propertyName == AccessibilityProperties.Text
+                    ? UiaInterop.UIA_Text_TextChangedEventId : UiaInterop.UIA_Text_TextSelectionChangedEventId);
+            }
+            finally { Marshal.Release(source); }
+            return;
+        }
         if (propertyName == AccessibilityProperties.NativeContent)
         {
             // A foreign tree came or went. Its window moves between the window root and the
@@ -542,6 +598,17 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     }
 
     // ── Actions routed back to the app ──
+
+    /// <summary>A node's text as it is now (seam A1), or null when it has none.</summary>
+    internal AccessibleText? GetText(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Text : null;
+
+    /// <summary>A node's box in layout units, scroll applied.</summary>
+    internal bool TryGetBounds(ElementId id, out Rect bounds)
+    {
+        bool found = _wrappers.TryGetValue(id, out var w);
+        bounds = found ? w!.Bounds : default;
+        return found;
+    }
 
     internal void InvokeElement(ElementId id) => _host.InvokeElement(id);
     internal void ToggleElement(ElementId id) => _host.ToggleElement(id);

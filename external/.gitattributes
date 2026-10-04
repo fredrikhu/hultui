@@ -1,0 +1,8 @@
+# The vendored tree is stored byte for byte as upstream has it. The root's `text=auto eol=lf`
+# would otherwise convert any CRLF file upstream adds, and vendor-xterm-net.ps1 -Verify compares
+# bytes: one converted file would fail it on every machine. (Upstream is LF today, except
+# src/XTerm.NET/Common/Charsets.cs, which carries CR bytes git already treats as binary.)
+XTerm.NET/** -text
+
+# The patches are git mail; leave their bytes alone too.
+XTerm.NET.patches/*.patch -text

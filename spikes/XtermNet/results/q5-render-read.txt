@@ -1,0 +1,5 @@
+copy viewport out (200x60 cells, indexer per cell):     12.6 us/frame         0 B alloc/frame
+walk into styled runs, CodePoint + cluster table:      21.0 us/frame         0 B alloc/frame  (635 runs)
+walk into styled runs, cell.Content strings:           43.3 us/frame         0 B alloc/frame  (635 runs)
+hash every row (dirty detection):                      53.1 us/frame         0 B alloc/frame
+hash sees: a character -> rows [9]; a colour -> rows [19]; a scroll -> 60 of 60 rows moved, 60 of them found in a cache keyed by content

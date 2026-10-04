@@ -1,0 +1,87 @@
+From 10d6d13268509d63376efaf4c4e22651a675b4a3 Mon Sep 17 00:00:00 2001
+From: Fredrik Hult <fredrik.hult@outlook.com>
+Date: Sat, 3 Oct 2026 20:28:17 +0200
+Subject: [PATCH 1/5] A width change reuses each line's cell array instead of
+ reallocating it
+
+BufferLine.Resize allocated and copied a new array for every line of the buffer on every width
+change, in both directions: 48 MB of garbage per one-column change at 10 000 lines x 200
+columns, and 25 ms per resize, which is a window drag dropping frames. The array is now a
+capacity: narrowing moves the length, widening within the capacity fills only the uncovered
+columns, and the array is reallocated only to grow or when it is more than twice what the line
+needs (xterm.js's rule). CopyFrom reuses a large-enough array, and the enumerator yields the
+line rather than the whole array.
+
+Measured with the same harness: 25 ms -> 3.6 ms per one-column change at 10 000 x 200 with
+wrapping text, 22 ms -> 0.26 ms with short lines.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/XTerm.NET/Buffer/BufferLine.cs | 34 ++++++++++++++----------------
+ 1 file changed, 16 insertions(+), 18 deletions(-)
+
+diff --git a/src/XTerm.NET/Buffer/BufferLine.cs b/src/XTerm.NET/Buffer/BufferLine.cs
+index a4d8345..f433b45 100644
+--- a/src/XTerm.NET/Buffer/BufferLine.cs
++++ b/src/XTerm.NET/Buffer/BufferLine.cs
+@@ -264,22 +264,21 @@ public class BufferLine : IEnumerable<BufferCell>
+ 
+         var oldLength = _length;
+ 
+-        if (cols > _length)
++        // The array is a capacity, not the line. A width change used to allocate and copy a new
++        // array for EVERY line of the scrollback in both directions -- 48 MB of garbage per
++        // one-column change at 10 000 lines x 200 columns, which is what made a window drag cost
++        // 25 ms a frame. Narrowing now only moves _length; widening back within the capacity only
++        // fills the columns it uncovers. The array is reallocated when it has to grow, and given
++        // back when it is more than twice what the line needs (xterm.js's rule), so a terminal
++        // narrowed for good does not keep its widest arrays forever.
++        if (cols > _cells.Length || cols * 2 < _cells.Length)
+         {
+             var newCells = new BufferCell[cols];
+-            Array.Copy(_cells, newCells, _length);
+-            for (int i = _length; i < cols; i++)
+-            {
+-                newCells[i] = fillCell;
+-            }
+-            _cells = newCells;
+-        }
+-        else
+-        {
+-            var newCells = new BufferCell[cols];
+-            Array.Copy(_cells, newCells, cols);
++            Array.Copy(_cells, newCells, Math.Min(_length, cols));
+             _cells = newCells;
+         }
++        if (cols > _length)
++            _cells.AsSpan(_length, cols - _length).Fill(fillCell);
+         Cache = null;
+         _length = cols;
+ 
+@@ -1124,7 +1123,8 @@ public class BufferLine : IEnumerable<BufferCell>
+     {
+         if (_length != line._length)
+         {
+-            _cells = new BufferCell[line._length];
++            if (_cells.Length < line._length)
++                _cells = new BufferCell[line._length];
+             _length = line._length;
+         }
+ 
+@@ -1154,13 +1154,11 @@ public class BufferLine : IEnumerable<BufferCell>
+         this.Cache = line.Cache;
+     }
+ 
++    // The line's cells, not the array's: past _length the array holds whatever a narrowing left.
+     public IEnumerator<BufferCell> GetEnumerator()
+     {
+-        return _cells.AsEnumerable().GetEnumerator();
++        return new ArraySegment<BufferCell>(_cells, 0, _length).GetEnumerator();
+     }
+ 
+-    IEnumerator IEnumerable.GetEnumerator()
+-    {
+-        return _cells.GetEnumerator();
+-    }
++    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+ }

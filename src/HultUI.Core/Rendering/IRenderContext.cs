@@ -74,6 +74,20 @@ public interface IRenderContext
     /// </summary>
     IReadOnlyList<TextLineBox> LayoutTextLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines);
 
+    /// <summary>
+    /// The metrics of the font <paramref name="style"/> names, read from the font DrawText draws
+    /// with (<see cref="IMeasureContext.MeasureFont"/>). The default estimates them from a
+    /// measured <c>"0"</c>.
+    /// </summary>
+    FontMetrics MeasureFont(ResolvedInheritedStyle style)
+        => FontMetrics.Estimate(style, MeasureText("0", style));
+
+    /// <summary>
+    /// Whether the face <paramref name="style"/> resolves to has its own glyph for
+    /// <paramref name="codePoint"/> (<see cref="IMeasureContext.HasGlyph"/>). The default says yes.
+    /// </summary>
+    bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => true;
+
     // ── Offset ↔ x mapping for one line of text (docs/plans/14-bidi.md, stage 2) ──
     //
     // Editable and selectable text needs three things from a laid-out line: where

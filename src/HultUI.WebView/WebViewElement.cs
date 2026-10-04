@@ -334,7 +334,7 @@ public partial class WebViewElement : Element, IAccessibleContentSource
         // page's.
         if (WebKeys.IsShortcut(e.Key, e.Modifiers) && Parent is { } parent)
         {
-            var offered = new KeyDownEvent { Key = e.Key, Modifiers = e.Modifiers, IsRepeat = e.IsRepeat, ScanCode = e.ScanCode };
+            var offered = e.CopyUnhandled();
             EventDispatcher.Dispatch(offered, parent);
             if (offered.StopPropagation || offered.Handled)
             {

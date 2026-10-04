@@ -44,10 +44,15 @@ internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, Eleme
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeValue
+internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId, bool readOnly = false)
+    : INativeValue
 {
+    /// <summary>UIA_E_ELEMENTNOTENABLED: what SetValue on a read-only value answers.</summary>
+    private const int ElementNotEnabled = unchecked((int)0x80040200);
+
     public int SetValue(IntPtr pwsz)
     {
+        if (readOnly) return ElementNotEnabled;
         bridge.SetValue(elementId, Marshal.PtrToStringUni(pwsz) ?? "");
         return 0;
     }
@@ -60,7 +65,7 @@ internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, Elemen
 
     public int GetIsReadOnly(out int pRetVal)
     {
-        pRetVal = 0; // VARIANT_FALSE
+        pRetVal = readOnly ? 1 : 0;
         return 0;
     }
 }

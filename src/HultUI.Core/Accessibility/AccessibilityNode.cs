@@ -54,6 +54,20 @@ public sealed class AccessibilityNode
     /// </summary>
     public NativeAccessibleContent NativeContent { get; internal set; }
 
+    /// <summary>
+    /// The text a reader can move through (UIA's text pattern, AT-SPI's Text), as it was when
+    /// this tree was built; null for an element that offers none. The differ compares it to
+    /// tell bridges the text, caret or selection changed.
+    /// </summary>
+    public AccessibleText? Text { get; internal set; }
+
+    /// <summary>Where a bridge reads the text as it is now, from its own thread, between
+    /// rebuilds; null with <see cref="Text"/>.</summary>
+    public IAccessibleTextSource? TextSource { get; internal set; }
+
+    /// <summary>The text now: the source's, or the snapshot this tree was built with.</summary>
+    public AccessibleText? CurrentText => TextSource?.AccessibleText ?? Text;
+
     private readonly List<AccessibilityNode> _children = [];
 
     internal AccessibilityNode(

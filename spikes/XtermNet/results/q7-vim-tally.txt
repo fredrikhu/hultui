@@ -1,0 +1,2 @@
+out-of-band ConPTY 1.24: first keystroke after resize arrives — bare ESC 8/10, win32-input ESC 10/10
+in-box ConPTY: first keystroke after resize arrives — bare ESC 10/10, win32-input ESC 10/10

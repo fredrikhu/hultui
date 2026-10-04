@@ -70,6 +70,25 @@ public static class TextMeasure
         MeasureWidth(text, StyleFor(fontSize, fontFamily, fontWeight));
 
     /// <summary>
+    /// The metrics of the font <paramref name="style"/> names (<see cref="IMeasureContext.MeasureFont"/>):
+    /// the cell size of a monospace grid, the baseline, where an underline goes. Null when no
+    /// context is installed.
+    /// </summary>
+    public static FontMetrics? MeasureFont(ResolvedInheritedStyle style) => Context?.MeasureFont(style);
+
+    /// <summary>The metrics of a font at a size, without building a full style.</summary>
+    public static FontMetrics? MeasureFont(float fontSize, string fontFamily = FontFamilies.SansSerif,
+        FontWeight fontWeight = FontWeight.Regular) =>
+        MeasureFont(StyleFor(fontSize, fontFamily, fontWeight));
+
+    /// <summary>
+    /// Whether the face <paramref name="style"/> resolves to has its own glyph for
+    /// <paramref name="codePoint"/> (<see cref="IMeasureContext.HasGlyph"/>). Null when no context
+    /// is installed.
+    /// </summary>
+    public static bool? HasGlyph(ResolvedInheritedStyle style, int codePoint) => Context?.HasGlyph(style, codePoint);
+
+    /// <summary>
     /// Builds a minimal <see cref="ResolvedInheritedStyle"/> for measurement from a
     /// font size/family/weight, using the resolver defaults for the rest.
     /// </summary>

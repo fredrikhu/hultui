@@ -149,6 +149,21 @@ public class TimePickerTests
         Assert.Equal(new TimeOnly(14, 30), picker.Value);
     }
 
+    [Fact]
+    public void TheKeypadsDigitsType_WhileNumLockIsOn()
+    {
+        using var session = HeadlessSession.Create();
+        var picker = Mount(session);
+
+        foreach (var key in new[] { KeyCode.Numpad1, KeyCode.Numpad4, KeyCode.Numpad3, KeyCode.Numpad0 })
+            session.Window.PressKey(key, KeyModifiers.NumLock);
+        Assert.Equal(new TimeOnly(14, 30), picker.Value);
+
+        // With it off they are Home, Up and so on, and type nothing.
+        session.Window.PressKey(KeyCode.Numpad9);
+        Assert.Equal(new TimeOnly(14, 30), picker.Value);
+    }
+
     /// <summary>A digit that cannot start a two-digit hour is the whole hour, and the
     /// field moves on by itself — 5 can only ever mean 05.</summary>
     [Fact]

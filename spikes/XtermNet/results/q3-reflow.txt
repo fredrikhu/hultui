@@ -1,0 +1,15 @@
+PASS  narrow re-wraps a long line, widen rejoins it                at 40 cols: 5 rows; text intact narrow=True wide=True; rows used at 80: 4
+FAIL  the cursor's own line is reflowed (xterm.js: no, it is cut)  cursor 80:(25, 1) 50:(25, 1); x kept at 50 cols: 70 of 100
+PASS  wide char at the wrap point, cursor elsewhere                row0[79] ' ' w1; row1 '東東'
+FAIL  wide char at the wrap point, cursor on that line             row0[79] '東' w2 (line length 80)
+PASS  scrollback reflows, nothing lost                             0 of 500 lines missing after 120 -> 60 -> 120
+PASS  alternate screen is not reflowed (vim redraws itself)        row0 at 40 cols: 40 chars, row1 'yyyyyyyyyyyyyyyyyyyy'
+PASS  row-only resize keeps content and pulls scrollback down      top row after 10 -> 20 rows: 'line 11' YBase=11
+5/7 passed
+
+resize cost (window drag: width -1/+1 and height -1/+1 alternating; p50 / p95 / max over 200 resizes each)
+  120 cols,    1000 scrollback, prose: width    0.48 /    3.49 /   13.27 ms;  height   0.01 /   0.01 /   0.29 ms;  to 60 cols    1.3 ms, back    0.4 ms
+  120 cols,   10000 scrollback, prose: width   13.74 /   22.72 /   28.36 ms;  height   0.02 /   0.03 /   3.68 ms;  to 60 cols   10.5 ms, back   22.9 ms
+  200 cols,   10000 scrollback, prose: width   24.85 /   34.13 /   36.22 ms;  height   0.02 /   0.02 /   2.95 ms;  to 100 cols   18.8 ms, back   26.3 ms
+  200 cols,   10000 scrollback, short: width   22.22 /   29.58 /   44.37 ms;  height   0.02 /   0.03 /   4.13 ms;  to 100 cols    9.8 ms, back    6.2 ms
+  200 cols,  100000 scrollback, prose: width  234.59 /  303.79 /  440.42 ms;  height   0.48 /   0.73 /   2.50 ms;  to 100 cols  333.9 ms, back  310.5 ms

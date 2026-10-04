@@ -174,8 +174,20 @@ public sealed partial class HeadlessWindow
     /// <param name="modifiers">The modifiers held with it.</param>
     /// <param name="repeat">The key held down, repeating.</param>
     /// <param name="scanCode">The physical key, as SDL would report it (the USB HID usage); 0 for none.</param>
-    public void KeyDown(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, bool repeat = false, ushort scanCode = 0)
-        => _platform.RaiseInput(new InputEvent.KeyInput(key, modifiers, IsDown: true, IsRepeat: repeat, ScanCode: scanCode));
+    /// <param name="layoutKey">The character the key types on the layout
+    /// (<see cref="KeyDownEvent.LayoutKey"/>); 0 for none, or not known.</param>
+    /// <param name="modifierKeys">The modifier keys held, left and right apart
+    /// (<see cref="KeyDownEvent.ModifierKeys"/>).</param>
+    /// <param name="text">The text the keystroke types (<see cref="KeyDownEvent.Text"/>). When it
+    /// is not empty it is also sent after the key, as text input, the way SDL does; null leaves
+    /// it unknown and sends no text.</param>
+    public void KeyDown(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, bool repeat = false, ushort scanCode = 0,
+        int layoutKey = 0, ModifierKeys modifierKeys = ModifierKeys.None, string? text = null)
+    {
+        _platform.RaiseInput(new InputEvent.KeyInput(key, modifiers, IsDown: true, IsRepeat: repeat, ScanCode: scanCode,
+            LayoutKey: layoutKey, ModifierKeys: modifierKeys, Text: text));
+        if (!string.IsNullOrEmpty(text)) _platform.RaiseInput(new InputEvent.TextInputInput(text));
+    }
 
     /// <summary>A key released.</summary>
     /// <param name="key">The key.</param>
@@ -184,11 +196,12 @@ public sealed partial class HeadlessWindow
     public void KeyUp(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, ushort scanCode = 0)
         => _platform.RaiseInput(new InputEvent.KeyInput(key, modifiers, IsDown: false, IsRepeat: false, ScanCode: scanCode));
 
-    /// <summary>Press and release.</summary>
-    public void PressKey(KeyCode key, KeyModifiers modifiers = KeyModifiers.None)
+    /// <summary>Press and release. The optional values are <see cref="KeyDown"/>'s.</summary>
+    public void PressKey(KeyCode key, KeyModifiers modifiers = KeyModifiers.None,
+        int layoutKey = 0, ModifierKeys modifierKeys = ModifierKeys.None, string? text = null, ushort scanCode = 0)
     {
-        KeyDown(key, modifiers);
-        KeyUp(key, modifiers);
+        KeyDown(key, modifiers, scanCode: scanCode, layoutKey: layoutKey, modifierKeys: modifierKeys, text: text);
+        KeyUp(key, modifiers, scanCode);
     }
 
     /// <summary>

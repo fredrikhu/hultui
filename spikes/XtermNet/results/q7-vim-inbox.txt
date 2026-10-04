@@ -1,0 +1,36 @@
+--- inbox run 1
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: inbox
+── vim (Git for Windows), Escape sent as a bare ESC byte ──
+terminal's Win32InputMode (ConPTY sent ?9001h): True; Escape -> insert mode left after 63 ms
+:echo before the resize answered: yes
+after Resize(80,20): last row repainted after 0 ms; :echo &columns &lines answered '80 20': yes
+:wq -> exit code 0 (144 ms); file says 'hello from vim'; alternate buffer after: False
+── vim (Git for Windows), Escape sent as win32-input-mode key events ──
+terminal's Win32InputMode (ConPTY sent ?9001h): True; Escape -> insert mode left after 60 ms
+:echo before the resize answered: yes
+after Resize(80,20): last row repainted after 0 ms; :echo &columns &lines answered '80 20': yes
+:wq -> exit code 0 (142 ms); file says 'hello from vim'; alternate buffer after: False
+--- inbox run 2
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: inbox
+── vim (Git for Windows), Escape sent as a bare ESC byte ──
+terminal's Win32InputMode (ConPTY sent ?9001h): True; Escape -> insert mode left after 62 ms
+:echo before the resize answered: yes
+after Resize(80,20): last row repainted after 0 ms; :echo &columns &lines answered '80 20': yes
+:wq -> exit code 0 (143 ms); file says 'hello from vim'; alternate buffer after: False
+── vim (Git for Windows), Escape sent as win32-input-mode key events ──
+terminal's Win32InputMode (ConPTY sent ?9001h): True; Escape -> insert mode left after 62 ms
+:echo before the resize answered: yes
+after Resize(80,20): last row repainted after 0 ms; :echo &columns &lines answered '80 20': yes
+:wq -> exit code 0 (174 ms); file says 'hello from vim'; alternate buffer after: False
+--- inbox run 3
+OS Microsoft Windows NT 10.0.26200.0, ConPTY implementation: inbox
+── vim (Git for Windows), Escape sent as a bare ESC byte ──
+terminal's Win32InputMode (ConPTY sent ?9001h): True; Escape -> insert mode left after 63 ms
+:echo before the resize answered: yes
+after Resize(80,20): last row repainted after 0 ms; :echo &columns &lines answered '80 20': yes
+:wq -> exit code 0 (188 ms); file says 'hello from vim'; alternate buffer after: False
+── vim (Git for Windows), Escape sent as win32-input-mode key events ──
+terminal's Win32InputMode (ConPTY sent ?9001h): True; Escape -> insert mode left after 63 ms
+:echo before the resize answered: yes
+after Resize(80,20): last row repainted after 0 ms; :echo &columns &lines answered '80 20': yes
+:wq -> exit code 0 (173 ms); file says 'hello from vim'; alternate buffer after: False

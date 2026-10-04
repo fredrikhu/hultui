@@ -1,5 +1,6 @@
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
 namespace HultUI.Text;
@@ -58,6 +59,36 @@ public sealed class TextPipeline
         _fonts = fonts;
         _shaper = shaper;
     }
+
+    /// <summary>
+    /// The metrics of the face <paramref name="style"/> resolves to, at its size. The vertical
+    /// metrics are the ones a line of that face is laid out with; the character width is the
+    /// shaped advance of <c>"0"</c>, so a grid that steps by it stays on the glyphs this pipeline
+    /// draws. Decoration lines the font does not give fall back to the renderer's estimates.
+    /// </summary>
+    public FontMetrics MeasureFont(ResolvedInheritedStyle style)
+    {
+        var font = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
+        float size = style.FontSize;
+        var zero = Layout("0", style, float.PositiveInfinity, 1);
+        var estimate = FontMetrics.Estimate(style, zero.Size);
+        return new FontMetrics(
+            FamilyName: font.FamilyName,
+            Ascent: MathF.Abs(font.Ascent) * size,
+            Descent: font.Descent * size,
+            LineGap: font.Leading * size,
+            CharacterWidth: zero.Size.Width,
+            IsFixedPitch: font.IsFixedPitch,
+            UnderlinePosition: font.Underline is { } u ? u.Position * size : estimate.UnderlinePosition,
+            UnderlineThickness: font.Underline is { } ut && ut.Thickness > 0 ? ut.Thickness * size : estimate.UnderlineThickness,
+            StrikeoutPosition: font.Strikeout is { } s ? s.Position * size : estimate.StrikeoutPosition,
+            StrikeoutThickness: font.Strikeout is { } st && st.Thickness > 0 ? st.Thickness * size : estimate.StrikeoutThickness);
+    }
+
+    /// <summary>Whether the face <paramref name="style"/> resolves to has its own glyph for
+    /// <paramref name="codePoint"/>: true means no fallback font draws it.</summary>
+    public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) =>
+        _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant).HasGlyph(codePoint);
 
     // ── The paragraph's CJK context ──
     //

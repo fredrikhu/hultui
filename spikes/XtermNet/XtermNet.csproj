@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Spike for an embedded terminal (HultUI.Terminal), deliberately not in HultUI.slnx: a
+       throwaway that answers whether XTerm.NET, fed by Porta.Pty, is the engine a HultUI terminal
+       element can be built on. A console program; HultUI.Core is referenced only for the key
+       types question 6 maps from (it has no dependencies, so the AOT publish stays small). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>XtermNet</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Question 1: the framework builds with zero IL2xxx/IL3xxx warnings, so whatever this
+         pulls in has to as well. The analyzers run on build; `dotnet publish -p:PublishAot=true`
+         runs the real thing. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- The proposed upstream fixes (patches/) are measured by building against a local XTerm.NET
+       checkout with them applied, beside the package build rather than over it:
+         dotnet build spikes/XtermNet -c Release -p:XtermNetSource=<checkout>
+       which Directory.Build.props sends to bin\patched\. Both builds' output folders are
+       excluded from compilation, so neither picks up the other's generated sources. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(XtermNetSource)' == ''">
+    <PackageReference Include="XTerm.NET" Version="2.0.2" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(XtermNetSource)' != ''">
+    <ProjectReference Include="$(XtermNetSource)\src\XTerm.NET\XTerm.NET.csproj" />
+  </ItemGroup>
+  <!-- XTERM_PATCHED turns on what only the patched engine has (TerminalOptions.ReflowCursorLine),
+       so the same checks run against both builds. -->
+  <PropertyGroup Condition="'$(XtermNetSource)' != ''">
+    <DefineConstants>$(DefineConstants);XTERM_PATCHED</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Porta.Pty" Version="2.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI.Core\HultUI.Core.csproj" />
+  </ItemGroup>
+
+</Project>

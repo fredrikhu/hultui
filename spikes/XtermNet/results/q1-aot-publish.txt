@@ -1,0 +1,11 @@
+dotnet publish -c Release -r win-x64 -p:PublishAot=true (MSVC 14.51, vcvars64 + vswhere on PATH), from a clean obj
+XtermNet -> C:\Users\fredr\source\repos\fredrikhu\hului-revamped\.claude\worktrees\terminal-spike\spikes\XtermNet\bin\x64\Release\net10.0\win-x64\XtermNet.dll
+Generating native code
+XtermNet -> C:\Users\fredr\source\repos\fredrikhu\hului-revamped\.claude\worktrees\terminal-spike\spikes\XtermNet\bin\aot\
+IL2xxx/IL3xxx warnings: 0
+published files (no .pdb):
+  conpty.dll                   107,3 KB
+  HultUI.Core.xml              531,6 KB
+  XtermNet.exe               3 761,5 KB
+  arm64\OpenConsole.exe      1 093,8 KB
+  x64\OpenConsole.exe        1 041,3 KB

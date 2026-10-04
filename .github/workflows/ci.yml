@@ -30,6 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # external/XTerm.NET must be exactly upstream at the pinned commit plus
+      # external/XTerm.NET.patches (docs/design/TERMINAL.md). A hand edit there would be lost at
+      # the next update, so it fails here instead. On this job because it needs pwsh and git,
+      # which the Linux runner is not set up with; it fetches one upstream commit, shallow.
+      - name: Verify the vendored XTerm.NET
+        shell: pwsh
+        run: ./scripts/vendor-xterm-net.ps1 -Verify
+
       - name: Build solution
         run: dotnet build HultUI.slnx -c Release
 

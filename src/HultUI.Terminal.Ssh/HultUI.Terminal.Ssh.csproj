@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A shell on another machine over SSH, as a HultUI.Terminal connection, through SSH.NET (MIT)
+    and SshNet.Agent (MIT) for the user's SSH agent. Managed code only, no natives. Host keys are
+    checked against OpenSSH's known_hosts, shared with ssh itself; nothing is trusted without a
+    decision. See docs/design/TERMINAL.md, "SSH".
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Terminal.Ssh</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI terminal connection to a shell over SSH, through SSH.NET: host keys checked against OpenSSH's known_hosts, password, key file, agent and keyboard-interactive sign-in, and the remote exit code. NativeAOT-compatible.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Terminal.Ssh.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Terminal\HultUI.Terminal.csproj" />
+    <!-- Exact: the exit code is read from an internal of this version (SshExitStatus.cs), and
+         its test fails on a version that moved it. -->
+    <PackageReference Include="SSH.NET" Version="[2026.0.0]" />
+    <PackageReference Include="SshNet.Agent" Version="2026.0.0" />
+  </ItemGroup>
+
+</Project>

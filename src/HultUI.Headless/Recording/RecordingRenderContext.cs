@@ -122,6 +122,17 @@ public sealed class RecordingRenderContext : IRenderContext
         _inner.DrawImage(source, destRect, fit);
     }
 
+    // The interface's default draws the whole image with Fill: without this the recorded call
+    // lost its source rectangle, and so did the pixels drawn under recording.
+    public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect)
+    {
+        Record("DrawImage",
+            $"{Fmt(destRect)} source={Fmt(sourceRect)} intrinsic={F(source.IntrinsicSize.Width)}x{F(source.IntrinsicSize.Height)}"
+            + (source is IPixelImageSource frames ? $" version={frames.Version}" : "")
+            + (source.IsLoaded ? "" : " (not loaded)"));
+        _inner.DrawImage(source, destRect, sourceRect);
+    }
+
     // ──── Text ────
 
     public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines)
@@ -160,6 +171,10 @@ public sealed class RecordingRenderContext : IRenderContext
     public IReadOnlyList<TextLineBox> LayoutTextLines(string text, ResolvedInheritedStyle style,
         float maxWidth, int? maxLines)
         => _inner.LayoutTextLines(text, style, maxWidth, maxLines);
+
+    public FontMetrics MeasureFont(ResolvedInheritedStyle style) => _inner.MeasureFont(style);
+
+    public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => _inner.HasGlyph(style, codePoint);
 
     // ──── State stack ────
     // Each push records at the current depth then indents; Pop outdents first,

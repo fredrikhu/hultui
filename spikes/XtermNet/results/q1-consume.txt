@@ -1,0 +1,26 @@
+loaded  Porta.Pty                    2.2.3+0186b604bf40161f199823fe5cdb2dfa02c37bea
+loaded  XTerm.NET                    2.0.2+b2d78f89b58b495a82628f9630c7d5745b093305
+loaded  XtermNet                     0.1.0-preview+17882eef3233c7474e880c7469cfa97b452142f9
+
+sizeof(BufferCell)    24 B
+sizeof(AttributeData) 12 B
+BufferCell has references: False
+ConPTY implementation: oob
+
+output directory C:\Users\fredr\source\repos\fredrikhu\hului-revamped\.claude\worktrees\terminal-spike\spikes\XtermNet\bin\Release\net10.0\
+  HultUI.Core.dll                                                  543.0 KB
+  HultUI.Core.xml                                                  531.6 KB
+  Porta.Pty.dll                                                     79.5 KB
+  XTerm.NET.dll                                                    301.5 KB
+  XtermNet.dll                                                      85.5 KB
+  XtermNet.exe                                                     158.5 KB
+  runtimes\linux-arm64\native\libporta_pty.so                       70.5 KB
+  runtimes\linux-x64\native\libporta_pty.so                         13.8 KB
+  runtimes\osx-arm64\native\libporta_pty.dylib                      50.4 KB
+  runtimes\osx-x64\native\libporta_pty.dylib                        17.9 KB
+  runtimes\win-arm64\native\arm64\OpenConsole.exe                 1093.8 KB
+  runtimes\win-arm64\native\conpty.dll                             103.8 KB
+  runtimes\win-x64\native\conpty.dll                               107.3 KB
+  runtimes\win-x64\native\x64\OpenConsole.exe                     1041.3 KB
+  runtimes\win-x86\native\conpty.dll                                85.8 KB
+  total 4.18 MB

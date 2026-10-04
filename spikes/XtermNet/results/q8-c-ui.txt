@@ -1,0 +1,2 @@
+paste: 1048604 bytes, 10487 lines ending in END
+c) UI thread writes synchronously: blocked 901 ms; child saw END after 1118 ms

@@ -41,6 +41,17 @@ internal sealed class AtSpiAccessible
     public bool Selected { get; init; }
     public bool? Toggled { get; init; }
 
+    /// <summary>The text a reader moves through (seam A1), as when the tree was built, and where
+    /// to read it now; both null for an object with none.</summary>
+    public AccessibleText? Text { get; init; }
+    public IAccessibleTextSource? TextSource { get; init; }
+
+    /// <summary>The text now: the source's, read on the bus thread, or the built snapshot.</summary>
+    public AccessibleText? CurrentText => TextSource?.AccessibleText ?? Text;
+
+    /// <summary>Device pixels per layout unit, for the text's geometry.</summary>
+    public float Scale { get; init; } = 1f;
+
     public string ParentPath { get; init; } = AtSpiConstants.NullPath;
     public int IndexInParent { get; init; } = -1;
     public IReadOnlyList<string> ChildPaths { get; init; } = [];
@@ -72,7 +83,9 @@ internal sealed class AtSpiAccessible
             };
             if (IsRoot) list.Add(AtSpiConstants.ApplicationInterface);
             if (HasAction) list.Add(AtSpiConstants.ActionInterface);
-            if (Value is not null) list.Add(AtSpiConstants.ValueInterface);
+            // Not Value for a string value: AT-SPI's Value is a number (a slider's), and it was
+            // advertised here with no handler behind it, so a client asking got UnknownMethod.
+            if (Text is not null || TextSource is not null) list.Add(AtSpiConstants.TextInterface);
             return [.. list];
         }
     }
@@ -124,6 +137,9 @@ internal sealed class AtSpiAccessible
             Selected = node.IsToggled == true &&
                 node.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab,
             Toggled = node.IsToggled,
+            Text = node.Text,
+            TextSource = node.TextSource,
+            Scale = scale,
             ParentPath = parentPath,
             IndexInParent = indexInParent,
             ChildPaths = childPaths,
