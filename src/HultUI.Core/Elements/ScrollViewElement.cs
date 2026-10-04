@@ -67,6 +67,19 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     public bool MiddleClickAutoScroll { get; set; } = true;
 
     /// <summary>
+    /// Whether a vertical wheel scrolls this view sideways when it cannot use the wheel
+    /// vertically itself — the way a list in Windows' list mode moves through its columns.
+    /// On for <see cref="Builders.ScrollView.Horizontal"/>: without it a mouse with no tilt
+    /// wheel can only reach the rest of a horizontal view with Shift held.
+    ///
+    /// <para>It defers to the page. While a scroll view around this one can still move the
+    /// way the wheel turned, the wheel is left to it, so a horizontal strip inside a scrolling
+    /// page does not trap the wheel on its way down the page. Only when nothing around can — a
+    /// strip that fills its pane, or a page already at its end — does the strip take it.</para>
+    /// </summary>
+    public bool VerticalWheelScrollsSideways { get; set; }
+
+    /// <summary>
     /// Who really scrolls this view's content sideways, when it is not the view itself.
     ///
     /// <para>A virtualized list pins its content width to the viewport, so its own
@@ -110,22 +123,43 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         if (dy != 0) ScrollOffsetY = beforeY - dy;
         bool movedY = _scrollOffsetY != beforeY;
 
-        // Sideways goes to whoever really scrolls it, as the autoscroll's does (see ScrollBy),
-        // and last, for the same reason: a pan rebuilds its owner from inside the call.
-        bool movedX = false;
-        if (dx != 0)
+        // A vertical wheel this view had no use for goes sideways, when it is that kind of
+        // view and nothing around it wants the wheel vertically. The motion it then uses is
+        // the vertical one, so that is the axis reported used.
+        if (dy != 0 && !movedY && dx == 0 && VerticalWheelScrollsSideways && !AncestorCanScrollVertically(dy))
         {
-            if (SidewaysScroller is { } sideways)
-                movedX = sideways.ScrollSidewaysBy(-dx);
-            else
-            {
-                float beforeX = _scrollOffsetX;
-                ScrollOffsetX = beforeX - dx;
-                movedX = _scrollOffsetX != beforeX;
-            }
+            movedY = ScrollSideways(dy);
+            dy = 0;
         }
 
+        // Sideways goes to whoever really scrolls it, as the autoscroll's does (see ScrollBy),
+        // and last, for the same reason: a pan rebuilds its owner from inside the call.
+        bool movedX = dx != 0 && ScrollSideways(dx);
+
         evt.Consume(this, movedX, movedY);
+    }
+
+    /// <summary>Moves the content sideways by a wheel's <paramref name="delta"/> (positive is
+    /// back towards the start, as a wheel turned up is), through <see cref="SidewaysScroller"/>
+    /// when one is set. True when something moved.</summary>
+    private bool ScrollSideways(float delta)
+    {
+        if (SidewaysScroller is { } sideways)
+            return sideways.ScrollSidewaysBy(-delta);
+        float before = _scrollOffsetX;
+        ScrollOffsetX = before - delta;
+        return _scrollOffsetX != before;
+    }
+
+    /// <summary>Whether a scroll view around this one could move vertically by a wheel's
+    /// <paramref name="delta"/> — in which case the vertical wheel is that view's, not ours to
+    /// turn sideways.</summary>
+    private bool AncestorCanScrollVertically(float delta)
+    {
+        for (var e = Parent; e is not null; e = e.Parent)
+            if (e is ScrollViewElement sv && sv.ClampY(sv._scrollOffsetY - delta) != sv._scrollOffsetY)
+                return true;
+        return false;
     }
 
     /// <summary>
@@ -332,6 +366,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         {
             ScrollSpeed = sv.ScrollSpeed;
             MiddleClickAutoScroll = sv.MiddleClickAutoScroll;
+            VerticalWheelScrollsSideways = sv.VerticalWheelScrollsSideways;
             SidewaysScroller = sv.SidewaysScroller;
             ShowScrollbarX = sv.ShowScrollbarX;
             ShowScrollbarY = sv.ShowScrollbarY;

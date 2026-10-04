@@ -449,6 +449,14 @@ being scrolled is not taken over by a list that arrives under the pointer. Brows
 same and call it latching. Shift turns a vertical wheel sideways. A wheel over an overlay
 belongs to the overlay.
 
+A **horizontal** view (`ScrollView.Horizontal()`, or `VerticalWheelScrollsSideways` set)
+also turns a plain vertical wheel sideways — a list in Windows' list mode moves through its
+columns that way, and a mouse without a tilt wheel has no other way there short of Shift. It
+defers to the page: while a scroll view around it can still move the way the wheel turned,
+the wheel is the page's, so a strip on its way past keeps the page scrolling. Only when
+nothing around can — the strip fills its pane, or the page is already at its end — does the
+strip take it.
+
 To take part from your own code — something that scrolls or changes a value on the wheel —
 follow the same three steps the built-in elements do:
 
