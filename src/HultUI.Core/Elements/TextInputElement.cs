@@ -20,7 +20,11 @@ public class TextInputElement : BoxElement
     private float _scrollOffset; // horizontal scroll for text wider than the box
     private IRenderContext? _renderCtx; // cached for hit-testing with real font metrics
     private CompositionState _composition;
+    private readonly TextUndoHistory _history = new();
 
+    /// <summary>The value. Setting a different one from code also forgets the undo history,
+    /// whose recorded offsets describe the text it replaced; a rebuild handing back the value
+    /// the user is already editing keeps it.</summary>
     public string Text
     {
         get => _text;
@@ -33,7 +37,10 @@ public class TextInputElement : BoxElement
             _selectionStart = _cursorPos;
             MarkPaintDirty();
             if (changed)
+            {
+                _history.Clear();
                 NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
+            }
         }
     }
 
@@ -44,7 +51,40 @@ public class TextInputElement : BoxElement
         {
             _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
+            _history.Seal();
         }
+    }
+
+    /// <summary>Whether <see cref="Undo"/> has an edit to take back.</summary>
+    public bool CanUndo => _history.CanUndo;
+
+    /// <summary>Whether <see cref="Redo"/> has an undone edit to re-apply.</summary>
+    public bool CanRedo => _history.CanRedo;
+
+    /// <summary>
+    /// Takes back the last edit — what Ctrl+Z does. Typing undoes a word at a time, a run of
+    /// Backspaces or Deletes as one, a paste or cut on its own, and the selection the edit was
+    /// made from comes back with the text. Reported through <see cref="TextChanged"/> like any
+    /// other edit. False when there was nothing to undo, or while an input method is composing.
+    /// </summary>
+    public bool Undo()
+    {
+        if (_composition.IsActive || !_history.Undo(ref _text, out _cursorPos, out _selectionStart))
+            return false;
+        NotifyChanged();
+        MarkPaintDirty();
+        return true;
+    }
+
+    /// <summary>Re-applies the last undone edit — Ctrl+Y or Ctrl+Shift+Z. Any new edit discards
+    /// what could have been redone.</summary>
+    public bool Redo()
+    {
+        if (_composition.IsActive || !_history.Redo(ref _text, out _cursorPos, out _selectionStart))
+            return false;
+        NotifyChanged();
+        MarkPaintDirty();
+        return true;
     }
 
     // ──── UTF-16 surrogate-pair stepping ────
@@ -90,6 +130,7 @@ public class TextInputElement : BoxElement
     {
         _selectionStart = 0;
         _cursorPos = _text.Length;
+        _history.Seal();
         MarkPaintDirty();
     }
 
@@ -230,6 +271,7 @@ public class TextInputElement : BoxElement
         OnOwn<BlurEvent>(_ =>
         {
             _focused = false;
+            _history.Seal();
             if (_composition.IsActive)
             {
                 _composition.Clear();
@@ -254,12 +296,17 @@ public class TextInputElement : BoxElement
 
         return
         [
+            new ContextMenuItem { Label = "Undo", ShortcutHint = "Ctrl+Z", IsDisabled = !CanUndo,
+                Action = () => Undo() },
+            new ContextMenuItem { Label = "Redo", ShortcutHint = "Ctrl+Y", IsDisabled = !CanRedo,
+                Action = () => Redo() },
+            ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Cut", ShortcutHint = "Ctrl+X", IsDisabled = !hasSelection,
-                Action = () => { if (HasSelection && Clipboard is not null) { Clipboard.SetText(SelectedText); DeleteSelection(); NotifyChanged(); MarkPaintDirty(); } } },
+                Action = () => { Cut(); MarkPaintDirty(); } },
             new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
-                Action = () => { if (HasSelection && Clipboard is not null) Clipboard.SetText(SelectedText); } },
+                Action = Copy },
             new ContextMenuItem { Label = "Paste", ShortcutHint = "Ctrl+V", IsDisabled = !hasClipboard,
-                Action = () => { if (Clipboard?.GetText() is { } t) { DeleteSelection(); _text = _text.Insert(_cursorPos, t); _cursorPos += t.Length; _selectionStart = _cursorPos; NotifyChanged(); MarkPaintDirty(); } } },
+                Action = () => { Paste(); MarkPaintDirty(); } },
             ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _text.Length == 0,
                 Action = SelectAll },
@@ -279,10 +326,7 @@ public class TextInputElement : BoxElement
         // IME commit arrives as a normal TextInput — the selection was already
         // consumed when composition started, so only clear the preedit.
         _composition.Clear();
-        DeleteSelection();
-        _text = _text.Insert(_cursorPos, evt.Text);
-        _cursorPos += evt.Text.Length;
-        _selectionStart = _cursorPos;
+        Replace(SelectionStart, SelectionEnd, evt.Text, TextUndoHistory.EditKind.Typing);
         NotifyChanged();
         MarkPaintDirty();
     }
@@ -303,6 +347,14 @@ public class TextInputElement : BoxElement
 
         bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
         bool ctrl = evt.Modifiers.HasFlag(KeyModifiers.Ctrl);
+
+        // Letter chords go by the letter on the key, not its position: on a German keyboard the
+        // key KeyCode calls Y is the one printed Z, and Ctrl+Z there must undo, not redo.
+        if (ctrl && TryLetterShortcut(evt.ShortcutLetter, shift))
+        {
+            MarkPaintDirty();
+            return;
+        }
 
         switch (evt.Key)
         {
@@ -334,9 +386,7 @@ public class TextInputElement : BoxElement
                 else if (_cursorPos > 0)
                 {
                     int target = ctrl ? FindWordBoundaryLeft(_cursorPos) : StepLeft(_cursorPos);
-                    _text = _text.Remove(target, _cursorPos - target);
-                    _cursorPos = target;
-                    _selectionStart = _cursorPos;
+                    Replace(target, _cursorPos, "", TextUndoHistory.EditKind.DeleteBackward);
                 }
                 NotifyChanged();
                 break;
@@ -347,42 +397,9 @@ public class TextInputElement : BoxElement
                 else if (_cursorPos < _text.Length)
                 {
                     int target = ctrl ? FindWordBoundaryRight(_cursorPos) : StepRight(_cursorPos);
-                    _text = _text.Remove(_cursorPos, target - _cursorPos);
+                    Replace(_cursorPos, target, "", TextUndoHistory.EditKind.DeleteForward);
                 }
                 NotifyChanged();
-                break;
-
-            case KeyCode.A when ctrl:
-                SelectAll();
-                break;
-
-            case KeyCode.C when ctrl:
-                if (HasSelection && Clipboard is not null)
-                    Clipboard.SetText(SelectedText);
-                break;
-
-            case KeyCode.X when ctrl:
-                if (HasSelection && Clipboard is not null)
-                {
-                    Clipboard.SetText(SelectedText);
-                    DeleteSelection();
-                    NotifyChanged();
-                }
-                break;
-
-            case KeyCode.V when ctrl:
-                if (Clipboard is not null)
-                {
-                    var clipText = Clipboard.GetText();
-                    if (clipText is not null)
-                    {
-                        DeleteSelection();
-                        _text = _text.Insert(_cursorPos, clipText);
-                        _cursorPos += clipText.Length;
-                        _selectionStart = _cursorPos;
-                        NotifyChanged();
-                    }
-                }
                 break;
 
             default:
@@ -390,6 +407,55 @@ public class TextInputElement : BoxElement
         }
 
         MarkPaintDirty();
+    }
+
+    /// <summary>Ctrl plus a letter: select all, the clipboard, undo and redo. False for a letter
+    /// the field has no use for, which leaves the key to the rest of the handler.</summary>
+    private bool TryLetterShortcut(char letter, bool shift)
+    {
+        switch (letter)
+        {
+            case 'a': SelectAll(); return true;
+            case 'c': Copy(); return true;
+            case 'x': Cut(); return true;
+            case 'v': Paste(); return true;
+            case 'z': if (shift) Redo(); else Undo(); return true;
+            case 'y': Redo(); return true;
+            default: return false;
+        }
+    }
+
+    private void Copy()
+    {
+        if (HasSelection && Clipboard is not null)
+            Clipboard.SetText(SelectedText);
+    }
+
+    private void Cut()
+    {
+        if (!HasSelection || Clipboard is null) return;
+        Clipboard.SetText(SelectedText);
+        DeleteSelection();
+        NotifyChanged();
+    }
+
+    private void Paste()
+    {
+        if (Clipboard?.GetText() is not { } clipText) return;
+        Replace(SelectionStart, SelectionEnd, clipText, TextUndoHistory.EditKind.Other);
+        NotifyChanged();
+    }
+
+    /// <summary>The one way the value is edited: the range [<paramref name="start"/>,
+    /// <paramref name="end"/>) becomes <paramref name="inserted"/>, the caret lands collapsed
+    /// after it, and the undo history hears about it. An edit that bypasses this is one Ctrl+Z
+    /// cannot take back — and the next undo then finds text it does not describe and drops the
+    /// history.</summary>
+    private void Replace(int start, int end, string inserted, TextUndoHistory.EditKind kind)
+    {
+        _history.Record(kind, start, _text[start..end], inserted, _cursorPos, _selectionStart);
+        _text = string.Concat(_text.AsSpan(0, start), inserted, _text.AsSpan(end));
+        _cursorPos = _selectionStart = start + inserted.Length;
     }
 
     private void OnPointerDown(PointerDownEvent evt)
@@ -413,6 +479,7 @@ public class TextInputElement : BoxElement
             (_selectionStart, _cursorPos) = _dragAnchor;
         }
 
+        _history.Seal();
         _isDragging = true;
         MarkPaintDirty();
     }
@@ -475,6 +542,7 @@ public class TextInputElement : BoxElement
 
     private void MoveCursor(int delta, bool extendSelection)
     {
+        _history.Seal();
         if (!extendSelection && HasSelection)
         {
             // Collapse selection in the direction of movement
@@ -504,6 +572,7 @@ public class TextInputElement : BoxElement
 
     private void MoveCursorTo(int pos, bool extendSelection)
     {
+        _history.Seal();
         _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
@@ -526,11 +595,7 @@ public class TextInputElement : BoxElement
     private void DeleteSelection()
     {
         if (!HasSelection) return;
-        int start = SelectionStart;
-        int end = SelectionEnd;
-        _text = _text.Remove(start, end - start);
-        _cursorPos = start;
-        _selectionStart = start;
+        Replace(SelectionStart, SelectionEnd, "", TextUndoHistory.EditKind.Other);
     }
 
     private void NotifyChanged()

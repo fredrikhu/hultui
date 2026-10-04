@@ -1,6 +1,27 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Undo and redo in text fields** — `TextInputElement` and `TextAreaElement` handled
+  Ctrl+A/C/X/V and nothing else, so every field in every app lost an edit for good. Ctrl+Z,
+  Ctrl+Y and Ctrl+Shift+Z now work, along with `Undo()` / `Redo()` / `CanUndo` / `CanRedo` and
+  Undo/Redo at the top of the right-click menu. Both fields share `TextUndoHistory`, which stores
+  each edit as one replace (start, removed, inserted) rather than a snapshot of the value, and
+  groups edits the way word processors do: typing a word at a time, a run of Backspaces or Deletes
+  as one step, paste/cut/selection-delete/IME commit each on their own, any caret move ending the
+  run. Every edit in both fields now goes through a single `Replace`, which is what makes the
+  history complete. If anything bypasses it, the next undo finds text the step does not describe
+  and drops the history rather than splicing into the wrong place.
+  Two decisions worth knowing. **A different value set from code clears the history**, as a
+  browser does: its offsets describe text that is gone. The rebuild every keystroke causes in a
+  controlled field patches in the *same* value and keeps it — the headless tests type a frame
+  per key to prove that, since one `TypeText` call with no pump between characters would not.
+  **Ctrl+letter chords now match the letter on the key** (`KeyDownEvent.LayoutKey`, as FOCUS.md
+  told apps to), not its position. Matched by position, Ctrl+Z on a German keyboard would have
+  redone. The older chords had the same bug where their keys move — Ctrl+A on French AZERTY, all
+  four of Ctrl+A/C/X/V on Dvorak — and were moved over too.
+  30 Core tests, 4 headless, and 1 in Meridian proving its URL and body editors round-trip their
+  value exactly through the document (a document that normalised it would silently kill undo
+  there). Five faults were put back and every one was caught.
 - **Middle-click autoscroll pans an unwrapped diff sideways** — reported from Junction: the
   scrollbar under an unwrapped diff worked and the gesture that means the same thing did not.
   The diff's sideways position lives in `HorizontalPan` (a margin inside a clipping cell)

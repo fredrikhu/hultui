@@ -302,4 +302,45 @@ public class RequestsShellTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.Null(session.Window.FindByAutomationId("reload-external"));
         });
     }
+
+    /// <summary>
+    /// Both editors are controlled: each keystroke goes into the document, and the rebuild hands
+    /// the field its value back from there. Undo depends on that value coming back exactly — a
+    /// document that normalised it would look, to the field, like a value set from code, and the
+    /// history would be forgotten one key after it was written. Typed a frame per key, the way
+    /// a person types, so every keystroke goes through that round trip.
+    /// </summary>
+    [Fact]
+    public void CtrlZUndoesTypingInTheUrlAndTheBody()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-get-ok");
+            string url = app.ActiveTab!.Doc.Url!;
+
+            Click(session, "url-display");
+            TypeSlowly(session, "?a=1");
+            Assert.Equal(url + "?a=1", app.ActiveTab.Doc.Url);
+            session.Window.PressKey(KeyCode.Z, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal(url, app.ActiveTab.Doc.Url);
+
+            Click(session, "subtab-body");
+            Click(session, "body-editor");
+            TypeSlowly(session, "hello world");
+            Assert.Equal("hello world", app.ActiveTab.Doc.Body?.Content);
+            session.Window.PressKey(KeyCode.Z, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal("hello ", app.ActiveTab.Doc.Body?.Content);
+        });
+    }
+
+    private static void TypeSlowly(HeadlessSession session, string text)
+    {
+        foreach (char c in text)
+        {
+            session.Window.TypeText(c.ToString());
+            session.PumpFrame();
+        }
+    }
 }

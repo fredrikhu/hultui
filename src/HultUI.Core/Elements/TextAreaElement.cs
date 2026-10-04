@@ -34,6 +34,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     // This prevents scroll-wheel offset from being overridden every frame.
     private bool _needsScrollToCursor;
 
+    private readonly TextUndoHistory _history = new();
+
+    /// <summary>The value. Setting a different one from code also forgets the undo history —
+    /// see <see cref="TextInputElement.Text"/>.</summary>
     public string Text
     {
         get => _text;
@@ -47,7 +51,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             InvalidateLines();
             MarkPaintDirty();
             if (changed)
+            {
+                _history.Clear();
                 NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
+            }
         }
     }
 
@@ -58,7 +65,45 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         {
             _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
+            _history.Seal();
         }
+    }
+
+    /// <summary>Whether <see cref="Undo"/> has an edit to take back. Always false while
+    /// <see cref="ReadOnly"/>.</summary>
+    public bool CanUndo => !ReadOnly && _history.CanUndo;
+
+    /// <summary>Whether <see cref="Redo"/> has an undone edit to re-apply. Always false while
+    /// <see cref="ReadOnly"/>.</summary>
+    public bool CanRedo => !ReadOnly && _history.CanRedo;
+
+    /// <summary>Takes back the last edit — what Ctrl+Z does; see
+    /// <see cref="TextInputElement.Undo"/> for how edits group. A line break typed with Enter
+    /// counts as typing, so a new line's first word starts a step of its own.</summary>
+    public bool Undo()
+    {
+        if (ReadOnly || _composition.IsActive || !_history.Undo(ref _text, out _cursorPos, out _selectionStart))
+            return false;
+        AfterHistoryStep();
+        return true;
+    }
+
+    /// <summary>Re-applies the last undone edit — Ctrl+Y or Ctrl+Shift+Z.</summary>
+    public bool Redo()
+    {
+        if (ReadOnly || _composition.IsActive || !_history.Redo(ref _text, out _cursorPos, out _selectionStart))
+            return false;
+        AfterHistoryStep();
+        return true;
+    }
+
+    private void AfterHistoryStep()
+    {
+        _preferredX = -1;
+        _needsScrollToCursor = true;
+        InvalidateLines();
+        NotifyChanged();
+        MarkPaintDirty();
     }
 
     // ──── UTF-16 surrogate-pair stepping (see TextInputElement for rationale) ────
@@ -206,6 +251,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         OnOwn<BlurEvent>(_ =>
         {
             _focused = false;
+            _history.Seal();
             if (_composition.IsActive)
             {
                 _composition.Clear();
@@ -236,20 +282,25 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
                 new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
                     Action = () => { if (HasSelection && Clipboard is not null) Clipboard.SetText(SelectedText); } },
                 new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _text.Length == 0,
-                    Action = () => { _selectionStart = 0; _cursorPos = _text.Length; MarkPaintDirty(); } },
+                    Action = () => { SelectAll(); MarkPaintDirty(); } },
             ];
 
         return
         [
+            new ContextMenuItem { Label = "Undo", ShortcutHint = "Ctrl+Z", IsDisabled = !CanUndo,
+                Action = () => Undo() },
+            new ContextMenuItem { Label = "Redo", ShortcutHint = "Ctrl+Y", IsDisabled = !CanRedo,
+                Action = () => Redo() },
+            ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Cut", ShortcutHint = "Ctrl+X", IsDisabled = !hasSelection,
-                Action = () => { if (HasSelection && Clipboard is not null) { Clipboard.SetText(SelectedText); DeleteSelection(); NotifyChanged(); MarkPaintDirty(); } } },
+                Action = () => { Cut(); MarkPaintDirty(); } },
             new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
-                Action = () => { if (HasSelection && Clipboard is not null) Clipboard.SetText(SelectedText); } },
+                Action = Copy },
             new ContextMenuItem { Label = "Paste", ShortcutHint = "Ctrl+V", IsDisabled = !hasClipboard,
-                Action = () => { if (Clipboard?.GetText() is { } t) { DeleteSelection(); InsertText(t); NotifyChanged(); MarkPaintDirty(); } } },
+                Action = () => { Paste(); MarkPaintDirty(); } },
             ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _text.Length == 0,
-                Action = () => { _selectionStart = 0; _cursorPos = _text.Length; MarkPaintDirty(); } },
+                Action = () => { SelectAll(); MarkPaintDirty(); } },
         ];
     }
 
@@ -445,8 +496,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     {
         if (!_focused || ReadOnly) return;
         _composition.Clear();
-        DeleteSelection();
-        InsertText(evt.Text);
+        Replace(SelectionStart, SelectionEnd, evt.Text, TextUndoHistory.EditKind.Typing);
         NotifyChanged();
         MarkPaintDirty();
     }
@@ -460,11 +510,15 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         MarkPaintDirty();
     }
 
-    private void InsertText(string t)
+    /// <summary>The one way the buffer is edited: the range [<paramref name="start"/>,
+    /// <paramref name="end"/>) becomes <paramref name="inserted"/>, the caret lands collapsed
+    /// after it, and the undo history hears about it — see
+    /// <see cref="TextInputElement"/>'s copy of this for why nothing may bypass it.</summary>
+    private void Replace(int start, int end, string inserted, TextUndoHistory.EditKind kind)
     {
-        _text = _text.Insert(_cursorPos, t);
-        _cursorPos += t.Length;
-        _selectionStart = _cursorPos;
+        _history.Record(kind, start, _text[start..end], inserted, _cursorPos, _selectionStart);
+        _text = string.Concat(_text.AsSpan(0, start), inserted, _text.AsSpan(end));
+        _cursorPos = _selectionStart = start + inserted.Length;
         _preferredX = -1;
         _needsScrollToCursor = true;
         InvalidateLines();
@@ -476,6 +530,13 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
         bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
         bool ctrl = evt.Modifiers.HasFlag(KeyModifiers.Ctrl);
+
+        // By the letter on the key, not its position — see TextInputElement.OnKeyDown.
+        if (ctrl && TryLetterShortcut(evt.ShortcutLetter, shift))
+        {
+            MarkPaintDirty();
+            return;
+        }
 
         switch (evt.Key)
         {
@@ -534,8 +595,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
             case KeyCode.Enter:
                 if (ReadOnly) return;
-                DeleteSelection();
-                InsertText("\n");
+                Replace(SelectionStart, SelectionEnd, "\n", TextUndoHistory.EditKind.Typing);
                 NotifyChanged();
                 break;
 
@@ -546,11 +606,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
                 else if (_cursorPos > 0)
                 {
                     int target = ctrl ? FindWordBoundaryLeft(_cursorPos) : StepLeft(_cursorPos);
-                    _text = _text.Remove(target, _cursorPos - target);
-                    _cursorPos = target;
-                    _selectionStart = _cursorPos;
-                    _needsScrollToCursor = true;
-                    InvalidateLines();
+                    Replace(target, _cursorPos, "", TextUndoHistory.EditKind.DeleteBackward);
                 }
                 _preferredX = -1;
                 NotifyChanged();
@@ -563,41 +619,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
                 else if (_cursorPos < _text.Length)
                 {
                     int target = ctrl ? FindWordBoundaryRight(_cursorPos) : StepRight(_cursorPos);
-                    _text = _text.Remove(_cursorPos, target - _cursorPos);
-                    InvalidateLines();
+                    Replace(_cursorPos, target, "", TextUndoHistory.EditKind.DeleteForward);
                 }
                 _preferredX = -1;
                 NotifyChanged();
-                break;
-
-            case KeyCode.A when ctrl:
-                _selectionStart = 0;
-                _cursorPos = _text.Length;
-                break;
-
-            case KeyCode.C when ctrl:
-                if (HasSelection && Clipboard is not null)
-                    Clipboard.SetText(SelectedText);
-                break;
-
-            case KeyCode.X when ctrl:
-                if (ReadOnly) return;
-                if (HasSelection && Clipboard is not null)
-                {
-                    Clipboard.SetText(SelectedText);
-                    DeleteSelection();
-                    NotifyChanged();
-                }
-                break;
-
-            case KeyCode.V when ctrl:
-                if (ReadOnly) return;
-                if (Clipboard?.GetText() is { } clipText)
-                {
-                    DeleteSelection();
-                    InsertText(clipText);
-                    NotifyChanged();
-                }
                 break;
 
             default:
@@ -605,6 +630,51 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         }
 
         MarkPaintDirty();
+    }
+
+    /// <summary>Ctrl plus a letter: select all, the clipboard, undo and redo. A read-only
+    /// viewer takes only the two that do not edit; false leaves the key to the rest of the
+    /// handler.</summary>
+    private bool TryLetterShortcut(char letter, bool shift)
+    {
+        switch (letter)
+        {
+            case 'a': SelectAll(); return true;
+            case 'c': Copy(); return true;
+            case 'x' when !ReadOnly: Cut(); return true;
+            case 'v' when !ReadOnly: Paste(); return true;
+            case 'z' when !ReadOnly: if (shift) Redo(); else Undo(); return true;
+            case 'y' when !ReadOnly: Redo(); return true;
+            default: return false;
+        }
+    }
+
+    private void SelectAll()
+    {
+        _selectionStart = 0;
+        _cursorPos = _text.Length;
+        _history.Seal();
+    }
+
+    private void Copy()
+    {
+        if (HasSelection && Clipboard is not null)
+            Clipboard.SetText(SelectedText);
+    }
+
+    private void Cut()
+    {
+        if (ReadOnly || !HasSelection || Clipboard is null) return;
+        Clipboard.SetText(SelectedText);
+        DeleteSelection();
+        NotifyChanged();
+    }
+
+    private void Paste()
+    {
+        if (ReadOnly || Clipboard?.GetText() is not { } clipText) return;
+        Replace(SelectionStart, SelectionEnd, clipText, TextUndoHistory.EditKind.Other);
+        NotifyChanged();
     }
 
     private void OnPointerDown(PointerDownEvent evt)
@@ -626,6 +696,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             _dragAnchor = UnitRangeAt(pos);
             (_selectionStart, _cursorPos) = _dragAnchor;
         }
+        _history.Seal();
         _preferredX = -1;
         _needsScrollToCursor = true;
         _isDragging = true;
@@ -854,6 +925,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     private void MoveCursor(int delta, bool extendSelection)
     {
+        _history.Seal();
         if (!extendSelection && HasSelection)
         {
             _cursorPos = delta < 0 ? SelectionStart : SelectionEnd;
@@ -902,6 +974,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     private void MoveCursorTo(int pos, bool extendSelection)
     {
+        _history.Seal();
         _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
@@ -978,14 +1051,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void DeleteSelection()
     {
         if (!HasSelection) return;
-        int start = SelectionStart;
-        int end = SelectionEnd;
-        _text = _text.Remove(start, end - start);
-        _cursorPos = start;
-        _selectionStart = start;
-        _preferredX = -1;
-        _needsScrollToCursor = true;
-        InvalidateLines();
+        Replace(SelectionStart, SelectionEnd, "", TextUndoHistory.EditKind.Other);
     }
 
     private void NotifyChanged()

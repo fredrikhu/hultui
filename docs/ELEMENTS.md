@@ -315,6 +315,10 @@ TextInput.New("initial text") // Pre-filled
 | `CursorWidth` | -- | `float` | `1.5f` |
 | `TextChanged` | `.OnTextChanged(handler)` | `Action<string>?` | `null` |
 | `Clipboard` | -- | `IClipboard?` | Set by Application |
+| `CanUndo`, `CanRedo` | -- | `bool` (read-only) | |
+
+`Undo()` and `Redo()` do what Ctrl+Z and Ctrl+Y do, for an Edit menu or a toolbar button;
+both return false when there was nothing to do.
 
 **Built-in interaction features:**
 
@@ -325,8 +329,27 @@ TextInput.New("initial text") // Pre-filled
 - Triple-click to select all
 - Ctrl+A to select all
 - Ctrl+C / Ctrl+X / Ctrl+V for clipboard
+- Ctrl+Z to undo, Ctrl+Y or Ctrl+Shift+Z to redo
 - Ctrl+Left/Right for word navigation, Ctrl+Backspace/Delete to erase a word
 - Horizontal scroll when text overflows the box
+- Right-click menu: Undo, Redo, Cut, Copy, Paste, Select All
+
+The Ctrl+letter chords match the letter printed on the key (`KeyDownEvent.LayoutKey`), not
+its position: on a German keyboard Ctrl+Z is the key `KeyCode` calls `Y`, and on a French one
+Ctrl+A is the key it calls `Q`.
+
+**Undo** takes back one action as a person counts them, not one keystroke: typing undoes a
+word at a time (a step ends where the next word starts), a run of Backspaces or of Deletes
+undoes as one, and a paste, a cut, deleting a selection and an input-method commit are each a
+step of their own. Moving the caret or clicking ends a run. Undoing an edit made over a
+selection brings the selection back with the text. 200 steps are kept.
+
+**A value set from code forgets the history.** Setting `Text` to a different string — the app
+clearing a field after its form was sent, or reformatting what was typed — drops every step,
+because their offsets describe the old text. The rebuild after each keystroke in a controlled
+field hands back the value the field already holds, which changes nothing and keeps the
+history. A rebuild that *replaces* the element (see Reconciliation under `TextAreaElement`)
+loses it along with the caret.
 
 A "word" means the same thing to every one of these as it does to a double-click:
 letters, digits and `_` form one class, whitespace another, and punctuation and symbols a
@@ -1124,10 +1147,16 @@ Those four are the only fluent members; everything else is a property.
 
 | Property | Type | Notes |
 |---|---|---|
-| `Text` | `string` | setting it collapses the selection to a caret |
+| `Text` | `string` | setting it collapses the selection to a caret, and a different value forgets the undo history |
 | `CursorPosition` | `int` | UTF-16 offset |
 | `SelectionStart`, `SelectionEnd`, `HasSelection`, `SelectedText` | read-only | document-order |
+| `CanUndo`, `CanRedo` | read-only | false while `ReadOnly` |
 | `ReadOnly` | `bool` | |
+
+Undo and redo work as in `TextInputElement` — Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, `Undo()`,
+`Redo()`, the right-click menu — and a line break typed with Enter counts as typing, so a new
+line's first word starts a step of its own. A read-only area ignores both keys and has no Undo
+in its menu.
 | `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives |
 | `ScrollOffsetY`, `ScrollSpeed`, `Scrollbar*` | | vertical only |
 | `TextChanged` | `Action<string>?` | |
