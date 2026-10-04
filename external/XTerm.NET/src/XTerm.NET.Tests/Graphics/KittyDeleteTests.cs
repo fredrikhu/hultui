@@ -330,8 +330,8 @@ public class KittyDeleteTests
     }
 
     /// <summary>
-    /// Nothing here stores animation frames, so there are none to remove. That is a request already
-    /// satisfied rather than one this terminal cannot honour, so it is not an error.
+    /// A still picture's one frame is the picture itself, which lower case keeps. That is a request
+    /// already satisfied rather than one this terminal cannot honour, so it is not an error.
     /// </summary>
     [Fact]
     public void Deleting_animation_frames_succeeds_having_nothing_to_do()

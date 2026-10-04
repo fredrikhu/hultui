@@ -233,6 +233,7 @@ public sealed class DemoShell
             case "styles": Styles(); break;
             case "boxes": Boxes(); break;
             case "unicode": Unicode(); break;
+            case "images": Images(); break;
             case "seq": Seq(int.TryParse(arg, out var n) ? n : 1000); break;
             case "title": Write(Esc + "]2;" + arg + "\a"); break;
             case "cd": Write(Esc + "]7;file://localhost/" + arg.TrimStart('/') + "\a"); break;
@@ -259,6 +260,7 @@ public sealed class DemoShell
             ("styles", "bold, dim, italic, underlines, strikethrough, overline, inverse"),
             ("boxes", "box drawing and block elements, drawn as geometry"),
             ("unicode", "wide characters, emoji, combining marks"),
+            ("images", "Sixel and kitty pictures, one under the text, one animated"),
             ("seq [n]", "n numbered lines, for the scrollback (wheel, Shift+PageUp)"),
             ("top", "a full-screen program on the alternate screen (q quits)"),
             ("mouse", "reports the mouse as a program sees it (q quits)"),
@@ -313,6 +315,87 @@ public sealed class DemoShell
             < 240 => (0d, x, 1d), < 300 => (x, 0d, 1d), _ => (1d, 0d, x),
         };
         return ((int)(r * 255), (int)(g * 255), (int)(b * 255));
+    }
+
+    /// <summary>The image protocols: a Sixel, kitty pictures over and under the text, and a kitty
+    /// animation the terminal's frame clock runs. Sizes are in pixels; the cells they take depend
+    /// on the font.</summary>
+    private void Images()
+    {
+        const int animation = 1001;
+        var sb = new StringBuilder();
+        sb.Append("  Sixel:\r\n").Append(SixelRainbow(240, 8)).Append("\r\n");
+        sb.Append("  Kitty, in true colour:\r\n");
+        sb.Append(Kitty("a=T,f=32,s=240,v=48,q=2", Gradient(240, 48))).Append("\r\n");
+        sb.Append("  Kitty, under the text (z=-1):\r\n");
+        sb.Append(Kitty("a=T,f=32,s=240,v=20,z=-1,C=1,q=2", Gradient(240, 20, dark: true)));
+        sb.Append(Bold("  the text is drawn over this picture")).Append("\r\n\r\n");
+        sb.Append("  Kitty, animated by the terminal (four frames, a quarter second each):\r\n");
+        for (int frame = 0; frame < 4; frame++)
+        {
+            var (r, g, b) = Hue(90.0 * frame);
+            var pixels = new byte[48 * 48 * 4];
+            for (int i = 0; i < 48 * 48; i++)
+                (pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2], pixels[i * 4 + 3]) = ((byte)r, (byte)g, (byte)b, 255);
+            sb.Append(Kitty(frame == 0
+                ? $"a=t,i={animation},f=32,s=48,v=48,q=2"
+                : $"a=f,i={animation},f=32,s=48,v=48,z=250,q=2", pixels));
+        }
+        sb.Append(Kitty($"a=a,i={animation},r=1,z=250,q=2"));
+        sb.Append(Kitty($"a=p,i={animation},q=2"));
+        sb.Append(Kitty($"a=a,i={animation},s=3,v=1,q=2")).Append("\r\n");
+        Write(sb.ToString());
+    }
+
+    /// <summary>Sixel: sixteen hues across, <paramref name="bands"/> six-pixel bands down.</summary>
+    private static string SixelRainbow(int width, int bands)
+    {
+        const int hues = 16;
+        var sb = new StringBuilder($"{Esc}Pq\"1;1;{width};{bands * 6}");
+        for (int c = 0; c < hues; c++)
+        {
+            var (r, g, b) = Hue(360.0 * c / hues);
+            sb.Append($"#{c};2;{r * 100 / 255};{g * 100 / 255};{b * 100 / 255}");
+        }
+        for (int band = 0; band < bands; band++)
+        {
+            if (band > 0) sb.Append('-');
+            for (int c = 0; c < hues; c++) sb.Append($"#{c}!{width / hues}~");
+        }
+        return sb.Append(Esc + "\\").ToString();
+    }
+
+    /// <summary>RGBA: the hues across, fading down (or dimmed throughout).</summary>
+    private static byte[] Gradient(int width, int height, bool dark = false)
+    {
+        var pixels = new byte[width * height * 4];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                var (r, g, b) = Hue(360.0 * x / width);
+                double light = dark ? 0.35 : 1 - 0.7 * y / height;
+                int i = (y * width + x) * 4;
+                (pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]) =
+                    ((byte)(r * light), (byte)(g * light), (byte)(b * light), 255);
+            }
+        }
+        return pixels;
+    }
+
+    /// <summary>A kitty graphics command, its payload sent in the protocol's 4096-byte chunks.</summary>
+    private static string Kitty(string control, byte[]? pixels = null)
+    {
+        if (pixels is null) return $"{Esc}_G{control}{Esc}\\";
+        var data = Convert.ToBase64String(pixels);
+        var sb = new StringBuilder();
+        for (int at = 0; at < data.Length; at += 4096)
+        {
+            var chunk = data.Substring(at, Math.Min(4096, data.Length - at));
+            int more = at + 4096 < data.Length ? 1 : 0;
+            sb.Append(at == 0 ? $"{Esc}_G{control},m={more};{chunk}{Esc}\\" : $"{Esc}_Gm={more};{chunk}{Esc}\\");
+        }
+        return sb.ToString();
     }
 
     private void Styles()

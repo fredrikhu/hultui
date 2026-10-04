@@ -100,13 +100,21 @@ public sealed class ImageAnimation
     public int Serial { get; private set; }
 
     /// <summary>Total size of every frame, for accounting against an image budget.</summary>
+    /// <remarks>
+    /// Not the root while it is still the image's own array: <see cref="TerminalImage.ByteCount"/>
+    /// counts that already, and counting it here too made an animated image look a picture larger
+    /// than it is.
+    /// </remarks>
     public long ByteCount
     {
         get
         {
             long total = 0;
             foreach (var frame in _frames)
-                total += frame.Data.LongLength;
+            {
+                if (!ReferenceEquals(frame.Data, Image.PixelArray))
+                    total += frame.Data.LongLength;
+            }
             return total;
         }
     }
@@ -152,6 +160,36 @@ public sealed class ImageAnimation
 
         Serial++;
         return frame.Data;
+    }
+
+    /// <summary>
+    /// Deletes a frame, never the last one left, and returns the bytes that released.
+    /// </summary>
+    /// <remarks>
+    /// <para>The frames after it move down a number, the current one with them. Deleting the
+    /// current frame shows the one that took its place, or the new last one. With one frame left
+    /// the animation stops: nothing can move, and a host would otherwise keep a clock running for
+    /// it.</para>
+    /// <para>The root still shared with the image releases nothing: the image holds those pixels
+    /// either way.</para>
+    /// </remarks>
+    internal long RemoveFrame(int number)
+    {
+        if (number < 1 || number > _frames.Count || _frames.Count < 2)
+            return 0;
+
+        var frame = _frames[number - 1];
+        _frames.RemoveAt(number - 1);
+
+        if (number < CurrentFrame || CurrentFrame > _frames.Count)
+            CurrentFrame--;
+
+        if (_frames.Count < 2)
+            State = AnimationState.Stopped;
+
+        _elapsedMilliseconds = 0;
+        Serial++;
+        return ReferenceEquals(frame.Data, Image.PixelArray) ? 0 : frame.Data.LongLength;
     }
 
     internal void SetGap(int number, int gapMilliseconds)

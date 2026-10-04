@@ -81,7 +81,7 @@ public sealed class TerminalController : IDisposable
         _maxScrollbackBytes = new(Options.MaxScrollbackBytes);
 
         _emulator = new XtermEmulator(_columns.Value, _rows.Value, EffectiveScrollback(_columns.Value),
-            Options.Theme, Options.TermName);
+            Options.Theme, Options.TermName, Options.Images, Options.MaxImageBytes);
         _emulator.Event += OnEmulatorEvent;
         _connection.Exited += OnConnectionExited;
 
@@ -311,12 +311,18 @@ public sealed class TerminalController : IDisposable
     // outlive its controller by a frame.
 
     /// <summary>The cell in device pixels, for the window-size reports.</summary>
-    internal void SetCellPixels(double width, double height)
+    internal void SetCellPixels(double width, double height, double scale)
     {
         lock (_gate)
         {
-            if (!_disposed) _emulator.SetCellPixels(width, height);
+            if (!_disposed) _emulator.SetCellPixels(width, height, scale);
         }
+    }
+
+    /// <summary>Moves animated pictures on; true when a frame changed.</summary>
+    internal bool AdvanceAnimations(TimeSpan delta)
+    {
+        lock (_gate) return !_disposed && _emulator.AdvanceAnimations(delta);
     }
 
     internal string? EncodeKey(in TerminalKey key)

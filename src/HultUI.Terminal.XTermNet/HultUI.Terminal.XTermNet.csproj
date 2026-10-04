@@ -21,7 +21,7 @@
          CS15xx/CS1658 warnings). HultUI.Terminal's API exposes no XTerm type, so nothing is lost;
          and the vendored files may not be edited to fix them. -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <Description>XTerm.NET, the terminal emulator engine behind HultUI.Terminal, built from upstream source with HultUI's patches: cursor-line reflow, capacity-keeping resize, overline, and Alt/Ctrl key encodings. MIT, Tom Laird-McConnell.</Description>
+    <Description>XTerm.NET, the terminal emulator engine behind HultUI.Terminal, built from upstream source with HultUI's patches: cursor-line reflow, capacity-keeping resize, overline, Alt/Ctrl key encodings, the row shrink, and kitty graphics fixes. MIT, Tom Laird-McConnell.</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -24,6 +24,16 @@ internal sealed class ImageRegistry
 
     private long _bytes;
 
+    /// <summary>What each image was charged, so removing it gives back exactly that.</summary>
+    /// <remarks>
+    /// Removal used to subtract the image's size at that moment. An image changes size after it is
+    /// stored (an animation gains and loses frames, and its root is copied when edited), so the
+    /// two disagreed: an animated image counted its root twice and gave back a picture more than it
+    /// was charged, and every one removed left the total that much lower -- below zero in the end,
+    /// where nothing is ever trimmed.
+    /// </remarks>
+    private readonly Dictionary<uint, long> _charged = new();
+
     /// <summary>Total size of everything held.</summary>
     public long ByteCount => _bytes;
 
@@ -57,6 +67,7 @@ internal sealed class ImageRegistry
 
         _byId[id] = image;
         _nodes[id] = _order.AddLast(id);
+        _charged[id] = image.ByteCount;
         _bytes += image.ByteCount;
 
         if (number != 0)
@@ -76,14 +87,27 @@ internal sealed class ImageRegistry
     /// and removing a grown image later subtracted its CURRENT size from a counter that had never
     /// been credited it, driving the total negative and disabling trimming entirely.
     /// </remarks>
-    public bool TryCharge(long delta, long budget)
+    public bool TryCharge(uint id, long delta, long budget)
     {
         if (budget > 0 && _bytes + delta > budget)
             return false;
 
         _bytes += delta;
+        if (_charged.TryGetValue(id, out var charged))
+            _charged[id] = charged + delta;
         Trim(budget);
         return true;
+    }
+
+    /// <summary>Gives back bytes an image no longer holds, a deleted frame's, say.</summary>
+    public void Refund(uint id, long bytes)
+    {
+        if (bytes <= 0 || !_charged.TryGetValue(id, out var charged))
+            return;
+
+        var refund = Math.Min(bytes, charged);
+        _charged[id] = charged - refund;
+        _bytes -= refund;
     }
 
     public bool TryGet(uint id, out TerminalImage image) => _byId.TryGetValue(id, out image!);
@@ -124,7 +148,8 @@ internal sealed class ImageRegistry
         if (!_byId.TryGetValue(id, out var existing))
             return false;
 
-        _bytes -= existing.ByteCount;
+        _bytes -= _charged.TryGetValue(id, out var charged) ? charged : existing.ByteCount;
+        _charged.Remove(id);
         _byId.Remove(id);
 
         if (_nodes.TryGetValue(id, out var node))
@@ -157,6 +182,7 @@ internal sealed class ImageRegistry
         _order.Clear();
         _nodes.Clear();
         _idByNumber.Clear();
+        _charged.Clear();
         _bytes = 0;
     }
 

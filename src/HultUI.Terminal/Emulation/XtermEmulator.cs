@@ -23,7 +23,8 @@ internal sealed class XtermEmulator : ITerminalEmulator
     private int? _pendingScrollback;
     private double _cellPixelWidth, _cellPixelHeight;
 
-    public XtermEmulator(int columns, int rows, int scrollback, TerminalTheme theme, string termName)
+    public XtermEmulator(int columns, int rows, int scrollback, TerminalTheme theme, string termName,
+        bool images = true, long maxImageBytes = TerminalOptions.DefaultMaxImageBytes)
     {
         if (theme.Ansi.Count != 16)
             throw new ArgumentException($"A theme has 16 ANSI colours; this one has {theme.Ansi.Count}.", nameof(theme));
@@ -39,6 +40,11 @@ internal sealed class XtermEmulator : ITerminalEmulator
             // The size reports a program reads to fit images or a layout to the grid. Answered
             // from the grid, not the element: the strip below the last row belongs to no row.
             WindowOptions = new WindowOptions { GetWinSizePixels = true, GetCellSizePixels = true, GetWinSizeChars = true },
+            // Pictures: off, the terminal says it has none (no Sixel in DA1), and drops them.
+            SixelEnabled = images,
+            KittyGraphicsEnabled = images,
+            ITerm2ImagesEnabled = images,
+            MaxImageBytes = maxImageBytes,
         });
         // The buffers are made once, in the constructor; RIS clears them in place. Held here so
         // the scrollback can be changed while the alternate screen is up, and its trims counted.
@@ -109,10 +115,23 @@ internal sealed class XtermEmulator : ITerminalEmulator
         _generation++;
     }
 
-    public void SetCellPixels(double width, double height)
+    public void SetCellPixels(double width, double height, double scale)
     {
         _cellPixelWidth = width;
         _cellPixelHeight = height;
+        // What pictures are laid out against: how many cells an image of a given size covers.
+        // Whole pixels, as the engine counts them; left at its default it was 10 x 20.
+        var options = _term.Options;
+        options.CellWidthPixels = Math.Max(1, (int)Math.Round(width));
+        options.CellHeightPixels = Math.Max(1, (int)Math.Round(height));
+        options.DisplayScale = scale > 0 ? scale : 1;
+    }
+
+    public bool AdvanceAnimations(TimeSpan delta)
+    {
+        if (!_term.AdvanceAnimations(delta)) return false;
+        _generation++;
+        return true;
     }
 
     public void ScrollViewport(int lines)
@@ -167,6 +186,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
         s.Resize(cols, rows);
 
         s.Links.Clear();
+        s.Pictures.Clear();
         var colors = _term.Colors.Take();
         int defaultFg = colors.Foreground, defaultBg = colors.Background;
         s.DefaultForeground = defaultFg;
@@ -190,6 +210,7 @@ internal sealed class XtermEmulator : ITerminalEmulator
                 foreach (var link in line.Links)
                     if (link.Column < cols)
                         s.Links.Add(new LinkSpan(r, link.Column, Math.Min(link.EndColumn, cols), link.Url, link.Id));
+            if (line.HasImages) CopyPictures(line, r, s.Pictures);
             for (int c = 0; c < n; c++)
             {
                 var cell = line[c];
@@ -238,6 +259,34 @@ internal sealed class XtermEmulator : ITerminalEmulator
         if (_term.MouseTrackingMode != MouseTrackingMode.None) modes |= TerminalModes.MouseTracking;
         s.Modes = modes;
         s.Generation = _generation;
+        s.PicturesAnimating = AnyAnimating(s.Pictures);
+    }
+
+    /// <summary>Whether a picture on screen animates. Not the engine's HasRunningAnimations, which
+    /// counts every animation it holds: one transmitted and never shown, or cleared off the screen
+    /// while still running, kept the element drawing four times a second for nothing. One off
+    /// screen waits, and goes on when it is shown again.</summary>
+    private static bool AnyAnimating(List<PictureRun> pictures)
+    {
+        foreach (var run in pictures)
+            if (run.Image is XTerm.Graphics.TerminalImage { Animation: { FrameCount: > 1, State: not XTerm.Graphics.AnimationState.Stopped } })
+                return true;
+        return false;
+    }
+
+    private static void CopyPictures(BufferLine line, int row, List<PictureRun> into)
+    {
+        var images = line.Images;
+        foreach (var p in line.Placements)
+        {
+            XTerm.Graphics.TerminalImage? image = null;
+            for (int i = 0; i < images.Count && image is null; i++)
+                if (images[i].Id == p.ImageId) image = images[i];
+            if (image is null || p.Cols <= 0 || p.SrcWidth <= 0 || p.SrcHeight <= 0) continue;
+            into.Add(new PictureRun(row, p.Column, p.Cols,
+                image, image.PixelWidth, image.PixelHeight, image.CellWidth, image.CellHeight, image.FrameSerial, image.CurrentPixels,
+                p.SrcX, p.SrcY, p.SrcWidth, p.SrcHeight, p.PxPerCellX, p.PxPerCellY, p.OffsetX, p.OffsetY, p.ZIndex));
+        }
     }
 
     /// <summary>

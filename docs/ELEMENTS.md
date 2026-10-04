@@ -1061,7 +1061,9 @@ because the track it measured was the track it had just created.
 image's own pixels — over the whole element, which is how a frame is taken from a sprite
 sheet. It is also the element's intrinsic size, so a sheet of twenty frames measures as one
 frame. `IRenderContext.DrawImage(source, dest, sourceRect)` is the draw underneath; a
-context with no pixels to cut from falls back to drawing the whole image.
+context with no pixels to cut from falls back to drawing the whole image. The headless
+recorder records the rectangle (`source=` in the log) and passes it on; until 2026-10-04 it
+took that fallback, so a recorded session drew the whole sheet squashed into the frame's box.
 
 **A slider cut into pieces.** `SliderElement.Segments` takes values inside the range where
 the track is split, with `SegmentGap` between the pieces — a video scrubber divided by its

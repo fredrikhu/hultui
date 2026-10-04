@@ -81,7 +81,7 @@ public sealed partial class TerminalElement
         NoteTextFrame();
         if (!ReferenceEquals(_pixelsFor, controller) || _pixelsKey != _metricsKey)
         {
-            controller.SetCellPixels(_cellWidth * scale, _cellHeight * scale);
+            controller.SetCellPixels(_cellWidth * scale, _cellHeight * scale, scale);
             _pixelsFor = controller;
             _pixelsKey = _metricsKey;
         }
@@ -98,10 +98,14 @@ public sealed partial class TerminalElement
             float y = box.Y + row * _cellHeight;
             if (y >= box.Y + box.Height) break;
             DrawBackgrounds(ctx, s, row, box.X, y, scale);
+            if (s.Pictures.Count > 0) DrawPictures(ctx, s, row, box.X, y, scale, underText: true);
             DrawSearchHits(ctx, s, row, box.X, y, scale, controller.Options.Theme);
             if (_selection is { } sel) DrawSelection(ctx, s, row, sel, selectionColor, box.X, y, scale);
             DrawRowText(ctx, s, row, box.X, y, style, scale);
+            if (s.Pictures.Count > 0) DrawPictures(ctx, s, row, box.X, y, scale, underText: false);
         }
+        SweepPictures();
+        TendPictureClock(s);
 
         DrawCursor(ctx, s, box, style, scale);
         DrawPreedit(ctx, s, box, style);

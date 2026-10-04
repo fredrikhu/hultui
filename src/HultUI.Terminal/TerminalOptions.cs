@@ -61,6 +61,31 @@ public sealed class TerminalOptions
     /// <summary>The colours. Programs can change any of them while running (OSC 4, 10, 11, 12).</summary>
     public TerminalTheme Theme { get; init; } = TerminalTheme.Dark;
 
+    /// <summary>The default <see cref="MaxImageBytes"/>: 64 MiB.</summary>
+    public const long DefaultMaxImageBytes = 64L * 1024 * 1024;
+
+    private readonly long _maxImageBytes = DefaultMaxImageBytes;
+
+    /// <summary>
+    /// Whether programs can show pictures: Sixel, the kitty graphics protocol and iTerm2's inline
+    /// images. On by default. Off, the terminal tells programs it has none (no Sixel in its
+    /// device attributes) and drops any a program sends anyway.
+    /// </summary>
+    public bool Images { get; init; } = true;
+
+    /// <summary>
+    /// A memory budget for the pictures the terminal holds, scrollback included, in bytes
+    /// (<see cref="DefaultMaxImageBytes"/>); over it the oldest are dropped. A picture otherwise
+    /// lives as long as a line shows it. 0 is no budget.
+    /// </summary>
+    public long MaxImageBytes
+    {
+        get => _maxImageBytes;
+        init => _maxImageBytes = value >= 0
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(MaxImageBytes), value, "The picture budget cannot be negative.");
+    }
+
     /// <summary>What the terminal calls itself to programs that ask (XTGETTCAP <c>TN</c>).
     /// A connection sets <c>TERM</c> in the program's environment itself.</summary>
     public string TermName { get; init; } = "xterm-256color";

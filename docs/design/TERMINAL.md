@@ -38,7 +38,6 @@ unreachable by its short name, the `Text` trap WebView also avoided.
 **Out of scope for the first version:**
 
 - Tabs and splits (that is the app's layout).
-- Sixel and Kitty images (the engine decodes them; drawing them is a later step).
 - Ligatures.
 - Shell integration UI beyond what the engine already reports.
 - SSH (a later `HultUI.Terminal.Ssh`).
@@ -72,10 +71,14 @@ spike ran the fix; "proposed" means it is design only.
 | 20 | A quick program can end before anyone listens: `cmd /c echo hi` is gone in 60 ms, before Porta.Pty's exit event has a handler or the controller exists. A plain event loses that exit for good. | `ConnectionExit`: raised once, and a handler added after the end is called at once. Every connection in the packages uses it; `PtyConnection` also asks Porta.Pty whether the program already ended | `HultUI.Terminal`, `HultUI.Terminal.Pty` | found in step 4 (an exit reported with no code); the test fails without it |
 | 21 | A background process a program started can hold a pseudoterminal open after the program exits (`sleep 60 &` then `exit 4`). | The controller reports the exit anyway one second after it, and leaves the input open to whatever still reads it | controller | built in step 4; the test fails without it |
 | 22 | Git for Windows' MSYS2 runtime (3.6.6 in Git 2.53; unchanged in 3.6.11 and in Cygwin's `main`) misses about one resize in six until the next input arrives, and throws away that input's first character: bash runs `cho` for `echo`, vim loses a `:`. Both ConPTYs alike, so Windows Terminal very likely too. | **None in the terminal.** A race in the runtime's console code: one thread drops its lock to send SIGWINCH, the other takes the resize, and the first then blocks in a read that discards the next input record. Every sacrificial record a terminal could send fails: key-ups and modifier presses never reach that queue (the program reads VT input); a same-size resize is no event; a focus report reaches only programs that asked for one, and leaves `[I` behind as a command; a real resize re-arms the race | upstream (msys2-runtime), not reported | measured in step 6: 5 of 30 resizes with bash, twice; a native console program lost none of 40. An opt-in test re-measures it |
+| 23 | The engine decodes Sixel, kitty and iTerm2 pictures, and its device attributes offer Sixel, but nothing drew them: a program that asked was shown blank cells. | Draw the engine's per-line picture runs (*Rendering*, item 9) | element | built in step 8 |
+| 24 | The engine lays a picture out against a 10 × 20 pixel cell unless told otherwise, so a picture took the wrong number of cells: one 30 pixels wide took three whatever the font. | The element sets the engine's cell to its own, in device pixels, rounded | element | built in step 8; the test fails without it |
+| 25 | Kitty graphics: a placement sent again under the same ids, and an image sent again under the same id, both left the old picture on screen; `d=f` deleted nothing; and the registry's byte count fell below zero as animated images were deleted, which switches its budget off. | Replace as the specification says; delete a frame as kitty does; the registry records what it charged each image | engine patch 0006 | measured in step 8: 14 new upstream tests, and each fix's test fails without it |
+| 26 | The engine counts an animation as running for as long as it holds it, shown or not, so a cleared animation kept the element drawing four times a second. | A frame clock only while a picture on screen animates | element | built in step 8; the test fails without it |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
-therefore built from source: upstream at a pinned commit with patches 0001–0005 applied, never the
-NuGet package. All 2 240 of XTerm.NET's tests pass with the patches, 19 of them new. How the
+therefore built from source: upstream at a pinned commit with patches 0001–0006 applied, never the
+NuGet package. All 2 254 of XTerm.NET's tests pass with the patches, 33 of them new. How the
 patched source is kept, built and updated is in *The patched engine* below. The alternative
 weighed was offering them upstream and building on the stock package meanwhile, with problem 1
 visible on Windows until a release carried `ReflowCursorLine`.
@@ -86,7 +89,7 @@ visible on Windows until a release carried `ReflowCursorLine`.
 external/
   XTerm.NET/                    upstream's src/XTerm.NET and src/XTerm.NET.Tests at the pinned
                                 commit, patches applied, plus its LICENSE; generated, committed
-  XTerm.NET.patches/            0001–0005: everything HultUI's engine differs from upstream by
+  XTerm.NET.patches/            0001–0006: everything HultUI's engine differs from upstream by
   XTerm.NET.version             upstream URL and the pinned commit
 src/
   HultUI.Terminal.XTermNet/     builds external/XTerm.NET as HultUI.Terminal.XTermNet.dll
@@ -95,7 +98,7 @@ src/
   HultUI.Terminal.Pty/          PtyLaunch, PtyConnection: Porta.Pty (ConPTY + OpenConsole on
                                 Windows, the forkpty shim elsewhere), quoting, ending
 tests/
-  HultUI.Terminal.XTermNet.Tests/  XTerm.NET's own suite, from external/ (2 240 tests, ~3 s)
+  HultUI.Terminal.XTermNet.Tests/  XTerm.NET's own suite, from external/ (2 254 tests, ~3 s)
   HultUI.Terminal.Tests/        headless: scripted bytes through the real emulator
   HultUI.Terminal.Pty.Tests/    real pseudoterminals: a child program of its own, and the shells
   HultUI.Terminal.Pty.Tests.Child/  that child: prints its arguments, size, input count, a flood
@@ -336,6 +339,32 @@ The element draws the snapshot copied at the start of its `Render`. All of it us
    `ReflowCursorLine` on, the engine no longer leaves a width-2 cell in the last column (the stock
    engine's cut did), but a renderer that trusts `Width` there would draw past the grid if it ever
    did.
+9. **Pictures** (step 8): Sixel, the kitty graphics protocol (Unicode placeholders included) and
+   iTerm2's inline images. The engine decodes them and keeps, on each line a picture covers, a run
+   naming the picture, the columns and the slice of its pixels; the snapshot copies the runs on
+   screen.
+   - **Where.** A run is laid on the grid in cells: its pixels over the pixels a cell covered when
+     the picture was laid out, times the cell's size now. The element sets the engine's cell to
+     its own in device pixels, rounded (problem 24), so a picture fills exactly the cells it took,
+     row against row, and stays in them when the font changes. A stretched kitty picture (`c`,
+     `r`) carries its own pixels per cell; kitty's pixel offsets (`X`, `Y`) shift it within its
+     cell. A run is cut at the grid's right edge: a narrowing resize hides part of a picture and
+     widening shows it again. Edges snap to device pixels, as fills do.
+   - **Order.** Kitty's z decides: below zero is drawn after the row's backgrounds and before its
+     text, anything else after the text, as Sixel and iTerm2 pictures are.
+   - **Textures.** One still image per picture and animation frame (`SkiaImageSource.FromPixels`,
+     straight alpha, a new framework call), made when it first shows and dropped once a frame
+     draws without it, so only what is on screen is held. The plan said a `PixelFrameSink` per
+     image; a frame sink is for frames arriving from another thread and is uploaded on every
+     draw, where a picture is still and uploaded once.
+   - **Animation.** The engine owns no clock. While a picture on screen animates, a frame clock
+     (a no-op tween, as the cursor's blink) hands it each frame's time and the element draws when
+     a frame changed. An animation off screen waits and goes on when shown (problem 26); kitty
+     runs it regardless.
+   - **Options.** `TerminalOptions.Images` (on by default; off, the device attributes stop
+     offering Sixel and nothing is decoded) and `MaxImageBytes`, the engine's budget for the
+     pictures lines hold, scrollback included (64 MiB; the oldest go first). Kitty's store of
+     pictures sent but not shown keeps the engine's own 32 MiB.
 
 **Cost.**
 
@@ -791,6 +820,9 @@ typed were unrelated events. All four are new members, so no existing code chang
     off the UI thread; the text and caret changes told; announcements, the echo of typing left
     out, a full-screen program not announced, a flood by its last screenful, nothing while no
     reader listens.
+  - Pictures (step 8): each protocol drawn (by the recorded call, and by its pixels where a crop
+    or a colour is the point), in the cells it took, under or over the text, cut at the edge, let
+    go off screen, and animated by the frame clock only while shown.
 - **`HultUI.Terminal.Pty.Tests`** (built in step 4; real pseudoterminals, about 10 s):
   - **A child program of its own** (`HultUI.Terminal.Pty.Tests.Child`, run as `dotnet <dll>`)
     prints its arguments, its window size, how many lines it read, a flood, and the exit code it
@@ -960,7 +992,22 @@ typed were unrelated events. All four are new members, so no existing code chang
      announcement until a window takes it.
    - **Not verified:** AT-SPI and Orca; selecting text from a reader is not offered on either
      platform.
-8. **Later:**
-   - images (Sixel and Kitty, through a `PixelFrameSink` per image);
-   - `HultUI.Terminal.Ssh` (Vesper's SFTP brief makes SSH the next transport);
-   - libghostty-vt as a second emulator once it tags a release.
+8. **Images, SSH and libghostty-vt.**
+   - **8a, pictures: done 2026-10-04** (see *Rendering*, item 9).
+     - **The terminal:** Sixel, kitty (placeholders included) and iTerm2 pictures drawn from the
+       engine's runs, the engine's cell set from the element's, kitty's z order, textures held
+       only while shown, the animation clock, and `TerminalOptions.Images` and `MaxImageBytes`.
+       The demo shell's `images` command shows all of it.
+     - **The framework:** `SkiaImageSource.FromPixels`; the headless recorder keeps a draw's source
+       rectangle, where it used to draw the whole image squashed into the crop's box.
+     - **The engine:** patch 0006 (problem 25).
+     - **Tests:** 158 in `HultUI.Terminal.Tests` (12 new), 2 254 in the engine's suite (14 new).
+       Negative controls: the engine's cell, the layer split, the edge cut, the sweep, the clock,
+       the option, the clock only while shown, iTerm2, and the recorder's crop; in the engine,
+       each of patch 0006's seven mechanisms, and its two accounting fixes together, which
+       reproduce the drift.
+     - **Seen in the sample** through the headless driver: the four pictures, and the animation
+       stepping.
+     - **Found on the way:** problems 23 to 26.
+   - **8b:** `HultUI.Terminal.Ssh` (Vesper's SFTP brief makes SSH the next transport).
+   - **8c:** libghostty-vt as a second emulator once it tags a release.

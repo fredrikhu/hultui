@@ -406,6 +406,13 @@ public partial class InputHandler
 
         // A client that sent only a number gets an id chosen here, and is told what it was.
         var id = command.ImageId != 0 ? command.ImageId : _kittyImages.NextAssignedId();
+
+        // New data for an id takes the old image's placements with it, as the specification asks:
+        // a program reusing an id another one used must not leave that one's pictures on screen.
+        // A number is different: it names the newest of several images, and the older ones stay.
+        if (command.ImageId != 0 && _kittyImages.TryGet(id, out var replaced))
+            _terminal.DropImage(replaced);
+
         _kittyImages.Store(id, image, _terminal.Options.MaxImageRegistryBytes, command.ImageNumber);
 
         if (command.Action == Graphics.KittyAction.TransmitAndDisplay)
@@ -481,7 +488,7 @@ public partial class InputHandler
             // Charged to the REGISTRY, not measured against this animation alone: several
             // animations could otherwise each grow to the whole budget, and the registry's counter
             // would still hold the size each image was first stored at.
-            if (!_kittyImages.TryCharge(frameBytes, _terminal.Options.MaxImageRegistryBytes))
+            if (!_kittyImages.TryCharge(id, frameBytes, _terminal.Options.MaxImageRegistryBytes))
             {
                 ReplyToKitty(command, Graphics.KittyError.TooLarge);
                 return;
@@ -715,6 +722,11 @@ public partial class InputHandler
             stretched ? Graphics.ImageScaling.Stretched : Graphics.ImageScaling.Natural,
             command.ZIndex, command.OffsetX, command.OffsetY);
 
+        // The same image and placement id again replaces the first, which is how a client moves or
+        // resizes a picture without flicker. Left alone, the old one stayed where it was.
+        if (command.PlacementId != 0)
+            _terminal.DropPlacements(p => p.ImageId == image.Id && p.PlacementId == command.PlacementId);
+
         PlaceImage(placement, Graphics.PlacementKind.Kitty, command.KeepCursor);
     }
 
@@ -784,8 +796,7 @@ public partial class InputHandler
                 break;
 
             case 'f':
-                // Animation frames. Nothing here stores any, so there is nothing to remove -- but
-                // saying "unsupported" would be wrong, since the requested state is the state.
+                DeleteKittyFrame(command, alsoFree);
                 break;
 
             default:
@@ -831,6 +842,33 @@ public partial class InputHandler
 
         if (alsoFree)
             _kittyImages.Remove(id);
+    }
+
+    /// <summary>
+    /// Deletes one animation frame: <c>r</c>, the first when it is not given, the last at most.
+    /// </summary>
+    /// <remarks>
+    /// The specification names the target and says no more; this is what kitty does. The last frame
+    /// left is the picture itself, so lower case leaves it and upper case deletes the image.
+    /// </remarks>
+    private void DeleteKittyFrame(Graphics.KittyCommand command, bool alsoFree)
+    {
+        if (!TryResolveKittyImage(command, out var id, out var image))
+            return;
+
+        var animation = image.Animation;
+        if (animation is null || animation.FrameCount < 2)
+        {
+            if (alsoFree)
+            {
+                _terminal.DropImage(image);
+                _kittyImages.Remove(id);
+            }
+            return;
+        }
+
+        var number = Math.Clamp(command.EditFrame, 1, animation.FrameCount);
+        _kittyImages.Refund(id, animation.RemoveFrame(number));
     }
 
     /// <summary>Removes every placement covering one screen cell.</summary>

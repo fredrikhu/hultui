@@ -103,6 +103,8 @@ public sealed partial class TerminalElement : Element
         StopBlink();
         StopSearchRebind();
         StopScreenWait();
+        StopPictureClock();
+        DropPictures();
     }
 
     private void StartListening()

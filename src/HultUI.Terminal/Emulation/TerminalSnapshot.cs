@@ -40,6 +40,13 @@ internal sealed class TerminalSnapshot
 
     /// <summary>The OSC 8 links on the visible rows, left to right, top to bottom.</summary>
     public List<LinkSpan> Links { get; } = [];
+
+    /// <summary>The pictures on the visible rows (Sixel, kitty graphics, iTerm2 inline images):
+    /// one run per row a picture covers, top to bottom, on a row in the order they were placed.</summary>
+    public List<PictureRun> Pictures { get; } = [];
+
+    /// <summary>A picture is animating: the element keeps a frame clock while one is.</summary>
+    public bool PicturesAnimating { get; set; }
     public int ViewportTop { get; set; }
     public bool AtBottom { get; set; }
 
@@ -181,6 +188,36 @@ internal readonly record struct TerminalPosition(long Line, int Column) : ICompa
     public static bool operator >=(TerminalPosition a, TerminalPosition b) => a.CompareTo(b) >= 0;
 }
 
+/// <summary>
+/// One row's band of a picture: the part of the image on that row, and where it goes.
+/// </summary>
+/// <param name="Row">The visible row.</param>
+/// <param name="Column">The column the band starts at.</param>
+/// <param name="Cols">The cells it covers when fully visible; never clipped to the grid (the
+/// renderer clips), so a narrowing resize hides part of a picture and widening shows it again.</param>
+/// <param name="Image">The picture, by identity: the key a renderer caches a texture under.</param>
+/// <param name="Width">The picture's width in pixels.</param>
+/// <param name="Height">The picture's height in pixels.</param>
+/// <param name="CellWidth">The cell width, in pixels, the picture was laid out against.</param>
+/// <param name="CellHeight">The cell height, in pixels, it was laid out against.</param>
+/// <param name="Frame">Changes when <paramref name="Pixels"/> do (an animation's frame).</param>
+/// <param name="Pixels">BGRA8888 with straight (unpremultiplied) alpha, top row first.</param>
+/// <param name="SrcX">The band's source rectangle in the picture, in pixels.</param>
+/// <param name="SrcY">See <paramref name="SrcX"/>.</param>
+/// <param name="SrcWidth">See <paramref name="SrcX"/>.</param>
+/// <param name="SrcHeight">See <paramref name="SrcX"/>.</param>
+/// <param name="PxPerCellX">Picture pixels per cell for a stretched placement; 0 for one at its
+/// natural size, which covers <paramref name="CellWidth"/> pixels a cell.</param>
+/// <param name="PxPerCellY">See <paramref name="PxPerCellX"/>.</param>
+/// <param name="OffsetX">An offset within the first cell, in the picture's cell pixels.</param>
+/// <param name="OffsetY">See <paramref name="OffsetX"/>; only on a picture's first row.</param>
+/// <param name="ZIndex">Kitty's z: negative goes under the text.</param>
+internal readonly record struct PictureRun(
+    int Row, int Column, int Cols,
+    object Image, int Width, int Height, int CellWidth, int CellHeight, int Frame, ReadOnlyMemory<byte> Pixels,
+    int SrcX, int SrcY, int SrcWidth, int SrcHeight,
+    float PxPerCellX, float PxPerCellY, short OffsetX, short OffsetY, short ZIndex);
+
 /// <summary>A key as the element hands it over: HultUI's key event, unchanged, its lock
 /// modifiers (NumLock) included.</summary>
 internal readonly record struct TerminalKey(KeyCode Key, KeyModifiers Modifiers, bool IsRepeat = false, ushort ScanCode = 0,
@@ -245,8 +282,13 @@ internal interface ITerminalEmulator : IDisposable
     void SetScrollback(int lines);
 
     /// <summary>The cell's size in device pixels, which the window-size reports answer with
-    /// (CSI 14 t, CSI 16 t). Until it is set they answer zeroes.</summary>
-    void SetCellPixels(double width, double height);
+    /// (CSI 14 t, CSI 16 t) and pictures are laid out against; until it is set the reports
+    /// answer zeroes. <paramref name="scale"/> is device pixels per layout unit.</summary>
+    void SetCellPixels(double width, double height, double scale);
+
+    /// <summary>Moves animated pictures on by <paramref name="delta"/>; true when a frame
+    /// changed, so the screen should be drawn again.</summary>
+    bool AdvanceAnimations(TimeSpan delta);
 
     /// <summary>The current screen's buffer as logical lines, scrollback included: what search
     /// binds to. From <paramref name="fromLine"/> on (a <see cref="TerminalPosition.Line"/>), the
