@@ -51,6 +51,18 @@ public sealed class KeyDownEvent : ElementEvent
         _ => null,
     };
 
+    /// <summary>The Latin letter this key names in a Ctrl chord, lower case: the layout's
+    /// (<see cref="LayoutKey"/>) when the platform said, else the one at the key's position on a
+    /// US keyboard. '\0' for any other key. What the built-in fields match Ctrl+Z, Ctrl+A and
+    /// the clipboard chords against, so they follow the letters printed on the keys.</summary>
+    internal char ShortcutLetter => LayoutKey switch
+    {
+        >= 'a' and <= 'z' => (char)LayoutKey,
+        >= 'A' and <= 'Z' => (char)(LayoutKey + ('a' - 'A')),
+        0 when Key is >= KeyCode.A and <= KeyCode.Z => (char)('a' + (Key - KeyCode.A)),
+        _ => '\0',
+    };
+
     /// <summary>The same key as a new event, nothing handled or stopped: what an element that
     /// takes keys for itself offers its ancestors first (a terminal, a web view).</summary>
     internal KeyDownEvent CopyUnhandled() => new()
