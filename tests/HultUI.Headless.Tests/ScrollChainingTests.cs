@@ -120,6 +120,62 @@ public class ScrollChainingTests
         Assert.Equal(2 * Notch, strip.ScrollOffsetX);
     }
 
+    /// <summary>A horizontal view with nothing around it to scroll takes the vertical wheel
+    /// sideways, the way Windows' list view moves through its columns — a mouse without a tilt
+    /// wheel could otherwise only get there with Shift held.</summary>
+    [Fact]
+    public void AHorizontalViewOnItsOwnTakesTheVerticalWheelSideways()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var strip = ScrollView.Horizontal().Width(300f).Height(80f)
+            .Children(Box.New().Width(900f).Height(80f).FlexShrink(0));
+        session.Application.SetRoot(Box.New().Children(strip));
+        session.PumpFrame();
+
+        WheelDown(session, 100, 40, notches: 2);
+        Assert.Equal(2 * Notch, strip.ScrollOffsetX);
+
+        session.Window.Wheel(100, 40, 0, 1);        // wheel up: back towards the start
+        Assert.Equal(Notch, strip.ScrollOffsetX);
+    }
+
+    /// <summary>The strip defers only while the page can use the wheel. A page at its end has
+    /// nothing to do with a wheel turned further down, so the strip under the pointer takes it.</summary>
+    [Fact]
+    public void AStripInAPageAtItsEndTakesTheVerticalWheel()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var strip = ScrollView.Horizontal().Width(300f).Height(80f).FlexShrink(0)
+            .Children(Box.New().Width(900f).Height(80f).FlexShrink(0));
+        var page = ScrollView.New().Width(300f).Height(200f).Children(Spacer(500), strip);
+        session.Application.SetRoot(Box.New().Children(page));
+        session.PumpFrame();
+        page.ScrollOffsetY = 10_000;                  // clamps to the end: the strip is at y 120–200
+        session.PumpFrame();
+
+        WheelDown(session, 100, 160);
+
+        Assert.Equal(Notch, strip.ScrollOffsetX);
+        Assert.Equal(380, page.ScrollOffsetY);
+    }
+
+    /// <summary>Only a view that is horizontal turns the wheel: an ordinary vertical view with
+    /// nothing to scroll leaves it alone, even if its content happens to be wide.</summary>
+    [Fact]
+    public void AVerticalViewDoesNotTurnTheWheelSideways()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var view = ScrollView.New().Width(300f).Height(200f);
+        view.Box.OverflowX = HultUI.Core.Layout.Overflow.Scroll;
+        view.Children(Box.New().Width(900f).Height(100f).FlexShrink(0));
+        session.Application.SetRoot(Box.New().Children(view));
+        session.PumpFrame();
+
+        WheelDown(session, 100, 50);
+
+        Assert.Equal(0, view.ScrollOffsetX);
+    }
+
     /// <summary>The view's own handler used to stop the event, and in this framework stopping
     /// also ends the element's remaining handlers — so a handler an app put on a scroll view
     /// never ran. Vesper's brief view re-windows its columns from one.</summary>

@@ -514,6 +514,7 @@ ScrollView.Horizontal()   // Horizontal scroll (row direction, X scrollbar shown
 | `ScrollOffsetX` | -- | `float` | `0` |
 | `ScrollOffsetY` | -- | `float` | `0` |
 | `ScrollSpeed` | `.ScrollSpeed(40f)` | `float` | `40f` |
+| `VerticalWheelScrollsSideways` | -- | `bool` | `false`; `true` from `ScrollView.Horizontal()` |
 | `ShowScrollbarX` | -- | `bool` | `false` |
 | `ShowScrollbarY` | -- | `bool` | `true` |
 | `ScrollbarColor` | -- | `Color` | `rgba(128,128,128,100)` |
@@ -535,7 +536,10 @@ Scroll offset is automatically clamped to the valid range based on content size.
 scroll views around it, so nested views work for both axes and a list at the end of its
 range hands the next gesture to the page. A gesture stays with the view it started on
 while the events keep coming, Shift turns a vertical wheel sideways, and a wheel over an
-overlay is the overlay's. An app's own `ScrollEvent` handler on a scroll view runs after
+overlay is the overlay's. A horizontal view (`VerticalWheelScrollsSideways`) turns a
+vertical wheel it cannot use into sideways motion, as Windows' list view does — but only
+when no scroll view around it can still move that way, so a strip inside a scrolling page
+never traps the wheel. An app's own `ScrollEvent` handler on a scroll view runs after
 the view's, and sees what was used through `ConsumedX`/`ConsumedY`. The rules, and how to
 take part from your own code, are in
 [LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views). A *virtualized* list

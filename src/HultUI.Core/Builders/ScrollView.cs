@@ -16,6 +16,7 @@ public static class ScrollView
         sv.Box.OverflowY = Layout.Overflow.Hidden;
         sv.ShowScrollbarX = true;
         sv.ShowScrollbarY = false;
+        sv.VerticalWheelScrollsSideways = true;
         sv.Flex.Direction = Layout.FlexDirection.Row;
         return sv;
     }

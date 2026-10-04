@@ -35,10 +35,14 @@
   were put back: the old handler (8 of 11 fail), latching off (4 plus 1 unit), and overlays,
   Shift and the zero-DeltaY step each caught by their own tests. The Junction test reports
   exactly the symptom with the old handler back.
-  Not done, and a separate question: a plain vertical wheel over a horizontal-only view (Vesper's
-  brief view) still does nothing there, and now passes through to whatever is around it. Windows'
-  list view scrolls sideways on the vertical wheel; whether a horizontal-only `ScrollView` should
-  is a decision.
+  Follow-up, decided and done: **a horizontal view turns the vertical wheel sideways**
+  (`VerticalWheelScrollsSideways`, on from `ScrollView.Horizontal()`), as Windows' list view
+  does — Vesper's brief view did nothing on the wheel at all. It defers to the page: only when no
+  scroll view around it can still move that way does it take the wheel, so the strip-in-a-page
+  case above still scrolls the page. 3 headless tests (alone; in a page at its end; a vertical
+  view never turns it) and 1 in Vesper, which wheels a 400-file brief view to its last column and
+  asserts that column was built. Three faults put back — mapping off, no deference, every view
+  mapping — each caught by its own test.
 - **Undo and redo in text fields** — `TextInputElement` and `TextAreaElement` handled
   Ctrl+A/C/X/V and nothing else, so every field in every app lost an edit for good. Ctrl+Z,
   Ctrl+Y and Ctrl+Shift+Z now work, along with `Undo()` / `Redo()` / `CanUndo` / `CanRedo` and
