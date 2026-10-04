@@ -213,7 +213,7 @@ public partial class JunctionApp
             () => { ClosePalette(); SetView(JunctionView.Commit); ToggleCommitMessage(); }));
         // Find-in-text, which until now was only ever reachable by knowing Ctrl+F.
         items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", "f · Ctrl+F",
-            () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) OpenFindBar(bar); }));
+            () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) bar.Open(); }));
         // Background fetch is a switch in Options › General now, not a palette toggle.
         items.Add(new("action", "Action", Icons.ArrowsClockwise,
             "Background fetch: " + (_settings.General.AutoFetchEnabled ? "on" : "off"),

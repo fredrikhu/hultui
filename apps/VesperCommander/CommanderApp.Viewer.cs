@@ -430,7 +430,7 @@ public partial class CommanderApp
         // it owns, and everything that moves the body is skipped entirely while typing.
         bool typing = e.Target is TextInputElement;
 
-        if (HandleFindBarKey(e, _viewerFind, CloseViewer)) { e.StopPropagation = true; return; }
+        if (_viewerFind.HandleKey(e)) { e.StopPropagation = true; return; }
         // Nothing else claimed Esc, so it leaves the view.
         if (e.Key == KeyCode.Escape) { CloseViewer(); e.StopPropagation = true; return; }
         // A function key is never text, so it closes the view whether or not the field has
@@ -441,10 +441,8 @@ public partial class CommanderApp
 
         switch (e.Key)
         {
-            // n / p walk the matches, the same pair the diff uses to walk its changes.
-            case KeyCode.N when _viewerFind.Open: FindNav(_viewerFind, 1); e.StopPropagation = true; break;
-            case KeyCode.P when _viewerFind.Open: FindNav(_viewerFind, -1); e.StopPropagation = true; break;
-            // The body is read-only, so the arrows scroll it rather than moving a cursor.
+            // n / p walk the matches, and the bar takes them (FindBar.LetterKeys). The body
+            // is read-only, so the arrows scroll it rather than moving a cursor.
             case KeyCode.Up: ViewerScroll(-DiffLineH); e.StopPropagation = true; break;
             case KeyCode.Down: ViewerScroll(DiffLineH); e.StopPropagation = true; break;
             case KeyCode.PageUp: ViewerScroll(-ViewerPage()); e.StopPropagation = true; break;
@@ -467,9 +465,9 @@ public partial class CommanderApp
     {
         var col = Flex.Column(gap: 0).FlexGrow(1).Background(Nocturne.Bg);
         col.AddChild(BuildViewerHeader());
-        if (_viewerFind.Open)
+        if (_viewerFind.IsOpen)
         {
-            var bar = BuildFindBar(_viewerFind, "Find in file…");
+            var bar = _viewerFind.Build();
             // Keyed so the bar reconciles as itself across rebuilds — a keyless element that
             // comes and goes takes the retained caret and focus of whatever was in its slot.
             bar.Key = "viewer-find";
@@ -639,7 +637,7 @@ public partial class CommanderApp
                 footer.AddChild(Ui.Mono(_viewerPretty ? "as stored" : $"format {(_viewerPrettyKind == PrettyKind.Json ? "JSON" : "XML")}",
                     10f, Nocturne.On(0.45)));
             }
-            if (_viewerFind.Open)
+            if (_viewerFind.IsOpen)
             {
                 footer.AddChild(Ui.Kbd("n")); footer.AddChild(Ui.Kbd("p"));
                 footer.AddChild(Ui.Mono("match", 10f, Nocturne.On(0.45)));

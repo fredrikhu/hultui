@@ -318,15 +318,7 @@ public sealed class TextSearch
 
         try
         {
-            for (int line = 0; line < _lineCount; line++)
-                for (int lane = 0; lane < _lanes; lane++)
-                {
-                    // A null line is a lane with nothing on it — the blank half opposite an
-                    // insertion. An empty one is a real, searchable line: "^$" finds it.
-                    if (_textAt(line, lane) is not { } text) continue;
-                    if (regex is null ? !ScanPlain(text, line, lane, cmp) : !ScanRegex(regex, text, line, lane))
-                        return;   // hit the cap
-                }
+            ScanAll(regex, cmp);
         }
         catch (RegexMatchTimeoutException)
         {
@@ -335,7 +327,23 @@ public sealed class TextSearch
             return;
         }
 
+        // Also after a scan that stopped at the cap: what it found is still the answer, from its
+        // first match. It used to return before this, leaving no current match — the count read
+        // "0 of 20,000+" and nothing was tinted or scrolled to until the first Enter.
         if (_hits.Count > 0) Index = 0;
+    }
+
+    private void ScanAll(Regex? regex, StringComparison cmp)
+    {
+        for (int line = 0; line < _lineCount; line++)
+            for (int lane = 0; lane < _lanes; lane++)
+            {
+                // A null line is a lane with nothing on it — the blank half opposite an
+                // insertion. An empty one is a real, searchable line: "^$" finds it.
+                if (_textAt!(line, lane) is not { } text) continue;
+                if (regex is null ? !ScanPlain(text, line, lane, cmp) : !ScanRegex(regex, text, line, lane))
+                    return;   // hit the cap
+            }
     }
 
     /// <summary>False when the cap has been reached and the scan should stop.</summary>

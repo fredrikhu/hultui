@@ -426,8 +426,13 @@ public partial class JunctionApp : Component, IDisposable
             settings.CommitFileListWidth);
         _changesSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.ChangesFileListWidth);
-        _diffFind = new FindBarState(MarkDirty);
-        _filesFind = new FindBarState(MarkDirty);
+        _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit);
+        _diffFind.Selection = DiffFindSelection;
+        _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit);
+        _filesFind.Selection = FilesFindSelection;
+        // Blame replaces the file's text with a gutter view the search cannot bind to, and its
+        // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.
+        _filesFind.Opening = () => _filesBlame = false;
         _filesTree = new TreeView<string>(MarkDirty);
         _commitFilesTree = NewChangeTree();
         _diffWrap = _settings.DiffWrap;
@@ -947,8 +952,8 @@ public partial class JunctionApp : Component, IDisposable
             _modalNameRef.Current?.Focus();
         }
 
-        ServiceFindBar(_diffFind, () => _diffBodyRef.Current, RevealDiffHit);
-        ServiceFindBar(_filesFind, () => _fileBodyRef.Current, RevealFilesHit);
+        _diffFind.Service();
+        _filesFind.Service();
 
         if (_pendingFilesTreeScroll)
         {
@@ -1399,7 +1404,7 @@ public partial class JunctionApp : Component, IDisposable
         // Find-in-text, before the typing guard and before Esc leaves fullscreen: the bar's
         // own keys have to reach it while its field has the keyboard, and Esc backs out of
         // the search before it backs out of the view.
-        if (ActiveFindBar() is { } findBar && HandleFindBarKey(e, findBar))
+        if (ActiveFindBar() is { } findBar && findBar.HandleKey(e))
         {
             e.StopPropagation = true;
             return;
@@ -1462,7 +1467,7 @@ public partial class JunctionApp : Component, IDisposable
         // the letter stays free in the views that have none.
         if (e.Key == KeyCode.F && ActiveFindBar() is { } findTarget)
         {
-            OpenFindBar(findTarget);
+            findTarget.Open();
             e.StopPropagation = true;
             return;
         }

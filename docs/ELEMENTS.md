@@ -1352,3 +1352,66 @@ active, a toggle going primary — never moves its neighbours. The same idea as
 The framework's own `Dialog.Confirm` and `Dialog.Alert` build their actions from this
 element — cancel is `Secondary`, the confirming action `Primary`, and a destructive one
 `Danger` — so a themed app's dialogs match its buttons without any work.
+
+---
+
+## 19. FindBar and FindBarElement
+
+Find in the text on screen: a field over a `TextSearch`, its match count, the match-case and
+regular-expression chips, and previous / next / close — plus the keys and the after-build work
+that make them behave. App state, like `ToastHost`: one per searchable view.
+
+```csharp
+// Once, in the component:
+_find = new FindBar(MarkDirty)
+{
+    Placeholder = "Find in file…",
+    Body = () => _bodyRef.Current,          // gets the keyboard back on close; a reveal waits for it
+    Reveal = RevealCurrentMatch,            // scroll _find.Search.Current into view
+    Selection = SelectionInBody,            // Ctrl+F searches for it, starting at it
+    LetterKeys = true,                      // n / p walk the matches when no field has the keyboard
+};
+_find.Search.Bind(lines.Length, lanes: 1, (line, _) => lines[line]);   // when the text changes
+
+// The view's key handler, before its own shortcuts:
+if (_find.HandleKey(e)) { e.StopPropagation = true; return; }
+
+// In Build():
+if (_find.IsOpen) column.AddChild(_find.Build());
+
+// In OnAfterBuild():
+_find.Service();
+```
+
+| Member | Meaning |
+|---|---|
+| `Search` | the `TextSearch` — tint lines with `Search.Decorate`, rebind with `Search.Bind` |
+| `IsOpen`, `Open()`, `Close()`, `Next()`, `Previous()` | what the keys and buttons do |
+| `HandleKey(e)` | Ctrl+F, Escape, Enter / Shift+Enter, Alt+C, Alt+R, and `n` / `p` with `LetterKeys` |
+| `Service()` | focus the field, give the body the keyboard back, reveal the current match |
+| `RevealCurrent()` | ask for a reveal at the next `Service` without rebuilding |
+| `Body`, `Reveal`, `Selection`, `Opening` | the owner's hooks |
+| `RevealAfterLayout` (true) | false when `Reveal` defers itself (`ScrollRangeIntoView`) and can land on the same frame |
+| `Placeholder`, `FieldWidth` 280, `FieldHeight` 30, `Icon` | the field and the glyphs |
+
+`new FindBar(search, onChanged)` puts a bar over a search something else owns — a terminal
+searches its own scrollback. The bar handles its own keys while its field has the keyboard, so
+an owner with nothing else to route can skip `HandleKey`; routing it as well is harmless.
+Ctrl+F on an open bar puts the keyboard back in the field with the query selected whole. Keys
+match the letter on the key (`LayoutKey`), as the text fields' shortcuts do.
+
+**Reveal timing.** `OnAfterBuild` runs before layout, so by default the reveal goes through the
+window's post-frame callback, once the body is in the tree — a ref keeps pointing at an
+unmounted body, and a reveal spent on that is lost.
+
+**Looks** come from `Theme.FindBar` (`FindBarTheme`): fill, divider, padding, gap, the field's
+`TextInputStyle` and face, the count's face, size and colours (an error, or "no matches", in
+`StatusErrorColor`), the chips' `ButtonStyle` off and on, and the buttons' `ButtonStyle`. Null
+colours come from the palette. `Icon` draws the magnifier and the three button glyphs from the
+app's icon set; unset, or null for a glyph, the buttons show ↑ ↓ × and there is no magnifier.
+`FindBarElement` is the row: it applies the theme to its parts each style pass, finding them by
+their automation ids — `find-input`, `find-status`, `find-case`, `find-regex`, `find-prev`,
+`find-next`, `find-close` — which tests can use too.
+
+**The count** (`FindBar.Status`): "3 of 41"; "20,000+" when the scan stopped at
+`TextSearch.MaxHits`; the pattern's error when it does not compile or ran too long; "no matches".

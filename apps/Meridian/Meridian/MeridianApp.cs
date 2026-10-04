@@ -130,8 +130,8 @@ public partial class MeridianApp : Component, IDisposable
         _keyring = keyring ?? new DefaultKeyring();
         Engine = new HttpEngine(viewerCapBytes);
         _oauth = new OAuth2(Engine);
-        _responseFind = new FindBarState(MarkDirty);
-        _historyFind = new FindBarState(MarkDirty);
+        _responseFind = NewResponseFind();
+        _historyFind = new TextSearch(MarkDirty);
 
         View = MeridianView.Requests;
 
@@ -238,7 +238,7 @@ public partial class MeridianApp : Component, IDisposable
             _pendingDialogFocus = false;
             _dialogRef.Current?.Focus();
         }
-        ServiceFindBar(_responseFind);
+        _responseFind.Service();
     }
 
     private Element BuildBody()
@@ -607,7 +607,7 @@ public partial class MeridianApp : Component, IDisposable
         // Junction discipline, so Esc closes the bar before it cancels a send
         // and n/p walk matches instead of typing.
         if (View == MeridianView.Requests && ActiveTab?.Result?.Response != null
-            && HandleFindBarKey(e, _responseFind))
+            && _responseFind.HandleKey(e))
         {
             e.StopPropagation = true;
             return;

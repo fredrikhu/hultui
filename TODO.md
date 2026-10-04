@@ -1,6 +1,31 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **One find bar** — `FindBar` (`src/HultUI.Core/Builders/FindBar.cs`) and its `FindBarTheme`
+  replace four copies of the same bar around the same `TextSearch`: Junction's (diff and Files),
+  Vesper's (viewer and comparison), Meridian's (response body) and the terminal sample's. The
+  copies had drifted. Meridian's had no match-case or regex chips, no close button, and left the
+  keyboard on the unmounted field when Escape closed it; only Junction and Meridian took `n`/`p`
+  from the body; the terminal sample's had no seeding from the selection. The shared bar has
+  all of it: Ctrl+F (seeded from the selection, starting at it; on an open bar, re-selecting
+  the query), Escape, Enter/Shift+Enter, Alt+C/Alt+R, `n`/`p` with `LetterKeys` (not in an
+  editable field), the keyboard handed back to `Body` on close, and the reveal held until the
+  body is in the tree and run after layout (`RevealAfterLayout`, off for Vesper, whose
+  `ScrollRangeIntoView` defers itself and lands on the same frame). Each app keeps its look
+  through `Theme.FindBar` plus an `Icon` factory for its glyphs; the terminal sample shows the
+  `FindBar(search, onChanged)` form over a search the terminal owns. It needed two seams on
+  `IOverlayHost` with defaults, `RequestPostFrameCallback` and `IsInTree`, which `Window`
+  already had.
+  Two traps worth knowing. The host has to be found through the body's *ancestors*: a body
+  mounted in this build has no `OverlayHost` until the style pass, which runs after
+  `OnAfterBuild`, and Junction's reveal-delivery tests caught a reveal held for ever that way.
+  And `RevealCurrent()` must not rebuild: it spent a reveal on the outgoing body.
+  Found and fixed in `TextSearch` on the way: a scan that stopped at `MaxHits` returned before
+  choosing its first match, so in every app a capped search read "0 of 20,000+" and tinted and
+  scrolled to nothing until the first Enter.
+  8 headless tests (five faults put back, each caught — the `n`/`p` one only after the test
+  stopped sending text with no key down, which is not a keystroke), 5 Core status tests, and the
+  apps' existing find suites, moved off reflection onto the public type.
 - **`AlignItems.Baseline` does what it says** — it was in the enum, the builders and LAYOUT.md
   ("align children along their text baseline"), and the engine fell through to FlexStart for it.
   Now a row lines its baseline-aligned items up on their first baselines (CSS Flexbox §8.3/§9.4):

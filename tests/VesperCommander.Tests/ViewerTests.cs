@@ -922,16 +922,10 @@ public class ViewerTests
         public Settings Settings => Field<Settings>("_settings");
 
         // ── Find in file ─────────────────────────────────────────────────
-        // The bar's state is a private nested type shared with the diff view, so it is read
-        // through its (public) members rather than by naming the type here.
-        private object FindState => Field<object>("_viewerFind");
+        private HultUI.Core.Builders.FindBar FindState => Field<HultUI.Core.Builders.FindBar>("_viewerFind");
 
-        private static object Member(object owner, string name) =>
-            owner.GetType().GetField(name, BindingFlags.Public | BindingFlags.Instance)!.GetValue(owner)!;
-
-        public bool FindOpen => (bool)Member(FindState, "Open");
-        public HultUI.Core.Builders.TextSearch Search =>
-            (HultUI.Core.Builders.TextSearch)Member(FindState, "Search");
+        public bool FindOpen => FindState.IsOpen;
+        public HultUI.Core.Builders.TextSearch Search => FindState.Search;
         public IReadOnlyList<HultUI.Core.Builders.TextSearch.Hit> Hits => Search.Hits;
         public int HitIndex => Search.Index;
         public Element? Focused => _session.Window.Window.FocusedElement;

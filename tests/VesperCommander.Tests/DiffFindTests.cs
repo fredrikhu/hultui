@@ -200,16 +200,10 @@ public class DiffFindTests
     }
 
     // ── Reaching the bar's state ─────────────────────────────────────────
-    // A private nested type shared with the viewer, so it is read through its public members
-    // rather than by naming the type here.
+    private static FindBar State(DiffViewTests.Fixture t) => t.Field<FindBar>("_diffFind");
 
-    private static object State(DiffViewTests.Fixture t) => t.Field<object>("_diffFind");
-
-    private static object Member(object owner, string name) =>
-        owner.GetType().GetField(name, BindingFlags.Public | BindingFlags.Instance)!.GetValue(owner)!;
-
-    private static bool FindOpen(DiffViewTests.Fixture t) => (bool)Member(State(t), "Open");
-    private static TextSearch Search(DiffViewTests.Fixture t) => (TextSearch)Member(State(t), "Search");
+    private static bool FindOpen(DiffViewTests.Fixture t) => State(t).IsOpen;
+    private static TextSearch Search(DiffViewTests.Fixture t) => State(t).Search;
 
     /// <summary>Opens the bar and types, the way a user does — real text input to the focused
     /// field, so the app runs whatever it runs on a keystroke.</summary>

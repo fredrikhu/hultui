@@ -175,6 +175,36 @@ public static class Azimuth
             CheckedBackground = Accent,
             CheckMarkColor = Accent100,
         },
+        // The response find bar, as MeridianApp.Response drew it by hand: a ground field with the
+        // query in mono, the count in mono, and the small secondary buttons the request bar uses.
+        FindBar = new FindBarTheme
+        {
+            Background = Surface,
+            Divider = Border,
+            Padding = new Thickness(4, S3, 4, S3),
+            Gap = S2,
+            Field = new TextInputStyle
+            {
+                Background = Bg, Border = Border, FocusBorder = Border,
+                BorderWidth = new Thickness(1f), CornerRadius = new CornerRadius(Radius1),
+                Padding = new Thickness(0, S2, 0, S2), FontSize = 11.5f,
+            },
+            FieldFontFamily = Meridian.Fonts.Mono,
+            StatusFontFamily = Meridian.Fonts.Mono,
+            StatusFontSize = 10.5f,
+            StatusColor = TextMuted,
+            StatusErrorColor = StatusWarn,
+            ToggleFontFamily = Meridian.Fonts.Mono,
+            Toggle = SmallButton,
+            ToggleOn = SmallButton,
+            Button = SmallButton,
+        },
+    };
+
+    // The same as Ui.Small — the request bar's small button — so the theme stands on its own.
+    private static readonly ButtonStyle SmallButton = new()
+    {
+        Padding = new Thickness(4, S2, 4, S2), FontSize = 11.5f, FontWeight = FontWeight.Regular,
     };
 
     private static Color Hex(string hex) => Color.FromHex(hex);

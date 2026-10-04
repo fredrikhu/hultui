@@ -266,10 +266,9 @@ public class DiffShortcutTests
     /// <summary>The diff's find state, which is what says where in the matches the bar is.</summary>
     private static HultUI.Core.Builders.TextSearch Search(JunctionApp app)
     {
-        var state = typeof(JunctionApp)
+        var bar = (HultUI.Core.Builders.FindBar)typeof(JunctionApp)
             .GetField("_diffFind", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
-        return (HultUI.Core.Builders.TextSearch)state.GetType()
-            .GetField("Search", BindingFlags.Public | BindingFlags.Instance)!.GetValue(state)!;
+        return bar.Search;
     }
 
     /// <summary>The find bar by its key rather than by its placeholder: the placeholder is a

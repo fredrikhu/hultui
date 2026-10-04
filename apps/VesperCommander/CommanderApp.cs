@@ -443,8 +443,10 @@ public partial class CommanderApp : Component, IDisposable
         // A sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
         _viewerPan = new HorizontalPan(MarkDirty);
-        _viewerFind = new FindBarState(MarkDirty);
-        _diffFind = new FindBarState(MarkDirty);
+        _viewerFind = NewFindBar("Find in file…", _viewerScrollRef, RevealViewerHit);
+        _viewerFind.Selection = ViewerFindSelection;
+        _diffFind = NewFindBar("Find in comparison…", _diffScrollRef, RevealDiffHit);
+        _diffFind.Selection = DiffFindSelection;
         Nocturne.Use(_settings.Theme, _settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
         RebuildKeymap();
@@ -851,8 +853,8 @@ public partial class CommanderApp : Component, IDisposable
             }
             else _pendingDiffScroll = false;
         }
-        ServiceFindBar(_viewerFind, _viewerScrollRef, RevealViewerHit);
-        ServiceFindBar(_diffFind, _diffScrollRef, RevealDiffHit);
+        _viewerFind.Service();
+        _diffFind.Service();
         if (_pendingFindScroll)
         {
             _pendingFindScroll = false;

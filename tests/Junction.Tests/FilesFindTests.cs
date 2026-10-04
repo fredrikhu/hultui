@@ -270,15 +270,12 @@ public class FilesFindTests
 
     // ── Reaching the app's state ─────────────────────────────────────────
 
-    private static object State(JunctionApp app) =>
-        typeof(JunctionApp).GetField("_filesFind", BindingFlags.NonPublic | BindingFlags.Instance)!
+    private static FindBar State(JunctionApp app) =>
+        (FindBar)typeof(JunctionApp).GetField("_filesFind", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app)!;
 
-    private static object Member(object owner, string name) =>
-        owner.GetType().GetField(name, BindingFlags.Public | BindingFlags.Instance)!.GetValue(owner)!;
-
-    private static bool Open(JunctionApp app) => (bool)Member(State(app), "Open");
-    private static TextSearch Search(JunctionApp app) => (TextSearch)Member(State(app), "Search");
+    private static bool Open(JunctionApp app) => State(app).IsOpen;
+    private static TextSearch Search(JunctionApp app) => State(app).Search;
 
     private static TextAreaElement Body(JunctionApp app) =>
         ((HultUI.Core.Reactivity.Ref<TextAreaElement>)typeof(JunctionApp)

@@ -1,3 +1,4 @@
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Rendering;
 using VesperCommander.Theme;
@@ -12,7 +13,7 @@ public partial class CommanderApp
     // CommanderApp.FindBar.cs. What is left here is the part only this view can answer: which
     // text the search runs over, where a match sits on screen, and how a line is tinted.
 
-    private readonly FindBarState _viewerFind;
+    private readonly FindBar _viewerFind;
 
     /// <summary>Points the search at the file now open. Called when one lands, so a query
     /// typed before it arrived — or carried over from the last file — searches this one.</summary>
