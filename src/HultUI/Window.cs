@@ -2265,10 +2265,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             DismissOnOutsideClick = dismissOnOutsideClick,
             IsHitTestable = hitTestable,
             OnDismissed = onDismissed,
+            FocusBefore = _focusManager.FocusedElement,
         };
 
         // Set overlay host so elements inside the overlay can show/close overlays
         content.OverlayHost = this;
+        // And the window's focus, as the root has it, so Focus() works inside: a dialog's field
+        // can take the keyboard. (Style resolution hands it down to the content's children.)
+        content.FocusManager = _focusManager;
 
         // Resolve style and layout immediately so we can clamp to viewport
         var theme = Application.Theme;
@@ -2297,10 +2301,35 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             if (_overlays[i].Id == handle.Id)
             {
-                _overlays.RemoveAt(i);
+                RemoveOverlayAt(i);
                 _root?.MarkPaintDirty();
                 return;
             }
+        }
+    }
+
+    /// <summary>
+    /// Removes an overlay. If the focus was inside it, it goes back to what had it when the
+    /// overlay opened, while that is still in the window; otherwise nowhere. Left on an element
+    /// that has gone, the keys would go to it and reach nothing.
+    /// </summary>
+    private void RemoveOverlayAt(int index)
+    {
+        var entry = _overlays[index];
+        _overlays.RemoveAt(index);
+        if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
+        _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);
+
+        static Element TopOf(Element element)
+        {
+            while (element.Parent is { } parent) element = parent;
+            return element;
+        }
+
+        bool IsInWindow(Element element)
+        {
+            var top = TopOf(element);
+            return top == _root || _overlays.Exists(o => o.Content == top);
         }
     }
 
@@ -2420,7 +2449,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     _contextSubmenuElement = null;
                 }
                 var dismissed = _overlays[i].OnDismissed;
-                _overlays.RemoveAt(i);
+                RemoveOverlayAt(i);
                 _root?.MarkPaintDirty();
                 dismissed?.Invoke();
             }

@@ -44,7 +44,7 @@ public sealed class SshConnectionTests : IDisposable
     {
         SshConnection connection;
         try { connection = SshConnection.ConnectAsync(options).WaitAsync(Patience).GetAwaiter().GetResult(); }
-        catch (Exception ex) when (!_server.Errors.IsEmpty && ex is not (SshHostKeyRejectedException or SshAuthenticationException))
+        catch (Exception ex) when (!_server.Errors.IsEmpty && ex is not (SshHostKeyRejectedException or SshSignInException))
         {
             throw new InvalidOperationException("the server said: " + string.Join("\n", _server.Errors), ex);
         }
@@ -178,16 +178,77 @@ public sealed class SshConnectionTests : IDisposable
     }
 
     [Fact]
-    public void CancellingThePassword_FailsTheSignIn()
+    public void CancellingThePassword_FailsTheSignIn_AndSaysSo()
     {
         int asked = 0;
-        Assert.Throws<SshAuthenticationException>(() => Connect(Options(SshAuthentication.Password((_, _) =>
+        var failed = Assert.Throws<SshSignInException>(() => Connect(Options(SshAuthentication.Password((_, _) =>
         {
             asked++;
             return Task.FromResult<string?>(null);
         }))));
         Assert.Equal(1, asked);
         Assert.Equal(0, _server.PasswordAttempts);
+        Assert.Equal(["password: not given"], failed.Attempts);
+    }
+
+    [Fact]
+    public void WrongPasswords_AreCounted()
+    {
+        var failed = Assert.Throws<SshSignInException>(() => Connect(Options(SshAuthentication.Password(
+            (_, _) => Task.FromResult<string?>("wrong")))));
+        Assert.Equal(["password: refused 3 times"], failed.Attempts);
+        Assert.Equal(3, _server.PasswordAttempts);
+    }
+
+    /// <summary>
+    /// What a first try with a host looks like: no agent, no default key files, and a server that
+    /// would take a password nobody offered. "Permission denied (publickey)" said none of that.
+    /// </summary>
+    [Fact]
+    public void NothingToOffer_SaysWhatEachWayFound_AndWhatTheServerTakes()
+    {
+        var agent = "hultui-no-such-agent-" + Guid.NewGuid().ToString("N");
+        var missing = Path.Combine(_dir, "id_ed25519");
+        var failed = Assert.Throws<SshSignInException>(() => Connect(Options(
+            SshAuthentication.Agent(agent), SshAuthentication.KeyFile(missing))));
+
+        Assert.Contains("password", failed.ServerAccepts);
+        Assert.Contains("publickey", failed.ServerAccepts);
+        Assert.Equal([$"SSH agent: {agent} is not running", $"key file {missing}: not found"], failed.Attempts);
+        Assert.Equal(
+            $"Could not sign in to 127.0.0.1 as tester.\nThe server takes: {string.Join(", ", failed.ServerAccepts)}.\n" +
+            $"  SSH agent: {agent} is not running\n  key file {missing}: not found",
+            failed.Message);
+    }
+
+    [Fact]
+    public void AWayTheServerDoesNotTake_IsNotAskedFor_AndSaysSo()
+    {
+        _server.Methods = ["publickey"];
+        bool asked = false;
+        var missing = Path.Combine(_dir, "id_rsa");
+        var failed = Assert.Throws<SshSignInException>(() => Connect(Options(
+            SshAuthentication.KeyFile(missing),
+            SshAuthentication.Password((_, _) => { asked = true; return Task.FromResult<string?>("secret"); }))));
+
+        Assert.False(asked);
+        Assert.Equal(["publickey"], failed.ServerAccepts);
+        Assert.Equal([$"key file {missing}: not found", "password: this server does not take it"], failed.Attempts);
+    }
+
+    [Fact]
+    public void AKeyFileWithAPassphrase_AndNothingToAskForIt_SaysSo()
+    {
+        using var key = TestKeys.New();
+        _server.Password = null;
+        _server.AuthorizedKey = TestKeys.Blob(key);
+        var path = TestKeys.File(key, passphrase: "secret phrase");
+        try
+        {
+            var failed = Assert.Throws<SshSignInException>(() => Connect(Options(SshAuthentication.KeyFile(path))));
+            Assert.Equal([$"key file {path}: has a passphrase, and nothing to ask for it"], failed.Attempts);
+        }
+        finally { File.Delete(path); }
     }
 
     [Fact]

@@ -41,7 +41,7 @@ public sealed class TerminalSampleApp : IDisposable
     /// <param name="remote">For <see cref="SampleProgram.Shell"/>: a shell elsewhere instead, over
     /// SSH (the sample's <c>--ssh</c>).</param>
     public TerminalSampleApp(SampleProgram program = SampleProgram.Shell, PtyLaunch? launch = null,
-        Func<ITerminalConnection>? remote = null)
+        Func<TerminalSampleApp, ITerminalConnection>? remote = null)
     {
         _launch = launch;
         _remote = remote;
@@ -50,7 +50,7 @@ public sealed class TerminalSampleApp : IDisposable
     }
 
     private readonly PtyLaunch? _launch;
-    private readonly Func<ITerminalConnection>? _remote;
+    private readonly Func<TerminalSampleApp, ITerminalConnection>? _remote;
 
     /// <summary>What the next <see cref="Restart"/> runs.</summary>
     public Signal<SampleProgram> Program { get; }
@@ -72,17 +72,22 @@ public sealed class TerminalSampleApp : IDisposable
     /// <summary>The shell behind the running session, when that is what runs.</summary>
     public PtyConnection? Shell { get; private set; }
 
+    /// <summary>What the header calls a shell elsewhere (<c>ssh user@host</c>); set by the
+    /// <c>--ssh</c> connection.</summary>
+    public string? RemoteName { get; set; }
+
     private TerminalController Start(SampleProgram program)
     {
         Demo = null;
         Shell = null;
+        RemoteName = null;
         ITerminalConnection connection;
         if (program == SampleProgram.Shell)
         {
             try
             {
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                connection = _remote?.Invoke()
+                connection = _remote?.Invoke(this)
                     ?? (Shell = PtyConnection.Start(_launch ?? PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null)));
                 Problem.Value = null;
             }
@@ -246,7 +251,7 @@ public sealed class TerminalSampleApp : IDisposable
                 : "running";
             string where = c.WorkingDirectory is { } dir ? "  ·  " + dir : "";
             string bells = app.Bells.Value > 0 ? $"  ·  bell ×{app.Bells.Value}" : "";
-            string what = app.Problem.Value ?? (app.Shell is { } shell ? Path.GetFileName(shell.Program) : "demo shell");
+            string what = app.Problem.Value ?? app.RemoteName ?? (app.Shell is { } shell ? Path.GetFileName(shell.Program) : "demo shell");
 
             var program = Dropdown.New(ProgramNames, (int)app.Program.Value);
             program.AccessibleName = "Program";

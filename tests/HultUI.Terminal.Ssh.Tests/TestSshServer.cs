@@ -56,6 +56,9 @@ internal sealed class TestSshServer : IDisposable
     public byte[]? AuthorizedKey { get; set; }
     public string? InteractiveCode { get; set; }
 
+    /// <summary>The sign-in methods the server offers; null for the library's own list.</summary>
+    public string[]? Methods { get; set; }
+
     public int PasswordAttempts => Volatile.Read(ref _passwordAttempts);
     public PtyRequestMessage? Pty { get; private set; }
     public (uint Columns, uint Rows) Size { get; private set; }
@@ -82,7 +85,13 @@ internal sealed class TestSshServer : IDisposable
 
     private async Task Serve(TcpClient tcp)
     {
-        var session = new SshServerSession(new SshSessionConfiguration(), new TraceSource("test-ssh-server"))
+        var config = new SshSessionConfiguration();
+        if (Methods is { } methods)
+        {
+            config.AuthenticationMethods.Clear();
+            foreach (var method in methods) config.AuthenticationMethods.Add(method);
+        }
+        var session = new SshServerSession(config, new TraceSource("test-ssh-server"))
         {
             Credentials = new SshServerCredentials([_hostKeyPair]),
         };

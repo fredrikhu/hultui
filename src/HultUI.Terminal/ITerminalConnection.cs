@@ -23,7 +23,9 @@ public interface ITerminalConnection : IDisposable
     /// <summary>What the program reads. Written only by the controller's writer thread.</summary>
     Stream Input { get; }
 
-    /// <summary>What the controller needs to know about the other end.</summary>
+    /// <summary>What the controller needs to know about the other end. Read when used, so a
+    /// connection that learns them as it connects (<see cref="DeferredConnection"/>) may report
+    /// them from then on.</summary>
     TerminalConnectionTraits Traits { get; }
 
     /// <summary>Tells the program the grid's new size. Called on the UI thread, always together

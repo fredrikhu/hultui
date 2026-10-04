@@ -140,6 +140,16 @@ Clicking non-focusable space in the main tree clears focus; inside an overlay (a
 context menu, a dialog) it does not, so a dialog's field keeps focus while you click
 around its own chrome.
 
+An overlay's content has the window's focus manager, as the root does, so `Focus()` works
+inside one: call it on a dialog's field after `Dialog.Show` returns, and what is typed goes
+there. When an overlay closes holding the focus, the focus goes back to what had it when the
+overlay opened, if that is still in the window, and otherwise nowhere: never left on the
+overlay's elements, which have gone (the detached-focus trap above). Until 2026-10-04 overlay
+content had no focus manager, `Focus()` inside a dialog did nothing, and a dialog's field
+took the keyboard only when clicked.
+
+Tab is not yet kept inside a dialog: it moves through the main tree behind it.
+
 ---
 
 ## Text input follows focus

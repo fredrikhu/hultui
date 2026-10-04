@@ -62,7 +62,8 @@ public sealed class SshConnection : ITerminalConnection
     /// Connects, checks the host's key, signs in and starts a shell.
     /// </summary>
     /// <exception cref="SshHostKeyRejectedException">The host's key was not trusted.</exception>
-    /// <exception cref="SshAuthenticationException">No way of signing in was accepted.</exception>
+    /// <exception cref="SshSignInException">No way of signing in was accepted; it says what each
+    /// did, and what the server takes.</exception>
     /// <exception cref="SshConnectionException">The connection failed or was refused.</exception>
     /// <exception cref="SshOperationTimeoutException">The host did not answer in time.</exception>
     /// <exception cref="System.Net.Sockets.SocketException">The host could not be reached.</exception>
@@ -74,7 +75,8 @@ public sealed class SshConnection : ITerminalConnection
         if (options.Authentication.Count == 0)
             throw new ArgumentException("Give at least one way to sign in.", nameof(options));
 
-        var methods = options.Authentication.Select(a => a.Create(options.User, options.Host, cancellationToken)).ToArray();
+        var log = new SignInLog();
+        var methods = options.Authentication.Select(a => a.Create(options.User, options.Host, log.Add(a), cancellationToken)).ToArray();
         var info = new ConnectionInfo(options.Host, options.Port, options.User, methods) { Timeout = options.ConnectTimeout };
         if (options.Banner is { } banner) info.AuthenticationBanner += (_, e) => banner(e.BannerMessage);
         var client = new SshClient(info)
@@ -115,8 +117,20 @@ public sealed class SshConnection : ITerminalConnection
             // SSH.NET reports its own refusal as a plain connection failure ("Host key could not
             // be verified"), with no reason to tell it by; this side knows it said no.
             if (rejected && hostKey is { } key) throw new SshHostKeyRejectedException(key, ex);
+            if (ex is SshAuthenticationException)
+                throw new SshSignInException(options.User, options.Host, log.ServerAccepts ?? AcceptsIn(ex.Message), log.Lines(), ex);
             throw;
         }
+    }
+
+    /// <summary>The methods SSH.NET names when none it was given is one the server takes: "No
+    /// suitable authentication method found to complete authentication (publickey,password)."</summary>
+    private static string[] AcceptsIn(string message)
+    {
+        int open = message.LastIndexOf('('), close = message.LastIndexOf(')');
+        return message.StartsWith("No suitable", StringComparison.Ordinal) && open >= 0 && close > open
+            ? message[(open + 1)..close].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
     }
 
     /// <summary>What the known hosts and the verifier make of the key. Records it when the user

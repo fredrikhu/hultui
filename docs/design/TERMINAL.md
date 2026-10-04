@@ -81,6 +81,10 @@ spike ran the fix; "proposed" means it is design only.
 | 30 | A connection reset leaves SSH.NET's shell stream open, and a reader waits on it forever. | Close the session on the shell stream's error | `HultUI.Terminal.Ssh` | built in step 8b; without it the test times out |
 | 31 | SSH.NET opens an encrypted PKCS#8 key with an empty passphrase instead of asking for one (the decryption's error comes out), and with the right passphrase cannot read an encrypted PKCS#8 EC key as .NET writes it (an ASN.1 error: it expects the public key where the optional curve comes). A key handed to it ready-made it offers only as `ssh-rsa` (SHA-1), which OpenSSH refuses since 8.8. | Read PKCS#8 with .NET, and offer an RSA key as `rsa-sha2-512` and `-256` first | `HultUI.Terminal.Ssh` | built in step 8b; two tests fail without it |
 | 32 | SSH.NET's password sign-in takes the password before connecting, so an app would ask for one the server may not take, and could not ask again. | A sign-in way that asks when the server takes passwords, and again while wrong | `HultUI.Terminal.Ssh` | built in step 8b; two tests fail with one attempt |
+| 33 | A failed sign-in said only "Permission denied (publickey)": SSH.NET names the last way tried. The owner's first real host (2026-10-04) had no agent running, none of the default key files, and took passwords too; nothing said so. | `SshSignInException`: what each way did, and what the server takes (asked with SSH's `none` method when no way asked it) | `HultUI.Terminal.Ssh` | built after step 8b; two tests fail when the server is not asked |
+| 34 | A controller needs its connection when it is made, and an SSH connection asks its questions (host key, password) on the UI thread while it connects: made there, it waits for itself. The sample did exactly that. | `DeferredConnection`: the terminal shows at once and connects in the background; the controller reads traits when it uses them | `HultUI.Terminal` | built after step 8b; each of its parts fails a test without it, and the sample's whole sign-in was run headless against the test server |
+| 35 | `Element.Focus()` did nothing inside an overlay (its content had no focus manager), so a dialog's field took the keyboard only when clicked; and closing a dialog that held the focus left it on elements that had gone. | Overlay content gets the window's focus manager; closing hands the focus back to what had it | framework (`Window`) | built after step 8b; both tests fail without it. `docs/FOCUS.md` |
+| 36 | A user's keys are often chosen per host in `~/.ssh/config` (the owner's are), which nothing read, so only the agent and the default key files could be offered. | `SshConfigFile` | `HultUI.Terminal.Ssh` | built after step 8b; two tests fail when the last value wins |
 
 **DECIDED (engine patches): kept as HultUI's patches, not offered upstream** (2026-10-03). XTerm.NET is
 therefore built from source: upstream at a pinned commit with patches 0001–0006 applied, never the
@@ -100,10 +104,12 @@ external/
 src/
   HultUI.Terminal.XTermNet/     builds external/XTerm.NET as HultUI.Terminal.XTermNet.dll
   HultUI.Terminal/              controller, element, renderer, key mapping, emulator seam,
-                                the XTerm.NET adapter, StreamConnection, fake connection — no natives
+                                the XTerm.NET adapter, StreamConnection, DeferredConnection,
+                                fake connection — no natives
   HultUI.Terminal.Pty/          PtyLaunch, PtyConnection: Porta.Pty (ConPTY + OpenConsole on
                                 Windows, the forkpty shim elsewhere), quoting, ending
-  HultUI.Terminal.Ssh/          SshConnection over SSH.NET, KnownHostsFile, the ways to sign in
+  HultUI.Terminal.Ssh/          SshConnection over SSH.NET, KnownHostsFile, SshConfigFile, the
+                                ways to sign in
 tests/
   HultUI.Terminal.XTermNet.Tests/  XTerm.NET's own suite, from external/ (2 254 tests, ~3 s)
   HultUI.Terminal.Tests/        headless: scripted bytes through the real emulator
@@ -691,14 +697,17 @@ Built in step 8b. A shell on another machine, through SSH.NET 2026.0.0 (MIT) and
 (MIT): managed code only, no natives, so an app that never opens one carries neither.
 
 ```csharp
-var connection = await SshConnection.ConnectAsync(new SshConnectOptions
+var host = new SshConfigFile(SshConfigFile.UserFilePath).Resolve("build");   // ~/.ssh/config
+var options = new SshConnectOptions
 {
-    Host = "build.example.com", User = "fredrik",
-    Authentication = [SshAuthentication.Agent(), SshAuthentication.KeyFile(keyPath, AskPassphrase),
+    Host = host.HostName, Port = host.Port ?? 22, User = host.User ?? Environment.UserName,
+    Authentication = [SshAuthentication.Agent(), .. host.IdentityFiles.Select(f => SshAuthentication.KeyFile(f, AskPassphrase)),
                       SshAuthentication.Password(AskPassword)],
     VerifyHostKey = (key, ct) => ShowTrustDialog(key, ct),   // Unknown or Changed only
-});
-var shell = new TerminalController(connection);
+};
+// The terminal shows at once; the prompts show on the UI thread while it connects.
+var shell = new TerminalController(new DeferredConnection(
+    async ct => await SshConnection.ConnectAsync(options, ct), connecting: "Connecting to build…"));
 ```
 
 - **Trust.** The host's key is checked before anything is sent, against OpenSSH's `known_hosts`
@@ -719,6 +728,30 @@ var shell = new TerminalController(connection);
   Prompts are called on a background thread that waits for the answer; nothing is stored, so
   keeping a password (in the keyring, as the brief says) is the app's choice. A null answer skips
   that way. A missing key file, or no agent, is skipped too.
+- **When none is accepted,** `SshSignInException` says what each way did and what the server
+  takes, one line each, which a terminal can show as it is (problem 33):
+
+  ```
+  Could not sign in to jellyfin.home as root.
+  The server takes: publickey, password.
+    SSH agent: Windows' OpenSSH agent is not running; Pageant is not running
+    key file C:\Users\you\.ssh\id_ed25519: not found
+    password: not given
+  ```
+
+  A way that fails before asking the server (no key, no agent) asks it what it takes with SSH's
+  `none` method, one round trip; a way the server does not take says so.
+- **The user's own setup.** `SshConfigFile` reads `~/.ssh/config` as `ssh` does for what a
+  connection needs: `HostName`, `User`, `Port`, `IdentityFile` (adding up), `IdentitiesOnly`,
+  `UserKnownHostsFile`, and `ProxyJump` so an app can say it is not supported. `Host` patterns
+  with negation, `Include`, the first value winning, and `~` and `%` tokens; `Match` blocks apply
+  to nothing. `SshConfigFile.DefaultIdentityFiles` are the files `ssh` tries when no
+  `IdentityFile` applies (problem 36).
+- **Connecting without blocking.** `DeferredConnection` (in `HultUI.Terminal`) gives the
+  controller a connection at once: it shows what it is connecting to, runs the connect on a pool
+  thread, keeps what is typed and the last size meanwhile, and writes a failure into the terminal
+  (problem 34). The controller reads a connection's traits when it uses them, so a Windows
+  server's ConPTY traits count once connected.
 - **The shell** gets a pseudoterminal of `TerminalName` (`xterm-256color`) with `IUTF8` and DEL as
   erase, follows the element's grid with `window-change`, and keeps the session alive every 30 s.
   Windows' OpenSSH server (`OpenSSH_for_Windows` in its version) runs the shell under ConPTY, so
@@ -1127,6 +1160,21 @@ typed were unrelated events. All four are new members, so no existing code chang
        likely cause under load, and it is a task of its own.
      - **Not verified:** a real OpenSSH server (none here, and installing one changes the machine:
        the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits, Linux.
+     - **After the first real host (2026-10-04).** The owner's `--ssh root@jellyfin.home` showed
+       "Permission denied (publickey)" and fell back to the demo shell. OpenSSH's `none` method
+       showed the server took passwords too; the owner's keys are chosen per host in
+       `~/.ssh/config`, no agent runs, and no default key file exists. So: problems 33 to 36. The
+       sign-in failure says what each way did and what the server takes; `SshConfigFile`;
+       `DeferredConnection`; and a framework fix so a dialog's field can take the keyboard. The
+       sample now signs in as `ssh` would: `--ssh [user@]host[:port]` through `~/.ssh/config`, the
+       agent unless `IdentitiesOnly`, the host's key files or the default ones, then the server's
+       questions and a password, each asked in a dialog in the window; an unknown host's
+       fingerprint is asked about too (`--accept-new` still trusts without asking), a changed key
+       only replaced after typing the host's name. OpenSSH also accepted the `known_hosts` line the
+       package wrote for that host. Tests: 48 in `HultUI.Terminal.Ssh.Tests`, 4 more in
+       `HultUI.Terminal.Tests`, 2 in `HultUI.Headless.Tests`; negative controls for each new
+       mechanism; the sample's whole sign-in (unknown host, a wrong password, the shell; and a
+       cancelled one, with the report) run headless against the test server.
    - **8c, libghostty-vt: checked 2026-10-04, not built** (see *libghostty-vt, checked against the
      seam*). Still no release, and its header still warns the API will change. Against the seam:
      input encoding, selection, scrolling and most of the snapshot are covered; win32-input-mode,
