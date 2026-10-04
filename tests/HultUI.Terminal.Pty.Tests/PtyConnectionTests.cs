@@ -157,6 +157,32 @@ public class PtyConnectionTests
         t.WaitForText("[xterm-256color] [truecolor] [yes]");
     }
 
+    /// <summary>
+    /// A program that is over before anyone reads its output still gets it all read, and then
+    /// the end. On a loaded machine the reader can start late — a cold process, thirty test
+    /// assemblies at once — and the pseudoconsole used to be closed, and the pipe with it, once
+    /// nothing had been read for 100 ms after the exit: `cmd /c echo` came out as an empty screen.
+    /// Here the reader waits half a second, deliberately.
+    /// </summary>
+    [Fact]
+    public void AQuickProgramsOutput_WaitsForAReaderThatComesLate()
+    {
+        var launch = OperatingSystem.IsWindows()
+            ? new PtyLaunch("cmd.exe", "/c", "echo [late reader]")
+            : new PtyLaunch("/bin/sh", "-c", "echo [late reader]");
+        using var connection = PtyConnection.Start(launch);
+        using var exited = new ManualResetEventSlim();
+        connection.Exited += _ => exited.Set();
+        Assert.True(exited.Wait(PtyTerm.Patience), "the program did not end");
+
+        Thread.Sleep(500);
+
+        var output = new MemoryStream();
+        var read = Task.Run(() => connection.Output.CopyTo(output));
+        Assert.True(read.Wait(PtyTerm.Patience), "the output never ended");
+        Assert.Contains("[late reader]", Encoding.UTF8.GetString(output.ToArray()));
+    }
+
     [Fact]
     public void TheWorkingDirectory_IsTheLaunches()
     {

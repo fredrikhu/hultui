@@ -67,7 +67,7 @@ spike ran the fix; "proposed" means it is design only.
 | 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | **Not a problem: keep it.** Microsoft's own ConPTY targets ship both hosts for x64 ("x64 can only run on x64 and ARM64"), because the x64 `conpty.dll` checks the machine (`IsWow64Process2`) and starts the arm64 host on ARM64 Windows. Trimming it would drop an x64 app on ARM64 back to the in-box console host, silently | `HultUI.Terminal.Pty` | decided in step 4 from the package's targets and the DLL's imports |
 | 17 | A row shrink with the cursor near the top leaves the cut rows below the screen, so the scrollback keeps that many lines fewer, for good. A terminal created at 80 × 24 and sized to its pane before its first screenful is that case. | Drop the blank rows below the cursor, as xterm.js does | engine patch 0005 | measured: found in step 2; the new upstream test fails without it |
 | 18 | A symbol the monospace font lacks (Consolas lacks some arrows and maths operators) is drawn from a fallback font whose advance pushes the rest of its row off its columns. | A character the face has no glyph for is drawn on its own at its column. Step 2 used fixed code point ranges; step 3 asks the face (`HasGlyph`, seam T1) | element | measured: found in step 2 by the sample; the font check built in step 3 |
-| 19 | ConPTY keeps the output open after its program exits, until the pseudoconsole is closed, so the controller, which reports an exit when the output ends, never would. | The connection closes the pseudoconsole once the output has been quiet for 100 ms after the exit | `HultUI.Terminal.Pty` | measured in step 4: the output stayed open in 5 of 5 programs; with the fix the exit is reported within 0.7 s of the last output, and the test fails without it |
+| 19 | ConPTY keeps the output open after its program exits, until the pseudoconsole is closed, so the controller, which reports an exit when the output ends, never would. | The pseudoconsole alone is closed at the exit (Porta.Pty's `UseAsyncIo`): the console host paints its final frame and ends the output, as `ClosePseudoConsole` is documented to. The connection releases the rest once the output has been read to its end. It first closed everything after 100 ms of quiet following the exit, which lost a quick program's whole output when the reader came late: a cold test process under load showed `cmd /c echo` as an empty screen | `HultUI.Terminal.Pty` | measured in step 4: the output stayed open in 5 of 5 programs; the exit is reported within 0.7 s of the last output, and the test fails without it. The late-reader test fails 3 of 3 with the timed close; under full CPU load the environment test failed 1 of 10 cold runs before, 0 of 20 after |
 | 20 | A quick program can end before anyone listens: `cmd /c echo hi` is gone in 60 ms, before Porta.Pty's exit event has a handler or the controller exists. A plain event loses that exit for good. | `ConnectionExit`: raised once, and a handler added after the end is called at once. Every connection in the packages uses it; `PtyConnection` also asks Porta.Pty whether the program already ended | `HultUI.Terminal`, `HultUI.Terminal.Pty` | found in step 4 (an exit reported with no code); the test fails without it |
 | 21 | A background process a program started can hold a pseudoterminal open after the program exits (`sleep 60 &` then `exit 4`). | The controller reports the exit anyway one second after it, and leaves the input open to whatever still reads it | controller | built in step 4; the test fails without it |
 | 22 | Git for Windows' MSYS2 runtime (3.6.6 in Git 2.53; unchanged in 3.6.11 and in Cygwin's `main`) misses about one resize in six until the next input arrives, and throws away that input's first character: bash runs `cho` for `echo`, vim loses a `:`. Both ConPTYs alike, so Windows Terminal very likely too. | **None in the terminal.** A race in the runtime's console code: one thread drops its lock to send SIGWINCH, the other takes the resize, and the first then blocks in a read that discards the next input record. Every sacrificial record a terminal could send fails: key-ups and modifier presses never reach that queue (the program reads VT input); a same-size resize is no event; a focus report reaches only programs that asked for one, and leaves `[I` behind as a command; a real resize re-arms the race | upstream (msys2-runtime), not reported | measured in step 6: 5 of 30 resizes with bash, twice; a native console program lost none of 40. An opt-in test re-measures it |
@@ -694,10 +694,11 @@ the first frame.
   running its `x64\OpenConsole.exe`.
 - **Ending.** Porta.Pty's exit event carries the code; `Terminate` kills the program and what
   shares its console (a job object on Windows), with exit code -1. ConPTY keeps the output open
-  after the program exits, so the connection closes the pseudoconsole once the output has been
-  quiet for 100 ms, counted from the exit too (problem 19). Porta.Pty's `Dispose` closes the pipe
-  we read along with the pseudoconsole, which is why it waits for quiet rather than closing at the
-  exit: what is still in the pipe would be lost.
+  after the program exits, until the pseudoconsole is closed (problem 19). With `UseAsyncIo`
+  Porta.Pty closes the pseudoconsole alone at the exit; the console host then paints its final
+  frame and ends the output. The connection releases the rest only once the output has been read
+  to its end, because Porta.Pty's `Dispose` closes the pipe we read along with everything else:
+  what is still in the pipe would be lost.
 - **Packaging.** Both `OpenConsole.exe` hosts stay in an x64 build, as Microsoft's targets ship
   them (problem 16). Porta.Pty answers ConPTY's startup DA1 query and hides it from the stream;
   without that the first output waits 3 s.
@@ -1193,8 +1194,8 @@ Built after step 8.**
        revocation, the terminal modes, and negation in `known_hosts`.
      - **Found on the way:** problems 27 to 32, all in SSH.NET and solved in the package; none
        reported upstream. The Pty environment test timed out once in a full-solution run beside
-       Junction's suite and passes alone; ConPTY's 100 ms close after the exit (problem 19) is the
-       likely cause under load, and it is a task of its own.
+       Junction's suite and passes alone; ConPTY's 100 ms close after the exit (problem 19) was the
+       cause under load, fixed since by closing the pseudoconsole alone and reading to the end.
      - **Not verified:** a real OpenSSH server (none here, and installing one changes the machine:
        the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits. Linux:
        all of `HultUI.Terminal.Ssh.Tests` passes on Linux CI since 2026-10-04, the agent over a
