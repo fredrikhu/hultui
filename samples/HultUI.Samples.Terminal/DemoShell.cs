@@ -412,7 +412,11 @@ public sealed class DemoShell
               "  │ thin │ cell │  ┃ bold ┃ cell ┃  ║ dbl  ║ cell ║  │round │\r\n" +
               "  ├──────┼──────┤  ┣━━━━━━╋━━━━━━┫  ╠══════╬══════╣  ╰──────╯\r\n" +
               "  └──────┴──────┘  ┗━━━━━━┻━━━━━━┛  ╚══════╩══════╝\r\n\r\n" +
-              "  ▁▂▃▄▅▆▇█ ▏▎▍▌▋▊▉█  ░░▒▒▓▓██  ▖▗▘▙▚▛▜▝▞▟  ▀▄▀▄\r\n");
+              "  ▁▂▃▄▅▆▇█ ▏▎▍▌▋▊▉█  ░░▒▒▓▓██  ▖▗▘▙▚▛▜▝▞▟  ▀▄▀▄\r\n\r\n" +
+              // Powerline separators, as a prompt uses them: drawn, so any face shows them.
+              $"  {Esc}[97;44m user {Esc}[34;46m{Esc}[30m ~/src {Esc}[36;49m{Esc}[0m    " +
+              $"{Esc}[35m{Esc}[97;45m 12:44 {Esc}[35;49m{Esc}[0m  " +
+              $"{Esc}[32m{Esc}[30;42m main {Esc}[32;49m{Esc}[0m     \r\n");
     }
 
     private void Unicode()

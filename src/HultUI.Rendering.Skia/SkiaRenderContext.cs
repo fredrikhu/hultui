@@ -1019,6 +1019,39 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         Canvas.DrawLine(from.X, from.Y, to.X, to.Y, _pooledPaint);
     }
 
+    public void FillPolygon(ReadOnlySpan<Point> points, Color fill)
+    {
+        if (points.Length < 3 || fill.A == 0) return;
+        using var path = PathThrough(points);
+        path.Close();
+        _pooledPaint.Reset();
+        _pooledPaint.Color = ToSkColor(fill);
+        _pooledPaint.IsAntialias = true;
+        Canvas.DrawPath(path, _pooledPaint);
+    }
+
+    public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
+    {
+        if (points.Length < 2 || color.A == 0 || strokeWidth <= 0) return;
+        using var path = PathThrough(points);
+        _pooledPaint.Reset();
+        _pooledPaint.Color = ToSkColor(color);
+        _pooledPaint.IsAntialias = true;
+        _pooledPaint.IsStroke = true;
+        _pooledPaint.StrokeWidth = strokeWidth;
+        _pooledPaint.StrokeJoin = SKStrokeJoin.Round;
+        _pooledPaint.StrokeCap = SKStrokeCap.Butt;
+        Canvas.DrawPath(path, _pooledPaint);
+    }
+
+    private static SKPath PathThrough(ReadOnlySpan<Point> points)
+    {
+        var path = new SKPath();
+        path.MoveTo(points[0].X, points[0].Y);
+        for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
+        return path;
+    }
+
     public void PushClip(Rect clipRect)
     {
         _saveStack.Push(Canvas.Save());

@@ -78,6 +78,11 @@ These propagate to child elements unless overridden.
 - **Glyph coverage.** `HasGlyph(style, codePoint)` says whether the face itself has a glyph, not a
   fallback font. A character grid draws a missing one on its own, since a fallback glyph's advance
   need not be the cell's.
+- **Fallback keeps a sequence in one font.** A character that only extends the one before it — a
+  joiner, a variation selector, an emoji tag, and a skin tone or combining mark the font has — stays
+  in that one's font, as does a character after a joiner that the font has. A sequence split across
+  fonts is never shaped into its one glyph: the joiners in 👨‍👩‍👧 are in most text faces, and used to
+  break the family into three people.
 - **Measure contexts that cannot read a font** (test stubs, the headless fixed-metrics context)
   answer with estimates from a measured `"0"`, and say every glyph is there.
 
@@ -605,6 +610,7 @@ which operations snap tells you what a custom drawing can rely on:
 | Solid fills (`DrawRect`, backgrounds, gradients) | yes; a rect asked for at all becomes at least one device pixel, so a 0.3-DIP caret cannot vanish, while a zero-size rect stays empty |
 | `DrawLine` | **only when axis-aligned**; diagonals keep raw coordinates, because nearly every diagonal in the framework is a hand-drawn glyph (a checkbox tick, a chevron) that snapping would kink |
 | Arcs and rounded corners | no — snapping a curve steps it |
+| `FillPolygon`, `DrawPolyline` | no — antialiased along their slopes; a caller that wants a crisp edge places its points on the grid itself |
 | Text, shadows, images | no — text keeps subpixel positioning, shadows are blurred, images would change resampling |
 
 Two consequences worth knowing. A snapped fill's size is *position-dependent*: a 1-DIP
