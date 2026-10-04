@@ -88,12 +88,18 @@ public sealed class SingleInstanceTests
         var got = new HashSet<string>();
         first.Listen(launch => got.Add(launch.Args[0]));
 
+        // Each launch on a thread of its own, as each is a process of its own with a main thread
+        // that blocks in Forward. Run as twelve thread-pool items instead, the twelve blocked
+        // waits took the threads the pipes' own I/O completes on, the listener's included, in
+        // the one pool they shared: on a runner with few cores and the whole suite running, a
+        // send then waited past ForwardTimeout and reported failure for a launch that had in
+        // fact arrived (CI's Linux job, 7 of 12; reproduced with one core under load).
         var names = Enumerable.Range(0, 12).Select(i => $"episode-{i:00}.mkv").ToArray();
-        var sends = names.Select(name => Task.Run(() =>
+        var sends = names.Select(name => Task.Factory.StartNew(() =>
         {
             using var later = SingleInstance.Claim(id);
             return later.Forward([name]);
-        })).ToArray();
+        }, TaskCreationOptions.LongRunning)).ToArray();
 
         session.PumpUntil(() => sends.All(t => t.IsCompleted) && got.Count == names.Length, TimeSpan.FromSeconds(15));
         Assert.All(sends, t => Assert.True(t.Result));
