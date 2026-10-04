@@ -31,9 +31,9 @@ namespace HultUI.Core.Builders;
 /// <c>onChanged</c> callback given to the constructor is where the owner marks itself
 /// dirty.</para>
 ///
-/// <para>Hand it to the list it pans with <c>ScrollSidewaysWith</c>, and the middle-click
-/// autoscroll moves it too: the gesture otherwise drives the list's own horizontal offset,
-/// which under a virtualized list has nowhere to go.</para>
+/// <para>Hand it to the list it pans with <c>ScrollSidewaysWith</c>, and the wheel's sideways
+/// motion and the middle-click autoscroll move it too: both otherwise drive the list's own
+/// horizontal offset, which under a virtualized list has nowhere to go.</para>
 /// </summary>
 public sealed class HorizontalPan : ISidewaysScroller
 {
@@ -90,7 +90,8 @@ public sealed class HorizontalPan : ISidewaysScroller
     /// <summary>Back to the left margin — call when the content changes underneath.</summary>
     public void Reset() => _offset = 0;
 
-    // ISidewaysScroller: the autoscroll's sideways half, by way of the list this pans under.
+    // ISidewaysScroller: the wheel's and the autoscroll's sideways half, by way of the list
+    // this pans under.
     bool ISidewaysScroller.CanScrollSideways => CanPan;
     bool ISidewaysScroller.ScrollSidewaysBy(float dx) => PanBy(dx);
 
@@ -182,17 +183,24 @@ public sealed class HorizontalPan : ISidewaysScroller
     }
 
     /// <summary>
-    /// Routes a wheel event: a trackpad's sideways swipe arrives as <c>DeltaX</c>, a mouse's
-    /// as Shift plus <c>DeltaY</c>. True when it was used for panning.
+    /// Routes a wheel event's sideways motion (<see cref="ScrollEvent.ScrollDeltaX"/>: a
+    /// trackpad's swipe, or a mouse wheel with Shift) into the pan. True when it moved.
     ///
-    /// <para>Attach this to the scrolling element itself. Its own handler sees the event
-    /// first and clamps it to nothing, having no horizontal range, then leaves it alone.</para>
+    /// <para>A scroll view told about the pan with <c>ScrollSidewaysWith</c> already sends the
+    /// wheel here, and the middle-click autoscroll with it — prefer that. This is for a pan
+    /// whose content is not a scroll view's. Attach it to the element that shows the content;
+    /// it takes only motion nothing nearer the pointer has used, and reports what it uses, so
+    /// a pan at its margin hands the wheel on like any scroll view (see
+    /// <see cref="ScrollEvent.Consume"/>).</para>
     /// </summary>
     public bool HandleScroll(ScrollEvent e)
     {
-        float dx = e.DeltaX != 0 ? e.DeltaX
-            : e.Modifiers.HasFlag(KeyModifiers.Shift) ? e.DeltaY : 0;
-        return dx != 0 && PanBy(-dx * KeyStep);
+        var owner = e.CurrentTarget;
+        float dx = e.RemainingDeltaX;
+        if (dx == 0 || !e.IsFor(owner)) return false;
+        bool moved = PanBy(-dx * KeyStep);
+        e.Consume(owner, movedX: moved, movedY: false);
+        return moved;
     }
 
     /// <summary>

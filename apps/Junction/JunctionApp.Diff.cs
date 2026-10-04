@@ -540,12 +540,9 @@ public partial class JunctionApp
         if (review is { } rv)
             list.On<PointerUpEvent>(_ => { if (rv.Dragging) { rv.Dragging = false; OpenComposer(rv); } });
         list.WithRef(_diffBodyRef);
-        // A trackpad's sideways swipe arrives as DeltaX, a mouse's as Shift+DeltaY. The
-        // list's own handler sees them first and clamps them to nothing, since its content
-        // is exactly as wide as its viewport. The middle-click autoscroll never arrives as
-        // an event at all — the window drives the list directly — so the list is told who
-        // scrolls it sideways, or aiming right of the anchor would do nothing.
-        list.On<ScrollEvent>(ev => _diffPan.HandleScroll(ev));
+        // The list's content is exactly as wide as its viewport, so it cannot scroll sideways
+        // itself: it is told who does, and the wheel's sideways motion (a trackpad swipe, or
+        // Shift+wheel) and the middle-click autoscroll's both go to the pan.
         list.ScrollSidewaysWith(_diffPan);
 
         if (!_diffBarBuilt) return list;

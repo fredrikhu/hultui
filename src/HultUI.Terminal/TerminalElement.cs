@@ -531,8 +531,10 @@ public sealed partial class TerminalElement : Element
 
     private void OnScroll(ScrollEvent e)
     {
-        if (_controller is null) return;
-        e.StopPropagation = true;
+        // The terminal keeps the whole wheel — scrollback or the program's mouse — so nothing
+        // around it scrolls as well; but not a gesture that started on a page scrolling past.
+        if (_controller is null || !e.IsFor(this)) return;
+        e.Consume(this, movedX: true, movedY: true);
 
         // Whole notches; a precise wheel's fractions add up.
         _wheelRemainder += e.DeltaY;

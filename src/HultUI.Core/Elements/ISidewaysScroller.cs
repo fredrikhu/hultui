@@ -12,8 +12,8 @@ namespace HultUI.Core.Elements;
 /// gesture drove the list's own offset, which had nowhere to go, and aiming right did nothing.</para>
 ///
 /// <para>So a scroll view can be told who really scrolls it sideways
-/// (<see cref="ScrollViewElement.SidewaysScroller"/>), and the middle-click autoscroll's
-/// horizontal delta goes there instead. Implemented by <see cref="Builders.HorizontalPan"/>;
+/// (<see cref="ScrollViewElement.SidewaysScroller"/>), and the wheel's sideways motion and the
+/// middle-click autoscroll's go there instead. Implemented by <see cref="Builders.HorizontalPan"/>;
 /// implement it on anything else that moves a scroll view's content sideways by other means.</para>
 /// </summary>
 public interface ISidewaysScroller

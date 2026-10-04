@@ -49,6 +49,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private Point _autoScrollPointer;
     private long _autoScrollLastMs;
 
+    // Which scroller the current run of wheel events belongs to (see WheelGesture).
+    private readonly WheelGesture _wheelGesture = new();
+
     /// <summary>How far the pointer must leave the origin before anything moves. Also the
     /// radius the anchor marker is drawn at, so the zone you have to come back into to stop
     /// is the circle you can see.</summary>
@@ -1419,12 +1422,23 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             case InputEvent.MouseWheelInput wheel:
             {
                 var pos = new Point(wheel.MouseX, wheel.MouseY);
-                var target = HitTester.HitTest(_root, pos);
+                // Overlays first, as a press does: a wheel over a dialog or a popup list is
+                // that overlay's, not the page's underneath it.
+                var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
+                var target = overlayTarget ?? HitTester.HitTest(_root, pos);
                 if (target is not null)
                 {
-                    EventDispatcher.Dispatch(
-                        new ScrollEvent { Position = pos, DeltaX = wheel.DeltaX, DeltaY = wheel.DeltaY, Modifiers = wheel.Modifiers },
-                        target);
+                    var at = overlayTarget is not null
+                        ? new Point(pos.X - overlayOffset.X, pos.Y - overlayOffset.Y)
+                        : pos;
+                    long now = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+                    var scroll = new ScrollEvent
+                    {
+                        Position = at, DeltaX = wheel.DeltaX, DeltaY = wheel.DeltaY, Modifiers = wheel.Modifiers,
+                        Latched = _wheelGesture.LatchFor(target, now),
+                    };
+                    EventDispatcher.Dispatch(scroll, target);
+                    _wheelGesture.Dispatched(scroll, now);
                 }
                 break;
             }

@@ -557,12 +557,9 @@ public partial class CommanderApp
         // would be a no-op that looks like a broken Tab.
         list.IsFocusable = true;
         list.TabIndex = -1;
-        // A trackpad's sideways swipe arrives as DeltaX; a mouse reports Shift+wheel as
-        // DeltaY. The list's own handler sees both first, but its content is exactly as wide
-        // as its viewport, so it clamps them to nothing and leaves them to us. The
-        // middle-click autoscroll is not an event — the window drives the list directly —
-        // so the list is told who scrolls it sideways.
-        list.On<ScrollEvent>(ev => _viewerPan.HandleScroll(ev));
+        // The list's content is exactly as wide as its viewport, so it cannot scroll sideways
+        // itself: it is told who does, and the wheel's sideways motion (a trackpad swipe, or
+        // Shift+wheel) and the middle-click autoscroll's both go to the pan.
         list.ScrollSidewaysWith(_viewerPan);
         return list;
     }

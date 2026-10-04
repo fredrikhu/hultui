@@ -749,17 +749,20 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         MarkPaintDirty();
     }
 
+    /// <summary>Vertical only, and handed on at either end — see
+    /// <see cref="ScrollEvent.Consume"/>. Wrapped text has no sideways axis, so horizontal
+    /// motion always goes to whatever is around the area.</summary>
     private void OnScroll(ScrollEvent evt)
     {
-        var style = ResolvedInherited;
-        float wrapWidth = GetWrapWidth();
-        float totalHeight = LineCount(wrapWidth, style) * GetLineHeight(style);
-        float viewportHeight = Layout.AbsoluteContentBox.Height;
-        float maxScroll = Math.Max(0, totalHeight - viewportHeight);
+        if (!evt.IsFor(this)) return;
+        float dy = evt.RemainingDeltaY;
+        if (dy == 0) return;
 
-        _scrollOffsetY = Math.Clamp(_scrollOffsetY - evt.DeltaY * ScrollSpeed, 0, maxScroll);
-        evt.StopPropagation = true;
-        MarkPaintDirty();
+        float before = _scrollOffsetY;
+        _scrollOffsetY = Math.Clamp(before - dy * ScrollSpeed, 0, MaxScrollY());
+        bool moved = _scrollOffsetY != before;
+        if (moved) MarkPaintDirty();
+        evt.Consume(this, movedX: false, movedY: moved);
     }
 
     /// <summary>Current vertical scroll offset in pixels. Setting it clamps to the

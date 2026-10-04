@@ -288,10 +288,12 @@ public partial class WebViewElement : Element, IAccessibleContentSource
 
     private void OnScroll(ScrollEvent e)
     {
-        if (_controller is null) return;
-        // The page scrolls itself; an enclosing scroll view must not scroll as well.
+        // Not a gesture that started on a page scrolling past (see ScrollEvent.IsFor).
+        if (_controller is null || !e.IsFor(this)) return;
+        // The page scrolls itself; an enclosing scroll view must not scroll as well. Whether the
+        // page had anywhere to go is not knowable from here, so it keeps every axis.
         _controller.SendPointer(At(e.Position, WebPointerAction.Wheel, e.Modifiers) with { WheelX = e.DeltaX, WheelY = e.DeltaY });
-        e.StopPropagation = true;
+        e.Consume(this, movedX: true, movedY: true);
     }
 
     // ──── Focus and keys ────
