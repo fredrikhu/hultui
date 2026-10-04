@@ -1,6 +1,23 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **A dialog holds the keyboard** — the overlay dialog could only be closed with the pointer,
+  Tab walked straight out of it into the page behind (traversal always ran over the main tree,
+  and an element not in it reads as "start from the top"), and with nothing focused the page's
+  own shortcuts fired underneath it, because keys go to the focus or else the root.
+  Overlays can now be **modal** (`ShowOverlay(..., modal: true)`; `Dialog.Show` always is).
+  While one is open, keys go to it whenever the focus is not in it or above it, and Tab walks
+  only its controls, always wrapping. Any overlay holding the focus is a Tab scope too, so Tab
+  in a popover cycles there instead of jumping to the page. The dialog takes the keyboard when
+  it opens (its first control, else the scrim, which is focusable but not a Tab stop), and
+  Escape closes it with the default result (`DismissOnEscape`, on by default). The handler sits
+  on the scrim, so whatever is inside sees Escape first and can keep it: a dropdown closing its
+  list, or the web view's and SSH sample's panels, which answer on Escape themselves. The panel
+  gets the `Dialog` role unless the content chose one, named by the title for Confirm/Alert.
+  Focus going back to what had it on close was already there and still holds.
+  9 headless tests, 2 Core. Four faults put back — no Escape handler, Tab over the main tree,
+  keys following a focus behind the dialog, no focus on open — each caught (7, 1 and 3 tests;
+  the first two were run together).
 - **The wheel is shared out between nested scrollers** — every scroll view stopped the wheel
   event whether or not it moved, so a list at the end of its range kept the wheel from the page
   around it and a horizontal strip inside a vertical page ate the vertical wheel. Stopping

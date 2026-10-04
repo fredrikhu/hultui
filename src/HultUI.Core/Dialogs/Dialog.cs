@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -46,19 +47,49 @@ public static class Dialog
         var panel = content(controller);
         // Clicks inside the panel must not fall through to the scrim's dismiss.
         panel.On<ClickEvent>(e => e.StopPropagation = true);
+        // What a screen reader announces it as, unless the content said otherwise.
+        if (panel.Role == AccessibilityRole.None) panel.Role = AccessibilityRole.Dialog;
         scrim.ReplaceChildren(panel);
 
         if (options.DismissOnScrimClick)
             scrim.On<ClickEvent>(_ => controller.Close(default!));
+        // Last in line: the panel and everything in it see Escape first, and one that stops it
+        // — a dropdown closing its list, a panel that answers on Escape — keeps it.
+        if (options.DismissOnEscape)
+            scrim.On<KeyDownEvent>(e =>
+            {
+                if (e.Key != KeyCode.Escape) return;
+                e.StopPropagation = true;
+                controller.Close(default!);
+            });
 
-        var handle = host.ShowOverlay(scrim, 0, 0, dismissOnOutsideClick: false, hitTestable: true);
+        // Somewhere for the keyboard to be when the content has nothing that takes it: keys go
+        // to the focus, and Escape has to reach the handler above. Not a Tab stop.
+        scrim.IsFocusable = true;
+        scrim.TabIndex = -1;
+
+        // Modal: Tab stays inside, and keys reach nothing behind the dialog.
+        var handle = host.ShowOverlay(scrim, 0, 0, dismissOnOutsideClick: false, hitTestable: true, modal: true);
         controller.Bind(host, handle);
+
+        // The dialog takes the keyboard, as a modal one has to: its first control, or the
+        // dialog itself when it has none. Content that wants a particular field focuses it
+        // after this, and wins. Whatever had the focus gets it back when the dialog closes.
+        if (!Contains(scrim, scrim.FocusManager?.FocusedElement))
+            (FocusTraversal.FindNext(panel, null) ?? scrim).Focus();
 
         // Subtle fade-in of the whole dialog.
         scrim.Opacity = 0f;
         Animate.Opacity(scrim, 0f, 1f).Duration(0.12f).Start();
 
         return tcs.Task;
+    }
+
+    private static bool Contains(Element root, Element? element)
+    {
+        for (var e = element; e is not null; e = e.Parent)
+            if (e == root) return true;
+        return false;
     }
 
     /// <summary>A yes/no confirmation. Resolves true if confirmed, false if cancelled or dismissed.</summary>
@@ -91,10 +122,12 @@ public static class Dialog
         var actions = Flex.Row(gap: 8).JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
         actions.ReplaceChildren(buttons);
 
-        return Box.New()
+        var panel = Box.New()
             .Width(400).Padding(new Thickness(20, 24, 20, 24)).CornerRadius(12f)
             .Background(theme.Surface).BorderColor(theme.Border).BorderWidth(1f)
-            .BoxShadow(0, 18, 48, new Color(0, 0, 0, 90))
+            .BoxShadow(0, 18, 48, new Color(0, 0, 0, 90));
+        panel.AccessibleName = title;
+        return panel
             .Children(Flex.Column(gap: 16).Children(
                 Text.New(title).FontSize(16f).FontWeight(FontWeight.Bold).TextColor(theme.TextColor),
                 Text.New(message).FontSize(13f).TextColor(theme.Secondary).LineHeight(19f),

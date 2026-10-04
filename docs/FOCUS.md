@@ -148,7 +148,20 @@ overlay's elements, which have gone (the detached-focus trap above). Until 2026-
 content had no focus manager, `Focus()` inside a dialog did nothing, and a dialog's field
 took the keyboard only when clicked.
 
-Tab is not yet kept inside a dialog: it moves through the main tree behind it.
+**A modal overlay holds the keyboard** (`ShowOverlay(..., modal: true)`, which is how
+`Dialog.Show` presents every dialog). Tab and Shift+Tab cycle through its controls and
+never reach the page behind it, and keys go to it even when the focus is somewhere it does
+not reach — nothing focused, or a page element focused from code while the dialog is up —
+so the page's own shortcuts cannot fire underneath. Any other overlay is a Tab scope once
+it holds the focus: Tab from a field in a popover cycles in the popover.
+
+A dialog takes the keyboard when it opens: its first control, or the dialog itself when it
+has none. Content that wants a particular field focuses it after `Dialog.Show` returns and
+wins. **Escape closes it** with the default result (`DialogOptions.DismissOnEscape`, on by
+default), after everything inside has had its turn: a dropdown closing its list, or a panel
+that answers on Escape and stops it, keeps the key. The panel is announced as a `Dialog` to
+screen readers, named by its title for `Confirm` and `Alert`, unless the content set a role
+of its own.
 
 ---
 
