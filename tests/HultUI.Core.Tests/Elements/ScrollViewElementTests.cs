@@ -124,8 +124,38 @@ public class ScrollViewElementTests
         Assert.Equal(40, sv.ScrollOffsetY);
     }
 
+    /// <summary>The motion a view moved on reaches the views around it already used, so they
+    /// do not scroll as well. The event itself still bubbles: stopping it also ended the
+    /// view's remaining handlers, and an app's own wheel handler on a scroll view never ran.</summary>
     [Fact]
-    public void ScrollEvent_StopsPropagation()
+    public void ScrollEvent_ReachesTheParentAlreadyUsed()
+    {
+        var (parent, sv) = ParentAround(contentHeight: 500);
+        ScrollEvent? seen = null;
+        parent.On<ScrollEvent>(e => seen = e);
+
+        EventDispatcher.Dispatch(new ScrollEvent { Position = new Point(100, 50), DeltaY = -1 }, sv);
+
+        Assert.NotNull(seen);
+        Assert.True(seen!.ConsumedY);
+        Assert.Equal(0, seen.RemainingDeltaY);
+    }
+
+    /// <summary>A view with nowhere to go leaves the motion for the views around it.</summary>
+    [Fact]
+    public void ScrollEvent_ThatCouldNotMoveIsLeftForTheParent()
+    {
+        var (parent, sv) = ParentAround(contentHeight: 50);
+        ScrollEvent? seen = null;
+        parent.On<ScrollEvent>(e => seen = e);
+
+        EventDispatcher.Dispatch(new ScrollEvent { Position = new Point(100, 50), DeltaY = -1 }, sv);
+
+        Assert.False(seen!.ConsumedY);
+        Assert.Equal(-1, seen.RemainingDeltaY);
+    }
+
+    private (BoxElement Parent, ScrollViewElement View) ParentAround(float contentHeight)
     {
         var sv = ScrollViewElement.New();
         sv.Box.Width = 200;
@@ -133,26 +163,15 @@ public class ScrollViewElementTests
 
         var child = BoxElement.New();
         child.Box.Width = 200;
-        child.Box.Height = 500;
+        child.Box.Height = contentHeight;
         sv.AddChild(child);
 
         _layout.PerformLayout(sv, 200, 100);
         sv.UpdateContentSize();
 
-        bool parentScrolled = false;
         var parent = BoxElement.New();
-        parent.On<ScrollEvent>(_ => parentScrolled = true);
         parent.AddChild(sv);
-
-        var evt = new ScrollEvent
-        {
-            Position = new Point(100, 50),
-            DeltaX = 0,
-            DeltaY = -1
-        };
-        EventDispatcher.Dispatch(evt, sv);
-
-        Assert.False(parentScrolled);
+        return (parent, sv);
     }
 
     [Fact]

@@ -29,7 +29,9 @@
   for a pan whose content is not a scroll view's. Terminal and WebView keep the whole wheel as
   before, through `Consume` rather than a stop. LAYOUT.md "Nesting scroll views" has the rules
   and the three-step pattern for app code.
-  11 headless tests, 9 Core, 1 in Junction (swipe and Shift+wheel pan the diff). Five faults
+  11 headless tests, 9 Core, 1 in Junction (swipe and Shift+wheel pan the diff), and the old
+  `ScrollEvent_StopsPropagation`, which pinned the bug, rewritten as two: the parent sees the
+  motion already used, and sees it unused when the view could not move. Five faults
   were put back: the old handler (8 of 11 fail), latching off (4 plus 1 unit), and overlays,
   Shift and the zero-DeltaY step each caught by their own tests. The Junction test reports
   exactly the symptom with the old handler back.
