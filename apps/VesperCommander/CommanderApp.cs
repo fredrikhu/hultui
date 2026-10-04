@@ -2261,7 +2261,7 @@ public partial class CommanderApp : Component, IDisposable
     /// has rebound it is worse than one showing nothing. Null when the command is unbound,
     /// which <see cref="Overlays.PaletteRow"/> renders as no chip at all.</summary>
     private string? Key(Cmd cmd) =>
-        CurrentChord(cmd, _settings) is { } chord ? Keybindings.Format(chord) : null;
+        KeyText(cmd) is { Length: > 0 } keys ? keys : null;
 
     /// <summary>All palette commands in display order (before query filtering). Everything the
     /// keymap can reach is here, so the palette is a complete second route to the app's
@@ -2422,6 +2422,7 @@ public partial class CommanderApp : Component, IDisposable
     private void OpenOptions()
     {
         _draft = _settings.Clone();
+        _draftKeys = null; _rebindCmd = null; _rebindRefusal = null;
         _optSearch = "";
         _optionsOpen = true;
         MarkDirty();
@@ -2464,7 +2465,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_diffOpen) ComputeDiff();            // the diff does not keep the lines it tokenized
     }
 
-    private void ResetOptions() { _draft = new Settings(); MarkDirty(); }
+    private void ResetOptions() { _draft = new Settings(); _draftKeys = null; _rebindCmd = null; MarkDirty(); }
 
     /// <summary>Clicking a column header. Same column flips direction; a new column
     /// adopts a sensible default (Name ascending, Size/Date descending — big & newest
@@ -2918,11 +2919,13 @@ public partial class CommanderApp : Component, IDisposable
         if (_optionsOpen)
         {
             // Capturing a rebind: the next non-modifier key becomes the command's chord.
+            // A key Vesper keeps for itself is refused, and the capture stays open saying so.
             if (_rebindCmd is { } rc)
             {
-                if (Keybindings.IsModifier(e.Key)) { e.StopPropagation = true; return; }
-                if (e.Key != KeyCode.Escape) RebindTo(rc, ChordOf(e));   // Esc cancels
-                _rebindCmd = null; MarkDirty(); e.StopPropagation = true; return;
+                if (e.Key == KeyCode.Escape) { _rebindCmd = null; _rebindRefusal = null; }   // Esc cancels
+                else if (KeyChord.From(e) is { } chord) RebindTo(rc, chord);
+                else { e.StopPropagation = true; return; }   // a modifier on its own: keep waiting
+                MarkDirty(); e.StopPropagation = true; return;
             }
             bool inField = e.Target is TextInputElement;
             switch (e.Key)
@@ -2968,15 +2971,15 @@ public partial class CommanderApp : Component, IDisposable
         // Review affordance (prototype): Ctrl+Shift+E/O/D force the active pane's
         // empty/offline/denied view; K clears back to the real state. Checked before
         // Ctrl+D so Shift disambiguates it from the bookmark manager.
-        if (ctrl && e.Modifiers.HasFlag(KeyModifiers.Shift)
-            && e.Key is KeyCode.E or KeyCode.O or KeyCode.D or KeyCode.N or KeyCode.K)
+        if (_keys.Find(e, Keybindings.Group)?.Id is ("ReviewEmpty" or "ReviewOffline" or "ReviewDenied"
+            or "ReviewConnecting" or "ReviewClear") and var review)
         {
-            PaneState? s = e.Key switch
+            PaneState? s = review switch
             {
-                KeyCode.E => PaneState.Empty,
-                KeyCode.O => PaneState.Offline,
-                KeyCode.D => PaneState.Denied,
-                KeyCode.N => PaneState.Connecting,   // needs no server to look at
+                "ReviewEmpty" => PaneState.Empty,
+                "ReviewOffline" => PaneState.Offline,
+                "ReviewDenied" => PaneState.Denied,
+                "ReviewConnecting" => PaneState.Connecting,   // needs no server to look at
                 _ => null,
             };
             if (_active == 'L') _forceStateL = s; else _forceStateR = s;
@@ -2985,8 +2988,7 @@ public partial class CommanderApp : Component, IDisposable
 
         // Ctrl+Shift+C copies the active pane's current folder path to the clipboard
         // (Explorer's "Copy as path"). Skipped in a text field, where it means copy text.
-        if (ctrl && e.Modifiers.HasFlag(KeyModifiers.Shift) && e.Key == KeyCode.C
-            && e.Target is not (TextInputElement or TextAreaElement))
+        if (_keys.Matches("CopyPath", e) && e.Target is not (TextInputElement or TextAreaElement))
         {
             CopyCurrentPath(_active); e.StopPropagation = true; return;
         }
@@ -2996,45 +2998,43 @@ public partial class CommanderApp : Component, IDisposable
         if (MatchHotkey(e, wantGlobal: true, out var gcmd)) { Dispatch(gcmd); e.StopPropagation = true; return; }
 
         // Ctrl+1..9 jump the active pane to the Nth bookmark.
-        if (ctrl && e.Key is >= KeyCode.Digit1 and <= KeyCode.Digit9)
+        if (_keys.Matches("JumpBookmark", e) && e.Digit is { } n)
         {
-            JumpBookmark(e.Key - KeyCode.Digit1); e.StopPropagation = true; return;
+            JumpBookmark(n - 1); e.StopPropagation = true; return;
         }
 
         // Ctrl+C / Ctrl+X / Ctrl+V file clipboard — but not while a text field (e.g. the
         // preview TextArea) is focused, where these mean copy/cut/paste text.
-        if (ctrl && e.Key is KeyCode.C or KeyCode.X or KeyCode.V
-            && e.Target is not (TextInputElement or TextAreaElement))
+        if (e.Target is not (TextInputElement or TextAreaElement)
+            && _keys.Find(e, Keybindings.Group)?.Id is ("ClipboardCopy" or "ClipboardCut" or "ClipboardPaste") and var clip)
         {
-            if (e.Key == KeyCode.V) PasteFromClipboard();
-            else CopyToClipboard(cut: e.Key == KeyCode.X);
+            if (clip == "ClipboardPaste") PasteFromClipboard();
+            else CopyToClipboard(cut: clip == "ClipboardCut");
             e.StopPropagation = true; return;
         }
 
         // Ctrl+A marks everything in the active pane — except in a text field, where it
-        // keeps its select-all-text meaning. Shift excluded: Ctrl+Shift+A is the (rebindable)
-        // mark-by-pattern command, and must not fall through to mark-all if rebound away.
-        if (ctrl && e.Key == KeyCode.A && !e.Modifiers.HasFlag(KeyModifiers.Shift)
-            && e.Target is not (TextInputElement or TextAreaElement))
+        // keeps its select-all-text meaning.
+        if (_keys.Matches("MarkAll", e) && e.Target is not (TextInputElement or TextAreaElement))
         {
             MarkAll(_active); e.StopPropagation = true; return;
         }
 
         // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs.
-        if (ctrl && e.Key == KeyCode.Tab)
+        if (_keys.Matches("NextTab", e) || _keys.Matches("PreviousTab", e))
         {
-            CycleTab(_active, e.Modifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
+            CycleTab(_active, _keys.Matches("PreviousTab", e) ? -1 : 1);
             e.StopPropagation = true; return;
         }
 
         // Alt+← / Alt+→ move back / forward through the active pane's history.
-        if (alt && e.Key == KeyCode.Left) { GoBack(_active); e.StopPropagation = true; return; }
-        if (alt && e.Key == KeyCode.Right) { GoForward(_active); e.StopPropagation = true; return; }
+        if (_keys.Matches("Back", e)) { GoBack(_active); e.StopPropagation = true; return; }
+        if (_keys.Matches("Forward", e)) { GoForward(_active); e.StopPropagation = true; return; }
 
         // Alt+F1 / Alt+F2 open the drive picker for the left / right pane.
-        if (alt && e.Key is KeyCode.F1 or KeyCode.F2)
+        if (_keys.Matches("LeftDrive", e) || _keys.Matches("RightDrive", e))
         {
-            OpenDrivePicker(e.Key == KeyCode.F1 ? 'L' : 'R'); e.StopPropagation = true; return;
+            OpenDrivePicker(_keys.Matches("LeftDrive", e) ? 'L' : 'R'); e.StopPropagation = true; return;
         }
 
         var typing = e.Target is TextInputElement or TextAreaElement;

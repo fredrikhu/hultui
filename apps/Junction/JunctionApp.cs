@@ -1296,13 +1296,10 @@ public partial class JunctionApp : Component, IDisposable
 
         // ⌘P / Ctrl+P toggles the palette from anywhere — the same key Vesper uses, so the
         // shortcut does not change meaning between the two apps. Ctrl+K, which Junction used
-        // before, still works: it was the advertised key for ten releases.
-        //
-        // Both are caught here, ahead of the per-view handlers, and that is load-bearing rather
-        // than tidy: those switch on the bare key and ignore modifiers, so Ctrl+P reaching the
-        // Branches view would push the selected branch (KeyCode.P is Push there). Any new
-        // Ctrl+<letter> shortcut has to be intercepted at this level for the same reason.
-        if (ctrl && e.Key is KeyCode.P or KeyCode.K)
+        // before, still works: it was the advertised key for ten releases. Every key from here
+        // down is matched through Shortcuts, which is exact about modifiers: the per-view keys
+        // used to switch on the bare key, so a Ctrl chord that reached them acted as the letter.
+        if (Shortcuts.Pressed("palette", e))
         {
             TogglePalette();
             e.StopPropagation = true;
@@ -1311,7 +1308,7 @@ public partial class JunctionApp : Component, IDisposable
 
         // Ctrl+, opens Options — the key every editor uses for its settings. There is no
         // gear in the chrome by design; this and the palette are the two ways in.
-        if (ctrl && e.Key == KeyCode.Comma)
+        if (Shortcuts.Pressed("options", e))
         {
             OpenOptions();
             e.StopPropagation = true;
@@ -1321,14 +1318,13 @@ public partial class JunctionApp : Component, IDisposable
         // ⌘+ / ⌘- / ⌘0 — the zoom keys every browser and editor has, driving the same
         // interface scale the Appearance overlay offers in steps. Handled here, above the
         // typing guard, because zooming is not something to lose because a field has focus.
-        if (ctrl && e.Key is KeyCode.Equals or KeyCode.Minus or KeyCode.Digit0)
+        // Matched as the symbols the layout types (see Shortcuts), so + zooms in on a Swedish
+        // keyboard too, where it used to be read as the US minus key and zoomed out.
+        int zoom = Shortcuts.Pressed("zoom.in", e) ? 1 : Shortcuts.Pressed("zoom.out", e) ? -1
+            : Shortcuts.Pressed("zoom.reset", e) ? 0 : int.MinValue;
+        if (zoom != int.MinValue)
         {
-            NudgeUiScale(e.Key switch
-            {
-                KeyCode.Equals => 1,
-                KeyCode.Minus => -1,
-                _ => 0,
-            });
+            NudgeUiScale(zoom);
             e.StopPropagation = true;
             return;
         }
@@ -1336,7 +1332,7 @@ public partial class JunctionApp : Component, IDisposable
         // ⌘D / Ctrl+D opens the selected file's diff in VS Code (Commit/Changes
         // views) — the primary way to inspect a diff when the pane is hidden on
         // narrow windows, but available at any size.
-        if (ctrl && e.Key == KeyCode.D && View is JunctionView.Commit or JunctionView.Changes)
+        if (Shortcuts.Pressed("diff.editor", e) && View is JunctionView.Commit or JunctionView.Changes)
         {
             OpenSelectedDiffExternally();
             e.StopPropagation = true;
@@ -1345,9 +1341,7 @@ public partial class JunctionApp : Component, IDisposable
 
         // ⌘O / Ctrl+O opens the selected file itself with the desktop's own handler — the
         // other half of Ctrl+D, for when the answer is "edit this" rather than "compare it".
-        // Intercepted here for the same reason as the two above: the per-view handlers switch
-        // on the bare key, and KeyCode.O is Open in the Files tree.
-        if (ctrl && e.Key == KeyCode.O && View is JunctionView.Commit or JunctionView.Changes)
+        if (Shortcuts.Pressed("diff.open", e) && View is JunctionView.Commit or JunctionView.Changes)
         {
             OpenSelectedFile();
             e.StopPropagation = true;
@@ -1424,21 +1418,18 @@ public partial class JunctionApp : Component, IDisposable
         // handled above, take precedence). Alt+↑/↓ steps through the repos;
         // Alt+N / Ctrl+N jump to the Nth entry (1-based). Ctrl+↑/↓ belongs to
         // the History list (focus caret) — workspaces switch via Ctrl+N only.
-        if (alt || ctrl)
+        if (Shortcuts.Pressed("repo", e))
         {
-            if (e.Key is >= KeyCode.Digit1 and <= KeyCode.Digit9)
-            {
-                var index = e.Key - KeyCode.Digit1;
-                if (alt) SelectRepoByIndex(index); else SelectWorkspaceByIndex(index);
-                e.StopPropagation = true;
-                return;
-            }
-            if (alt && e.Key is KeyCode.Up or KeyCode.Down)
-            {
-                NavigateRepo(e.Key == KeyCode.Down ? 1 : -1);
-                e.StopPropagation = true;
-                return;
-            }
+            if (e.Digit is { } nth) SelectRepoByIndex(nth - 1);
+            else NavigateRepo(e.Key == KeyCode.Down ? 1 : -1);
+            e.StopPropagation = true;
+            return;
+        }
+        if (Shortcuts.Pressed("workspace", e) && e.Digit is { } workspace)
+        {
+            SelectWorkspaceByIndex(workspace - 1);
+            e.StopPropagation = true;
+            return;
         }
 
         if (typing) return;
@@ -1453,7 +1444,7 @@ public partial class JunctionApp : Component, IDisposable
         // m folds the commit message away. Behind the typing guard above, like f — an m
         // typed into a commit summary has to stay an m — and gated on the Commit tab
         // actually showing a message with a body, so the letter is free elsewhere.
-        if (e.Key == KeyCode.M && CommitMessageHasBody)
+        if (Shortcuts.Pressed("commit.message", e) && CommitMessageHasBody)
         {
             ToggleCommitMessage();
             e.StopPropagation = true;
@@ -1465,7 +1456,7 @@ public partial class JunctionApp : Component, IDisposable
         // from inside a field. This one is deliberately after it: an f typed into the commit
         // message is an f. ActiveFindBar answers null where there is no text to search, so
         // the letter stays free in the views that have none.
-        if (e.Key == KeyCode.F && ActiveFindBar() is { } findTarget)
+        if (Shortcuts.Pressed("find", e) && ActiveFindBar() is { } findTarget)
         {
             findTarget.Open();
             e.StopPropagation = true;
@@ -1473,7 +1464,7 @@ public partial class JunctionApp : Component, IDisposable
         }
 
         // Backtick (the key left of 1) toggles the sidebar.
-        if (e.Key == KeyCode.Backtick)
+        if (Shortcuts.Pressed("sidebar", e))
         {
             ToggleSidebar();
             e.StopPropagation = true;
@@ -1481,15 +1472,15 @@ public partial class JunctionApp : Component, IDisposable
         }
 
         // Number keys switch views.
-        var viewForKey = e.Key switch
+        var viewForKey = !Shortcuts.Pressed("view", e) ? null : e.Digit switch
         {
-            KeyCode.Digit1 => JunctionView.Overview,
-            KeyCode.Digit2 => JunctionView.History,
-            KeyCode.Digit3 => JunctionView.Commit,
-            KeyCode.Digit4 => JunctionView.Changes,
-            KeyCode.Digit5 => JunctionView.Branches,
-            KeyCode.Digit6 => JunctionView.Tags,
-            KeyCode.Digit7 => JunctionView.Files,
+            1 => JunctionView.Overview,
+            2 => JunctionView.History,
+            3 => JunctionView.Commit,
+            4 => JunctionView.Changes,
+            5 => JunctionView.Branches,
+            6 => JunctionView.Tags,
+            7 => JunctionView.Files,
             _ => (JunctionView?)null,
         };
         if (viewForKey is { } v) { SetView(v); e.StopPropagation = true; return; }
@@ -1501,8 +1492,7 @@ public partial class JunctionApp : Component, IDisposable
         // view (which re-roots its tree at the new commit). The list is
         // newest-first, so Up = newer, Down = older. Same path as the ▲/▼ buttons
         // in both headers, so keyboard and mouse stay in step.
-        if (ctrl && e.Key is KeyCode.Up or KeyCode.Down
-            && View is JunctionView.Commit or JunctionView.Files)
+        if (Shortcuts.Pressed("commit.step", e) && View is JunctionView.Commit or JunctionView.Files)
         {
             MoveCommitSelection(e.Key == KeyCode.Up ? -1 : 1);
             e.StopPropagation = true;
@@ -1531,7 +1521,7 @@ public partial class JunctionApp : Component, IDisposable
         {
             // The same key History, Branches and Tags use to reach their search box. Here it
             // finds a file in the browsed tree; Ctrl+F still finds text inside the open one.
-            if (e.Key == KeyCode.Slash)
+            if (Shortcuts.Pressed("files.search", e))
             {
                 _pendingFilesSearchFocus = true;
                 MarkDirty();
@@ -1545,7 +1535,7 @@ public partial class JunctionApp : Component, IDisposable
 
         if (View == JunctionView.History)
         {
-            if (e.Key == KeyCode.Slash)
+            if (Shortcuts.Pressed("history.search", e))
             {
                 _pendingHistorySearchFocus = true;
                 MarkDirty();
@@ -1558,7 +1548,7 @@ public partial class JunctionApp : Component, IDisposable
 
         if (View == JunctionView.Tags)
         {
-            if (e.Key == KeyCode.Slash)
+            if (Shortcuts.Pressed("tags.search", e))
             {
                 _pendingTagSearchFocus = true;
                 MarkDirty();
@@ -1571,7 +1561,7 @@ public partial class JunctionApp : Component, IDisposable
 
         if (View == JunctionView.Branches)
         {
-            if (e.Key == KeyCode.Slash)
+            if (Shortcuts.Pressed("branches.search", e))
             {
                 _pendingBranchSearchFocus = true;
                 MarkDirty();

@@ -124,6 +124,30 @@ public class VideoPlayerTests
     }
 
     [Fact]
+    public void AnAppsChord_IsNotThePlayersLetter()
+    {
+        // The keys ignored modifiers, so a focused player took Ctrl+F (an app's find), Ctrl+M
+        // and Ctrl+L as its own F, M and L — and swallowed them.
+        using var f = new Fixture();
+        bool fullscreen = false;
+        f.VideoPlayer.FullscreenRequested += () => fullscreen = true;
+        f.FocusPlayer();
+        var w = f.Session.Window;
+
+        w.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+        w.PressKey(KeyCode.M, KeyModifiers.Ctrl);
+        w.PressKey(KeyCode.L, KeyModifiers.Ctrl);
+        w.PressKey(KeyCode.Digit5, KeyModifiers.Alt);
+        Assert.False(fullscreen);
+        Assert.False(f.Player.Muted);
+        Assert.Equal(TimeSpan.Zero, f.Player.Position);
+
+        w.PressKey(KeyCode.F);
+        Assert.True(fullscreen);
+        Assert.Equal("Space · k", VideoPlayer.Shortcuts.Keys("play"));
+    }
+
+    [Fact]
     public void TheJumpButtons_SeekByTheJumpStep()
     {
         using var f = new Fixture();

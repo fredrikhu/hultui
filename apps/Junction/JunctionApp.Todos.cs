@@ -295,9 +295,12 @@ public partial class JunctionApp
             case KeyCode.Enter:
                 if (_todoSel >= 0 && _todoSel < todos.Count) OpenTodoTarget(todos[_todoSel].Host, todos[_todoSel].Todo);
                 return true;
-            case KeyCode.D:
-                if (_todoSel >= 0 && _todoSel < todos.Count) MarkTodoDone(todos[_todoSel].Host, todos[_todoSel].Todo);
-                return true;
+        }
+        // Exact about modifiers: Ctrl+D used to mark the to-do done.
+        if (Shortcuts.Pressed("todo.done", e))
+        {
+            if (_todoSel >= 0 && _todoSel < todos.Count) MarkTodoDone(todos[_todoSel].Host, todos[_todoSel].Todo);
+            return true;
         }
         return false;
     }

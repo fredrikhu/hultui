@@ -5,39 +5,47 @@ namespace VesperCommander;
 public partial class CommanderApp
 {
     // ── Keymap (rebindable commands) ─────────────────────────────────────
-    private readonly Dictionary<Chord, Cmd> _keyReverse = new();
-    private Cmd? _rebindCmd;   // set while the Keyboard page is capturing a new chord
+    private readonly ShortcutMap _keys = Keybindings.Create();
+    private ShortcutMap? _draftKeys;   // the Keyboard page's copy, while Options is open
+    private Cmd? _rebindCmd;           // set while the Keyboard page is capturing a new chord
+    private string? _rebindRefusal;    // why the last key pressed in a capture was not taken
 
-    /// <summary>Rebuild the pressed-chord → command lookup from defaults + user overrides.
-    /// Call after settings load / save.</summary>
-    private void RebuildKeymap()
+    /// <summary>Apply the user's overrides from settings. Call after settings load / save.</summary>
+    private void RebuildKeymap() => _keys.LoadOverrides(_settings.KeyBindings);
+
+    /// <summary>The draft's keymap: the map with the draft settings' overrides, made when the
+    /// Keyboard page first asks and dropped whenever the draft's bindings are replaced.</summary>
+    private ShortcutMap DraftKeys
     {
-        _keyReverse.Clear();
-        foreach (var (cmd, def) in Keybindings.Defaults)
+        get
         {
-            var chord = def;
-            if (_settings.KeyBindings.TryGetValue(cmd.ToString(), out var s))
+            if (_draftKeys is null)
             {
-                if (s.Length == 0) continue;                     // explicitly unbound (a conflict steal)
-                if (Keybindings.Parse(s) is { } c) chord = c;
+                _draftKeys = Keybindings.Create();
+                _draftKeys.LoadOverrides(_draft.KeyBindings);
             }
-            _keyReverse[chord] = cmd;   // conflicts are prevented at rebind time (RebindTo steals)
+            return _draftKeys;
         }
     }
 
-    private static Chord ChordOf(KeyDownEvent e) => new(e.Key,
-        e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super),
-        e.Modifiers.HasFlag(KeyModifiers.Alt),
-        e.Modifiers.HasFlag(KeyModifiers.Shift));
+    /// <summary>A command's keys as shown — a caption, a tooltip, a palette row — so they move
+    /// when it is rebound. Empty when it has none.</summary>
+    private string KeyText(Cmd cmd) => _keys.Keys(cmd.ToString());
+
+    /// <summary><see cref="KeyText"/>, or null when there is none: a menu's shortcut column.</summary>
+    private string? KeyHint(Cmd cmd) => KeyText(cmd) is { Length: > 0 } keys ? keys : null;
+
+    private bool Pressed(Cmd cmd, KeyDownEvent e) => _keys.Matches(cmd.ToString(), e);
 
     /// <summary>Match a pressed chord to a rebindable command. <paramref name="wantGlobal"/>
     /// selects the Ctrl/Alt-modified commands (which fire even from a focused field) vs the
     /// bare ones (which fire only in a pane), preserving the original two-tier dispatch.</summary>
     private bool MatchHotkey(KeyDownEvent e, bool wantGlobal, out Cmd cmd)
     {
-        var chord = ChordOf(e);
-        if ((chord.Ctrl || chord.Alt) != wantGlobal) { cmd = default; return false; }
-        return _keyReverse.TryGetValue(chord, out cmd);
+        cmd = default;
+        bool global = (e.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Super | KeyModifiers.Alt)) != 0;
+        if (global != wantGlobal) return false;
+        return _keys.Find(e, Keybindings.Group) is { Rebindable: true } s && Enum.TryParse(s.Id, out cmd);
     }
 
     private void Dispatch(Cmd cmd)
@@ -82,41 +90,25 @@ public partial class CommanderApp
         }
     }
 
-    /// <summary>Record a rebind in the draft: store the chord as an override (or drop it when
-    /// it matches the default, so only real changes persist), then <b>steal</b> the chord from
-    /// any other command that held it — that command reverts to its default, or becomes
-    /// explicitly unbound ("") when its default is the very chord we took. This keeps the map
-    /// unambiguous instead of a nondeterministic last-write-wins.</summary>
-    private void RebindTo(Cmd cmd, Chord chord)
+    /// <summary>
+    /// The Keyboard page's capture: bind <paramref name="cmd"/> to <paramref name="chord"/> in
+    /// the draft. The map takes the chord from any command that had it (that one goes back to
+    /// its default, or to none when its default is this chord), and refuses a key Vesper keeps
+    /// for itself — then the capture stays open and says whose key it is.
+    /// </summary>
+    private void RebindTo(Cmd cmd, KeyChord chord)
     {
-        if (chord.Equals(Keybindings.Defaults[cmd]))
-            _draft.KeyBindings.Remove(cmd.ToString());
+        var draft = DraftKeys;
+        if (draft.Rebind(cmd.ToString(), chord))
+        {
+            _draft.KeyBindings = draft.SaveOverrides();
+            _rebindCmd = null;
+            _rebindRefusal = null;
+        }
         else
-            _draft.KeyBindings[cmd.ToString()] = Keybindings.Format(chord);
-
-        foreach (var (other, _) in Keybindings.Order)
         {
-            if (other == cmd) continue;
-            if (CurrentChord(other, _draft) is { } oc && oc.Equals(chord))
-            {
-                if (Keybindings.Defaults[other].Equals(chord))
-                    _draft.KeyBindings[other.ToString()] = "";   // its default IS this chord → unbind
-                else
-                    _draft.KeyBindings.Remove(other.ToString());  // revert to its own (free) default
-            }
+            var holder = draft.Holder(chord, draft[cmd.ToString()]);
+            _rebindRefusal = $"{chord} is taken: {holder?.Title.ToLowerInvariant()}";
         }
-    }
-
-    /// <summary>The chord bound to a command in the given settings (draft while editing),
-    /// falling back to the default. Null when the command is explicitly unbound (a stolen
-    /// chord's former owner).</summary>
-    private static Chord? CurrentChord(Cmd cmd, Settings s)
-    {
-        if (s.KeyBindings.TryGetValue(cmd.ToString(), out var str))
-        {
-            if (str.Length == 0) return null;                       // explicitly unbound
-            if (Keybindings.Parse(str) is { } c) return c;
-        }
-        return Keybindings.Defaults[cmd];
     }
 }

@@ -182,7 +182,7 @@ public partial class MeridianApp
         // than patching into one another.
         if (_runState == RunState.Running)
         {
-            var abort = Ui.Button(ButtonVariant.Secondary, "Abort", AbortRun, "run-abort", kbd: "Esc", style: Ui.Warn)
+            var abort = Ui.Button(ButtonVariant.Secondary, "Abort", AbortRun, "run-abort", kbd: Shortcuts.Keys("cancel"), style: Ui.Warn)
                 .AccessibleName("Abort run");
             abort.Key = "run-abort";
             panel.AddChild(abort);
@@ -198,7 +198,7 @@ public partial class MeridianApp
         }
         else
         {
-            var run = Ui.Button(ButtonVariant.Primary, $"Run · {scopeCount} req", StartRun, "run-start", kbd: "Ctrl R")
+            var run = Ui.Button(ButtonVariant.Primary, $"Run · {scopeCount} req", StartRun, "run-start", kbd: Shortcuts.Keys("run"))
                 .AccessibleName($"Run {scopeCount} requests");
             run.Key = "run-start";
             panel.AddChild(run);

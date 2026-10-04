@@ -26,7 +26,8 @@ using Text = HultUI.Core.Builders.Text;
 /// <para>Keys, when the player has focus (clicking the picture gives it focus): Space
 /// and K play/pause; Left/Right seek by <see cref="SeekStep"/>, J/L by <see cref="JumpStep"/>;
 /// Up/Down change the volume; M mutes; F asks for full screen; Home/End go to the
-/// start/end; 0–9 jump to that tenth of the media.</para>
+/// start/end; 0–9 jump to that tenth of the media. All without modifiers — an app's Ctrl
+/// chords pass through — and listed in <see cref="Shortcuts"/>.</para>
 ///
 /// <para>Full screen is the application's to grant — the component knows no window —
 /// so <see cref="FullscreenRequested"/> is raised and the app sets
@@ -67,6 +68,34 @@ public sealed class VideoPlayer : Component
     public TimeSpan SeekStep { get; set; } = TimeSpan.FromSeconds(5);
     /// <summary>How far the jump buttons, and J/L, seek.</summary>
     public TimeSpan JumpStep { get => _jumpStep.Value; set => _jumpStep.Value = value; }
+
+    /// <summary>
+    /// The player's keys, for an app's help or legend to name. Matched exactly: they used to
+    /// ignore modifiers, so the focused player took Ctrl+F, Ctrl+L and the rest of an app's
+    /// chords as its own letters.
+    /// </summary>
+    public static ShortcutMap Shortcuts { get; } = BuildShortcuts();
+
+    private static ShortcutMap BuildShortcuts()
+    {
+        static KeyChord K(KeyCode key) => new(key);
+        var map = new ShortcutMap();
+        const string group = "Player";
+        map.Add("play", group, "Play or pause", K(KeyCode.Space), K(KeyCode.K));
+        map.Add("back", group, "Back a little", K(KeyCode.Left));
+        map.Add("forward", group, "Forward a little", K(KeyCode.Right));
+        map.Add("jumpBack", group, "Jump back", K(KeyCode.J));
+        map.Add("jumpForward", group, "Jump forward", K(KeyCode.L));
+        map.Add("louder", group, "Louder", K(KeyCode.Up));
+        map.Add("quieter", group, "Quieter", K(KeyCode.Down));
+        map.Add("mute", group, "Mute", K(KeyCode.M));
+        map.Add("fullscreen", group, "Full screen", K(KeyCode.F));
+        map.Add("start", group, "To the start", K(KeyCode.Home));
+        map.Add("end", group, "To the end", K(KeyCode.End));
+        map.Add("tenth", group, "To that tenth of the media",
+            Enumerable.Range(0, 10).Select(n => new KeyChord(KeyCode.Digit0 + (ushort)n)).ToArray()).Shown("0 – 9");
+        return map;
+    }
     /// <summary>How long the bar takes to fade out once the pointer has been still.</summary>
     public TimeSpan FadeDuration { get; set; } = TimeSpan.FromMilliseconds(300);
 
@@ -512,20 +541,20 @@ public sealed class VideoPlayer : Component
             return;
 
         var player = Player;
-        switch (e.Key)
+        switch (Shortcuts.Find(e)?.Id)
         {
-            case KeyCode.Space or KeyCode.K: player.TogglePlay(); break;
-            case KeyCode.Left: player.SeekBy(-SeekStep); break;
-            case KeyCode.Right: player.SeekBy(SeekStep); break;
-            case KeyCode.J: player.SeekBy(-JumpStep); break;
-            case KeyCode.L: player.SeekBy(JumpStep); break;
-            case KeyCode.Up: player.Volume += 0.05f; break;
-            case KeyCode.Down: player.Volume -= 0.05f; break;
-            case KeyCode.M: player.Muted = !player.Muted; break;
-            case KeyCode.F: FullscreenRequested?.Invoke(); break;
-            case KeyCode.Home: player.Seek(TimeSpan.Zero); break;
-            case KeyCode.End when player.Duration is { } end: player.Seek(end); break;
-            case var _ when e.Digit is { } digit && player.Duration is { } total:
+            case "play": player.TogglePlay(); break;
+            case "back": player.SeekBy(-SeekStep); break;
+            case "forward": player.SeekBy(SeekStep); break;
+            case "jumpBack": player.SeekBy(-JumpStep); break;
+            case "jumpForward": player.SeekBy(JumpStep); break;
+            case "louder": player.Volume += 0.05f; break;
+            case "quieter": player.Volume -= 0.05f; break;
+            case "mute": player.Muted = !player.Muted; break;
+            case "fullscreen": FullscreenRequested?.Invoke(); break;
+            case "start": player.Seek(TimeSpan.Zero); break;
+            case "end" when player.Duration is { } end: player.Seek(end); break;
+            case "tenth" when e.Digit is { } digit && player.Duration is { } total:
                 player.Seek(total * (digit / 10.0));
                 break;
             default: return;

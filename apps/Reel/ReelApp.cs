@@ -279,10 +279,11 @@ public sealed partial class ReelApp : Component, IDisposable
 
     private void OnKey(KeyDownEvent e)
     {
-        // The transport keys belong to the overlay; these are the app's own.
-        switch (e.Key)
+        // The transport keys belong to the overlay; these are the app's own, matched exactly
+        // (N, P and C used to answer to any modifier, and Ctrl+O not to ⌘).
+        switch (Shortcuts.Find(e)?.Id)
         {
-            case KeyCode.O when e.Modifiers.HasFlag(KeyModifiers.Ctrl):
+            case "open":
                 OpenDialog();
                 e.Handled = true;
                 break;
@@ -290,28 +291,28 @@ public sealed partial class ReelApp : Component, IDisposable
             // file at either end — so one key does the whole evening, and a file with no
             // marks behaves exactly as it did before. N and P are always the file, for
             // when the film is one long chapter and you want the next episode anyway.
-            case KeyCode.PageDown:
+            case "nextChapter":
                 if (StepChapter(1) || Step(1)) e.Handled = true;
                 break;
-            case KeyCode.PageUp:
+            case "previousChapter":
                 if (StepChapter(-1) || Step(-1)) e.Handled = true;
                 break;
-            case KeyCode.N:
+            case "nextFile":
                 if (Step(1)) e.Handled = true;
                 break;
-            case KeyCode.P:
+            case "previousFile":
                 if (Step(-1)) e.Handled = true;
                 break;
-            case KeyCode.C:
+            case "chapters":
                 ToggleChapters();
                 e.Handled = Chapters.Count > 0;
                 break;
             // One Escape, one thing: the panel first, then full screen.
-            case KeyCode.Escape when _chaptersOpen:
+            case "back" when _chaptersOpen:
                 CloseChapters();
                 e.Handled = true;
                 break;
-            case KeyCode.Escape when _window.IsFullscreen:
+            case "back" when _window.IsFullscreen:
                 ToggleFullscreen();
                 e.Handled = true;
                 break;
@@ -368,7 +369,7 @@ public sealed partial class ReelApp : Component, IDisposable
 
         column.AddChild(Text.New(broken
                 ? "Reel plays through libmpv. Put it beside the app, or point HULTUI_MPV_PATH at it."
-                : "Open a file with Ctrl+O, or drop one on the window.")
+                : $"Open a file with {Shortcuts.Keys("open")}, or drop one on the window.")
             .FontSize(13f).TextColor(Emulsion.TextDim));
 
         if (!broken)

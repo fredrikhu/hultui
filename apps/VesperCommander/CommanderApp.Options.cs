@@ -165,7 +165,7 @@ public partial class CommanderApp
             new(0, "Single instance", "startup one window prevent second launch",
                 () => ToggleRow(_draft.SingleInstance, "Single instance — a second launch is prevented", () => Flip(ref _draft.SingleInstance))),
             new(0, "Confirm before delete", "safety trash",
-                () => ToggleRow(_draft.ConfirmDelete, "Confirm before delete", () => Flip(ref _draft.ConfirmDelete), "F8")),
+                () => ToggleRow(_draft.ConfirmDelete, "Confirm before delete", () => Flip(ref _draft.ConfirmDelete), KeyText(Cmd.Delete))),
             new(0, "Delete to Recycle Bin", "trash permanent safety",
                 () => ToggleRow(_draft.Recycle, "Delete to Recycle Bin instead of permanently", () => Flip(ref _draft.Recycle))),
             new(0, "On copy conflict", "overwrite keep newer auto rename move",
@@ -193,7 +193,7 @@ public partial class CommanderApp
                     ("Compact", _draft.Density == Density.Compact, () => SetDraft(() => _draft.Density = Density.Compact)),
                     ("Comfortable", _draft.Density == Density.Comfortable, () => SetDraft(() => _draft.Density = Density.Comfortable))))),
             new(1, "Preview panel", "off on image file inactive pane",
-                () => ToggleRow(_draft.PreviewPane, PreviewPanelLabel, () => Flip(ref _draft.PreviewPane), "Ctrl+Q")),
+                () => ToggleRow(_draft.PreviewPane, PreviewPanelLabel, () => Flip(ref _draft.PreviewPane), KeyText(Cmd.Preview))),
             new(1, "Default view", "brief thumbnail grid detail mode layout",
                 () => FieldRow("Default view", DefaultViewSeg())),
             new(1, "Directories first", "folders sort order",
@@ -237,8 +237,8 @@ public partial class CommanderApp
                 () => ToggleRow(_draft.Zebra, "Alternating row tint", () => Flip(ref _draft.Zebra))),
         };
         // Keyboard: one searchable row per rebindable command.
-        foreach (var (cmd, label) in Keybindings.Order)
-            c.Add(new OptRow(2, label, "shortcut keybinding hotkey key", () => KeyBindRow(cmd, label)));
+        foreach (var (cmd, shortcut) in Keybindings.Commands(_keys))
+            c.Add(new OptRow(2, shortcut.Title, "shortcut keybinding hotkey key", () => KeyBindRow(cmd, shortcut.Title)));
         return c;
     }
 
@@ -261,7 +261,7 @@ public partial class CommanderApp
         var toggles = Flex.Column(gap: 2);
         toggles.AddChild(ToggleRow(_draft.RestoreTabs, "Restore tabs and pane paths on start", () => Flip(ref _draft.RestoreTabs)));
         toggles.AddChild(ToggleRow(_draft.SingleInstance, "Single instance — a second launch is prevented", () => Flip(ref _draft.SingleInstance)));
-        toggles.AddChild(ToggleRow(_draft.ConfirmDelete, "Confirm before delete", () => Flip(ref _draft.ConfirmDelete), "F8"));
+        toggles.AddChild(ToggleRow(_draft.ConfirmDelete, "Confirm before delete", () => Flip(ref _draft.ConfirmDelete), KeyText(Cmd.Delete)));
         toggles.AddChild(ToggleRow(_draft.Recycle, "Delete to Recycle Bin instead of permanently", () => Flip(ref _draft.Recycle)));
         page.AddChild(toggles);
         page.AddChild(Divider());
@@ -295,7 +295,7 @@ public partial class CommanderApp
             ("Comfortable", _draft.Density == Density.Comfortable, () => SetDraft(() => _draft.Density = Density.Comfortable)))));
         page.AddChild(FieldRow("Default view", DefaultViewSeg()));
         var toggles = Flex.Column(gap: 2);
-        toggles.AddChild(ToggleRow(_draft.PreviewPane, PreviewPanelLabel, () => Flip(ref _draft.PreviewPane), "Ctrl+Q"));
+        toggles.AddChild(ToggleRow(_draft.PreviewPane, PreviewPanelLabel, () => Flip(ref _draft.PreviewPane), KeyText(Cmd.Preview)));
         toggles.AddChild(ToggleRow(_draft.DirsFirst, "Directories first", () => Flip(ref _draft.DirsFirst)));
         toggles.AddChild(ToggleRow(_draft.ShowHidden, "Show hidden and system files", () => Flip(ref _draft.ShowHidden)));
         page.AddChild(toggles);
@@ -307,19 +307,19 @@ public partial class CommanderApp
         // No scroll view of its own: the page column is one now, and a scroll inside a
         // scroll takes the wheel away from the outer one for whichever it happens to be over.
         var col = Flex.Column(gap: 0);
-        foreach (var (cmd, label) in Keybindings.Order)
-            col.AddChild(KeyBindRow(cmd, label));
+        foreach (var (cmd, shortcut) in Keybindings.Commands(DraftKeys))
+            col.AddChild(KeyBindRow(cmd, shortcut.Title));
         page.AddChild(col);
 
         var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(6, 0, 0, 0));
-        footer.AddChild(Text.New($"{Keybindings.Order.Length} rebindable commands").FontSize(11f).TextColor(Nocturne.Neutral500));
+        footer.AddChild(Text.New($"{Keybindings.Commands(DraftKeys).Count()} rebindable commands").FontSize(11f).TextColor(Nocturne.Neutral500));
         footer.AddChild(Box.New().FlexGrow(1));
         if (_draft.KeyBindings.Count > 0)
         {
             var reset = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(4, 11, 4, 11)).CornerRadius(Nocturne.RadiusSm)
                 .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
                 .Children(Text.New($"Reset {_draft.KeyBindings.Count} to defaults").FontSize(11f).TextColor(Nocturne.Neutral300));
-            reset.OnClick(_ => { _draft.KeyBindings.Clear(); _rebindCmd = null; MarkDirty(); });
+            reset.OnClick(_ => { _draft.KeyBindings.Clear(); _draftKeys = null; _rebindCmd = null; MarkDirty(); });
             footer.AddChild(reset.HoverBg(Nocturne.Neutral900, Color.Transparent));
         }
         page.AddChild(footer);
@@ -337,14 +337,14 @@ public partial class CommanderApp
         BoxElement chip = capturing
             ? Box.New().Padding(new Thickness(1, 6, 2, 6)).CornerRadius(4f)
                 .Background(Nocturne.Accent900).BorderColor(Nocturne.Accent).BorderWidth(1f)
-                .Children(Ui.Mono("press keys…", 10f, Nocturne.Accent200))
-            : CurrentChord(cmd, _draft) is { } ch
-                ? Ui.Kbd(Keybindings.Format(ch))
+                .Children(Ui.Mono(_rebindRefusal ?? "press keys…", 10f, Nocturne.Accent200))
+            : DraftKeys.Keys(cmd.ToString()) is { Length: > 0 } keys
+                ? Ui.Kbd(keys)
                 : Box.New().Padding(new Thickness(1, 6, 2, 6))   // stolen chord's former owner
                     .Children(Ui.Mono("unassigned", 10f, Nocturne.Neutral600));
         row.AddChild(chip.GridCell(0, 1));
 
-        row.OnClick(_ => { _rebindCmd = cmd; MarkDirty(); });
+        row.OnClick(_ => { _rebindCmd = cmd; _rebindRefusal = null; MarkDirty(); });
         if (!capturing) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
@@ -548,7 +548,7 @@ public partial class CommanderApp
         row.AddChild(sw);
         var lbl = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         lbl.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.Text));
-        if (kbd != null) lbl.AddChild(Ui.Kbd(kbd));
+        if (!string.IsNullOrEmpty(kbd)) lbl.AddChild(Ui.Kbd(kbd));
         row.AddChild(lbl);
         row.OnClick(_ => onToggle());
         return row;

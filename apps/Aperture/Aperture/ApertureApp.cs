@@ -487,39 +487,41 @@ public sealed partial class ApertureApp : Component, IDisposable
                 }
                 return;
             }
-            switch (e.Key)
+            // Matched exactly (see Shortcuts): these answered to any modifier, so Ctrl+F made
+            // the film full screen and Ctrl+Q opened the queue.
+            switch (Shortcuts.Find(e, "Player")?.Id)
             {
-                case KeyCode.Escape when _reportOpen:
+                case "player.stop" when _reportOpen:
                     CloseReport();
                     e.Handled = true;
                     break;
-                case KeyCode.Escape:
+                case "player.stop":
                     StopPlayback(report: true);
                     e.Handled = true;
                     break;
-                case KeyCode.Space or KeyCode.K:
+                case "player.play":
                     _player?.TogglePlay();
                     e.Handled = true;
                     break;
-                case KeyCode.F:
+                case "player.fullscreen":
                     ToggleFullscreen();
                     e.Handled = true;
                     break;
-                case KeyCode.C:
+                case "player.chapters":
                     ToggleChapters();
                     e.Handled = true;
                     break;
-                case KeyCode.Q:
+                case "player.queue":
                     ToggleQueue();
                     e.Handled = true;
                     break;
                 // Page keys step chapters without opening anything — the transport keys
                 // the overlay owns are all taken, and these two are idle in a player.
-                case KeyCode.PageDown:
+                case "player.nextChapter":
                     StepChapter(1);
                     e.Handled = true;
                     break;
-                case KeyCode.PageUp:
+                case "player.previousChapter":
                     StepChapter(-1);
                     e.Handled = true;
                     break;
@@ -536,27 +538,27 @@ public sealed partial class ApertureApp : Component, IDisposable
             return;
         }
 
-        switch (e.Key)
+        switch (Shortcuts.Find(e, "Browse")?.Id)
         {
-            case KeyCode.Escape or KeyCode.Backspace:
+            case "browse.back":
                 if (GoBack()) e.Handled = true;
                 return;
-            case KeyCode.Slash:
+            case "browse.search":
                 Navigate(new Route(ApertureView.Search));
                 e.Handled = true;
                 return;
-            case KeyCode.Digit0:
+            case "browse.favourites":
                 Navigate(new Route(ApertureView.Favourites));
                 e.Handled = true;
                 return;
-            case KeyCode.F5:
+            case "browse.refresh":
                 Refresh();
                 e.Handled = true;
                 return;
         }
 
         // 1 is Home; 2… are the libraries in the order the rail lists them.
-        int digit = e.Key - KeyCode.Digit1;
+        int digit = Shortcuts.Pressed("browse.library", e) && e.Digit is { } d ? d - 1 : -1;
         if (digit is >= 0 and <= 8)
         {
             if (digit == 0) { GoHome(); e.Handled = true; return; }

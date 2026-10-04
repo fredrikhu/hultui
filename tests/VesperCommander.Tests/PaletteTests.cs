@@ -20,9 +20,9 @@ public class PaletteTests
         t.Open();
 
         var shown = t.Commands().Select(c => c.Shortcut).Where(s => s != null).ToHashSet();
-        var missing = Keybindings.Order
-            .Where(o => o.cmd != Cmd.Palette)          // the palette does not list itself
-            .Select(o => (o.label, chord: Keybindings.Format(Keybindings.Defaults[o.cmd])))
+        var missing = Keybindings.Commands(Keybindings.Create())
+            .Where(o => o.Cmd != Cmd.Palette)          // the palette does not list itself
+            .Select(o => (label: o.Shortcut.Title, chord: o.Shortcut.KeysText))
             .Where(o => !shown.Contains(o.chord))
             .Select(o => $"{o.label} ({o.chord})")
             .ToList();
@@ -68,6 +68,7 @@ public class PaletteTests
 
         var settings = t.Field<Settings>("_settings");
         settings.KeyBindings["Pack"] = "Ctrl+Shift+P";
+        t.ApplySettings();
 
         Assert.Equal("Ctrl+Shift+P", t.ShortcutOf(l => l.StartsWith("Pack into archive")));
     }
@@ -81,6 +82,7 @@ public class PaletteTests
         t.Open();
 
         t.Field<Settings>("_settings").KeyBindings["Pack"] = "";
+        t.ApplySettings();
 
         var row = t.Commands().Single(c => c.Label.StartsWith("Pack into archive"));
         Assert.Null(row.Shortcut);
@@ -96,6 +98,9 @@ public class PaletteTests
         public void WriteLeft(string name, string text) => _t.WriteLeft(name, text);
         public void Mark(params string[] names) => _t.Mark('L', names);
         public T Field<T>(string name) => _t.Field<T>(name);
+
+        /// <summary>What saving the Options does with the bindings: load them into the keymap.</summary>
+        public void ApplySettings() => _t.Invoke("RebuildKeymap");
 
         private object App => typeof(DiffViewTests.Fixture)
             .GetField("_app", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(_t)!;

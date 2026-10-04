@@ -310,4 +310,46 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.Equal("Command palette", palette!.Name);
         });
     }
+
+    // ── keys the hints name ──────────────────────────────────────────────
+    // The hints were typed by hand, and three named keys that did nothing. They read the same
+    // table the key handler does now.
+
+    [Fact]
+    public void CtrlI_OpensTheImportDialogThePaletteAndTheFrontDoorOffer()
+    {
+        Hosted((session, app) =>
+        {
+            Assert.False(Contains(session, "Import OpenAPI"));
+            session.Window.PressKey(KeyCode.I, KeyModifiers.Ctrl);
+            session.PumpFrame();
+            Assert.True(Contains(session, "Import OpenAPI"), "Ctrl+I did nothing");
+        });
+    }
+
+    [Fact]
+    public void CtrlR_RunsTheCollectionFromAnyView_AsThePaletteSays()
+    {
+        Hosted((session, app) =>
+        {
+            app.View = MeridianView.Requests;
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.R, KeyModifiers.Ctrl);
+            session.PumpFrame();
+            Assert.Equal(MeridianView.Runner, app.View);
+            session.PumpUntil(() => !app.RunnerRunning, TimeSpan.FromSeconds(15));
+        });
+    }
+
+    [Fact]
+    public void TheCardForWhatIsNotBuilt_NamesNoKey()
+    {
+        Hosted((session, app) =>
+        {
+            Assert.True(Contains(session, "New collection"));
+            Assert.False(Contains(session, "Ctrl+N") || Contains(session, "Ctrl N"),
+                "the inert New collection card still advertises a key");
+            Assert.True(Contains(session, "Ctrl+I"));   // the import card's key, which works now
+        }, open: false);
+    }
 }

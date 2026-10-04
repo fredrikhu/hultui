@@ -36,6 +36,47 @@ public class DiffShortcutTests
     }
 
     [Fact]
+    public void ACtrlChord_IsNotTheBareLetter()
+    {
+        // The view keys used to switch on the key alone, so Ctrl+S (a save reflex) split the
+        // diff and Ctrl+W (a close-tab reflex) wrapped it — the same fault that had Ctrl+C on a
+        // selected branch check it out. Shortcuts now matches modifiers exactly.
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+            session.Window.PressKey(KeyCode.W, KeyModifiers.Ctrl);
+            session.Window.PressKey(KeyCode.S, KeyModifiers.Alt);
+            session.PumpFrames(3);
+            Assert.False(Split(app), "Ctrl+S or Alt+S split the diff");
+            Assert.False(Wrap(app), "Ctrl+W wrapped the diff");
+
+            session.Window.PressKey(KeyCode.S);
+            session.PumpFrames(3);
+            Assert.True(Split(app), "the bare s stopped working");
+        });
+    }
+
+    [Fact]
+    public void ThePlusKeyZoomsIn_OnALayoutWhereItHasAKeyOfItsOwn()
+    {
+        // Swedish: + is the key a US keyboard has - on. Matched by position it zoomed out.
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var settings = (JunctionSettingsData)typeof(JunctionApp)
+                .GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            float before = settings.Appearance.UiScale;
+
+            session.Window.PressKey(KeyCode.Minus, KeyModifiers.Ctrl, layoutKey: '+');
+            session.PumpFrames(2);
+            Assert.True(settings.Appearance.UiScale > before, $"zoom went {before} → {settings.Appearance.UiScale}");
+
+            session.Window.PressKey(KeyCode.Digit0, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            Assert.Equal(1f, settings.Appearance.UiScale);
+        });
+    }
+
+    [Fact]
     public void WWrapsWithoutTheDiffBodyHavingToBeFocused()
     {
         // The point of moving the key out of the pane's own handler: it used to reach wrap

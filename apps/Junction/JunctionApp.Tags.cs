@@ -285,17 +285,17 @@ public partial class JunctionApp
     private bool HandleTagKey(KeyDownEvent e)
     {
         if (HandleTagNavKey(e)) return true;
-        switch (e.Key)
+        if (Shortcuts.Pressed("tags.checkout", e)) { CheckoutSelectedTag(); return true; }
+        if (Shortcuts.Pressed("tags.push", e)) { PushSelectedTag(); return true; }
+        if (Shortcuts.Pressed("tags.tree", e)) { ToggleRefTreeView(); return true; }
+        // The folder keys, kept out of HandleTagNavKey for the same reason the
+        // branch ones are: that subset also runs from inside the search box.
+        if (_refTreeView && Shortcuts.Pressed("tags.folder", e))
         {
-            case KeyCode.C: CheckoutSelectedTag(); return true;
-            case KeyCode.P: PushSelectedTag(); return true;
-            case KeyCode.T: ToggleRefTreeView(); return true;
-            // The folder keys, kept out of HandleTagNavKey for the same reason the
-            // branch ones are: that subset also runs from inside the search box.
-            case KeyCode.Right when _refTreeView: StepTagTree(right: true); return true;
-            case KeyCode.Left when _refTreeView: StepTagTree(right: false); return true;
-            default: return false;
+            StepTagTree(right: e.Key == KeyCode.Right);
+            return true;
         }
+        return false;
     }
 
     private void StepTagTree(bool right)

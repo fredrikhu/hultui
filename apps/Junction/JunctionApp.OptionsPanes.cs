@@ -301,10 +301,10 @@ public partial class JunctionApp
     // ── Keyboard shortcuts ───────────────────────────────────────────────────────────
 
     /// <summary>Two columns of groups, each a list of key + description rows, all read
-    /// from <see cref="Shortcuts.All"/> — the table the legends and tooltips read.</summary>
+    /// from <see cref="Shortcuts.Map"/> — the table the key handlers, legends and tooltips read.</summary>
     private static Element BuildShortcutsPane()
     {
-        var groups = Shortcuts.Groups.ToList();
+        var groups = Shortcuts.Map.Groups.ToList();
         var columns = Flex.Row(gap: 24).AlignItems(AlignItems.FlexStart).Padding(new Thickness(10, 0, 0, 0));
         var left = Flex.Column(gap: 18).FlexGrow(1).FlexBasis(Dimension.Px(0));
         var right = Flex.Column(gap: 18).FlexGrow(1).FlexBasis(Dimension.Px(0));
@@ -320,13 +320,13 @@ public partial class JunctionApp
         var col = Flex.Column(gap: 0);
         col.AddChild(Text.New(group).FontSize(11f).LetterSpacing(0.8f).TextColor(Nocturne.Accent300)
             .Padding(new Thickness(0, 0, 6, 0)));
-        foreach (var entry in Shortcuts.All.Where(e => e.Group == group))
+        foreach (var entry in Shortcuts.Map.All.Where(e => e.Group == group))
         {
             var row = Flex.Row(gap: 12).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(6, 0, 6, 0))
                 .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-            row.AddChild(Kbd(entry.Keys).FlexShrink(0));
-            row.AddChild(Text.New(entry.What).FontSize(12f).TextColor(Nocturne.On(0.78)).FlexShrink(1));
+            row.AddChild(Kbd(entry.KeysText).FlexShrink(0));
+            row.AddChild(Text.New(entry.Title).FontSize(12f).TextColor(Nocturne.On(0.78)).FlexShrink(1));
             col.AddChild(row);
         }
         return col;

@@ -336,13 +336,13 @@ public partial class MeridianApp
         // Cancel would keep Send's focus and pointer state across the swap.
         if (tab.Sending == null)
         {
-            var send = Ui.Button(ButtonVariant.Primary, "Send", SendActive, "send", kbd: "Ctrl ↵");
+            var send = Ui.Button(ButtonVariant.Primary, "Send", SendActive, "send", kbd: Shortcuts.Keys("send"));
             send.Key = "send";
             bar.AddChild(send);
         }
         else
         {
-            var cancel = Ui.Button(ButtonVariant.Secondary, "Cancel", CancelActive, "cancel", kbd: "Esc", style: Ui.Warn);
+            var cancel = Ui.Button(ButtonVariant.Secondary, "Cancel", CancelActive, "cancel", kbd: Shortcuts.Keys("cancel"), style: Ui.Warn);
             cancel.Key = "cancel";
             bar.AddChild(cancel);
         }
@@ -616,7 +616,7 @@ public partial class MeridianApp
                 Dot(Azimuth.Accent),
                 Text.New("unsaved").FontSize(11f).TextColor(Azimuth.TextDim).AutomationId("save-state"))
             : Text.New("saved").FontSize(11f).TextColor(Azimuth.TextFaint).AutomationId("save-state"));
-        footer.AddChild(Ui.Kbd("Ctrl S"));
+        footer.AddChild(Ui.Kbd(Shortcuts.Keys("save")));
         return footer;
     }
 

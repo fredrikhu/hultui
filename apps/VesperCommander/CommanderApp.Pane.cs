@@ -52,10 +52,10 @@ public partial class CommanderApp
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusMd)
             .Cursor(CursorType.Pointer)
-            .Tooltip("Search & commands (Ctrl P)");
+            .Tooltip(KeyText(Cmd.Palette) is { Length: > 0 } pk ? $"Search & commands ({pk})" : "Search & commands");
         search.AddChild(Ui.Icon(Glyphs.Search, 13f, Nocturne.On(0.55)));
         search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
-        search.AddChild(Ui.Kbd("Ctrl P"));
+        if (KeyText(Cmd.Palette) is { Length: > 0 } paletteKeys) search.AddChild(Ui.Kbd(paletteKeys));
         search.OnClick(_ => TogglePalette());
         search.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.08), Nocturne.Bg);
         right.AddChild(search);
@@ -465,7 +465,7 @@ public partial class CommanderApp
             new() { Icon = MenuIcon(Glyphs.Swap), Label = "Open in other pane", Action = () => OpenTabInOtherPane(side, index) },
             new() { Icon = MenuIcon(Glyphs.Lock), Label = tab.Locked ? "Unlock tab" : "Lock tab (read-only)", Action = () => ToggleTabLock(side, index) },
             ContextMenuItem.Separator(),
-            new() { Label = "Close tab", ShortcutHint = "Ctrl+W", Action = () => CloseTab(side, index), IsDisabled = !canClose },
+            new() { Label = "Close tab", ShortcutHint = KeyHint(Cmd.CloseTab), Action = () => CloseTab(side, index), IsDisabled = !canClose },
             new() { Label = "Close others", Action = () => CloseOtherTabs(side, index), IsDisabled = !canClose },
         ];
     }
@@ -929,7 +929,7 @@ public partial class CommanderApp
             case PaneState.Empty:
                 block.AddChild(Text.New("This folder is empty").FontSize(12f).TextColor(Nocturne.Neutral500));
                 var hint = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-                hint.AddChild(Ui.Kbd("F7"));
+                if (KeyText(Cmd.NewFolder) is { Length: > 0 } nf) hint.AddChild(Ui.Kbd(nf));
                 hint.AddChild(Text.New("new folder").FontSize(11f).TextColor(Nocturne.Neutral500));
                 block.AddChild(hint);
                 break;
@@ -1154,8 +1154,9 @@ public partial class CommanderApp
 
         row.AddChild(Box.New().FlexGrow(1));
         // Right-aligned key hints.
-        foreach (var (k, label) in new[] { ("F5", "copy"), ("F6", "move"), ("F8", "delete"), ("Space", "mark") })
+        foreach (var (k, label) in new[] { (KeyText(Cmd.Copy), "copy"), (KeyText(Cmd.Move), "move"), (KeyText(Cmd.Delete), "delete"), ("Space", "mark") })
         {
+            if (k.Length == 0) continue;   // rebound away
             row.AddChild(Ui.Kbd(k));
             row.AddChild(Text.New(label).FontSize(10f).TextColor(Nocturne.On(0.40)));
         }

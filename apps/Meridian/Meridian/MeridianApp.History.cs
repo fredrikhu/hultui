@@ -92,10 +92,13 @@ public partial class MeridianApp
                 _historySelection = rows[_historyCursor];
                 MarkDirty();
                 return true;
-            case KeyCode.R when _historySelection is { } selected:
-                RestoreToEditor(selected);
-                return true;
             default:
+                // r alone: Shift or Alt and r used to restore too.
+                if (Shortcuts.Pressed("history.restore", e) && _historySelection is { } selected)
+                {
+                    RestoreToEditor(selected);
+                    return true;
+                }
                 return false;
         }
     }

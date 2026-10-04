@@ -1,6 +1,26 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Shortcuts in the framework** — `KeyChord` and `ShortcutMap` (`src/HultUI.Core/Events`, docs
+  in FOCUS.md). Junction's display-only `Shortcuts` table and Vesper's `Keybindings` keymap both
+  became `ShortcutMap`s that dispatch and display read; Meridian, Reel, Aperture and the
+  framework's `VideoPlayer` got one each. What the duplication hid, all now fixed: per-view keys
+  matched the bare key and ignored modifiers — Ctrl+C on a selected branch checked it out,
+  Ctrl+L pulled, Ctrl+S/Ctrl+W flipped the diff, Ctrl+D dropped a rebase commit or marked a
+  to-do done, a focused video player took Ctrl+F; Vesper could rebind a command onto a key it
+  kept for itself (Ctrl+C: the command never fired, or replaced copying) or onto ↑/Enter;
+  Meridian advertised Ctrl+I and Ctrl+N with no handler and Ctrl+R that worked on one view;
+  Junction's zoom read the Swedish + key as the US minus and zoomed out; hints were typed by hand
+  in four notations ("Ctrl P", "Ctrl+P", "⌥↑↓", "Ctrl ↵") and went stale on a rebind. Now: exact
+  modifiers (Super = Ctrl), letters by the layout's label, other keys by position, character
+  chords for symbols; one notation (`Ctrl+Shift+P`, bare letters lower case) that reads back
+  Vesper's saved spellings; rebinding that steals from rebindable shortcuts and refuses fixed
+  ones, with the capture saying whose key it is. Tests: 52 Core, 3 Vesper, 2 Junction, 3 Meridian,
+  1 Media, plus updated ones. Controls: modifier-blind letters fail the Junction chord test;
+  positional zoom fails the Swedish + test; earlier ones in the Core suite. Left: the three
+  command palettes and four `Kbd` chips are still per app; positional punctuation is labelled with
+  its US symbol (`` ` `` is § on a Swedish keyboard); FindBar, the terminal and the web view keep
+  their own chord checks.
 - **Single instance in the framework** — `HultUI.SingleInstance` (+ `SecondLaunch`) replaces
   Reel's and Vesper's identical `SingleInstance.cs` and their named-mutex code. The copies' real
   faults, not just their duplication: they listened only after the window was built, and a
