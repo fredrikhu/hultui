@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Porta.Pty;
 
@@ -12,20 +11,18 @@ namespace HultUI.Terminal.Pty;
 /// <remarks>
 /// <para><b>Ending.</b> <see cref="ITerminalConnection.Exited"/> carries the program's exit code.
 /// ConPTY keeps the output open after its program exits, until the pseudoconsole is closed, so on
-/// Windows the connection closes it once the output has gone quiet: the last of what the program
-/// wrote is read first, and the controller then sees the output end. A program that leaves a
-/// background process attached loses it then, as closing a terminal tab does.</para>
+/// Windows the pseudoconsole is closed when the program exits. The console host then paints the
+/// last of what the program wrote and ends the output, the controller reads it all and sees the
+/// end, and only then is the rest released. A program that leaves a background process attached
+/// loses it then, as closing a terminal tab does.</para>
 /// <para><b>Terminate</b> kills the program and everything it started that shares its console
 /// (a job object on Windows). The exit code is then -1.</para>
 /// </remarks>
 public sealed class PtyConnection : ITerminalConnection
 {
-    /// <summary>How long the output must be quiet, after the program exits, before the
-    /// pseudoconsole is closed.</summary>
-    internal static readonly TimeSpan QuietAfterExit = TimeSpan.FromMilliseconds(100);
-
-    /// <summary>The longest the output may keep arriving after the program exits.</summary>
-    internal static readonly TimeSpan MostAfterExit = TimeSpan.FromSeconds(2);
+    /// <summary>How long after the program exits the rest is released even though the output
+    /// has not been read to its end — a safety net: closing the pseudoconsole ends it.</summary>
+    internal static readonly TimeSpan MostAfterExit = TimeSpan.FromSeconds(10);
 
     private readonly IPtyConnection _pty;
     private readonly OutputStream _output;
@@ -85,6 +82,11 @@ public sealed class PtyConnection : ITerminalConnection
             Cwd = launch.WorkingDirectory ?? System.Environment.CurrentDirectory,
             Name = "xterm-256color",
             Environment = environment,
+            // Overlapped pipes, and with them Porta.Pty closes the pseudoconsole itself the moment
+            // the program exits, leaving our end of the output open: the console host paints its
+            // final frame into it and ends it, which is how Microsoft's ClosePseudoConsole asks to
+            // be used. Without it the output stays open until we close everything at once.
+            UseAsyncIo = windows,
         }, cancellationToken).ConfigureAwait(false);
         return new PtyConnection(pty, program);
     }
@@ -130,19 +132,22 @@ public sealed class PtyConnection : ITerminalConnection
     {
         if (!_exit.Raise(exitCode)) return;
         if (OperatingSystem.IsWindows())
-            _ = Task.Run(CloseWhenQuiet);
+            _ = Task.Run(CloseWhenRead);
     }
 
-    /// <summary>ConPTY's output stays open after its program exits. Close the pseudoconsole once
-    /// nothing has arrived for <see cref="QuietAfterExit"/>, counted from the exit too: the
-    /// console host paints what the program last wrote a frame later, and a reader that sat idle
-    /// before the exit must still get it.</summary>
-    private async Task CloseWhenQuiet()
+    /// <summary>
+    /// Releases the rest once the output has been read to its end. Porta.Pty has closed the
+    /// pseudoconsole at the exit (<c>UseAsyncIo</c>), so the end comes; closing our end of the
+    /// pipe any sooner throws away what is still in it, because Porta.Pty's <c>Dispose</c> closes
+    /// the pipe along with everything else.
+    /// <para>This was timed: everything closed once nothing had been read for 100 ms after the
+    /// exit. The console host paints on its own schedule and a reader starts on its own, and on a
+    /// loaded machine — a cold test process among thirty — a quick program's whole output could
+    /// still be in the pipe then: <c>cmd /c echo</c> came out as an empty screen.</para>
+    /// </summary>
+    private async Task CloseWhenRead()
     {
-        var sinceExit = Stopwatch.StartNew();
-        while (sinceExit.Elapsed < MostAfterExit
-            && (sinceExit.Elapsed < QuietAfterExit || _output.SinceLastRead < QuietAfterExit))
-            await Task.Delay(20).ConfigureAwait(false);
+        await Task.WhenAny(_output.Ended, Task.Delay(MostAfterExit)).ConfigureAwait(false);
         Close();
     }
 
@@ -159,19 +164,27 @@ public sealed class PtyConnection : ITerminalConnection
         Close();
     }
 
-    /// <summary>The pseudoterminal's output, noting when each read returned.</summary>
+    /// <summary>The pseudoterminal's output, noting when a read has reached its end.</summary>
     private sealed class OutputStream(Stream inner) : Stream
     {
-        private long _lastRead = Stopwatch.GetTimestamp();
+        private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public TimeSpan SinceLastRead => Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastRead));
+        /// <summary>Completes when a read has returned the end of the output.</summary>
+        public Task Ended => _ended.Task;
 
         public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
         public override int Read(Span<byte> buffer)
         {
-            int n = inner.Read(buffer);
-            Interlocked.Exchange(ref _lastRead, Stopwatch.GetTimestamp());
+            int n;
+            try { n = inner.Read(buffer); }
+            catch (IOException)
+            {
+                // A broken pipe is an end too, however the stream reports it.
+                _ended.TrySetResult();
+                throw;
+            }
+            if (n == 0 && buffer.Length > 0) _ended.TrySetResult();
             return n;
         }
 
