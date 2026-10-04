@@ -35,9 +35,9 @@ public class FindRevealDeliveryTests
             Assert.Null(BodyRef(app).Current);
 
             var find = FindState(app);
-            Member(find, "Open", true);
+            find.Open();
             Search(app).SetQuery("marker");
-            Member(find, "PendingReveal", true);
+            find.RevealCurrent();
 
             // Seeded before the tree lands: PickInitialTreeFile keeps an existing
             // selection it finds in the tree, and left to its own devices it would pick
@@ -72,9 +72,9 @@ public class FindRevealDeliveryTests
             Assert.NotNull(oldBody);
 
             var find = FindState(app);
-            Member(find, "Open", true);
+            find.Open();
             Search(app).SetQuery("marker");   // nothing in README.md matches
-            Member(find, "PendingReveal", true);
+            find.RevealCurrent();
 
             // Selecting sample.cs rebuilds the pane as a "Loading…" placeholder for the
             // frame its content takes to land. The old TextArea is unmounted, but the
@@ -107,14 +107,10 @@ public class FindRevealDeliveryTests
         typeof(JunctionApp).GetMethod("Rerender", Priv)!.Invoke(app, null);
     }
 
-    private static object FindState(JunctionApp app) =>
-        typeof(JunctionApp).GetField("_filesFind", Priv)!.GetValue(app)!;
+    private static FindBar FindState(JunctionApp app) =>
+        (FindBar)typeof(JunctionApp).GetField("_filesFind", Priv)!.GetValue(app)!;
 
-    private static TextSearch Search(JunctionApp app) =>
-        (TextSearch)FindState(app).GetType().GetField("Search")!.GetValue(FindState(app))!;
-
-    private static void Member(object target, string name, object value) =>
-        target.GetType().GetField(name)!.SetValue(target, value);
+    private static TextSearch Search(JunctionApp app) => FindState(app).Search;
 
     private static HultUI.Core.Reactivity.Ref<TextAreaElement> BodyRef(JunctionApp app) =>
         (HultUI.Core.Reactivity.Ref<TextAreaElement>)typeof(JunctionApp)

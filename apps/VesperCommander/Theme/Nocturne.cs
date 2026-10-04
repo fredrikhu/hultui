@@ -210,5 +210,36 @@ public static class Nocturne
             Height = 5f,
             Track = Neutral900,
         },
+        // The find bar over the viewer and the comparison, as CommanderApp.FindBar drew it by
+        // hand: the count in monospace, the option chips as outlined mono labels lit in the
+        // accent, and small outlined icon buttons that wash on hover.
+        FindBar = new FindBarTheme
+        {
+            Background = Surface,
+            Divider = Divider,
+            StatusFontFamily = VesperCommander.Fonts.Mono,
+            StatusFontSize = 10.5f,
+            StatusColor = On(0.50),
+            StatusErrorColor = MarkRed,
+            ToggleFontFamily = VesperCommander.Fonts.Mono,
+            Toggle = new ButtonStyle
+            {
+                Padding = new Thickness(3, 7, 3, 7), CornerRadius = new(4f), FontSize = 10f,
+                FontWeight = FontWeight.Regular,
+                Background = Color.Transparent, Border = Neutral700, Text = Neutral300,
+                HoverBackground = Neutral900,
+            },
+            ToggleOn = new ButtonStyle
+            {
+                Padding = new Thickness(3, 7, 3, 7), CornerRadius = new(4f), FontSize = 10f,
+                FontWeight = FontWeight.Regular,
+                Background = Accent800, Border = Accent600, Text = Accent200,
+            },
+            Button = new ButtonStyle
+            {
+                Padding = new Thickness(2, 7, 2, 7), CornerRadius = new(4f),
+                Background = Color.Transparent, Border = Neutral700, HoverBackground = Neutral900,
+            },
+        },
     };
 }

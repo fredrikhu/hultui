@@ -37,7 +37,10 @@ public partial class JunctionApp
     private readonly Ref<Element> _diffBodyRef = new();
 
     // Find in the diff. Two lanes in split mode, one in unified — see BindDiffSearch.
-    private readonly FindBarState _diffFind;
+    private readonly FindBar _diffFind;
+    // What the diff search was last bound to: Build reflattens the rows every repaint, and
+    // rebinding unguarded would rescan the whole file every frame.
+    private object? _diffFindKey;
 
     private Element BuildDiffPane(string path, GitFileDiff? diff, DiffInteract? interact = null)
     {
@@ -68,9 +71,9 @@ public partial class JunctionApp
         header.AddChild(external.FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, ToggleDiffFullscreen, "Fullscreen diff (F11)").FlexShrink(0));
         col.AddChild(header);
-        if (_diffFind.Open)
+        if (_diffFind.IsOpen)
         {
-            var bar = BuildFindBar(_diffFind, "Find in diff…");
+            var bar = _diffFind.Build();
             // Keyed so it reconciles as itself: a keyless element that comes and goes
             // inherits the retained caret and focus of whatever last held its slot.
             bar.Key = "diff-find";
@@ -827,8 +830,8 @@ public partial class JunctionApp
     private void BindDiffSearch(GitFileDiff diff, List<DiffRow> rows)
     {
         var key = (diff, _diffSplit, rows.Count);
-        if (Equals(_diffFind.BoundKey, key)) return;
-        _diffFind.BoundKey = key;
+        if (Equals(_diffFindKey, key)) return;
+        _diffFindKey = key;
         _diffFind.Search.Bind(rows.Count, _diffSplit ? 2 : 1, (row, lane) =>
         {
             if (row < 0 || row >= rows.Count) return null;

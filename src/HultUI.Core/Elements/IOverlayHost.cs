@@ -24,4 +24,14 @@ public interface IOverlayHost
     void CloseOverlay(OverlayHandle handle);
     void UpdateOverlayPosition(OverlayHandle handle, float x, float y);
     Theme? ActiveTheme { get; }
+
+    /// <summary>Runs <paramref name="callback"/> once, after the next frame has been laid out and
+    /// presented — for work that needs where things ended up, which a build cannot know yet. A
+    /// host without frames runs it at once.</summary>
+    void RequestPostFrameCallback(Action callback) => callback();
+
+    /// <summary>Whether <paramref name="element"/> is part of this host's live tree. A
+    /// <see cref="Reactivity.Ref{T}"/> goes on pointing at an element after a rebuild unmounts it,
+    /// so a non-null ref is no proof the element is on screen.</summary>
+    bool IsInTree(Element element) => element.IsHosted;
 }

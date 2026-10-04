@@ -15,99 +15,45 @@ namespace Meridian;
 
 public partial class MeridianApp
 {
-    // ── Find in the response body (Ctrl+F) — the Junction find-bar idiom ─
+    // ── Find in the response body (Ctrl+F) ───────────────────────────────
+    //
+    // HultUI's FindBar, the one Junction and Vesper use, so its keys and a regular expression
+    // mean the same thing in all three; its look is Azimuth's FindBarTheme. What lives here is
+    // where the body's selection is and how to scroll to a match.
 
-    private sealed class FindBarState
-    {
-        public FindBarState(Action onChanged) => Search = new TextSearch(onChanged);
-
-        public readonly TextSearch Search;
-        public readonly Ref<TextInputElement> FieldRef = new();
-        public bool Open;
-        public bool PendingFocus;
-        public bool PendingReveal;
-        public object? BoundKey;
-    }
-
-    private readonly FindBarState _responseFind;
+    private readonly FindBar _responseFind;
     private readonly Ref<TextAreaElement> _responseBodyRef = new();
 
-    private bool HandleFindBarKey(KeyDownEvent e, FindBarState s)
+    private FindBar NewResponseFind() => new(MarkDirty)
     {
-        bool ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
-        bool shift = e.Modifiers.HasFlag(KeyModifiers.Shift);
-        bool alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
-
-        if (ctrl && e.Key == KeyCode.F)
+        Placeholder = "find in response…",
+        FieldWidth = 220,
+        FieldHeight = 26,
+        LetterKeys = true,
+        Body = () => _responseBodyRef.Current,
+        Reveal = RevealResponseHit,
+        Selection = ResponseFindSelection,
+        // Text glyphs in the chrome's mono, as the response bar has always had, and no magnifier.
+        Icon = icon => icon switch
         {
-            s.Open = true;
-            s.PendingFocus = true;
-            SeedFindFromSelection(s);
-            MarkDirty();
-            return true;
-        }
-        if (!s.Open) return false;
+            FindBarIcon.Previous => Text.New("‹"),
+            FindBarIcon.Next => Text.New("›"),
+            FindBarIcon.Close => Text.New("×"),
+            _ => null,
+        },
+    };
 
-        switch (e.Key)
-        {
-            case KeyCode.Escape:
-                s.Open = false;
-                s.Search.SetQuery("");
-                MarkDirty();
-                return true;
-            case KeyCode.Enter: FindNav(s, shift ? -1 : 1); return true;
-            case KeyCode.N when e.Target is not TextInputElement: FindNav(s, 1); return true;
-            case KeyCode.P when e.Target is not TextInputElement: FindNav(s, -1); return true;
-            default: return false;
-        }
-    }
-
-    private void FindNav(FindBarState s, int dir)
+    /// <summary>The selection in the body. One TextArea over the joined text: its offsets are
+    /// absolute, and the line starts the tinting pass computed turn them back into a line and a
+    /// column.</summary>
+    private FindSelection? ResponseFindSelection()
     {
-        s.Search.Move(dir);
-        s.PendingReveal = true;
-        MarkDirty();
-    }
-
-    /// <summary>
-    /// Ctrl+F with text selected in the body searches for that text. The query becomes the
-    /// selection's first line, and the current match becomes the selection itself rather than
-    /// the first occurrence in the response — the reader is looking at the one they selected,
-    /// and the bar opening should not scroll them away from it. With nothing selected the bar
-    /// keeps the query it had, which Ctrl+F on an open bar selects whole.
-    /// </summary>
-    private void SeedFindFromSelection(FindBarState s)
-    {
-        // One TextArea over the joined text: its offsets are absolute, and the line starts
-        // the tinting pass computed turn them back into a line and a column.
-        if (_responseBodyRef.Current is not { HasSelection: true } area || !_window.IsInTree(area)) return;
-        if (TextSearch.QueryFromSelection(area.SelectedText) is not { } query) return;
+        if (_responseBodyRef.Current is not { HasSelection: true } area || !_window.IsInTree(area)) return null;
         int offset = area.SelectionStart;
         int line = Array.BinarySearch(_respLineStarts, offset);
         if (line < 0) line = ~line - 1;
         int column = line < 0 ? offset : offset - _respLineStarts[line];
-        s.Search.SetQuery(query);
-        s.Search.SeekTo(Math.Max(0, line), 0, column);
-        s.PendingReveal = true;
-    }
-
-    private void ServiceFindBar(FindBarState s)
-    {
-        // Ctrl+F on a bar that is already open lands here too. The query is still in the
-        // field, and the person pressed the key to search for something else, so it is
-        // selected whole: the next keystroke replaces it rather than appending to it. On a
-        // freshly opened bar the field is empty and the selection is nothing.
-        if (s.PendingFocus && s.FieldRef.Current is { } field)
-        {
-            s.PendingFocus = false;
-            field.Focus();
-            field.SelectAll();
-        }
-        if (s.PendingReveal)
-        {
-            s.PendingReveal = false;
-            _window.RequestPostFrameCallback(() => RevealResponseHit(s));
-        }
+        return new FindSelection(area.SelectedText, Math.Max(0, line), 0, column);
     }
 
     /// <summary>
@@ -119,10 +65,10 @@ public partial class MeridianApp
     /// on, and a match near the end of such a line would be scrolled to just off the bottom.
     /// The offsets are the ones already computed for the tinting, so this costs nothing.</para>
     /// </summary>
-    private void RevealResponseHit(FindBarState s)
+    private void RevealResponseHit()
     {
         if (_responseBodyRef.Current is not { } area) return;
-        if (s.Search.Current is not { } hit) return;
+        if (_responseFind.Search.Current is not { } hit) return;
         if (hit.Line >= 0 && hit.Line < _respLineStarts.Length)
             area.ScrollOffsetIntoView(_respLineStarts[hit.Line] + hit.Start);
         else
@@ -342,8 +288,8 @@ public partial class MeridianApp
     {
         var col = Flex.Column(gap: 0).FlexGrow(1);
 
-        if (_responseFind.Open)
-            col.AddChild(BuildFindBar(_responseFind));
+        if (_responseFind.IsOpen)
+            col.AddChild(_responseFind.Build());
 
         if (response.Body.Truncated)
         {
@@ -429,7 +375,6 @@ public partial class MeridianApp
             _respSyntaxSpans = SyntaxSpans(text, response.ContentType);
 
             // (Re)bind the search to the displayed text.
-            _responseFind.BoundKey = key;
             var lines = _respBodyLines;
             _responseFind.Search.Bind(lines.Length, lanes: 1,
                 (line, _) => line >= 0 && line < lines.Length ? lines[line] : null);
@@ -521,36 +466,6 @@ public partial class MeridianApp
         }
         merged.Sort(static (a, b) => a.Start.CompareTo(b.Start));
         return merged;
-    }
-
-    private Element BuildFindBar(FindBarState s)
-    {
-        var search = s.Search;
-        var row = Flex.Row(gap: Azimuth.S2).FlexShrink(0).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(4, Azimuth.S3, 4, Azimuth.S3))
-            .Background(Azimuth.Surface)
-            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
-
-        var input = TextInput.New(search.Query).Style(Ui.GroundField)
-            .Height(Dimension.Px(26)).Width(220).FlexShrink(0);
-        input.PlaceholderText("find in response…");
-        input.OnTextChanged(v => { search.SetQuery(v); s.PendingReveal = true; });
-        input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
-        input.WithRef(s.FieldRef);
-        input.AutomationId("find-input");
-        row.AddChild(input);
-
-        string status = search.Query.Length == 0 ? ""
-            : search.Error is { } why ? why
-            : !search.HasHits ? "no matches"
-            : $"{search.Index + 1} of {search.Hits.Count}";
-        row.AddChild(Ui.Mono(status, 10.5f, search.Query.Length > 0 && !search.HasHits
-            ? Azimuth.StatusWarn : Azimuth.TextMuted).AutomationId("find-status"));
-
-        row.AddChild(Box.New().FlexGrow(1));
-        row.AddChild(BarAction("‹", "find-prev", () => FindNav(s, -1)));
-        row.AddChild(BarAction("›", "find-next", () => FindNav(s, 1)));
-        return row;
     }
 
     // ── Headers / Cookies / Timeline ─────────────────────────────────────

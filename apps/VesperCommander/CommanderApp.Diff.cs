@@ -47,7 +47,7 @@ public partial class CommanderApp
 
     // Find in the comparison. Two lanes over one set of row numbers — lane 0 is the left
     // column, lane 1 the right — so a match knows which side it is on.
-    private readonly FindBarState _diffFind;
+    private readonly FindBar _diffFind;
 
     /// <summary>Points both side groups at the current comparison. Rebinding a different
     /// model key drops a stale selection, since offsets into the old file mean nothing here.</summary>
@@ -546,17 +546,15 @@ public partial class CommanderApp
         // otherwise "w" typed into a query would toggle wrapping.
         bool typing = e.Target is TextInputElement;
 
-        if (HandleFindBarKey(e, _diffFind, CloseDiff)) { e.StopPropagation = true; return; }
+        if (_diffFind.HandleKey(e)) { e.StopPropagation = true; return; }
         if (typing) return;
 
         switch (e.Key)
         {
             case KeyCode.Escape:
             case KeyCode.F3: CloseDiff(); e.StopPropagation = true; break;
-            // n / p walk the search when one is running, and the changes otherwise: while a
-            // query is up, stepping through its matches is what those keys plainly mean.
-            case KeyCode.N when _diffFind.Open: FindNav(_diffFind, 1); e.StopPropagation = true; break;
-            case KeyCode.P when _diffFind.Open: FindNav(_diffFind, -1); e.StopPropagation = true; break;
+            // n / p walk the changes. While a search is up the bar has already taken them
+            // (FindBar.LetterKeys): stepping through its matches is what they plainly mean then.
             case KeyCode.N: DiffNav(1); e.StopPropagation = true; break;
             case KeyCode.P: DiffNav(-1); e.StopPropagation = true; break;
             // F8 walks the changes the way most comparison tools do; Shift reverses it.
@@ -602,9 +600,9 @@ public partial class CommanderApp
     {
         var col = Flex.Column(gap: 0).FlexGrow(1).Background(Nocturne.Bg);
         col.AddChild(BuildDiffHeader());
-        if (_diffFind.Open)
+        if (_diffFind.IsOpen)
         {
-            var bar = BuildFindBar(_diffFind, "Find in comparison…");
+            var bar = _diffFind.Build();
             // Keyed so it reconciles as itself: a keyless element that comes and goes takes
             // the retained caret and focus of whatever last held its slot.
             bar.Key = "diff-find";
@@ -922,7 +920,7 @@ public partial class CommanderApp
             footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("w"));
             footer.AddChild(Ui.Mono(DiffWrap ? "no wrap" : "wrap", 10f, Nocturne.On(0.45)));
-            if (!_diffFind.Open)
+            if (!_diffFind.IsOpen)
             {
                 footer.AddChild(Ui.Kbd("Ctrl+F"));
                 footer.AddChild(Ui.Mono("find", 10f, Nocturne.On(0.45)));

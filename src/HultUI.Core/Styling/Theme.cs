@@ -40,6 +40,7 @@ public sealed class Theme
     public DropdownTheme Dropdown { get => Get<DropdownTheme>(); init => Set(value); }
     public CalendarTheme Calendar { get => Get<CalendarTheme>(); init => Set(value); }
     public TimeFieldTheme TimeField { get => Get<TimeFieldTheme>(); init => Set(value); }
+    public FindBarTheme FindBar { get => Get<FindBarTheme>(); init => Set(value); }
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;

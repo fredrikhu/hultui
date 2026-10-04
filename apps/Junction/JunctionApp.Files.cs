@@ -51,7 +51,7 @@ public partial class JunctionApp
     private readonly Ref<ScrollViewElement> _filesTreeScrollRef = new();
     // Find in the open file. The body is one TextArea rather than a row list, so matches
     // become spans at absolute offsets into the flattened text — see FileBodyTextAndSpans.
-    private readonly FindBarState _filesFind;
+    private readonly FindBar _filesFind;
     private readonly Ref<TextAreaElement> _fileBodyRef = new();
     private bool _pendingFilesTreeScroll;
 
@@ -591,9 +591,9 @@ public partial class JunctionApp
             header.AddChild(reveal);
         }
         pane.AddChild(header);
-        if (_filesFind.Open)
+        if (_filesFind.IsOpen)
         {
-            var bar = BuildFindBar(_filesFind, "Find in file…");
+            var bar = _filesFind.Build();
             // Keyed so it reconciles as itself across rebuilds rather than inheriting the
             // caret and focus of whatever last held its slot.
             bar.Key = "files-find";

@@ -21,7 +21,8 @@ public partial class MeridianApp
     /// <summary>The keyboard cursor into the filtered rows (the mock's
     /// "↑↓ walk rows · enter open · r restore").</summary>
     private int _historyCursor = -1;
-    private readonly FindBarState _historyFind;
+    private readonly TextSearch _historyFind;
+    private readonly Ref<TextInputElement> _historyFieldRef = new();
     /// <summary>Active filters. Null means "any".</summary>
     private string? _filterMethod;
     private bool _filterFailuresOnly;
@@ -59,7 +60,7 @@ public partial class MeridianApp
     internal List<HistoryEntry> FilteredHistory()
     {
         var now = DateTimeOffset.Now;
-        var query = _historyFind.Search.Query.Trim();
+        var query = _historyFind.Query.Trim();
         return _history.Where(e =>
             (_filterMethod == null || e.Method.Equals(_filterMethod, StringComparison.OrdinalIgnoreCase))
             && (!_filterFailuresOnly || !e.Reached || e.StatusCode >= 400)
@@ -176,12 +177,12 @@ public partial class MeridianApp
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        var input = TextInput.New(_historyFind.Search.Query).Style(Ui.Field)
+        var input = TextInput.New(_historyFind.Query).Style(Ui.Field)
             .Height(Dimension.Px(26)).Width(260).FlexShrink(0);
         input.PlaceholderText("find in history…");
-        input.OnTextChanged(v => { _historyFind.Search.SetQuery(v); MarkDirty(); });
+        input.OnTextChanged(v => { _historyFind.SetQuery(v); MarkDirty(); });
         input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
-        input.WithRef(_historyFind.FieldRef);
+        input.WithRef(_historyFieldRef);
         input.AutomationId("history-search");
         bar.AddChild(input);
 
@@ -231,7 +232,7 @@ public partial class MeridianApp
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Children(_history.Count == 0
                     ? Text.New("no sends yet").FontSize(12f).TextColor(Azimuth.TextMuted).AutomationId("history-empty")
-                    : Text.New($"0 matches for \"{_historyFind.Search.Query}\"").FontSize(12f)
+                    : Text.New($"0 matches for \"{_historyFind.Query}\"").FontSize(12f)
                         .TextColor(Azimuth.TextMuted).AutomationId("history-no-matches"),
                     _history.Count == 0
                         ? Text.New("Everything you send lands here, newest first.").FontSize(11.5f).TextColor(Azimuth.TextFaint)
@@ -259,7 +260,7 @@ public partial class MeridianApp
     {
         var row = Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.Center);
         row.AddChild(BarAction("clear search", "history-clear-search",
-            () => { _historyFind.Search.SetQuery(""); MarkDirty(); }));
+            () => { _historyFind.SetQuery(""); MarkDirty(); }));
         if (AnyFilterActive)
             row.AddChild(BarAction("drop filters", "history-clear-filters", ClearHistoryFilters));
         return row;

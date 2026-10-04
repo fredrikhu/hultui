@@ -227,5 +227,31 @@ public static class Nocturne
             CheckedBackground = Accent,
             CheckMarkColor = Accent100,
         },
+        // The find bar over the diff and the Files view, as JunctionApp.FindBar drew it by hand:
+        // the count in the chrome's monospace, the two option chips as outlined mono labels that
+        // light up in the accent, and square 26px icon buttons.
+        FindBar = new FindBarTheme
+        {
+            Background = Surface,
+            Divider = Divider,
+            StatusFontFamily = Junction.Fonts.Mono,
+            StatusFontSize = 10.5f,
+            StatusColor = On(0.50),
+            StatusErrorColor = DangerText,
+            ToggleFontFamily = Junction.Fonts.Mono,
+            Toggle = new ButtonStyle
+            {
+                Padding = new Thickness(3, 7, 3, 7), CornerRadius = new(RadiusSm), FontSize = 10f,
+                FontWeight = FontWeight.Regular,
+                Background = Color.Transparent, Border = Neutral700, Text = Neutral300,
+            },
+            ToggleOn = new ButtonStyle
+            {
+                Padding = new Thickness(3, 7, 3, 7), CornerRadius = new(RadiusSm), FontSize = 10f,
+                FontWeight = FontWeight.Regular,
+                Background = Accent800, Border = Accent600, Text = Accent200,
+            },
+            Button = new ButtonStyle { Size = 26f, Padding = new Thickness(0) },
+        },
     };
 }
