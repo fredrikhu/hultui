@@ -111,6 +111,18 @@ public class ReelTests : IDisposable
     // ── Where it was left ────────────────────────────────────────────────
 
     [Fact]
+    public void TheWindowPlacementSurvivesARestart()
+    {
+        // Through the app's own source-generated context, which publishes AOT.
+        var placement = new HultUI.Core.Platform.WindowPlacement(120, 80, 1280, 760, true);
+        var settings = new ReelSettings(Path.Combine(_folder, "settings.json"));
+        settings.Data.WindowPlacement = placement;
+        settings.Save();
+
+        Assert.Equal(placement, new ReelSettings(Path.Combine(_folder, "settings.json")).Data.WindowPlacement);
+    }
+
+    [Fact]
     public void AFileResumesWhereItWasLeftAndAFinishedOneDoesNot()
     {
         var path = File_("film.mkv");

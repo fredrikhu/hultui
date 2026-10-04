@@ -90,6 +90,25 @@ window.Title = $"{Path.GetFileName(folder)} — Vesper Commander";
 
 A borderless window has one too. No caption paints it, but the task bar, Alt+Tab and every window switcher read it — so an app with custom chrome should still keep it current, and draw its own caption text from the same string. Assigning the value it already has is a no-op all the way down to the platform, which makes it safe to set once per build rather than tracking a separate invalidation path.
 
+### Placement
+
+`Window.Placement` is where the window is and whether it is maximized: a `WindowPlacement` record to save as the app closes and give back as it starts, so the window opens where the person left it. Store it with the app's settings (it serializes through a source-generated `JsonSerializerContext` like any other property):
+
+```csharp
+window.Placement = settings.WindowPlacement;          // before app.Run(); null does nothing
+window.Closed += () =>
+{
+    settings.WindowPlacement = window.Placement;      // the native window still exists here
+    settings.Save();
+};
+```
+
+- **Set it before `Run`.** The window is hidden until its first frame, so it opens in place instead of appearing at its default size and jumping. A maximized placement is maximized before that frame — on Windows the window is shown cloaked, drawn at its maximized size, then revealed — so the first thing on screen is the finished window.
+- **The bounds are the restored ones.** A maximized, minimized or full-screen window reports the rectangle it goes back to, so un-maximizing after a restart lands where it did before. A window Aero Snap arranged reports where it is, since that is where it was last seen.
+- **The numbers belong to the platform.** Windows uses the outer window rectangle in physical pixels; SDL elsewhere uses its window coordinates. Wayland takes the size and the maximized state but never a position — a client does not place its own windows there. Save and restore; do not compute with them.
+- **A changed desktop is handled.** Bounds are fitted to the monitors there are now (`WindowPlacement.FitTo`): a window whose monitor is gone is centred on the nearest one, one hanging off an edge slides back, one larger than its monitor shrinks to it. A window counts as reachable while 100 px of its top edge, with the 32 px caption band below it, is on some monitor — a custom title bar out of reach cannot be dragged back.
+- **Headless and hosted windows.** Under a `HeadlessSession` the placement is recorded and read back, not applied, so an app's save-and-restore wiring is testable without a desktop; the maximized flag is applied. A WinForms-hosted control returns null: its form owns its placement.
+
 ---
 
 ## Shared State Between Windows

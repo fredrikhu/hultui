@@ -1,6 +1,26 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Window placement** — `Window.Placement` (a `WindowPlacement` record: restored bounds plus
+  maximized) to save on close and give back on start; Junction, Vesper (in its session file),
+  Reel and Aperture now open where they were closed. Meridian persists nothing and is unchanged.
+  Windows reads and moves the HWND's outer rectangle (`WindowsPlacement.cs`), because SDL's
+  client-rect path is a caption height off under the custom frame; `GetWindowPlacement`'s
+  workspace coordinates are converted by the window's monitor, as Chromium does. Elsewhere
+  SDL3Window notes the restored bounds as the window moves, since SDL cannot report them for a
+  maximized window. `WindowPlacement.FitTo` brings back bounds a changed desktop stranded.
+  Three traps found on real windows: a move onto a monitor at another scale lands at the wrong
+  size (SDL answers `WM_DPICHANGED` by keeping the old pixel size) — a second `SetWindowPos`
+  fixes it; a process's first `ShowWindow` takes its command from `STARTUPINFO`, so the cloaked
+  maximize is retried once; and a cloaked window gets `EXPOSED`, whose live-resize frame cleared
+  the dirty flags so the loop never drew the frame that reveals it — live frames now wait until
+  the window is shown. Tests: 13 Core (`FitTo` cases on this desk's two-monitor layout, JSON),
+  3 headless, 4 real-window UiTests (both frames, every monitor, maximized-before-first-frame,
+  restored bounds while maximized/minimized/full screen, missing monitor), app round trips in
+  all four. Controls: no second `SetWindowPos` fails 3 of 4 UiTests; live frames before show
+  fails the reveal test (once its first frame stopped being forced — a forced frame hid it);
+  "always in reach" fails 7 of 13 Core; no restore in Vesper fails its test. Linux (SDL path)
+  builds but was not run on a desktop: Wayland ignores the position by design.
 - **App storage in the framework** — `HultUI.Core.Storage`: `AppFolders.Config/Data(app)` and
   `JsonFile<T>`, replacing four apps' own copies of "where do my files go" and "read and write
   the JSON". The copies had drifted where it mattered. Junction and Aperture wrote beside the file
@@ -18,8 +38,7 @@
   13 Core tests (four faults put back — no backup, no fallback, relative folders accepted, a
   failed save's staging file left — each caught), and the apps' settings suites unchanged:
   Junction's already pinned the backup, the corrupt-file fallback and the staging file.
-  Not done: saving window size and position, which no app does — it needs the window's own
-  placement API, and is a feature rather than a promotion.
+  Window size and position followed separately (see Window placement).
 - **One find bar** — `FindBar` (`src/HultUI.Core/Builders/FindBar.cs`) and its `FindBarTheme`
   replace four copies of the same bar around the same `TextSearch`: Junction's (diff and Files),
   Vesper's (viewer and comparison), Meridian's (response body) and the terminal sample's. The

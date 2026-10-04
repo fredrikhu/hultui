@@ -5,10 +5,12 @@ namespace VesperCommander;
 
 /// <summary>The open tabs per pane + active index, persisted for "Restore tabs on start".
 /// The view-mode lists are parallel to the dir lists (index-aligned) and optional — an
-/// older session file without them restores every tab in Detail.</summary>
+/// older session file without them restores every tab in Detail. <see cref="Window"/> is
+/// where the window was, restored whatever the tabs option says; null in an older file.</summary>
 public sealed record SessionData(
     List<string> Left, int LeftActive, List<string> Right, int RightActive,
-    List<int>? LeftViews = null, List<int>? RightViews = null);
+    List<int>? LeftViews = null, List<int>? RightViews = null,
+    HultUI.Core.Platform.WindowPlacement? Window = null);
 
 // Source-generated (de)serialization — reflection-based System.Text.Json is not
 // trim/AOT-safe, and this app publishes AOT.

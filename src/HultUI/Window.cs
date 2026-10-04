@@ -235,6 +235,30 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// </summary>
     public void SetFullscreen(bool fullscreen) => PlatformWindow.SetFullscreen(fullscreen);
 
+    /// <summary>
+    /// Where the window is and whether it is maximized — what to save as the app closes and
+    /// give back as it starts, so the window opens where the person left it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Set it before <see cref="Application.Run"/>: the window is hidden until its first
+    /// frame, so it opens in place, already maximized if it was, rather than appearing at its
+    /// default size and jumping. Read it in a <see cref="Closed"/> handler, where the native
+    /// window still exists. Null on set does nothing, so a first run with nothing saved needs
+    /// no special case:</para>
+    /// <code>
+    /// window.Placement = settings.Placement;
+    /// window.Closed += () => { settings.Placement = window.Placement; settings.Save(); };
+    /// </code>
+    /// <para>The values belong to this platform and this machine — see
+    /// <see cref="WindowPlacement"/>. Bounds left off screen by a monitor that has gone are
+    /// brought back within reach.</para>
+    /// </remarks>
+    public WindowPlacement? Placement
+    {
+        get => PlatformWindow.Placement;
+        set => PlatformWindow.Placement = value;
+    }
+
     public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
 
     /// <summary>Current viewport width in density-independent (layout) units.</summary>

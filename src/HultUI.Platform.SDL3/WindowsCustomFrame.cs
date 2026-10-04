@@ -137,6 +137,13 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     /// <summary>True while the window is covering its monitor with no chrome.</summary>
     public bool IsFullscreen { get; private set; }
 
+    /// <summary>Where full screen brings the window back to: its placement while it is full
+    /// screen, since the window's own rectangle is the monitor's then.</summary>
+    public HultUI.Core.Platform.WindowPlacement PlacementBeforeFullscreen => new(
+        _rectBeforeFullscreen.Left, _rectBeforeFullscreen.Top,
+        _rectBeforeFullscreen.Right - _rectBeforeFullscreen.Left,
+        _rectBeforeFullscreen.Bottom - _rectBeforeFullscreen.Top, _zoomedBeforeFullscreen);
+
     private WindowsCustomFrame(SDL3Window window, IntPtr hwnd)
     {
         _window = window;

@@ -98,6 +98,11 @@ internal static class ReelProgram
         // what is missing and where it looks.
         Func<IMediaBackend>? backends = MpvBackend.IsAvailable ? () => new MpvBackend() : null;
 
+        // Open where it was closed. Recorded before the app's own teardown, while the native
+        // window still exists to be asked; that teardown saves the settings.
+        window.Placement = settings.Data.WindowPlacement;
+        window.Closed += () => settings.Data.WindowPlacement = window.Placement;
+
         var reel = new ReelApp(app, window, settings, backends);
         window.Closed += reel.Dispose;
         app.SetRoot(reel.Mount());

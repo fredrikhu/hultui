@@ -38,6 +38,10 @@ public sealed class ReelSettingsData
     /// <summary>Whether a second launch hands its file to the running window.</summary>
     public bool SingleInstance { get; set; } = true;
 
+    /// <summary>Where the window was when Reel last closed — the windowed bounds, if it was
+    /// full screen — so it opens there again. Null until it has closed once.</summary>
+    public HultUI.Core.Platform.WindowPlacement? WindowPlacement { get; set; }
+
     public void Normalize()
     {
         Resume ??= [];

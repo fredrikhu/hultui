@@ -422,6 +422,25 @@ public class FindToPaneTests
         Assert.Equal(t.Left, saved!.Left[0]);
     }
 
+    /// <summary>The window opens where the last session closed it — with no tabs to restore,
+    /// too: where the window sits is not part of the "restore tabs" choice. Not maximized,
+    /// because every fixture's teardown saves the session and the next test would open so.</summary>
+    [Fact]
+    public void TheWindowOpensWhereTheLastSessionLeftIt_AndTheSessionRecordsItAgain()
+    {
+        var placement = new HultUI.Core.Platform.WindowPlacement(-2000, 500, 1000, 700, false);
+        SessionStore.Save(new SessionData([], 0, [], 0, Window: placement));
+
+        using var t = new DiffViewTests.Fixture();
+        t.Open();
+        var window = t.Session.Window.Window;
+        Assert.Equal(placement, window.Placement);
+
+        window.Placement = placement with { X = 40 };
+        t.Invoke("SaveSession");
+        Assert.Equal(placement with { X = 40 }, SessionStore.Load()!.Window);
+    }
+
     // ── the sort helper the listing is built on (pure) ───────────────────
     [Fact]
     public void SortGroupsDirectoriesFirstAndDropsAnyParentRow()

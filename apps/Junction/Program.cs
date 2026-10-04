@@ -81,6 +81,15 @@ internal static class JunctionProgram
         foreach (var path in repoPaths)
             Console.WriteLine($"  {path}");
 
+        // Open where it was closed. Recorded before the app's own teardown, while the native
+        // window still exists to be asked.
+        window.Placement = settings.WindowPlacement;
+        window.Closed += () =>
+        {
+            settings.WindowPlacement = window.Placement;
+            JunctionSettings.Save(settings);
+        };
+
         var junction = new JunctionApp(app, window, settings);
         window.Closed += junction.Dispose;
         app.SetRoot(junction.Mount());

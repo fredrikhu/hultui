@@ -511,6 +511,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // returns false and no swapchain is rebuilt.
         SDL_SyncWindow(_window);
         UpdateSize();
+        NoteNormalBounds();
 
         IsOpen = true;
         StartupTrace.Mark("platform window ready");
@@ -653,7 +654,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     // blocks SDL_PollEvent until the mouse is released. The
                     // event watcher is the only code path that runs during
                     // that pump, so drive a live frame from here on Windows.
-                    if (OperatingSystem.IsWindows())
+                    //
+                    // Not before the window is shown, which no one can drag. A window put in
+                    // place maximized is visible to Windows, only cloaked, so it gets an
+                    // EXPOSED of its own; a frame drawn from here then cleared the dirty flags
+                    // without revealing anything, the loop saw nothing left to draw, and the
+                    // first frame that uncloaks it never came.
+                    if (OperatingSystem.IsWindows() && window._shown)
                         window.LiveResizeFrame?.Invoke();
                     break;
             }
@@ -677,6 +684,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_Event evt;
         while (SDL_PollEvent(&evt))
         {
+            // Off Windows the restored bounds are only known by watching for them (see
+            // NoteNormalBounds). Both events still go on to their cases below.
+            if (evt.type is (uint)SDL_EventType.SDL_EVENT_WINDOW_MOVED or (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED
+                && !OperatingSystem.IsWindows()
+                && _registry.TryGetValue(evt.window.windowID, out var placed))
+                placed.NoteNormalBounds();
+
             switch (evt.type)
             {
                 case (uint)SDL_EventType.SDL_EVENT_QUIT:
@@ -892,6 +906,128 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         ResizePending = true;
+    }
+
+    // ──── Placement ────
+
+    /// <summary>The last bounds the window had while neither maximized, minimized nor full
+    /// screen, in SDL window coordinates. Off Windows only: SDL has no call that answers it for
+    /// a maximized window, so it is noted as the window moves. Windows asks the HWND.</summary>
+    private (int X, int Y, int Width, int Height) _normalBounds;
+
+    /// <summary>The window was shown maximized and cloaked to put it in place before its first
+    /// frame; <see cref="EnsureShown"/> uncloaks it.</summary>
+    private bool _cloaked;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>Windows reads and moves the HWND's outer rectangle (see
+    /// <see cref="WindowsPlacement"/>); elsewhere it is SDL's client rectangle in window
+    /// coordinates, and Wayland takes the size and maximized state but no position.</para>
+    /// <para>No live-resize frames are drawn while the window moves into place: before the
+    /// first frame there is nothing to draw into a hidden window, and after it the loop draws
+    /// the new size on its next pass, flagged by <see cref="ResizePending"/>.</para>
+    /// </remarks>
+    public WindowPlacement? Placement
+    {
+        get
+        {
+            if (_window == null) return null;
+            if (OperatingSystem.IsWindows())
+            {
+                if (_customFrame is { IsFullscreen: true } frame) return frame.PlacementBeforeFullscreen;
+                if (_plainFullscreen is { IsFullscreen: true } plain) return plain.PlacementBeforeFullscreen;
+                return WindowsPlacement.Read(GetWin32Hwnd());
+            }
+            var b = _normalBounds;
+            return new WindowPlacement(b.X, b.Y, b.Width, b.Height, IsMaximized);
+        }
+        set
+        {
+            if (_window == null || value is not { IsUsable: true }) return;
+            var live = LiveResizeFrame;
+            LiveResizeFrame = null;
+            try
+            {
+                if (IsFullscreen) SetFullscreen(false);
+                if (OperatingSystem.IsWindows()) PlaceWin32(value);
+                else PlaceSdl(value);
+                UpdateSize();
+            }
+            finally
+            {
+                LiveResizeFrame = live;
+                ResizePending = true;
+            }
+        }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private void PlaceWin32(WindowPlacement placement)
+    {
+        var hwnd = GetWin32Hwnd();
+        var fit = placement.FitTo(WindowsPlacement.WorkAreas());
+        // A maximized window cannot be moved: Windows keeps the state and snaps the rect back.
+        if (WindowsPlacement.IsMaximizedOrMinimized(hwnd)) Restore();
+        WindowsPlacement.Move(hwnd, fit);
+        if (!fit.Maximized) return;
+        if (_shown) Maximize();
+        else
+        {
+            WindowsPlacement.ShowMaximizedCloaked(hwnd);
+            _cloaked = true;
+        }
+    }
+
+    private void PlaceSdl(WindowPlacement placement)
+    {
+        var fit = placement.FitTo(SdlWorkAreas());
+        uint flags = (uint)SDL_GetWindowFlags(_window);
+        if (_shown && (flags & (uint)(SDL_WindowFlags.SDL_WINDOW_MAXIMIZED | SDL_WindowFlags.SDL_WINDOW_MINIMIZED)) != 0)
+            SDL_RestoreWindow(_window);
+        // Wayland refuses the position — a client does not place its own windows there — and
+        // keeps the size; that refusal is the whole of the difference.
+        SDL_SetWindowPosition(_window, fit.X, fit.Y);
+        SDL_SetWindowSize(_window, fit.Width, fit.Height);
+        SDL_SyncWindow(_window);
+        _normalBounds = (fit.X, fit.Y, fit.Width, fit.Height);
+        // A hidden window holds the request until it is shown, so it maps maximized.
+        if (fit.Maximized) SDL_MaximizeWindow(_window);
+    }
+
+    /// <summary>The usable bounds of every display, in SDL window coordinates.</summary>
+    private static List<Rect> SdlWorkAreas()
+    {
+        var areas = new List<Rect>();
+        int count;
+        var ids = SDL_GetDisplays(&count);
+        if (ids == null) return areas;
+        try
+        {
+            for (int i = 0; i < count; i++)
+            {
+                SDL_Rect r;
+                if (SDL_GetDisplayUsableBounds(ids[i], &r))
+                    areas.Add(new Rect(r.x, r.y, r.w, r.h));
+            }
+        }
+        finally { SDL_free(ids); }
+        return areas;
+    }
+
+    /// <summary>Notes the window's bounds as its restored ones, unless it is maximized,
+    /// minimized or full screen, when they are not.</summary>
+    private void NoteNormalBounds()
+    {
+        if (_window == null || IsFullscreen) return;
+        uint flags = (uint)SDL_GetWindowFlags(_window);
+        const uint notNormal = (uint)(SDL_WindowFlags.SDL_WINDOW_MAXIMIZED | SDL_WindowFlags.SDL_WINDOW_MINIMIZED
+            | SDL_WindowFlags.SDL_WINDOW_FULLSCREEN);
+        if ((flags & notNormal) != 0) return;
+        int x, y, w, h;
+        SDL_GetWindowPosition(_window, &x, &y);
+        SDL_GetWindowSize(_window, &w, &h);
+        if (w > 0 && h > 0) _normalBounds = (x, y, w, h);
     }
 
     /// <summary>
@@ -1282,6 +1418,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (_shown || _window == null) return;
         _shown = true;
         SDL_ShowWindow(_window);
+        if (_cloaked && OperatingSystem.IsWindows())
+        {
+            _cloaked = false;
+            WindowsPlacement.Uncloak(GetWin32Hwnd());
+        }
     }
     private bool _shown;
 
