@@ -65,7 +65,7 @@ public sealed unsafe class WebView2Engine : IWebEngine
     internal static string DefaultUserDataFolder()
     {
         var app = Path.GetFileNameWithoutExtension(System.Environment.ProcessPath) ?? "HultUI";
-        return Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), app, "WebView2");
+        return Path.Combine(HultUI.Core.Storage.AppFolders.Data(app), "WebView2");
     }
 
     /// <summary>

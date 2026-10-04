@@ -1,6 +1,25 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **App storage in the framework** — `HultUI.Core.Storage`: `AppFolders.Config/Data(app)` and
+  `JsonFile<T>`, replacing four apps' own copies of "where do my files go" and "read and write
+  the JSON". The copies had drifted where it mattered. Junction and Aperture wrote beside the file
+  and swapped it in, keeping a `.bak`; Reel swapped with no backup; Vesper wrote its settings,
+  session and bookmarks straight over the live files, so a crash mid-write could lose all three.
+  The fresh-Linux-account fix (special folders that answer "" until they exist, which put
+  settings in the working directory) lived only in Vesper and in the CEF profile path, as two
+  copies. Now every file is written beside, flushed to disk, swapped in with the previous kept
+  as `.bak`, and read back from the backup when the live file is unreadable — or missing, which
+  is the moment between the swap's two renames. Neither ever throws; `Save` says whether it
+  worked. Folders are never relative. `XDG_CONFIG_HOME` still counts on Windows, as it always
+  did; it is how the tests move Junction's config. `XDG_DATA_HOME` only counts off Windows,
+  as Vesper always had it. The WebView2 and CEF profiles use the same folders, unchanged in
+  practice. Every path the apps used is the same as before. `VESPER_CONFIG_DIR` stays Vesper's.
+  13 Core tests (four faults put back — no backup, no fallback, relative folders accepted, a
+  failed save's staging file left — each caught), and the apps' settings suites unchanged:
+  Junction's already pinned the backup, the corrupt-file fallback and the staging file.
+  Not done: saving window size and position, which no app does — it needs the window's own
+  placement API, and is a feature rather than a promotion.
 - **One find bar** — `FindBar` (`src/HultUI.Core/Builders/FindBar.cs`) and its `FindBarTheme`
   replace four copies of the same bar around the same `TextSearch`: Junction's (diff and Files),
   Vesper's (viewer and comparison), Meridian's (response body) and the terminal sample's. The
