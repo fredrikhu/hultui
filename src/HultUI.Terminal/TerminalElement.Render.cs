@@ -130,6 +130,7 @@ public sealed partial class TerminalElement
         if (_metricsKey == key) return;
         _metricsKey = key;
         _glyphs.Clear();
+        _glyphWidths.Clear();
 
         _font = ctx.MeasureFont(style);
         _cellWidth = _font.CharacterWidth > 0 ? _font.CharacterWidth : style.FontSize * 0.6f;
@@ -358,7 +359,11 @@ public sealed partial class TerminalElement
         }
 
         foreach (int col in _specials)
-            DrawSpecial(ctx, cells[col], left + col * _cellWidth, y, style, scale);
+        {
+            // Room to spill into: the next cell, when nothing is drawn there.
+            bool roomAfter = col + 1 < cells.Length && cells[col + 1].IsBlank && cells[col + 1].Width == 1;
+            DrawSpecial(ctx, cells[col], left + col * _cellWidth, y, style, scale, roomAfter);
+        }
 
         DrawDecorations(ctx, s, row, left, y, scale);
     }
@@ -421,7 +426,7 @@ public sealed partial class TerminalElement
             or >= 0x1E800 and <= 0x1EFFF;
 
     private void DrawSpecial(IRenderContext ctx, in TerminalCell cell, float x, float y,
-        ResolvedInheritedStyle style, float scale)
+        ResolvedInheritedStyle style, float scale, bool roomAfter = false)
     {
         int width = Math.Max(1, (int)cell.Width);
         var rect = new Rect(x, y, width * _cellWidth, _cellHeight);
@@ -437,9 +442,45 @@ public sealed partial class TerminalElement
             FontWeight = (cell.Flags & CellFlags.Bold) != 0 ? FontWeight.Bold : FontWeight.Regular,
             FontSlant = (cell.Flags & CellFlags.Italic) != 0 ? FontSlant.Italic : FontSlant.Normal,
         };
-        ctx.PushClip(rect);
-        ctx.DrawText(text, rect with { Width = rect.Width + 2 * _cellWidth }, glyphStyle, TextOverflow.Clip, 1);
+
+        // Fitted to its cells. A wide glyph wider than them (an emoji from the emoji font is wider
+        // than two cells of most monospace faces) is drawn smaller, kept in the middle of the row;
+        // clipped, it lost its right edge. A one-cell glyph from a fallback font (⇒ ★ ∀) has an
+        // advance well beyond its ink, and shrunk by it came out small: it spills into the next
+        // cell when that one is blank, and is shrunk only when it is not. A narrower glyph is
+        // centred.
+        float glyph = GlyphWidth(ctx, text, glyphStyle);
+        float dy = 0;
+        var clip = rect;
+        if (glyph > rect.Width && cell.Width <= 1 && roomAfter)
+        {
+            clip = rect with { Width = rect.Width + _cellWidth };
+            glyph = rect.Width; // drawn from the cell's left, as text would
+        }
+        else if (glyph > rect.Width)
+        {
+            float k = rect.Width / glyph;
+            glyphStyle = glyphStyle with { FontSize = glyphStyle.FontSize * k };
+            dy = _font.LineHeight * (1 - k) / 2;
+            glyph = rect.Width;
+        }
+        float dx = (rect.Width - glyph) / 2;
+
+        ctx.PushClip(clip);
+        ctx.DrawText(text, new Rect(rect.X + dx, rect.Y + dy, rect.Width + 2 * _cellWidth, rect.Height), glyphStyle,
+            TextOverflow.Clip, 1);
         ctx.Pop();
+    }
+
+    /// <summary>How wide a glyph drawn on its own is, by its text and style; cleared with the font.</summary>
+    private readonly Dictionary<(string Text, FontWeight Weight, FontSlant Slant), float> _glyphWidths = [];
+
+    private float GlyphWidth(IRenderContext ctx, string text, ResolvedInheritedStyle style)
+    {
+        var key = (text, style.FontWeight, style.FontSlant);
+        if (!_glyphWidths.TryGetValue(key, out float width))
+            _glyphWidths[key] = width = ctx.MeasureText(text, style).Width;
+        return width;
     }
 
     private static Rect SnapRect(Rect r, float scale)

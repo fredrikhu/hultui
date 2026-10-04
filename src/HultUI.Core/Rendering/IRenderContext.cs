@@ -59,6 +59,20 @@ public interface IRenderContext
     void DrawLine(Point from, Point to, Color color, float strokeWidth);
 
     /// <summary>
+    /// Fills the polygon through <paramref name="points"/>, closed back to the first, antialiased:
+    /// a shape no rectangle makes, such as a terminal's Powerline triangles and half-circles.
+    /// Default is a no-op so non-visual render contexts need not implement it.
+    /// </summary>
+    void FillPolygon(ReadOnlySpan<Point> points, Color fill) { }
+
+    /// <summary>
+    /// Strokes the open line through <paramref name="points"/>, antialiased, with round joins so a
+    /// curve made of short segments has no notches, and flat ends that stop at the last point.
+    /// Default is a no-op so non-visual render contexts need not implement it.
+    /// </summary>
+    void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth) { }
+
+    /// <summary>
     /// Measures the width and height of a text string using the same font metrics as DrawText.
     /// Used by elements like TextInput that need precise cursor/selection positioning.
     /// </summary>

@@ -4,14 +4,15 @@ using HultUI.Core.Rendering;
 namespace HultUI.Terminal.Rendering;
 
 /// <summary>
-/// Box drawing (U+2500–257F) and block elements (U+2580–259F) drawn as geometry rather than from
-/// the font, so lines meet across cells whatever the font's line height. Windows Terminal, kitty
-/// and Ghostty do the same. Dashed and diagonal lines are left to the font.
+/// Box drawing (U+2500–257F), block elements (U+2580–259F) and the Powerline separators
+/// (U+E0B0–E0BF) drawn as geometry rather than from the font, so lines meet across cells whatever
+/// the font's line height, and a prompt's separators show in a face that has none. Windows
+/// Terminal, kitty and Ghostty do the same. Dashed and diagonal lines are left to the font.
 /// </summary>
 internal static class BoxDrawing
 {
     // Arm weights per character, in the order up, right, down, left:
-    // 0 none, 1 light, 2 heavy, 3 double. Rounded corners are drawn square.
+    // 0 none, 1 light, 2 heavy, 3 double. The rounded corners (U+256D–2570) are drawn by Arc.
     private static readonly Dictionary<int, string> Arms = new()
     {
         [0x2500] = "0101", [0x2501] = "0202", [0x2502] = "1010", [0x2503] = "2020",
@@ -49,12 +50,22 @@ internal static class BoxDrawing
 
     /// <summary>Whether <paramref name="codePoint"/> is drawn here rather than from the font.</summary>
     public static bool Handles(int codePoint) =>
-        Arms.ContainsKey(codePoint) || codePoint is >= 0x2580 and <= 0x259F;
+        Arms.ContainsKey(codePoint) || codePoint is >= 0x2580 and <= 0x259F or >= 0xE0B0 and <= 0xE0BF;
 
     /// <summary>Draws <paramref name="codePoint"/> into <paramref name="cell"/>. Returns false for a
     /// character this does not draw.</summary>
     public static bool TryDraw(IRenderContext ctx, int codePoint, Rect cell, Color color, float scale)
     {
+        if (codePoint is >= 0x256D and <= 0x2570)
+        {
+            Arc(ctx, codePoint, cell, color, scale);
+            return true;
+        }
+        if (codePoint is >= 0xE0B0 and <= 0xE0BF)
+        {
+            Powerline(ctx, codePoint, cell, color, scale);
+            return true;
+        }
         if (Arms.TryGetValue(codePoint, out var arms))
         {
             DrawLines(ctx, arms, cell, color, scale);
@@ -91,6 +102,81 @@ internal static class BoxDrawing
         if (right != 0) Horizontal(ctx, cx - halfV, cell.X + cell.Width, cy, right, light, heavy, gap, color);
         if (up != 0) Vertical(ctx, cell.Y, cy + halfH, cx, up, light, heavy, gap, color);
         if (down != 0) Vertical(ctx, cy - halfH, cell.Y + cell.Height, cx, down, light, heavy, gap, color);
+    }
+
+    /// <summary>The light line's thickness: whole device pixels, a sixteenth of the cell's height.</summary>
+    private static float Light(Rect cell, float scale) => MathF.Max(1, MathF.Round(cell.Height * scale / 16f)) / scale;
+
+    /// <summary>
+    /// A rounded corner: a quarter circle whose centre line has a radius of half the cell's width,
+    /// so it meets the horizontal arm at the cell's edge, tangent to it, and runs on straight into
+    /// the vertical one. Drawn as the corner of a rounded box centred on the lines, clipped to the
+    /// cell: its straight sides are the same snapped bands the plain lines are, so they meet them.
+    /// </summary>
+    private static void Arc(IRenderContext ctx, int cp, Rect cell, Color color, float scale)
+    {
+        float light = Light(cell, scale);
+        float cx = Snap(cell.X + cell.Width / 2f, scale), cy = Snap(cell.Y + cell.Height / 2f, scale);
+        float radius = cell.Width / 2f;
+        float big = cell.Width + cell.Height; // the box's far sides fall outside the cell
+        bool right = cp is 0x256D or 0x2570, down = cp is 0x256D or 0x256E; // ╭ ╮ ╯ ╰
+        float x = right ? cx - light / 2 : cx + light / 2 - big;
+        float y = down ? cy - light / 2 : cy + light / 2 - big;
+        ctx.PushClip(cell);
+        // The stroke is inside the box, so the outer radius is the centre line's plus half the line.
+        ctx.DrawRoundedRect(new Rect(x, y, big, big), new CornerRadius(radius + light / 2), default, color, new Thickness(light));
+        ctx.Pop();
+    }
+
+    /// <summary>
+    /// The Powerline separators: solid and thin triangles, half-circles and diagonals, filling the
+    /// cell edge to edge so a prompt's segments meet without a seam.
+    /// </summary>
+    private static void Powerline(IRenderContext ctx, int cp, Rect c, Color color, float scale)
+    {
+        float x0 = c.X, y0 = c.Y, x1 = c.X + c.Width, y1 = c.Y + c.Height, ym = c.Y + c.Height / 2f;
+        float thin = Light(c, scale);
+        switch (cp)
+        {
+            case 0xE0B0: ctx.FillPolygon([new(x0, y0), new(x1, ym), new(x0, y1)], color); return;
+            case 0xE0B2: ctx.FillPolygon([new(x1, y0), new(x0, ym), new(x1, y1)], color); return;
+            case 0xE0B4: ctx.FillPolygon(HalfEllipse(c, facingRight: true), color); return;
+            case 0xE0B6: ctx.FillPolygon(HalfEllipse(c, facingRight: false), color); return;
+            case 0xE0B8: ctx.FillPolygon([new(x0, y0), new(x1, y1), new(x0, y1)], color); return;
+            case 0xE0BA: ctx.FillPolygon([new(x1, y0), new(x1, y1), new(x0, y1)], color); return;
+            case 0xE0BC: ctx.FillPolygon([new(x0, y0), new(x1, y0), new(x0, y1)], color); return;
+            case 0xE0BE: ctx.FillPolygon([new(x0, y0), new(x1, y0), new(x1, y1)], color); return;
+        }
+        // The thin ones, clipped so the stroke's ends stay in the cell.
+        ctx.PushClip(c);
+        switch (cp)
+        {
+            case 0xE0B1: ctx.DrawPolyline([new(x0, y0), new(x1, ym), new(x0, y1)], color, thin); break;
+            case 0xE0B3: ctx.DrawPolyline([new(x1, y0), new(x0, ym), new(x1, y1)], color, thin); break;
+            case 0xE0B5: ctx.DrawPolyline(HalfEllipse(c, facingRight: true, inset: thin / 2), color, thin); break;
+            case 0xE0B7: ctx.DrawPolyline(HalfEllipse(c, facingRight: false, inset: thin / 2), color, thin); break;
+            case 0xE0B9 or 0xE0BF: ctx.DrawPolyline([new(x0, y0), new(x1, y1)], color, thin); break;
+            case 0xE0BB or 0xE0BD: ctx.DrawPolyline([new(x0, y1), new(x1, y0)], color, thin); break;
+        }
+        ctx.Pop();
+    }
+
+    /// <summary>The curve of a half-ellipse filling the cell, its flat side on the cell's left edge
+    /// (facing right) or right edge, top to bottom; <paramref name="inset"/> pulls it in for a
+    /// stroke.</summary>
+    private static Point[] HalfEllipse(Rect c, bool facingRight, float inset = 0)
+    {
+        const int Segments = 24;
+        float flat = facingRight ? c.X : c.X + c.Width;
+        float rx = c.Width - inset, ry = c.Height / 2f - inset, cy = c.Y + c.Height / 2f;
+        var points = new Point[Segments + 1];
+        for (int i = 0; i <= Segments; i++)
+        {
+            double t = -Math.PI / 2 + Math.PI * i / Segments;
+            float dx = (float)Math.Cos(t) * rx;
+            points[i] = new Point(facingRight ? flat + dx : flat - dx, cy + (float)Math.Sin(t) * ry);
+        }
+        return points;
     }
 
     private static float HalfWidth(int weight, float light, float heavy, float gap) => weight switch
