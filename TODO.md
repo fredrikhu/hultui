@@ -1,6 +1,27 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Single instance in the framework** — `HultUI.SingleInstance` (+ `SecondLaunch`) replaces
+  Reel's and Vesper's identical `SingleInstance.cs` and their named-mutex code. The copies' real
+  faults, not just their duplication: they listened only after the window was built, and a
+  launch that waited 500 ms gave up — so most of a multi-file "Open" landed nowhere; they exited
+  whether or not the hand-off worked; a relative path (`vesper .`, `reel film.mkv` from a
+  terminal) resolved against the running copy's folder; `Raise` was refused by Windows' foreground
+  lock (Reel never raised, so a relaunch with no file did nothing visible); a pipe name taken
+  elsewhere made the accept loop spin; and the pipe was machine-wide. Now: a lock file
+  (`FileShare.None`, flock on Linux) per user (+ session on Windows), the pipe listening from
+  `Claim` with launches kept until `Listen`, many senders at once, `CurrentUserOnly` both ends,
+  an acknowledgement so `Forward` can return false and the launch opens its own window, the
+  sender's working directory carried with its args, and `AllowSetForegroundWindow` for the
+  running copy. Also fixed: `Window.Raise` restored unconditionally, which un-maximizes — every
+  hand-off shrank a maximized Vesper. Linux: a listener per name shares one socket there, closed
+  with the last of them, so the next listener is made before a connection is handed off (a burst
+  lost launches on Linux until then). Apps keep their Windows-only gating and their options.
+  Tests: 9 headless (Windows, and Linux under WSL Fedora ×3), 1 real-window (`Raise`); a
+  cross-process probe: six launches during the first's start-up, all delivered in 23 ms each.
+  Controls: no early queue fails the before-Listen test; a shared lock fails 6 of 9; unconditional
+  restore fails the `Raise` test. Not verified: the foreground hand-off itself, which needs a
+  launch the person started (a tool-started process has no foreground right to pass on).
 - **Window placement** — `Window.Placement` (a `WindowPlacement` record: restored bounds plus
   maximized) to save on close and give back on start; Junction, Vesper (in its session file),
   Reel and Aperture now open where they were closed. Meridian persists nothing and is unchanged.

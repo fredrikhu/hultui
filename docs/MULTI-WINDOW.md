@@ -109,6 +109,30 @@ window.Closed += () =>
 - **A changed desktop is handled.** Bounds are fitted to the monitors there are now (`WindowPlacement.FitTo`): a window whose monitor is gone is centred on the nearest one, one hanging off an edge slides back, one larger than its monitor shrinks to it. A window counts as reachable while 100 px of its top edge, with the 32 px caption band below it, is on some monitor — a custom title bar out of reach cannot be dragged back.
 - **Headless and hosted windows.** Under a `HeadlessSession` the placement is recorded and read back, not applied, so an app's save-and-restore wiring is testable without a desktop; the maximized flag is applied. A WinForms-hosted control returns null: its form owns its placement.
 
+### Single instance
+
+`SingleInstance` keeps one running copy of an app per person: a later launch hands its command line to the copy already running and exits. Claim before building anything, listen once the app exists:
+
+```csharp
+using var instance = SingleInstance.Claim("Reel");
+if (!instance.IsFirst && instance.Forward(args)) return;   // handed over
+
+using var app = new Application("Reel", 1280, 760);
+// ...
+instance.Listen(launch =>                                  // runs on the UI thread
+{
+    if (launch.Args.Count > 0) player.Open(launch.FullPath(launch.Args[0]));
+    window.Raise();
+});
+app.Run();
+```
+
+- **Nothing is dropped.** The first copy listens from `Claim`, before it has a window, and keeps launches until `Listen`; a file manager opening ten selected files starts ten processes at once, nine of them while the first is still starting. `Forward` returns true only once the running copy has the message; false (it did not answer within 3 s) means carry on as a window of its own.
+- **Paths are the launch's.** The working directory travels with the arguments; `launch.FullPath(arg)` resolves against it, not the running copy's.
+- **`Raise` works on Windows.** A background process may not take the foreground; the forwarding launch, which the person just started, grants its right to the running copy before sending. Wayland has no equivalent.
+- **Per person, and per session on Windows.** The claim is a locked file in the user's temp folder (`$XDG_RUNTIME_DIR` on Linux) and the channel a named pipe only the same user can open from either end. The claim goes when the process ends, however it ends.
+- **Give each app its own id.** Tests should claim a fresh one (a GUID): a fixed id would hand their launches to the real app if it is running.
+
 ---
 
 ## Shared State Between Windows
