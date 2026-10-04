@@ -1,6 +1,11 @@
 using System.Globalization;
+using HultUI.Core.Builders;
+using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Headless;
+using HultUI.Terminal.Rendering;
 using Xunit;
 
 namespace HultUI.Terminal.Tests;
@@ -48,7 +53,67 @@ public class TerminalGlyphShapeTests
         Assert.True(MaxLit(bitmap, round - 1, cy - 1, round, cy) < 64, "the round corner keeps off its join");
         // The arc's arms still reach the cell's edges, where the next cells' lines go on.
         Assert.True(MaxLit(bitmap, round - 1, box.Y + h - 1, round + 1, box.Y + h - 1) > 128, "the arm down");
-        Assert.True(MaxLit(bitmap, box.X + 3 * w - 1, cy - 1, box.X + 3 * w - 1, cy + 1) > 128, "the arm right");
+        // The cell's last column: its right edge snapped the way the renderer snaps cells. Taken
+        // from the unsnapped edge, this read a column short wherever the edge rounds up.
+        float edge = MathF.Round(box.X + 3 * w);
+        Assert.True(MaxLit(bitmap, edge - 1, cy - 1, edge - 1, cy + 1) > 128, "the arm right");
+    }
+
+    /// <summary>
+    /// Lines and a rounded corner in cells an odd number of pixels wide, drawn into fixed cells so
+    /// the answer does not hang on the platform's monospace face. DejaVu Sans Mono, Linux's, has
+    /// 7.82px cells, 7 or 8 pixels once snapped; the test above failed only there.
+    /// <para>
+    /// A one-pixel line belongs in the middle column, with three pixels either side. Snapping the
+    /// cell's middle (19.5 → 20) before taking half the line off it moved the line a pixel right.
+    /// The arc, given half the cell as its radius, then turned straight half a pixel past the
+    /// cell's edge, so it was still curving where the next cell's line began: a notch in every
+    /// join.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void InACellAnOddNumberOfPixelsWide_TheLineIsCentred_AndTheArcIsStraightByTheEdge()
+    {
+        using var session = HeadlessSession.Create(48, 24);
+        // │ in [0,7), ╭ in [16,23) and ─ after it in [23,30): seven pixels wide, sixteen high.
+        session.Window.SetRoot(new BoxDrawn(
+            (0x2502, new Rect(0, 0, 7, 16)), (0x256D, new Rect(16, 0, 7, 16)), (0x2500, new Rect(23, 0, 7, 16)))
+            .Width(48).Height(24));
+        session.PumpFrame();
+        using var image = session.Window.CapturePixels();
+        using var bitmap = SkiaSharp.SKBitmap.FromImage(image);
+
+        Assert.True(Lit(bitmap, 3, 12) > 200, "│ is in the cell's middle column");
+        Assert.True(Lit(bitmap, 2, 12) < 64 && Lit(bitmap, 4, 12) < 64, "and only there");
+
+        // The corner's straight parts are the same pixels as the lines they join: its down arm in
+        // │'s column, its right arm on ─'s row, and nearly straight already in the cell's last
+        // column — a curve still bending there leaves a step where ─ begins.
+        Assert.True(Lit(bitmap, 16 + 3, 15) > 200, "the arm down is in the middle column");
+        Assert.True(Lit(bitmap, 23, 8) > 200, "─ runs on ╭'s row");
+        Assert.True(Lit(bitmap, 22, 8) > 200, "the arc is straight by the cell's edge");
+        Assert.True(Lit(bitmap, 19, 8) < 64, "and keeps off the square corner's join");
+    }
+
+    /// <summary>Box-drawing characters drawn straight into the given cells, at scale 1.</summary>
+    private sealed class BoxDrawn : BoxElement
+    {
+        private readonly (int CodePoint, Rect Cell)[] _cells;
+
+        public BoxDrawn(params (int CodePoint, Rect Cell)[] cells)
+        {
+            _cells = cells;
+            BackgroundColor = Color.Black;
+        }
+
+        public override void Render(IRenderContext ctx)
+        {
+            base.Render(ctx);
+            var origin = Layout.AbsoluteContentBox;
+            foreach (var (cp, cell) in _cells)
+                Assert.True(BoxDrawing.TryDraw(ctx, cp,
+                    cell with { X = origin.X + cell.X, Y = origin.Y + cell.Y }, Color.White, 1f));
+        }
     }
 
     [Fact]
