@@ -72,9 +72,11 @@ public sealed class WebViewSampleApp : IDisposable
 
     private readonly Color _muted = new(100, 116, 139);
 
-    public WebViewSampleApp(IWebEngine engine)
+    /// <param name="devTools">Allows the page's developer tools: F12 in the page, and a
+    /// toolbar button that opens them from code (<c>--devtools</c>).</param>
+    public WebViewSampleApp(IWebEngine engine, bool devTools = false)
     {
-        Web = new WebViewController(engine);
+        Web = new WebViewController(engine, new WebViewOptions { DevTools = devTools });
         Web.MessageReceived += m => LastMessage.Value = m.Json;
         Web.NewWindowRequested += r => Web.Navigate(r.Uri);   // keep it in this window
         Web.DownloadRequested += OnDownload;
@@ -168,9 +170,13 @@ public sealed class WebViewSampleApp : IDisposable
             reload.AccessibleName = web.IsLoading ? "Stop" : "Reload";
             var send = Button.New("Send to page", ButtonVariant.Secondary)
                 .OnClick(_ => web.PostMessage($"{{\"time\":\"{DateTime.Now:HH:mm:ss}\"}}"));
+            // Only where it would work: the options allow it and the engine can.
+            Element devTools = web.Options.DevTools && (web.Capabilities & WebEngineCapabilities.DevTools) != 0
+                ? Button.New("DevTools", ButtonVariant.Secondary).OnClick(_ => web.OpenDevTools())
+                : Box.New();
 
             return Flex.Row(gap: 8).Padding(8f).AlignItems(AlignItems.Center).Children(
-                back, forward, reload, address, send,
+                back, forward, reload, address, send, devTools,
                 // Opens over the page: the reason the page is drawn rather than a child window.
                 Dropdown.New(["Menus open over the page", "…like this one", "…and this"], selectedIndex: 0));
         }

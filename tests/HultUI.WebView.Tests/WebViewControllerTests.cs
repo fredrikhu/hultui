@@ -50,6 +50,59 @@ public class WebViewControllerTests
     }
 
     [Fact]
+    public void DevTools_OpenOnlyWhereTheOptionsAllowThem_AndWaitForTheEngine()
+    {
+        using var session = HeadlessSession.Create();
+        var engine = new FakeWebEngine { Capabilities = WebEngineCapabilities.DevTools };
+
+        // Off by default: a page from the internet must not get developer tools by accident.
+        var (closed, closedView) = Ready(engine);
+        Assert.Throws<InvalidOperationException>(closed.OpenDevTools);
+        Assert.DoesNotContain("OpenDevTools", closedView.Calls);
+        closed.Dispose();
+
+        // On, before the engine is ready: held, then sent, as every command is.
+        using var web = new WebViewController(engine, new WebViewOptions { DevTools = true });
+        var view = engine.Views[^1];
+        web.OpenDevTools();
+        Assert.DoesNotContain("OpenDevTools", view.Calls);
+        view.RaiseReady();
+        Assert.Contains("OpenDevTools", view.Calls);
+    }
+
+    [Fact]
+    public void AContentFolder_MustExist_AndReachesTheEngineAsAnAbsolutePath()
+    {
+        using var session = HeadlessSession.Create();
+        var missing = Path.Combine(Path.GetTempPath(), "hultui-no-such-folder-" + Guid.NewGuid().ToString("N"));
+        Assert.Throws<DirectoryNotFoundException>(() =>
+            new WebViewController(new FakeWebEngine(), new WebViewOptions { ContentFolder = missing }));
+
+        var folder = Directory.CreateTempSubdirectory("hultui-content-").FullName;
+        try
+        {
+            var engine = new FakeWebEngine();
+            using var web = new WebViewController(engine,
+                new WebViewOptions { ContentFolder = Path.GetRelativePath(Environment.CurrentDirectory, folder) });
+            Assert.Equal(Path.GetFullPath(folder), web.Options.ContentFolder);
+            Assert.Equal(web.Options.ContentFolder, engine.Views[^1].Options.ContentFolder);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [Fact]
+    public void DevTools_OnAnEngineThatHasNone_SayItIsNotSupported()
+    {
+        using var session = HeadlessSession.Create();
+        var (web, view) = Ready(new FakeWebEngine(), new WebViewOptions { DevTools = true });
+        using (web)
+        {
+            Assert.Throws<NotSupportedException>(web.OpenDevTools);
+            Assert.DoesNotContain("OpenDevTools", view.Calls);
+        }
+    }
+
+    [Fact]
     public async Task AScript_AwaitedBeforeReady_CompletesOnceTheEngineIs()
     {
         using var session = HeadlessSession.Create();
@@ -198,7 +251,7 @@ public class WebViewControllerTests
         view.RaiseMessage("1", new Uri("https://evil.test"));
         view.RaiseMessage("2", new Uri(WebViewOptions.AppOrigin + "/page.html"));
         view.RaiseMessage("3", origin: null);                         // a string document
-        view.RaiseMessage("4", new Uri("http://app.local"));          // wrong scheme
+        view.RaiseMessage("4", new Uri("http://app.example"));          // wrong scheme
 
         Assert.Equal(["2", "3"], received.Select(m => m.Json));
     }

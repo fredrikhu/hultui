@@ -2,6 +2,42 @@ using HultUI.WebView.Cef;
 
 // Starts CEF and returns from Main, so the test can watch the process exit. Prints what it
 // sees for the test to check; exit code 3 means there is no CEF here.
+// Without the sandbox, the engine is made with options of its own, and a default engine may
+// well be unavailable (Ubuntu without a profile): before the default's check.
+var withoutSandbox = Array.IndexOf(args, "--without-sandbox");
+if (withoutSandbox >= 0) return WithoutSandbox.Run(args[withoutSandbox + 1]);
+var contentFolder = Array.IndexOf(args, "--content-folder");
+if (contentFolder >= 0) return ContentFolderProbe.Run(args[contentFolder + 1]);
+
+// A view hidden before CEF has started, as an element's first frame can do: the call has no
+// browser to reach yet, and the page must come up hidden all the same (the review of 2026-10-03).
+if (args.Contains("--hidden-before-start"))
+{
+    using var hiddenEngine = new CefEngine();
+    var profile = Path.Combine(Path.GetTempPath(), $"hultui-hidden-{Environment.ProcessId}");
+    CefRuntime.ShutDown += _ => { try { Directory.Delete(profile, recursive: true); } catch (IOException) { } };
+    var events = new System.Collections.Concurrent.ConcurrentQueue<HultUI.WebView.WebEngineEvent>();
+    var view = (CefView)hiddenEngine.CreateView(new HultUI.WebView.WebViewOptions { UserDataFolder = profile });
+    view.Event += events.Enqueue;
+    view.Event += e => { if (e is HultUI.WebView.WebEngineEvent.NavigationStarting s) s.Request.Complete(); };
+    view.Attach(new Host());
+    view.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 300, 200), 1f));
+    view.SetVisible(false);   // CEF is starting: no browser yet
+    Console.WriteLine("CEF running when hidden: " + CefRuntime.IsRunning);
+    var end = DateTime.UtcNow.AddSeconds(20);
+    while (!events.Any(e => e is HultUI.WebView.WebEngineEvent.Ready) && DateTime.UtcNow < end) Thread.Sleep(20);
+    view.NavigateToString("<title>t</title>");
+    while (!events.OfType<HultUI.WebView.WebEngineEvent.TitleChanged>().Any() && DateTime.UtcNow < end) Thread.Sleep(20);
+    Console.WriteLine("at start: " + view.ExecuteScriptAsync("document.visibilityState").Result);
+    view.SetVisible(true);
+    Thread.Sleep(500);
+    Console.WriteLine("shown: " + view.ExecuteScriptAsync("document.visibilityState").Result);
+    view.Dispose();
+    Thread.Sleep(500);
+    Console.Out.Flush();
+    return 0;
+}
+
 var engine = new CefEngine();
 if (!engine.Availability.IsAvailable)
 {
@@ -100,6 +136,75 @@ if (quick >= 0)
     }
     Thread.Sleep(3000);
     Console.WriteLine("disposed");
+    return 0;
+}
+
+var devToolsWindow = Array.IndexOf(args, "--devtools-window");
+if (devToolsWindow >= 0)
+{
+    // The developer tools in a native window of their own, on the platform given ("wayland",
+    // "x11"), opened <how>: "call" (OpenDevTools), "f12", "ctrl-shift-i", "f12-off" (F12 with the
+    // option off: nothing should open), or "inspect" (the context menu's entry). Then held for
+    // a look at the compositor's windows, then the page goes, then held again.
+    var system = args[devToolsWindow + 1];
+    var how = args[devToolsWindow + 2];
+    int held = args.Length > devToolsWindow + 3 ? int.Parse(args[devToolsWindow + 3]) : 4000;
+    // A profile of its own: the lifetime tests, run beside these, need the default one free.
+    var profile = Path.Combine(Path.GetTempPath(), $"hultui-devtools-{Environment.ProcessId}");
+    // Removed once CEF has shut down and let go of it, as the engine's own temporary profile is.
+    CefRuntime.ShutDown += _ => { try { Directory.Delete(profile, recursive: true); } catch (IOException) { } };
+    var started = CefRuntime.Start(windowSystem: system, profile).Wait(TimeSpan.FromSeconds(20)) ? CefRuntime.Error : "timed out";
+    if (started is not null) { Console.WriteLine("did not start: " + started); return 1; }
+    var page = (CefView)engine.CreateView(new HultUI.WebView.WebViewOptions { DevTools = how != "f12-off", UserDataFolder = profile });
+    var ready = new ManualResetEventSlim();
+    var menu = new ManualResetEventSlim();
+    page.Event += e =>
+    {
+        if (e is HultUI.WebView.WebEngineEvent.Ready) ready.Set();
+        if (e is HultUI.WebView.WebEngineEvent.ContextMenuRequested m)
+        {
+            Console.WriteLine("menu: " + string.Join(", ", m.Request.Items.Select(i => i.Name)));
+            if (m.Request.Items.FirstOrDefault(i => i.Name == "inspectElement") is { } inspect) m.Request.Select(inspect);
+            else m.Request.Dismiss();
+            menu.Set();
+        }
+    };
+    page.Attach(new Host());
+    page.SetPlacement(new HultUI.WebView.WebViewPlacement(0, new HultUI.WebView.PixelRect(0, 0, 400, 300), 1f) { WindowSystem = system });
+    Console.WriteLine("ready: " + ready.Wait(20_000));
+    page.Focus(HultUI.Core.Events.FocusReason.Pointer);
+    Thread.Sleep(300);
+    void Press(HultUI.Core.Events.KeyCode key, HultUI.Core.Events.KeyModifiers modifiers)
+    {
+        page.SendKey(new HultUI.WebView.WebKeyInput(true, key, modifiers));
+        page.SendKey(new HultUI.WebView.WebKeyInput(false, key, modifiers));
+    }
+    switch (how)
+    {
+        case "call": page.OpenDevTools(); break;
+        case "f12" or "f12-off": Press(HultUI.Core.Events.KeyCode.F12, HultUI.Core.Events.KeyModifiers.None); break;
+        case "ctrl-shift-i": Press(HultUI.Core.Events.KeyCode.I, HultUI.Core.Events.KeyModifiers.Ctrl | HultUI.Core.Events.KeyModifiers.Shift); break;
+        case "inspect":
+            page.SendPointer(new HultUI.WebView.WebPointerInput(HultUI.WebView.WebPointerAction.Move, 50, 50));
+            page.SendPointer(new HultUI.WebView.WebPointerInput(HultUI.WebView.WebPointerAction.Down, 50, 50,
+                HultUI.WebView.WebPointerButtons.Right, HultUI.WebView.WebPointerButtons.Right, 1));
+            page.SendPointer(new HultUI.WebView.WebPointerInput(HultUI.WebView.WebPointerAction.Up, 50, 50,
+                HultUI.WebView.WebPointerButtons.Right, HultUI.WebView.WebPointerButtons.None, 1));
+            Console.WriteLine("menu asked: " + menu.Wait(10_000));
+            break;
+    }
+    Thread.Sleep(held / 2);
+    var open = new TaskCompletionSource<bool>();
+    CefRuntime.Post(() => open.TrySetResult(page.HasDevToolsWindow));
+    Console.WriteLine("devtools open: " + (open.Task.Wait(5000) && open.Task.Result));
+    Console.WriteLine("holding");
+    Console.Out.Flush();
+    Thread.Sleep(held / 2);
+    page.Dispose();
+    Thread.Sleep(1500);
+    Console.WriteLine("disposed");
+    Console.Out.Flush();
+    Thread.Sleep(held / 2);
     return 0;
 }
 

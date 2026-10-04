@@ -409,7 +409,8 @@ and input is recorded; `Raise*` injects what a page does.
 an event (the app opens the system browser or navigates in place); `file://` is
 off; local content is served through a virtual host
 (`SetVirtualHostNameToFolderMapping` / a CEF scheme handler factory) under a fixed
-`https://app.local/`; `MessageReceived` only from origins the options allow;
+`https://app.example/` (first `app.local`, which cost WebView2 two seconds a navigation:
+`.local` is mDNS's); `MessageReceived` only from origins the options allow;
 DevTools off unless `WebViewOptions.DevTools`.
 
 ## Framework seams
@@ -548,8 +549,12 @@ action routing by `ElementId`. Neither bridge needs a second kind of node.
   whole and the UI thread reads it without a lock.
 - **`AccessibleContentAction`**: `Invoke`, `Toggle`, `Select`, `Focus`, `SetValue`.
 - **`ContentNodeId`**: like `VirtualItemId`, an `ElementId` that marks a data node (bit 62;
-  bit 63 is the virtual item's), packing the owner's id and the key. So a node keeps its
+  bit 63 is the virtual item's), packing the owner's slot and the key. So a node keeps its
   identity, and its AT-SPI object path, across rebuilds while the page keeps the node.
+  The slot (`AccessibleOwnerSlots`, 2026-10-03) stands in for the owner's own id, which
+  first went in truncated to 30 bits: element ids count every element ever built, and an
+  application running for months outgrows that. An owner takes a slot when it first
+  publishes nodes and gives it back when it unmounts; slots are never reused.
 - **The builder** adds a source's content under the element's own node, offset and clipped
   like any child: offscreen when outside the visible region.
 - **The router** (`AccessibilityActionRouter`, `HultUI`) decodes a `ContentNodeId` and calls
@@ -1058,6 +1063,21 @@ engine if it changed, but nothing more.
      the application's executable and nothing else. A tested `.deb` (profile, maintainer scripts,
      a measured `Depends` list) installs, runs, unloads and purges cleanly on both. arm64:
      untested.
+   - **Developer tools on Linux: done 2026-10-03.** CEF's own, in a native top-level window
+     (`show_dev_tools`), on Wayland and X11 alike; opened by `OpenDevTools`, F12, Ctrl+Shift+I and
+     an "Inspect" entry the engine adds to the page's menu; closed with the page. The brief's
+     decision has the details; `CefDevToolsTests` check each way on sway.
+   - **Running without the sandbox: done 2026-10-03.** `CefEngineOptions.Sandbox = false`,
+     enforced to the application's own content unless `AllowUntrustedContentWithoutSandbox`;
+     one mode per process, the first engine deciding; `CefEngine.IsSandboxed`. Tested on Fedora
+     and on the Ubuntu VM without a profile and as root; the brief has it. Its review's gaps,
+     closed the same day: WebSockets (a stricter CSP on the engine's own documents), requests
+     with no page (the filter on the request context too), WebRTC's UDP (off for the process).
+   - **Local content on Linux: done 2026-10-03.** `ContentFolder` served at
+     `https://app.example` by a scheme handler factory registered once, serving the requesting
+     page's folder (found by its browser's identifier): paths kept inside the folder (403 for
+     `..` in any spelling and for links out), types by extension, single byte ranges, no CORS
+     headers. CEF has no `.local` delay; the brief has the measurements.
 6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
@@ -1073,3 +1093,12 @@ engine if it changed, but nothing more.
    browser's guard against automatic downloads; `Element.Focus()` does nothing inside an
    overlay (overlay content has no focus manager), so the dialog focuses its field through
    the window's. **Drag and drop**: option 2 below, chosen by the owner.
+
+7. **Developer tools — Windows done 2026-10-03, Linux next.** The owner chose native
+   windows: the engine's own developer tools, not drawn by HultUI. One contract member,
+   `IWebEngineView.OpenDevTools()` (a default that does nothing), behind
+   `WebViewController.OpenDevTools()`, which needs `WebViewOptions.DevTools` and
+   `WebEngineCapabilities.DevTools`. WebView2 calls `OpenDevToolsWindow`, and its F12 and
+   Inspect were already there; proven by `WebView2Tests` (the call; F12 with the option on
+   and, as the control, off). CEF's `show_dev_tools` in a native window, F12 and an Inspect
+   entry are the Linux session's, in `WEBVIEW-LINUX-BRIEF.md`.

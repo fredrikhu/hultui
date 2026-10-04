@@ -84,8 +84,7 @@ public class PackOverlayTests
 
         t.CommitPack(eachOwn: true, t.Names(60));
         // Let a few archives land before stopping the run.
-        t.PumpUntilDone(3);
-        t.PauseOp();
+        t.PauseOnceDone(3);
         t.CancelOp();
         t.WaitForNotice();
 
@@ -161,12 +160,20 @@ public class PackOverlayTests
             _t.Session.Window.PressKey(KeyCode.Enter);
         }
 
-        /// <summary>Wait until the pack has finished at least <paramref name="count"/> entries,
-        /// so a cancel lands part-way through the run rather than before any of it.</summary>
-        public void PumpUntilDone(int count) =>
-            _t.Session.PumpUntil(
-                () => Op is { } op && (int)OpField(op, "Done") >= count,
-                TimeSpan.FromSeconds(20));
+        /// <summary>Pause the pack as soon as it has finished at least <paramref name="count"/>
+        /// entries, so a cancel lands part-way through the run rather than before any of it.
+        ///
+        /// <para>Watched from this thread, not between frames: the worker counts on its own,
+        /// and one frame was long enough for the Linux runner to finish all sixty archives —
+        /// the cancel then found nothing left to stop. Nothing pumps here, so the op cannot be
+        /// cleared while it is watched (see <see cref="CommitPack(bool, string[])"/>).</para></summary>
+        public void PauseOnceDone(int count)
+        {
+            var op = Op ?? throw new Xunit.Sdk.XunitException("no pack is running");
+            Assert.True(SpinWait.SpinUntil(() => (int)OpField(op, "Done") >= count, TimeSpan.FromSeconds(20)),
+                $"the pack never finished {count} entries");
+            PauseOp();
+        }
 
         public bool PackDialogOpen => _t.Field<bool>("_packOpen");
         public string PackError => _t.Field<string?>("_packError") ?? "";

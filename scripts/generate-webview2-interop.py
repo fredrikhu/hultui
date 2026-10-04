@@ -71,6 +71,7 @@ WANTED = {
         "ICoreWebView2MoveFocusRequestedEventHandler",
         "ICoreWebView2AcceleratorKeyPressedEventHandler",
         # Step 6: the page's own menus, dialogs, downloads and drops.
+        "ICoreWebView2_3",
         "ICoreWebView2_4",
         "ICoreWebView2_11",
         "ICoreWebView2CompositionController3",

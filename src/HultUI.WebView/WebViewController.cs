@@ -49,10 +49,20 @@ public sealed class WebViewController : IDisposable
 
     /// <param name="engine">The engine to create the page in.</param>
     /// <param name="options">Fixed for the page's life; null takes the defaults.</param>
+    /// <exception cref="DirectoryNotFoundException"><see cref="WebViewOptions.ContentFolder"/>
+    /// names a folder that does not exist.</exception>
     public WebViewController(IWebEngine engine, WebViewOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         Options = options ?? new WebViewOptions();
+        // Engines get an absolute path, fixed now: the working directory may change later.
+        if (Options.ContentFolder is { } folder)
+        {
+            var full = Path.GetFullPath(folder);
+            if (!Directory.Exists(full))
+                throw new DirectoryNotFoundException($"WebViewOptions.ContentFolder does not exist: {full}");
+            Options = Options with { ContentFolder = full };
+        }
 
         var availability = engine.Availability;
         if (availability.IsAvailable)
@@ -242,6 +252,23 @@ public sealed class WebViewController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(json);
         Run("PostMessage", () => _view.PostMessage(json));
+    }
+
+    /// <summary>
+    /// Opens the page's developer tools in a native window of their own, as F12 in the page
+    /// does. Waits for the engine if it is not ready yet.
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><see cref="WebViewOptions.DevTools"/> is off
+    /// for this page.</exception>
+    /// <exception cref="NotSupportedException">The engine cannot open developer tools (it lacks
+    /// <see cref="WebEngineCapabilities.DevTools"/>).</exception>
+    public void OpenDevTools()
+    {
+        if (!Options.DevTools)
+            throw new InvalidOperationException("Developer tools are off for this page: set WebViewOptions.DevTools.");
+        if ((Capabilities & WebEngineCapabilities.DevTools) == 0)
+            throw new NotSupportedException("This web engine cannot open developer tools.");
+        Run("OpenDevTools", () => _view.OpenDevTools());
     }
 
     private static async void ForwardResult(Task<string> task, TaskCompletionSource<string> to)

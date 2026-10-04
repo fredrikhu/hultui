@@ -195,6 +195,27 @@ internal sealed unsafe partial class WebView2View : IWebEngineView
             }
         }
         finally { Com.Release(ref settings); }
+        MapContentFolder();
+    }
+
+    /// <summary>
+    /// <see cref="WebViewOptions.ContentFolder"/> served at <see cref="WebViewOptions.AppOrigin"/>.
+    /// DENY_CORS: another origin may use its files as an image or script source but not read
+    /// them with fetch, which is what CEF's scheme handler, sending no CORS headers, gives.
+    /// </summary>
+    private void MapContentFolder()
+    {
+        if (_options.ContentFolder is not { } folder) return;
+        var webview3 = Com.TryQueryInterface(_webview, ICoreWebView2_3.IID);
+        if (webview3 == 0)
+            throw new NotSupportedException("This WebView2 Runtime cannot serve a folder (it lacks ICoreWebView2_3).");
+        try
+        {
+            const int DenyCors = 2;   // COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS
+            Com.Check(Com.CallStrings(webview3, ICoreWebView2_3.SetVirtualHostNameToFolderMapping,
+                new Uri(WebViewOptions.AppOrigin).Host, folder, DenyCors), "SetVirtualHostNameToFolderMapping");
+        }
+        finally { Com.Release(ref webview3); }
     }
 
     private void Apply(WebViewPlacement placement)
@@ -476,6 +497,14 @@ internal sealed unsafe partial class WebView2View : IWebEngineView
     {
         RequireReady();
         Com.Check(Com.CallString(_webview, ICoreWebView2.NavigateToString, html), "NavigateToString");
+    }
+
+    /// <summary>WebView2's own DevTools window, as its F12 opens it. Needs
+    /// <c>AreDevToolsEnabled</c>, which <see cref="WebViewOptions.DevTools"/> sets.</summary>
+    public void OpenDevTools()
+    {
+        RequireReady();
+        Com.Check(Com.Call(_webview, ICoreWebView2.OpenDevToolsWindow), "OpenDevToolsWindow");
     }
 
     public void GoBack() { RequireReady(); Com.Call(_webview, ICoreWebView2.GoBack); }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -44,6 +45,29 @@ internal sealed unsafe partial class CefView : IWebEngineView
     private cef_load_handler_t* _load;
     private cef_focus_handler_t* _focus;
     private cef_browser_t* _browser;
+
+    /// <summary>Each live page by its browser's identifier: for handlers CEF calls with the
+    /// browser alone (the content folder's, the string pages').</summary>
+    private static readonly ConcurrentDictionary<int, CefView> ByBrowser = new();
+    private int _browserId;
+
+    /// <summary>The view a browser of CEF's is, or null (none, the developer tools', a closed one).</summary>
+    internal static CefView? ForBrowser(cef_browser_t* browser) =>
+        browser == null ? null : ByBrowser.GetValueOrDefault(browser->get_identifier(browser));
+
+    /// <summary>Whether this view loads only the application's own content.</summary>
+    internal bool OwnContentOnly => _ownContentOnly;
+
+    /// <summary>The folder this page serves at <see cref="WebViewOptions.AppOrigin"/>, or null.</summary>
+    internal string? ContentFolder => _options.ContentFolder;
+
+    /// <summary>For a request with no page (a service worker's): the folder, when every live
+    /// page that has one has the same; otherwise null.</summary>
+    internal static string? SoleContentFolder()
+    {
+        var folders = ByBrowser.Values.Select(v => v.ContentFolder).OfType<string>().Distinct(StringComparer.Ordinal).Take(2).ToList();
+        return folders.Count == 1 ? folders[0] : null;
+    }
     private cef_browser_host_t* _browserHost;
     private DevToolsSession? _devTools;
     private readonly Dictionary<int, Uri?> _contextOrigins = [];
@@ -79,9 +103,21 @@ internal sealed unsafe partial class CefView : IWebEngineView
     /// <summary>What a string document's address reads as, as on WebView2 and the fake engine.</summary>
     private static readonly Uri AboutBlank = new("about:blank");
 
-    public CefView(WebViewOptions options) => _options = options;
+    public CefView(WebViewOptions options) : this(options, new CefEngineOptions()) { }
 
-    public WebEngineCapabilities Capabilities => WebEngineCapabilities.None;
+    public CefView(WebViewOptions options, CefEngineOptions engine)
+    {
+        _options = options;
+        _wantsSandbox = CefRuntime.WantsSandbox(engine);
+        _ownContentOnly = !_wantsSandbox && !engine.AllowUntrustedContentWithoutSandbox;
+    }
+
+    /// <summary>Whether this view's engine runs its pages in Chromium's sandbox.</summary>
+    private readonly bool _wantsSandbox;
+
+    /// <summary>Developer tools in a native window of their own, on Wayland and X11 alike (and
+    /// harmlessly invisible on the headless platform). Keys are forwarded by the element.</summary>
+    public WebEngineCapabilities Capabilities => WebEngineCapabilities.DevTools;
 
     public event Action<WebEngineEvent>? Event;
 
@@ -112,9 +148,11 @@ internal sealed unsafe partial class CefView : IWebEngineView
         if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
             UseSharedFrames(placement.WindowSystem);
         if (phase == Phase.Waiting && !placement.Bounds.IsEmpty)
-            CefRuntime.Start(placement.WindowSystem, _options.UserDataFolder).ContinueWith(t =>
+            CefRuntime.Start(placement.WindowSystem, _options.UserDataFolder, _wantsSandbox).ContinueWith(t =>
             {
                 if (t.Result is { } error) Fail(WebFailure.InitializationFailed, error);
+                // CEF runs in the mode the engine that started it chose: another cannot be had.
+                else if (CefRuntime.ModeConflict(CefRuntime.IsSandboxed, _wantsSandbox) is { } conflict) Fail(WebFailure.InitializationFailed, conflict);
                 else if (CefRuntime.ResolveFolder(_options.UserDataFolder) is { Error: { } refused }) Fail(WebFailure.InitializationFailed, refused);
                 else CreateBrowser();
             }, TaskScheduler.Default);
@@ -131,7 +169,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
     private void UseSharedFrames(string? windowSystem)
     {
         if (_frames is not null || _host is not { } host || windowSystem != "wayland" || !ZeroCopyAllowed) return;
-        _frames = new CefFrames(host, () => OnUi(() =>
+        _frames = new CefFrames(host, () => OnUiIfBrowser(() =>
         {
             if (_browserHost != null) _browserHost->invalidate(_browserHost, cef_paint_element_type_t.PET_VIEW);
         }));
@@ -160,6 +198,20 @@ internal sealed unsafe partial class CefView : IWebEngineView
                 catch (Exception ex) { CefLog.Error("posted work", ex); }
             }))
             CefLog.Note("CEF is not running; a call to the page was dropped.");
+    }
+
+    /// <summary>
+    /// <see cref="OnUi"/> for a call whose state the view has already kept, which the browser
+    /// takes up when it is made: before CEF runs there is no browser to tell, and nothing is
+    /// dropped (visibility, applied in <see cref="Created"/>; the frames' mode, in which the
+    /// first frame is painted). The sample's first frame comes while CEF is still starting.
+    /// </summary>
+    private void OnUiIfBrowser(Action work)
+    {
+        bool early;
+        lock (_gate) early = _phase is Phase.Waiting or Phase.Starting;
+        if (early && !CefRuntime.IsRunning) return;
+        OnUi(work);
     }
 
     private void CreateBrowser() => OnUi(() =>
@@ -222,7 +274,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
         settings.background_color = 0xFFFFFFFF;
         var url = CefString.Make("about:blank");
         _appliedScale = ScaleNow();
-        var context = CefRuntime.ContextFor(CefRuntime.ResolveFolder(_options.UserDataFolder).ChildPath);
+        var context = CefRuntime.ContextFor(CefRuntime.ResolveFolder(_options.UserDataFolder).ChildPath, _ownContentOnly);
         if (context != null) CefObject.AddRef(context);   // the call takes a reference; the runtime keeps its own
         int ok = Capi.cef_browser_host_create_browser(&info, CefObject.Give(_client), &url, &settings, null, context);
         CefString.Clear(&url);
@@ -236,6 +288,8 @@ internal sealed unsafe partial class CefView : IWebEngineView
         lock (_gate) disposed = _phase == Phase.Disposed;
         if (_browser != null) return;
         _browser = CefObject.AddRef(browser);
+        _browserId = browser->get_identifier(browser);
+        ByBrowser[_browserId] = this;
         if (disposed)
         {
             // Disposed while CEF was creating it: close it, but after this callback. It runs
@@ -313,7 +367,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
     public void SetVisible(bool visible)
     {
         lock (_gate) _visible = visible;
-        OnUi(() =>
+        OnUiIfBrowser(() =>
         {
             if (_browserHost != null) _browserHost->was_hidden(_browserHost, visible ? 0 : 1);
         });
@@ -442,6 +496,7 @@ internal sealed unsafe partial class CefView : IWebEngineView
             _devTools?.Dispose();
             _devTools = null;
             if (_browserHost == null) return;
+            CloseDevToolsWindow();
             if (!_popupShown) { CloseBrowser(); return; }
             // Closing a browser whose popup (a <select>'s list) is open fails a CHECK inside
             // CEF and ends the process. Close the list first, by taking the page's focus and
@@ -472,8 +527,9 @@ internal sealed unsafe partial class CefView : IWebEngineView
         _devTools?.Dispose();
         _devTools = null;
         if (_browserHost != null) { CefObject.Release(_browserHost); _browserHost = null; }
-        if (_browser != null) { CefObject.Release(_browser); _browser = null; }
+        if (_browser != null) { ByBrowser.TryRemove(_browserId, out _); CefObject.Release(_browser); _browser = null; }
         CefObject.Release(_client); _client = null;
+        ReleaseDevToolsWindow();
         CefObject.Release(_render); _render = null;
         CefObject.Release(_lifeSpan); _lifeSpan = null;
         CefObject.Release(_display); _display = null;

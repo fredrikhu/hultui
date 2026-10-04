@@ -42,6 +42,7 @@ internal sealed unsafe partial class CefView
         _request = CefObject.New<cef_request_handler_t>(this);
         _request->on_before_browse = &OnBeforeBrowse;
         _request->on_render_process_terminated = &OnRenderProcessTerminated;
+        CreateOwnContentHandler();
         _client->get_request_handler = &GetRequestHandler;
 
         _load->on_load_end = &OnLoadEnd;
@@ -74,6 +75,7 @@ internal sealed unsafe partial class CefView
     {
         CefRuntime.ShuttingDown -= AnswerEverythingOwed;
         CefObject.Release(_request); _request = null;
+        ReleaseOwnContentHandler();
         CefObject.Release(_menu); _menu = null;
         CefObject.Release(_dialogs); _dialogs = null;
         CefObject.Release(_downloads); _downloads = null;
@@ -112,6 +114,15 @@ internal sealed unsafe partial class CefView
     private bool Browse(cef_frame_t* frame, string url, bool userGesture, bool isRedirect)
     {
         if (frame->is_main(frame) == 0 || !IsReady || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (_ownContentOnly && !IsOwnContent(url))
+        {
+            // Without the sandbox, only the application's own content: refused before anything
+            // is asked or loaded, and reported as the failure it is.
+            Refused(url);
+            _cancelledUrl = url;
+            Raise(new WebEngineEvent.NavigationCompleted(Interlocked.Increment(ref _navigationId), false, null, BlockedWithoutSandbox));
+            return true;
+        }
         // A redirect is the navigation it redirects, asked again.
         long id = isRedirect && _navigations.Count > 0 ? _navigations[^1].Id : Interlocked.Increment(ref _navigationId);
         var answered = new ManualResetEventSlim();
@@ -229,6 +240,9 @@ internal sealed unsafe partial class CefView
         _ => "other",
     };
 
+    /// <summary>The "Inspect" entry's command: the first id CEF leaves to the embedder.</summary>
+    private const int InspectCommand = (int)cef_menu_id_t.MENU_ID_USER_FIRST;
+
     private static List<WebContextMenuItem> MenuItems(cef_menu_model_t* model)
     {
         var items = new List<WebContextMenuItem>();
@@ -284,14 +298,28 @@ internal sealed unsafe partial class CefView
         };
         // CEF's point is in view coordinates (CSS pixels); the contract's in device pixels.
         float scale = ScaleNow();
-        int x = (int)MathF.Round(p->get_xcoord(p) * scale), y = (int)MathF.Round(p->get_ycoord(p) * scale);
+        int cssX = p->get_xcoord(p), cssY = p->get_ycoord(p);
+        int x = (int)MathF.Round(cssX * scale), y = (int)MathF.Round(cssY * scale);
+        var items = MenuItems(model);
+        // CEF's menu has no "Inspect"; with developer tools on, the page's menu gets one, named
+        // as WebView2 names it, which opens the tools at the menu's point.
+        if (_options.DevTools)
+        {
+            if (items.Count > 0) items.Add(WebContextMenuItem.Separator());
+            items.Add(new WebContextMenuItem("inspectElement", "Inspect", WebContextMenuItemKind.Command, InspectCommand));
+        }
         long owed = Owe(() => OnUi(() => { callback->cancel(callback); CefObject.Release(callback); }));
-        var request = new WebContextMenuRequest(x, y, target, MenuItems(model), chosen =>
+        var request = new WebContextMenuRequest(x, y, target, items, chosen =>
         {
             if (!Settle(owed)) return;
             OnUi(() =>
             {
-                if (chosen is { CommandId: var id and not 0 }) callback->cont(callback, id, 0);
+                if (chosen is { CommandId: InspectCommand })
+                {
+                    callback->cancel(callback);
+                    OpenDevToolsAt((cssX, cssY));
+                }
+                else if (chosen is { CommandId: var id and not 0 }) callback->cont(callback, id, 0);
                 else callback->cancel(callback);
                 CefObject.Release(callback);
             });

@@ -82,6 +82,8 @@ public class CefEngineTests
         Assert.Equal([("ozone-platform", "wayland"), ("disable-features", "WaylandFractionalScaleV1")], CefRuntime.Switches("wayland"));
         Assert.Equal([("ozone-platform", "x11")], CefRuntime.Switches("x11"));
         Assert.Equal([("ozone-platform", "headless"), ("use-angle", "gl-egl")], CefRuntime.Switches(null));
+        // Without the sandbox, WebRTC's UDP is off for the process.
+        Assert.Equal([("ozone-platform", "x11"), ("webrtc-ip-handling-policy", "disable_non_proxied_udp")], CefRuntime.Switches("x11", sandbox: false));
         Assert.Equal([("ozone-platform", "x11"), ("use-fake-device-for-media-stream", null), ("v", "1")],
             CefRuntime.Switches("x11", " --use-fake-device-for-media-stream  v=1 "));
     }
@@ -357,6 +359,9 @@ public class CefEngineTests
     internal static (int ExitCode, string Output) RunCefProcess(string mark, params string[] args)
         => RunCefProcess(mark, args, terminateAfterMs: null);
 
+    internal static (int ExitCode, string Output) RunCefProcessWith(string mark, string[] args, Dictionary<string, string?>? environment)
+        => RunCefProcess(mark, args, terminateAfterMs: null, environment);
+
     private static (int ExitCode, string Output) RunCefProcess(string mark, string[] args, int? terminateAfterMs,
         Dictionary<string, string?>? environment = null)
     {
@@ -470,5 +475,21 @@ public class CefCallbackTests
             .Select(m => $"{m.DeclaringType!.Name}.{m.Name}")
             .ToList();
         Assert.True(without.Count == 0, "no catch in: " + string.Join(", ", without));
+    }
+
+    /// <summary>
+    /// A view hidden while CEF is still starting (the sample's first frame does it): there is no
+    /// browser to tell yet, so nothing is posted and nothing logged, and the page comes up hidden
+    /// because the view kept the wish (the review of 2026-10-03).
+    /// </summary>
+    [CefFact]
+    public void HiddenBeforeCefStarts_ThePageComesUpHidden_WithNoDroppedCall()
+    {
+        var run = CefEngineTests.RunCefProcessWith(Guid.NewGuid().ToString("N"), ["--hidden-before-start"], null);
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("CEF running when hidden: False", run.Output);
+        Assert.Contains("at start: \"hidden\"", run.Output);
+        Assert.Contains("shown: \"visible\"", run.Output);
+        Assert.DoesNotContain("a call to the page was dropped", run.Output);
     }
 }

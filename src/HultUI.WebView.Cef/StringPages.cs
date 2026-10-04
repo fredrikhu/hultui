@@ -12,7 +12,7 @@ namespace HultUI.WebView.Cef;
 /// </summary>
 /// <remarks>
 /// <para>Not a <c>data:</c> URL: a <c>srcdoc</c> iframe inside one crashes the renderer, on 146
-/// and on 154 (spike L0, question 6). Not <c>app.local</c> either: there an untrusted string (a
+/// and on 154 (spike L0, question 6). Not <see cref="WebViewOptions.AppOrigin"/> either: there an untrusted string (a
 /// mail body, rendered Markdown) would be same-origin with the application's own content. The
 /// sandbox makes the document's origin opaque, as the contract says and WebView2 gives, so its
 /// messages arrive with a null origin (decided 2026-10-02).</para>
@@ -26,6 +26,15 @@ internal static unsafe class StringPages
 
     /// <summary>The CSP sandbox: everything a string document may need but its own origin.</summary>
     public const string Sandbox = "sandbox allow-scripts allow-forms allow-popups allow-modals";
+
+    /// <summary>
+    /// Added without Chromium's sandbox, for the application's own documents: nothing from
+    /// elsewhere, so the page refuses an outside connection before any request exists. Defence
+    /// in depth for the request filter, and the only thing that stops a WebSocket, which no
+    /// handler of CEF's sees (the review of 2026-10-03). Inline script and style stay allowed:
+    /// a string document is mostly that.
+    /// </summary>
+    public const string WithoutSandbox = "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self' data: blob:";
 
     /// <summary>How many of a view's documents are kept: the newest, enough for back and
     /// forward through recent ones. An older one gets the "no longer available" page, so an
@@ -88,10 +97,11 @@ internal static unsafe class StringPages
         CefString.Clear(&domain);
     }
 
-    private sealed class Response(byte[] body, int status)
+    private sealed class Response(byte[] body, int status, string policy)
     {
         public readonly byte[] Body = body;
         public readonly int Status = status;
+        public readonly string Policy = policy;
         public int Offset;
     }
 
@@ -103,9 +113,12 @@ internal static unsafe class StringPages
         {
             var url = CefString.Take(request->get_url(request));
             var id = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.AbsolutePath.TrimStart('/') : "";
+            // Stricter without the sandbox, unless the page is known to allow untrusted content.
+            bool strict = CefRuntime.IsSandboxed == false && CefView.ForBrowser(browser) is not { OwnContentOnly: false };
+            var policy = strict ? Sandbox + "; " + WithoutSandbox : Sandbox;
             var response = Pages.TryGetValue(id, out var body)
-                ? new Response(body, 200)
-                : new Response(Encoding.UTF8.GetBytes("This page is no longer available."), 404);
+                ? new Response(body, 200, policy)
+                : new Response(Encoding.UTF8.GetBytes("This page is no longer available."), 404, policy);
             var h = CefObject.New<cef_resource_handler_t>(response);
             h->open = &Open;
             h->get_response_headers = &Headers;
@@ -149,7 +162,7 @@ internal static unsafe class StringPages
             var mime = CefString.Make(r.Status == 200 ? "text/html" : "text/plain");
             var charset = CefString.Make("utf-8");
             var csp = CefString.Make("Content-Security-Policy");
-            var sandbox = CefString.Make(Sandbox);
+            var sandbox = CefString.Make(r.Policy);
             response->set_mime_type(response, &mime);
             response->set_charset(response, &charset);
             response->set_header_by_name(response, &csp, &sandbox, 1);

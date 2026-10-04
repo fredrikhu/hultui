@@ -56,4 +56,49 @@
     <DefineConstants>$(DefineConstants);HULTUI_STRICT_LIFETIME</DefineConstants>
   </PropertyGroup>
 
+  <!--
+    Native assets for platforms HultUI does not run on, and native debug symbols, stay out
+    of builds with no runtime identifier: every `dotnet build` and `dotnet test` here.
+
+    Such a build copies every RID's natives under bin/.../runtimes/, because it could run
+    anywhere. Measured 2026-10-03: 574 MB in every test and app output folder, a worktree's
+    bin folders 31 GB. 315 MB of it was SkiaSharp's and HarfBuzz's native .pdb files (105 MB
+    in each of win-x64, win-arm64 and win-x86), the rest platforms nothing here targets:
+    Android, iOS, Mac Catalyst, musl and bionic Linux, LoongArch, RISC-V, 32-bit ARM and x86.
+
+    What stays: win-x64, win-arm64, linux-x64, linux-arm64, the osx ones, and every generic
+    RID (win, unix, linux, osx), which carry managed code. The items are removed where the
+    SDK resolves package assets, before it writes the .deps.json, so the manifest and the
+    folder agree. A build or publish for one RID (every app's release, NativeAOT) resolves
+    only that RID's assets and is untouched.
+
+    For a native crash in Skia, keep the symbols:   -p:HultUIKeepNativeSymbols=true
+    For every platform's natives, as before:        -p:HultUIKeepAllRuntimes=true
+  -->
+  <Target Name="HultUITrimForeignNativeAssets" AfterTargets="ResolvePackageAssets"
+          Condition="'$(RuntimeIdentifier)' == '' and '$(HultUIKeepAllRuntimes)' != 'true'">
+    <ItemGroup>
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+          Condition="$([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('android'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('ios'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('tvos'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('maccatalyst'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('browser'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('linux-musl'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('linux-bionic'))
+                  or $([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)').StartsWith('freebsd'))
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-arm'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-armel'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-x86'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-loongarch64'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-riscv64'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-s390x'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'linux-ppc64le'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'win-x86'
+                  or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'win-arm'" />
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+          Condition="'$(HultUIKeepNativeSymbols)' != 'true' and '%(RuntimeTargetsCopyLocalItems.AssetType)' == 'native' and '%(RuntimeTargetsCopyLocalItems.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

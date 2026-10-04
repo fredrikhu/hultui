@@ -109,11 +109,11 @@ public sealed class WebView2Tests
         }
     }
 
-    private static Page Open(string html)
+    private static Page Open(string html, bool devTools = false)
     {
         var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
         var engine = new WebView2Engine();
-        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile });
+        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
         app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
         web.NavigateToString(html);
         var page = new Page { App = app, Engine = engine, Web = web };
@@ -281,6 +281,172 @@ public sealed class WebView2Tests
         Assert.True(page.PumpUntil(() => pressed.Contains(HultUI.Core.Events.KeyCode.F2), seconds: 5),
             $"the app never saw F2; it saw [{string.Join(", ", pressed)}]");
     });
+
+    [WebView2UiFact]
+    public void AContentFolder_IsServedAtAppLocal_WithItsRelativeFiles() => OnSta(() =>
+    {
+        var folder = Directory.CreateTempSubdirectory("hultui-app-content-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "style.css"), "body { background: rgb(10, 200, 30); }");
+            File.WriteAllText(Path.Combine(folder, "data.json"), "{\"answer\":42}");
+            File.WriteAllText(Path.Combine(folder, "index.html"), """
+                <html><head><link rel=stylesheet href=style.css></head><body>
+                <script>
+                  fetch('data.json').then(r => r.json()).then(d =>
+                    chrome.webview.postMessage(getComputedStyle(document.body).backgroundColor + ' ' + d.answer));
+                </script></body></html>
+                """);
+
+            // Served: the stylesheet and the JSON found by relative paths, and the page's message
+            // accepted, since AppOrigin is the origin MessageOrigins allows by default.
+            var (served, ms) = Load(new WebViewOptions { UserDataFolder = Profile, ContentFolder = folder });
+            Assert.Equal("\"rgb(10, 200, 30) 42\"", served);
+
+            // Not served: the same address without the option is no page at all.
+            var (unserved, _) = Load(new WebViewOptions { UserDataFolder = Profile });
+            Assert.Equal("failed", unserved);
+        }
+        finally { try { Directory.Delete(folder, recursive: true); } catch (IOException) { } }
+
+        static (string Result, long Ms) Load(WebViewOptions options)
+        {
+            var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+            var engine = new WebView2Engine();
+            var web = new WebViewController(engine, options);
+            app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
+            using var page = new Page { App = app, Engine = engine, Web = web };
+            string? result = null;
+            web.MessageReceived += m => result = m.Json;
+            web.NavigationCompleted += r => { if (!r.IsSuccess) result = "failed"; };
+            var clock = Stopwatch.StartNew();
+            web.Navigate(new Uri(WebViewOptions.AppOrigin + "/index.html"));
+            Assert.True(page.PumpUntil(() => result is not null, seconds: 15), "the page neither reported nor failed");
+            return (result!, clock.ElapsedMilliseconds);
+        }
+    });
+
+    [WebView2UiFact]
+    public void AnAppPage_LoadsInMilliseconds_NotTheSecondsADotLocalNameCost() => OnSta(() =>
+    {
+        // AppOrigin was https://app.local, and every navigation to it took 2.0 s: .local is
+        // mDNS's, and WebView2 waited for a lookup before serving the mapped folder. The same
+        // page under app.example took 11-21 ms once the engine was warm (measured 2026-10-03).
+        var folder = Directory.CreateTempSubdirectory("hultui-app-timing-").FullName;
+        File.WriteAllText(Path.Combine(folder, "index.html"), "<html><body><script>chrome.webview.postMessage(location.search)</script></body></html>");
+        var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+        var engine = new WebView2Engine();
+        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, ContentFolder = folder });
+        app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
+        using var page = new Page { App = app, Engine = engine, Web = web };
+        string? got = null;
+        web.MessageReceived += m => got = m.Json;
+        for (int i = 0; i < 6; i++)
+        {
+            got = null;
+            var clock = Stopwatch.StartNew();
+            web.Navigate(new Uri($"{WebViewOptions.AppOrigin}/index.html?{i}"));
+            Assert.True(page.PumpUntil(() => got is not null, seconds: 15));
+            // The first includes starting the engine; the rest are the name's cost alone.
+            if (i > 0) Assert.True(clock.ElapsedMilliseconds < 500, $"navigation {i} to {WebViewOptions.AppOrigin} took {clock.ElapsedMilliseconds} ms");
+        }
+        try { Directory.Delete(folder, recursive: true); } catch (IOException) { }
+    });
+
+    [WebView2UiFact]
+    public void DevTools_OpenFromTheApp_InANativeWindowOfTheirOwn() => OnSta(() =>
+    {
+        using var page = Open("<html><body>devtools</body></html>", devTools: true);
+        Assert.True(page.PumpUntil(() => !page.Web.IsLoading && page.Web.Frames.IsLoaded));
+        var before = DevToolsWindows();
+
+        page.Web.OpenDevTools();
+
+        nint devTools = 0;
+        try
+        {
+            Assert.True(page.PumpUntil(() => (devTools = NewDevToolsWindow(before)) != 0, seconds: 10),
+                "no DevTools window opened");
+        }
+        finally { CloseWindow(page, devTools); }
+    });
+
+    [WebView2UiFact]
+    public void F12InThePage_OpensDevTools_OnlyWhereTheOptionsAllowThem() => OnSta(() =>
+    {
+        // On: the browser's own F12, which reaches the app first (a function key is a shortcut)
+        // and the page after, since nothing here takes it.
+        Assert.True(PressF12(devTools: true, out nint opened), "F12 opened no DevTools window with DevTools on");
+        // Off, the default: the same key, and no window.
+        Assert.False(PressF12(devTools: false, out _), "F12 opened DevTools although the options turn them off");
+
+        bool PressF12(bool devTools, out nint window)
+        {
+            window = 0;
+            var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+            var engine = new WebView2Engine();
+            var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile, DevTools = devTools });
+            var element = WebViewElement.New(web).FlexGrow(1);
+            app.SetRoot(Flex.Column().Children(element));
+            web.NavigateToString("<html><body><input autofocus></body></html>");
+            using var page = new Page { App = app, Engine = engine, Web = web };
+            Assert.True(page.PumpUntil(() => web.State == WebViewState.Ready && !web.IsLoading && web.Frames.IsLoaded));
+            element.Focus();
+            page.PumpUntil(() => false, seconds: 0.3);
+            nint focusWindow = FocusWindowOf(app.PrimaryWindow.NativeHandle);
+            Assert.NotEqual(0, focusWindow);
+            var before = DevToolsWindows();
+
+            const uint WM_KEYDOWN = 0x100, WM_KEYUP = 0x101;
+            const nint VK_F12 = 0x7B;
+            nint down = 1 | (0x58 << 16), up = unchecked((nint)(1 | (0x58 << 16) | (1 << 30) | (1u << 31)));
+            PostMessage(focusWindow, WM_KEYDOWN, VK_F12, down);
+            PostMessage(focusWindow, WM_KEYUP, VK_F12, up);
+
+            nint found = 0;
+            bool opened = page.PumpUntil(() => (found = NewDevToolsWindow(before)) != 0, seconds: devTools ? 10 : 3);
+            window = found;
+            CloseWindow(page, found);
+            return opened;
+        }
+    });
+
+    /// <summary>
+    /// WebView2's visible DevTools windows. Found by title and by process name, not by the
+    /// process of the page's focus window: the DevTools window belongs to another
+    /// <c>msedgewebview2</c> process than that one (seen: pid 16124 against 42336).
+    /// </summary>
+    private static HashSet<nint> DevToolsWindows()
+    {
+        var found = new HashSet<nint>();
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd)) return true;
+            var title = new System.Text.StringBuilder(256);
+            GetWindowText(hwnd, title, title.Capacity);
+            if (!title.ToString().Contains("DevTools", StringComparison.Ordinal)) return true;
+            GetWindowThreadProcessId(hwnd, out uint process);
+            try
+            {
+                using var owner = Process.GetProcessById((int)process);
+                if (owner.ProcessName.Equals("msedgewebview2", StringComparison.OrdinalIgnoreCase)) found.Add(hwnd);
+            }
+            catch (ArgumentException) { }   // gone meanwhile
+            return true;
+        }, 0);
+        return found;
+    }
+
+    /// <summary>A DevTools window that was not there in <paramref name="before"/>, or 0.</summary>
+    private static nint NewDevToolsWindow(HashSet<nint> before) =>
+        DevToolsWindows().FirstOrDefault(w => !before.Contains(w));
+
+    private static void CloseWindow(Page page, nint hwnd)
+    {
+        if (hwnd == 0) return;
+        PostMessage(hwnd, 0x0010 /* WM_CLOSE */, 0, 0);
+        page.PumpUntil(() => !IsWindowVisible(hwnd), seconds: 5);
+    }
 
     [WebView2UiFact]
     public void ASelectsList_OpensUnderItsField_AndStillDoesAfterTheWindowMoves() => OnSta(() =>
@@ -562,4 +728,5 @@ public sealed class WebView2Tests
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumProc proc, nint lParam);
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetClassName(nint hwnd, System.Text.StringBuilder name, int max);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder text, int max);
 }

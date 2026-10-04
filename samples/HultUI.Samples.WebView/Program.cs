@@ -14,7 +14,8 @@ internal static class Program
     {
         using var app = new Application("HultUI - Web view", 1100, 760);
         using var engine = CreateEngine();
-        using var sample = new WebViewSampleApp(engine);
+        // --devtools: F12 in the page, and a toolbar button, open its developer tools.
+        using var sample = new WebViewSampleApp(engine, devTools: args.Contains("--devtools"));
         app.SetRoot(sample.Mount());
         if (args.Contains("--check")) return Check(app, sample);
         if (args.Contains("--bench")) Application.InvokeOnMainThread(() => _ = Bench(app, sample));

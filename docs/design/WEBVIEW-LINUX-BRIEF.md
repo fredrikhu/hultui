@@ -1051,6 +1051,395 @@ it. The fresh-account bug was a good find.
 5. **Left open, and fine to leave:** arm64, GNOME and KDE sessions, and the first run of the
    `cef natives` workflow, which needs the owner's go-ahead because it publishes a prerelease.
 
+## Developer tools on Linux (decided 2026-10-03)
+
+**The owner's decision:** developer tools open in **a native window of their own**, CEF's
+`show_dev_tools` with an ordinary window: not drawn by HultUI. F12 opens them on both
+platforms when `WebViewOptions.DevTools` is on, and so does code.
+
+**Done on the Windows side:**
+- The contract: `IWebEngineView.OpenDevTools()` (a default that does nothing) and
+  `WebViewController.OpenDevTools()`. The controller throws `InvalidOperationException` when the
+  options leave developer tools off, and `NotSupportedException` on an engine without
+  `WebEngineCapabilities.DevTools`; otherwise it holds the call until the engine is ready, as
+  every command is.
+- WebView2: `OpenDevToolsWindow`. F12 and Inspect were WebView2's own already.
+- `WebView2Tests`: the call opens a DevTools window; F12 does with the option on and does
+  not with it off. Found on the way: the DevTools window belongs to another `msedgewebview2`
+  process than the page's focus window, so the tests find it by title and process name.
+- The sample: `--devtools` turns them on and adds a toolbar button that calls
+  `OpenDevTools()`.
+- `docs/WEBVIEW.md`: a "Developer tools" section.
+
+**Yours:**
+1. **`CefView.OpenDevTools`:** on CEF's UI thread, `show_dev_tools` with a windowed
+   `cef_window_info_t` (no parent: a top-level window), a client of its own for the DevTools
+   browser, and no point to inspect. A second call shows the open one. The tools close with
+   their page (`close_dev_tools` when the view goes) and are released before `cef_shutdown`.
+2. **Find out first whether CEF can make that window on the Ozone platform the engine
+   started**: Wayland, with fractional scaling off, or X11. The platform is CEF's for the
+   whole process, so it cannot change for one window. If Wayland cannot, stop and report what
+   does, with what it costs, before choosing.
+3. **The capability:** add `WebEngineCapabilities.DevTools` to `CefView.Capabilities` once it
+   works, and not before: the controller relies on it.
+4. **F12** (and Ctrl+Shift+I, which WebView2 also answers): in `SendKey`, with the option on,
+   the key opens the tools instead of reaching the page. The element forwards only what the
+   app did not take, so an app's own F12 still wins.
+5. **Inspect on the context menu:** CEF's menu has no such entry. Add one named
+   `inspectElement` (the menu code keeps it under that name when the option is on) whose choice
+   opens the tools at the menu's point (`inspect_element_at`).
+6. **Tests** on sway: the call, F12 and Inspect each open a window titled like DevTools (sway's
+   tree shows it), F12 opens nothing with the option off, and disposing the page closes it.
+7. **Docs:** the Linux paragraph of `docs/WEBVIEW.md`'s "Developer tools", and take "there is
+   no 'inspect' entry" out of the Linux limits.
+
+**Done 2026-10-03, all seven.**
+- **Point 2 first:** CEF made the window on both platforms the engine starts. Under Wayland
+  (fractional scaling off) it is an xdg-shell window, "DevTools - about:blank", app id
+  `chromium-browser`; under X11 (Xwayland here) an X11 window of the same title. On the headless
+  platform (no window system, tests only) the tools open invisibly and do no harm. Nothing to
+  stop for.
+- **`CefView.OpenDevTools`** (`CefView.DevToolsWindow.cs`): on CEF's UI thread,
+  `show_dev_tools` with a windowed, parentless `cef_window_info_t`, a client of its own (no
+  handlers), and a point only for Inspect. A second call shows the open window. The page's
+  disposal calls `close_dev_tools` before `close_browser`, and the client is released with the
+  page's other objects, before `cef_shutdown`.
+- **`WebEngineCapabilities.DevTools`** always: the capability is read before the platform is
+  known, and every platform the engine starts works.
+- **F12 and Ctrl+Shift+I** (no other modifier) open the tools in `SendKey` when the option is
+  on; the page sees neither the press nor its release. The element offers keys to the app
+  first, so an app's own F12 still wins.
+- **Inspect:** with the option on, the page's menu ends with a separator and `inspectElement`
+  ("Inspect", the first command id CEF leaves to the embedder). Chosen, it cancels CEF's menu
+  and opens the tools at the menu's point (CSS pixels, as `show_dev_tools` takes them).
+- **Tests** (`CefDevToolsTests`, on sway): each runs the engine in a process of its own on
+  Wayland and asks sway's tree for that process's windows. The call, F12, Ctrl+Shift+I and
+  Inspect each open a window titled "DevTools…" that is gone once the page is disposed; F12
+  with the option off opens none. Plus the key rule. Not checked: which element Inspect
+  selects inside the tools.
+
+## Running without the sandbox (decided 2026-10-03)
+
+**The owner's decision:** a proper option to run CEF without Chromium's sandbox, **enforced**:
+without the sandbox, the engine loads only the application's own content, unless the
+application says, with a second and separate setting, that it accepts untrusted content
+without a sandbox. Today the only way is the diagnostic `HULTUI_CEF_SWITCHES=no-sandbox`.
+
+**Why it is needed:** the sandbox cannot start as root, on Ubuntu 23.10 and later without the
+AppArmor profile, or where user namespaces are off. In each case the engine reports itself
+unavailable (`CefSandbox`). An application that shows only its own trusted content may prefer
+to run there without the sandbox, and should be able to say so in code.
+
+**The API** (Linux only: WebView2's sandbox always works on Windows, so it gets nothing):
+
+```csharp
+new CefEngine(new CefEngineOptions
+{
+    Sandbox = false,                              // default true
+    AllowUntrustedContentWithoutSandbox = false,  // default false; ignored while Sandbox is on
+});
+```
+
+Keep the parameterless constructor. `CefEngineOptions` is a public sealed record with init
+properties, like `WebViewOptions`, and its documentation says plainly what running without the
+sandbox means: a page that exploits a browser bug runs with the user's full rights.
+
+**What to build:**
+
+1. **Start CEF without its sandbox** (`cef_settings.no_sandbox = 1`) when the engine that starts
+   CEF asks for it. CEF hands the switch on to its children, so the helper needs nothing.
+2. **The first engine decides.** CEF starts once per process, so the engine whose page starts
+   it fixes the mode for the process. A later engine asking for the other mode reports itself
+   unavailable (`Availability`), and its pages fail with `InitializationFailed`, with a reason
+   that names the conflict rather than silently running in the wrong mode.
+3. **The sandbox check:** with the sandbox off, root and the AppArmor limit no longer make the
+   engine unavailable. `CefSandbox.Facts.NoSandbox` already exists; feed it from the option.
+   The diagnostic `HULTUI_CEF_SWITCHES=no-sandbox` keeps working and goes through the same
+   path, **enforcement included**: one rule, no sandbox means only the application's own
+   content, unless the API's second setting says otherwise.
+4. **The enforcement.** With the sandbox off and untrusted content not allowed, every network
+   request of the page, in every frame and of every kind (documents, iframes, scripts, styles,
+   images, `fetch`, WebSockets), is cancelled unless its URL is the application's own:
+   - `WebViewOptions.AppOrigin` (`https://app.local`);
+   - the string pages' host (`StringPages.Host`);
+   - `data:`, `blob:` and `about:blank`.
+
+   Put it in the request handler (`get_resource_request_handler` and
+   `on_before_resource_load` returning `RV_CANCEL`), so nothing slips past the navigation
+   check. A refused main-frame navigation also completes as failed, with an error name that
+   says why (pick one in the style of the existing WebView2 names), and each refusal is logged
+   once with its URL (`CefLog`).
+
+   Note: when this was decided no folder mapping existed in `WebViewOptions`, on either
+   engine; the origin was allowed anyway, so it would work the day one did. Since 2026-10-03
+   `ContentFolder` serves it (and the origin is `https://app.example`). DevTools are untouched: their window has its own client.
+5. **Never silent:** log a line when CEF starts without its sandbox, and give `CefEngine` a
+   `bool? IsSandboxed` (null until CEF has started; then how it actually runs, whichever engine
+   started it).
+
+**Tests:**
+- **Rule tests:** the option lifts the root and AppArmor cases; two engines asking for
+  different modes conflict. The request rule: which URLs pass, for each kind of URL above.
+- **Process tests:**
+  - **Ubuntu VM, no profile:** the default reports unavailable; `Sandbox = false` draws a string
+    page.
+  - **Fedora:** with the option off, the renderer processes really run unsandboxed (no user
+    namespace of their own, `Seccomp: 0` in `/proc/<pid>/status`), so the option is shown to
+    do what it says rather than only skip the check.
+  - **Enforcement, with the sandbox off:** a string page loads; a navigation to
+    `https://example.org` is refused and reported; an `<img>`, a `<script>` and an `<iframe>`
+    from the internet inside a string page do not load (the page can report each with
+    `onerror`); with `AllowUntrustedContentWithoutSandbox`, the same page loads them.
+- Every test that runs on Windows builds its expected paths with `Path.Combine` or is
+  `[LinuxFact]`/`[CefFact]`.
+
+**Docs:**
+- `docs/WEBVIEW.md`: a "Running without the sandbox" part of the Linux text, with the warning
+  and the enforcement.
+- The natives README: option (c) of the Ubuntu list becomes this setting.
+- `docs/ENVIRONMENT.md`: `HULTUI_CEF_SWITCHES=no-sandbox` is enforced the same way.
+
+**Done 2026-10-03, as written.**
+- **The API:** `CefEngineOptions` (a public sealed record; `Sandbox`, default true;
+  `AllowUntrustedContentWithoutSandbox`, default false), `new CefEngine(options)` beside the
+  parameterless constructor, and `CefEngine.IsSandboxed`.
+- **The mode:** the engine whose page starts CEF passes its mode, and `cef_settings.no_sandbox` follows
+  it. A later engine in the other mode gets `Availability` false and its pages
+  `InitializationFailed`, both with a reason that names the conflict (`CefRuntime.ModeConflict`).
+  The diagnostic `HULTUI_CEF_SWITCHES=no-sandbox` turns an engine's wish off through the same
+  `CefRuntime.WantsSandbox`, so its pages are limited the same way. The sandbox check takes
+  `NoSandbox` from the mode.
+- **The enforcement** (`CefView.OwnContent.cs`): with the sandbox off and untrusted content not
+  allowed, the request handler's `get_resource_request_handler` returns a resource handler whose
+  `on_before_resource_load` cancels (`RV_CANCEL`) every URL that is not the application's own, and
+  whose `on_resource_redirect` sends a redirect elsewhere to `data:,`. `on_before_browse` refuses a
+  main-frame navigation first and completes it with "BlockedWithoutSandbox". Each refused URL is
+  logged once per page. The rule (`CefView.IsOwnContent`) passes the string pages' origin,
+  `AppOrigin` (scheme, host and port all), and `data:`, `blob:`, `about:blank`, `about:srcdoc`.
+  It refuses the rest, the local network and `file:` included. The DevTools window has its own
+  client and is not limited.
+- **Never silent:** "CEF starts without Chromium's sandbox: …" on standard error at start.
+- **Found when testing:** an `http` resource inside the `https` string page is mixed content,
+  which Chromium refuses with or without the sandbox. So the enforcement test's foreign content
+  is the internet's, over `https` (example.org, wikipedia.org, cdnjs). The test that needs it
+  loaded returns early offline. On Fedora (an LXC container) every process carries the
+  container's own seccomp filter, so "no seccomp" is read as "no filter Chromium added"
+  (`Seccomp_filters` equal to the process's own). Chromium does not pass the environment on
+  to its renderers, so they are found by parentage.
+- **Tests:**
+  - Rules: the option lifts root and AppArmor; the mode conflicts; 17 URLs through the own-content
+    rule.
+  - Processes on Fedora: the renderers really run without the sandbox (in the application's user
+    namespace, no filter of Chromium's; with the sandbox, namespaces of their own and one filter
+    more). Only the own content loads: image, script, fetch and frame refused, the navigation
+    failed and named. The diagnostic switch is enforced the same way. Untrusted allowed loads
+    all of it. A second engine in the other mode is unavailable, and its page fails.
+  - On the Ubuntu VM, no profile, the same probe (self-contained, on the bundled CEF 154): the
+    default engine is unavailable with the AppArmor reason. `Sandbox = false` draws the string
+    page with the same refusals, and its renderers have `Seccomp_filters: 0` in the
+    application's namespace. Untrusted, the conflict and the switch behave as on Fedora. As
+    root, the default is refused and `Sandbox = false` draws.
+
+## Review of running without the sandbox (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there. **It stands**: the
+filter fails closed (an error while deciding cancels), a redirect cannot leave own content,
+the mode is one per process and says so, and the Fedora and Ubuntu runs prove the renderers
+really run unsandboxed rather than that a check was skipped.
+
+What the tests do not cover yet, each a way past a per-page request filter:
+
+1. **WebSockets.** The brief listed them; the tests load an image, a script, a `fetch` and an
+   iframe. Whether CEF hands a WebSocket handshake to `get_resource_request_handler` is not
+   certain. Test a `new WebSocket('wss://…')` from a string page. If it opens, the filter
+   does not see WebSockets, and the next items matter more.
+2. **Requests with no page.** Service workers, shared workers and the like make requests that
+   CEF hands to the *request context's* handler (no browser), not to the page's client. With
+   one mode per process, put the same filter on the request context handler
+   (`cef_request_context_handler_t::get_resource_request_handler`) as well, so worker traffic
+   is covered. Test with a service worker registered by own content that fetches from the
+   internet.
+3. **WebRTC** reaches its STUN and TURN servers over UDP, which no request filter sees.
+   Without the sandbox, turn it off for the process with Chromium's own switches (find the
+   right ones for 146 and 154: a policy that forbids non-proxied UDP, or WebRTC's features
+   disabled), and test that an `RTCPeerConnection` gathers no candidates.
+4. **Defence in depth for string pages:** without the sandbox, serve them with a stricter
+   `Content-Security-Policy` beside the `sandbox` directive (`default-src 'self' data: blob:`;
+   `connect-src` the same), so the page refuses outside connections before any request
+   exists. The same applies to `app.local` the day it serves anything.
+
+None changes the API. Fix what the tests find, and write the result down here and in
+`docs/WEBVIEW.md`'s "Running without the sandbox (Linux)".
+
+**Done (Linux, 2026-10-03).** The probe (`--without-sandbox`) gained a second string document
+that tries each way out, and a `data:` document of the application's own; measured on CEF 146
+(Fedora's) and 154, with the sandbox and without:
+
+| | with the sandbox | without, before | without, now |
+|---|---|---|---|
+| `new WebSocket('wss://…')` from a string document | open | **open** | error (CSP) |
+| the same from a `data:` frame inside it | open | — | error (inherits the CSP) |
+| a dedicated worker's `fetch` | loaded | blocked (the page's filter) | blocked |
+| `RTCPeerConnection` with a STUN server | host, srflx | **host, srflx** | none, gathering complete |
+| a `fetch` from the application's `data:` document | loaded | blocked | blocked (the filter alone) |
+
+1. **WebSockets: not seen.** No handler of CEF's is asked for the handshake; the socket opened.
+   Point 4's policy is what stops them, in the document and in its local-scheme frames, which
+   inherit it. A `data:` document the application navigates to itself has no policy of ours;
+   that is the application's own document, and `NavigateToString` is the way to show untrusted
+   HTML (written in `docs/WEBVIEW.md`).
+2. **Requests with no page:** a view limited to own content now gets a request context of its
+   own, sharing its profile's storage (`cef_create_context_shared`, over the global context or
+   the folder's), whose handler (`get_resource_request_handler`) returns the same filter. A
+   dedicated worker's requests were already the page's (blocked before the change). A
+   service worker needs an origin of its own, which no own content had until `ContentFolder`;
+   its test is there (below).
+3. **WebRTC:** `webrtc-ip-handling-policy=disable_non_proxied_udp` for the whole process when it
+   runs without the sandbox, and a peer connection gathers no candidates (146 and 154).
+   `force-webrtc-ip-handling-policy` changed nothing. It holds for an engine that allows
+   untrusted content too: the mode is the process's.
+4. **Stricter policy:** without the sandbox, a string document comes with
+   `sandbox …; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self'
+   data: blob:`. Inline script and style stay allowed (a string document is mostly that), which
+   the brief's `default-src 'self' data: blob:` alone would have refused. Not for a view that
+   allows untrusted content: the string pages' handler now finds the view by its browser's
+   identifier (a registry the content folder uses too). `ContentFolder`'s files get the same
+   policy (below).
+
+## Local content: `ContentFolder` (decided 2026-10-03)
+
+**The owner's decision:** a folder served at `WebViewOptions.AppOrigin`, on both engines, so an
+application can show local HTML with relative files, with or without the sandbox.
+
+**Changed on the Windows side, read first: `AppOrigin` is now `https://app.example`, not
+`https://app.local`.** Measured: WebView2 took 2.0 s on every navigation to `app.local`, warm
+(`.local` is mDNS's name space, and it waited for a lookup before serving the mapping), against
+11 to 21 ms for `app.example`. `.example` is reserved and never resolves. Your code uses the
+constant, so it follows; the literal `app.local` in your tests is already replaced. Check
+whether CEF on Linux has the same delay for `.local`: it would be a reason to keep the change
+there too, not a reason to undo it.
+
+**Done on the Windows side:**
+- `WebViewOptions.ContentFolder` (per page). The controller makes it absolute when it is
+  created and throws `DirectoryNotFoundException` if the folder does not exist, so engines
+  always get an absolute path to an existing folder.
+- WebView2: `SetVirtualHostNameToFolderMapping` (`ICoreWebView2_3`, added to the generator) with
+  `DENY_CORS`: another origin may use the files as an image or script source but cannot read
+  them with `fetch`.
+- Tests: a page at `https://app.example/index.html` loads its stylesheet and fetches its JSON by
+  relative paths, and its message is accepted by default. The same address without the option
+  fails. Warm navigations to the origin take milliseconds (a guard against a `.local`-like
+  name coming back).
+- `docs/WEBVIEW.md`: a "Local content" section.
+
+**Yours:**
+1. **A scheme handler factory** for `https` and `AppOrigin`'s host, registered once like
+   `StringPages`, which serves **the requesting page's** folder: the setting is per page, so
+   look the view up by the browser's identifier. A page without a folder gets no handler, so
+   the address fails as it does on Windows.
+2. **Serving:**
+   - The URL's path, percent-decoded, resolved inside the folder. Refuse anything that leaves
+     it (`..`, its encoded forms, a symbolic link pointing out), and answer 404 for a missing
+     file. Whatever WebView2 does for a folder's own address, do the same.
+   - A MIME type by extension, enough for the web's usual files (html, css, js and mjs, json,
+     svg, png, jpeg, gif, webp, ico, woff and woff2, wasm, mp4, webm, mp3, ogg, txt), and a
+     charset for text.
+   - No CORS headers, which matches WebView2's `DENY_CORS`. Answer range requests if CEF's
+     resource handler makes it reasonable, so video can seek; write down if not.
+   - Spike question 7's handler (`spikes/CefOsr/Q7.cs`) is a starting point.
+3. **Without the sandbox:** the own-content rule already lets `AppOrigin` through. Test that
+   a page from `ContentFolder` loads, with its files, in that mode, and that its iframe to the
+   internet is still refused.
+4. **Tests:**
+   - The Windows test's twin: stylesheet, `fetch`, message accepted; without the option, the
+     address fails.
+   - Path escapes refused (`../`, `%2e%2e/`, a link pointing out).
+   - MIME types for each listed extension.
+   - Two pages with different folders, each served its own.
+5. **Docs:** `docs/WEBVIEW.md`'s "Local content" applies to both engines once this works. Take
+   out "nothing serves app.local yet" wherever it is still written, the natives README
+   included.
+
+**Done (Linux, 2026-10-03).** `ContentFolder` (`src/HultUI.WebView.Cef/ContentFolder.cs`),
+tested in `CefContentFolderTests` through the CEF test process (`--content-folder`), on CEF 146
+and 154.
+
+1. **The factory** is registered for `https` and `app.example` beside the string pages', on the
+   global context and on every context of the engine's own (a folder's, an own-content view's).
+   It finds the view by the browser's identifier (`CefView.ForBrowser`, the registry part 1
+   added) and serves that view's folder; a view without one gets no handler, and the address
+   fails as on WebView2 (`HostNameNotResolved`). A request with no browser (a service worker's,
+   its script included) is served the folder when every live view that has one has the same,
+   and gets no handler otherwise: the one case where "the requesting page" cannot be known.
+2. **Serving:** the URL's path is percent-decoded and resolved inside the folder; `..` in any
+   spelling, a NUL, or a path whose real location (`realpath`) is outside the folder is
+   answered 403 and logged; a missing file 404. Chromium itself folds `/%2e%2e/` and `/../`
+   before the handler sees them (the request becomes `/outside.txt`, a 404), so what reaches
+   it is `..%2f` and the like. A folder's address, the root included, is a 404: WebView2 is
+   believed to serve no index or listing either, but that is not measured here; one
+   navigation to `https://app.example/` on Windows would settle it. Types for each listed
+   extension, `charset=utf-8` for the text ones, `application/octet-stream` otherwise. No CORS
+   headers: a string document may run a folder's file as a script but its `fetch` of one is
+   refused. **Ranges: yes**, single ones (`a-b`, `a-`, `-n`), with 206 and `Content-Range`,
+   416 past the end, several ranges answered whole. CEF's own help is partial (on 146 it
+   skips to a range's start but says 200 and sends the rest, does not skip for a suffix,
+   and fails one past the end), so the handler answers the range itself and takes CEF's
+   skip as done. Files are read as they are sent, not held.
+3. **Without the sandbox:** the folder's page loads with its stylesheet and data; its iframe
+   to the internet and a WebSocket are refused by the stricter policy (its pages get the same
+   as string documents, `securitypolicyviolation` names both), and a service worker it
+   registers cannot fetch from the internet. With the policy turned off for the test, the
+   request context's filter refuses the worker's fetch by itself (logged); with that handler
+   removed as a counter-check, the worker's fetch loaded. That is review point 2's test.
+4. **Tests:** the Windows test's twin (stylesheet, `fetch`, message accepted by default; no
+   folder, the address fails); the escapes (in the rules and served); each type, as a rule and
+   as served; ranges; two views with different folders at once, each served its own; the
+   other origin's script and refused `fetch`.
+5. **Docs:** `docs/WEBVIEW.md`'s "Local content" is now both engines'; the natives README
+   names the folder; the last "nothing serves app.local" (in this brief's no-sandbox decision)
+   is a note of when that was so.
+
+**`.local` on CEF: no delay.** The same page under `app.example` and under `app.local` (the
+handler registered for both, for the test), six navigations each: 20 ms every time after the
+first, either name, on Fedora whose `nsswitch.conf` has `mdns4_minimal`. CEF's scheme handler
+answers before any name lookup. The change stays, for WebView2's sake, and
+`TheOrigin_LoadsInMilliseconds` guards it.
+
+## Review of the sandbox gaps and Linux's ContentFolder (2026-10-03)
+
+Read on the Windows side, with the whole solution built and tested there. **Both stand.** The
+probe table is the right evidence: each way out shown open first and closed after, and the
+request-context handler shown necessary by taking it out. The path check is sound: decoded
+first, NUL and `..` refused, the full path required inside the folder, and symbolic links
+compared where they really point. `ContentFolder.ExtraHosts` is a test hook only, empty in
+an application.
+
+1. **Settled on Windows: the folder's own address.** WebView2 serves no index file either.
+   `https://app.example/`, the bare origin and a subfolder each fail as a navigation
+   (`ConnectionAborted` or `Unknown`, no HTTP status). CEF's 404 is also a failed navigation,
+   so the outcome is the same on both: link to `index.html` by name. Written into "Local
+   content" on the Windows side.
+2. **Follow-up: the two "CEF is not running; a call to the page was dropped" lines** the
+   sample prints at start. A dropped call is harmless only if its state is put back later, as
+   visibility is (`was_hidden` when the browser is created). Find which calls they are (focus
+   or blur from the element at start would be the likely ones), and keep each one's state for
+   when the page exists, as 5.6 did for the accessibility switch, or show it to be harmless.
+   Not a blocker.
+3. **Noted, and fine:** WebRTC goes for the whole process once one engine runs without the
+   sandbox; a `data:` document the application navigates to itself gets no policy (the docs
+   say to use `NavigateToString` for untrusted HTML); the Ubuntu VM was not run again.
+
+**Item 2, done (Linux, 2026-10-03).** The two lines are `SetVisible`, from the element's first
+`FlushPlacement`, and `CefFrames.OnModeDecided`'s request for a frame, from the first frame
+drawn: both come while CEF is still starting, with no browser yet. Both were harmless: the
+view keeps `_visible` (applied with `was_hidden` when the browser is created) and the frames
+keep their mode, in which the browser's first frame is painted. Shown, not assumed: a view
+hidden before CEF ran came up `document.visibilityState == "hidden"` with the old code too.
+Now neither is posted while there is no browser and CEF is not running
+(`CefView.OnUiIfBrowser`), so the warning is left for calls really dropped (after CEF has
+stopped). `HiddenBeforeCefStarts_ThePageComesUpHidden_WithNoDroppedCall` checks it in a
+process of its own; the sample's `--check` prints neither line.
+
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push

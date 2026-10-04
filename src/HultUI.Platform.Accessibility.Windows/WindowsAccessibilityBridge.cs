@@ -225,8 +225,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     /// </summary>
     private bool TryResolveItem(ElementId itemId, out ElementId listId, out int index)
     {
+        // A virtual item of a list that has unmounted since decodes to no list: it is gone.
         if (VirtualItemId.TryDecode(itemId, out listId, out index))
-            return true;
+            return listId != default;
         if (_wrappers.TryGetValue(itemId, out var w) && w.Node.Parent is { } parent
             && parent.Role == AccessibilityRole.List)
         {

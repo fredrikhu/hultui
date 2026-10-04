@@ -56,7 +56,7 @@ public class WebView2MappingTests
     }
 
     [Theory]
-    [InlineData("https://app.local/page.html?x=1", "https://app.local/")]
+    [InlineData("https://app.example/page.html?x=1", "https://app.example/")]
     [InlineData("http://localhost:8080/a/b", "http://localhost:8080/")]
     [InlineData("about:blank", null)]
     [InlineData("data:text/html,hi", null)]

@@ -138,7 +138,9 @@ public class ArchiveSafetyTests
 
         Assert.Null(FileOps.ContainedPath(dest, ".." + Path.DirectorySeparatorChar + "out.txt"));
         Assert.Null(FileOps.ContainedPath(dest, Path.Combine("a", "..", "..", "out.txt")));
-        Assert.Null(FileOps.ContainedPath(dest, @"C:\windows\out.txt"));
+        // A rooted name: C:\windows\out.txt on Windows, /windows/out.txt elsewhere, where a
+        // "C:\" name is just a file name with backslashes in it and stays inside.
+        Assert.Null(FileOps.ContainedPath(dest, Path.Combine(Path.GetPathRoot(dest)!, "windows", "out.txt")));
         // A sibling whose name merely starts with the destination's — the prefix test has to
         // compare whole path segments, not characters.
         Assert.Null(FileOps.ContainedPath(dest, Path.Combine("..", "dest-evil", "out.txt")));

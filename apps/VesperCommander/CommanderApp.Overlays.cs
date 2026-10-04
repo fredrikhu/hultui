@@ -419,12 +419,16 @@ public partial class CommanderApp
     }
 
     /// <summary>" · 42 MB/s · 8s left" once there's enough signal, else "".</summary>
-    private static string TransferRate(TransferOp op)
+    /// <param name="op">The transfer.</param>
+    /// <param name="now">The current <see cref="Environment.TickCount64"/>; null reads it. A test
+    /// passes the one it set the transfer up with, or the clock moving between its read and this
+    /// one turns "1000 B/s" into "999 B/s" (seen on the Linux runner).</param>
+    private static string TransferRate(TransferOp op, long? now = null)
     {
         if (op.Paused) return " · paused";
         // Time spent paused is not time spent transferring: leaving it in would make a run that
         // was held for a while report a rate and an ETA it never had.
-        long elapsedMs = Environment.TickCount64 - op.StartTick - op.PausedTotal;
+        long elapsedMs = (now ?? Environment.TickCount64) - op.StartTick - op.PausedTotal;
         if (elapsedMs < 400 || op.TotalBytesDone <= 0) return "";
         double bps = op.TotalBytesDone / (elapsedMs / 1000.0);
         if (bps < 1) return "";

@@ -18,6 +18,7 @@
       "tests/HultUI.WebView.Engines.Tests/HultUI.WebView.Engines.Tests.csproj",
       "tests/HultUI.Samples.WebView.Tests/HultUI.Samples.WebView.Tests.csproj",
       "tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj",
+      "tests/VesperCommander.Tests/VesperCommander.Tests.csproj",
       "tests/HultUI.Terminal.Tests/HultUI.Terminal.Tests.csproj",
       "tests/HultUI.Terminal.Pty.Tests/HultUI.Terminal.Pty.Tests.csproj",
       "tests/HultUI.Terminal.Ssh.Tests/HultUI.Terminal.Ssh.Tests.csproj",
