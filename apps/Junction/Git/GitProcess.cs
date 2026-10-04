@@ -18,6 +18,57 @@ public static class GitProcess
     private static readonly string NeutralDirectory = Path.GetTempPath();
 
     /// <summary>
+    /// The program every git command runs: the real <c>git.exe</c> where Git for Windows put
+    /// its launcher first on PATH, otherwise plain <c>git</c>, found the way it always was.
+    ///
+    /// <para>The installer puts <c>&lt;Git&gt;\cmd</c> on PATH, and the <c>git.exe</c> there is a
+    /// launcher: it adjusts the environment and starts <c>&lt;Git&gt;\mingw64\bin\git.exe</c> as a
+    /// second process. Every command paid for two process starts, and Junction runs a great
+    /// many short commands — measured at 17 ms a call through the launcher against 8 ms
+    /// direct, and a fifth of the test suite's time. Starting the real one directly loses
+    /// nothing the launcher did that git does not do for itself: it still finds the global
+    /// and system config, hooks and editors still get <c>sh</c>, and credential helpers still
+    /// resolve.</para>
+    ///
+    /// <para>Anything else first on PATH — Git Bash's own <c>mingw64\bin</c>, a package
+    /// manager's shim, a Linux <c>/usr/bin/git</c> — is left to the operating system's lookup,
+    /// exactly as before.</para>
+    /// </summary>
+    internal static string Executable => _executable.Value;
+
+    private static readonly Lazy<string> _executable = new(() =>
+        OperatingSystem.IsWindows()
+            ? ResolveExecutable(Environment.GetEnvironmentVariable("PATH"), File.Exists)
+            : "git");
+
+    /// <summary>The Windows lookup behind <see cref="Executable"/>, with the PATH and the file
+    /// system passed in so a test can describe an installation without having one.</summary>
+    internal static string ResolveExecutable(string? path, Func<string, bool> exists)
+    {
+        foreach (var entry in (path ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var dir = entry.Trim().Trim('"').TrimEnd('\\', '/');
+            if (dir.Length == 0 || !exists(Path.Combine(dir, "git.exe")))
+                continue;
+
+            // The first git.exe on PATH is the one Windows would start. Only the installer's
+            // launcher is replaced, and only when the program it launches is where it should be.
+            if (string.Equals(Path.GetFileName(dir), "cmd", StringComparison.OrdinalIgnoreCase)
+                && Path.GetDirectoryName(dir) is { } root)
+            {
+                // x64, then arm64, then 32-bit installations.
+                foreach (var bin in new[] { "mingw64", "clangarm64", "mingw32" })
+                {
+                    var real = Path.Combine(root, bin, "bin", "git.exe");
+                    if (exists(real)) return real;
+                }
+            }
+            return "git";
+        }
+        return "git";
+    }
+
+    /// <summary>
     /// The common part of launching git against a repository.
     ///
     /// <para>The repository is passed as <c>-C &lt;path&gt;</c> rather than as the process's
@@ -37,7 +88,7 @@ public static class GitProcess
     {
         var psi = new ProcessStartInfo
         {
-            FileName = "git",
+            FileName = Executable,
             WorkingDirectory = NeutralDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
