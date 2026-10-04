@@ -976,21 +976,25 @@ typed were unrelated events. All four are new members, so no existing code chang
   - `known_hosts` on its own: names, ports, hashes, patterns, negation, revocation, and writes
     that keep every other line.
 - **Real-window UI tests,** for IME placement and the drag-resize cost.
-- **Linux CI** runs both test projects; `[HanFontsFact]`'s pattern applies to wide-glyph rendering
-  tests.
+- **Linux CI** runs the four terminal test projects (the cross-platform filter). Its first run, on
+  2026-10-04 (run 37194792589, `main` at `a743ad5`), passed all of them: 162 in
+  `HultUI.Terminal.Tests` with fontconfig's faces, 48 in `HultUI.Terminal.Ssh.Tests` with the
+  agent on a Unix socket, 21 in `HultUI.Terminal.Pty.Tests` through forkpty (the other 6 are
+  Windows-only: ConPTY's keys, Git for Windows' programs, the pwsh prompt, OpenConsole), and the
+  engine's 2 254. `[HanFontsFact]`'s pattern applies to wide-glyph rendering tests.
 
 ## Implementation order
 
 0. **Spike: done on Windows 2026-10-03** (`spikes/XtermNet`), with the four engine patches measured.
-   The Linux half is open:
-   - forkpty through Porta.Pty's shim;
-   - the cut on a raw pty, and whether bash's SIGWINCH redraw agrees with `ReflowCursorLine`;
-   - tmux, htop and vttest byte streams;
-   - the paste-deadlock threshold (the N_TTY buffer is 4 KiB);
-   - linux-x64 AOT.
+   The Linux half, as of Linux CI's first run of the terminal suites (2026-10-04):
+   - forkpty through Porta.Pty's shim: **works**, 21 Pty tests pass through it;
+   - the paste deadlock: a 1 MiB paste through the writer queue reaches the program on a Linux
+     pty, past the 4 KiB N_TTY buffer;
+   - still open: the cut on a raw pty, and whether bash's SIGWINCH redraw agrees with
+     `ReflowCursorLine` (the narrowed-prompt test uses pwsh, so it runs only on Windows); tmux,
+     htop and vttest byte streams; linux-x64 AOT.
 
-   It runs on the Linux machine before step 4 ships there; `q7` and `q8` already pick bash, vim
-   and sh off Windows.
+   `q7` and `q8` already pick bash, vim and sh off Windows.
 1. **The patched engine: done 2026-10-03.**
    - **`external/`:** `XTerm.NET` holds upstream `56ea809` with patches 0001–0004 (moved from the
      spike): 167 files. Beside it are `XTerm.NET.version`, a README, and a `.gitattributes` that
@@ -1045,10 +1049,11 @@ typed were unrelated events. All four are new members, so no existing code chang
      letters are still drawn on their own. 75 tests.
    - **On this Windows machine** the default face moved from Consolas to Cascadia Mono, so the
      sample's 980 × 640 window holds 126 columns instead of 134.
-   - **Not verified:** Linux and macOS ran nothing here (no WSL distribution on this machine).
-     The Linux behaviour rests on Skia's fontconfig manager: a family match drops fontconfig's
-     weak defaults, so an unknown name matches nothing and `monospace` keeps its preferred
-     aliases. Linux CI is the first real check; macOS has no runner.
+   - **Linux: verified by Linux CI** (2026-10-04): the font tests in `HultUI.Rendering.Skia.Tests`
+     and all of `HultUI.Terminal.Tests` pass with fontconfig's faces. The behaviour rests on Skia's
+     fontconfig manager: a family match drops fontconfig's weak defaults, so an unknown name
+     matches nothing and `monospace` keeps its preferred aliases. **Not verified:** macOS, which
+     has no runner.
 4. **`HultUI.Terminal.Pty`: done on Windows 2026-10-03** (see *Process launch*).
    - **The package:** `PtyLaunch` (the program found on `PATH`, the default shell, the
      environment) and `PtyConnection` over Porta.Pty 2.2.3, with MSVCRT quoting, the exit code, and
@@ -1065,8 +1070,11 @@ typed were unrelated events. All four are new members, so no existing code chang
    - **The sample** runs the user's shell (the header switches to the demo shell, and `--demo`
      starts with it); `--check` drives the real shell end to end and passes in about 0.9 s under
      JIT and 1.0 s under NativeAOT, which publishes with no warnings.
-   - **Not verified:** Linux and macOS ran nothing here. The forkpty half of every Pty test, and
-     step 0's Linux list, wait for the Linux machine and Linux CI.
+   - **Linux: verified by Linux CI** (2026-10-04), through forkpty: a program's output and exit
+     code, arguments, a resize, a 1 MiB paste, a flood, a background job holding the terminal,
+     both teardowns, a missing program, the environment, the working directory, and the default
+     shell. **Not verified:** macOS (no runner); on Linux, the narrowed prompt with bash, and AOT;
+     the rest of step 0's Linux list.
 5. **Resize policy, search, hyperlinks, and step 2's "not yet": done 2026-10-03,** in four commits.
    - **Rendering and input:** the five underline styles in their colours, blinking text and
      cursor, Alt+drag block selection, the window-size reports, and the resize policy.
@@ -1159,7 +1167,9 @@ typed were unrelated events. All four are new members, so no existing code chang
        Junction's suite and passes alone; ConPTY's 100 ms close after the exit (problem 19) is the
        likely cause under load, and it is a task of its own.
      - **Not verified:** a real OpenSSH server (none here, and installing one changes the machine:
-       the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits, Linux.
+       the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits. Linux:
+       all of `HultUI.Terminal.Ssh.Tests` passes on Linux CI since 2026-10-04, the agent over a
+       Unix socket and the `ssh-keygen` key included.
      - **After the first real host (2026-10-04).** The owner's `--ssh root@jellyfin.home` showed
        "Permission denied (publickey)" and fell back to the demo shell. OpenSSH's `none` method
        showed the server took passwords too; the owner's keys are chosen per host in
