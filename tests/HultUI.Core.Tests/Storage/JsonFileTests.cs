@@ -105,9 +105,29 @@ public class JsonFileTests : IDisposable
     }
 
     /// <summary>A write that cannot happen says so, leaves the file as it was, and leaves no
-    /// half-written staging file behind to be mistaken for anything.</summary>
+    /// half-written staging file behind to be mistaken for anything.
+    /// <para>The swap is made to fail the same way on every system: a folder where the backup
+    /// goes, which neither Windows' <c>ReplaceFile</c> nor the unlink and rename .NET does
+    /// elsewhere can put a file in place of. Holding the live file open, the way the next test
+    /// does, stops the swap only on Windows: a lock is advisory on Linux, and the rename went
+    /// ahead there.</para></summary>
     [Fact]
     public void AFailedSaveLeavesTheFileAsItWas()
+    {
+        File().Save(new SampleState { Name = "kept" });
+        Directory.CreateDirectory(PathOf("state.json.bak"));
+        System.IO.File.WriteAllText(System.IO.Path.Combine(PathOf("state.json.bak"), "occupied"), "");
+
+        Assert.False(File().Save(new SampleState { Name = "lost" }));
+
+        Assert.Equal("kept", File().Load()!.Name);
+        Assert.False(System.IO.File.Exists(PathOf("state.json.tmp")));
+    }
+
+    /// <summary>On Windows the usual reason a save fails: another program — an editor, a
+    /// virus scanner — has the file open without sharing it.</summary>
+    [WindowsFact]
+    public void OnWindows_ASaveWhileTheFileIsHeldOpenFails_AndLeavesTheFileAsItWas()
     {
         File().Save(new SampleState { Name = "kept" });
         using (new FileStream(PathOf("state.json"), FileMode.Open, FileAccess.Read, FileShare.None))
@@ -117,6 +137,15 @@ public class JsonFileTests : IDisposable
 
         Assert.Equal("kept", File().Load()!.Name);
         Assert.False(System.IO.File.Exists(PathOf("state.json.tmp")));
+    }
+}
+
+/// <summary>A fact that runs only on Windows, and says so where it is skipped.</summary>
+internal sealed class WindowsFactAttribute : FactAttribute
+{
+    public WindowsFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows()) Skip = "Windows only: elsewhere a lock does not stop a rename";
     }
 }
 
