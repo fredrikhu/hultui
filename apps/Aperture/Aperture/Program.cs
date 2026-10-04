@@ -61,6 +61,16 @@ internal static class ApertureProgram
         Func<IMediaBackend>? backends = MpvBackend.IsAvailable ? () => new MpvBackend() : null;
 
         var settings = new ApertureSettings(CredentialStore.Default);
+
+        // Open where it was closed. Recorded before the app's own teardown, while the native
+        // window still exists to be asked.
+        window.Placement = settings.Data.WindowPlacement;
+        window.Closed += () =>
+        {
+            settings.Data.WindowPlacement = window.Placement;
+            settings.Save();
+        };
+
         var aperture = new ApertureApp(app, window, settings, library: null, backends: backends);
         window.Closed += aperture.Dispose;
         app.SetRoot(aperture.Mount());

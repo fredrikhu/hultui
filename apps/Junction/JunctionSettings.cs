@@ -76,6 +76,10 @@ public sealed class JunctionSettingsData
     /// hosted, when it is not <c>origin</c>. Absent means origin, then the only remote.</summary>
     public Dictionary<string, string> RepoHostingRemote { get; set; } = new();
 
+    /// <summary>Where the window was when Junction last closed, so it opens there again.
+    /// Null until it has closed once. The window fits it to the monitors there are now.</summary>
+    public HultUI.Core.Platform.WindowPlacement? WindowPlacement { get; set; }
+
     public void Normalize()
     {
         RepositoryPaths ??= [];

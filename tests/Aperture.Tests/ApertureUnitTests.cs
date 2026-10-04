@@ -185,6 +185,27 @@ public class ApertureUnitTests
     }
 
     [Fact]
+    public void TheWindowPlacementSurvivesARestart()
+    {
+        // Through the app's own source-generated context, which publishes AOT.
+        var store = new InMemoryCredentialStore();
+        var path = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
+        try
+        {
+            var placement = new HultUI.Core.Platform.WindowPlacement(-2000, 500, 1600, 900, true);
+            var first = new ApertureSettings(store, path);
+            first.Data.WindowPlacement = placement;
+            first.Save();
+
+            Assert.Equal(placement, new ApertureSettings(store, path).Data.WindowPlacement);
+        }
+        finally
+        {
+            TryDeleteDirectory(Path.GetDirectoryName(path)!);
+        }
+    }
+
+    [Fact]
     public void AnUnreadableSettingsFileReadsAsAFirstRunRatherThanThrowing()
     {
         var path = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");

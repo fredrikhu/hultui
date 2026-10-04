@@ -453,10 +453,17 @@ public partial class CommanderApp : Component, IDisposable
         SevenZip.ExePath = _settings.SevenZipPath;
         _sevenZip = SevenZip.Available();   // probed once — the probe spawns a process
 
+        var session = SessionStore.Load();
+
+        // The window opens where it was closed whether or not the tabs come back with it: that
+        // option is about which folders, not about where the window sits. The window is still
+        // hidden here, so it opens in place rather than jumping there.
+        window.Placement = session?.Window;
+
         // Restore the last session's tabs when enabled and still valid; else open one
         // tab per pane on the starting folder.
         bool restored = false;
-        if (_settings.RestoreTabs && SessionStore.Load() is { } s)
+        if (_settings.RestoreTabs && session is { } s)
         {
             // Pair each dir with its saved view mode before filtering, so a dropped
             // (no-longer-existing) folder doesn't misalign the remaining view indices.
@@ -3194,5 +3201,6 @@ public partial class CommanderApp : Component, IDisposable
         _tabsL.Select(t => t.Dir).ToList(), _tabL,
         _tabsR.Select(t => t.Dir).ToList(), _tabR,
         _tabsL.Select(t => (int)t.View).ToList(),
-        _tabsR.Select(t => (int)t.View).ToList()));
+        _tabsR.Select(t => (int)t.View).ToList(),
+        _window.Placement));
 }

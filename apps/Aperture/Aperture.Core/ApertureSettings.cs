@@ -150,6 +150,10 @@ public sealed class ApertureSettingsData
     /// back on for someone who switched them off.</summary>
     public bool SubtitlesOn { get; set; }
 
+    /// <summary>Where the window was when Aperture last closed — the windowed bounds, if it
+    /// was full screen — so it opens there again. Null until it has closed once.</summary>
+    public HultUI.Core.Platform.WindowPlacement? WindowPlacement { get; set; }
+
     public void Normalize()
     {
         Servers ??= [];

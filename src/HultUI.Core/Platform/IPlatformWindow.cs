@@ -131,6 +131,19 @@ public interface IPlatformWindow : IDisposable
     /// </summary>
     void SetFullscreen(bool fullscreen) { }
 
+    /// <summary>
+    /// Where the window is and whether it is maximized, for an app to save and give back on
+    /// its next start. See <see cref="WindowPlacement"/> for what the numbers mean.
+    ///
+    /// <para>Setting it before the first frame is the intended use: the window is still
+    /// hidden, so it opens in place rather than jumping there. Setting it later moves a window
+    /// on screen. Either way the bounds are fitted to the monitors there are now, so reading
+    /// the property back can differ from what was set. Null on get means the platform cannot
+    /// say (a hosted control, whose host owns its placement); null on set does nothing, so an
+    /// app can pass whatever its settings hold, including nothing on a first run.</para>
+    /// </summary>
+    WindowPlacement? Placement { get => null; set { } }
+
     void Close();
     void Minimize();
     void Maximize();

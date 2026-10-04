@@ -221,6 +221,7 @@ public class SettingsTests
         };
         s.General.AutoFetchEnabled = true;
         s.General.AutoFetchIntervalMinutes = 17;
+        s.WindowPlacement = new HultUI.Core.Platform.WindowPlacement(-2000, 500, 1440, 900, true);
 
         var json = JsonSerializer.Serialize(s, JunctionSettingsJsonContext.Default.JunctionSettingsData);
         var back = JsonSerializer.Deserialize(json, JunctionSettingsJsonContext.Default.JunctionSettingsData)!;
@@ -231,6 +232,7 @@ public class SettingsTests
         Assert.Equal("teal", back.RepoBadges["/a"]);
         Assert.True(back.General.AutoFetchEnabled);
         Assert.Equal(17, back.General.AutoFetchIntervalMinutes);
+        Assert.Equal(s.WindowPlacement, back.WindowPlacement);
 
         var ws = Assert.Single(back.Workspaces);
         Assert.Equal("Work", ws.Name);

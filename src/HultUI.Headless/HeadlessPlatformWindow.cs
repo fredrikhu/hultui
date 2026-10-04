@@ -151,6 +151,29 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public void Restore() => IsMaximized = false;
 
     public void SetFullscreen(bool fullscreen) => IsFullscreen = fullscreen;
+
+    private WindowPlacement? _placement;
+
+    /// <summary>
+    /// Recorded, not applied, for the reason <see cref="IsFullscreen"/> is: there is no desktop
+    /// to place the window on, and resizing the surface to saved bounds would make a test's
+    /// geometry depend on whatever the app last saved. What it gives a test is the app's wiring
+    /// — that a saved placement reaches the window and the window's comes back out to be saved.
+    /// The maximized flag is applied, as <see cref="Maximize"/> applies it. Before anything is
+    /// set it reports the client area at the origin.
+    /// </summary>
+    public WindowPlacement? Placement
+    {
+        get => (_placement ?? new WindowPlacement(0, 0, PixelWidth, PixelHeight, false))
+            with { Maximized = IsMaximized };
+        set
+        {
+            if (value is not { IsUsable: true }) return;
+            _placement = value;
+            IsMaximized = value.Maximized;
+        }
+    }
+
     public void Raise() { }
 
     public void SetMinimumSize(int layoutWidth, int layoutHeight) { }
