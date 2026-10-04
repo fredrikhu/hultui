@@ -17,7 +17,10 @@ public interface IOverlayHost
     /// click. An explicit <see cref="CloseOverlay"/> does not raise it — the callback
     /// exists so an owner tracking open state is told about the one close it did not
     /// initiate.</param>
-    OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null);
+    /// <param name="modal">Whether the overlay holds the keyboard while it is open: Tab and
+    /// Shift+Tab stay inside it, and keys go to it even when the focus is somewhere it does not
+    /// reach — so nothing behind a dialog acts on a key pressed while the dialog is up.</param>
+    OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null, bool modal = false);
     void CloseOverlay(OverlayHandle handle);
     void UpdateOverlayPosition(OverlayHandle handle, float x, float y);
     Theme? ActiveTheme { get; }

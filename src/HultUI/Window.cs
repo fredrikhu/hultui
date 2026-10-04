@@ -512,11 +512,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// </param>
     public bool MoveFocus(bool forward, bool wrap = true)
     {
-        if (_root is null) return false;
+        if (FocusScope() is not { } scope) return false;
+        // An overlay is a closed loop: there is no host tab order to hand over to from inside
+        // a dialog, so its end always returns to its start.
+        if (scope != _root) wrap = true;
 
         bool moved = forward
-            ? _focusManager.MoveFocusNext(_root, wrap)
-            : _focusManager.MoveFocusPrevious(_root, wrap);
+            ? _focusManager.MoveFocusNext(scope, wrap)
+            : _focusManager.MoveFocusPrevious(scope, wrap);
         if (!moved) return false;
 
         _focusFromKeyboard = true;
@@ -1534,7 +1537,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 // were silently dead.
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
-                    var tabTarget = _focusManager.FocusedElement ?? _root;
+                    var tabTarget = KeyTarget();
                     var tabEvent = NewKeyDown(key);
                     EventDispatcher.Dispatch(tabEvent, tabTarget);
                     if (tabEvent.StopPropagation)
@@ -1544,7 +1547,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     break;
                 }
 
-                var target = _focusManager.FocusedElement ?? _root;
+                var target = KeyTarget();
                 // Ctrl/Cmd+C over a grouped label copies the whole cross-label selection
                 // (the label's own handler skips grouped copy, so there's no double).
                 // Keyed off the group holding the selection rather than off the focused
@@ -1580,14 +1583,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
             case InputEvent.TextInputInput textInput:
             {
-                var target = _focusManager.FocusedElement ?? _root;
+                var target = KeyTarget();
                 EventDispatcher.Dispatch(new TextInputEvent { Text = textInput.Text }, target);
                 break;
             }
 
             case InputEvent.TextEditingInput editInput:
             {
-                var target = _focusManager.FocusedElement ?? _root;
+                var target = KeyTarget();
                 EventDispatcher.Dispatch(new TextEditingEvent
                 {
                     Text = editInput.Text,
@@ -2267,7 +2270,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
     // ──── Overlay system (IOverlayHost) ────
 
-    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null)
+    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null, bool modal = false)
     {
         var id = _nextOverlayId++;
         var entry = new OverlayEntry
@@ -2278,6 +2281,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             Y = y,
             DismissOnOutsideClick = dismissOnOutsideClick,
             IsHitTestable = hitTestable,
+            IsModal = modal,
             OnDismissed = onDismissed,
             FocusBefore = _focusManager.FocusedElement,
         };
@@ -2345,6 +2349,55 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             var top = TopOf(element);
             return top == _root || _overlays.Exists(o => o.Content == top);
         }
+    }
+
+    // ──── Where the keyboard is ────
+    //
+    // A modal overlay holds the keyboard: keys go to it, and Tab walks only its controls. Any
+    // other overlay is a scope for Tab once it holds the focus — Tab from a field in a popover
+    // cycles in the popover rather than jumping to the first control of the page underneath —
+    // and otherwise keys simply follow the focus, as they always have.
+
+    /// <summary>Index of the overlay whose tree holds <paramref name="element"/>; -1 for the
+    /// main tree, and -2 for an element in neither, which the window no longer shows.</summary>
+    private int OverlayIndexOf(Element element)
+    {
+        var top = element;
+        while (top.Parent is { } parent) top = parent;
+        if (top == _root) return -1;
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+            if (_overlays[i].Content == top) return i;
+        return -2;
+    }
+
+    private int TopmostModalIndex()
+    {
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+            if (_overlays[i].IsModal) return i;
+        return -1;
+    }
+
+    /// <summary>The tree Tab walks: the overlay holding the focus, unless a modal one is above
+    /// it; else the topmost modal overlay; else the main tree.</summary>
+    private Element? FocusScope()
+    {
+        int modal = TopmostModalIndex();
+        int holding = _focusManager.FocusedElement is { } focused ? OverlayIndexOf(focused) : -1;
+        if (holding >= 0 && holding >= modal) return _overlays[holding].Content;
+        if (modal >= 0) return _overlays[modal].Content;
+        return _root;
+    }
+
+    /// <summary>Where a key goes: the focused element — unless a modal overlay is open and the
+    /// focus is not in it or above it (nothing focused, or something behind it focused from
+    /// code), in which case the modal overlay has it, and nothing behind the dialog acts on it.</summary>
+    private Element? KeyTarget()
+    {
+        var focused = _focusManager.FocusedElement;
+        int modal = TopmostModalIndex();
+        if (modal >= 0 && (focused is null || OverlayIndexOf(focused) < modal))
+            return _overlays[modal].Content;
+        return focused ?? _root;
     }
 
     public void UpdateOverlayPosition(OverlayHandle handle, float x, float y)

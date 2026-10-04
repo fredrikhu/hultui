@@ -21,6 +21,11 @@ public sealed class DialogOptions
     /// <summary>Clicking the scrim closes the dialog with the default result.</summary>
     public bool DismissOnScrimClick { get; init; } = true;
 
+    /// <summary>Escape closes the dialog with the default result — what a cancel button would
+    /// do. Content that handles Escape itself and stops it keeps it: a dropdown closing its
+    /// list, a panel answering on Escape.</summary>
+    public bool DismissOnEscape { get; init; } = true;
+
     /// <summary>Scrim colour. Null uses a default translucent black.</summary>
     public Color? ScrimColor { get; init; }
 }

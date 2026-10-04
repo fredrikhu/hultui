@@ -101,10 +101,9 @@ aren't forgotten.
   drag-capture path is gated to non-overlay hits. Click-to-caret, typing,
   double-click word-select and right-click Cut/Copy/Paste all work. Fix needs the
   pointer-move handler to apply the overlay's offset when capturing.
-- **Dialog: Esc-to-dismiss + focus trap** — a modal dialog should close on Esc and
-  keep Tab focus within itself. Needs the dialog to move keyboard focus into its
-  content (a bit of `FocusManager` access through the overlay host). Dismissal is
-  currently scrim-click / buttons only.
+- ~~**Dialog: Esc-to-dismiss + focus trap**~~ — done 2026-10-04: modal overlays
+  (`ShowOverlay(..., modal: true)`) hold the keyboard and scope Tab; a dialog takes focus
+  on open and closes on Escape (`DialogOptions.DismissOnEscape`). See FOCUS.md "Overlays".
 - **Dialog: `Window` presentation** — the separate-OS-window backend (agreed:
   overlay first, window later). Currently `DialogPresentation.Window` throws.
 

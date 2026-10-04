@@ -32,6 +32,34 @@ public class DialogTests
         Assert.Equal(42, await task);       // awaited result flows through
     }
 
+    /// <summary>Modal is what makes the window keep the keyboard inside it; the panel is what a
+    /// screen reader announces as the dialog, unless the content gave it a role of its own.</summary>
+    [Fact]
+    public void Show_AsksForAModalOverlay_AndMarksThePanelAsADialog()
+    {
+        var host = new FakeOverlayHost();
+        Element? panel = null;
+        _ = Dialog.Show<int>(host, _ => panel = Box.New());
+
+        Assert.True(host.Modal);
+        Assert.Equal(HultUI.Core.Accessibility.AccessibilityRole.Dialog, panel!.Role);
+    }
+
+    [Fact]
+    public void Show_KeepsARoleTheContentChose()
+    {
+        var host = new FakeOverlayHost();
+        Element? panel = null;
+        _ = Dialog.Show<int>(host, _ =>
+        {
+            panel = Box.New();
+            panel.Role = HultUI.Core.Accessibility.AccessibilityRole.Alert;
+            return panel;
+        });
+
+        Assert.Equal(HultUI.Core.Accessibility.AccessibilityRole.Alert, panel!.Role);
+    }
+
     [Fact]
     public async Task Close_IsIdempotent()
     {
@@ -97,9 +125,12 @@ public class DialogTests
         public Element? Shown { get; private set; }
         public bool Closed { get; private set; }
 
-        public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null)
+        public bool Modal { get; private set; }
+
+        public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null, bool modal = false)
         {
             Shown = content;
+            Modal = modal;
             return new OverlayHandle { Id = 1 };
         }
 

@@ -12,6 +12,8 @@ internal sealed class OverlayEntry
     /// <c>CloseOverlay</c> does not raise it; the caller already knows.</summary>
     public Action? OnDismissed { get; init; }
     public bool IsHitTestable { get; init; } = true;
+    /// <summary>Holds the keyboard while open — see <c>IOverlayHost.ShowOverlay</c>.</summary>
+    public bool IsModal { get; init; }
     /// <summary>What had the focus when the overlay opened: where it goes back to when the
     /// overlay closes holding it.</summary>
     public Element? FocusBefore { get; init; }
