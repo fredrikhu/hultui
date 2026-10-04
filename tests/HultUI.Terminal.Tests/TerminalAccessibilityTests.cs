@@ -1,4 +1,5 @@
 using HultUI.Core.Accessibility;
+using HultUI.Core.Primitives;
 using Xunit;
 
 namespace HultUI.Terminal.Tests;
@@ -95,6 +96,206 @@ public class TerminalAccessibilityTests
         session.Window.SetRoot(element);
         session.PumpFrames(2);
         Assert.Equal("Demo shell", session.Window.FindByRole(AccessibilityRole.Document)!.Name);
+    }
+
+    // ──── The text (seam A1) ────
+
+    private static AccessibleText TextOf(Term t) =>
+        t.Window.FindByRole(AccessibilityRole.Document)!.Node.CurrentText!;
+
+    private static void Settle(Term t)
+    {
+        t.Session.PumpFrame(TerminalElement.ScreenSettle + TimeSpan.FromMilliseconds(50));
+        t.Session.PumpFrames(2);
+    }
+
+    [Fact]
+    public void TheText_IsTheRows_WithTheCursorAsTheCaret()
+    {
+        using var t = Term.Shown();
+        t.Emit("hello\r\nworld\r\n$ ");
+        var text = TextOf(t);
+        Assert.Equal("hello\nworld\n$", text.Text);
+        Assert.Equal(3, text.LineCount);
+        // The cursor is past the prompt's blank, beyond the row's text: the row's end.
+        Assert.Equal(text.Length, text.Caret);
+        Assert.True(text.IsReadOnly);
+    }
+
+    [Fact]
+    public void TheGeometry_IsTheCellGrid_WideCharactersTwoCellsWide()
+    {
+        using var t = Term.Shown();
+        t.Emit("ab日本c\r\nxy");
+        var text = TextOf(t);
+        var box = t.Element!.ScreenContentBox;
+        var (w, h) = t.Element.CellSize;
+        Assert.Equal(new Rect(box.X + 2 * w, box.Y, 2 * w, h), text.Geometry!.CharacterBounds(text, 2)); // 日
+        Assert.Equal(new Rect(box.X + 6 * w, box.Y, w, h), text.Geometry.CharacterBounds(text, 4));     // c
+        Assert.Equal(new Rect(box.X + w, box.Y + h, w, h), text.Geometry.CharacterBounds(text, 7));     // y
+        // A point in 本's second cell finds 本; a point past a row's text finds its end.
+        Assert.Equal(3, text.OffsetAt(new Point(box.X + 5.5f * w, box.Y + 0.5f * h)));
+        Assert.Equal(5, text.OffsetAt(new Point(box.X + 20 * w, box.Y + 0.5f * h)));
+    }
+
+    [Fact]
+    public void TheSelection_IsTheTextsSelection()
+    {
+        using var t = Term.Shown();
+        t.Emit("one two three");
+        var (x0, y) = t.CellCentre(4, 0);
+        var (x1, _) = t.CellCentre(6, 0);
+        t.Window.Drag(new Point(x0, y), new Point(x1, y));
+        var text = TextOf(t);
+        Assert.Equal("two", text.Text[text.SelectionStart..text.SelectionEnd]);
+    }
+
+    [Fact]
+    public void TheSource_IsReadOffTheUiThread_AsTheScreenIsNow()
+    {
+        using var t = Term.Shown();
+        t.Emit("first");
+        var source = t.Window.FindByRole(AccessibilityRole.Document)!.Node.TextSource!;
+        t.Emit("\r\nsecond");
+        // No rebuild since: the source reads the screen itself, here from another thread.
+        var text = Task.Run(() => source.AccessibleText).Result;
+        Assert.Equal("first\nsecond", text!.Text);
+        Assert.Same(text, source.AccessibleText); // unchanged screen, the same snapshot
+    }
+
+    [Fact]
+    public void Output_TellsTheTextChanged_AndAMovedCursorTheCaret()
+    {
+        AccessibilityClients.Force = true;
+        try
+        {
+            using var t = Term.Shown();
+            var bridge = t.Window.InstallAccessibilityBridge();
+            t.Emit("abc");
+            Settle(t);
+            bridge.ClearDiffs();
+
+            t.Emit("d");
+            Settle(t);
+            Assert.True(ToldOf(bridge, AccessibilityProperties.Text));
+
+            bridge.ClearDiffs();
+            t.Emit("\x1b[2D"); // the cursor back two
+            Settle(t);
+            Assert.True(ToldOf(bridge, AccessibilityProperties.TextSelection));
+            Assert.False(ToldOf(bridge, AccessibilityProperties.Text));
+        }
+        finally { AccessibilityClients.Force = null; }
+    }
+
+    // ──── Announcements (seam A2) ────
+
+    private static Term Listening(out HultUI.Headless.HeadlessAccessibilityBridge bridge)
+    {
+        AccessibilityClients.Force = true;
+        var t = Term.Shown();
+        bridge = t.Window.InstallAccessibilityBridge();
+        t.Emit("$ ");
+        Settle(t); // the first settle takes the place: nothing before it is announced
+        bridge.ClearAnnouncements();
+        return t;
+    }
+
+    [Fact]
+    public void NewOutput_IsAnnounced_OnceItSettles()
+    {
+        try
+        {
+            using var t = Listening(out var bridge);
+            Assert.Empty(bridge.Announcements);
+            t.Emit("building\r\n");
+            t.Session.PumpFrames(2);
+            Assert.Empty(bridge.Announcements); // not yet: the output has not paused
+            Settle(t);
+            var said = Assert.Single(bridge.Announcements);
+            Assert.Equal("building", said.Text);
+            Assert.Equal(AnnouncementPoliteness.Polite, said.Politeness);
+            Assert.Equal(AccessibilityRole.Document, said.Source!.Role);
+
+            t.Emit("done\r\n$ ");
+            Settle(t);
+            Assert.Equal("done\n$", bridge.Announcements[^1].Text);
+        }
+        finally { AccessibilityClients.Force = null; }
+    }
+
+    [Fact]
+    public void WhatTheUserTyped_IsNotAnnouncedBack()
+    {
+        try
+        {
+            using var t = Listening(out var bridge);
+            t.Window.TypeText("l");
+            t.Emit("l"); // the shell's echo
+            Settle(t);
+            Assert.Empty(bridge.Announcements);
+
+            t.Window.TypeText("s");
+            t.Window.PressKey(Core.Events.KeyCode.Enter, text: "");
+            t.Emit("s\r\nfile.txt\r\n$ ");
+            Settle(t);
+            Assert.Equal("file.txt\n$", Assert.Single(bridge.Announcements).Text);
+        }
+        finally { AccessibilityClients.Force = null; }
+    }
+
+    [Fact]
+    public void AFullScreenProgram_IsNotAnnounced()
+    {
+        try
+        {
+            using var t = Listening(out var bridge);
+            t.Emit("\x1b[?1049h\x1b[Hmenu item one\r\nmenu item two");
+            Settle(t);
+            t.Emit("\x1b[2;1Hmenu item 2!!");
+            Settle(t);
+            Assert.Empty(bridge.Announcements);
+
+            t.Emit("\x1b[?1049lback\r\n");
+            Settle(t); // the way back takes the place again
+            t.Emit("after\r\n");
+            Settle(t);
+            Assert.Equal("after", Assert.Single(bridge.Announcements).Text);
+        }
+        finally { AccessibilityClients.Force = null; }
+    }
+
+    [Fact]
+    public void AFlood_IsAnnouncedByItsLastScreenful()
+    {
+        try
+        {
+            using var t = Listening(out var bridge);
+            int rows = t.Controller.Rows;
+            t.Emit(string.Concat(Enumerable.Range(1, rows * 3).Select(i => $"line {i}\r\n")));
+            Settle(t);
+            var lines = Assert.Single(bridge.Announcements).Text.Split('\n');
+            Assert.True(lines.Length <= rows);
+            Assert.Equal($"line {rows * 3}", lines[^1]);
+        }
+        finally { AccessibilityClients.Force = null; }
+    }
+
+    [Fact]
+    public void NobodyListening_NothingIsAnnounced()
+    {
+        AccessibilityClients.Force = false;
+        try
+        {
+            using var t = Term.Shown();
+            var bridge = t.Window.InstallAccessibilityBridge();
+            t.Emit("$ ");
+            Settle(t);
+            t.Emit("output\r\n");
+            Settle(t);
+            Assert.Empty(bridge.Announcements);
+        }
+        finally { AccessibilityClients.Force = null; }
     }
 
     private static AccessibilityNode? FindDocument(AccessibilityNode node)

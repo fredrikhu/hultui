@@ -3,6 +3,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Rendering;
 using HultUI.Terminal;
+using HultUI.Terminal.Pty;
 
 namespace HultUI.Samples.Terminal;
 
@@ -16,8 +17,13 @@ internal static class Program
             ? new Application("HultUI - Terminal bench", 1500, 960)
             : new Application("HultUI - Terminal", 980, 640);
         app.Theme = HultUI.Core.Styling.Theme.Dark;
+        // --run <program> [arguments...]: that program instead of the user's shell (everything
+        // after it is its arguments). What a check that needs output nobody types runs.
+        int run = Array.IndexOf(args, "--run");
+        var launch = run >= 0 && run + 1 < args.Length ? new PtyLaunch(args[run + 1], args[(run + 2)..]) : null;
+        if (run >= 0) args = args[..run];
         // The bench measures drawing, so it runs the demo shell, whose output is the same every time.
-        using var sample = new TerminalSampleApp(bench || args.Contains("--demo") ? SampleProgram.Demo : SampleProgram.Shell);
+        using var sample = new TerminalSampleApp(bench || args.Contains("--demo") ? SampleProgram.Demo : SampleProgram.Shell, launch);
         var root = sample.Mount();
         if (args.Contains("--check"))
         {

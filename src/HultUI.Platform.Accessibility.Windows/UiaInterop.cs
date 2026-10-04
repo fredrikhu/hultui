@@ -60,6 +60,28 @@ internal static partial class UiaInterop
     [LibraryImport("UIAutomationCore.dll")]
     public static partial int UiaDisconnectProvider(IntPtr provider);
 
+    /// <summary>Has assistive technology speak <paramref name="displayString"/> (Windows 10
+    /// 1709 and later). <paramref name="activityId"/> names the kind of announcement, so a
+    /// reader can treat a run of them alike.</summary>
+    [LibraryImport("UIAutomationCore.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int UiaRaiseNotificationEvent(IntPtr provider, int notificationKind,
+        int notificationProcessing, IntPtr displayString, IntPtr activityId);
+
+    /// <summary><see cref="UiaRaiseNotificationEvent(IntPtr, int, int, IntPtr, IntPtr)"/>
+    /// with the strings as BSTRs, freed after; false where Windows predates notifications.</summary>
+    public static bool RaiseNotification(IntPtr provider, int kind, int processing, string text, string activityId)
+    {
+        IntPtr display = Marshal.StringToBSTR(text), activity = Marshal.StringToBSTR(activityId);
+        try { return UiaRaiseNotificationEvent(provider, kind, processing, display, activity) >= 0; }
+        catch (EntryPointNotFoundException) { return false; }
+        finally { Marshal.FreeBSTR(display); Marshal.FreeBSTR(activity); }
+    }
+
+    /// <summary>The value a text range's attribute answers when it is not supported: a COM
+    /// object of UIA's own, handed back in a VT_UNKNOWN VARIANT.</summary>
+    [LibraryImport("UIAutomationCore.dll")]
+    public static partial int UiaGetReservedNotSupportedValue(out IntPtr notSupportedValue);
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ClientToScreen(IntPtr hwnd, ref PointNative point);
@@ -124,6 +146,23 @@ internal static partial class UiaInterop
         return psa;
     }
 
+    /// <summary>
+    /// A SAFEARRAY of doubles (VT_R8): what <c>ITextRangeProvider::GetBoundingRectangles</c>
+    /// returns, four per rectangle (left, top, width, height). UIA takes ownership.
+    /// </summary>
+    public static IntPtr BuildDoubleArray(ReadOnlySpan<double> values)
+    {
+        const ushort VT_R8 = 5;
+        IntPtr psa = SafeArrayCreateVector(VT_R8, 0, (uint)values.Length);
+        if (psa == IntPtr.Zero || values.Length == 0)
+            return psa;
+        if (SafeArrayAccessData(psa, out IntPtr data) != 0)
+            return psa;
+        Marshal.Copy(values.ToArray(), 0, data, values.Length);
+        SafeArrayUnaccessData(psa);
+        return psa;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct PointNative
     {
@@ -182,6 +221,32 @@ internal static partial class UiaInterop
     public const int UIA_ScrollPatternId = 10004;
     public const int UIA_RangeValuePatternId = 10003;
     public const int UIA_ItemContainerPatternId = 10019;
+    public const int UIA_TextPatternId = 10014;
+    public const int UIA_TextPattern2Id = 10024;
+
+    // ──── Text pattern: TextUnit, TextPatternRangeEndpoint, SupportedTextSelection, attributes
+    public const int TextUnit_Character = 0;
+    public const int TextUnit_Format = 1;
+    public const int TextUnit_Word = 2;
+    public const int TextUnit_Line = 3;
+    public const int TextUnit_Paragraph = 4;
+    public const int TextUnit_Page = 5;
+    public const int TextUnit_Document = 6;
+    public const int TextPatternRangeEndpoint_Start = 0;
+    public const int TextPatternRangeEndpoint_End = 1;
+    public const int SupportedTextSelection_None = 0;
+    public const int SupportedTextSelection_Single = 1;
+    public const int UIA_IsReadOnlyAttributeId = 40015;
+
+    // ──── Notifications
+    public const int NotificationKind_Other = 4;
+    public const int NotificationProcessing_ImportantAll = 0;
+    public const int NotificationProcessing_All = 2;
+
+    // ──── HRESULTs a provider answers
+    public const int E_INVALIDARG = unchecked((int)0x80070057);
+    /// <summary>UIA_E_INVALIDOPERATION: what selecting read-only text answers.</summary>
+    public const int UIA_E_INVALIDOPERATION = unchecked((int)0x80131509);
 
     // ──── ScrollAmount + "no scroll" sentinel
     public const int ScrollAmount_LargeDecrement = 0;
@@ -200,6 +265,8 @@ internal static partial class UiaInterop
     // ──── UIA event IDs
     public const int UIA_AutomationFocusChangedEventId = 20005;
     public const int UIA_Invoke_InvokedEventId = 20009;
+    public const int UIA_Text_TextSelectionChangedEventId = 20014;
+    public const int UIA_Text_TextChangedEventId = 20015;
 
     // ──── StructureChangeType
     public const int StructureChangeType_ChildAdded = 0;

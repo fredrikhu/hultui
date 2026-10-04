@@ -354,9 +354,16 @@ public sealed class TerminalController : IDisposable
         ContentChanged?.Invoke();
     }
 
-    internal List<LogicalLine> ReadLogicalLines()
+    internal List<LogicalLine> ReadLogicalLines(long fromLine = 0)
     {
-        lock (_gate) return _disposed ? [] : _emulator.ReadLogicalLines();
+        lock (_gate) return _disposed ? [] : _emulator.ReadLogicalLines(fromLine);
+    }
+
+    /// <summary>The emulator's generation (<see cref="ITerminalEmulator.Generation"/>), or -1
+    /// once disposed. Any thread.</summary>
+    internal long Generation
+    {
+        get { lock (_gate) return _disposed ? -1 : _emulator.Generation; }
     }
 
     internal string GetText(TerminalPosition start, TerminalPosition end)

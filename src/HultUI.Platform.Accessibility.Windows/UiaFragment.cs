@@ -36,6 +36,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private bool? _isToggled;
     private bool? _expanded;
     private bool _isOffscreen;
+    private bool _hasText;
 
     /// <summary>Snapshot expand state (null = not expandable), read by the ExpandCollapse provider.</summary>
     public bool? Expanded => _expanded;
@@ -68,7 +69,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _isToggled = node.IsToggled;
         _expanded = node.Expanded;
         _isOffscreen = node.IsOffscreen;
+        _hasText = node.TextSource is not null || node.Text is not null;
     }
+
+    /// <summary>The text now, for the text pattern: the node's source, read on this thread.</summary>
+    public AccessibleText? Text => Node.CurrentText;
+
+    /// <summary>The node's box in layout units, scroll applied.</summary>
+    public Rect Bounds => _bounds;
 
     // ── IRawElementProviderSimple ──
 
@@ -87,6 +95,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     {
         object? provider = _role switch
         {
+            // Text a reader moves through (seam A1), whatever the role: a terminal's document,
+            // and later edit fields.
+            _ when patternId is UiaInterop.UIA_TextPatternId or UiaInterop.UIA_TextPattern2Id && _hasText
+                => new UiaTextProvider(_bridge, ElementId),
             AccessibilityRole.Button when patternId == UiaInterop.UIA_InvokePatternId
                 => new UiaInvokeProvider(_bridge, ElementId),
             // List items are invokable so assistive tech can activate any row —

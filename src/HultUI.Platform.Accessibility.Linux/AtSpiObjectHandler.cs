@@ -53,6 +53,7 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
             case AtSpiConstants.ComponentInterface: HandleComponent(context, member, node); break;
             case AtSpiConstants.ApplicationInterface: HandleApplication(context, member, node); break;
             case AtSpiConstants.ActionInterface: HandleAction(context, member, node); break;
+            case AtSpiConstants.TextInterface: HandleText(context, member, node); break;
             default: context.ReplyUnknownMethodError(); break;
         }
         return default;
@@ -151,6 +152,12 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
             w.WriteVariantInt32(node.HasAction ? 1 : 0);
             return;
         }
+        else if (iface == AtSpiConstants.TextInterface && prop is "CharacterCount" or "CaretOffset")
+        {
+            var text = node.CurrentText;
+            w.WriteVariantInt32(text is null ? 0 : prop == "CharacterCount" ? text.Length : text.Caret);
+            return;
+        }
 
         // Unknown property — an empty string keeps the reply well-formed.
         w.WriteVariantString("");
@@ -179,6 +186,11 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
             WriteStringEntry(ref w, "Version", FrameworkVersion);
             WriteStringEntry(ref w, "AtspiVersion", "2.1");
             WriteInt32Entry(ref w, "Id", _tree.ApplicationId);
+        }
+        else if (iface == AtSpiConstants.TextInterface && node.CurrentText is { } text)
+        {
+            WriteInt32Entry(ref w, "CharacterCount", text.Length);
+            WriteInt32Entry(ref w, "CaretOffset", text.Caret);
         }
         w.WriteDictionaryEnd(dict);
     }
@@ -391,6 +403,145 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
         }
     }
 
+    // ───────────────────────────────────────────────── org.a11y.atspi.Text
+
+    private static void HandleText(MethodContext context, string member, AtSpiAccessible node)
+    {
+        var text = node.CurrentText;
+        if (text is null)
+        {
+            context.ReplyUnknownMethodError();
+            return;
+        }
+        var reader = context.Request.GetBodyReader();
+        switch (member)
+        {
+            case "GetText":
+            {
+                int start = reader.ReadInt32(), end = reader.ReadInt32();
+                string s = AtSpiText.GetText(text, start, end);
+                Reply(context, "s", (ref MessageWriter w) => w.WriteString(s));
+                break;
+            }
+            case "GetStringAtOffset":
+            {
+                int offset = reader.ReadInt32();
+                uint granularity = reader.ReadUInt32();
+                var r = AtSpiText.GetStringAtOffset(text, offset, granularity);
+                ReplyStringRange(context, r);
+                break;
+            }
+            case "GetTextAtOffset":
+            case "GetTextBeforeOffset":
+            case "GetTextAfterOffset":
+            {
+                int offset = reader.ReadInt32();
+                uint boundary = reader.ReadUInt32();
+                int relative = member == "GetTextBeforeOffset" ? -1 : member == "GetTextAfterOffset" ? 1 : 0;
+                ReplyStringRange(context, AtSpiText.GetTextRelative(text, offset, boundary, relative));
+                break;
+            }
+            case "GetCharacterAtOffset":
+            {
+                int c = AtSpiText.GetCharacterAtOffset(text, reader.ReadInt32());
+                Reply(context, "i", (ref MessageWriter w) => w.WriteInt32(c));
+                break;
+            }
+            case "GetCharacterExtents":
+            {
+                int offset = reader.ReadInt32();
+                ReplyBox(context, AtSpiText.GetCharacterExtents(text, offset, node.Scale));
+                break;
+            }
+            case "GetRangeExtents":
+            {
+                int start = reader.ReadInt32(), end = reader.ReadInt32();
+                ReplyBox(context, AtSpiText.GetRangeExtents(text, start, end, node.Scale));
+                break;
+            }
+            case "GetOffsetAtPoint":
+            {
+                int x = reader.ReadInt32(), y = reader.ReadInt32();
+                int offset = AtSpiText.GetOffsetAtPoint(text, x, y, node.Scale);
+                Reply(context, "i", (ref MessageWriter w) => w.WriteInt32(offset));
+                break;
+            }
+            case "GetNSelections":
+            {
+                int n = AtSpiText.SelectionCount(text);
+                Reply(context, "i", (ref MessageWriter w) => w.WriteInt32(n));
+                break;
+            }
+            case "GetSelection":
+            {
+                var (start, end) = AtSpiText.GetSelection(text, reader.ReadInt32());
+                Reply(context, "ii", (ref MessageWriter w) => { w.WriteInt32(start); w.WriteInt32(end); });
+                break;
+            }
+            case "GetAttributes":
+            case "GetAttributeRun":
+            {
+                // No attributes: one run, the whole text.
+                int length = text.Length;
+                Reply(context, "a{ss}ii", (ref MessageWriter w) =>
+                {
+                    var d = w.WriteDictionaryStart();
+                    w.WriteDictionaryEnd(d);
+                    w.WriteInt32(0);
+                    w.WriteInt32(length);
+                });
+                break;
+            }
+            case "GetDefaultAttributes":
+            case "GetDefaultAttributeSet":
+                Reply(context, "a{ss}", static (ref MessageWriter w) =>
+                {
+                    var d = w.WriteDictionaryStart();
+                    w.WriteDictionaryEnd(d);
+                });
+                break;
+            case "GetAttributeValue":
+                Reply(context, "s", static (ref MessageWriter w) => w.WriteString(""));
+                break;
+            case "GetBoundedRanges":
+                Reply(context, "a(iisv)", static (ref MessageWriter w) =>
+                {
+                    var arr = w.WriteArrayStart(DBusType.Struct);
+                    w.WriteArrayEnd(arr);
+                });
+                break;
+            case "SetCaretOffset":
+            case "AddSelection":
+            case "RemoveSelection":
+            case "SetSelection":
+            case "ScrollSubstringTo":
+            case "ScrollSubstringToPoint":
+                // A reader reads this text; moving its caret or selection is not offered yet.
+                Reply(context, "b", static (ref MessageWriter w) => w.WriteBool(false));
+                break;
+            default:
+                context.ReplyUnknownMethodError();
+                break;
+        }
+    }
+
+    private static void ReplyStringRange(MethodContext context, (string Text, int Start, int End) r) =>
+        Reply(context, "sii", (ref MessageWriter w) =>
+        {
+            w.WriteString(r.Text);
+            w.WriteInt32(r.Start);
+            w.WriteInt32(r.End);
+        });
+
+    private static void ReplyBox(MethodContext context, (int X, int Y, int Width, int Height) box) =>
+        Reply(context, "iiii", (ref MessageWriter w) =>
+        {
+            w.WriteInt32(box.X);
+            w.WriteInt32(box.Y);
+            w.WriteInt32(box.Width);
+            w.WriteInt32(box.Height);
+        });
+
     // ──────────────────────────────────────────────────────────── helpers
 
     private static void Reply(MethodContext context, string signature, AtSpiMarshal.BodyWriter writeBody) =>
@@ -423,5 +574,6 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
         "<node>\n" +
         "  <interface name=\"org.a11y.atspi.Accessible\"/>\n" +
         "  <interface name=\"org.a11y.atspi.Component\"/>\n" +
+        "  <interface name=\"org.a11y.atspi.Text\"/>\n" +
         "</node>";
 }

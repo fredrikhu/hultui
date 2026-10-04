@@ -348,7 +348,9 @@ internal sealed class XtermEmulator : ITerminalEmulator
         return (new TerminalPosition(first, 0), new TerminalPosition(last, width));
     }
 
-    public List<LogicalLine> ReadLogicalLines()
+    public long Generation => _generation;
+
+    public List<LogicalLine> ReadLogicalLines(long fromLine = 0)
     {
         var result = new List<LogicalLine>();
         var lines = _term.Buffer.Lines;
@@ -358,7 +360,11 @@ internal sealed class XtermEmulator : ITerminalEmulator
         var starts = new List<int>();
         Span<char> pair = stackalloc char[2];
 
-        for (int i = 0; i < lines.Length; i++)
+        // From the start of the logical line holding fromLine.
+        int from = (int)Math.Clamp(fromLine - dropped, 0, lines.Length);
+        while (from > 0 && from < lines.Length && lines[from]?.IsWrapped == true) from--;
+
+        for (int i = from; i < lines.Length; i++)
         {
             var line = lines[i];
             if (starts.Count > 0 && line?.IsWrapped != true) Flush();

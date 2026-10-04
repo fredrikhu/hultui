@@ -53,6 +53,12 @@ internal static class WordBoundary
     // this replaced did too.
     private static bool IsBlank(CharClass c) => c is CharClass.Space or CharClass.Newline;
 
+    /// <summary>A space or a line break: what <see cref="WordRight"/> steps over after a word.</summary>
+    public static bool IsBlank(char c) => IsBlank(ClassOf(c));
+
+    /// <summary>Whether two characters are the same kind (word, blank, line break, other).</summary>
+    public static bool SameKind(char a, char b) => ClassOf(a) == ClassOf(b);
+
     /// <summary>
     /// Where Ctrl+Left lands, starting from <paramref name="from"/>: back over any blanks
     /// immediately to the left, then back over the whole run of whichever class precedes

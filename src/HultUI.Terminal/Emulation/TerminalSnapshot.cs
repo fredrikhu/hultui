@@ -249,8 +249,13 @@ internal interface ITerminalEmulator : IDisposable
     void SetCellPixels(double width, double height);
 
     /// <summary>The current screen's buffer as logical lines, scrollback included: what search
-    /// binds to.</summary>
-    List<LogicalLine> ReadLogicalLines();
+    /// binds to. From <paramref name="fromLine"/> on (a <see cref="TerminalPosition.Line"/>), the
+    /// logical line holding it first; 0 for all of it.</summary>
+    List<LogicalLine> ReadLogicalLines(long fromLine = 0);
+
+    /// <summary>Bumped by every feed, resize and scroll of the viewport, as
+    /// <see cref="TerminalSnapshot.Generation"/>: equal generations, equal screens.</summary>
+    long Generation { get; }
 
     /// <summary>Moves the viewport by <paramref name="lines"/> (negative is up, into the
     /// scrollback); 0 moves nothing.</summary>

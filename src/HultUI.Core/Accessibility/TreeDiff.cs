@@ -129,6 +129,7 @@ public readonly record struct RemovedNode(AccessibilityNode Node, AccessibilityN
 /// <summary>
 /// Announces that a single property on <see cref="Node"/> (from the new tree)
 /// changed value. <see cref="PropertyName"/> is one of
-/// <see cref="AccessibilityProperties"/>.
+/// <see cref="AccessibilityProperties"/>. <see cref="Previous"/> is the node in the previous
+/// tree, for a change a bridge describes as a difference (the text's).
 /// </summary>
-public readonly record struct PropertyChange(AccessibilityNode Node, string PropertyName);
+public readonly record struct PropertyChange(AccessibilityNode Node, string PropertyName, AccessibilityNode? Previous = null);

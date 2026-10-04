@@ -33,7 +33,28 @@ internal static class AtSpiConstants
     public const string ApplicationInterface = "org.a11y.atspi.Application";
     public const string ActionInterface = "org.a11y.atspi.Action";
     public const string ValueInterface = "org.a11y.atspi.Value";
+    public const string TextInterface = "org.a11y.atspi.Text";
     public const string CacheInterface = "org.a11y.atspi.Cache";
+
+    // ── Text granularity (AtspiTextGranularity), for GetStringAtOffset.
+    public const uint GranularityChar = 0;
+    public const uint GranularityWord = 1;
+    public const uint GranularitySentence = 2;
+    public const uint GranularityLine = 3;
+    public const uint GranularityParagraph = 4;
+
+    // ── Text boundaries (AtspiTextBoundaryType), for the older Get*Offset calls.
+    public const uint BoundaryChar = 0;
+    public const uint BoundaryWordStart = 1;
+    public const uint BoundaryWordEnd = 2;
+    public const uint BoundarySentenceStart = 3;
+    public const uint BoundarySentenceEnd = 4;
+    public const uint BoundaryLineStart = 5;
+    public const uint BoundaryLineEnd = 6;
+
+    // ── Live-region politeness (AtspiLive), an announcement's detail1.
+    public const int LivePolite = 1;
+    public const int LiveAssertive = 2;
 
     // ── Standard freedesktop interfaces every object answers.
     public const string PropertiesInterface = "org.freedesktop.DBus.Properties";

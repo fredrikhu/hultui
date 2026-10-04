@@ -418,6 +418,33 @@ public abstract class Element
     /// </summary>
     internal virtual string? AccessibleValue => null;
 
+    /// <summary>
+    /// The text a screen reader can move through by character, word and line, with a caret and
+    /// a selection: UIA's text pattern and AT-SPI's Text interface. Read when the accessibility
+    /// tree is built; the source itself is then read by the bridges on their own threads. An
+    /// element whose text, caret or selection change calls
+    /// <see cref="NotifyAccessibilityPropertyChanged"/> (any property) so the tree is rebuilt
+    /// and the difference told. Null (the default) is none.
+    /// </summary>
+    internal virtual Accessibility.IAccessibleTextSource? AccessibleTextSource => null;
+
+    /// <summary>
+    /// Has a screen reader speak <paramref name="text"/>, without moving its focus: a status, a
+    /// toast, a program's new output. Spoken only while one listens (nothing is queued for a
+    /// reader that starts later), on Windows as a UI Automation notification and on Linux as an
+    /// AT-SPI announcement. An element not in a window yet (one announcing as it mounts, in a
+    /// tree still being built) says it once a window takes it; one removed first never does.
+    /// </summary>
+    /// <param name="text">What to say.</param>
+    /// <param name="politeness">Whether to wait for the reader to finish what it is saying
+    /// (the default), or to cut in.</param>
+    public void Announce(string text, Accessibility.AnnouncementPoliteness politeness = Accessibility.AnnouncementPoliteness.Polite)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        if (OverlayHost is Accessibility.IAccessibilityAnnouncer announcer) announcer.Announce(this, text, politeness);
+        else (_pendingAnnouncements ??= []).Add((text, politeness));
+    }
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 
@@ -430,7 +457,23 @@ public abstract class Element
     public bool IsWindowMaximizeButton { get; set; }
 
     // ──── Overlay ────
-    public IOverlayHost? OverlayHost { get; internal set; }
+    public IOverlayHost? OverlayHost
+    {
+        get => _overlayHost;
+        internal set
+        {
+            _overlayHost = value;
+            // Said before the element was in a window: say it now that it is.
+            if (_pendingAnnouncements is { } pending && value is Accessibility.IAccessibilityAnnouncer announcer)
+            {
+                _pendingAnnouncements = null;
+                foreach (var (text, politeness) in pending) announcer.Announce(this, text, politeness);
+            }
+        }
+    }
+
+    private IOverlayHost? _overlayHost;
+    private List<(string Text, Accessibility.AnnouncementPoliteness Politeness)>? _pendingAnnouncements;
 
     // ──── Tooltip ────
     public string? TooltipText { get; set; }
@@ -864,6 +907,7 @@ public abstract class Element
         if (_mounted)
         {
             _mounted = false;
+            _pendingAnnouncements = null; // gone before a window took it: a rebuild's twin
             OnUnmounted();
         }
         if (_children is null) return;

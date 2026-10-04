@@ -980,8 +980,10 @@ sits there; the pill inside it is still clickable.
 border, text, the action verb in `Primary`, and fixed success/warning accents plus
 `Danger` for errors). A severity draws a bar at the leading edge.
 
-**Accessibility:** a plain toast is an **alert** named by its message, which readers
-announce unprompted. With an action the whole pill is a **button** named by
+**Accessibility:** a plain toast is an **alert** named by its message. Either way the
+message is announced as the toast appears (`Element.Announce`: politely, an error
+assertively), since a reader would not find it in the second or two it is up. With an
+action the whole pill is a **button** named by
 the verb, with the message as its description: a bigger target for the second or
 two it is up, and one invokable node rather than a link buried in an alert. Clicking it dismisses the toast and runs
 the action.

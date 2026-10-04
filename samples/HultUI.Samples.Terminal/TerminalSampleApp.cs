@@ -35,11 +35,17 @@ public sealed class TerminalSampleApp : IDisposable
     private static readonly Color HeaderBackground = new(31, 31, 31);
     private static readonly Color Muted = new(150, 150, 150);
 
-    public TerminalSampleApp(SampleProgram program = SampleProgram.Shell)
+    /// <param name="program">What runs.</param>
+    /// <param name="launch">For <see cref="SampleProgram.Shell"/>: a program to run instead of the
+    /// user's shell (the sample's <c>--run</c>).</param>
+    public TerminalSampleApp(SampleProgram program = SampleProgram.Shell, PtyLaunch? launch = null)
     {
+        _launch = launch;
         Program = new Signal<SampleProgram>(program);
         Session = new Signal<TerminalController>(Start(program));
     }
+
+    private readonly PtyLaunch? _launch;
 
     /// <summary>What the next <see cref="Restart"/> runs.</summary>
     public Signal<SampleProgram> Program { get; }
@@ -71,7 +77,7 @@ public sealed class TerminalSampleApp : IDisposable
             try
             {
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                connection = Shell = PtyConnection.Start(PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null));
+                connection = Shell = PtyConnection.Start(_launch ?? PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null));
                 Problem.Value = null;
             }
             catch (Exception ex) when (ex is FileNotFoundException or InvalidOperationException or IOException)

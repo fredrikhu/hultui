@@ -197,6 +197,24 @@ internal sealed class AtSpiBus : IDisposable
         EmitEvent("StateChanged", path, state, active ? 1 : 0, 0,
             static (ref MessageWriter w) => w.WriteVariantInt32(0));
 
+    /// <summary>Text removed or added (<paramref name="insert"/>) at an offset, with the text.</summary>
+    public void EmitTextChanged(string path, bool insert, int offset, string text) =>
+        EmitEvent("TextChanged", path, insert ? "insert" : "delete", offset, text.Length,
+            (ref MessageWriter w) => w.WriteVariantString(text));
+
+    public void EmitTextCaretMoved(string path, int offset) =>
+        EmitEvent("TextCaretMoved", path, "", offset, 0, static (ref MessageWriter w) => w.WriteVariantInt32(0));
+
+    public void EmitTextSelectionChanged(string path) =>
+        EmitEvent("TextSelectionChanged", path, "", 0, 0, static (ref MessageWriter w) => w.WriteVariantInt32(0));
+
+    /// <summary>
+    /// An announcement (seam A2): <c>Object:Announcement</c>, AT-SPI 2.46's, which Orca speaks;
+    /// the politeness is detail1 (<see cref="AtSpiConstants.LivePolite"/>, assertive).
+    /// </summary>
+    public void EmitAnnouncement(string path, string text, int politeness) =>
+        EmitEvent("Announcement", path, "", politeness, 0, (ref MessageWriter w) => w.WriteVariantString(text));
+
     // ──── Cache signals. Keep AT clients' object caches warm so libatspi does
     // not treat every node we later signal as transient (and mark it defunct).
 

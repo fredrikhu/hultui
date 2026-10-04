@@ -13,7 +13,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI;
 
-public sealed class Window : IOverlayHost, IDisposable
+public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -106,6 +106,9 @@ public sealed class Window : IOverlayHost, IDisposable
     // force the next frame to rebuild+diff the tree — that regenerates the node
     // snapshots (Name, bounds, …) and emits precise property-changed events.
     private bool _a11yPropertyDirty;
+    /// <summary>Announcements made since the last frame, handed to the bridge once the tree
+    /// holding their elements is applied (<see cref="Element.Announce"/>).</summary>
+    private readonly List<(Element Source, string Text, AnnouncementPoliteness Politeness)> _announcements = [];
     // Layout-only changes (resize, scroll) refresh the a11y tree's bounds, but
     // rebuilding the whole snapshot every frame of a drag floods assistive tech
     // and is O(total items) for a virtualized list. These changes are coalesced:
@@ -812,6 +815,14 @@ public sealed class Window : IOverlayHost, IDisposable
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
             _a11yLayoutRefreshPending = false;
+        }
+        if (_announcements.Count > 0)
+        {
+            // After the rebuild, so an element that announces as it appears has its node.
+            if (a11yActive)
+                foreach (var (source, text, politeness) in _announcements)
+                    _accessibilityBridge.Announce(FindA11yNode(source), text, politeness);
+            _announcements.Clear();
         }
         _a11yPropertyDirty = false;
         _a11yWasActive = a11yActive;
@@ -2839,6 +2850,14 @@ public sealed class Window : IOverlayHost, IDisposable
     /// button's name-from-content stay correct) and the diff emits exactly the
     /// property-changed events that platforms forward to assistive tech.
     /// </summary>
+    void IAccessibilityAnnouncer.Announce(Element source, string text, AnnouncementPoliteness politeness)
+    {
+        // Nobody to hear it: nothing is kept for a reader that starts later.
+        if (!_accessibilityBridge.IsActive) return;
+        _announcements.Add((source, text, politeness));
+        _a11yPropertyDirty = true; // a frame, and a tree that holds the element
+    }
+
     private sealed class AccessibilityObserverAdapter(Window window) : IElementPropertyObserver
     {
         public void OnElementPropertyChanged(Element element, string propertyName)

@@ -78,6 +78,7 @@ public sealed partial class TerminalElement
         var style = BaseStyle(controller);
 
         UpdateMetrics(ctx, style, scale);
+        NoteTextFrame();
         if (!ReferenceEquals(_pixelsFor, controller) || _pixelsKey != _metricsKey)
         {
             controller.SetCellPixels(_cellWidth * scale, _cellHeight * scale);

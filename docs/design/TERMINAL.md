@@ -64,7 +64,7 @@ spike ran the fix; "proposed" means it is design only.
 | 12 | Engine facts a renderer must know: default colours are palette 256/257, the deferred wrap is X == Cols, and a width-2 cell can end a row. | Renderer rules | element | built in step 2 |
 | 13 | HultUI has no positioned-glyph-run or offscreen-surface API for elements. | One `DrawText` per row, with a span per style. Seams T2/T3 were for the case where that was too slow, and it is not | element | measured in step 2: about 7 ms a frame for a 207 × 58 full-screen redraw |
 | 14 | HultUI has no monospace default font and no cell-metrics API. | Seam T1: `FontFamilies.Monospace`, family lists, `MeasureFont`, `HasGlyph` | framework | built in step 3 |
-| 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2; until then, role and value | framework | role, name and value built in steps 2 and 5; A1/A2 proposed |
+| 15 | HultUI has no UIA TextPattern, no AT-SPI Text, and no announcements. | Seams A1/A2: an element's text a reader moves through, and `Element.Announce` | framework; element | built in step 7: checked from outside with Windows' own UI Automation client (the text, its lines and words, boxes, and every new line of `ping` announced); AT-SPI unit-tested only |
 | 16 | Porta.Pty puts arm64's `OpenConsole.exe` (1.1 MB) in a win-x64 publish. | **Not a problem: keep it.** Microsoft's own ConPTY targets ship both hosts for x64 ("x64 can only run on x64 and ARM64"), because the x64 `conpty.dll` checks the machine (`IsWow64Process2`) and starts the arm64 host on ARM64 Windows. Trimming it would drop an x64 app on ARM64 back to the in-box console host, silently | `HultUI.Terminal.Pty` | decided in step 4 from the package's targets and the DLL's imports |
 | 17 | A row shrink with the cursor near the top leaves the cut rows below the screen, so the scrollback keeps that many lines fewer, for good. A terminal created at 80 × 24 and sized to its pane before its first screenful is that case. | Drop the blank rows below the cursor, as xterm.js does | engine patch 0005 | measured: found in step 2; the new upstream test fails without it |
 | 18 | A symbol the monospace font lacks (Consolas lacks some arrows and maths operators) is drawn from a fallback font whose advance pushes the rest of its row off its columns. | A character the face has no glyph for is drawn on its own at its column. Step 2 used fixed code point ranges; step 3 asks the face (`HasGlyph`, seam T1) | element | measured: found in step 2 by the sample; the font check built in step 3 |
@@ -559,29 +559,57 @@ means in the four apps' bars; the bar itself is the application's.
 
 ## Accessibility
 
-HultUI has no UIA TextPattern and no AT-SPI Text interface; text elements expose their whole text
-as a Value. It has no live-region or announcement API either.
+The element is a document (`AccessibilityRole.Document`), named after the session's title unless
+the app names it, whose value is the visible screen (`TerminalController.ReadScreen`). Step 7 gave
+it what Windows Terminal has: text a reader moves through, and announcements of new output.
 
-- **First version** (steps 2 and 5). The element is `AccessibilityRole.Document`, named after the
-  session's title unless the app names it, and its value is the visible screen
-  (`TerminalController.ReadScreen`).
-  - **Seam.** `Element.AccessibleValue` (internal virtual, new in step 5) lets an element the
-    framework's own types do not cover supply a value; the tree builder and the Windows host
-    bridge read it. The Windows bridge offers a document with a value the Value pattern,
-    read-only (`SetValue` answers `UIA_E_ELEMENTNOTENABLED`). Checked from outside with Windows'
-    own UI Automation client against the sample: a Document named "Demo shell", read-only,
-    whose value is the screen.
-  - **Changes** are told once the output has paused for 500 ms, or after 2 s of unbroken output:
-    one update per burst, not one a frame, and nothing is timed while no assistive tool listens.
-    A title renames the node at once.
-  - **Found:** a title that arrived before the element listened (the demo shell's first output,
-    read while the window was still being built) never named it; listening now starts by reading
-    the title.
-  - Readers are still not told what is new, and cannot move through the screen by line or word.
-- **Seams A1 and A2 (below)** give it what Windows Terminal has: a text range model a reader can
-  review by line and word, and announcements of new output.
-- **TextArea benefits too.** A1 is the same work TextArea needs; its whole-text Value is the same
-  limitation.
+- **The value** (step 5). `Element.AccessibleValue`, an internal seam, lets an element the
+  framework's own types do not cover supply a value. Windows offers a document's value through a
+  read-only Value pattern (`SetValue` answers `UIA_E_ELEMENTNOTENABLED`).
+- **The text** (seam A1, step 7). The screen's rows, trailing blanks dropped, down to the last row
+  with text or the cursor's, with the cursor as the caret and the selection mapped onto it (a
+  block selection is not: it is no range of the text).
+  - **Built when a reader asks,** on its thread, from a copy of the screen, and kept until the
+    emulator's generation, the selection or the cell grid changes: an unchanged screen is the same
+    snapshot.
+  - **Geometry** is the cell grid, from where the element last drew: a character's columns times
+    the cell width, a wide one two cells wide.
+- **When** (steps 5 and 7). A change is told once the output has paused for 150 ms, or after 2 s
+  of unbroken output: one update per burst, not one a frame. That one rebuild tells the value, the
+  text and the caret, whichever changed (UIA's text-changed and text-selection-changed events,
+  AT-SPI's insert, delete and caret-moved). Nothing is timed while no assistive tool listens.
+  - Step 5 waited 500 ms, for the value alone. A caret that moves with the arrow keys is read at
+    the caret, and half a second was too slow for that.
+- **Announcements** (seam A2, step 7). At the same settle, the output since the last announcement,
+  on the normal screen:
+  - **not a full-screen program's**, which a reader reviews through the text instead; the place is
+    taken again on the way back;
+  - **not the echo of typing**: once the user has typed (or pasted), what comes back up to the first
+    line break is the echo, which the reader spoke as it was typed, and is left out, and a line's
+    editing that never reaches a line break is not announced at all;
+  - **a screenful at most**: a flood is announced by its end;
+  - **from where the last one ended**: a logical line and the characters of it already said. The
+    first settle only takes the place, so a reader that starts is not read the whole screen.
+- **Checked from outside** with Windows' own UI Automation client (FlaUI's UIA3, a scratch program,
+  read-only) against the sample running `ping` (`--run`, new in step 7):
+  - every reply was announced as it came, about one a second, from the document, as an "Other"
+    notification with activity `HultUI.Announcement`;
+  - the document range held the screen's twelve lines;
+  - the line at a point was "Pinging 127.0.0.1 with 32 bytes of data:", its box one row down and
+    40 cells of Cascadia Mono (7.6 px) wide;
+  - a word was "Pinging " and two words on was ".";
+  - the caret's line was the cursor's.
+- **Found:**
+  - **Windows never told the terminal a reader was listening.** Only the Linux bridge reported to
+    `AccessibilityClients`, so on Windows the settle never ran and nothing was told at all; step 5's
+    check read the value by asking, which does not need it. With the report taken out again, the
+    same client heard no announcements.
+  - **The Linux bridge advertised a Value interface** for every string value, with nothing behind
+    it; AT-SPI's Value is numeric, and it is gone.
+- **Not verified:** AT-SPI (Orca) ran nothing here; the Text interface's answers are unit-tested,
+  the signals are not.
+- **TextArea benefits too.** A1 is the work TextArea and text inputs need; they still expose their
+  text only as a value.
 
 ## Process launch (`HultUI.Terminal.Pty`)
 
@@ -624,7 +652,7 @@ the first frame.
 
 Each is useful beyond the terminal. No terminal package may need anything not listed here; if
 implementation finds another, it goes here first. Step 2 needed none; step 3 built T1; step 6
-built K1–K4. A1–A2 make later steps right rather than possible.
+built K1–K4; step 7 built A1 and A2.
 
 **T1: monospace cell metrics and a default monospace family (`HultUI.Core`, `HultUI.Text`,
 `HultUI.Rendering.Skia`). Built in step 3.**
@@ -715,17 +743,34 @@ typed were unrelated events. All four are new members, so no existing code chang
   layout key and the Windows AltGr rule. `CefKeysTests`, `WebView2MappingTests`, `KeyMapTests` and
   a time picker test cover the backends' new names.
 
-**A1: a text range model for screen readers (`HultUI.Core`, both bridges).**
+**A1: text a reader moves through (`HultUI.Core`, both bridges). Built in step 7.**
 
-- **What to add.** UIA `ITextProvider`/`ITextRangeProvider` on Windows and AT-SPI `Text` on Linux,
-  over an element-supplied model: lines, a caret, ranges by character, word and line.
-- **Who uses it.** The terminal and TextArea first.
+- **The model.** `AccessibleText`: an immutable snapshot of the text, its lines, a caret, a
+  selection, the visible part, and `AccessibleTextGeometry`, which maps offsets to boxes and back.
+  It answers character, word and line steps itself, so both bridges move alike: a character is a
+  surrogate pair whole, a word a run with the blanks after it, a line with its line break.
+- **The seam.** `Element.AccessibleTextSource` (internal) hands out an `IAccessibleTextSource`,
+  which the bridges read on their own threads. The node carries the source and the snapshot the
+  tree was built with. The differ compares snapshots and tells `Text` (with the previous node)
+  and `TextSelection`.
+- **Windows:** `ITextProvider2` and `ITextRangeProvider`, hand-built vtables like the other
+  patterns, offered by any node with text. Ranges never move onto the empty end; selecting from a
+  reader is refused. Text changes raise `Text_TextChanged`, caret moves `Text_TextSelectionChanged`.
+- **Linux:** `org.a11y.atspi.Text` (its answers in plain functions, `AtSpiText`), and `TextChanged`
+  insert/delete, `TextCaretMoved` and `TextSelectionChanged`. A sentence and a paragraph are a line.
+- **Who uses it.** The terminal. Text inputs and TextArea are next.
 
-**A2: announcements (`HultUI.Core`, both bridges).**
+**A2: announcements (`HultUI.Core`, both bridges). Built in step 7.**
 
-- **What to add.** `Element.Announce(text, politeness)`: `UiaRaiseNotificationEvent` on Windows, an
-  AT-SPI announcement or live region on Linux.
-- **Who uses it.** The terminal announces new output in batches. Toasts can use it too.
+- **The API.** `Element.Announce(text, politeness)`, polite or assertive. The window gives it to
+  the bridge once the frame's tree holds the element, from the element's node. Nothing is kept
+  while no reader listens. An element not in a window yet says it once a window takes it, and one
+  removed first never does, so a rebuild's discarded twin says nothing.
+- **Windows:** `UiaRaiseNotificationEvent`, kind Other, activity `HultUI.Announcement`; polite is
+  `All`, assertive `ImportantAll`. **Linux:** AT-SPI 2.46's `Object:Announcement`, politeness in
+  detail1.
+- **Who uses it.** The terminal, for new output, and toasts, for their message (an error
+  assertively): the docs said a toast's alert was announced unprompted, and nothing announced it.
 
 ## Testing
 
@@ -742,6 +787,10 @@ typed were unrelated events. All four are new members, so no existing code chang
     titles, and what it draws, through the recorded render log.
   - Still to add from the spike: question 3's reflow checks, and the resize policy when it is
     built.
+  - Accessibility (step 7): the text, the caret, the geometry and the selection; the source read
+    off the UI thread; the text and caret changes told; announcements, the echo of typing left
+    out, a full-screen program not announced, a flood by its last screenful, nothing while no
+    reader listens.
 - **`HultUI.Terminal.Pty.Tests`** (built in step 4; real pseudoterminals, about 10 s):
   - **A child program of its own** (`HultUI.Terminal.Pty.Tests.Child`, run as `dotnet <dll>`)
     prints its arguments, its window size, how many lines it read, a flood, and the exit code it
@@ -892,8 +941,25 @@ typed were unrelated events. All four are new members, so no existing code chang
        keystrokes sent to a real window.
    - **Not verified:** X11 and Wayland ran nothing here; the SDL behaviour there (AltGr as
      `MODE`, a key's text in the same pump) is read from SDL 3's source.
-7. **Accessibility:** seams **A1** and **A2**, and the element's text range model and output
-   announcements.
+7. **Accessibility: done on Windows 2026-10-04** (see *Accessibility* and seams A1 and A2).
+   - **The framework:** `AccessibleText` and its geometry, `IAccessibleTextSource`, the node's text,
+     the differ's `Text` and `TextSelection`; UIA's text pattern and notifications; AT-SPI's Text
+     interface, text signals and announcements; `Element.Announce`; toasts announcing.
+   - **The terminal:** its screen as text with the cursor as caret, the cell grid as geometry, the
+     selection, a 150 ms settle, and announcements of new output. The sample takes
+     `--run <program> [arguments]`.
+   - **Tests:** 146 in `HultUI.Terminal.Tests` (10 new); `AccessibleTextTests` (7) in Core;
+     `UiaTextPatternTests` (9) and `AnnouncementTests` (5) headless; `AtSpiTextTests` (5). Negative
+     controls: the window handing announcements on, the announcement kept until hosted, the differ's
+     text change, the echo, the alternate screen, the flood's cap, the range's stop before the end,
+     and the Value interface; the Windows report to `AccessibilityClients` by the outside client,
+     which heard nothing without it.
+   - **Found on the way:** Windows never reported a listening reader, and the Linux bridge
+     advertised a Value interface it did not serve (both under *Accessibility*). A toast mounted in a
+     tree still being built had no window to announce through, which is why an element keeps an
+     announcement until a window takes it.
+   - **Not verified:** AT-SPI and Orca; selecting text from a reader is not offered on either
+     platform.
 8. **Later:**
    - images (Sixel and Kitty, through a `PixelFrameSink` per image);
    - `HultUI.Terminal.Ssh` (Vesper's SFTP brief makes SSH the next transport);

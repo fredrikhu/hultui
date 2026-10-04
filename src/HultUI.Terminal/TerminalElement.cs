@@ -70,6 +70,7 @@ public sealed partial class TerminalElement : Element
             _controller = value;
             _selection = null;
             _searchBound = false;
+            _announcedTo = null;
             if (value is not null && _search is { Query.Length: > 0 }) Rebind();
             if (value is not null) ApplyTitle(value.Title);
             StartListening();
@@ -273,6 +274,7 @@ public sealed partial class TerminalElement : Element
         if (!_snapshot.AtBottom) c.ScrollToBottom();
         if (_selection is not null) { _selection = null; MarkPaintDirty(); }
         RestartBlink();
+        _typedSinceAnnounce = true;
         c.Send(bytes);
     }
 
@@ -344,6 +346,7 @@ public sealed partial class TerminalElement : Element
         if (window.Clipboard.GetText() is { Length: > 0 } text)
         {
             if (!_snapshot.AtBottom) _controller.ScrollToBottom();
+            _typedSinceAnnounce = true;
             _controller.Paste(text);
         }
     }

@@ -93,6 +93,11 @@ public static class AccessibilityTreeBuilder
             automationId: element.AutomationId,
             expanded: element.AccessibleExpanded);
         node.NativeContent = element.NativeAccessibleContent;
+        if (element.AccessibleTextSource is { } text)
+        {
+            node.TextSource = text;
+            node.Text = text.AccessibleText;
+        }
         return node;
     }
 

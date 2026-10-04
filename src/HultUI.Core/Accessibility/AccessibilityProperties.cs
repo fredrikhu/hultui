@@ -25,4 +25,11 @@ public static class AccessibilityProperties
 
     /// <summary>An <see cref="IAccessibleContentSource"/>'s content changed (seam W11).</summary>
     public const string Content = "Content";
+
+    /// <summary><see cref="AccessibilityNode.Text"/>'s text changed. The change carries the
+    /// previous node, so a bridge can say what was removed and inserted.</summary>
+    public const string Text = "Text";
+
+    /// <summary><see cref="AccessibilityNode.Text"/>'s caret or selection moved.</summary>
+    public const string TextSelection = "TextSelection";
 }

@@ -29,4 +29,13 @@ public interface IAccessibilityBridge
     /// non-null, belongs to the most recently applied tree snapshot.
     /// </summary>
     void NotifyFocusChanged(AccessibilityNode? focused);
+
+    /// <summary>
+    /// Has assistive technology speak <paramref name="text"/> (<see cref="Elements.Element.Announce"/>):
+    /// a UIA notification on Windows, an AT-SPI announcement on Linux. <paramref name="source"/>
+    /// is the announcing element's node in the most recently applied tree, or null when it has
+    /// none (the bridge then announces from the window's root). Called on the UI thread, only
+    /// while <see cref="IsActive"/>. Does nothing by default.
+    /// </summary>
+    void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness) { }
 }

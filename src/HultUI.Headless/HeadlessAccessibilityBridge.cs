@@ -33,5 +33,18 @@ public sealed class HeadlessAccessibilityBridge : IAccessibilityBridge
 
     public void NotifyFocusChanged(AccessibilityNode? focused) => FocusedNode = focused;
 
+    /// <summary>Every announcement made so far, oldest first (<c>Element.Announce</c>): the
+    /// announcing element's node (null when it had none) and what a reader would say.</summary>
+    public IReadOnlyList<HeadlessAnnouncement> Announcements => _announcements;
+    private readonly List<HeadlessAnnouncement> _announcements = [];
+
+    public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness) =>
+        _announcements.Add(new HeadlessAnnouncement(source, text, politeness));
+
     public void ClearDiffs() => _diffs.Clear();
+
+    public void ClearAnnouncements() => _announcements.Clear();
 }
+
+/// <summary>An announcement as the headless bridge recorded it.</summary>
+public readonly record struct HeadlessAnnouncement(AccessibilityNode? Source, string Text, AnnouncementPoliteness Politeness);
