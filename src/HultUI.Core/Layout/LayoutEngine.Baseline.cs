@@ -115,7 +115,7 @@ public sealed partial class LayoutEngine
             || LayoutSpace.IsUnbounded(mainAvailable);
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount) = MeasureFlexItems(container.Children, isRow, mainDistribute, crossAvailable);
+        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(container.Children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
         try
         {
             if (itemCount == 0) return null;
@@ -125,7 +125,7 @@ public sealed partial class LayoutEngine
                 ResolveFlexGrowShrink(l, mainDistribute, mainGap, isRow, crossAvailable);
             foreach (var l in lines)
                 RemeasureFlexedCrossSizes(l, isRow, mainDistribute, crossAvailable);
-            ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
+            if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
             float totalCross = 0;

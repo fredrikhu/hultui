@@ -16,8 +16,12 @@
   The trap was the measure pass: Phase 1 sizes are write-free and separate from layout, so a row
   that baseline alignment makes taller has to be measured taller too, or the parent reserves
   less than the row takes. So the baselines are computed measure-only (`LayoutEngine.Baseline.cs`),
-  in both passes, before line cross sizes — and only for items that ask, so a tree that never
-  uses it pays one pass over its items per line. Column containers keep FlexStart, as CSS does.
+  in both passes, before line cross sizes — and only for rows that ask. Column containers keep
+  FlexStart, as CSS does. **Benchmarked**, because the first cut ran a pass over every row's items
+  whether or not anything asked: three alternating A/B rounds showed append-1,000 about 3% slower,
+  consistently (best-of 8.07–8.14 → 8.28–8.60 ms). The check now rides in `MeasureFlexItems`, the
+  loop that already visits every item, and the pass runs only when it found something; the re-run
+  put append-1,000 at 7.70–7.78 against main's 7.90–8.52 and create-10,000 level.
   8 Core layout tests (a font whose numbers check by hand) and 1 headless pixel test with real
   fonts: flat-bottomed capitals at 30px, 12px and in a 44px field end on one pixel row (±1),
   and with the alignment off the 12px word ends 19 rows higher. Four faults put back — no

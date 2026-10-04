@@ -205,7 +205,7 @@ public sealed partial class LayoutEngine
         // inside a ScrollView would resolve itself against the viewport and shrink
         // its own children to fit. Percentages against it resolve to auto (see
         // Dimension.Resolve), so no absurd sizes leak out.
-        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable);
+        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
         try
         {
             // ── Phase 2: Collect items into lines ──
@@ -220,7 +220,7 @@ public sealed partial class LayoutEngine
                 RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
 
             // ── Phase 4: Compute per-line cross sizes ──
-            ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
+            if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
             // ── Phase 5: Distribute lines along cross axis (AlignContent) ──
@@ -372,11 +372,16 @@ public sealed partial class LayoutEngine
 
     // ── Flex helpers ──
 
-    private (FlexItem[] Array, int Count) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
-        float mainAvailable, float crossAvailable)
+    /// <returns>The items, and whether any of them aligns by baseline in a row — noted here, in
+    /// the loop that already visits every item, so a row that never asks for baseline alignment
+    /// pays one comparison per item for it rather than a pass of its own.</returns>
+    private (FlexItem[] Array, int Count, bool AnyBaseline) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
+        float mainAvailable, float crossAvailable, AlignItems containerAlign)
     {
         var array = ArrayPool<FlexItem>.Shared.Rent(Math.Max(1, children.Count));
         int count = 0;
+        bool anyBaseline = false;
+        bool rowAlignsByBaseline = isRow && containerAlign == AlignItems.Baseline;
 
         for (int i = 0; i < children.Count; i++)
         {
@@ -384,10 +389,14 @@ public sealed partial class LayoutEngine
             if (child.PositionRead.Type == PositionType.Absolute)
                 continue;
             var childBox = child.BoxRead;
+            var childFlex = child.FlexRead;
+            if (isRow && !anyBaseline)
+                anyBaseline = childFlex.AlignSelf == AlignSelf.Baseline
+                    || (childFlex.AlignSelf == AlignSelf.Auto && rowAlignsByBaseline);
 
-            float basisOrSize = child.FlexRead.FlexBasis.IsAuto
+            float basisOrSize = childFlex.FlexBasis.IsAuto
                 ? (isRow ? childBox.Width.ResolveOr(mainAvailable, -1f) : childBox.Height.ResolveOr(mainAvailable, -1f))
-                : child.FlexRead.FlexBasis.ResolveOr(mainAvailable, -1f);
+                : childFlex.FlexBasis.ResolveOr(mainAvailable, -1f);
             bool hasBasisOrSize = basisOrSize >= 0f;
 
             float hypotheticalMain;
@@ -448,7 +457,7 @@ public sealed partial class LayoutEngine
             array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross, hypotheticalMain);
         }
 
-        return (array, count);
+        return (array, count, anyBaseline);
     }
 
     /// <summary>
@@ -560,7 +569,7 @@ public sealed partial class LayoutEngine
             || LayoutSpace.IsUnbounded(mainAvailable);
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable);
+        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
         try
         {
             var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
@@ -575,7 +584,7 @@ public sealed partial class LayoutEngine
 
             // As the layout pass does, or a row baseline alignment makes taller would be
             // measured shorter than it lays out.
-            ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
+            if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
             float totalMain = 0;
