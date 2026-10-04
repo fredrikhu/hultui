@@ -112,6 +112,45 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     }
 
     [UiFact]
+    public void Raise_UnMinimizes_ButLeavesAMaximizedWindowMaximized()
+    {
+        // Raise restored unconditionally, and a restore is what takes a window out of
+        // maximized: every file handed over from a second launch shrank the player.
+        foreach (var style in Styles)
+        {
+            var area = WorkAreas()[0];
+            var normal = new WindowPlacement((int)area.X + 80, (int)area.Y + 80, 800, 600, false);
+            using var app = Open(style);
+            var window = app.PrimaryWindow;
+            var hwnd = window.NativeHandle;
+            window.Placement = normal with { Maximized = true };
+            FirstFrame(app);
+
+            window.Raise();
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            Assert.True(IsZoomed(hwnd), $"{style}: raising a maximized window un-maximized it");
+            Assert.True(window.IsMaximized);
+
+            window.Minimize();
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            window.Raise();
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            Assert.False(IsIconic(hwnd), $"{style}: raise left the window minimized");
+            Assert.True(IsZoomed(hwnd), $"{style}: a window minimized from maximized came back restored");
+
+            window.Restore();   // posted on the custom frame: let it land before minimizing
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            window.Minimize();
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            window.Raise();
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            Assert.False(IsIconic(hwnd));
+            Assert.Equal(normal, OuterRect(window));
+            window.Close();
+        }
+    }
+
+    [UiFact]
     public void BoundsOnAMonitorThatIsGone_ComeBackOnOne()
     {
         using var app = Open(WindowStyle.Borderless);
@@ -177,6 +216,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [DllImport("user32", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfoW(nint monitor, ref MONITORINFO info);
     [DllImport("user32")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
     [DllImport("user32")] private static extern bool IsZoomed(nint hwnd);
+    [DllImport("user32")] private static extern bool IsIconic(nint hwnd);
     [DllImport("user32")] private static extern bool IsWindowVisible(nint hwnd);
     [DllImport("user32")] private static extern uint GetDpiForWindow(nint hwnd);
     [DllImport("dwmapi")] private static extern int DwmGetWindowAttribute(nint hwnd, int attribute, out int value, int size);

@@ -56,19 +56,14 @@ internal static class ReelProgram
 
         // A second launch hands its file to the window that is already open, rather than
         // opening a tenth copy of the app — which is what "set as default player and
-        // select ten files" does otherwise. Vesper's arrangement, for the same reason.
-        System.Threading.Mutex? instanceLock = null;
-        bool single = OperatingSystem.IsWindows() && settings.Data.SingleInstance;
-        if (single)
-        {
-            instanceLock = new System.Threading.Mutex(initiallyOwned: true, @"Local\Reel.SingleInstance",
-                out bool isNew);
-            if (!isNew)
-            {
-                if (file is not null) SingleInstance.TrySignal(file);
-                return;
-            }
-        }
+        // select ten files" does otherwise. A launch with no file brings that window forward.
+        // When the running copy does not take it — hung, or closing — this launch opens a
+        // window of its own rather than drop the file.
+        using var instance = OperatingSystem.IsWindows() && settings.Data.SingleInstance
+            ? SingleInstance.Claim("Reel")
+            : null;
+        if (instance is { IsFirst: false } && instance.Forward(args))
+            return;
 
         // Vulkan, because Reel plays films and HDR needs it: it is the only renderer that can
         // present an HDR swapchain, and the only one that carries sixteen bits a channel from
@@ -109,14 +104,16 @@ internal static class ReelProgram
 
         if (file is not null) reel.Open(file);
 
-        using var ipc = new CancellationTokenSource();
-        if (single)
-            SingleInstance.StartServer(path => Application.InvokeOnMainThread(() => reel.Open(path)), ipc.Token);
+        // Later launches, on the UI thread — including any that arrived while this window was
+        // being built. A relative path means the folder that launch was started in.
+        if (instance is { IsFirst: true })
+            instance.Listen(launch =>
+            {
+                if (launch.Args.FirstOrDefault(a => !a.StartsWith('-')) is { } path)
+                    reel.Open(launch.FullPath(path));
+                window.Raise();
+            });
 
         app.Run();
-
-        ipc.Cancel();
-        instanceLock?.ReleaseMutex();
-        instanceLock?.Dispose();
     }
 }

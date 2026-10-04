@@ -794,7 +794,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public void Raise()
     {
-        SDL_RestoreWindow(_window);   // un-minimize first, then bring to front
+        // Un-minimize first, then bring to front — and only un-minimize. Restoring was
+        // unconditional, and a restore is also what takes a window out of maximized, so every
+        // raise of a maximized window (a file handed over from a second launch) shrank it.
+        if (((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MINIMIZED) != 0)
+            Restore();
         SDL_RaiseWindow(_window);
     }
 

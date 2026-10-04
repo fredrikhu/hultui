@@ -29,23 +29,19 @@ internal static class VesperProgram
         // costs up to 21 seconds, and nothing is on screen yet to say why. The pane resolves it
         // and shows its own offline state. A local argument is checked as before: microseconds,
         // and it keeps "a file path falls back to the working directory" working.
-        var startPath = args.Length > 0 && (PathProbe.IsRemote(args[0]) || Directory.Exists(args[0]))
-            ? args[0]
+        // A local one is made full here: it may be handed to a copy started somewhere else.
+        var startPath = args.Length > 0 && PathProbe.IsRemote(args[0]) ? args[0]
+            : args.Length > 0 && Directory.Exists(args[0]) ? Path.GetFullPath(args[0])
             : Directory.GetCurrentDirectory();
 
-        // Single-instance (Windows): the owning instance holds a named mutex and runs an IPC server;
-        // a second launch hands its folder to the running window (which opens it as a tab) and exits.
-        System.Threading.Mutex? instanceLock = null;
-        bool single = OperatingSystem.IsWindows() && SettingsStore.Load().SingleInstance;
-        if (single)
-        {
-            instanceLock = new System.Threading.Mutex(initiallyOwned: true, @"Local\VesperCommander.SingleInstance", out bool isNew);
-            if (!isNew)
-            {
-                SingleInstance.TrySignal(startPath);   // fold this launch into the running instance
-                return 0;
-            }
-        }
+        // Single instance (Windows, when the option is on): a second launch hands its folder to the
+        // running window, which opens it as a tab, and exits. When the running copy does not take
+        // it — hung, or closing — this launch opens a window of its own rather than drop it.
+        using var instance = OperatingSystem.IsWindows() && SettingsStore.Load().SingleInstance
+            ? SingleInstance.Claim("VesperCommander")
+            : null;
+        if (instance is { IsFirst: false } && instance.Forward([startPath]))
+            return 0;
 
         // The Application ctor creates the SDL window + GL context + Skia GRContext
         // synchronously on the main thread. Borderless: Vesper draws its own chrome
@@ -70,14 +66,15 @@ internal static class VesperProgram
         window.Closed += commander.Dispose;
         app.SetRoot(commander.Mount());
 
-        // Listen for second launches and open their folder as a tab (marshaled to the UI thread).
-        using var ipcCts = new System.Threading.CancellationTokenSource();
-        if (single)
-            SingleInstance.StartServer(path => Application.InvokeOnMainThread(() => commander.OpenPathAsTab(path)), ipcCts.Token);
+        // Later launches' folders open as tabs, on the UI thread — including any that arrived
+        // while this window was being built.
+        if (instance is { IsFirst: true })
+            instance.Listen(launch =>
+            {
+                if (launch.Args.Count > 0) commander.OpenPathAsTab(launch.Args[0]);
+            });
 
         app.Run();
-        ipcCts.Cancel();
-        instanceLock?.Dispose();
         return 0;
 
     }
