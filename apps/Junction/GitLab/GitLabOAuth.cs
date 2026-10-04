@@ -206,26 +206,64 @@ public static class GitLabOAuth
     public sealed record RedirectCallback(string? Code, string? State, string? Error, string? ErrorDescription);
 
     /// <summary>
-    /// Accepts connections on <c>127.0.0.1:port</c> until one asks for
+    /// Accepts connections on <c>127.0.0.1:port</c> and <c>[::1]:port</c> until one asks for
     /// <see cref="RedirectPath"/>; anything else (a favicon probe) gets a 404 and the wait
     /// continues. Replies with a small page telling the user to close the tab.
+    ///
+    /// <para>Both, because the redirect names <c>localhost</c> and Windows resolves that to
+    /// <c>::1</c> first. A client that tries <c>::1</c>, finds nothing there and only then
+    /// falls back to <c>127.0.0.1</c> loses two seconds to Windows retrying the refused
+    /// connection; .NET's HttpClient does exactly that, measured at 2 s a redirect against the
+    /// IPv4-only listener this used to be. When <c>::1</c> cannot be bound (no IPv6, or the
+    /// port taken there) the listener carries on with IPv4 alone, as before.</para>
     /// </summary>
     public sealed class LoopbackListener : IDisposable
     {
         private readonly TcpListener _listener;
+        private TcpListener? _ipv6;
 
         public LoopbackListener(int port) => _listener = new TcpListener(IPAddress.Loopback, port);
 
-        public void Start() => _listener.Start();
+        public void Start()
+        {
+            _listener.Start();
+            if (!Socket.OSSupportsIPv6) return;
+            try
+            {
+                // On the port IPv4 got, which for a requested 0 is only known now.
+                _ipv6 = new TcpListener(IPAddress.IPv6Loopback, Port);
+                _ipv6.Start();
+            }
+            catch (SocketException)
+            {
+                _ipv6 = null;
+            }
+        }
 
         /// <summary>The bound port — the requested one, or the free one chosen for 0.</summary>
         public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
         public async Task<RedirectCallback> WaitForRedirectAsync(CancellationToken ct)
         {
+            // Stops whichever accept is still waiting once the redirect has come in.
+            using var done = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            try { return await AcceptRedirectAsync(done.Token).ConfigureAwait(false); }
+            finally { done.Cancel(); }
+        }
+
+        private async Task<RedirectCallback> AcceptRedirectAsync(CancellationToken ct)
+        {
+            Task<TcpClient>? ipv4 = null, ipv6 = null;
             while (true)
             {
-                using var client = await _listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                ipv4 ??= _listener.AcceptTcpClientAsync(ct).AsTask();
+                if (_ipv6 is not null)
+                    ipv6 ??= _ipv6.AcceptTcpClientAsync(ct).AsTask();
+
+                var accepted = ipv6 is null ? ipv4 : await Task.WhenAny(ipv4, ipv6).ConfigureAwait(false);
+                if (accepted == ipv4) ipv4 = null; else ipv6 = null;
+
+                using var client = await accepted.ConfigureAwait(false);
                 client.ReceiveTimeout = 5000;
                 using var stream = client.GetStream();
                 var requestLine = await ReadRequestLineAsync(stream, ct).ConfigureAwait(false);
@@ -308,6 +346,10 @@ public static class GitLabOAuth
             await stream.FlushAsync(ct).ConfigureAwait(false);
         }
 
-        public void Dispose() => _listener.Stop();
+        public void Dispose()
+        {
+            _listener.Stop();
+            _ipv6?.Stop();
+        }
     }
 }
