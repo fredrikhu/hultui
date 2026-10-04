@@ -559,6 +559,10 @@ public partial class JunctionApp
     // Whether the last build included the scrollbar.
     private bool _diffBarBuilt;
 
+    // The diff list's content width the last time it was laid out; 0 before it ever was.
+    // UpdateDiffPan's fallback for a build that finds the list without a layout.
+    private float _diffLaidOutWidth;
+
     // What the number / sign / staging-mark columns took in the last build. Kept so the
     // post-frame check can redo the same arithmetic against the width the body ended up
     // with, rather than reconstructing the column model a second time and drifting from it.
@@ -621,6 +625,7 @@ public partial class JunctionApp
         _window.RequestPostFrameCallback(() =>
         {
             if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
+            _diffLaidOutWidth = body.Layout.AbsoluteContentBox.Width;
             if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return; }
             if (!_diffWrap && !ReviewRowsActive) return;
 
@@ -635,15 +640,22 @@ public partial class JunctionApp
 
     /// <summary>Tell the pan how wide the content and its window are. The width of one code
     /// column is what the fixed number and sign columns leave over, halved in split mode —
-    /// taken from the laid-out body when there is one, and from the window before that, since
-    /// the first build after opening a file runs before any layout and still has to decide
-    /// whether there is a scrollbar. Line widths are measured once per comparison; the rows
-    /// are the same objects across a rebuild and measuring is a shaping call.</summary>
+    /// taken from the laid-out body when there is one, otherwise from the body the last time
+    /// one was laid out, and from the window before there ever was one, since the first build
+    /// after opening a file runs before any layout and still has to decide whether there is a
+    /// scrollbar. Line widths are measured once per comparison; the rows are the same objects
+    /// across a rebuild and measuring is a shaping call.</summary>
     private void UpdateDiffPan(GitFileDiff diff, List<DiffRow> rows, bool interactive)
     {
+        // A build can find the list with no layout after the first one too. Switching wrap on
+        // drops the pan's scrollbar from around the list, so the list is replaced rather than
+        // patched, and a MarkDirty before the next frame lays the new one out lands in the gap.
+        // Guessing the window there measured every wrapped row at several times the pane's
+        // width — a line or two short — and that frame drew each line over its neighbour. The
+        // width the list last had is a far better guess; the window only bounds it.
         float body = _diffBodyRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } b
-            ? b.Layout.AbsoluteContentBox.Width
-            : _window.LayoutWidth;
+            ? _diffLaidOutWidth = b.Layout.AbsoluteContentBox.Width
+            : _diffLaidOutWidth > 0 ? Math.Min(_diffLaidOutWidth, _window.LayoutWidth) : _window.LayoutWidth;
         // Split: two 44px number columns. Unified: two 46px number columns, a 16px sign,
         // and — while staging — a 20px checkbox; while reviewing, the 22px gutter.
         bool reviewing = ReviewRowsActive;
