@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
+using HultUI.Core.Storage;
 
 namespace VesperCommander;
 
@@ -13,35 +13,17 @@ public sealed record BookmarkData(string Name, string Path);
 internal partial class BookmarkJsonContext : JsonSerializerContext;
 
 /// <summary>
-/// Persists the user's bookmarks to <c>%LOCALAPPDATA%\VesperCommander\bookmarks.json</c>.
-/// All operations are best-effort: any I/O or parse failure is swallowed so a corrupt
-/// or unwritable file never blocks the app.
+/// Persists the user's bookmarks to <c>bookmarks.json</c> in <see cref="ConfigDir"/>. Best-effort:
+/// a corrupt or unwritable file never blocks the app, and a write is swapped in with the previous
+/// kept as a backup (see <see cref="JsonFile{T}"/>) — it used to be written over in place, where a
+/// crash mid-write lost every bookmark.
 /// </summary>
 public static class BookmarkStore
 {
-    private static string FilePath => Path.Combine(ConfigDir.Path, "bookmarks.json");
+    private static JsonFile<List<BookmarkData>> File =>
+        new(ConfigDir.Path, "bookmarks.json", BookmarkJsonContext.Default.ListBookmarkData);
 
-    public static List<BookmarkData> Load()
-    {
-        try
-        {
-            var path = FilePath;
-            if (!File.Exists(path)) return [];
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize(json, BookmarkJsonContext.Default.ListBookmarkData) ?? [];
-        }
-        catch { return []; }
-    }
+    public static List<BookmarkData> Load() => File.Load() ?? [];
 
-    public static void Save(IEnumerable<BookmarkData> items)
-    {
-        try
-        {
-            var path = FilePath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var json = JsonSerializer.Serialize(items.ToList(), BookmarkJsonContext.Default.ListBookmarkData);
-            File.WriteAllText(path, json);
-        }
-        catch { /* best-effort persistence */ }
-    }
+    public static void Save(IEnumerable<BookmarkData> items) => File.Save(items.ToList());
 }

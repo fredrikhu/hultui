@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
+using HultUI.Core.Storage;
 
 namespace Reel;
 
@@ -65,12 +65,12 @@ public sealed class ReelSettings
     public static readonly TimeSpan ResumeThreshold = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan EndMargin = TimeSpan.FromSeconds(20);
 
-    private readonly string _path;
+    private readonly JsonFile<ReelSettingsData> _file;
 
     public ReelSettings(string? settingsPath = null)
     {
-        _path = settingsPath ?? DefaultPath;
-        Data = Read(_path) ?? new ReelSettingsData();
+        _file = new JsonFile<ReelSettingsData>(settingsPath ?? DefaultPath, ReelJsonContext.Default.ReelSettingsData);
+        Data = _file.Load() ?? new ReelSettingsData();
         Data.Normalize();
     }
 
@@ -130,52 +130,15 @@ public sealed class ReelSettings
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return 0; }
     }
 
-    public void Save()
-    {
-        var pending = _path + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(pending, JsonSerializer.Serialize(Data, ReelJsonContext.Default.ReelSettingsData));
-            if (File.Exists(_path)) File.Replace(pending, _path, null, ignoreMetadataErrors: true);
-            else File.Move(pending, _path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Losing the resume point is not worth failing playback over.
-            try { File.Delete(pending); } catch (IOException) { /* nothing further to try */ }
-        }
-    }
-
-    private static ReelSettingsData? Read(string path)
-    {
-        try
-        {
-            if (!File.Exists(path)) return null;
-            var data = JsonSerializer.Deserialize(File.ReadAllText(path), ReelJsonContext.Default.ReelSettingsData);
-            data?.Normalize();
-            return data;
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    /// <summary>Writes the file — on every stop, for the resume points — keeping the previous one
+    /// as <c>settings.json.bak</c>. Best-effort: losing a resume point is not worth failing
+    /// playback over (see <see cref="JsonFile{T}"/>).</summary>
+    public void Save() => _file.Save(Data);
 
     public static string DefaultPath => Path.Combine(ConfigDirectory, "settings.json");
 
     /// <summary>XDG on Linux, <c>%APPDATA%\Reel</c> on Windows — the lookup the other apps use.</summary>
-    public static string ConfigDirectory
-    {
-        get
-        {
-            var xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-            if (!string.IsNullOrWhiteSpace(xdg)) return Path.Combine(xdg, "Reel");
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (!string.IsNullOrWhiteSpace(appData)) return Path.Combine(appData, "Reel");
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "Reel");
-        }
-    }
+    public static string ConfigDirectory => AppFolders.Config("Reel");
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

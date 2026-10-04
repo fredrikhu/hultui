@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
+using HultUI.Core.Storage;
 
 namespace VesperCommander;
 
@@ -16,31 +16,13 @@ public sealed record SessionData(
 [JsonSerializable(typeof(SessionData))]
 internal partial class SessionJsonContext : JsonSerializerContext;
 
-/// <summary>Persists the tab session to <c>%LOCALAPPDATA%\VesperCommander\session.json</c>.
-/// Best-effort: any I/O or parse failure is swallowed.</summary>
+/// <summary>Persists the tab session to <c>session.json</c> in <see cref="ConfigDir"/>. Best-effort:
+/// written beside and swapped in, the previous kept as a backup (see <see cref="JsonFile{T}"/>).</summary>
 public static class SessionStore
 {
-    private static string FilePath => Path.Combine(ConfigDir.Path, "session.json");
+    private static JsonFile<SessionData> File => new(ConfigDir.Path, "session.json", SessionJsonContext.Default.SessionData);
 
-    public static SessionData? Load()
-    {
-        try
-        {
-            var path = FilePath;
-            if (!File.Exists(path)) return null;
-            return JsonSerializer.Deserialize(File.ReadAllText(path), SessionJsonContext.Default.SessionData);
-        }
-        catch { return null; }
-    }
+    public static SessionData? Load() => File.Load();
 
-    public static void Save(SessionData session)
-    {
-        try
-        {
-            var path = FilePath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(session, SessionJsonContext.Default.SessionData));
-        }
-        catch { /* best-effort persistence */ }
-    }
+    public static void Save(SessionData session) => File.Save(session);
 }

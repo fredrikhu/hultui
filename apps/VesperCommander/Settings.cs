@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
+using HultUI.Core.Storage;
 
 namespace VesperCommander;
 
@@ -107,18 +107,12 @@ internal partial class SettingsJsonContext : JsonSerializerContext;
 /// <summary>
 /// Where the app keeps its settings and session: <c>%LOCALAPPDATA%\VesperCommander</c> on
 /// Windows, <c>$XDG_DATA_HOME/VesperCommander</c> (by default
-/// <c>~/.local/share/VesperCommander</c>) elsewhere, or whatever <c>VESPER_CONFIG_DIR</c>
-/// names.
+/// <c>~/.local/share/VesperCommander</c>) elsewhere — HultUI's <see cref="AppFolders.Data"/> —
+/// or whatever <c>VESPER_CONFIG_DIR</c> names.
 ///
 /// <para>The override exists for tests. They construct the real app, which loads these
 /// files and — since the diff's wrap toggle persists — writes them, so without somewhere
 /// else to point them a test run reads and rewrites the developer's own configuration.</para>
-///
-/// <para>Never a relative path. On Linux, .NET answers "" for
-/// <c>LocalApplicationData</c> while <c>~/.local/share</c> does not exist yet, as on a new
-/// account, and the settings then went to whatever directory Vesper was started in (found
-/// on fresh Debian 13 and Ubuntu 24.04 accounts). Hence <c>DoNotVerify</c>, and a fallback
-/// under the home folder when even that is empty.</para>
 /// </summary>
 public static class ConfigDir
 {
@@ -127,69 +121,38 @@ public static class ConfigDir
     /// <summary>The per-user folder, ignoring <c>VESPER_CONFIG_DIR</c>.</summary>
     internal static string Default => Resolve(null);
 
-    private static string Resolve(string? overrideDir) => Resolve(
-        overrideDir,
-        Environment.GetEnvironmentVariable("XDG_DATA_HOME"),
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify),
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify),
-        OperatingSystem.IsWindows());
+    private static string Resolve(string? overrideDir) => string.IsNullOrEmpty(overrideDir)
+        ? AppFolders.Data("VesperCommander")
+        : System.IO.Path.GetFullPath(overrideDir);
 
-    /// <summary>The folder, from the values the environment gives. The override wins, made
-    /// absolute against the working directory (where a relative one pointed anyway). Then the
-    /// data folder: <paramref name="xdgDataHome"/> (not on Windows, whose behaviour predates
-    /// this and stays as it was), then <paramref name="localAppData"/>, then
-    /// <c><paramref name="userProfile"/>/.local/share</c>. A value that is not a full path is
-    /// skipped: the XDG spec says to ignore a relative one, and a relative answer from .NET
-    /// is the bug this guards against. With no full path anywhere — no home folder at all —
-    /// the application's own folder, so the answer is still one fixed place.</summary>
+    /// <summary>The folder, from the values the environment gives: the override, made absolute
+    /// against the working directory (where a relative one pointed anyway), else
+    /// <see cref="AppFolders.ResolveData"/> — which is where the fix for the fresh-Linux-account
+    /// empty folder now lives, for every app.</summary>
     internal static string Resolve(string? overrideDir, string? xdgDataHome, string? localAppData,
-                                   string? userProfile, bool isWindows)
-    {
-        if (!string.IsNullOrEmpty(overrideDir)) return System.IO.Path.GetFullPath(overrideDir);
-        var data = !isWindows && IsFull(xdgDataHome) ? xdgDataHome!
-                 : IsFull(localAppData) ? localAppData!
-                 : IsFull(userProfile) ? System.IO.Path.Combine(userProfile!, ".local", "share")
-                 : AppContext.BaseDirectory;
-        return System.IO.Path.Combine(data, "VesperCommander");
-    }
-
-    private static bool IsFull(string? path) =>
-        !string.IsNullOrEmpty(path) && System.IO.Path.IsPathFullyQualified(path);
+                                   string? userProfile, bool isWindows) =>
+        !string.IsNullOrEmpty(overrideDir)
+            ? System.IO.Path.GetFullPath(overrideDir)
+            : AppFolders.ResolveData("VesperCommander", xdgDataHome, localAppData, userProfile, isWindows);
 }
 
-/// <summary>Persists <see cref="Settings"/> to <c>settings.json</c> in
-/// <see cref="ConfigDir"/> (best-effort, AOT-safe).</summary>
+/// <summary>Persists <see cref="Settings"/> to <c>settings.json</c> in <see cref="ConfigDir"/>:
+/// written beside and swapped in, the previous kept as a backup (see <see cref="JsonFile{T}"/>).</summary>
 public static class SettingsStore
 {
-    private static string FilePath => Path.Combine(ConfigDir.Path, "settings.json");
+    private static JsonFile<Settings> File => new(ConfigDir.Path, "settings.json", SettingsJsonContext.Default.Settings);
 
     public static Settings Load()
     {
-        try
-        {
-            var path = FilePath;
-            if (!File.Exists(path)) return new Settings();
-            var loaded = JsonSerializer.Deserialize(File.ReadAllText(path), SettingsJsonContext.Default.Settings)
-                         ?? new Settings();
-            // A hand-edited (or older) file must not be able to leave the viewer at a size
-            // with no glyphs in it, or with a null family the text pipeline would throw on.
-            loaded.TextFont ??= string.Empty;
-            loaded.TextFontSize = loaded.TextFontSize <= 0f
-                ? 11.5f
-                : Math.Clamp(loaded.TextFontSize, Settings.MinTextFontSize, Settings.MaxTextFontSize);
-            return loaded;
-        }
-        catch { return new Settings(); }
+        var loaded = File.Load() ?? new Settings();
+        // A hand-edited (or older) file must not be able to leave the viewer at a size
+        // with no glyphs in it, or with a null family the text pipeline would throw on.
+        loaded.TextFont ??= string.Empty;
+        loaded.TextFontSize = loaded.TextFontSize <= 0f
+            ? 11.5f
+            : Math.Clamp(loaded.TextFontSize, Settings.MinTextFontSize, Settings.MaxTextFontSize);
+        return loaded;
     }
 
-    public static void Save(Settings s)
-    {
-        try
-        {
-            var path = FilePath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(s, SettingsJsonContext.Default.Settings));
-        }
-        catch { /* best-effort */ }
-    }
+    public static void Save(Settings s) => File.Save(s);
 }

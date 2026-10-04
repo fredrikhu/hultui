@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
+using HultUI.Core.Storage;
 
 namespace Junction;
 
@@ -398,84 +398,32 @@ public sealed class AppearanceOptions
 public static class JunctionSettings
 {
     /// <summary>
-    /// Reads the stored settings, falling back to the backup written by <see cref="Save"/>
-    /// when the live file cannot be parsed, and to defaults when neither can.
+    /// Reads the stored settings, falling back to the backup <see cref="Save"/> keeps when the
+    /// live file cannot be parsed, and to defaults when neither can (see <see cref="JsonFile{T}"/>).
     /// <para>The fallback matters because losing this file is silent: an unreadable config
     /// looks exactly like a first run, so the repository list simply comes back empty.</para>
     /// </summary>
-    public static JunctionSettingsData Load()
-    {
-        var path = SettingsPath;
-        return ReadFile(path) ?? ReadFile(path + BackupSuffix) ?? new JunctionSettingsData();
-    }
+    public static JunctionSettingsData Load() => Normalized(File.Load()) ?? new JunctionSettingsData();
 
     /// <summary>Reads a settings file at an explicit path — a harness borrowing the user's
     /// accounts from the real file while running against a scratch config, for one.</summary>
-    public static JunctionSettingsData? LoadFrom(string path) => ReadFile(path);
+    public static JunctionSettingsData? LoadFrom(string path) =>
+        Normalized(new JsonFile<JunctionSettingsData>(path, JunctionSettingsJsonContext.Default.JunctionSettingsData).Load());
 
-    private static JunctionSettingsData? ReadFile(string path)
+    /// <summary>Writes the settings, keeping the previous contents as <c>settings.json.bak</c>.
+    /// Best-effort: the UI keeps working when the config cannot be written.</summary>
+    public static void Save(JunctionSettingsData settings) => File.Save(settings);
+
+    private static JunctionSettingsData? Normalized(JunctionSettingsData? settings)
     {
-        try
-        {
-            if (!File.Exists(path)) return null;
-            var settings = JsonSerializer.Deserialize(
-                File.ReadAllText(path),
-                JunctionSettingsJsonContext.Default.JunctionSettingsData);
-            settings?.Normalize();
-            return settings;
-        }
-        catch
-        {
-            return null;
-        }
+        settings?.Normalize();
+        return settings;
     }
 
-    /// <summary>
-    /// Writes the settings, keeping the previous contents as <c>settings.json.bak</c>.
-    /// <para>The new file is built beside the live one and swapped in, so an interrupted
-    /// write cannot leave a half-written <c>settings.json</c> behind — truncating in place
-    /// risks exactly that, and <see cref="Load"/> reads a truncated file as a first run.
-    /// The backup is one step of undo, not a history: the next save overwrites it.</para>
-    /// </summary>
-    public static void Save(JunctionSettingsData settings)
-    {
-        var path = SettingsPath;
-        var pending = path + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(pending, JsonSerializer.Serialize(
-                settings,
-                JunctionSettingsJsonContext.Default.JunctionSettingsData));
-
-            if (File.Exists(path)) File.Replace(pending, path, path + BackupSuffix, ignoreMetadataErrors: true);
-            else File.Move(pending, path);
-        }
-        catch
-        {
-            // Persistence is best-effort; the UI should keep working if config writes fail.
-            // The half-written file is the failure, so it must not be left to be found.
-            try { File.Delete(pending); } catch { /* nothing further to try */ }
-        }
-    }
-
-    private const string BackupSuffix = ".bak";
-
-    private static string SettingsPath => Path.Combine(GetConfigDirectory(), "settings.json");
-
-    private static string GetConfigDirectory()
-    {
-        var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        if (!string.IsNullOrWhiteSpace(xdgConfigHome))
-            return Path.Combine(xdgConfigHome, "HultGit");
-
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        if (!string.IsNullOrWhiteSpace(appData))
-            return Path.Combine(appData, "HultGit");
-
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".config", "HultGit");
-    }
+    // Resolved on every use, as it always was: tests point XDG_CONFIG_HOME at a fresh folder
+    // per test, and a path kept from the first one would write into the wrong one.
+    private static JsonFile<JunctionSettingsData> File =>
+        new(AppFolders.Config("HultGit"), "settings.json", JunctionSettingsJsonContext.Default.JunctionSettingsData);
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

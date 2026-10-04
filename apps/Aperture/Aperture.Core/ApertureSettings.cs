@@ -1,6 +1,6 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using HultUI.Core.Platform;
+using HultUI.Core.Storage;
 
 namespace Aperture.Core;
 
@@ -187,13 +187,13 @@ public sealed class ApertureSettings
     public const string CredentialService = "aperture|jellyfin";
 
     private readonly ICredentialStore _credentials;
-    private readonly string _path;
+    private readonly JsonFile<ApertureSettingsData> _file;
 
     public ApertureSettings(ICredentialStore credentials, string? settingsPath = null)
     {
         _credentials = credentials;
-        _path = settingsPath ?? DefaultPath;
-        Data = Read(_path) ?? Read(_path + BackupSuffix) ?? new ApertureSettingsData();
+        _file = new JsonFile<ApertureSettingsData>(settingsPath ?? DefaultPath, ApertureJsonContext.Default.ApertureSettingsData);
+        Data = _file.Load() ?? new ApertureSettingsData();
         Data.Normalize();
     }
 
@@ -277,56 +277,15 @@ public sealed class ApertureSettings
         if (save) Save();
     }
 
-    public void Save()
-    {
-        var pending = _path + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(pending, JsonSerializer.Serialize(Data, ApertureJsonContext.Default.ApertureSettingsData));
-            if (File.Exists(_path)) File.Replace(pending, _path, _path + BackupSuffix, ignoreMetadataErrors: true);
-            else File.Move(pending, _path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Persistence is best-effort; a half-written file is worse than none.
-            try { File.Delete(pending); } catch (IOException) { /* nothing further to try */ }
-        }
-    }
-
-    private const string BackupSuffix = ".bak";
-
-    private static ApertureSettingsData? Read(string path)
-    {
-        try
-        {
-            if (!File.Exists(path)) return null;
-            var data = JsonSerializer.Deserialize(File.ReadAllText(path), ApertureJsonContext.Default.ApertureSettingsData);
-            data?.Normalize();
-            return data;
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    /// <summary>Writes the file, keeping the previous one as <c>settings.json.bak</c>; best-effort
+    /// (see <see cref="JsonFile{T}"/>).</summary>
+    public void Save() => _file.Save(Data);
 
     /// <summary>Where the file lives: XDG on Linux, <c>%APPDATA%\Aperture</c> on Windows —
     /// the same lookup the other three apps use.</summary>
     public static string DefaultPath => Path.Combine(ConfigDirectory, "settings.json");
 
-    public static string ConfigDirectory
-    {
-        get
-        {
-            var xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-            if (!string.IsNullOrWhiteSpace(xdg)) return Path.Combine(xdg, "Aperture");
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (!string.IsNullOrWhiteSpace(appData)) return Path.Combine(appData, "Aperture");
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, ".config", "Aperture");
-        }
-    }
+    public static string ConfigDirectory => AppFolders.Config("Aperture");
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

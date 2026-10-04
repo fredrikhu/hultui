@@ -10,6 +10,8 @@ same as leaving the variable unset. The few that ignore case or accept more say 
 | Variable | Value | Effect |
 |---|---|---|
 | `HULTUI_A11Y` | `0` | No accessibility bridge is created for any window, on any platform. Read once per window at construction. The purpose is equalising benchmarks against a machine with no assistive technology attached (on Linux the AT-SPI bridge otherwise connects whenever a bus is reachable), and an escape hatch if a bridge misbehaves. Any other value leaves it on. |
+| `XDG_CONFIG_HOME` | a full path | Where `AppFolders.Config(app)` puts an app's configuration folder, on every platform — Windows included, which is how a test or a harness points an app at a scratch folder. Unset, or not a full path: `%APPDATA%` on Windows, `~/.config` elsewhere. Junction, Aperture and Reel keep their settings here. |
+| `XDG_DATA_HOME` | a full path | Where `AppFolders.Data(app)` puts an app's data folder, **off Windows only**. Unset, or not a full path: `~/.local/share`. Vesper Commander, and the web views' profiles (`<app>/CEF`, `<app>/WebView2`), live here. |
 | `HULTUI_UIA_EVENTS` | `0` | Windows only, finer than the above: the UIA tree stays exported but no structure, property or focus-changed events are raised. |
 | `HULTUI_TRACE` | a file path | Starts frame-trace recording at window creation and writes the trace there when the window is disposed. F11 still toggles a trace by hand and takes precedence. |
 | `HULTUI_STARTUP` | `1`, or a file path | Phase timings from process launch to the first presented frame (`SDL_Init`, `SDL_CreateWindow`, GL context, Skia surface, first frame). `1` prints to stderr; any other value is taken as a file to write. Needs no app change: the marks are in the framework. |
@@ -66,6 +68,7 @@ same as leaving the variable unset. The few that ignore case or accept more say 
 | `HULTUI_TRACE_MS` | Junction | An integer: drive continuous frames for that many milliseconds, then close the window so shutdown flushes `HULTUI_TRACE`. |
 | `JUNCTION_BENCH` | Junction | A script of interaction steps at absolute milliseconds since launch (`Branches@4000,History@12000,…`), annotated into the trace. |
 | `HULTUI_MEDIA_NOHIDE` | the VideoPlayer and ProceduralVideo samples | `1` keeps the transport bar visible, for screenshots under the headless driver, which compresses time so the bar would otherwise auto-hide. |
+| `VESPER_CONFIG_DIR` | Vesper Commander | A folder (made absolute against the working directory) that replaces `AppFolders.Data("VesperCommander")` for its settings, session and bookmarks. Its tests set it so a run never reads or rewrites the developer's own files. |
 
 ## Tests
 

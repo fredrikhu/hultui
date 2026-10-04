@@ -331,14 +331,11 @@ internal static unsafe partial class CefRuntime
         // every such application would share one profile.
         var app = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name
                   ?? Path.GetFileNameWithoutExtension(Environment.ProcessPath) ?? "HultUI";
-        // DoNotVerify: without it .NET answers "" on Linux while ~/.local/share does not exist
-        // yet, as on a new account, and the profile became a path relative to the working
-        // directory (found on a fresh Debian, where it ran into the executable's own name).
-        // The folder is made when CEF starts.
-        var data = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
-        if (string.IsNullOrEmpty(data))
-            data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), ".local", "share");
-        return Path.Combine(data, app, "CEF");
+        // AppFolders, not a special folder asked for directly: .NET answers "" on Linux while
+        // ~/.local/share does not exist yet, as on a new account, and the profile became a path
+        // relative to the working directory (found on a fresh Debian, where it ran into the
+        // executable's own name). The folder is made when CEF starts.
+        return Path.Combine(HultUI.Core.Storage.AppFolders.Data(app), "CEF");
     }
 
     private static string? _temporaryProfile;
