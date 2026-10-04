@@ -549,10 +549,18 @@ public partial class CommanderApp
         if (_diffFind.HandleKey(e)) { e.StopPropagation = true; return; }
         if (typing) return;
 
+        // The key that opened the comparison closes it, and the copy key copies the missing
+        // file across — whatever they are bound to now.
+        if (Pressed(Cmd.Diff, e)) { CloseDiff(); e.StopPropagation = true; return; }
+        if (Pressed(Cmd.Copy, e))
+        {
+            if (_diffState == DiffViewState.Missing) { CloseDiff(); StartCopy(); }
+            e.StopPropagation = true; return;
+        }
+
         switch (e.Key)
         {
-            case KeyCode.Escape:
-            case KeyCode.F3: CloseDiff(); e.StopPropagation = true; break;
+            case KeyCode.Escape: CloseDiff(); e.StopPropagation = true; break;
             // n / p walk the changes. While a search is up the bar has already taken them
             // (FindBar.LetterKeys): stepping through its matches is what they plainly mean then.
             case KeyCode.N: DiffNav(1); e.StopPropagation = true; break;
@@ -573,9 +581,6 @@ public partial class CommanderApp
             case KeyCode.Left or KeyCode.Right:
                 _diffPan.HandleKey(e); e.StopPropagation = true; break;
             case KeyCode.W: ToggleDiffWrap(); e.StopPropagation = true; break;
-            case KeyCode.F5:
-                if (_diffState == DiffViewState.Missing) { CloseDiff(); StartCopy(); }
-                e.StopPropagation = true; break;
         }
     }
 
@@ -897,7 +902,7 @@ public partial class CommanderApp
                 .CornerRadius(Nocturne.RadiusSm).BorderColor(Nocturne.Accent700).BorderWidth(1f);
             var lbl = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
             lbl.AddChild(Text.New("Copy left → right").FontSize(11.5f).TextColor(Nocturne.Accent200));
-            lbl.AddChild(Ui.Kbd("F5"));
+            if (KeyText(Cmd.Copy) is { Length: > 0 } copyKeys) lbl.AddChild(Ui.Kbd(copyKeys));
             btn.AddChild(lbl);
             btn.OnClick(_ => { CloseDiff(); StartCopy(); });
             box.AddChild(btn);

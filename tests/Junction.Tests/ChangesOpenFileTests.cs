@@ -42,7 +42,7 @@ public class ChangesOpenFileTests
 
             var open = Assert.Single(items, i => i.Label == "Open file");
             // The key is advertised where the action is, so it is learnable at all.
-            Assert.Equal("Ctrl O", open.ShortcutHint);
+            Assert.Equal("Ctrl+O", open.ShortcutHint);
             Assert.False(open.IsDisabled);
         });
     }

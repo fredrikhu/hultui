@@ -786,12 +786,13 @@ public partial class JunctionApp
         {
             SelectChange(f.Path, isStaged);
             LaunchFilesPath(f.Path);
-        }, "Ctrl O"));
-        items.Add(Item(Icons.FileCode, "Open diff in VS Code", () =>
+        }, Shortcuts.Keys("diff.open")));
+        // Named for the editor Options sets, as the diff header's button is.
+        items.Add(Item(Icons.FileCode, $"Open diff in {EditorName(_settings.ExternalTools)}", () =>
         {
             SelectChange(f.Path, isStaged);
             OpenSelectedDiffExternally();
-        }, "Ctrl D"));
+        }, Shortcuts.Keys("diff.editor")));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(f.Path)));
         if (_settings.ExternalTools.CustomCommand.Trim().Length > 0)
             items.Add(Item(Icons.TerminalWindow, "Run custom command",

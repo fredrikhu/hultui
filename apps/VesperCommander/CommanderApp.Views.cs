@@ -235,10 +235,10 @@ public partial class CommanderApp
     private Element ViewToggleBtn(char side, ViewMode mode, IconKind glyph, ViewMode cur)
     {
         bool on = cur == mode;
-        var bind = CurrentChord(ViewCmd(mode), _settings);
+        var bind = KeyText(ViewCmd(mode));
         var b = Box.New().Width(22).Height(15).CornerRadius(3f).Cursor(CursorType.Pointer)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Tooltip(bind is { } c ? $"{ModeLabel(mode)} · {Keybindings.Format(c)}" : ModeLabel(mode));
+            .Tooltip(bind.Length > 0 ? $"{ModeLabel(mode)} · {bind}" : ModeLabel(mode));
         if (on) b.Background(Nocturne.Alpha(Nocturne.Accent500, 0.14));
         b.AddChild(Icons.Draw(glyph, on ? Nocturne.Accent : Nocturne.Neutral500, 11f));
         b.OnClick(_ => { _active = side; SetView(side, mode); });

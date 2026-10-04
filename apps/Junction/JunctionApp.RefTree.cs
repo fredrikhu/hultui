@@ -108,7 +108,7 @@ public partial class JunctionApp
         var fg = active ? Nocturne.Accent : Nocturne.On(0.58);
         var b = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
-            .Tooltip(tree ? "Group refs into folders (t)" : "One flat list (t)");
+            .Tooltip($"{(tree ? "Group refs into folders" : "One flat list")} ({Shortcuts.Keys("branches.tree")})");
         // An outline, not a border: these size to their content, so a border on the active
         // one would make it 2px wider and slide every button beside it. Layout never reads
         // an outline.

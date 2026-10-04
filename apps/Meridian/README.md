@@ -102,15 +102,19 @@ GitHub Actions:
 
 | | |
 |---|---|
-| `Ctrl P` | command palette — every command, and every request by name |
+| `Ctrl+P` | command palette — every command, and every request by name |
 | `1`–`5` | Requests · Runner · Discovery · History · Environments |
-| `Ctrl ↵` / `Esc` | send · cancel |
-| `Ctrl O` / `Ctrl S` / `Ctrl W` | open a collection · save · close tab |
-| `Ctrl E` | switch environment |
-| `Ctrl R` | run the collection |
-| `Ctrl F` | find in the response, or in history |
-| `Ctrl \` | flip the response pane right ⇄ bottom |
-| `↑↓ · enter · r` | in History: walk rows · open · restore |
+| `Ctrl+Enter` / `Esc` | send · cancel |
+| `Ctrl+O` / `Ctrl+S` / `Ctrl+W` | open a collection · save (the request, or the environments on their view) · close tab |
+| `Ctrl+E` | switch environment |
+| `Ctrl+R` | run the collection, from any view |
+| `Ctrl+I` | import an OpenAPI spec |
+| `Ctrl+F` | find in the response |
+| `Ctrl+\` | flip the response pane right ⇄ bottom |
+| `↑↓ · Enter · r` | in History: walk rows · open · restore |
+
+The app reads its keys from one table, `Meridian/Shortcuts.cs`; the hints in the palette and on
+the buttons come from it too.
 
 ## Installing
 

@@ -282,28 +282,29 @@ public class PropertiesTests
     }
 
     /// <summary>Alt+Enter lands one Shift away from Alt+Shift+Enter (measure all folders).
-    /// The keymap is a dictionary keyed by chord and built with a plain indexer assignment,
-    /// so a collision doesn't fail — it silently drops whichever command was written first.</summary>
+    /// A clash does not fail anywhere else — the first shortcut in the map wins the key and the
+    /// other never fires — and the keys Vesper keeps for itself count as much as the commands.</summary>
     [Fact]
     public void NoTwoCommandsShareADefaultChord()
     {
-        var clashes = Keybindings.Defaults
-            .GroupBy(kv => kv.Value)
+        var clashes = Keybindings.Create().All
+            .SelectMany(s => s.Defaults.Select(chord => (chord, s.Id)))
+            .GroupBy(x => x.chord)
             .Where(g => g.Count() > 1)
-            .Select(g => $"{Keybindings.Format(g.Key)} → {string.Join(", ", g.Select(kv => kv.Key))}")
+            .Select(g => $"{g.Key} → {string.Join(", ", g.Select(x => x.Id))}")
             .ToList();
 
         Assert.True(clashes.Count == 0, "chords bound to more than one command: " + string.Join("; ", clashes));
     }
 
-    /// <summary>Every command needs a row on the Options Keyboard page, or it can't be
-    /// rebound — and <see cref="Keybindings.Order"/> is a second list that is easy to forget
-    /// when adding one.</summary>
+    /// <summary>Every command needs a rebindable entry in the map, which is what puts it on the
+    /// Options Keyboard page — and the <see cref="Cmd"/> enum is a second list that is easy to
+    /// forget when adding one.</summary>
     [Fact]
     public void EveryCommandIsListedOnTheKeyboardPage()
     {
-        var listed = Keybindings.Order.Select(o => o.cmd).ToHashSet();
-        var missing = Keybindings.Defaults.Keys.Where(c => !listed.Contains(c)).ToList();
+        var listed = Keybindings.Commands(Keybindings.Create()).Select(o => o.Cmd).ToHashSet();
+        var missing = Enum.GetValues<Cmd>().Where(c => !listed.Contains(c)).ToList();
 
         Assert.True(missing.Count == 0, "not on the Keyboard page: " + string.Join(", ", missing));
     }

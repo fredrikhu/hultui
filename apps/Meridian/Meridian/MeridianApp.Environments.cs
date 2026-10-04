@@ -167,7 +167,7 @@ public partial class MeridianApp
                 Dot(Azimuth.Accent),
                 Text.New($"{dirty} unsaved").FontSize(11f).TextColor(Azimuth.TextDim).AutomationId("env-save-state"))
             : Text.New("saved").FontSize(11f).TextColor(Azimuth.TextFaint).AutomationId("env-save-state"));
-        footer.AddChild(Ui.Kbd("Ctrl S"));
+        footer.AddChild(Ui.Kbd(Shortcuts.Keys("save")));
         col.AddChild(footer);
         return col;
     }

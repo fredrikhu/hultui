@@ -395,7 +395,7 @@ public sealed partial class ApertureApp
         column.AddChild(Ui.Icon(Icons.Loading, 24f, Halide.Accent));
         column.AddChild(Text.New(_playingItem is { } item ? $"Opening {item.Name}…" : "Opening…")
             .FontSize(14f).TextColor(Halide.TextDim));
-        column.AddChild(Text.New("Escape stops").FontSize(11.5f).TextColor(Halide.TextFaint));
+        column.AddChild(Text.New($"{Shortcuts.Keys("player.stop")} stops").FontSize(11.5f).TextColor(Halide.TextFaint));
         return column;
     }
 

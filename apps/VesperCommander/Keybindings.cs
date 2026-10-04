@@ -1,11 +1,8 @@
-using System.Text;
 using HultUI.Core.Events;
 
 namespace VesperCommander;
 
-/// <summary>The rebindable commands (the ones listed on the Options Keyboard page).
-/// Structural keys — arrows, Tab, Space, Enter, Backspace, the clipboard and history
-/// combos, the pane drive pickers — stay fixed and aren't part of this set.</summary>
+/// <summary>The rebindable commands (the ones listed on the Options Keyboard page).</summary>
 public enum Cmd
 {
     Copy, Move, Rename, Delete, NewFolder, Edit, View, Diff, Sync, Find, MeasureAll,
@@ -15,121 +12,99 @@ public enum Cmd
     MarkPattern, Holders,
 }
 
-/// <summary>A key plus its modifiers — one per command.</summary>
-public readonly record struct Chord(KeyCode Key, bool Ctrl, bool Alt, bool Shift);
-
-/// <summary>Default chords, display metadata, and chord ⇄ string conversion for the
-/// keymap. User overrides live in <c>Settings.KeyBindings</c> (command name → chord
-/// string) and are merged over these defaults at load time.</summary>
+/// <summary>
+/// Every key the main window answers to, as one <see cref="ShortcutMap"/>: the rebindable
+/// commands first, in Keyboard-page order, then the keys Vesper keeps for itself. Those are in
+/// the map too, so a command can never be rebound onto one — it used to be possible, and a
+/// command on Ctrl+C either never fired or silently replaced copying, depending on which check
+/// ran first. User overrides live in <c>Settings.KeyBindings</c> (command name → chord text, ""
+/// for none), written and read by the map.
+/// </summary>
 public static class Keybindings
 {
-    public static readonly Dictionary<Cmd, Chord> Defaults = new()
-    {
-        [Cmd.Copy] = new(KeyCode.F5, false, false, false),
-        [Cmd.Move] = new(KeyCode.F6, false, false, false),
-        [Cmd.Rename] = new(KeyCode.F6, false, false, true),           // Shift+F6
-        [Cmd.Delete] = new(KeyCode.F8, false, false, false),
-        [Cmd.NewFolder] = new(KeyCode.F7, false, false, false),
-        [Cmd.Edit] = new(KeyCode.F4, false, false, false),
-        [Cmd.Diff] = new(KeyCode.F3, false, false, false),
-        [Cmd.View] = new(KeyCode.F3, false, false, true),             // Shift+F3
-        [Cmd.Sync] = new(KeyCode.F9, false, false, false),
-        [Cmd.Find] = new(KeyCode.F7, false, true, false),             // Alt+F7
-        [Cmd.MeasureAll] = new(KeyCode.Enter, false, true, true),     // Alt+Shift+Enter
-        [Cmd.Palette] = new(KeyCode.P, true, false, false),
-        [Cmd.Bookmarks] = new(KeyCode.D, true, false, false),
-        [Cmd.Options] = new(KeyCode.Comma, true, false, false),
-        [Cmd.NewTab] = new(KeyCode.T, true, false, false),
-        [Cmd.CloseTab] = new(KeyCode.W, true, false, false),
-        [Cmd.GoUpFolder] = new(KeyCode.PageUp, true, false, false),
-        [Cmd.IntoFolder] = new(KeyCode.PageDown, true, false, false),
-        [Cmd.Preview] = new(KeyCode.Q, true, false, false),
-        [Cmd.Refresh] = new(KeyCode.R, true, false, false),
-        [Cmd.ToggleHidden] = new(KeyCode.H, true, false, false),
-        [Cmd.Swap] = new(KeyCode.U, true, false, false),
-        [Cmd.OpenInOther] = new(KeyCode.Equals, false, false, false),
-        [Cmd.Pack] = new(KeyCode.F5, false, true, false),       // Alt+F5
-        [Cmd.Extract] = new(KeyCode.F9, false, true, false),    // Alt+F9
-        [Cmd.ViewDetail] = new(KeyCode.F1, true, false, false),      // Ctrl+F1
-        [Cmd.ViewBrief] = new(KeyCode.F2, true, false, false),       // Ctrl+F2
-        [Cmd.ViewThumbnails] = new(KeyCode.F3, true, false, false),  // Ctrl+F3
-        [Cmd.MultiRename] = new(KeyCode.M, true, false, false),      // Ctrl+M
-        [Cmd.GotoPath] = new(KeyCode.G, true, false, false),         // Ctrl+G
-        [Cmd.Properties] = new(KeyCode.Enter, false, true, false),   // Alt+Enter (Explorer's)
-        [Cmd.ContextMenu] = new(KeyCode.Menu, false, false, false),  // the context-menu key
-        [Cmd.MarkPattern] = new(KeyCode.A, true, false, true),       // Ctrl+Shift+A
-        [Cmd.Holders] = new(KeyCode.L, true, false, true),           // Ctrl+Shift+L ("locks")
-    };
+    /// <summary>The one group: the main window, where every key means one thing.</summary>
+    public const string Group = "Commands";
 
-    /// <summary>Commands in display order, with their Keyboard-page labels.</summary>
-    public static readonly (Cmd cmd, string label)[] Order =
-    [
-        (Cmd.Copy, "Copy"), (Cmd.Move, "Move"), (Cmd.Rename, "Rename"), (Cmd.Delete, "Delete"),
-        (Cmd.NewFolder, "New folder"), (Cmd.Edit, "Edit file"), (Cmd.View, "View file"),
-        (Cmd.Diff, "Diff"), (Cmd.Sync, "Synchronize"),
-        (Cmd.Properties, "Properties"), (Cmd.ContextMenu, "Context menu"),
-        (Cmd.Holders, "Who has this file open"),
-        (Cmd.Find, "Find files"), (Cmd.MarkPattern, "Mark files by pattern"),
-        (Cmd.MeasureAll, "Measure all folders"),
-        (Cmd.Palette, "Command palette"), (Cmd.Bookmarks, "Bookmark manager"), (Cmd.Options, "Options"),
-        (Cmd.NewTab, "New tab"), (Cmd.CloseTab, "Close tab"),
-        (Cmd.GoUpFolder, "Up one folder"), (Cmd.IntoFolder, "Into folder"),
-        (Cmd.GotoPath, "Go to path"),
-        (Cmd.Preview, "Preview panel"), (Cmd.Refresh, "Refresh"),
-        (Cmd.ToggleHidden, "Toggle hidden files"), (Cmd.Swap, "Swap panes"),
-        (Cmd.OpenInOther, "Open in other pane"),
-        (Cmd.Pack, "Pack (create archive)"), (Cmd.Extract, "Extract archive"),
-        (Cmd.ViewDetail, "View: Detail"), (Cmd.ViewBrief, "View: Brief"), (Cmd.ViewThumbnails, "View: Thumbnails"),
-        (Cmd.MultiRename, "Multi-rename"),
-    ];
-
-    public static string Format(Chord c)
+    public static ShortcutMap Create()
     {
-        var sb = new StringBuilder();
-        if (c.Ctrl) sb.Append("Ctrl+");
-        if (c.Alt) sb.Append("Alt+");
-        if (c.Shift) sb.Append("Shift+");
-        sb.Append(KeyName(c.Key));
-        return sb.ToString();
+        var map = new ShortcutMap();
+        void Bind(Cmd cmd, string label, KeyCode key, KeyModifiers modifiers = KeyModifiers.None) =>
+            map.Add(cmd.ToString(), Group, label, new KeyChord(key, modifiers)).CanRebind();
+        Shortcut Fixed(string id, string label, params KeyChord[] keys) => map.Add(id, Group, label, keys);
+
+        const KeyModifiers ctrl = KeyModifiers.Ctrl, alt = KeyModifiers.Alt, shift = KeyModifiers.Shift;
+
+        Bind(Cmd.Copy, "Copy", KeyCode.F5);
+        Bind(Cmd.Move, "Move", KeyCode.F6);
+        Bind(Cmd.Rename, "Rename", KeyCode.F6, shift);
+        Bind(Cmd.Delete, "Delete", KeyCode.F8);
+        Bind(Cmd.NewFolder, "New folder", KeyCode.F7);
+        Bind(Cmd.Edit, "Edit file", KeyCode.F4);
+        Bind(Cmd.View, "View file", KeyCode.F3, shift);
+        Bind(Cmd.Diff, "Diff", KeyCode.F3);
+        Bind(Cmd.Sync, "Synchronize", KeyCode.F9);
+        Bind(Cmd.Properties, "Properties", KeyCode.Enter, alt);           // Explorer's
+        Bind(Cmd.ContextMenu, "Context menu", KeyCode.Menu);               // the context-menu key
+        Bind(Cmd.Holders, "Who has this file open", KeyCode.L, ctrl | shift);   // "locks"
+        Bind(Cmd.Find, "Find files", KeyCode.F7, alt);
+        Bind(Cmd.MarkPattern, "Mark files by pattern", KeyCode.A, ctrl | shift);
+        Bind(Cmd.MeasureAll, "Measure all folders", KeyCode.Enter, alt | shift);
+        Bind(Cmd.Palette, "Command palette", KeyCode.P, ctrl);
+        Bind(Cmd.Bookmarks, "Bookmark manager", KeyCode.D, ctrl);
+        Bind(Cmd.Options, "Options", KeyCode.Comma, ctrl);
+        Bind(Cmd.NewTab, "New tab", KeyCode.T, ctrl);
+        Bind(Cmd.CloseTab, "Close tab", KeyCode.W, ctrl);
+        Bind(Cmd.GoUpFolder, "Up one folder", KeyCode.PageUp, ctrl);
+        Bind(Cmd.IntoFolder, "Into folder", KeyCode.PageDown, ctrl);
+        Bind(Cmd.GotoPath, "Go to path", KeyCode.G, ctrl);
+        Bind(Cmd.Preview, "Preview panel", KeyCode.Q, ctrl);
+        Bind(Cmd.Refresh, "Refresh", KeyCode.R, ctrl);
+        Bind(Cmd.ToggleHidden, "Toggle hidden files", KeyCode.H, ctrl);
+        Bind(Cmd.Swap, "Swap panes", KeyCode.U, ctrl);
+        Bind(Cmd.OpenInOther, "Open in other pane", KeyCode.Equals);
+        Bind(Cmd.Pack, "Pack (create archive)", KeyCode.F5, alt);
+        Bind(Cmd.Extract, "Extract archive", KeyCode.F9, alt);
+        Bind(Cmd.ViewDetail, "View: Detail", KeyCode.F1, ctrl);
+        Bind(Cmd.ViewBrief, "View: Brief", KeyCode.F2, ctrl);
+        Bind(Cmd.ViewThumbnails, "View: Thumbnails", KeyCode.F3, ctrl);
+        Bind(Cmd.MultiRename, "Multi-rename", KeyCode.M, ctrl);
+
+        // Kept for Vesper: the clipboard and history chords, the tab and drive keys, and the
+        // structural keys a pane is driven with.
+        Fixed("CopyPath", "Copy the folder's path", new KeyChord(KeyCode.C, ctrl | shift));
+        Fixed("ClipboardCopy", "Copy to the clipboard", new KeyChord(KeyCode.C, ctrl));
+        Fixed("ClipboardCut", "Cut to the clipboard", new KeyChord(KeyCode.X, ctrl));
+        Fixed("ClipboardPaste", "Paste from the clipboard", new KeyChord(KeyCode.V, ctrl));
+        Fixed("MarkAll", "Mark everything", new KeyChord(KeyCode.A, ctrl));
+        Fixed("JumpBookmark", "Jump to the Nth bookmark",
+            Enumerable.Range(1, 9).Select(n => new KeyChord(KeyCode.Digit0 + (ushort)n, ctrl)).ToArray()).Shown("Ctrl+1 – 9");
+        Fixed("NextTab", "Next tab", new KeyChord(KeyCode.Tab, ctrl));
+        Fixed("PreviousTab", "Previous tab", new KeyChord(KeyCode.Tab, ctrl | shift));
+        Fixed("Back", "Back", new KeyChord(KeyCode.Left, alt));
+        Fixed("Forward", "Forward", new KeyChord(KeyCode.Right, alt));
+        Fixed("LeftDrive", "Drive for the left pane", new KeyChord(KeyCode.F1, alt));
+        Fixed("RightDrive", "Drive for the right pane", new KeyChord(KeyCode.F2, alt));
+        Fixed("ReviewEmpty", "Review: the empty pane", new KeyChord(KeyCode.E, ctrl | shift));
+        Fixed("ReviewOffline", "Review: the offline pane", new KeyChord(KeyCode.O, ctrl | shift));
+        Fixed("ReviewDenied", "Review: the denied pane", new KeyChord(KeyCode.D, ctrl | shift));
+        Fixed("ReviewConnecting", "Review: the connecting pane", new KeyChord(KeyCode.N, ctrl | shift));
+        Fixed("ReviewClear", "Review: the real pane", new KeyChord(KeyCode.K, ctrl | shift));
+        Fixed("SwitchPane", "Switch pane", new KeyChord(KeyCode.Tab));
+        Fixed("Cursor", "Move the cursor",
+            new KeyChord(KeyCode.Up), new KeyChord(KeyCode.Down), new KeyChord(KeyCode.Left), new KeyChord(KeyCode.Right),
+            new KeyChord(KeyCode.PageUp), new KeyChord(KeyCode.PageDown), new KeyChord(KeyCode.Home), new KeyChord(KeyCode.End));
+        Fixed("ExtendMarks", "Extend the marks",
+            new KeyChord(KeyCode.Up, shift), new KeyChord(KeyCode.Down, shift), new KeyChord(KeyCode.Left, shift), new KeyChord(KeyCode.Right, shift),
+            new KeyChord(KeyCode.PageUp, shift), new KeyChord(KeyCode.PageDown, shift), new KeyChord(KeyCode.Home, shift), new KeyChord(KeyCode.End, shift));
+        Fixed("Open", "Open", new KeyChord(KeyCode.Enter));
+        Fixed("Mark", "Mark", new KeyChord(KeyCode.Space), new KeyChord(KeyCode.Insert));
+        Fixed("UpFolderKey", "Up a folder", new KeyChord(KeyCode.Backspace));
+        Fixed("DeleteKey", "Delete", new KeyChord(KeyCode.Delete));
+        Fixed("Clear", "Clear the search or the cut", new KeyChord(KeyCode.Escape));
+        return map;
     }
 
-    public static Chord? Parse(string s)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return null;
-        bool ctrl = false, alt = false, shift = false;
-        var parts = s.Split('+');
-        for (int i = 0; i < parts.Length - 1; i++)
-            switch (parts[i].Trim())
-            {
-                case "Ctrl": ctrl = true; break;
-                case "Alt": alt = true; break;
-                case "Shift": shift = true; break;
-                default: return null;
-            }
-        return KeyFromName(parts[^1].Trim()) is { } k ? new Chord(k, ctrl, alt, shift) : null;
-    }
-
-    /// <summary>A bare modifier key — ignored while capturing a rebind so the user can
-    /// hold a modifier before pressing the real key.</summary>
-    public static bool IsModifier(KeyCode k) => k is
-        KeyCode.ShiftLeft or KeyCode.ShiftRight or KeyCode.CtrlLeft or KeyCode.CtrlRight
-        or KeyCode.AltLeft or KeyCode.AltRight or KeyCode.SuperLeft or KeyCode.SuperRight;
-
-    private static string KeyName(KeyCode k) => k switch
-    {
-        KeyCode.Comma => ",",
-        KeyCode.Equals => "=",
-        KeyCode.PageUp => "PgUp",
-        KeyCode.PageDown => "PgDn",
-        _ => k.ToString(),
-    };
-
-    private static KeyCode? KeyFromName(string s) => s switch
-    {
-        "," => KeyCode.Comma,
-        "=" => KeyCode.Equals,
-        "PgUp" => KeyCode.PageUp,
-        "PgDn" => KeyCode.PageDown,
-        _ => Enum.TryParse<KeyCode>(s, out var k) ? k : null,
-    };
+    /// <summary>The rebindable commands, in Keyboard-page order.</summary>
+    public static IEnumerable<(Cmd Cmd, Shortcut Shortcut)> Commands(ShortcutMap map) =>
+        map.All.Where(s => s.Rebindable).Select(s => (Enum.Parse<Cmd>(s.Id), s));
 }

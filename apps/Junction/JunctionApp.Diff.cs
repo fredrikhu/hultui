@@ -66,7 +66,7 @@ public partial class JunctionApp
         var external = diff is { IsBinary: true }
             ? Ui.DisabledIconButton(Icons.FileCode,
                 "Binary file — there are no two texts for VS Code to compare")
-            : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, $"Open in {EditorName(_settings.ExternalTools)} ({Shortcuts.Keys("Diff", "Open in the editor")})");
+            : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, $"Open in {EditorName(_settings.ExternalTools)} ({Shortcuts.Keys("diff.editor")})");
         external.Key = diff is { IsBinary: true } ? "diff-external#off" : "diff-external";
         header.AddChild(external.FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, ToggleDiffFullscreen, "Fullscreen diff (F11)").FlexShrink(0));
@@ -157,9 +157,9 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow);
         // The key each button answers to is in its tooltip. Unified and Split share one —
         // S moves between them — the way the Branches tree/list pair shares T.
-        seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => SetDiffSplit(false), "s"));
-        seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => SetDiffSplit(true), "s"));
-        seg.AddChild(DiffModeButton("Wrap", Icons.Rows, _diffWrap, ToggleDiffWrap, "w"));
+        seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => SetDiffSplit(false), Shortcuts.Keys("diff.split")));
+        seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => SetDiffSplit(true), Shortcuts.Keys("diff.split")));
+        seg.AddChild(DiffModeButton("Wrap", Icons.Rows, _diffWrap, ToggleDiffWrap, Shortcuts.Keys("diff.wrap")));
         return seg;
     }
 
@@ -205,14 +205,11 @@ public partial class JunctionApp
     private bool HandleDiffViewKey(KeyDownEvent e)
     {
         if (!DiffOnScreen) return false;
-        switch (e.Key)
-        {
-            case KeyCode.S: SetDiffSplit(!_diffSplit); return true;
-            case KeyCode.W: ToggleDiffWrap(); return true;
-            case KeyCode.I: ToggleIgnoreWhitespace(); return true;
-            case KeyCode.F11: ToggleDiffFullscreen(); return true;
-            default: return false;
-        }
+        if (Shortcuts.Pressed("diff.split", e)) { SetDiffSplit(!_diffSplit); return true; }
+        if (Shortcuts.Pressed("diff.wrap", e)) { ToggleDiffWrap(); return true; }
+        if (Shortcuts.Pressed("diff.whitespace", e)) { ToggleIgnoreWhitespace(); return true; }
+        if (Shortcuts.Pressed("diff.fullscreen", e)) { ToggleDiffFullscreen(); return true; }
+        return false;
     }
 
     // "Ignore whitespace" (git --ignore-all-space). Lit while active; the tooltip
@@ -226,8 +223,8 @@ public partial class JunctionApp
             .BorderColor(on ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
             .Cursor(CursorType.Pointer)
             .Tooltip(on
-                ? "Ignoring whitespace (i) — line staging is off while active"
-                : "Ignore whitespace changes (i)");
+                ? $"Ignoring whitespace ({Shortcuts.Keys("diff.whitespace")}) — line staging is off while active"
+                : $"Ignore whitespace changes ({Shortcuts.Keys("diff.whitespace")})");
         if (on) b.Background(Nocturne.Alpha(Nocturne.Accent, 0.14));
         b.AddChild(Ui.Mono("W", 12f, on ? Nocturne.Accent300 : Nocturne.On(0.55)));
         b.Key = "ws-toggle" + (on ? "#on" : "");
@@ -1075,7 +1072,7 @@ public partial class JunctionApp
         bar.AddChild(fullPathLabel);
         bar.AddChild(DiffModeToggle());
         bar.AddChild(Ui.SecondaryButton("Exit fullscreen (Esc)", Icons.ArrowsIn,
-            ToggleDiffFullscreen, 12f).Tooltip("Esc or F11"));
+            ToggleDiffFullscreen, 12f).Tooltip($"Esc or {Shortcuts.Keys("diff.fullscreen")}"));
         col.AddChild(bar);
 
         // Same three-way choice as the docked pane, so fullscreen is not the one place a

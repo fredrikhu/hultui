@@ -175,7 +175,7 @@ public partial class MeridianApp
             var flip = Button.New(ButtonVariant.Ghost).Gap(4).Style(Ui.Tiny)
                 .AccessibleName(ResponseAtBottom ? "Move response pane right" : "Move response pane to bottom")
                 .AutomationId("flip-pane")
-                .Children(Ui.Kbd("Ctrl \\"), Text.New("flip pane"));
+                .Children(Ui.Kbd(Shortcuts.Keys("flip")), Text.New("flip pane"));
             flip.OnClick(_ => FlipResponsePane());
             status.AddChild(flip);
         }
@@ -234,7 +234,7 @@ public partial class MeridianApp
             bar.AddChild(PrettyRawToggle(tab, raw: false));
             bar.AddChild(PrettyRawToggle(tab, raw: true));
             bar.AddChild(Box.New().Width(Azimuth.S2));
-            bar.AddChild(Ui.Kbd("Ctrl F"));
+            bar.AddChild(Ui.Kbd(Shortcuts.Keys("find")));
         }
         return bar;
     }

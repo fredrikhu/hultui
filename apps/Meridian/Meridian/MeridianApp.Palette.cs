@@ -43,7 +43,7 @@ public partial class MeridianApp
     {
         var list = new List<Command>
         {
-            new("Open a folder…", "Collection", "Ctrl O", OpenFolder),
+            new("Open a folder…", "Collection", Shortcuts.Keys("open"), OpenFolder),
             new("Go to Requests", "Go", "1", () => SetView(MeridianView.Requests)),
             new("Go to Runner", "Go", "2", () => SetView(MeridianView.Runner)),
             new("Go to Discovery", "Go", "3", () => SetView(MeridianView.Discovery)),
@@ -53,20 +53,21 @@ public partial class MeridianApp
 
         if (_workspace != null)
         {
-            list.Add(new Command("Switch environment…", "Environment", "Ctrl E", OpenEnvSwitcher));
-            list.Add(new Command("Run the collection", "Run", "Ctrl R", () =>
+            list.Add(new Command("Switch environment…", "Environment", Shortcuts.Keys("env"), OpenEnvSwitcher));
+            list.Add(new Command("Run the collection", "Run", Shortcuts.Keys("run"), () =>
             {
                 SetView(MeridianView.Runner);
                 StartRun();
             }));
-            list.Add(new Command("Import an OpenAPI spec…", "Discovery", "Ctrl I",
-                () => OpenDialog("Import OpenAPI", "path to openapi.json", ImportSpecFile)));
+            list.Add(new Command("Import an OpenAPI spec…", "Discovery", Shortcuts.Keys("import"), OpenImportDialog));
             list.Add(new Command("Discover an API…", "Discovery", "",
                 () => OpenDialog("Discover an API", "https://api.example.com", url =>
                 {
                     if (url.Trim() is { Length: > 0 } trimmed) StartDiscovery(trimmed);
                 })));
-            list.Add(new Command("Save environments", "Environment", "Ctrl S", SaveEnvironments));
+            // Ctrl S saves whatever is on screen, so it is shown on the one row it does now.
+            list.Add(new Command("Save environments", "Environment",
+                View == MeridianView.Environments ? Shortcuts.Keys("save") : "", SaveEnvironments));
 
             // Every request in the collection is a command — the fastest way
             // to a known request in a large tree.
@@ -85,11 +86,13 @@ public partial class MeridianApp
 
         if (ActiveTab != null)
         {
-            list.Add(new Command("Send", "Request", "Ctrl ↵", SendActive));
-            list.Add(new Command("Save request", "Request", "Ctrl S", SaveActiveTab));
-            list.Add(new Command("Close tab", "Request", "Ctrl W", CloseActiveTab));
+            list.Add(new Command("Send", "Request", View == MeridianView.Requests ? Shortcuts.Keys("send") : "", SendActive));
+            list.Add(new Command("Save request", "Request",
+                View != MeridianView.Environments ? Shortcuts.Keys("save") : "", SaveActiveTab));
+            list.Add(new Command("Close tab", "Request", Shortcuts.Keys("close"), CloseActiveTab));
             if (!_forceResponseBottom)
-                list.Add(new Command("Flip the response pane", "Request", "Ctrl \\", FlipResponsePane));
+                list.Add(new Command("Flip the response pane", "Request",
+                    View == MeridianView.Requests ? Shortcuts.Keys("flip") : "", FlipResponsePane));
         }
 
         list.Add(new Command("Options…", "App", "", () => { _optionsOpen = true; MarkDirty(); }));
@@ -196,7 +199,7 @@ public partial class MeridianApp
         input.FontSize(13f).TextColor(Azimuth.Text).WithRef(_paletteRef);
         input.AutomationId("palette-input");
         field.AddChild(input);
-        field.AddChild(Ui.Kbd("Ctrl P"));
+        field.AddChild(Ui.Kbd(Shortcuts.Keys("palette")));
         card.AddChild(field);
 
         var scroll = ScrollView.New();
@@ -273,7 +276,7 @@ public partial class MeridianApp
         card.AddChild(Text.New("Options").FontSize(14f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Text));
 
         card.AddChild(OptionRow("Response pane at the bottom",
-            _forceResponseBottom ? "forced — the window is too narrow for the side pane" : "Ctrl \\ also flips it",
+            _forceResponseBottom ? "forced — the window is too narrow for the side pane" : $"{Shortcuts.Keys("flip")} also flips it",
             ResponseAtBottom, _forceResponseBottom, "option-response-bottom", () => FlipResponsePane()));
 
         card.AddChild(OptionRow("Stop the runner on the first failure",

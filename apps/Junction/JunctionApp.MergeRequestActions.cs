@@ -40,7 +40,7 @@ public partial class JunctionApp
         checkout.AccessibleName = "Checkout locally";
         row.AddChild(checkout);
         var review = Ui.SecondaryButton("Review", Icons.Eyes, () => StartReview(path, iid), 12.5f)
-            .Tooltip("Open the diff with its threads and the review gutter (r)");
+            .Tooltip($"Open the diff with its threads and the review gutter ({Shortcuts.Keys("mr.review")})");
         review.AccessibleName = "Review";
         row.AddChild(review);
 

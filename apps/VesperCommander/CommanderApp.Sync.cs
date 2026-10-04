@@ -108,6 +108,12 @@ public partial class CommanderApp
     private void HandleSyncKey(KeyDownEvent e)
     {
         var vis = VisibleSyncRows();
+        // The diff key compares the selected pair, as it does in a pane.
+        if (Pressed(Cmd.Diff, e))
+        {
+            if (_syncSel >= 0 && _syncSel < vis.Count) DiffSyncRow(vis[_syncSel]);
+            e.StopPropagation = true; return;
+        }
         switch (e.Key)
         {
             case KeyCode.Escape: CloseSync(); e.StopPropagation = true; break;
@@ -115,9 +121,6 @@ public partial class CommanderApp
             case KeyCode.Down: _syncSel = Math.Min(Math.Max(0, vis.Count - 1), _syncSel + 1); MarkDirty(); e.StopPropagation = true; break;
             case KeyCode.Space:
                 if (_syncSel >= 0 && _syncSel < vis.Count) CycleSyncDir(vis[_syncSel]);
-                e.StopPropagation = true; break;
-            case KeyCode.F3:
-                if (_syncSel >= 0 && _syncSel < vis.Count) DiffSyncRow(vis[_syncSel]);
                 e.StopPropagation = true; break;
             case KeyCode.Enter: OpenSyncPreflight(); e.StopPropagation = true; break;
         }
@@ -372,7 +375,7 @@ public partial class CommanderApp
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f);
         var dl = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         dl.AddChild(Text.New("Diff").FontSize(11.5f).TextColor(Nocturne.Neutral300));
-        dl.AddChild(Ui.Kbd("F3"));
+        if (KeyText(Cmd.Diff) is { Length: > 0 } diffKeys) dl.AddChild(Ui.Kbd(diffKeys));
         diffBtn.AddChild(dl);
         diffBtn.OnClick(_ => { var v = VisibleSyncRows(); if (_syncSel < v.Count) DiffSyncRow(v[_syncSel]); });
         bar.AddChild(diffBtn.HoverBg(Nocturne.Neutral900, Color.Transparent));

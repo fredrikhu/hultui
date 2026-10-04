@@ -201,18 +201,18 @@ public partial class JunctionApp
         // The diff's view toggles. The hint is the key, so the palette teaches it rather
         // than being the only way in; each switches to a diff view first, the way
         // "Search file contents…" switches to History.
-        items.Add(new("action", "Action", Icons.Columns, "Diff: unified or split", "s",
+        items.Add(new("action", "Action", Icons.Columns, "Diff: unified or split", Shortcuts.Keys("diff.split"),
             () => { ClosePalette(); ShowDiffView(); SetDiffSplit(!_diffSplit); }));
-        items.Add(new("action", "Action", Icons.Rows, "Diff: wrap long lines", "w",
+        items.Add(new("action", "Action", Icons.Rows, "Diff: wrap long lines", Shortcuts.Keys("diff.wrap"),
             () => { ClosePalette(); ShowDiffView(); ToggleDiffWrap(); }));
-        items.Add(new("action", "Action", Icons.ArrowsOut, "Diff: fullscreen", "F11",
+        items.Add(new("action", "Action", Icons.ArrowsOut, "Diff: fullscreen", Shortcuts.Keys("diff.fullscreen"),
             () => { ClosePalette(); ShowDiffView(); ToggleDiffFullscreen(); }));
-        items.Add(new("action", "Action", Icons.FileCode, "Diff: ignore whitespace changes", "i",
+        items.Add(new("action", "Action", Icons.FileCode, "Diff: ignore whitespace changes", Shortcuts.Keys("diff.whitespace"),
             () => { ClosePalette(); ShowDiffView(); ToggleIgnoreWhitespace(); }));
-        items.Add(new("action", "Action", Icons.GitCommit, "Commit: show or hide the message body", "m",
+        items.Add(new("action", "Action", Icons.GitCommit, "Commit: show or hide the message body", Shortcuts.Keys("commit.message"),
             () => { ClosePalette(); SetView(JunctionView.Commit); ToggleCommitMessage(); }));
         // Find-in-text, which until now was only ever reachable by knowing Ctrl+F.
-        items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", "f · Ctrl+F",
+        items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", Shortcuts.Keys("find"),
             () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) bar.Open(); }));
         // Background fetch is a switch in Options › General now, not a palette toggle.
         items.Add(new("action", "Action", Icons.ArrowsClockwise,
@@ -221,7 +221,7 @@ public partial class JunctionApp
             () => { ClosePalette(); OpenOptions(OptionsSection.General); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         // Options has no gear in the chrome by design: these verbs and Ctrl+, are the ways in.
-        items.Add(new("action", "Action", Icons.Gear, "Options…", "Ctrl ,",
+        items.Add(new("action", "Action", Icons.Gear, "Options…", Shortcuts.Keys("options"),
             () => { ClosePalette(); OpenOptions(); }));
         items.Add(new("action", "Action", Icons.GitLabLogo, "GitLab accounts…",
             _gitlab.All.Count == 0 ? "none" : string.Join(", ", _gitlab.All.Select(a => a.Host)),

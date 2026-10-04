@@ -78,7 +78,54 @@ whatever the layout prints on it. The rest says what the key means:
 
 A Ctrl+Z binding written as `e.Key == KeyCode.Z` fires on QWERTZ's Y key; write
 `e.LayoutKey is 'z' or 'Z'` and fall back to `Key` when `LayoutKey` is 0 (the WinForms
-host and synthesized keys give none).
+host and synthesized keys give none) — or let `KeyChord` do it, below.
+
+---
+
+## Shortcuts: `KeyChord` and `ShortcutMap`
+
+A `KeyChord` is one shortcut — a key and its modifiers — and `chord.Matches(e)` applies the
+rules above so a handler does not have to:
+
+- **The modifiers must be exactly the chord's.** `new KeyChord(KeyCode.C)` is c, not Ctrl+C.
+  Switching on `e.Key` alone is the trap this replaces: a view whose `c` checked out a branch
+  checked it out on Ctrl+C too. Super counts as Ctrl (⌘ on a Mac); CapsLock and NumLock never
+  count; AltGr is not Alt.
+- **A letter is the letter printed on the key** (`LayoutKey`, falling back to the US position).
+  **Any other key is a position.** **A digit** is the number row or, with NumLock, the keypad.
+- **A character chord**, `KeyChord.Of('+', KeyModifiers.Ctrl)`, is the symbol the layout
+  types, Shift ignored — for keys that mean their symbol, as zoom means +. On a Swedish keyboard
+  `+` has a key of its own, at the US `-` position: matched by position, Ctrl and + zoomed out.
+
+`ToString()` writes the one notation (`Ctrl+Shift+P`, `Alt+↑`, `Ctrl+,`, a bare letter as
+typed: `m`) and `KeyChord.Parse` reads it back, along with the older spellings settings files
+hold (`Digit1`, `PgUp`, `cmd+p`).
+
+A `ShortcutMap` is an app's table of them — id, group, title, chords — and the one thing both
+the handlers and the hints read, so a key cannot be shown one way and bound another:
+
+```csharp
+var keys = new ShortcutMap();
+keys.Add("palette", "Global", "Command palette", new(KeyCode.P, KeyModifiers.Ctrl));
+keys.Add("mr.approve", "Merge requests", "Approve", new(KeyCode.A)).Legend("approve");
+keys.Add("view", "Global", "Views", digits).Shown("1 – 7");
+
+if (keys.Matches("palette", e)) { TogglePalette(); e.StopPropagation = true; }
+button.Tooltip($"Search & commands ({keys.Keys("palette")})");
+```
+
+The map answers questions; the app still walks its overlays and views in its own order and
+asks where it used to compare `e.Key`. `Find(e, group)` returns the first match in table order.
+`Legend(group)` gives a panel's key-and-word row.
+
+**Rebinding.** Mark a shortcut `.CanRebind()`. `Rebind(id, chord)` takes the chord from whatever
+rebindable shortcut in the group had it (that one goes back to its default, or to none when its
+default is the chord) and **refuses** a chord held by a shortcut that is not rebindable — put the
+app's fixed keys in the map too, so a command can never land on Ctrl+C. `SaveOverrides()` /
+`LoadOverrides()` persist only the changes, as id → chord text; `Clone()` gives an options page a
+draft. `KeyChord.From(e)` turns a captured press into a chord, null for a modifier alone.
+
+`VideoPlayer.Shortcuts` is the player overlay's map, for an app's help to name.
 
 ---
 

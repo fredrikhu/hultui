@@ -613,23 +613,10 @@ public partial class MeridianApp : Component, IDisposable
             return;
         }
 
-        // Ctrl combos work everywhere, including while typing in an input.
-        if (ctrl)
-        {
-            switch (e.Key)
-            {
-                case KeyCode.O: OpenFolder(); e.StopPropagation = true; return;
-                case KeyCode.P: TogglePalette(); e.StopPropagation = true; return;
-                case KeyCode.E when _workspace != null: OpenEnvSwitcher(); e.StopPropagation = true; return;
-                case KeyCode.S when View == MeridianView.Environments: SaveEnvironments(); e.StopPropagation = true; return;
-                case KeyCode.S: SaveActiveTab(); e.StopPropagation = true; return;
-                case KeyCode.W when ActiveTab != null: CloseActiveTab(); e.StopPropagation = true; return;
-                case KeyCode.Enter when View == MeridianView.Requests: SendActive(); e.StopPropagation = true; return;
-                case KeyCode.Backslash when View == MeridianView.Requests: FlipResponsePane(); e.StopPropagation = true; return;
-                case KeyCode.R when View == MeridianView.Runner && !RunnerRunning: StartRun(); e.StopPropagation = true; return;
-            }
-            return;
-        }
+        // Ctrl combos work everywhere, including while typing in an input. Matched through
+        // Shortcuts, which the hints read too: three keys they named did nothing here.
+        if (CtrlShortcut(e)) { e.StopPropagation = true; return; }
+        if (ctrl) return;
 
         if (e.Key == KeyCode.Escape && RunnerRunning)
         {
@@ -655,17 +642,45 @@ public partial class MeridianApp : Component, IDisposable
         }
 
         // Number keys switch views.
-        var viewForKey = e.Key switch
+        var viewForKey = !Shortcuts.Pressed("view", e) ? null : e.Digit switch
         {
-            KeyCode.Digit1 => MeridianView.Requests,
-            KeyCode.Digit2 => MeridianView.Runner,
-            KeyCode.Digit3 => MeridianView.Discovery,
-            KeyCode.Digit4 => MeridianView.History,
-            KeyCode.Digit5 => MeridianView.Environments,
+            1 => MeridianView.Requests,
+            2 => MeridianView.Runner,
+            3 => MeridianView.Discovery,
+            4 => MeridianView.History,
+            5 => MeridianView.Environments,
             _ => (MeridianView?)null,
         };
         if (viewForKey is { } v) { SetView(v); e.StopPropagation = true; }
     }
+
+    /// <summary>The Ctrl shortcuts, which act from anywhere. True when one acted.</summary>
+    private bool CtrlShortcut(KeyDownEvent e)
+    {
+        if (Shortcuts.Pressed("open", e)) { OpenFolder(); return true; }
+        if (Shortcuts.Pressed("palette", e)) { TogglePalette(); return true; }
+        if (Shortcuts.Pressed("env", e) && _workspace != null) { OpenEnvSwitcher(); return true; }
+        if (Shortcuts.Pressed("save", e))
+        {
+            if (View == MeridianView.Environments) SaveEnvironments(); else SaveActiveTab();
+            return true;
+        }
+        if (Shortcuts.Pressed("close", e) && ActiveTab != null) { CloseActiveTab(); return true; }
+        if (Shortcuts.Pressed("send", e) && View == MeridianView.Requests) { SendActive(); return true; }
+        if (Shortcuts.Pressed("flip", e) && View == MeridianView.Requests) { FlipResponsePane(); return true; }
+        // From any view, as the palette's row does: it used to run only on the Runner view.
+        if (Shortcuts.Pressed("run", e) && _workspace != null && !RunnerRunning)
+        {
+            SetView(MeridianView.Runner);
+            StartRun();
+            return true;
+        }
+        // Advertised by the palette and the front door, and never handled until now.
+        if (Shortcuts.Pressed("import", e)) { OpenImportDialog(); return true; }
+        return false;
+    }
+
+    private void OpenImportDialog() => OpenDialog("Import OpenAPI", "path to openapi.json", ImportSpecFile);
 
     public void Dispose()
     {

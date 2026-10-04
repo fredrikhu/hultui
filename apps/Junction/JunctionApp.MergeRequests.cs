@@ -282,7 +282,7 @@ public partial class JunctionApp
         var legend = Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(8, 18, 8, 18))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
-        foreach (var (key, what) in Shortcuts.Legend("Merge requests").Where(l => l.Keys != "Esc" && l.Keys != "r" && l.Keys != "a"))
+        foreach (var (key, what) in Shortcuts.Legend("Merge requests", "mr.back", "mr.review", "mr.approve"))
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));
@@ -586,7 +586,7 @@ public partial class JunctionApp
 
         var legend = Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(7, 18, 7, 18));
-        foreach (var (key, what) in Shortcuts.Legend("Merge requests").Where(l => l.Keys != "/" && l.Keys != "↑ ↓ ↵"))
+        foreach (var (key, what) in Shortcuts.Legend("Merge requests", "mr.search", "mr.move"))
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));
@@ -851,12 +851,38 @@ public partial class JunctionApp
         var openPath = _mrOpen?.Path;
         var selected = _mrOpen is null && _mrSel >= 0 && _mrSel < _mrRows.Count ? _mrRows[_mrSel] : null;
 
+        if (_mrOpen is null && Shortcuts.Pressed("mr.search", e))
+        {
+            _pendingMrSearchFocus = true;
+            MarkDirty();
+            return true;
+        }
+        if (Shortcuts.Pressed("mr.checkout", e))
+        {
+            if (open != null && openPath != null) CheckoutMergeRequest(openPath, open);
+            else if (selected != null) CheckoutMergeRequest(selected.Path, selected.Mr);
+            return true;
+        }
+        if (Shortcuts.Pressed("mr.review", e))
+        {
+            if (open != null && openPath != null) StartReview(openPath, open.Iid);
+            else if (selected != null) StartReview(selected.Path, selected.Mr.Iid);
+            return true;
+        }
+        if (Shortcuts.Pressed("mr.approve", e))
+        {
+            if (open != null && openPath != null) ToggleApproval(openPath, open, ApprovalsFor(openPath, open.Iid).Value);
+            else if (selected != null) ToggleApproval(selected.Path, selected.Mr, ApprovalsFor(selected.Path, selected.Mr.Iid).Value);
+            return true;
+        }
+        if (Shortcuts.Pressed("mr.browser", e))
+        {
+            OpenUrl((open ?? selected?.Mr)?.WebUrl);
+            return true;
+        }
+
         switch (e.Key)
         {
-            case KeyCode.Slash when _mrOpen is null:
-                _pendingMrSearchFocus = true;
-                MarkDirty();
-                return true;
             case KeyCode.Up when _mrOpen is null:
                 if (_mrSel > 0) { _mrSel--; MarkDirty(); }
                 return true;
@@ -865,21 +891,6 @@ public partial class JunctionApp
                 return true;
             case KeyCode.Enter when _mrOpen is null:
                 if (selected != null) { _mrOpen = (selected.Path, selected.Mr.Iid); Rerender(); }
-                return true;
-            case KeyCode.C:
-                if (open != null && openPath != null) CheckoutMergeRequest(openPath, open);
-                else if (selected != null) CheckoutMergeRequest(selected.Path, selected.Mr);
-                return true;
-            case KeyCode.R:
-                if (open != null && openPath != null) StartReview(openPath, open.Iid);
-                else if (selected != null) StartReview(selected.Path, selected.Mr.Iid);
-                return true;
-            case KeyCode.A:
-                if (open != null && openPath != null) ToggleApproval(openPath, open, ApprovalsFor(openPath, open.Iid).Value);
-                else if (selected != null) ToggleApproval(selected.Path, selected.Mr, ApprovalsFor(selected.Path, selected.Mr.Iid).Value);
-                return true;
-            case KeyCode.O:
-                OpenUrl((open ?? selected?.Mr)?.WebUrl);
                 return true;
         }
         return false;

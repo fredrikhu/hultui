@@ -339,7 +339,7 @@ public partial class JunctionApp
                     : Ui.GhostButton(bodyLines > 0 ? $"{bodyLines} more line{(bodyLines == 1 ? "" : "s")}" : "Show message",
                         Icons.CaretDown, ToggleCommitMessage, 11.5f))
                 .FlexShrink(0)
-                .Tooltip(_commitMsgExpanded ? "Hide the message body (m)" : "Show the message body (m)"));
+                .Tooltip($"{(_commitMsgExpanded ? "Hide" : "Show")} the message body ({Shortcuts.Keys("commit.message")})"));
         }
         box.AddChild(row2);
 

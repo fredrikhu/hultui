@@ -96,7 +96,7 @@ public partial class CommanderApp
             .FontSize(15f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text).FlexShrink(0));
         var dir = System.IO.Path.GetDirectoryName(_renameFiles[0].FullPath) ?? "";
         h.AddChild(Ui.Mono(dir, 11f, Nocturne.On(0.55)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
-        h.AddChild(Ui.Kbd("Ctrl+M"));
+        if (KeyText(Cmd.MultiRename) is { Length: > 0 } keys) h.AddChild(Ui.Kbd(keys));
         h.AddChild(Ui.IconButton(Glyphs.Close, CloseOverlays, "Close", 28f));
         return h;
     }

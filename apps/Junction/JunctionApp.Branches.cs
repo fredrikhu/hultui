@@ -400,7 +400,7 @@ public partial class JunctionApp
         var btn = Flex.Row(gap: 0).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
             .Width(30).Height(30).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer)
-            .Tooltip(included ? "Exclude from history (i)" : "Include in history (i)");
+            .Tooltip($"{(included ? "Exclude from" : "Include in")} history ({Shortcuts.Keys("branches.include")})");
         if (explicitInc)
             btn.Background(Nocturne.Alpha(Nocturne.Accent, 0.12))
                .BorderColor(Nocturne.Accent).BorderWidth(1f);
@@ -451,21 +451,22 @@ public partial class JunctionApp
     private bool HandleBranchKey(KeyDownEvent e)
     {
         if (HandleBranchNavKey(e)) return true;
-        switch (e.Key)
+        // Exact about modifiers (see Shortcuts): Ctrl+C here used to check the branch out.
+        if (Shortcuts.Pressed("branches.checkout", e)) { CheckoutSelected(); return true; }
+        if (Shortcuts.Pressed("branches.mr", e)) { CreateMergeRequestForSelected(); return true; }
+        if (Shortcuts.Pressed("branches.push", e)) { PushSelected(); return true; }
+        if (Shortcuts.Pressed("branches.pull", e)) { PullSelected(); return true; }
+        if (Shortcuts.Pressed("branches.include", e)) { ToggleIncludeSelected(); return true; }
+        if (Shortcuts.Pressed("branches.tree", e)) { ToggleRefTreeView(); return true; }
+        // The folder keys. Left/right stay out of HandleBranchNavKey deliberately:
+        // that subset also runs from inside the search box, where the arrows are
+        // the text caret's.
+        if (_refTreeView && Shortcuts.Pressed("branches.folder", e))
         {
-            case KeyCode.C: CheckoutSelected(); return true;
-            case KeyCode.M: CreateMergeRequestForSelected(); return true;
-            case KeyCode.P: PushSelected(); return true;
-            case KeyCode.L: PullSelected(); return true;
-            case KeyCode.I: ToggleIncludeSelected(); return true;
-            case KeyCode.T: ToggleRefTreeView(); return true;
-            // The folder keys. Left/right stay out of HandleBranchNavKey deliberately:
-            // that subset also runs from inside the search box, where the arrows are
-            // the text caret's.
-            case KeyCode.Right when _refTreeView: StepBranchTree(right: true); return true;
-            case KeyCode.Left when _refTreeView: StepBranchTree(right: false); return true;
-            default: return false;
+            StepBranchTree(right: e.Key == KeyCode.Right);
+            return true;
         }
+        return false;
     }
 
     private void StepBranchTree(bool right)

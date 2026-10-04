@@ -249,16 +249,14 @@ public partial class JunctionApp
                 return true;
         }
 
-        var op = e.Key switch
-        {
-            KeyCode.P => (RebaseOp?)RebaseOp.Pick,
-            KeyCode.R => RebaseOp.Reword,
-            KeyCode.E => RebaseOp.Edit,
-            KeyCode.S => RebaseOp.Squash,
-            KeyCode.F => RebaseOp.Fixup,
-            KeyCode.D => RebaseOp.Drop,
-            _ => null,
-        };
+        // Exact about modifiers: Ctrl+D used to drop the selected commit.
+        RebaseOp? op = Shortcuts.Pressed("rebase.pick", e) ? RebaseOp.Pick
+            : Shortcuts.Pressed("rebase.reword", e) ? RebaseOp.Reword
+            : Shortcuts.Pressed("rebase.edit", e) ? RebaseOp.Edit
+            : Shortcuts.Pressed("rebase.squash", e) ? RebaseOp.Squash
+            : Shortcuts.Pressed("rebase.fixup", e) ? RebaseOp.Fixup
+            : Shortcuts.Pressed("rebase.drop", e) ? RebaseOp.Drop
+            : null;
         if (op is { } o && _rbSel >= 0 && _rbSel < n)
         {
             RbSetActionRow(rb.Rows[_rbSel], o);
@@ -480,7 +478,10 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
 
         bar.AddChild(Text.New(string.Join(" · ", parts)).FontSize(11.5f).TextColor(Nocturne.On(0.55)));
-        bar.AddChild(Text.New("↑↓ select · ⌥↑↓ move · p/r/e/s/f/d action")
+        var actions = string.Join("/", new[] { "pick", "reword", "edit", "squash", "fixup", "drop" }
+            .Select(op => Shortcuts.Keys("rebase." + op)));
+        bar.AddChild(Text.New(string.Join(" · ", Shortcuts.Legend("Rebase").Select(l => $"{l.Keys} {l.Word}"))
+                + $" · {actions} action")
             .FontSize(10.5f).TextColor(Nocturne.On(0.38)));
         if (bad)
             bar.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(

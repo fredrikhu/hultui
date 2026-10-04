@@ -864,7 +864,7 @@ public partial class JunctionApp
         else
         {
             var add = Ui.PrimaryButton(rv.ReviewMode ? "Add to review" : "Add comment", null, () => SubmitComposer(rv), 11.5f)
-                .Tooltip("Ctrl Enter");
+                .Tooltip(Shortcuts.Keys("review.post"));
             add.AccessibleName = rv.ReviewMode ? "Add to review" : "Add comment";
             buttons.AddChild(add);
             if (!rv.ReviewMode)
@@ -889,9 +889,8 @@ public partial class JunctionApp
         // Esc and Ctrl+Enter ahead of the area's own handling of them.
         card.On<KeyDownEvent>(EventPhase.Capture, e =>
         {
-            var mod = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
             if (e.Key == KeyCode.Escape) { e.StopPropagation = true; CloseComposer(rv); }
-            else if (mod && e.Key == KeyCode.Enter) { e.StopPropagation = true; SubmitComposer(rv); }
+            else if (Shortcuts.Pressed("review.post", e)) { e.StopPropagation = true; SubmitComposer(rv); }
         });
         outer.AddChild(card);
         return outer;
@@ -1249,9 +1248,9 @@ public partial class JunctionApp
             var counts = Text.New($"{threads} thread{(threads == 1 ? "" : "s")} · {unresolved} unresolved").FontSize(11.5f).TextColor(Nocturne.On(0.55));
             counts.AutomationId = "review-threads";
             row2.AddChild(counts);
-            row2.AddChild(Ui.IconButton(Icons.CaretUp, () => StepUnresolved(rv, -1), "Previous unresolved thread (p)", 26f));
-            row2.AddChild(Ui.IconButton(Icons.CaretDown, () => StepUnresolved(rv, 1), "Next unresolved thread (n)", 26f));
-            var expand = Ui.GhostButton(rv.ExpandAll ? "Collapse all" : "Expand all", null, () => ToggleExpandAll(rv), 11.5f).Tooltip("e");
+            row2.AddChild(Ui.IconButton(Icons.CaretUp, () => StepUnresolved(rv, -1), $"Previous unresolved thread ({Shortcuts.Keys("review.previous")})", 26f));
+            row2.AddChild(Ui.IconButton(Icons.CaretDown, () => StepUnresolved(rv, 1), $"Next unresolved thread ({Shortcuts.Keys("review.next")})", 26f));
+            var expand = Ui.GhostButton(rv.ExpandAll ? "Collapse all" : "Expand all", null, () => ToggleExpandAll(rv), 11.5f).Tooltip(Shortcuts.Keys("review.expand"));
             expand.AccessibleName = rv.ExpandAll ? "Collapse all" : "Expand all";
             row2.AddChild(expand);
         }
@@ -1381,13 +1380,11 @@ public partial class JunctionApp
             case KeyCode.Down or KeyCode.Up when rv.Lines.Count > 0:
                 MoveCaret(rv, e.Key == KeyCode.Down ? 1 : -1, shift);
                 return true;
-            case KeyCode.C when rv.Caret >= 0:
-                OpenComposer(rv);
-                return true;
-            case KeyCode.N: StepUnresolved(rv, 1); return true;
-            case KeyCode.P: StepUnresolved(rv, -1); return true;
-            case KeyCode.E: ToggleExpandAll(rv); return true;
         }
+        if (rv.Caret >= 0 && Shortcuts.Pressed("review.comment", e)) { OpenComposer(rv); return true; }
+        if (Shortcuts.Pressed("review.next", e)) { StepUnresolved(rv, 1); return true; }
+        if (Shortcuts.Pressed("review.previous", e)) { StepUnresolved(rv, -1); return true; }
+        if (Shortcuts.Pressed("review.expand", e)) { ToggleExpandAll(rv); return true; }
         return false;
     }
 

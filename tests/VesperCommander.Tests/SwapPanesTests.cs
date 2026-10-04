@@ -20,10 +20,10 @@ public class SwapPanesTests
         t.WriteLeft("a.txt", "a");
         t.Open();
 
-        var map = t.Field<System.Collections.Generic.Dictionary<Chord, Cmd>>("_keyReverse");
-        Assert.True(map.TryGetValue(new Chord(KeyCode.U, Ctrl: true, Alt: false, Shift: false), out var cmd),
-            "no command is bound to Ctrl+U");
-        Assert.Equal(Cmd.Swap, cmd);
+        var map = t.Field<ShortcutMap>("_keys");
+        var bound = map.Find(new KeyDownEvent { Key = KeyCode.U, Modifiers = KeyModifiers.Ctrl });
+        Assert.True(bound is not null, "no command is bound to Ctrl+U");
+        Assert.Equal(nameof(Cmd.Swap), bound!.Id);
     }
 
     [Fact]

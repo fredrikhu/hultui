@@ -141,8 +141,9 @@ public class OptionsPanesTests
             session.Window.Click(Named(session, "Keyboard shortcuts"));
             session.PumpFrames(2);
             Assert.True(TreeHas(session, "Search & commands"));
-            Assert.True(TreeHas(session, "Ctrl P"));
-            Assert.True(TreeHas(session, "Next / previous unresolved thread"));
+            Assert.True(TreeHas(session, "Ctrl+P · Ctrl+K"));
+            Assert.True(TreeHas(session, "Next unresolved thread"));
+            Assert.True(TreeHas(session, "Rebase"));   // a group the old table never had
 
             session.Window.Click(Named(session, "External tools"));
             session.PumpFrames(2);

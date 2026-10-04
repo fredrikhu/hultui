@@ -45,14 +45,14 @@ public partial class MeridianApp
         grid.AddChild(Flex.Row(gap: Azimuth.S3).Children(
             EntryCard(Icons.FolderOpen, "Open a folder",
                 "An existing collection — or any repo with .req files in it.",
-                "Ctrl O", OpenFolder),
+                Shortcuts.Keys("open"), OpenFolder),
             EntryCard(Icons.Plus, "New collection",
                 "Creates a folder, a first request, and an env file.",
-                "Ctrl N", null)));
+                "", null)));   // not built yet: no action, and so no key to name
         grid.AddChild(Flex.Row(gap: Azimuth.S3).Children(
             EntryCard(Icons.ImportSpec, "Import OpenAPI",
                 "A spec file or URL becomes a browsable endpoint map.",
-                "Ctrl I", () => OpenDialog("Import OpenAPI", "path to openapi.json", ImportSpecFile)),
+                Shortcuts.Keys("import"), OpenImportDialog),
             EntryCard(Icons.Discovery, "Discover an API",
                 "Give a base URL; Meridian probes for specs and maps what it sees.",
                 "3", () => SetView(MeridianView.Discovery), accent: true)));
@@ -94,7 +94,7 @@ public partial class MeridianApp
         head.AddChild(Ui.Icon(glyph, 16f, enabled ? Azimuth.Accent300 : Azimuth.TextMuted));
         head.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Text));
         head.AddChild(Box.New().FlexGrow(1));
-        head.AddChild(Ui.Kbd(key));
+        if (key.Length > 0) head.AddChild(Ui.Kbd(key));
         card.AddChild(head);
         card.AddChild(Text.New(desc).FontSize(11.5f).TextColor(Azimuth.TextMuted));
 
