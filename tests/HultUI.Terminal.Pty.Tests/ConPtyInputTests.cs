@@ -20,17 +20,29 @@ public class ConPtyInputTests
         public Shown(PtyLaunch launch)
         {
             Session = HeadlessSession.Create(900, 600);
-            Connection = PtyConnection.Start(launch, 100, 30);
-            Controller = new TerminalController(Connection);
+            // The program starts at the size it is shown at, once the element has laid out its
+            // grid. Started at another and resized as it lays out, the resize lands while the
+            // program starts, and Git for Windows' programs miss about one resize in six until the
+            // next input arrives, throwing away its first key (problem 22). In vim that key was
+            // the first round's A: `hello` ran as normal-mode commands, its o opened a line in
+            // insert mode, and the file came out a hello short — on CI once, and 4 of 30 times
+            // here with a resize forced into vim's start. Resized to the same size afterwards, as
+            // the deferred connection does, ConPTY reports nothing.
+            var grid = new TaskCompletionSource<(int Columns, int Rows)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Controller = new TerminalController(new DeferredConnection(async _ =>
+            {
+                var (columns, rows) = await grid.Task.ConfigureAwait(false);
+                return PtyConnection.Start(launch, columns, rows);
+            }));
             var element = TerminalElement.New(Controller).FlexGrow(1);
             Session.Window.SetRoot(Flex.Column().Children(element));
             Session.PumpFrames(2);
+            grid.SetResult((Controller.Columns, Controller.Rows));
             element.Focus();
             Session.PumpFrame();
         }
 
         public HeadlessSession Session { get; }
-        public PtyConnection Connection { get; }
         public TerminalController Controller { get; }
         public HeadlessWindow Window => Session.Window;
         public string Screen => Controller.ReadScreen();
@@ -103,7 +115,7 @@ public class ConPtyInputTests
     [ProgramFact("dotnet", windowsOnly: true)]
     public void ANativeConsoleProgram_SeesEveryResize_AndTheKeyAfterIt()
     {
-        // ConPTY's side of problem 11: the resize reaches a native program at once and loses no
+        // ConPTY's side of problem 22: the resize reaches a native program at once and loses no
         // key. Git for Windows' programs lose one (GitsPrograms_LoseNoKeyAfterAResize).
         using var t = new Shown(PtyTerm.ChildLaunch("events"));
         t.WaitFor(s => s.Contains("READY"), "the program");
@@ -145,7 +157,7 @@ public class ConPtyInputTests
     }
 
     /// <summary>
-    /// Problem 11, measured: Git for Windows' MSYS2 runtime (3.6.6 in Git 2.53) misses about one
+    /// Problem 22, measured: Git for Windows' MSYS2 runtime (3.6.6 in Git 2.53) misses about one
     /// resize in six until the next input arrives, and throws away the first character of it. Not
     /// the terminal's to fix (docs/design/TERMINAL.md), so this runs only when asked
     /// (<c>HULTUI_TERMINAL_MEASURE=1</c>), to see whether a newer Git still loses keys.
