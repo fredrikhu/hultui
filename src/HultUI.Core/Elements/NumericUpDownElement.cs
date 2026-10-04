@@ -213,10 +213,14 @@ public class NumericUpDownElement : Element, IRangeValueElement
             .Start();
     }
 
+    /// <summary>Steps on the vertical wheel. Not while a page is being scrolled past it (see
+    /// <see cref="ScrollEvent.IsFor"/>), and not on a sideways swipe, which has no DeltaY and
+    /// used to read as "down".</summary>
     private void OnScroll(ScrollEvent evt)
     {
-        StepBy(evt.DeltaY > 0 ? _step : -_step);
-        evt.StopPropagation = true;
+        if (!evt.IsFor(this) || evt.RemainingDeltaY == 0) return;
+        StepBy(evt.RemainingDeltaY > 0 ? _step : -_step);
+        evt.Consume(this, movedX: false, movedY: true);
     }
 
     private void OnKeyDown(KeyDownEvent evt)

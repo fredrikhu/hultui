@@ -1,6 +1,44 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The wheel is shared out between nested scrollers** — every scroll view stopped the wheel
+  event whether or not it moved, so a list at the end of its range kept the wheel from the page
+  around it and a horizontal strip inside a vertical page ate the vertical wheel. Stopping
+  turned out to cost more than nesting. In this framework `StopPropagation` also ends the
+  element's *remaining* handlers, and owned handlers run first, so an app's own `ScrollEvent`
+  handler on a scroll view never ran. That killed three app features nobody had noticed:
+  Junction's and Vesper's sideways pan on a trackpad swipe or Shift+wheel (the diff and the
+  viewer), and Vesper's brief view re-windowing its columns after a sideways scroll.
+  Now `ScrollEvent` carries the sharing out. A scroller asks `IsFor(this)`, moves by
+  `RemainingDeltaX/Y`, and reports with `Consume(this, movedX, movedY)`; an axis it could not
+  move on is left for the next one out. The event bubbles all the way and nobody stops it. Four
+  rules ride on that:
+  - **Latching.** A gesture stays with the scroller its first event moved while events keep
+    coming under 300 ms apart and the pointer stays over it (`WheelGesture`, kept by the
+    window). Without it, handing on at the end of a range would make a flick down a list carry
+    on with the page, and a list arriving under the pointer would take over a page scroll.
+  - **Shift turns a vertical wheel sideways** (`ScrollDeltaX/Y`), as in a browser. It had to,
+    or the pan handlers that can now run would have scrolled the diff diagonally.
+  - **A wheel over an overlay is the overlay's.** The wheel path never hit-tested overlays, so
+    a wheel over a dialog or a popup scrolled the page behind it.
+  - **NumericUpDown and TimePicker** respect a latched gesture, so a settings page scrolled past
+    a number field no longer changes it, and no longer step *down* on a sideways swipe, whose
+    zero DeltaY read as "down".
+  `ScrollSidewaysWith` now carries the wheel's sideways motion as well as the autoscroll's, so the
+  three app lines that hung `HandleScroll` on a list are gone; `HandleScroll` follows the protocol
+  for a pan whose content is not a scroll view's. Terminal and WebView keep the whole wheel as
+  before, through `Consume` rather than a stop. LAYOUT.md "Nesting scroll views" has the rules
+  and the three-step pattern for app code.
+  11 headless tests, 9 Core, 1 in Junction (swipe and Shift+wheel pan the diff), and the old
+  `ScrollEvent_StopsPropagation`, which pinned the bug, rewritten as two: the parent sees the
+  motion already used, and sees it unused when the view could not move. Five faults
+  were put back: the old handler (8 of 11 fail), latching off (4 plus 1 unit), and overlays,
+  Shift and the zero-DeltaY step each caught by their own tests. The Junction test reports
+  exactly the symptom with the old handler back.
+  Not done, and a separate question: a plain vertical wheel over a horizontal-only view (Vesper's
+  brief view) still does nothing there, and now passes through to whatever is around it. Windows'
+  list view scrolls sideways on the vertical wheel; whether a horizontal-only `ScrollView` should
+  is a decision.
 - **Undo and redo in text fields** — `TextInputElement` and `TextAreaElement` handled
   Ctrl+A/C/X/V and nothing else, so every field in every app lost an edit for good. Ctrl+Z,
   Ctrl+Y and Ctrl+Shift+Z now work, along with `Undo()` / `Redo()` / `CanUndo` / `CanRedo` and

@@ -176,6 +176,38 @@ public class MiddleClickAutoScrollTests
         });
     }
 
+    /// <summary>
+    /// A trackpad's sideways swipe, and Shift with the wheel, pan an unwrapped diff too.
+    /// <para>Neither ever did. The app hung its pan on the list as a wheel handler, but the
+    /// list's own handler ran first and stopped the event, and stopping also ends the
+    /// element's remaining handlers — so the app's never ran. The list now sends the wheel's
+    /// sideways motion to the pan it names, the same way the autoscroll's goes there, and
+    /// Shift+wheel is sideways only rather than scrolling the diff down as well.</para>
+    /// </summary>
+    [Fact]
+    public void ASidewaysSwipeAndShiftWheelPanTheDiff()
+    {
+        WithTallDiff((session, app) =>
+        {
+            var pan = Field<HultUI.Core.Builders.HorizontalPan>(app, "_diffPan");
+            Assert.True(pan.CanPan, "the fixture's diff has nothing to pan");
+            var box = Body(app).Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, y = box.Y + 40f;
+            float top = Body(app).ScrollOffsetY;
+
+            session.Window.Wheel(x, y, -1, 0);
+            session.PumpFrame();
+            float swiped = pan.Offset;
+            Assert.True(swiped > 0, "a sideways swipe did not pan the diff");
+
+            session.PumpFrame(TimeSpan.FromMilliseconds(400));   // a new gesture
+            session.Window.Wheel(x, y, 0, -1, KeyModifiers.Shift);
+            session.PumpFrame();
+            Assert.True(pan.Offset > swiped, "Shift+wheel did not pan the diff");
+            Assert.Equal(top, Body(app).ScrollOffsetY, 3);
+        });
+    }
+
     /// <summary>Wrapped, every line is visible in full and there is nothing sideways to reach:
     /// the gesture's horizontal half does nothing, and the vertical half still works.</summary>
     [Fact]

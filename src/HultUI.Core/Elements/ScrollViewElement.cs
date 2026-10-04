@@ -72,9 +72,10 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// <para>A virtualized list pins its content width to the viewport, so its own
     /// <see cref="ScrollOffsetX"/> never leaves zero and an app that pans a wide list keeps
     /// the position elsewhere (<see cref="Builders.HorizontalPan"/>). Set this to that, and
-    /// the middle-click autoscroll's horizontal delta goes there — otherwise a reader aiming
-    /// right of the anchor, over a list with a horizontal scrollbar plainly under it, gets
-    /// nothing. Null means the view scrolls sideways with its own offset, as a plain one does.</para>
+    /// the wheel's sideways motion and the middle-click autoscroll's go there — otherwise a
+    /// reader swiping sideways, or aiming right of the anchor, over a list with a horizontal
+    /// scrollbar plainly under it, gets nothing. Null means the view scrolls sideways with its
+    /// own offset, as a plain one does.</para>
     /// </summary>
     public ISidewaysScroller? SidewaysScroller { get; set; }
 
@@ -91,12 +92,40 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     public new static ScrollViewElement New([OriginFile] string? file = null, [OriginLine] int line = 0) =>
         new ScrollViewElement().WithOrigin(file, line);
 
+    /// <summary>
+    /// Takes the axes it can move on and leaves the rest to the scroll views around it — see
+    /// <see cref="ScrollEvent.Consume"/>. It used to stop the event outright, which cost twice:
+    /// a list at the end of its range kept the wheel from the page around it, and an app's own
+    /// wheel handler on the list never ran, since stopping also ends the element's remaining
+    /// handlers.
+    /// </summary>
     private void OnScroll(ScrollEvent evt)
     {
-        ScrollOffsetX -= evt.DeltaX * ScrollSpeed;
-        ScrollOffsetY -= evt.DeltaY * ScrollSpeed;
-        evt.StopPropagation = true;
-        MarkPaintDirty();
+        if (!evt.IsFor(this)) return;
+        float dx = evt.RemainingDeltaX * ScrollSpeed;
+        float dy = evt.RemainingDeltaY * ScrollSpeed;
+        if (dx == 0 && dy == 0) return;
+
+        float beforeY = _scrollOffsetY;
+        if (dy != 0) ScrollOffsetY = beforeY - dy;
+        bool movedY = _scrollOffsetY != beforeY;
+
+        // Sideways goes to whoever really scrolls it, as the autoscroll's does (see ScrollBy),
+        // and last, for the same reason: a pan rebuilds its owner from inside the call.
+        bool movedX = false;
+        if (dx != 0)
+        {
+            if (SidewaysScroller is { } sideways)
+                movedX = sideways.ScrollSidewaysBy(-dx);
+            else
+            {
+                float beforeX = _scrollOffsetX;
+                ScrollOffsetX = beforeX - dx;
+                movedX = _scrollOffsetX != beforeX;
+            }
+        }
+
+        evt.Consume(this, movedX, movedY);
     }
 
     /// <summary>

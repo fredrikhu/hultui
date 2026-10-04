@@ -316,14 +316,17 @@ public class TimePickerElement : Element
 
     private void OnScroll(ScrollEvent evt)
     {
+        // Not while a page is scrolled past it, and not on a sideways swipe — see
+        // NumericUpDownElement.OnScroll.
+        if (!evt.IsFor(this) || evt.RemainingDeltaY == 0) return;
         if (SegmentIndexAt(evt.LocalPosition.X) is { } index && index != _segment)
         {
             _segment = index;
             ResetTyping();
         }
         // Wheel up is away from the user, which reads as "later".
-        Step(evt.DeltaY > 0 ? 1 : -1);
-        evt.StopPropagation = true;
+        Step(evt.RemainingDeltaY > 0 ? 1 : -1);
+        evt.Consume(this, movedX: false, movedY: true);
     }
 
     private void OnKeyDown(KeyDownEvent evt)

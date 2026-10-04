@@ -531,11 +531,15 @@ Scroll offset is automatically clamped to the valid range based on content size.
 - Track click
 - Middle-click autoscroll (`ScrollBy(dx, dy)` from the frame loop; `CanAutoScroll` says whether there is anywhere to go)
 
-**Nesting.** A scroll view's wheel handler sets `StopPropagation` whether or not the
-offset moved, so a horizontal scroll view inside a vertical one eats the vertical wheel:
-the inner offset clamps to 0 and the outer never sees the event. Two-axis surfaces are
-built with one vertical scroll view and a sideways *pan* held as app state — see
-[LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views).
+**Nesting.** A scroll view takes the wheel axes it can move on and hands the rest to the
+scroll views around it, so nested views work for both axes and a list at the end of its
+range hands the next gesture to the page. A gesture stays with the view it started on
+while the events keep coming, Shift turns a vertical wheel sideways, and a wheel over an
+overlay is the overlay's. An app's own `ScrollEvent` handler on a scroll view runs after
+the view's, and sees what was used through `ConsumedX`/`ConsumedY`. The rules, and how to
+take part from your own code, are in
+[LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views). A *virtualized* list
+still cannot scroll sideways itself; wide lists use a pan (below and there).
 
 **Reveal before layout.** `ScrollRangeIntoView(top, height)` scrolls the minimum
 distance to show a band of content, and needs the viewport height to do it. Called
@@ -546,11 +550,10 @@ so a reveal asked for on the same frame the content appeared is not lost.
 element and sideways forms.
 
 **`ScrollSidewaysWith(ISidewaysScroller)`.** Set when the horizontal offset is owned by
-something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). `ScrollBy`
-then forwards `dx` there instead, and autoscroll asks it whether sideways travel is
-possible. A panned list without this is half-broken: the wheel works because the app
-routes it, but the autoscroll gesture, which the framework drives, aims sideways and
-nothing moves.
+something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). The wheel's
+sideways motion (a trackpad swipe, Shift+wheel) and `ScrollBy`'s `dx` go there instead,
+and autoscroll asks it whether sideways travel is possible. A panned list without this
+cannot be scrolled sideways by anything but its scrollbar.
 
 **Example:**
 

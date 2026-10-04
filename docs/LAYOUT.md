@@ -438,12 +438,38 @@ scroll.ShowScrollbarX = true;  // enable horizontal scrollbar
 
 ### Nesting scroll views
 
-Two constraints decide how any two-axis scrolling surface has to be built:
+**The wheel is shared out along the path.** A scroll view takes the axes it can move on
+and leaves the rest to the scroll views around it, so a horizontal strip inside a vertical
+page scrolls sideways and lets the vertical wheel through to the page, and a list at the end
+of its range hands the next gesture to the page. A *gesture* — one spin of the wheel, a
+swipe and its inertia — stays with the scroller its first event moved, for as long as the
+events keep coming (less than 300 ms apart) and the pointer stays over it: a flick that
+reaches the end of a list stops there rather than carrying on with the page, and a page
+being scrolled is not taken over by a list that arrives under the pointer. Browsers do the
+same and call it latching. Shift turns a vertical wheel sideways. A wheel over an overlay
+belongs to the overlay.
 
-- **A scroll view's wheel handler stops propagation whether or not it scrolled.** A
-  horizontal `ScrollView` nested inside a vertical one therefore eats the vertical
-  wheel: the inner `ScrollOffsetY` clamps to 0 and the outer never sees the event.
-  Nesting scroll views for the two axes costs you the wheel.
+To take part from your own code — something that scrolls or changes a value on the wheel —
+follow the same three steps the built-in elements do:
+
+```csharp
+el.On<ScrollEvent>(e =>
+{
+    var self = e.CurrentTarget;               // never the captured element: a rebuild detaches it
+    if (!e.IsFor(self)) return;               // a gesture that belongs to another scroller
+    float dy = e.RemainingDeltaY;             // 0 once something nearer the pointer used it
+    if (dy == 0) return;
+    bool moved = MyScroll(dy);
+    e.Consume(self, movedX: false, movedY: moved);   // what you used; the rest goes on
+});
+```
+
+Don't set `StopPropagation` on a wheel event: in this framework it also ends the element's
+remaining handlers, which is what used to keep an app's own wheel handler on a scroll view
+from ever running.
+
+One constraint still decides how a wide *virtualized* list has to be built:
+
 - **A `VirtualListElement` cannot scroll sideways at all.** Its content width is pinned
   to the viewport, so `ScrollOffsetX` is permanently 0. A plain `ScrollView` measures its
   children and can.
@@ -466,15 +492,14 @@ _pan.ContentWidth = HorizontalPan.MeasureWidest(lines, fontSize, fontFamily);
 _pan.Cell(Text.New(line).MaxLines(1).TextOverflow(TextOverflow.Clip))
 
 // on the list:
-list.On<ScrollEvent>(e => _pan.HandleScroll(e));           // Shift+wheel / horizontal wheel
+list.ScrollSidewaysWith(_pan);                             // the wheel's and autoscroll's sideways motion
 list.On<KeyDownEvent>(e => _pan.HandleKey(e));
-list.ScrollSidewaysWith(_pan);                             // so middle-click autoscroll follows
 ```
 
-The last line matters: the wheel and keys are events the app routes, but middle-click
-autoscroll runs from the frame loop and calls `ScrollBy` on the list itself. Without
-`ScrollSidewaysWith`, aiming right of the anchor does nothing while everything else
-works. `_pan.Scrollbar(track, thumb, border)` builds a draggable bar under the list.
+`ScrollSidewaysWith` is what makes the list's sideways axis the pan's: a trackpad's
+sideways swipe, Shift+wheel and middle-click autoscroll all go there. Keys are still the
+app's to route. `_pan.Scrollbar(track, thumb, border)` builds a draggable bar under the
+list. (`_pan.HandleScroll(e)` exists for a pan whose content is not a scroll view's.)
 
 ---
 
