@@ -46,6 +46,42 @@ happens to contain the string.
 - MSB3027 "file locked" usually means a previously launched sample app still holds its exe — find and `Stop-Process` it.
 - Reference CI: `.github/workflows/junction-installer.yml` (`test` on windows-latest runs the whole slnx and lets the UiTests skip themselves; `test-linux` on ubuntu-latest with the slnf).
 
+### On Linux, from this Windows machine (WSL)
+
+The `FedoraLinux-44` WSL distro runs the Linux tests locally, no push needed. `scripts/wsl-test.sh`
+keeps its own clone at `~/src/hului-revamped` on WSL's disk (made on first use), fetches from
+the Windows checkout, checks out the ref and runs `dotnet test`:
+
+```bash
+# A branch or commit of the Windows checkout (a worktree's branch is fine; commit first —
+# uncommitted work is not seen). Default ref github/main, default target the slnf CI runs:
+MSYS_NO_PATHCONV=1 wsl -d FedoraLinux-44 --exec bash /mnt/c/<checkout>/scripts/wsl-test.sh <branch>
+MSYS_NO_PATHCONV=1 wsl -d FedoraLinux-44 --exec bash /mnt/c/<checkout>/scripts/wsl-test.sh <branch> tests/VesperCommander.Tests --filter "FullyQualifiedName~Archive"
+```
+
+The whole slnf takes about 90 s there. Traps, each already handled by the script:
+- **Git Bash rewrites `/mnt/c/...`** into `C:/Program Files/Git/mnt/c/...` unless
+  `MSYS_NO_PATHCONV=1`, and turns `~` into `/c/Users/...`, so `wsl --cd ~` misfires. From
+  PowerShell neither applies.
+- **`bash -lc '...$VAR...'` through `wsl.exe` loses the quoting**: the variable expands empty
+  before it reaches Linux. Put anything with variables in a script file.
+- **WSL starts in the Windows working directory**, and in a worktree every git command, even
+  `git config --global`, fails with `not a git repository: (null)` on the `.git` file's
+  Windows path. `cd ~` first.
+- **`/mnt/c` files all show as root's**, so git refuses the Windows checkout as "dubious
+  ownership" until it is a `safe.directory`.
+- **Never build in `/mnt/c`**: it is slow, and it shares `bin/`/`obj/` with the Windows builds.
+- **WSL's PATH is not a Linux desktop's**: it appends the whole Windows PATH and puts `sbin`
+  first. The script sets a Fedora user's PATH.
+
+Fedora's minimal image differs from CI's Ubuntu runner in what it has installed:
+- **Fonts:** it has no monospace face (`monospace` resolves to Noto Sans) and nothing for
+  Hebrew. Install DejaVu (`dejavu-sans-fonts dejavu-sans-mono-fonts dejavu-serif-fonts`), which
+  Ubuntu gets with fontconfig, plus `google-noto-sans-cjk-fonts` for `[HanFontsFact]`.
+  Otherwise about nine Skia, Headless and Terminal font tests fail.
+- **7-Zip:** Fedora ships `7zip`, the runner has none, so Vesper's 7-Zip paths run only here.
+- **No `awk`** in the minimal image.
+
 ## Choosing a layer
 
 - **Element/layout/event logic** → Core.Tests. Build elements directly, dispatch with `EventDispatcher.Dispatch(new ClickEvent(), target)`, measure text with `StubMeasureContext` (7px/char, 14px lines). Target-phase dispatch runs *all* handlers in registration order; `StopPropagation` breaks the loop.
