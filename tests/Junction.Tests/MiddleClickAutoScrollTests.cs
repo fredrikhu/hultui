@@ -309,17 +309,22 @@ public class MiddleClickAutoScrollTests
     /// worth scrolling, opened on <paramref name="view"/>.</summary>
     private static void WithBusyRepo(KeyCode view, System.Action<HeadlessSession, JunctionApp> body)
     {
-        using var repo = TempRepo.CreateWithInitialCommit();
-        for (int i = 0; i < 60; i++)
+        // Built once and copied: close to two hundred git calls, the same for every view.
+        using var repo = TempRepo.CreateFrom("busy-repo", () =>
         {
-            repo.Write($"file-{i:00}.txt", $"content {i}\n");
-            repo.Git("add", "-A");
-            repo.Git("commit", "-m", $"commit number {i}");
-            if (i % 2 == 0) repo.Git("branch", $"topic/branch-{i:00}");
-            if (i % 2 == 0) repo.Git("tag", $"v0.0.{i}");
-        }
-        // Something uncommitted, so the Changes view has a list of its own.
-        for (int i = 0; i < 40; i++) repo.Write($"pending-{i:00}.txt", "x\n");
+            var busy = TempRepo.CreateWithInitialCommit();
+            for (int i = 0; i < 60; i++)
+            {
+                busy.Write($"file-{i:00}.txt", $"content {i}\n");
+                busy.Git("add", "-A");
+                busy.Git("commit", "-m", $"commit number {i}");
+                if (i % 2 == 0) busy.Git("branch", $"topic/branch-{i:00}");
+                if (i % 2 == 0) busy.Git("tag", $"v0.0.{i}");
+            }
+            // Something uncommitted, so the Changes view has a list of its own.
+            for (int i = 0; i < 40; i++) busy.Write($"pending-{i:00}.txt", "x\n");
+            return busy;
+        });
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;
