@@ -31,31 +31,92 @@ internal sealed class TempRepo : IDisposable
         Repo = new GitRepository(path);
     }
 
-    /// <summary>Creates an empty repository with one root commit already in it.</summary>
-    public static TempRepo CreateWithInitialCommit()
+    /// <summary>Creates a repository with one root commit already in it. Every call gets its
+    /// own copy of the same repository, so the commit is identical across fixtures (same id,
+    /// same date) — see <see cref="CreateFrom"/>.</summary>
+    public static TempRepo CreateWithInitialCommit() => CreateFrom("initial-commit", () =>
     {
         var repo = CreateEmpty();
         repo.Write("README.md", "hello\n");
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "initial");
         return repo;
-    }
+    });
 
     public static TempRepo CreateEmpty()
     {
-        PrepareEnvironment();
+        var repo = new TempRepo(NewFixturePath());
+        repo.Git("init", "-b", "main");
+        // Written straight into the repository's config rather than with four `git config`
+        // calls: the suite's time is mostly git process starts, and these were four of the
+        // five an empty fixture used to make.
+        File.AppendAllText(System.IO.Path.Combine(repo.Path, ".git", "config"),
+            "[user]\n\tname = Junction Tests\n\temail = tests@example.invalid\n" +
+            "[commit]\n\tgpgsign = false\n" +
+            "[core]\n\tautocrlf = false\n");
+        return repo;
+    }
 
+    private static readonly Dictionary<string, TempRepo> Templates = new();
+
+    /// <summary>
+    /// A fresh copy of a fixture that <paramref name="build"/> makes once per test process.
+    ///
+    /// <para>The suite's time goes on starting git, and a fixture made of commits pays for
+    /// every one of them in every test that wants it — sixty commits, branches and tags is
+    /// close to two hundred processes, about five seconds, for a repository that comes out
+    /// the same each time. Copying the finished repository costs a few milliseconds. Each
+    /// caller still owns its copy outright, so a test that commits, rebases or deletes
+    /// cannot disturb the next one.</para>
+    ///
+    /// <para>What a copy cannot give is uniqueness: every copy holds the same commits, with
+    /// the same ids and the same dates, made when the first test asked. A test that needs
+    /// commits newer than its own start, or repositories that differ, builds them itself.</para>
+    /// </summary>
+    public static TempRepo CreateFrom(string template, Func<TempRepo> build)
+    {
+        TempRepo? source;
+        lock (Templates)
+        {
+            if (!Templates.TryGetValue(template, out source))
+            {
+                source = build();
+                Templates[template] = source;
+                if (Templates.Count == 1)
+                    AppDomain.CurrentDomain.ProcessExit += (_, _) => DisposeTemplates();
+            }
+        }
+
+        var copy = new TempRepo(NewFixturePath());
+        CopyTree(source.Path, copy.Path);
+        return copy;
+    }
+
+    private static void DisposeTemplates()
+    {
+        lock (Templates)
+        {
+            foreach (var template in Templates.Values) template.Dispose();
+            Templates.Clear();
+        }
+    }
+
+    private static string NewFixturePath()
+    {
+        PrepareEnvironment();
         var path = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), FixturePrefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
+        return path;
+    }
 
-        var repo = new TempRepo(path);
-        repo.Git("init", "-b", "main");
-        repo.Git("config", "user.name", "Junction Tests");
-        repo.Git("config", "user.email", "tests@example.invalid");
-        repo.Git("config", "commit.gpgsign", "false");
-        repo.Git("config", "core.autocrlf", "false");
-        return repo;
+    private static void CopyTree(string from, string to)
+    {
+        foreach (var dir in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(System.IO.Path.Combine(to, System.IO.Path.GetRelativePath(from, dir)));
+        // git's object files are read-only and stay so in the copy; ForceDelete copes.
+        foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            File.Copy(file, System.IO.Path.Combine(to, System.IO.Path.GetRelativePath(from, file)));
     }
 
     /// <summary>Runs git in the repo and fails loudly — arranging a fixture must not

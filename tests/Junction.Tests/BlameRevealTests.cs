@@ -171,22 +171,26 @@ public class BlameRevealTests
     /// end up far enough down the history that reaching them needs a scroll.</summary>
     private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp> body, int extraCommits = 0)
     {
-        using var repo = TempRepo.CreateEmpty();
-        repo.Write("story.txt", "first line\nsecond line\n");
-        repo.Git("add", "-A");
-        repo.Git("commit", "-m", "first pass");
-        repo.Git("config", "user.name", "Second Author");
-        repo.Git("config", "user.email", "second@example.invalid");
-        repo.Write("story.txt", "first line\nsecond line\nthird line\n");
-        repo.Git("add", "-A");
-        repo.Git("commit", "-m", "second pass");
-
-        for (var i = 0; i < extraCommits; i++)
+        using var repo = TempRepo.CreateFrom($"blame-story-{extraCommits}", () =>
         {
-            repo.Write("filler.txt", $"{i}\n");
-            repo.Git("add", "-A");
-            repo.Git("commit", "-m", $"filler {i}");
-        }
+            var story = TempRepo.CreateEmpty();
+            story.Write("story.txt", "first line\nsecond line\n");
+            story.Git("add", "-A");
+            story.Git("commit", "-m", "first pass");
+            story.Git("config", "user.name", "Second Author");
+            story.Git("config", "user.email", "second@example.invalid");
+            story.Write("story.txt", "first line\nsecond line\nthird line\n");
+            story.Git("add", "-A");
+            story.Git("commit", "-m", "second pass");
+
+            for (var i = 0; i < extraCommits; i++)
+            {
+                story.Write("filler.txt", $"{i}\n");
+                story.Git("add", "-A");
+                story.Git("commit", "-m", $"filler {i}");
+            }
+            return story;
+        });
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using HultUI.Core.Animation;
 using HultUI.Core.Styling;
 
@@ -22,7 +24,9 @@ public sealed class HeadlessSession : IDisposable
     private readonly HeadlessTimeProvider _time;
     private readonly HeadlessWindowingPlatform _platform;
     private readonly SynchronizationContext? _previousSyncContext;
-    private readonly Queue<Action> _deferredWork = new();
+    // Concurrent because producers run off the test thread, so anything scheduled while
+    // they run arrives from several threads at once.
+    private readonly ConcurrentQueue<Func<Action?>> _deferredWork = new();
     private bool _disposed;
 
     /// <summary>The application under test. All normal app APIs (theme, InvokeOnMainThread, multi-window) work.</summary>
@@ -127,15 +131,38 @@ public sealed class HeadlessSession : IDisposable
     }
 
     /// <summary>
-    /// Runs the AsyncLoader producers queued since the last frame. Only what was
-    /// pending when the drain began: work scheduled by a running item waits for the
-    /// next frame, preserving the one-frame-later contract.
+    /// Runs the AsyncLoader producers queued since the last frame, then queues their
+    /// results for this frame's main-thread drain. Only what was pending when the drain
+    /// began: work scheduled by a running item waits for the next frame, preserving the
+    /// one-frame-later contract.
+    ///
+    /// <para>The producers run on the thread pool, all at once, and the drain waits for
+    /// every one of them. That is how a running app treats them, and it matters for
+    /// speed: a producer is typically a subprocess or I/O wait, and an app that asks for
+    /// five views' data at start-up used to wait for five in a row here. Their results
+    /// are applied in the order the loads were requested, whichever finished first, so
+    /// the outcome does not depend on machine load.</para>
     /// </summary>
     private void DrainDeferredWork()
     {
         int pending = _deferredWork.Count;
-        while (pending-- > 0)
-            _deferredWork.Dequeue()();
+        if (pending == 0) return;
+
+        var running = new Task<Action?>[pending];
+        for (int i = 0; i < pending; i++)
+        {
+            _deferredWork.TryDequeue(out var work);
+            running[i] = Task.Run(work!);
+        }
+        try { Task.WaitAll(running); }
+        catch (AggregateException) { /* rethrown below, once the others have landed */ }
+
+        foreach (var task in running)
+            if (task.IsCompletedSuccessfully && task.Result is { } apply)
+                Application.InvokeOnMainThread(apply);
+        foreach (var task in running)
+            if (task.IsFaulted)
+                ExceptionDispatchInfo.Capture(task.Exception!.InnerException!).Throw();
     }
 
     /// <summary>Pumps <paramref name="count"/> frames at <see cref="DefaultFrameDelta"/>.</summary>

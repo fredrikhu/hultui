@@ -131,6 +131,48 @@ public class GitLabOAuthTests
         Assert.StartsWith("gloas-", tokens.Value.AccessToken);
     }
 
+    // The redirect names localhost, which Windows resolves to ::1 first. With only 127.0.0.1
+    // bound, a client trying ::1 first waited two seconds for its refused connection before
+    // falling back — every sign-in, and every test here that plays the browser.
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("[::1]")]
+    public async Task TheRedirectIsAnsweredOnEitherLoopbackAddress(string host)
+    {
+        using var listener = new GitLabOAuth.LoopbackListener(0);
+        listener.Start();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var waiting = listener.WaitForRedirectAsync(timeout.Token);
+        using var http = new HttpClient();
+        var page = await http.GetStringAsync($"http://{host}:{listener.Port}{GitLabOAuth.RedirectPath}?code=c1&state=s1");
+
+        Assert.Contains("close this tab", page);
+        Assert.Equal(("c1", "s1"), ((await waiting).Code, (await waiting).State));
+    }
+
+    // Each address has its own accept; one that served a probe has to be listening again for
+    // the redirect, whichever address that comes in on.
+    [Fact]
+    public async Task AProbeOnOneAddressLeavesBothListening()
+    {
+        using var listener = new GitLabOAuth.LoopbackListener(0);
+        listener.Start();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var waiting = listener.WaitForRedirectAsync(timeout.Token);
+        using var http = new HttpClient();
+
+        var probe = await http.GetAsync($"http://[::1]:{listener.Port}/favicon.ico");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, probe.StatusCode);
+        Assert.False(waiting.IsCompleted);
+
+        probe = await http.GetAsync($"http://[::1]:{listener.Port}/favicon.ico");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, probe.StatusCode);
+
+        await http.GetStringAsync($"http://127.0.0.1:{listener.Port}{GitLabOAuth.RedirectPath}?code=c2&state=s2");
+        Assert.Equal("c2", (await waiting).Code);
+    }
+
     [Fact]
     public async Task ARedirectWithSomeoneElsesStateIsRefused()
     {

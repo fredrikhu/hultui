@@ -214,13 +214,18 @@ public class HistoryPagingTests
     /// line) on top of the initial one, hosted with the page shrunk to twenty.</summary>
     private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp> body)
     {
-        using var repo = TempRepo.CreateWithInitialCommit();
-        for (var i = 1; i <= Commits; i++)
+        // Built once and copied: ninety git calls, the same for every test here.
+        using var repo = TempRepo.CreateFrom("forty-five-commits", () =>
         {
-            repo.Write("log.txt", string.Concat(Enumerable.Range(1, i).Select(n => $"line {n}\n")));
-            repo.Git("add", "-A");
-            repo.Git("commit", "-m", $"commit {i}");
-        }
+            var source = TempRepo.CreateWithInitialCommit();
+            for (var i = 1; i <= Commits; i++)
+            {
+                source.Write("log.txt", string.Concat(Enumerable.Range(1, i).Select(n => $"line {n}\n")));
+                source.Git("add", "-A");
+                source.Git("commit", "-m", $"commit {i}");
+            }
+            return source;
+        });
 
         using var session = HeadlessSession.Create(1440, 900);
         JunctionApp? app = null;

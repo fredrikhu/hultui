@@ -16,6 +16,10 @@ using Text = HultUI.Core.Builders.Text;
 /// which needs the value to arrive on a later frame), and nothing needs wall-clock time
 /// (waiting on the pool under machine load produced a 30s timeout that was twice
 /// misdiagnosed as a reactivity regression — see the note in Signal.cs).
+/// <para>
+/// Within a drain the producers run concurrently on the pool, as they would in an app, and
+/// the drain waits for all of them; their results are still applied in request order.
+/// </para>
 /// </summary>
 public class DeferredAsyncLoadTests
 {
@@ -64,8 +68,8 @@ public class DeferredAsyncLoadTests
         loader.Load(1, () => "one");
         loader.Load(2, () => "two");
 
-        // Both producers run in the same drain, in order; "one" completes against a
-        // newer generation and is discarded.
+        // Both producers run in the same drain, and the results are applied in request
+        // order; "one" lands against a newer generation and is discarded.
         session.PumpFrame();
 
         Assert.Equal("two", loader.Value);
@@ -166,6 +170,59 @@ public class DeferredAsyncLoadTests
 
         session.PumpFrame();
         Assert.Equal("two", second.Value);
+    }
+
+    [Fact]
+    public void TheProducersOfOneFrame_RunAtTheSameTime()
+    {
+        // Each producer waits for the other to arrive. Run one after another, as the drain
+        // used to, the first would give up waiting before the second ever started.
+        using var session = HeadlessSession.Create();
+        var first = new AsyncLoader<bool>(false);
+        var second = new AsyncLoader<bool>(false);
+        using var rendezvous = new Barrier(2);
+
+        first.Load("a", () => rendezvous.SignalAndWait(TimeSpan.FromSeconds(10)));
+        second.Load("b", () => rendezvous.SignalAndWait(TimeSpan.FromSeconds(10)));
+        session.PumpFrame();
+
+        Assert.True(first.Value, "the first producer never met the second");
+        Assert.True(second.Value, "the second producer never met the first");
+    }
+
+    [Fact]
+    public void ResultsAreAppliedInTheOrderTheyWereAskedFor_NotTheOrderTheyFinished()
+    {
+        // The first producer cannot finish until the second has. Under the pool that would
+        // put the second result first; the session keeps request order, so an onLoaded that
+        // depends on another loader's value sees the same thing on every run.
+        using var session = HeadlessSession.Create();
+        var first = new AsyncLoader<string>("empty");
+        var second = new AsyncLoader<string>("empty");
+        using var secondDone = new ManualResetEventSlim();
+        var applied = new List<string>();
+
+        first.Load("a", () => secondDone.Wait(TimeSpan.FromSeconds(10)) ? "one" : "timed out",
+            onLoaded: v => applied.Add(v));
+        second.Load("b", () => { secondDone.Set(); return "two"; },
+            onLoaded: v => applied.Add(v));
+        session.PumpFrame();
+
+        Assert.Equal(["one", "two"], applied);
+    }
+
+    [Fact]
+    public void AProducerRunsOffTheTestThread()
+    {
+        // As in an app: the producer is not on the UI thread, so one that touches UI state
+        // or leans on the UI thread's synchronization context fails here too.
+        using var session = HeadlessSession.Create();
+        var loader = new AsyncLoader<int>(0);
+
+        loader.Load("key", () => Environment.CurrentManagedThreadId);
+        session.PumpFrame();
+
+        Assert.NotEqual(Environment.CurrentManagedThreadId, loader.Value);
     }
 
     [Fact]
