@@ -134,6 +134,12 @@ public class RadioButtonElement : Element
             Math.Max(RadioSize, textSize.Height));
     }
 
+    // The label, drawn from the top of the content box beside the circle. No label, no text.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
+        string.IsNullOrEmpty(Label)
+            ? null
+            : ContentTop + ctx.MeasureFirstBaseline(Label, ResolvedInherited, float.PositiveInfinity, null, TextOverflow.Ellipsis);
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;

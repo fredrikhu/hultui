@@ -332,6 +332,12 @@ public class DropdownElement : Element
         return new Size(width, _padding.Top + lineHeight + _padding.Bottom);
     }
 
+    // The selection (or the placeholder), in the control's font, below its own top padding
+    // from the top of the border box — where Render draws it.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
+        _padding.Top + ctx.MeasureFirstBaseline(SelectedItem ?? Placeholder,
+            ResolvedInherited with { FontSize = _fontSize }, float.PositiveInfinity, 1, TextOverflow.Ellipsis);
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

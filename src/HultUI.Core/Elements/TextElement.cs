@@ -529,6 +529,13 @@ public class TextElement : Element
             ? 0f
             : ctx.MinContentTextWidth(Content, ResolvedInherited, _spans);
 
+    // Drawn from the top of the content box, wrapped at its width.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
+        string.IsNullOrEmpty(Content)
+            ? null
+            : ContentTop + ctx.MeasureFirstBaseline(Content, ResolvedInherited, ContentSizeOf(borderBox).Width,
+                MaxLines, Overflow, _spans);
+
     public override void Render(IRenderContext ctx)
     {
         // A label needs the drawn line layout kept only if something will hit-test against

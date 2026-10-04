@@ -1197,6 +1197,27 @@ public abstract class Element
     /// </summary>
     internal virtual float MeasureMinContentWidth(IMeasureContext ctx) =>
         MeasureContent(0f, LayoutSpace.Unbounded, ctx).Width;
+
+    /// <summary>
+    /// Where this element's own first line of text sits: the distance from the top of its
+    /// border box to the baseline, at the border-box size given — what
+    /// <see cref="AlignItems.Baseline"/> lines items up by. Null for an element that draws no
+    /// text of its own (a box, an image, a slider). Layout then takes a container's baseline
+    /// from its first child, and gives a leaf without one a baseline at the bottom of its
+    /// border box, as CSS does. An element that draws text must answer with where it really
+    /// draws it — the same font, the same offsets — or the text it lines up with will not line up.
+    /// </summary>
+    internal virtual float? MeasureBaseline(Size borderBox, IMeasureContext ctx) => null;
+
+    /// <summary>Distance from the top of the border box to the top of the content box.</summary>
+    private protected float ContentTop => BoxRead.BorderWidth.Top + BoxRead.Padding.Top;
+
+    /// <summary>The content box a border box of <paramref name="borderBox"/> leaves.</summary>
+    private protected Size ContentSizeOf(Size borderBox)
+    {
+        var spacing = BoxRead.BorderWidth + BoxRead.Padding;
+        return new Size(Math.Max(0, borderBox.Width - spacing.Horizontal), Math.Max(0, borderBox.Height - spacing.Vertical));
+    }
 }
 
 internal readonly record struct EventHandlerEntry(

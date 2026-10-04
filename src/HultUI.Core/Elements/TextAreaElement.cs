@@ -1154,6 +1154,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     // ──── Rendering ────
 
+    // The first row sits at the top of the content box; rows are "X"-high, as Render lays them.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
+        ContentTop + ctx.MeasureFirstBaseline("X", ResolvedInherited, float.PositiveInfinity, 1);
+
     public override void Render(IRenderContext ctx)
     {
         if (_renderCtx != ctx)

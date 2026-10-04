@@ -663,6 +663,17 @@ public class TextInputElement : BoxElement
         return new Size(width, lineHeight);
     }
 
+    // The line the field reserves — an "X" — centred in the content box, as Render places it.
+    // Measured on that "X" rather than the value, so the field's baseline does not move with
+    // what is typed in it.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx)
+    {
+        var style = ResolvedInherited;
+        float line = ctx.MeasureText("X", style, float.PositiveInfinity, 1).Height;
+        return ContentTop + (ContentSizeOf(borderBox).Height - line) / 2
+            + ctx.MeasureFirstBaseline("X", style, float.PositiveInfinity, 1);
+    }
+
     public override void Render(IRenderContext ctx)
     {
         _renderCtx = ctx; // cache for hit-testing

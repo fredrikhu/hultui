@@ -62,4 +62,15 @@ public interface IMeasureContext
     /// for contexts that cannot read a font, says yes.
     /// </summary>
     bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => true;
+
+    /// <summary>
+    /// How far below the top of the box <paramref name="text"/> is laid out in its first line's
+    /// baseline sits — what <c>AlignItems.Baseline</c> lines text up by. The default works it out
+    /// from <see cref="MeasureFont"/>, placing the baseline where the pipeline does: the ascent,
+    /// plus half of whatever an explicit line height adds. Contexts backed by the real pipeline
+    /// override it with the laid-out first line, which knows about fallback fonts and spans.
+    /// </summary>
+    float MeasureFirstBaseline(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow = TextOverflow.Clip, IReadOnlyList<TextSpan>? spans = null)
+        => MeasureFont(style).FirstBaseline(style.LineHeight);
 }

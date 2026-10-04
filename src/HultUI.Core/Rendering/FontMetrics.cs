@@ -38,6 +38,15 @@ public readonly record struct FontMetrics(
     /// <see cref="ResolvedInheritedStyle.LineHeight"/> is not applied.</summary>
     public float LineHeight => Ascent + Descent + LineGap;
 
+    /// <summary>Where a line of this font puts its baseline, below the top of the line: the
+    /// ascent, plus half of whatever an explicit <paramref name="lineHeight"/> (0 for none) adds
+    /// above the text's own height — the text pipeline centres a line in a taller line box.</summary>
+    public float FirstBaseline(float lineHeight)
+    {
+        float extra = lineHeight - (Ascent + Descent);
+        return lineHeight > 0 && extra > 0 ? Ascent + extra / 2 : Ascent;
+    }
+
     /// <summary>
     /// Metrics worked out from the size of a measured <c>"0"</c>, for a measure context that
     /// cannot read a font. The decoration lines are where the renderer draws them for a font
