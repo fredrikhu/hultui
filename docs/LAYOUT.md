@@ -157,7 +157,32 @@ All values:
 | `FlexStart` | Align children to the start of the cross axis |
 | `FlexEnd` | Align children to the end of the cross axis |
 | `Center` | Center children on the cross axis |
-| `Baseline` | Align children along their text baseline |
+| `Baseline` | Align children along their text baseline (rows only — see below) |
+
+**Baseline.** In a row, the children set to `Baseline` are placed so the first line of
+text in each sits on one baseline — a big number beside its small unit, a label beside the
+text in a field, text beside an icon:
+
+```csharp
+Flex.Row(gap: 6).AlignItems(AlignItems.Baseline).Children(
+    Text.New("42").FontSize(32),
+    Text.New("items").FontSize(12));
+```
+
+- **Where a child's baseline is.** Text, and controls that draw text (text fields and
+  areas, checkbox/radio/toggle labels, dropdowns, number, date and time fields), report
+  where they really draw their first line. A container uses its first child's — or, when a
+  row inside it aligns by baseline, that row's shared one. Anything else (a box, an image,
+  an icon) gets one at the bottom of its border box, as in CSS, so text beside an icon
+  sits on the icon's bottom edge.
+- **The row grows** when that alignment pushes something below the tallest child: text
+  sitting on an icon's bottom hangs its descenders under it, and the row is tall enough to
+  hold them. The measure pass knows this, so a parent sizing the row gets the real height.
+- **The group sits at the top of the row**; in a row taller than the group (a fixed
+  height), the space is left below it.
+- **In a column it is `FlexStart`**, as CSS does: a column has no baseline across its line.
+  Grid items are not baseline-aligned yet (they start-align), and a grid container
+  reports no baseline of its own, so it is treated like a box.
 
 ---
 

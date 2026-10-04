@@ -205,7 +205,7 @@ public sealed partial class LayoutEngine
         // inside a ScrollView would resolve itself against the viewport and shrink
         // its own children to fit. Percentages against it resolve to auto (see
         // Dimension.Resolve), so no absurd sizes leak out.
-        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable);
+        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
         try
         {
             // ── Phase 2: Collect items into lines ──
@@ -220,6 +220,7 @@ public sealed partial class LayoutEngine
                 RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
 
             // ── Phase 4: Compute per-line cross sizes ──
+            if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
             // ── Phase 5: Distribute lines along cross axis (AlignContent) ──
@@ -297,7 +298,7 @@ public sealed partial class LayoutEngine
                     // Pre-compute cross offset from hypothetical cross size so
                     // ComputeLayout receives correct absolute positions on cache
                     // misses, avoiding OffsetDescendants for the common case
-                    float prelimCrossOffset = ComputeAlignOffset(alignSelf, line.CrossSize, item.CrossSize);
+                    float prelimCrossOffset = ItemCrossOffset(alignSelf, line, item, item.CrossSize);
 
                     float childAbsX, childAbsY;
                     if (isRow)
@@ -320,7 +321,7 @@ public sealed partial class LayoutEngine
                         ? child.Layout.Height + child.Layout.Margin.Vertical
                         : child.Layout.Width + child.Layout.Margin.Horizontal;
 
-                    float itemCrossOffset = ComputeAlignOffset(alignSelf, line.CrossSize, childCrossSize);
+                    float itemCrossOffset = ItemCrossOffset(alignSelf, line, item, childCrossSize);
 
                     float finalX, finalY;
                     if (isRow)
@@ -371,11 +372,16 @@ public sealed partial class LayoutEngine
 
     // ── Flex helpers ──
 
-    private (FlexItem[] Array, int Count) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
-        float mainAvailable, float crossAvailable)
+    /// <returns>The items, and whether any of them aligns by baseline in a row — noted here, in
+    /// the loop that already visits every item, so a row that never asks for baseline alignment
+    /// pays one comparison per item for it rather than a pass of its own.</returns>
+    private (FlexItem[] Array, int Count, bool AnyBaseline) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
+        float mainAvailable, float crossAvailable, AlignItems containerAlign)
     {
         var array = ArrayPool<FlexItem>.Shared.Rent(Math.Max(1, children.Count));
         int count = 0;
+        bool anyBaseline = false;
+        bool rowAlignsByBaseline = isRow && containerAlign == AlignItems.Baseline;
 
         for (int i = 0; i < children.Count; i++)
         {
@@ -383,10 +389,14 @@ public sealed partial class LayoutEngine
             if (child.PositionRead.Type == PositionType.Absolute)
                 continue;
             var childBox = child.BoxRead;
+            var childFlex = child.FlexRead;
+            if (isRow && !anyBaseline)
+                anyBaseline = childFlex.AlignSelf == AlignSelf.Baseline
+                    || (childFlex.AlignSelf == AlignSelf.Auto && rowAlignsByBaseline);
 
-            float basisOrSize = child.FlexRead.FlexBasis.IsAuto
+            float basisOrSize = childFlex.FlexBasis.IsAuto
                 ? (isRow ? childBox.Width.ResolveOr(mainAvailable, -1f) : childBox.Height.ResolveOr(mainAvailable, -1f))
-                : child.FlexRead.FlexBasis.ResolveOr(mainAvailable, -1f);
+                : childFlex.FlexBasis.ResolveOr(mainAvailable, -1f);
             bool hasBasisOrSize = basisOrSize >= 0f;
 
             float hypotheticalMain;
@@ -447,7 +457,7 @@ public sealed partial class LayoutEngine
             array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross, hypotheticalMain);
         }
 
-        return (array, count);
+        return (array, count, anyBaseline);
     }
 
     /// <summary>
@@ -559,7 +569,7 @@ public sealed partial class LayoutEngine
             || LayoutSpace.IsUnbounded(mainAvailable);
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable);
+        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
         try
         {
             var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
@@ -572,6 +582,9 @@ public sealed partial class LayoutEngine
             foreach (var line in lines)
                 RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
 
+            // As the layout pass does, or a row baseline alignment makes taller would be
+            // measured shorter than it lays out.
+            if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
             float totalMain = 0;
@@ -946,13 +959,25 @@ public sealed partial class LayoutEngine
     private static void ComputeLineCrossSizes(List<FlexLine> lines, float crossAvailable,
         AlignContent alignContent, bool isWrap, bool hasDefiniteCross)
     {
-        // Each line's cross size is the max cross size of its items
+        // Each line's cross size is the max cross size of its items — or, for the items that
+        // align by baseline, the tallest above the shared baseline plus the deepest below it,
+        // which is more when a short item hangs low: text beside an icon, whose descenders go
+        // below the icon's bottom edge (CSS Flexbox §9.4 step 8).
         for (int i = 0; i < lines.Count; i++)
         {
-            float maxCross = 0;
+            float maxCross = 0, maxAscent = 0, maxDescent = 0;
             foreach (var item in lines[i].Items)
+            {
                 maxCross = float.MaxNative(maxCross, item.CrossSize);
-            lines[i] = lines[i] with { CrossSize = maxCross };
+                if (float.IsNaN(item.Baseline)) continue;
+                maxAscent = float.MaxNative(maxAscent, item.Baseline);
+                maxDescent = float.MaxNative(maxDescent, item.CrossSize - item.Baseline);
+            }
+            lines[i] = lines[i] with
+            {
+                CrossSize = float.MaxNative(maxCross, maxAscent + maxDescent),
+                MaxAscent = maxAscent,
+            };
         }
 
         // If single line (nowrap), the line takes the full cross available
@@ -1096,6 +1121,14 @@ public sealed partial class LayoutEngine
         };
     }
 
+    /// <summary>Where an item sits across its line: by its baseline when it has one to align
+    /// by — the group's deepest-reaching item flush with the line's top and the rest lowered to
+    /// meet it — and otherwise by <see cref="ComputeAlignOffset"/>.</summary>
+    private static float ItemCrossOffset(AlignItems align, FlexLine line, FlexItem item, float childCrossSize) =>
+        align == AlignItems.Baseline && !float.IsNaN(item.Baseline)
+            ? line.MaxAscent - item.Baseline
+            : ComputeAlignOffset(align, line.CrossSize, childCrossSize);
+
     private static float ComputeAlignOffset(AlignItems align, float crossAvailable, float childCrossSize)
     {
         float free = crossAvailable - childCrossSize;
@@ -1154,6 +1187,10 @@ public sealed partial class LayoutEngine
 /// <param name="CrossSize">Its size along the cross axis.</param>
 /// <param name="BaseMain">The main size this item was measured at, kept so Phase 3.5 can
 /// tell which items flex resolution actually moved and re-measure only those.</param>
-internal record struct FlexItem(Element Element, float MainSize, float CrossSize, float BaseMain);
+/// <param name="Baseline">For an item aligned by baseline in a row: how far below its outer
+/// (margin-box) top its first baseline sits. NaN for every other item.</param>
+internal record struct FlexItem(Element Element, float MainSize, float CrossSize, float BaseMain, float Baseline = float.NaN);
 
-internal record struct FlexLine(ArraySegment<FlexItem> Items, float CrossSize = 0);
+/// <param name="MaxAscent">The largest <see cref="FlexItem.Baseline"/> on the line: where the
+/// shared baseline sits below the line's top. 0 when nothing on it aligns by baseline.</param>
+internal record struct FlexLine(ArraySegment<FlexItem> Items, float CrossSize = 0, float MaxAscent = 0);

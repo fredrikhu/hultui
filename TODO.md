@@ -1,6 +1,32 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **`AlignItems.Baseline` does what it says** — it was in the enum, the builders and LAYOUT.md
+  ("align children along their text baseline"), and the engine fell through to FlexStart for it.
+  Now a row lines its baseline-aligned items up on their first baselines (CSS Flexbox §8.3/§9.4):
+  the item reaching furthest above its baseline goes flush with the line's top, the rest are
+  lowered to meet it, and the line grows when that pushes something past its bottom — text
+  sitting on an icon's bottom edge hangs its descenders below it.
+  Where a baseline is: `Element.MeasureBaseline(borderBox, ctx)`, answered by the ten built-in
+  elements that draw text — text, field, area, checkbox/radio/toggle labels, dropdown, number,
+  date and time fields — each from the same font and offsets its `Render` uses, through a new
+  `IMeasureContext.MeasureFirstBaseline` (exact from the pipeline's first line in Skia, estimated
+  from `FontMetrics` elsewhere). A flex container takes its first line's shared baseline or its
+  first item's; anything else, a grid included, gets one synthesized at its border-box bottom.
+  The trap was the measure pass: Phase 1 sizes are write-free and separate from layout, so a row
+  that baseline alignment makes taller has to be measured taller too, or the parent reserves
+  less than the row takes. So the baselines are computed measure-only (`LayoutEngine.Baseline.cs`),
+  in both passes, before line cross sizes — and only for rows that ask. Column containers keep
+  FlexStart, as CSS does. **Benchmarked**, because the first cut ran a pass over every row's items
+  whether or not anything asked: three alternating A/B rounds showed append-1,000 about 3% slower,
+  consistently (best-of 8.07–8.14 → 8.28–8.60 ms). The check now rides in `MeasureFlexItems`, the
+  loop that already visits every item, and the pass runs only when it found something; the re-run
+  put append-1,000 at 7.70–7.78 against main's 7.90–8.52 and create-10,000 level.
+  8 Core layout tests (a font whose numbers check by hand) and 1 headless pixel test with real
+  fonts: flat-bottomed capitals at 30px, 12px and in a 44px field end on one pixel row (±1),
+  and with the alignment off the 12px word ends 19 rows higher. Four faults put back — no
+  baselines, none in the measure pass, no line growth, no container baselines — each caught;
+  the measure-pass one by exactly the predicted symptom, a parent sized 40 for a row laid out at 43.
 - **A dialog holds the keyboard** — the overlay dialog could only be closed with the pointer,
   Tab walked straight out of it into the page behind (traversal always ran over the main tree,
   and an element not in it reads as "start from the top"), and with nothing focused the page's

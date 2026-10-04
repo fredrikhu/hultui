@@ -302,6 +302,12 @@ public class DatePickerElement : Element
         return new Size(width, _theme.Padding.Top + glyph.Height + _theme.Padding.Bottom);
     }
 
+    // The date (or the placeholder), in the theme's font, below the theme's top padding from
+    // the top of the border box — where Render draws it.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
+        _theme.Padding.Top + ctx.MeasureFirstBaseline(DisplayText,
+            ResolvedInherited with { FontSize = _theme.FontSize }, float.PositiveInfinity, 1, TextOverflow.Ellipsis);
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

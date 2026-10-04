@@ -306,6 +306,15 @@ public class NumericUpDownElement : Element, IRangeValueElement
     private float WidthOf(double v, IMeasureContext ctx, ResolvedInheritedStyle style) =>
         double.IsInfinity(v) ? 0f : ctx.MeasureText(FormatValue(v), style, float.MaxValue, 1).Width;
 
+    // The value, in the theme's font, centred on the content box's height as Render places it.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx)
+    {
+        var style = ResolvedInherited with { FontSize = _boxTheme.FontSize };
+        float line = ctx.MeasureText(DisplayText, style, float.PositiveInfinity, 1).Height;
+        return ContentTop + (ContentSizeOf(borderBox).Height - line) / 2
+            + ctx.MeasureFirstBaseline(DisplayText, style, float.PositiveInfinity, 1);
+    }
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

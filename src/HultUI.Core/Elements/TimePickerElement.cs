@@ -514,6 +514,12 @@ public class TimePickerElement : Element
             _boxTheme.Padding.Top + digit.Height + _boxTheme.Padding.Bottom);
     }
 
+    // The digits, in the box theme's font, below its top padding from the top of the border
+    // box — where Render draws every segment.
+    internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
+        _boxTheme.Padding.Top + ctx.MeasureFirstBaseline("0",
+            ResolvedInherited with { FontSize = _boxTheme.FontSize }, float.PositiveInfinity, 1);
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;
