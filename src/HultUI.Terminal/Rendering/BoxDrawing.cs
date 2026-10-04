@@ -87,9 +87,13 @@ internal static class BoxDrawing
         float heavy = light * 2;
         float gap = light; // between the two strokes of a double line
 
-        // The centre, snapped, so vertical lines in a column and horizontal lines in a row line up.
-        float cx = Snap(cell.X + cell.Width / 2f, scale);
-        float cy = Snap(cell.Y + cell.Height / 2f, scale);
+        // The middle of the cell, as it is: the fills that draw the lines snap their own edges, so
+        // the bands land on whole pixels, and every cell in a column (or row) has the same snapped
+        // bounds, so its lines line up. Snapping the middle first moved a one-pixel line off it in
+        // a cell an odd number of pixels wide: 19.5 became 20, and the fill took the band from
+        // 19.5..20.5 over to column 20, leaving four pixels on one side and two on the other.
+        float cx = cell.X + cell.Width / 2f;
+        float cy = cell.Y + cell.Height / 2f;
 
         int up = arms[0] - '0', right = arms[1] - '0', down = arms[2] - '0', left = arms[3] - '0';
 
@@ -108,25 +112,43 @@ internal static class BoxDrawing
     private static float Light(Rect cell, float scale) => MathF.Max(1, MathF.Round(cell.Height * scale / 16f)) / scale;
 
     /// <summary>
-    /// A rounded corner: a quarter circle whose centre line has a radius of half the cell's width,
-    /// so it meets the horizontal arm at the cell's edge, tangent to it, and runs on straight into
-    /// the vertical one. Drawn as the corner of a rounded box centred on the lines, clipped to the
-    /// cell: its straight sides are the same snapped bands the plain lines are, so they meet them.
+    /// A rounded corner: a quarter circle from the vertical line to the cell's edge, where it meets
+    /// the horizontal arm tangent to it, and runs on straight into the vertical one. Drawn as the
+    /// corner of a rounded box whose sides are the bands the plain lines fill, clipped to the cell,
+    /// so its straight parts are the same pixels as the lines they join.
     /// </summary>
     private static void Arc(IRenderContext ctx, int cp, Rect cell, Color color, float scale)
     {
         float light = Light(cell, scale);
-        float cx = Snap(cell.X + cell.Width / 2f, scale), cy = Snap(cell.Y + cell.Height / 2f, scale);
-        float radius = cell.Width / 2f;
-        float big = cell.Width + cell.Height; // the box's far sides fall outside the cell
         bool right = cp is 0x256D or 0x2570, down = cp is 0x256D or 0x256E; // ╭ ╮ ╯ ╰
-        float x = right ? cx - light / 2 : cx + light / 2 - big;
-        float y = down ? cy - light / 2 : cy + light / 2 - big;
+
+        // The vertical line's left edge and the horizontal line's top, where DrawLines' fills land.
+        float bandX = BandStart(cell.X + cell.Width / 2f, light, scale);
+        float bandY = BandStart(cell.Y + cell.Height / 2f, light, scale);
+
+        // The outer radius runs from the vertical band's far side to the cell's edge, so the curve
+        // turns straight exactly where the next cell's line begins. Half the cell's width was that
+        // only when the band sat in the cell's middle: in a cell an odd number of pixels wide it
+        // came out half a pixel long, and the arc was still curving at the edge — a notch in every
+        // join, which DejaVu Sans Mono's 7.82px cells (Linux's monospace) showed in every row.
+        float across = right ? cell.X + cell.Width - bandX : bandX + light - cell.X;
+        float along = down ? cell.Y + cell.Height - bandY : bandY + light - cell.Y;
+        float radius = MathF.Max(light, MathF.Min(across, along));
+
+        float big = cell.Width + cell.Height; // the box's far sides fall outside the cell
+        float x = right ? bandX : bandX + light - big;
+        float y = down ? bandY : bandY + light - big;
         ctx.PushClip(cell);
-        // The stroke is inside the box, so the outer radius is the centre line's plus half the line.
-        ctx.DrawRoundedRect(new Rect(x, y, big, big), new CornerRadius(radius + light / 2), default, color, new Thickness(light));
+        // The stroke is inside the box, so its outer edge follows the box's corner.
+        ctx.DrawRoundedRect(new Rect(x, y, big, big), new CornerRadius(radius), default, color, new Thickness(light));
         ctx.Pop();
     }
+
+    /// <summary>Where a band <paramref name="thickness"/> wide centred on <paramref name="centre"/>
+    /// starts once drawn: on the device grid, rounded the way a fill's edges are, so the arc's
+    /// sides fall on the very pixels <see cref="Horizontal"/> and <see cref="Vertical"/> fill.</summary>
+    private static float BandStart(float centre, float thickness, float scale) =>
+        MathF.Round((centre - thickness / 2) * scale, MidpointRounding.AwayFromZero) / scale;
 
     /// <summary>
     /// The Powerline separators: solid and thin triangles, half-circles and diagonals, filling the
@@ -249,6 +271,4 @@ internal static class BoxDrawing
         if ((quads & 0b0010) != 0) ctx.DrawRect(new Rect(c.X, c.Y + h / 2, w / 2, h / 2), color);
         if ((quads & 0b0001) != 0) ctx.DrawRect(new Rect(c.X + w / 2, c.Y + h / 2, w / 2, h / 2), color);
     }
-
-    private static float Snap(float v, float scale) => MathF.Round(v * scale) / scale;
 }
