@@ -130,7 +130,7 @@ scripts/
   with a terminal would have carried those 2.4 MB whether it ran a local process or not.
 - **libghostty-vt.** It would come later as `HultUI.Terminal.Ghostty` plus `.Natives`, behind
   the same emulator seam, once it tags a stable release (its header still says the API "is not
-  yet stable and is definitely going to change").
+  yet stable and is definitely going to change"; re-checked in step 8c).
 
 `HultUI.Core` grants `InternalsVisibleTo HultUI.Terminal` for `OnOwn`, `PatchFrom`,
 `WantsTextInput` and `MeasureContent`, as it does for WebView and Media. Everything the package
@@ -736,6 +736,36 @@ var shell = new TerminalController(connection);
 - **Not done:** port forwarding, X11 and agent forwarding, jump hosts, host certificates, a
   password change the server demands at sign-in, reconnecting.
 
+## libghostty-vt, checked against the seam (step 8c)
+
+**Not built, by the rule in *Packages*: it has no release.** Checked 2026-10-04 at ghostty `main`
+`f96c971`. No tag or release names libghostty (the tags are the app's, v1.0.0 to v1.3.1, and the
+`tip` nightly). `vt.h` still says it is "not yet stable and is definitely going to change", and
+the headers changed on 2026-10-01. The nightly ships the C source, a WebAssembly build and an
+Apple framework; Windows and Linux libraries are built with Zig 0.16
+(`zig build -Demit-lib-vt`).
+
+The emulator seam (`ITerminalEmulator`) against its headers:
+
+| Seam | libghostty-vt | Fit |
+|---|---|---|
+| `Feed`, `Resize`, `SetScrollback`, `ScrollViewport` | `vt_write`; `resize` (reflows the primary screen, never the alternate); scrollback limit in lines or bytes, page-rounded; `scroll_viewport` | covered; whether the cursor's own line reflows (problem 1) needs a test |
+| `EncodeKey`, `EncodeMouse`, `EncodeFocus`, `Paste` | key encoder (legacy, DECCKM, keypad, modifyOtherKeys, kitty); mouse encoder (all tracking modes and formats, positions in surface pixels); focus; paste (bracketing, unsafe bytes) | covered, except **win32-input-mode**: no mode 9001, and its key event has no virtual key or scan code |
+| `CopySnapshot` | render state: rows, cells with grapheme and resolved colours, style flags, underline styles, cursor, palette, modes, scrollbar | mostly: the host resolves default colours, the underline colour and inverse; an OSC 8 link only as a URI per cell (a slow path) and **no link id**; pictures per placement, not per row |
+| `GetText`, `WordAt`, `LineAt`, `ReadLogicalLines` | selection formatter (unwrap, trim), word and line selection; search of its own (literal, no regex) | covered; logical lines come from the formatter, not an index |
+| `Generation` | dirty state per frame and per row | partly: dirty flags the host clears, not a counter |
+| `SetCellPixels` | only through `resize`; size reports answered by a host callback | partly |
+| `AdvanceAnimations` | kitty images expose their current frame; nothing moves it on | **gap** |
+| events | callbacks for replies, bell, title and directory (read back after), clipboard; no screen-switch event (diff the active screen) | partly |
+| Sixel, iTerm2 pictures | neither (a DCS is never reported to the host; OSC 1337 is swallowed) | **gap** |
+
+What the seam would have to absorb: events as native callbacks on the feeding thread that must not
+feed again (`UnmanagedCallersOnly` trampolines and a `GCHandle`); a snapshot copied cell by cell
+from the render state rather than one call; pixels in four formats; and a pre-scan of the byte
+stream for what libghostty-vt does not do (win32-input-mode, Sixel, iTerm2 pictures), split with
+its write-until-ground call. None of that changes the seam's members: it stays internal, and is
+re-checked when a release is tagged.
+
 ## Framework seams
 
 Each is useful beyond the terminal. No terminal package may need anything not listed here; if
@@ -1097,4 +1127,8 @@ typed were unrelated events. All four are new members, so no existing code chang
        likely cause under load, and it is a task of its own.
      - **Not verified:** a real OpenSSH server (none here, and installing one changes the machine:
        the sample's `--ssh` is how to try one), Windows' OpenSSH server's ConPTY traits, Linux.
-   - **8c:** libghostty-vt as a second emulator once it tags a release.
+   - **8c, libghostty-vt: checked 2026-10-04, not built** (see *libghostty-vt, checked against the
+     seam*). Still no release, and its header still warns the API will change. Against the seam:
+     input encoding, selection, scrolling and most of the snapshot are covered; win32-input-mode,
+     kitty animation, Sixel, iTerm2 pictures and OSC 8 link ids are not, and would stay with the
+     host. The seam keeps its members and stays internal until a release is tagged.
