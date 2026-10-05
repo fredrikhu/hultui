@@ -14,6 +14,17 @@ public sealed class WindowsFactAttribute : FactAttribute
     }
 }
 
+/// <summary>The other side of a <see cref="WindowsFactAttribute"/>: what Vesper does where the
+/// Windows feature is missing. Without one, that behaviour runs untested on every platform it
+/// is for.</summary>
+public sealed class NotWindowsFactAttribute : FactAttribute
+{
+    public NotWindowsFactAttribute(string reason)
+    {
+        if (OperatingSystem.IsWindows()) Skip = "Not on Windows: " + reason;
+    }
+}
+
 /// <inheritdoc cref="WindowsFactAttribute"/>
 public sealed class WindowsTheoryAttribute : TheoryAttribute
 {

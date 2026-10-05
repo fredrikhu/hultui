@@ -47,6 +47,24 @@ public class PropertiesTests
         Assert.Equal("No context menu for archive members", t.Field<string?>("_notice"));
     }
 
+    /// <summary>Where there is no Windows shell, both keys say so rather than doing nothing — the
+    /// one thing they do there, and the only part of this class that runs on Linux.</summary>
+    [NotWindowsFact("what the keys say where the Windows shell is missing")]
+    public void WithoutTheWindowsShellBothKeysSaySo()
+    {
+        using var t = new DiffViewTests.Fixture();
+        File.WriteAllText(Path.Combine(t.Left, "notes.txt"), "x");
+        t.Open();
+        t.PutCursorOn('L', "notes.txt");
+
+        t.Press(KeyCode.Enter, KeyModifiers.Alt);
+        Assert.Equal("Properties is a Windows shell feature", t.Field<string?>("_notice"));
+
+        t.SetField("_notice", null);
+        t.Press(KeyCode.Menu);
+        Assert.Equal("Context menu is a Windows shell feature", t.Field<string?>("_notice"));
+    }
+
     /// <summary>The headless harness injects a <see cref="KeyCode"/> directly, so the test
     /// above would pass even if no physical key ever produced one. This covers the other half:
     /// the scancode the context-menu key actually sends. SDL calls it APPLICATION and keeps
