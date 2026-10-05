@@ -1,6 +1,18 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Golden images** — `HeadlessOptions.Golden()` + `GoldenImage.Match(window, "name")`: a frame
+  compared against `Golden/<name>.png` beside the test, the same PNG bytes on Windows and Linux.
+  Two halves: **pinned fonts** (`SkiaFontCollection.Pinned` — every family resolves to DejaVu
+  Sans in four styles or DejaVu Sans Mono, embedded in HultUI.Headless; no OS fallback; slant
+  decides before weight) and **text as outlines** (`SkiaRenderContext.TextAsOutlines` draws each
+  shaped run's glyph paths through Skia's own rasteriser — DirectWrite and FreeType shade the
+  same file thousands of pixels apart, hinted or not; the paths match byte for byte).
+  `HULTUI_UPDATE_GOLDENS=1` writes baselines (only past tolerance, so no churn); a mismatch
+  writes actual/expected/diff PNGs to `golden-failures/`, which CI uploads. Default tolerance
+  ±2 per channel, 0 pixels — headroom for another CPU's SIMD rounding; this machine and WSL
+  Fedora agree exactly. `ControlGoldenTests`: controls light/dark, focus ring, text styles,
+  menu bar + expander + table. `SkiaFontCollection.Register` also lets an app ship a font.
 - **Sticky positioning** — `PositionType.Sticky` + `.Sticky(top, bottom, left, right)`: in the flow,
   held against an edge of the nearest scroll view while it is scrolled past, never out of its
   parent's content box (or, as the scroll view's own child, out of the scrolled content).
@@ -772,7 +784,6 @@
   hover brush `CardBackgroundTertiary` while showing a warning on it. Not worth guessing at:
   what would settle it is a hover measurement on a Settings card, which needs the real pointer.
 - **Automatic minimum size for flex items** (CSS `min-height:auto`) — content can still be crushed below its own size inside a bounded container. Needs a real recursive min-content pass in which scroll containers contribute zero; approximating it from the flex Phase 1 measurement was tried and reverted, because for a container that measurement is its full content extent, so an ancestor wrapping a scroll view gets pinned to the whole scrollable height (14,640px tall, 1007 draw calls instead of 47). `FlexShrinkTests` carries a skipped case. Add a shrink-heavy benchmark first — the current suite barely exercises the shrink path, so it would not catch the cost.
-- **Golden-image testing** — the raster surface already exposes `Snapshot`/`ReadPixels`. Blocked on font determinism: glyphs come from `SKFontManager.Default`, so an embedded, pinned font is needed before pixel baselines can hold across machines.
 - **Render-log element attribution** — recorded ops carry no element identity, so "what did this element draw?" means matching on coordinates. `ElementRenderer` has a single per-element call site to hook.
 - UIA `ITextProvider` (word-by-word reader navigation) — currently exposed via `IValueProvider`. Would also let selectable labels (`TextElement.Selectable`) report their selected sub-range to assistive tech via `GetSelection`/`RangeFromPoint`; today mouse/keyboard selection works but a screen reader reads the label as a whole.
 - AT-SPI `Text` / `EditableText` interfaces.

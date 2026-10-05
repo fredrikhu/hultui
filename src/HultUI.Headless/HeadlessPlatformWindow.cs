@@ -31,7 +31,8 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         _layoutWidth = width;
         _layoutHeight = height;
         _scale = scale;
-        _raster = new SkiaRasterRenderSurface();
+        PinnedText = options?.PinnedText == true;
+        _raster = PinnedText ? PinnedFonts.CreateSurface() : new SkiaRasterRenderSurface();
 
         // Recording wraps the raster surface rather than replacing it, so the
         // frame still renders and pixel capture keeps working.
@@ -49,6 +50,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         _surface.Resize(PixelWidth, PixelHeight, scale);
         IsOpen = true;
     }
+
+    /// <summary>Whether text draws in the bundled fonts, as outlines (<see cref="HeadlessOptions.PinnedText"/>).</summary>
+    public bool PinnedText { get; }
 
     /// <summary>The captured display list, or null when recording is off.</summary>
     public RenderLog? RenderLog { get; }

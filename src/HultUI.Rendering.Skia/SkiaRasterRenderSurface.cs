@@ -36,6 +36,21 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface
         _renderContext.SetPipeline(_text.Pipeline);
     }
 
+    /// <summary>Draws text as outlines — see <see cref="SkiaRenderContext.TextAsOutlines"/>. With
+    /// a pinned font collection, what is drawn is the same on every machine.</summary>
+    public bool TextAsOutlines
+    {
+        get => _renderContext.TextAsOutlines;
+        set => _renderContext.TextAsOutlines = value;
+    }
+
+    /// <summary>The face canvas-element text uses instead of the platform default.</summary>
+    public SKTypeface? CanvasTypeface
+    {
+        get => _renderContext.CanvasTypeface;
+        set => _renderContext.CanvasTypeface = value;
+    }
+
     public void Resize(int widthPx, int heightPx, float scaleFactor)
     {
         if (widthPx == _width && heightPx == _height && Math.Abs(scaleFactor - _scaleFactor) < 0.001f)

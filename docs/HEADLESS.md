@@ -174,7 +174,36 @@ using var image = window.CapturePixels();   // SKImage, layout size × scale
 
 Sessions support DPI testing: `HeadlessSession.Create(scale: 2f)` or `window.SetScale(1.5f)`.
 
-**Do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing; treat text positions as approximate unless the test is pinned to one platform. (Byte-stable golden images need an embedded font — a planned follow-up.)
+**Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.
+
+## Golden Images
+
+A golden image is a frame compared against a PNG committed next to the test:
+
+```csharp
+using var session = HeadlessSession.Create(480, 360, options: HeadlessOptions.Golden());
+session.Window.SetRoot(MyPanel());
+session.PumpFrames(2);
+GoldenImage.Match(session.Window, "my-panel");   // Golden/my-panel.png beside this .cs file
+```
+
+**Making and accepting baselines.** Run with `HULTUI_UPDATE_GOLDENS=1`: a missing baseline is written from the frame, and one that differs beyond the tolerance is rewritten (one within it is left alone, so tolerated noise never churns the repo). Look at every PNG in the diff before committing it — a baseline is only as right as the frame it was made from. Without the variable, a missing baseline fails.
+
+**On a mismatch** the test throws `GoldenImageMismatchException`, naming how many pixels differ, by how much at most, and where, and writes three files to `bin/<config>/<tfm>/golden-failures/` (`HULTUI_GOLDEN_FAILURES` overrides): `<name>.actual.png`, `<name>.expected.png`, and `<name>.diff.png` — differing pixels red over a faded copy of the baseline, near-misses within tolerance pale orange. A later pass deletes them. CI uploads the folder as the `golden-failures-windows`/`-linux` artifact when a run fails.
+
+**Why the frames match across OSes.** `HeadlessOptions.Golden()` sets `PinnedText`:
+
+- **Pinned fonts.** Every family name — `Segoe UI`, `sans-serif`, one nobody has — resolves to DejaVu Sans (regular, bold, oblique, bold oblique) and `monospace` to DejaVu Sans Mono, embedded in `HultUI.Headless` (`SkiaFontCollection.Pinned`). Nothing falls back to an installed font: a character DejaVu lacks (CJK, emoji) draws as the missing-glyph box on every machine. Measurement uses the same faces, so layout matches too — the font file decides the metrics and HarfBuzz's advances, not the OS.
+- **Text as outlines.** Even from one font file, DirectWrite (Windows) and FreeType (Linux) shade glyphs differently — thousands of pixels over a few lines, hinted or not. `SkiaRasterRenderSurface.TextAsOutlines` draws each glyph's outline through Skia's own path rasteriser instead, which comes out byte for byte the same. The five control goldens in `tests/HultUI.Headless.Tests/Golden/` render to identical PNG bytes on Windows and Linux.
+
+**Tolerance.** `GoldenTolerance.Default` lets any channel of a pixel be 2 apart and no pixel beyond that — room for Skia's SIMD paths to round a blend differently on another CPU, none for a moved edge or a changed colour (a 1 px change to the button corner radius moves ~200 pixels by up to 98). Pass `new GoldenTolerance(Channel: 4, Pixels: 20)` to loosen one test, or `GoldenTolerance.Exact`.
+
+**Traps:**
+- **`Match` refuses a window without pinned text** — a baseline from system fonts would fail on the other OS. `Match(SKImage, name)` takes any image and does not check.
+- **Baselines are found from `[CallerFilePath]`**, so the source tree must be on the machine running the tests, built without a `PathMap` that rewrites source paths (`ContinuousIntegrationBuild` does). Names are one portable file name: letters, digits, `-`, `_`, `.`.
+- **Unhinted, unpinned-looking text is expected.** Outlines carry no hinting, and DejaVu is not the app's font. A golden pins *what changed*, not what a user sees; for the real look, use the `/run-hultui-app` driver.
+- **Settle animations first.** Pump enough virtual time for transitions (an expander opening, a toggle sliding) to finish, and keep a focused text input out of a golden or pin the caret's blink phase — the frame is whatever the clock says.
+- **Keep scenes small.** Each baseline is a binary blob in git history forever; a few hundred pixels square, under 25 KB each, is the scale `ControlGoldenTests` uses.
 
 ## Test Isolation
 
@@ -191,4 +220,4 @@ A session owns process-global state: `Application.Current`, the animation list, 
 
 ## CI
 
-Headless tests need no display server, GPU, or GL — a stock `ubuntu-latest`/`windows-latest` runner works as-is. The repo's `test-linux` job in `.github/workflows/junction-installer.yml` is the reference setup. A headless session never loads the SDL3 native library (there's a test asserting exactly that).
+Headless tests need no display server, GPU, or GL — a stock `ubuntu-latest`/`windows-latest` runner works as-is, golden images included (they bring their own fonts). The repo's `test-linux` job in `.github/workflows/junction-installer.yml` is the reference setup. A headless session never loads the SDL3 native library (there's a test asserting exactly that).
