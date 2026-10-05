@@ -185,6 +185,7 @@ internal static partial class UiaInterop
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_ValueValuePropertyId = 30045;
     public const int UIA_ToggleToggleStatePropertyId = 30086;
+    public const int UIA_ExpandCollapseExpandCollapseStatePropertyId = 30070;
     public const int UIA_SelectionItemIsSelectedPropertyId = 30079;
 
     // ──── UIA control-type IDs

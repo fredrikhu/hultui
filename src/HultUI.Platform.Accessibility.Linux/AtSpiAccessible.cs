@@ -40,6 +40,8 @@ internal sealed class AtSpiAccessible
     public bool Selectable { get; init; }
     public bool Selected { get; init; }
     public bool? Toggled { get; init; }
+    /// <summary>Open or closed, for an object that can be either; null for one that cannot.</summary>
+    public bool? Expanded { get; init; }
 
     /// <summary>The text a reader moves through (seam A1), as when the tree was built, and where
     /// to read it now; both null for an object with none.</summary>
@@ -137,6 +139,7 @@ internal sealed class AtSpiAccessible
             Selected = node.IsToggled == true &&
                 node.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab,
             Toggled = node.IsToggled,
+            Expanded = node.Expanded,
             Text = node.Text,
             TextSource = node.TextSource,
             Scale = scale,

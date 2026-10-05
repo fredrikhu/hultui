@@ -339,6 +339,19 @@ public sealed record FluentPalette
             TitleCornerRadius = Fluent.ControlRadius, FontSize = 14f, Text = TextPrimary,
             HoverBackground = SubtleHover, OpenBackground = SubtlePressed,
         },
+        // WinUI's Expander: a card whose header and body are joined by a rule, the chevron at
+        // the far end. The header's right padding puts the chevron where WinUI centres it in
+        // a 32px button.
+        Expander = new ExpanderTheme
+        {
+            Chevron = ExpanderChevron.Trailing, ChevronSize = 10f, ChevronStrokeWidth = 1f,
+            ChevronColor = TextSecondary,
+            HeaderMinHeight = 68f, HeaderPadding = new Thickness(12, 27, 12, 16), HeaderGap = 16f,
+            HeaderBackground = Card, HoverBackground = CardHover, PressedBackground = CardHover,
+            FontSize = Fluent.BodySize, FontWeight = FontWeight.Regular, Text = TextPrimary,
+            BodyPadding = new Thickness(16), BodyBackground = IsDark ? Layer : Color.White,
+            Border = CardStroke, BorderWidth = 1f, CornerRadius = Fluent.ControlRadius,
+        },
         ContextMenu = new ContextMenuTheme
         {
             Background = Flyout,

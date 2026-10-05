@@ -1516,3 +1516,45 @@ padding and radius, font size, text colour, hover and open fills. The menus take
 menu that reports why it closed (`MenuCloseReason`: Chosen, Escape, Dismissed, Replaced) and
 hands back ← → (`Navigate`) when it has no use for them; `HighlightFirst` starts on the first
 item for a menu opened from the keyboard. `CloseMenu()` closes it.
+
+## 23. Expander
+
+A header that shows and hides a body below it: a chevron, a title, optionally actions at the
+end of the header, and the content. Click the header, or Enter or Space on it, and the body
+slides open while the chevron turns.
+
+```csharp
+// Keeps its own state, across rebuilds too:
+Expander.New("Advanced options", Flex.Column(gap: 8).Children(followLinks, hidden, pattern))
+
+// The app's state, a body built only while open, and an action that does not toggle:
+Expander.New("Recent searches", () => BuildRecent())
+    .Expanded(_recentOpen).OnExpandedChanged(v => _recentOpen = v)
+    .Actions(Button.New("Clear").OnClick(_ => ClearRecent()))
+```
+
+- **State:** left alone, the element keeps it — a rebuild does not close an expander the user
+  opened (`DefaultExpanded()` starts it open). `Expanded(bool)` hands it to the app, as
+  `Tabs.Selected` does: every build says open or closed, so pair it with `OnExpandedChanged`,
+  which reports the user's toggles either way. `IsExpanded` sets it from code without a report.
+- **Body:** a closed body is out of the tree — not laid out, not reached by Tab, not read. Given
+  as an element it is kept while closed and still patched by rebuilds, so whatever lives in the
+  element (a text box's undo history, a scroll offset) is there when it opens again. Given as a
+  function it is built only while open and dropped on closing. A body that closes with the
+  keyboard in it hands the keyboard to the header.
+- **Header:** `Header(element)` shows any element in place of the title text (an icon and a
+  second line); the title still names it. `Actions(...)` go at the end of the header row and do
+  not toggle it.
+- **Motion:** the body's height and the chevron's turn move together over
+  `TransitionSeconds`; a reversal mid-way takes the share of the time left. Off screen, or at
+  zero seconds, it snaps. `Progress` (0–1) says how far open it is drawn.
+- **Accessibility:** the header is a button with the expanded state (UIA ExpandCollapse;
+  AT-SPI expandable/expanded). Showing only the title it is named by that text, which is then
+  not read again inside it; with a header of the app's or actions, by the title. An
+  `AutomationId` set on the expander is the header's.
+
+**Looks** come from `Theme.Expander` (`ExpanderTheme`). The default is a disclosure: the chevron
+before the title (right when closed, down when open), a hover fill, the body lined up under the
+title. `Chevron = Trailing` puts it at the far end (down, then up); `Border`, `HeaderBackground`
+and `BodyBackground` make it a card whose header and body share the border and are joined by a
+rule, the header giving up its bottom corners while open — the Fluent sample's is one.

@@ -37,7 +37,6 @@ partial class AccessibilityDemo : Component
     [Reactive] public partial int ClickCount { get; set; }
     [Reactive] public partial bool Checked { get; set; }
     [Reactive] public partial int RowCount { get; set; }
-    [Reactive] public partial bool DetailsExpanded { get; set; }
     [Reactive] public partial double Volume { get; set; }
 
     public AccessibilityDemo(Window window) => _window = window;
@@ -95,21 +94,12 @@ partial class AccessibilityDemo : Component
                             .TextColor(new Color(160, 160, 180))
                     ),
 
-                    // Expandable tree item — exposes the ExpandCollapse pattern.
-                    Flex.Column(gap: 4).FlexShrink(0).Children(
-                        Box.New()
-                            .AutomationId("expander")
-                            .AccessibleRole(AccessibilityRole.TreeItem)
-                            .AccessibleName("Details")
-                            .AccessibleExpanded(DetailsExpanded)
-                            .Cursor(CursorType.Pointer)
-                            .OnClick(_ => DetailsExpanded = !DetailsExpanded)
-                            .Children(Text.New((DetailsExpanded ? "▾ " : "▸ ") + "Details").FontSize(13f)),
-                        DetailsExpanded
-                            ? Text.New("Extra details are now visible.").FontSize(12f)
-                                .TextColor(new Color(160, 160, 180))
-                            : Box.New()
-                    ),
+                    // An expander: its header exposes the ExpandCollapse pattern, and it keeps
+                    // its own open/closed state across rebuilds.
+                    Expander.New("Details",
+                            Text.New("Extra details are now visible.").FontSize(12f)
+                                .TextColor(new Color(160, 160, 180)))
+                        .AutomationId("expander"),
 
                     // Multi-select list — exposes the container Selection pattern
                     // (CanSelectMultiple) and per-item add/remove selection.

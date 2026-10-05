@@ -301,7 +301,7 @@ public static class Pages
             app.ExpanderOpen
                 ? "Showing per-app settings"
                 : $"{notifying} {(notifying == 1 ? "app" : "apps")} allowed to notify you",
-            app.ExpanderOpen, () => app.ExpanderOpen = !app.ExpanderOpen,
+            app.ExpanderOpen, v => app.ExpanderOpen = v,
             ToggleRow(p, "Mail", app.NotifyMail, v => app.NotifyMail = v),
             ToggleRow(p, "Calendar", app.NotifyCalendar, v => app.NotifyCalendar = v),
             ToggleRow(p, "Store", app.NotifyStore, v => app.NotifyStore = v)));

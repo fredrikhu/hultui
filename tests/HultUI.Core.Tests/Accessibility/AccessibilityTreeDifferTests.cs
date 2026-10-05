@@ -188,6 +188,26 @@ public class AccessibilityTreeDifferTests
     }
 
     [Fact]
+    public void Diff_ExpandedStateChanged_EmitsIsExpandedChange()
+    {
+        var root = AppRoot();
+        var header = new BoxElement { Role = AccessibilityRole.Button, AccessibleName = "Details", AccessibleExpanded = false };
+        root.AddChild(header);
+        Layout(root);
+        var before = AccessibilityTreeBuilder.Build(root);
+
+        header.AccessibleExpanded = true;
+        Layout(root);
+        var after = AccessibilityTreeBuilder.Build(root);
+
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+
+        var change = Assert.Single(diff.PropertyChanged);
+        Assert.Equal(AccessibilityProperties.IsExpanded, change.PropertyName);
+        Assert.Equal(true, change.Node.Expanded);
+    }
+
+    [Fact]
     public void Diff_TextInputValueChanged_EmitsValueChange()
     {
         var root = AppRoot();

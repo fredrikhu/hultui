@@ -533,6 +533,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             AccessibilityProperties.Description => UiaInterop.UIA_HelpTextPropertyId,
             AccessibilityProperties.Value => UiaInterop.UIA_ValueValuePropertyId,
             AccessibilityProperties.IsToggled => UiaInterop.UIA_ToggleToggleStatePropertyId,
+            AccessibilityProperties.IsExpanded => UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId,
             AccessibilityProperties.IsEnabled => UiaInterop.UIA_IsEnabledPropertyId,
             AccessibilityProperties.IsFocused => UiaInterop.UIA_HasKeyboardFocusPropertyId,
             AccessibilityProperties.BoundingRect => UiaInterop.UIA_BoundingRectanglePropertyId,

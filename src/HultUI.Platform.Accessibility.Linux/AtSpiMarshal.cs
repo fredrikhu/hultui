@@ -94,6 +94,14 @@ internal static class AtSpiMarshal
     /// </summary>
     public static void WriteStateSet(ref MessageWriter writer, AtSpiAccessible node)
     {
+        // Every state we model lives in the low word; the high word stays 0.
+        writer.WriteArray(new[] { StateBits(node), 0u });
+    }
+
+    /// <summary>The low word of an accessible's state set: one bit per <c>AtspiStateType</c>
+    /// below 32.</summary>
+    internal static uint StateBits(AtSpiAccessible node)
+    {
         uint low = 0;
         void Set(int bit) => low |= 1u << bit;
 
@@ -109,9 +117,14 @@ internal static class AtSpiMarshal
         if (node.Selectable) Set(AtSpiConstants.StateSelectable);
         if (node.Selected) Set(AtSpiConstants.StateSelected);
         if (node.Toggled == true) Set(AtSpiConstants.StateChecked);
+        // Expandable says there is something to open, which is what makes a reader say
+        // "collapsed" rather than nothing for a closed one.
+        if (node.Expanded is { } expanded)
+        {
+            Set(AtSpiConstants.StateExpandable);
+            if (expanded) Set(AtSpiConstants.StateExpanded);
+        }
         if (node.IsRoot) Set(AtSpiConstants.StateActive);
-
-        // Every state we model lives in the low word; the high word stays 0.
-        writer.WriteArray(new[] { low, 0u });
+        return low;
     }
 }
