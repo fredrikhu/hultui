@@ -125,6 +125,13 @@ Handlers are replaced by each rebuild's versions during reconciliation, so closu
 | `.AccessibleRole(role)` | `AccessibilityRole` |
 | `.AccessibleName("label")` | `string` |
 | `.AccessibleDescription("desc")` | `string` |
+| `.AccessibleExpanded(open)` | `bool?` — `null` = cannot open |
+| `.AccessibleSelected(selected)` | `bool?` — `null` = not one of a set |
+
+`AccessibleSelected` is for one of a set the user picks from, such as a tab: a reader is told
+it is selectable and whether it is the one selected, and selecting it from assistive tech
+clicks it, so the element has to select itself on click. `TabsElement` sets it on its headers
+(role `Tab`, in a strip of role `TabList`, beside a panel of role `TabPanel`).
 
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 

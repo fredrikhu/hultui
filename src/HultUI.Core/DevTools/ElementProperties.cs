@@ -237,7 +237,7 @@ public static class ElementProperties
 
         if (element.Role != Accessibility.AccessibilityRole.None
             || element.AccessibleName is not null || element.AccessibleDescription is not null
-            || element.AccessibleExpanded is not null)
+            || element.AccessibleExpanded is not null || element.AccessibleSelected is not null)
         {
             Group(groups, "Accessibility", rows =>
             {
@@ -245,6 +245,7 @@ public static class ElementProperties
                 Add(rows, "Name", element.AccessibleName);
                 Add(rows, "Description", element.AccessibleDescription);
                 if (element.AccessibleExpanded is { } expanded) rows.Add(new("Expanded", YesNo(expanded)));
+                if (element.AccessibleSelected is { } selected) rows.Add(new("Selected", YesNo(selected)));
             });
         }
 

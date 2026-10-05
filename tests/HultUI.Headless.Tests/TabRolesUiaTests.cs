@@ -22,6 +22,7 @@ public class TabRolesUiaTests
     [WindowsTheory]
     [InlineData(AccessibilityRole.Tab, UiaInterop.UIA_TabItemControlTypeId)]
     [InlineData(AccessibilityRole.TabPanel, UiaInterop.UIA_PaneControlTypeId)]
+    [InlineData(AccessibilityRole.TabList, UiaInterop.UIA_TabControlTypeId)]
     public void ATabIsATabItem_AndItsPanelAPane(AccessibilityRole role, int controlType)
     {
         using var hwnd = TestHwnd.Create();

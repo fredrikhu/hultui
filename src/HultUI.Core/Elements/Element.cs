@@ -576,6 +576,25 @@ public abstract class Element
     /// reuse the element's click handler, so wire the node to toggle on click.
     /// </summary>
     public bool? AccessibleExpanded { get; set; }
+
+    /// <summary>
+    /// Selected state for one of a set the user picks from — a tab: <c>null</c> = not
+    /// selectable, <c>true</c> = the one selected. Exposed as UIA's SelectionItem and AT-SPI's
+    /// selectable and selected states. Selecting it from assistive tech clicks it, so wire the
+    /// element to select itself on click.
+    /// </summary>
+    public bool? AccessibleSelected
+    {
+        get => _accessibleSelected;
+        set
+        {
+            if (_accessibleSelected == value) return;
+            _accessibleSelected = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
+        }
+    }
+    private bool? _accessibleSelected;
+
     public string? AccessibleDescription { get; set; }
 
     /// <summary>
@@ -1144,6 +1163,7 @@ public abstract class Element
         AccessibleDescription = source.AccessibleDescription;
         AutomationId = source.AutomationId;
         AccessibleExpanded = source.AccessibleExpanded;
+        AccessibleSelected = source.AccessibleSelected;
         // App event handlers ARE copied: the incoming build is the source of truth,
         // so a retained element always runs the latest build's handlers (matching how
         // callback props like ButtonElement.Clicked already behave). Element-OWNED

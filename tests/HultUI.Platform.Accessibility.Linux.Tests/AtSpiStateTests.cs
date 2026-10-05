@@ -43,4 +43,25 @@ public class AtSpiStateTests
         Assert.False(Has(bits, AtSpiConstants.StateExpandable));
         Assert.False(Has(bits, AtSpiConstants.StateExpanded));
     }
+
+    /// <summary>The selected state came from IsToggled, which no tab and no radio button ever
+    /// carried: Orca never heard either one called selected.</summary>
+    [Fact]
+    public void ASelectedTabIsSelected_AndAnotherOnlySelectable()
+    {
+        var open = Bits(Box.New().AccessibleRole(AccessibilityRole.Tab).AccessibleName("General").AccessibleSelected(true));
+        Assert.True(Has(open, AtSpiConstants.StateSelectable));
+        Assert.True(Has(open, AtSpiConstants.StateSelected));
+
+        var other = Bits(Box.New().AccessibleRole(AccessibilityRole.Tab).AccessibleName("Inbox").AccessibleSelected(false));
+        Assert.True(Has(other, AtSpiConstants.StateSelectable));
+        Assert.False(Has(other, AtSpiConstants.StateSelected));
+    }
+
+    [Fact]
+    public void ACheckedRadioButtonIsSelected()
+    {
+        Assert.True(Has(Bits(new RadioButtonElement { Label = "On", IsChecked = true }), AtSpiConstants.StateSelected));
+        Assert.False(Has(Bits(new RadioButtonElement { Label = "Off" }), AtSpiConstants.StateSelected));
+    }
 }

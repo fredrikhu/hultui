@@ -100,10 +100,16 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
                 source.ActivateItem(index);
             return;
         }
-        if (FindElement(id) is RadioButtonElement rb && !rb.IsChecked)
+        switch (FindElement(id))
         {
-            rb.IsChecked = true;
-            rb.OnChanged?.Invoke(true);
+            case RadioButtonElement rb when !rb.IsChecked:
+                rb.IsChecked = true;
+                rb.OnChanged?.Invoke(true);
+                break;
+            // One of a set that selects itself on click — a tab.
+            case { AccessibleSelected: false } item:
+                EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, item);
+                break;
         }
     });
 

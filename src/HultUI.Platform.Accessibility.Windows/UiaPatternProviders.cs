@@ -74,9 +74,10 @@ internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, Elemen
 internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
     : INativeSelectionItem
 {
-    // This provider serves both list items (virtualized and eager) and radio
-    // buttons. The bridge resolves list items to (list, index) — for anything it
-    // doesn't recognize as a list item, we fall back to the radio-button path.
+    // This provider serves list items (virtualized and eager), radio buttons and
+    // tabs. The bridge resolves list items to (list, index) — for anything it
+    // doesn't recognize as a list item, selecting goes to the element (a radio is
+    // checked, a tab clicked) and the node's selected state answers.
 
     public int Select()
     {
@@ -98,18 +99,17 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
 
     public int GetIsSelected(out int pRetVal)
     {
-        // A list item's selection comes from its source; a radio is selected when
-        // it's checked.
+        // A list item's selection comes from its source; a radio or a tab carries its own.
         bool selected = bridge.TryGetItemSelected(elementId, out bool s)
             ? s
-            : bridge.GetToggleState(elementId) == true;
+            : bridge.GetSelected(elementId) ?? bridge.GetToggleState(elementId) == true;
         pRetVal = selected ? -1 : 0; // VARIANT_BOOL
         return 0;
     }
 
     public int GetSelectionContainer(out IntPtr pRetVal)
     {
-        // A list item's selection container is its list; a radio's is implicit.
+        // A list item's selection container is its list, a tab's its strip; a radio's is implicit.
         pRetVal = bridge.ItemSelectionContainer(elementId);
         return 0;
     }

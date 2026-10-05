@@ -28,6 +28,7 @@ public class AtSpiConstantsTests
     // The content shown for a tab, which W3C Core-AAM maps to a scroll pane. It was the page
     // tab list (38) — the strip of tabs — so a reader announced each panel as a row of tabs.
     [InlineData(AccessibilityRole.TabPanel, 49u, "scroll pane")]
+    [InlineData(AccessibilityRole.TabList, 38u, "page tab list")]
     [InlineData(AccessibilityRole.Separator, 50u, "separator")]
     [InlineData(AccessibilityRole.List, 31u, "list")]
     [InlineData(AccessibilityRole.ListItem, 32u, "list item")]

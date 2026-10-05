@@ -138,6 +138,7 @@ internal static class AtSpiConstants
         // The content shown for a tab, which W3C Core-AAM maps to a scroll pane; the page tab
         // list is the strip of tabs.
         AccessibilityRole.TabPanel => RoleScrollPane,
+        AccessibilityRole.TabList => RolePageTabList,
         AccessibilityRole.Dialog => RoleDialog,
         AccessibilityRole.Alert => RoleAlert,
         AccessibilityRole.Heading => RoleHeading,
