@@ -1,6 +1,22 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **MenuBar** — `src/HultUI.Core/Builders/MenuBar.cs` (+ `MenuBarItem`, `MenuBarElement`,
+  `MenuTitleElement`, `MenuBarTheme`): titles that open the existing context menus as
+  dropdowns. Pointer: press to open/close, hover switches while one is open. Keyboard the
+  Windows way: F10 and lone (left) Alt take the titles, Alt+letter (`&File`) opens a menu, ← →
+  cross menus (the window hands them over through the new `IOverlayHost.OpenMenu` /
+  `MenuRequest.Navigate` when the menu has no submenu to close or open), Esc steps back
+  (`MenuCloseReason.Escape`) and then lets go, focus comes back; mnemonics underline while Alt is
+  held. New a11y roles `MenuBar`/`MenuItem` mapped in UIA and AT-SPI (34/35), titles report
+  expanded. In the Fluent sample's title bar (File, View with live checks, Help). Traps hit: a
+  component must look its elements up through its host — references kept from `Build` are the
+  throwaway copies a rebuild patches from (no overlay host, no layout); a label inside a
+  `WindowDrag()` bar is a drag point unless it is hit-test invisible; with nothing focused keys
+  land on the root host, so global key handlers belong on `Mount()`, not inside the tree. Also
+  fixed: the Fluent sample's context-menu hover was the window-blended fill, invisible on the
+  flyout (#2D2D2D on #2C2C2C). Tests: 7 headless + 1 Fluent; controls: no ← → hand-over, Esc taken
+  as a dismissal, AltGr counted as Alt — each fails its test; AT-SPI role constants test.
 - **One command palette** — `CommandPalette` + `PaletteCommand` + `FuzzyMatch`
   (`src/HultUI.Core/Builders`), themed by `CommandPaletteTheme`, replace Junction's, Vesper's and
   Meridian's own; `Kbd` + `KbdTheme` replace four apps' key chips (Aperture's was dead code). Each

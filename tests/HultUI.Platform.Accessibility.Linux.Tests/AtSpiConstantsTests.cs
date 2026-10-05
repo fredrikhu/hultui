@@ -35,6 +35,8 @@ public class AtSpiConstantsTests
     [InlineData(AccessibilityRole.Link, 88u, "link")]
     [InlineData(AccessibilityRole.Group, 39u, "panel")]
     [InlineData(AccessibilityRole.Application, 75u, "application")]
+    [InlineData(AccessibilityRole.MenuBar, 34u, "menu bar")]
+    [InlineData(AccessibilityRole.MenuItem, 35u, "menu item")]
     public void MapRole_MatchesAtSpiAbi(AccessibilityRole role, uint expectedCode, string expectedName)
     {
         uint code = AtSpiConstants.MapRole(role);

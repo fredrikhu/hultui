@@ -34,4 +34,16 @@ public interface IOverlayHost
     /// <see cref="Reactivity.Ref{T}"/> goes on pointing at an element after a rebuild unmounts it,
     /// so a non-null ref is no proof the element is on screen.</summary>
     bool IsInTree(Element element) => element.IsHosted;
+
+    /// <summary>
+    /// Opens a menu of <paramref name="items"/> at <paramref name="position"/> (window
+    /// coordinates), the way a context menu opens — for a control that owns menus of its own,
+    /// such as a menu bar. Opening one closes any menu already open. A host without menus
+    /// closes it at once, as <see cref="MenuCloseReason.Dismissed"/>.
+    /// </summary>
+    void OpenMenu(IReadOnlyList<ContextMenuItem> items, Primitives.Point position, MenuRequest? request = null) =>
+        request?.Closed?.Invoke(MenuCloseReason.Dismissed);
+
+    /// <summary>Closes the menu <see cref="OpenMenu"/> opened, if it is still open.</summary>
+    void CloseMenu() { }
 }
