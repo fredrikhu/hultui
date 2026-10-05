@@ -105,6 +105,73 @@ public class FocusVisualTests
         Assert.Contains(Hex(Outer), Frame(session));
     }
 
+    /// <summary>
+    /// Any key brings the ring back, not only Tab, in the frame the key itself brings about: the
+    /// frame is not forced here. Only Tab did, so a control whose arrow keys move the focus moved
+    /// it unseen after a click.
+    /// </summary>
+    [Fact]
+    public void AnyKeyShowsTheRing_OnWhatHasFocus()
+    {
+        var (session, target) = Start();
+        using var _ = session;
+
+        session.Window.Click(target);
+        session.PumpFrames(2);
+        Assert.DoesNotContain(Hex(Outer), Frame(session));
+
+        session.Window.PressKey(KeyCode.Down);
+        session.Window.RenderLog.Clear();
+        session.PumpFrame();
+
+        Assert.Contains(Hex(Outer), session.Window.RenderLog.ToString());
+    }
+
+    /// <summary>Shift alone, Ctrl alone, or a shortcut with Ctrl, Alt or Super is the mouse
+    /// user's hand on the keyboard, not keyboard navigation.</summary>
+    [Fact]
+    public void AModifierOrAShortcutDoesNot()
+    {
+        var (session, target) = Start();
+        using var _ = session;
+
+        session.Window.Click(target);
+        session.Window.PressKey(KeyCode.ShiftLeft, KeyModifiers.Shift);
+        session.Window.PressKey(KeyCode.CtrlLeft, KeyModifiers.Ctrl);
+        session.Window.PressKey(KeyCode.C, KeyModifiers.Ctrl);
+        session.Window.PressKey(KeyCode.F, KeyModifiers.Alt);
+        session.Window.PressKey(KeyCode.Down, KeyModifiers.Super);
+        session.PumpFrames(2);
+
+        Assert.DoesNotContain(Hex(Outer), Frame(session));
+    }
+
+    /// <summary>The case that started it: a tab clicked, then the arrow moves to the next tab,
+    /// which shows the ring.</summary>
+    [Fact]
+    public void ArrowingThroughTabsAfterAClickShowsTheRing()
+    {
+        using var session = HeadlessSession.Create(400, 160,
+            options: new HeadlessOptions { RecordDrawCalls = true });
+        session.Application.Theme = Loud;
+        var tabs = Tabs.New()
+            .Tab("General", () => TextElement.New("general page"))
+            .Tab("Inbox", () => TextElement.New("inbox page"));
+        session.Application.SetRoot(Box.New().Padding(20f).Children(tabs));
+        session.PumpFrames(2);
+        var strip = tabs.Children[0];
+
+        session.Window.Click(strip.Children[0]);
+        session.PumpFrames(2);
+        Assert.DoesNotContain(Hex(Outer), Frame(session));
+
+        session.Window.PressKey(KeyCode.Right);
+        session.PumpFrames(2);
+
+        Assert.Same(strip.Children[1], session.Application.PrimaryWindow.FocusedElement);
+        Assert.Contains(Band(strip.Children[1].ScreenBorderBox, 3f), Frame(session));
+    }
+
     [Fact]
     public void AnElementThatDidNotAskForOneGetsNothing()
     {

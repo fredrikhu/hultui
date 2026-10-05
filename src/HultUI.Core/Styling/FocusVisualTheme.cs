@@ -34,11 +34,12 @@ public sealed class FocusVisualTheme : IThemeExtension<FocusVisualTheme>
     public float Margin { get; init; } = 1f;
 
     /// <summary>
-    /// Whether the visual only appears when focus arrived from the keyboard.
+    /// Whether the visual only appears while the keyboard is in use: from any key press (not a
+    /// modifier alone, nor a chord with Ctrl, Alt or Super) until the next pointer press.
     ///
     /// <para>On by default, and it is the difference between a focus ring and an annoyance:
     /// clicking a button gives it focus too, and a ring that lights up on every click reads as
-    /// something being stuck. Windows shows it for Tab and not for the mouse.</para>
+    /// something being stuck. It is the rule browsers use for <c>:focus-visible</c>.</para>
     /// </summary>
     public bool KeyboardOnly { get; init; } = true;
 
