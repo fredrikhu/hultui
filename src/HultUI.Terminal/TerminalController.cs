@@ -282,13 +282,27 @@ public sealed class TerminalController : IDisposable
         }
     }
 
+    /// <summary>Whether the connection has been told a size yet. The grid the terminal first lays
+    /// out is always told, even when it is the size the controller starts at.</summary>
+    internal bool ConnectionSized { get; private set; }
+
     /// <summary>Resizes the emulator and tells the connection, together, always: ConPTY reflows
     /// its own copy and the two must agree.</summary>
     internal void Resize(int columns, int rows)
     {
         columns = Math.Max(1, columns);
         rows = Math.Max(1, rows);
-        if (columns == _columns.Peek() && rows == _rows.Peek()) return;
+        bool changed = columns != _columns.Peek() || rows != _rows.Peek();
+        // The first size goes to the connection even when it is the one the controller starts at:
+        // a connection made at the terminal's size (DeferredConnection) is waiting for it, and for
+        // any other, the size it already has is no change.
+        if (!changed && ConnectionSized) return;
+        ConnectionSized = true;
+        if (!changed)
+        {
+            _connection.Resize(columns, rows);
+            return;
+        }
         lock (_gate)
         {
             if (_disposed) return;

@@ -69,8 +69,14 @@ public sealed class TerminalSampleApp : IDisposable
     /// <summary>The demo program behind the running session, when that is what runs.</summary>
     public DemoShell? Demo { get; private set; }
 
-    /// <summary>The shell behind the running session, when that is what runs.</summary>
-    public PtyConnection? Shell { get; private set; }
+    /// <summary>The shell behind the running session, once it has started: it starts when the
+    /// terminal has laid out its grid (<see cref="StartShell"/>).</summary>
+    public PtyConnection? Shell => _shell?.Connection as PtyConnection;
+
+    // The running session's shell connection, and the name the header gives it, known before it
+    // starts. Both set on the UI thread, by Start.
+    private DeferredConnection? _shell;
+    private string? _shellName;
 
     /// <summary>What the header calls a shell elsewhere (<c>ssh user@host</c>); set by the
     /// <c>--ssh</c> connection.</summary>
@@ -79,7 +85,8 @@ public sealed class TerminalSampleApp : IDisposable
     private TerminalController Start(SampleProgram program)
     {
         Demo = null;
-        Shell = null;
+        _shell = null;
+        _shellName = null;
         RemoteName = null;
         ITerminalConnection connection;
         if (program == SampleProgram.Shell)
@@ -88,7 +95,7 @@ public sealed class TerminalSampleApp : IDisposable
             {
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                 connection = _remote?.Invoke(this)
-                    ?? (Shell = PtyConnection.Start(_launch ?? PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null)));
+                    ?? StartShell(_launch ?? PtyLaunch.DefaultShell(Directory.Exists(home) ? home : null));
                 Problem.Value = null;
             }
             catch (Exception ex) when (ex is FileNotFoundException or InvalidOperationException or IOException
@@ -108,6 +115,44 @@ public sealed class TerminalSampleApp : IDisposable
         controller.Bell += () => Bells.Value++;
         controller.LinkActivated += OpenLink;
         return controller;
+    }
+
+    /// <summary>
+    /// The shell, started once the terminal has laid out its grid, and at that size. Started at a
+    /// default size and resized a moment later, the resize lands while the shell starts, and Git
+    /// for Windows' programs (Git Bash, its vim) miss about one resize in six that way, then throw
+    /// away the first key typed (TERMINAL.md, problem 22).
+    /// <para>A shell that is not there is found now, so the demo shell stands in with the reason,
+    /// as before; one whose pseudoterminal cannot start falls back the same way once it is
+    /// tried.</para>
+    /// </summary>
+    private DeferredConnection StartShell(PtyLaunch launch)
+    {
+        var program = PtyLaunch.FindProgram(launch.Program)
+            ?? throw new FileNotFoundException($"'{launch.Program}' is not a file and is not on PATH.", launch.Program);
+        DeferredConnection shell = null!;
+        shell = new DeferredConnection(async (size, ct) =>
+        {
+            try
+            {
+                return await PtyConnection.StartAsync(launch, size.Columns, size.Rows, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException)
+            {
+                var demo = new DemoShell();
+                Application.InvokeOnMainThread(() =>
+                {
+                    if (!ReferenceEquals(_shell, shell)) return; // restarted meanwhile
+                    Demo = demo;
+                    _shellName = null;
+                    Problem.Value = "No shell: " + ex.Message;
+                });
+                return demo.Connection;
+            }
+        });
+        _shell = shell;
+        _shellName = Path.GetFileName(program);
+        return shell;
     }
 
     /// <summary>
@@ -200,7 +245,7 @@ public sealed class TerminalSampleApp : IDisposable
                 : "running";
             string where = c.WorkingDirectory is { } dir ? "  ·  " + dir : "";
             string bells = app.Bells.Value > 0 ? $"  ·  bell ×{app.Bells.Value}" : "";
-            string what = app.Problem.Value ?? app.RemoteName ?? (app.Shell is { } shell ? Path.GetFileName(shell.Program) : "demo shell");
+            string what = app.Problem.Value ?? app.RemoteName ?? app._shellName ?? "demo shell";
 
             var program = Dropdown.New(ProgramNames, (int)app.Program.Value);
             program.AccessibleName = "Program";
