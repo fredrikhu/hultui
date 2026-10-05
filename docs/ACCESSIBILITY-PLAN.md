@@ -276,6 +276,12 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   before that, Orca read every expandable node as a plain button.
 - **Table column headers** — role `ColumnHeader` (UIA HeaderItem, AT-SPI table column header),
   Invoke/click sorts (`TableView<T>`, 2026-10-05).
+- **Tabs** — role `Tab` is one tab: UIA `TabItem` (UIA's `Tab` is the strip that holds them),
+  AT-SPI `page tab`. Role `TabPanel` is the content shown for a tab: UIA `Pane`, AT-SPI
+  `scroll pane`. Both per W3C Core-AAM 1.1 (2026-10-05; `Tab` was UIA's strip type and
+  `TabPanel` AT-SPI's `page tab list`). Set by apps (Meridian's detail panels) and by CEF
+  pages on Linux; `TabsElement` does not use them yet — its headers read as buttons with
+  no selected state, and there is no role for the strip.
 - **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 - **Scroll** — scroll views and virtualized lists; read scroll percent/view size

@@ -210,7 +210,9 @@ internal static partial class UiaInterop
     public const int UIA_RadioButtonControlTypeId = 50013;
     public const int UIA_ScrollBarControlTypeId = 50014;
     public const int UIA_SeparatorControlTypeId = 50038;
+    /// <summary>The strip that holds the tabs — not one tab, which is <see cref="UIA_TabItemControlTypeId"/>.</summary>
     public const int UIA_TabControlTypeId = 50018;
+    public const int UIA_TabItemControlTypeId = 50019;
     public const int UIA_TextControlTypeId = 50020;
     public const int UIA_TreeControlTypeId = 50023;
     public const int UIA_TreeItemControlTypeId = 50024;

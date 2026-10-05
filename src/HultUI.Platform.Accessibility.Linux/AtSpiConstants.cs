@@ -135,7 +135,9 @@ internal static class AtSpiConstants
         AccessibilityRole.RadioButton => RoleRadioButton,
         AccessibilityRole.Switch => RoleToggleButton,
         AccessibilityRole.Tab => RolePageTab,
-        AccessibilityRole.TabPanel => RolePageTabList,
+        // The content shown for a tab, which W3C Core-AAM maps to a scroll pane; the page tab
+        // list is the strip of tabs.
+        AccessibilityRole.TabPanel => RoleScrollPane,
         AccessibilityRole.Dialog => RoleDialog,
         AccessibilityRole.Alert => RoleAlert,
         AccessibilityRole.Heading => RoleHeading,

@@ -296,7 +296,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.TreeItem => UiaInterop.UIA_TreeItemControlTypeId,
         AccessibilityRole.ScrollView => UiaInterop.UIA_PaneControlTypeId,
         AccessibilityRole.Group => UiaInterop.UIA_GroupControlTypeId,
-        AccessibilityRole.Tab => UiaInterop.UIA_TabControlTypeId,
+        // One tab. UIA's Tab control type is the strip of them (W3C Core-AAM, as Chromium maps it).
+        AccessibilityRole.Tab => UiaInterop.UIA_TabItemControlTypeId,
         AccessibilityRole.Separator => UiaInterop.UIA_SeparatorControlTypeId,
         AccessibilityRole.Application => UiaInterop.UIA_WindowControlTypeId,
         AccessibilityRole.Link => UiaInterop.UIA_HyperlinkControlTypeId,
