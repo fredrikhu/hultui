@@ -1,0 +1,225 @@
+using HultUI.Core.Accessibility;
+using HultUI.Core.Builders;
+using HultUI.Core.Elements;
+using HultUI.Core.Events;
+using HultUI.Core.Layout;
+using HultUI.Core.Platform;
+using HultUI.Core.Styling;
+using Xunit;
+
+namespace HultUI.Core.Tests.Elements;
+
+/// <summary>
+/// A masked field keeps its value to itself. The clipboard, which any application can read,
+/// never gets it; assistive tech gets the bullets the screen shows, and word that it is a
+/// password. Typing, pasting and <see cref="TextInputElement.TextChanged"/> still work on the
+/// real text — that is the field's job.
+///
+/// <para>Each "does nothing" test has an unmasked twin that does something, so a harness that
+/// never reached the clipboard or the tree cannot pass them all.</para>
+/// </summary>
+public class MaskedTextInputTests
+{
+    private const string Secret = "hunter2";
+    private static readonly string Bullets = new('●', Secret.Length);
+
+    private readonly LayoutEngine _layout = new(new StubMeasureContext());
+
+    private TextInputElement Field(string text, bool masked, StubClipboard? clipboard = null)
+    {
+        var field = TextInputElement.New(text);
+        field.Masked = masked;
+        field.Clipboard = clipboard;
+        field.Box.Width = 200;
+        field.Box.Height = 30;
+        var container = BoxElement.New();
+        container.Box.Width = 400;
+        container.Box.Height = 400;
+        container.AddChild(field);
+        StyleResolver.Resolve(container, Theme.Light.ToResolvedStyle());
+        _layout.PerformLayout(container, 400, 400);
+        EventDispatcher.DispatchDirect(new FocusEvent(), field);
+        return field;
+    }
+
+    private static void Ctrl(Element field, KeyCode key) =>
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = key, Modifiers = KeyModifiers.Ctrl }, field);
+
+    private static ContextMenuItem Item(TextInputElement field, string label) =>
+        field.ContextMenuItems!().Single(i => i.Label == label);
+
+    // ──── The clipboard ────
+
+    [Theory]
+    [InlineData(false, Secret)]
+    [InlineData(true, "before")]
+    public void CtrlCCopiesOnlyWhatIsShown(bool masked, string clipboardAfter)
+    {
+        var clipboard = new StubClipboard { Text = "before" };
+        var field = Field(Secret, masked, clipboard);
+
+        Ctrl(field, KeyCode.A);
+        Ctrl(field, KeyCode.C);
+
+        Assert.Equal(clipboardAfter, clipboard.Text);
+    }
+
+    /// <summary>Cut does nothing at all on a masked field. Deleting the selection without
+    /// copying it would lose the text and look like a cut that worked.</summary>
+    [Theory]
+    [InlineData(false, Secret, "")]
+    [InlineData(true, "before", Secret)]
+    public void CtrlXCutsOnlyWhatIsShown(bool masked, string clipboardAfter, string textAfter)
+    {
+        var clipboard = new StubClipboard { Text = "before" };
+        var field = Field(Secret, masked, clipboard);
+
+        Ctrl(field, KeyCode.A);
+        Ctrl(field, KeyCode.X);
+
+        Assert.Equal(clipboardAfter, clipboard.Text);
+        Assert.Equal(textAfter, field.Text);
+    }
+
+    /// <summary>Pasting a password from a password manager is how many people type one.</summary>
+    [Fact]
+    public void PasteStillWorks()
+    {
+        string? reported = null;
+        var field = Field("", masked: true, new StubClipboard { Text = Secret });
+        field.TextChanged = t => reported = t;
+
+        Ctrl(field, KeyCode.V);
+
+        Assert.Equal(Secret, field.Text);
+        Assert.Equal(Secret, reported);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheMenuGreysOutCutAndCopyButNotPaste(bool masked)
+    {
+        var clipboard = new StubClipboard { Text = "before" };
+        var field = Field(Secret, masked, clipboard);
+        Ctrl(field, KeyCode.A);
+
+        Assert.Equal(masked, Item(field, "Cut").IsDisabled);
+        Assert.Equal(masked, Item(field, "Copy").IsDisabled);
+        Assert.False(Item(field, "Paste").IsDisabled);
+        Assert.False(Item(field, "Select All").IsDisabled);
+
+        // A disabled item is still an action someone could run; it must not copy either.
+        Item(field, "Copy").Action!();
+        Assert.Equal(masked ? "before" : Secret, clipboard.Text);
+    }
+
+    // ──── Assistive tech ────
+
+    private static BoxElement AppRoot(Element child)
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+        root.AddChild(child);
+        return root;
+    }
+
+    private AccessibilityNode Node(Element root)
+    {
+        _layout.PerformLayout(root, 400, 400);
+        return AccessibilityTreeBuilder.Build(root).Children.Single();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AReaderIsGivenTheBulletsAndToldItIsAPassword(bool masked)
+    {
+        var input = new TextInputElement { Text = Secret, Masked = masked };
+        input.AccessibleName = "Password";
+
+        var node = Node(AppRoot(input));
+
+        Assert.Equal(AccessibilityRole.TextInput, node.Role);
+        Assert.Equal(masked, node.IsPassword);
+        Assert.Equal(masked ? Bullets : Secret, node.Value);
+    }
+
+    /// <summary>A show-password toggle, both ways: the reader hears the role and the value
+    /// change, and the value it is sent on masking is the bullets.</summary>
+    [Fact]
+    public void MaskingALiveFieldIsAChangeAReaderHears()
+    {
+        var input = new TextInputElement { Text = Secret };
+        var root = AppRoot(input);
+        _layout.PerformLayout(root, 400, 400);
+        var before = AccessibilityTreeBuilder.Build(root);
+
+        input.Masked = true;
+        _layout.PerformLayout(root, 400, 400);
+        var masked = AccessibilityTreeBuilder.Build(root);
+        var diff = AccessibilityTreeDiffer.Diff(before, masked);
+
+        Assert.Equal(
+            new[] { AccessibilityProperties.IsPassword, AccessibilityProperties.Value },
+            diff.PropertyChanged.Select(c => c.PropertyName).Order());
+        Assert.All(diff.PropertyChanged, c => Assert.Equal(Bullets, c.Node.Value));
+
+        input.Masked = false;
+        var revealed = AccessibilityTreeBuilder.Build(root);
+        var back = AccessibilityTreeDiffer.Diff(masked, revealed);
+
+        Assert.Contains(back.PropertyChanged, c => c.PropertyName == AccessibilityProperties.IsPassword && !c.Node.IsPassword);
+        Assert.Equal(Secret, revealed.Children.Single().Value);
+    }
+
+    /// <summary>Without the notification the change waits for the next layout-driven rebuild,
+    /// which a toggle that only repaints never causes.</summary>
+    [Fact]
+    public void SettingTheMaskTellsTheWindowAtOnce()
+    {
+        var input = new TextInputElement { Text = Secret };
+        var root = AppRoot(input);
+        var observer = new RecordingObserver();
+        root.AccessibilityObserver = observer;
+
+        input.Masked = true;
+        input.Masked = true; // no change, no news
+
+        var (element, property) = Assert.Single(observer.Changes);
+        Assert.Same(input, element);
+        Assert.Equal(AccessibilityProperties.IsPassword, property);
+    }
+
+    // ──── The builder ────
+
+    /// <summary>Named Password, not Masked: <c>input.Masked()</c> would bind to the property.</summary>
+    [Fact]
+    public void PasswordSetsTheMaskAndClearsIt()
+    {
+        var input = TextInput.New(Secret).Password();
+        Assert.True(input.Masked);
+
+        input.Password(false);
+        Assert.False(input.Masked);
+    }
+
+    private sealed class RecordingObserver : IElementPropertyObserver
+    {
+        public List<(Element, string)> Changes { get; } = [];
+        public void OnElementPropertyChanged(Element element, string propertyName) => Changes.Add((element, propertyName));
+    }
+
+    private sealed class StubClipboard : IClipboard
+    {
+        public string? Text { get; set; }
+        public string? GetText() => Text;
+        public void SetText(string text) => Text = text;
+        public bool HasFormat(string mimeType) => false;
+        public byte[]? GetData(string mimeType) => null;
+        public void SetData(IReadOnlyDictionary<string, byte[]> data) => throw new NotSupportedException();
+        public void Clear() => Text = null;
+    }
+}

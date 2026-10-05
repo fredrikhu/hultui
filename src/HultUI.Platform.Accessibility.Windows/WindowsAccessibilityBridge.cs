@@ -532,6 +532,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             AccessibilityProperties.Name => UiaInterop.UIA_NamePropertyId,
             AccessibilityProperties.Description => UiaInterop.UIA_HelpTextPropertyId,
             AccessibilityProperties.Value => UiaInterop.UIA_ValueValuePropertyId,
+            AccessibilityProperties.IsPassword => UiaInterop.UIA_IsPasswordPropertyId,
             AccessibilityProperties.IsToggled => UiaInterop.UIA_ToggleToggleStatePropertyId,
             AccessibilityProperties.IsExpanded => UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId,
             AccessibilityProperties.IsEnabled => UiaInterop.UIA_IsEnabledPropertyId,

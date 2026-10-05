@@ -263,6 +263,11 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
 - **Value** — text inputs.
+- **IsPassword** — a `TextInputElement` with `Masked` set (2026-10-05). Its Value, through
+  both the property and the value pattern, is the bullets on screen, never the text: any
+  process in the session can ask UIA for it, not only a screen reader. On Linux the node
+  takes AT-SPI's `password text` role (40) and the same bullets, and masking or revealing a
+  field sends a `property-change:accessible-role` signal.
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
   Expand/Collapse reuse the element's click-to-toggle. A change raises the

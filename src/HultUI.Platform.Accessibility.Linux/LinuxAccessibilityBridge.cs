@@ -260,6 +260,11 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             case AccessibilityProperties.Value:
                 _bus!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleValue, change.Node.Value ?? "");
                 return true;
+            case AccessibilityProperties.IsPassword:
+                // A client caches the role from the cache-add, so a field masked or revealed
+                // after it was first seen has to say its role changed.
+                _bus!.EmitRoleChange(path, AtSpiAccessible.RoleOf(change.Node));
+                return true;
             case AccessibilityProperties.IsToggled:
                 _bus!.EmitStateChanged(path, "checked", change.Node.IsToggled == true);
                 return true;

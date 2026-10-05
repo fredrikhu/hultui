@@ -313,9 +313,25 @@ TextInput.New("initial text") // Pre-filled
 | `CursorColor` | -- | `Color` | `rgb(0,0,0)` |
 | `FocusBorderColor` | -- | `Color` | `rgb(66,135,245)` |
 | `CursorWidth` | -- | `float` | `1.5f` |
+| `Masked` | `.Password()` | `bool` | `false` |
+| `Spans` | `.Spans(spans)` | `IReadOnlyList<TextSpan>?` | `null` |
 | `TextChanged` | `.OnTextChanged(handler)` | `Action<string>?` | `null` |
 | `Clipboard` | -- | `IClipboard?` | Set by Application |
 | `CanUndo`, `CanRedo` | -- | `bool` (read-only) | |
+
+**`Masked`** makes a password field. The value is drawn as bullets; a screen reader is told
+the field is a password (UIA's `IsPassword`, AT-SPI's `password text` role) and is given the
+bullets as its value, never the text; and Cut and Copy do nothing — the keys and the menu
+items alike, greyed out in the menu — because any application can read the clipboard. Paste
+still works, and `Text`, `TextChanged`, the caret and the selection all work on the real
+value. Its fluent setter is `.Password()` (`.Password(false)` clears it), named unlike the
+property for the reason `.Chromeless()` is. It follows a rebuild like every other property,
+which matters most here: unkeyed siblings are matched by position, so when a field before it
+goes away the live element that becomes the password field may be one that was built unmasked.
+
+**`Spans`** colours ranges of the value without changing it (mask-token highlighting, say),
+the same `TextSpan` that `TextElement` and `TextAreaElement` take. They are not drawn while
+the field is masked or an input method is composing.
 
 `Undo()` and `Redo()` do what Ctrl+Z and Ctrl+Y do, for an Edit menu or a toolbar button;
 both return false when there was nothing to do.
@@ -328,7 +344,7 @@ both return false when there was nothing to do.
 - Double-click to select a word
 - Triple-click to select all
 - Ctrl+A to select all
-- Ctrl+C / Ctrl+X / Ctrl+V for clipboard
+- Ctrl+C / Ctrl+X / Ctrl+V for clipboard (only Ctrl+V on a `Masked` field)
 - Ctrl+Z to undo, Ctrl+Y or Ctrl+Shift+Z to redo
 - Ctrl+Left/Right for word navigation, Ctrl+Backspace/Delete to erase a word
 - Horizontal scroll when text overflows the box

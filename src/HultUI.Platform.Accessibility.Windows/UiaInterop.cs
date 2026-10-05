@@ -182,6 +182,7 @@ internal static partial class UiaInterop
     public const int UIA_IsControlElementPropertyId = 30016;
     public const int UIA_IsContentElementPropertyId = 30017;
     public const int UIA_IsOffscreenPropertyId = 30022;
+    public const int UIA_IsPasswordPropertyId = 30019;
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_ValueValuePropertyId = 30045;
     public const int UIA_ToggleToggleStatePropertyId = 30086;

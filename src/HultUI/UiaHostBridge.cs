@@ -52,7 +52,9 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
 
     public string? GetValue(ElementId id) => GetElementOrNull(id) switch
     {
-        TextInputElement input => input.Text,
+        // The bullets, for a password: this is what any UI Automation client in the session
+        // reads, not only a screen reader.
+        TextInputElement input => input.ShownText,
         TextAreaElement area => area.Text,
         { } element => element.AccessibleValue,
         null => null,

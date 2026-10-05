@@ -109,7 +109,7 @@ internal sealed class AtSpiAccessible
     public static AtSpiAccessible From(
         AccessibilityNode node, bool isRoot, string parentPath, int indexInParent, float scale)
     {
-        uint role = isRoot ? AtSpiConstants.RoleApplication : AtSpiConstants.MapRole(node.Role);
+        uint role = isRoot ? AtSpiConstants.RoleApplication : RoleOf(node);
         var childPaths = new List<string>(node.Children.Count);
         foreach (var child in node.Children)
             childPaths.Add(PathFor(child, isRoot: false));
@@ -149,6 +149,11 @@ internal sealed class AtSpiAccessible
             Action = ActionFor(node.Role),
         };
     }
+
+    /// <summary>The role a reader is told, for anything but the root. A password is a role of
+    /// its own on AT-SPI, where UIA has a flag on an edit control.</summary>
+    public static uint RoleOf(AccessibilityNode node) =>
+        node.IsPassword ? AtSpiConstants.RolePasswordText : AtSpiConstants.MapRole(node.Role);
 
     private static AtSpiActionKind? ActionFor(AccessibilityRole role) => role switch
     {

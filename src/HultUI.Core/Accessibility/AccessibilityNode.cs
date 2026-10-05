@@ -28,6 +28,10 @@ public sealed class AccessibilityNode
     /// </summary>
     public string? Value { get; }
 
+    /// <summary>A password field: its <see cref="Value"/> is the bullets on screen, never the
+    /// text, and a reader says what it is (UIA's IsPassword, AT-SPI's password-text role).</summary>
+    public bool IsPassword { get; }
+
     /// <summary>Stable automation identifier (UIA AutomationId), for test selectors.</summary>
     public string? AutomationId { get; }
 
@@ -82,7 +86,8 @@ public sealed class AccessibilityNode
         bool? isToggled = null,
         string? value = null,
         string? automationId = null,
-        bool? expanded = null)
+        bool? expanded = null,
+        bool isPassword = false)
     {
         ElementId = elementId;
         Role = role;
@@ -96,6 +101,7 @@ public sealed class AccessibilityNode
         Value = value;
         AutomationId = automationId;
         Expanded = expanded;
+        IsPassword = isPassword;
     }
 
     internal void AddChild(AccessibilityNode child)
