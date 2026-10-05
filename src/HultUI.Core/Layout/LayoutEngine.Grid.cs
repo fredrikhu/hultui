@@ -73,9 +73,15 @@ public sealed partial class LayoutEngine
 
                 // Stretch = force border-box to (cell - margins). Otherwise pass null
                 // so ComputeLayout uses the child's own size, then we offset to align.
-                float? forcedW = (justifySelf == JustifyItems.Stretch && child.BoxRead.Width.IsAuto)
+                // A ratio box with its height given takes its width from it, not from the cell.
+                float? forcedW = (justifySelf == JustifyItems.Stretch && child.BoxRead.Width.IsAuto
+                        && !(RatioOf(child) > 0f && !child.BoxRead.Height.IsAuto))
                     ? cellW - childMargin.Horizontal : null;
-                float? forcedH = (alignSelf == AlignItems.Stretch && child.BoxRead.Height.IsAuto)
+                // A ratio box whose width is settled takes its height from it, at the top of
+                // the cell, rather than being stretched down it as well (CSS: normal is start).
+                bool widthSettled = forcedW.HasValue || !child.BoxRead.Width.IsAuto;
+                float? forcedH = (alignSelf == AlignItems.Stretch && child.BoxRead.Height.IsAuto
+                        && !(RatioOf(child) > 0f && widthSettled))
                     ? cellH - childMargin.Vertical : null;
 
                 // Constraint = container content area, so percentages on the child
@@ -89,7 +95,7 @@ public sealed partial class LayoutEngine
                     : MeasureSize(child, childConstraint).Width;
                 float prelimChildOuterH = forcedH.HasValue
                     ? forcedH.Value + childMargin.Vertical
-                    : MeasureSize(child, childConstraint).Height;
+                    : MeasureSize(child, childConstraint, forcedW).Height;
 
                 float xOffset = JustifyOffsetInCell(justifySelf, cellW, prelimChildOuterW);
                 float yOffset = AlignOffsetInCell(alignSelf, cellH, prelimChildOuterH);

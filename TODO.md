@@ -1,6 +1,23 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Aspect ratio** — `BoxStyle.AspectRatio` + `.AspectRatio(w, h)` / `.AspectRatio(ratio)`: the
+  side left auto follows the known one (given, stretched, flexed, or a grid cell's), within its
+  min/max; both known → ignored; neither → height from the content's width. Width wins: rows and
+  grid cells do not stretch a ratio box down (grid: CSS's normal-is-start); in a column a ratio
+  box of auto width and height takes the column's room in both passes — Phase 1 measures it at the
+  stretched width, or nested columns of no width saw a zero-height box — unless its height is
+  given. A shrinking column floors it at the height its width makes. One `ResolveBox`/`RatioOf`
+  pair serves ComputeLayout, MeasureSize, MeasureLeafSize and the baseline mirror. Pictures keep
+  their own shape (`Element.NaturalAspectRatio`, ImageElement's crop or intrinsic size) when given
+  exactly one side — never when stretched or given both, so existing letterboxed images do not
+  change. Adopted: HelloWorld's image (`TODO: This must be able to be done nicer`, a guessed 164 for
+  a 180-wide sidebar) and the video scrub preview's height. Survey: Aperture's ratios are fixed
+  constant pairs; its fluid poster grid is held back by VirtualList row heights, not by layout;
+  Junction's image diff keeps its equal 300px panels on purpose. Tests: 11 layout; controls (9):
+  no transfer, column measured without its width, rows/grids stretching ratio boxes down, no
+  shrink floor, no content-width fallback (all three copies), pictures ignoring their shape,
+  given heights stretched across, pictures keeping shape with neither side — each fails its test.
 - **Table / column model** — `TableView<T>` + `TableColumn<T>` + `TableState` + `TableTheme`
   (`src/HultUI.Core/Builders`): a model like `TreeView<T>`, header and rows on one set of grid
   tracks (fixed px or fill fr, never auto). Sort from the header (press, Enter/Space), stable,
