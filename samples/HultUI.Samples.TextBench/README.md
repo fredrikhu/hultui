@@ -37,7 +37,11 @@ wrong invents regressions that are not there:
   reaches tier-1 and dynamic PGO gets data first. Without it the same LRU cache
   hit reads 250 ns early in a run and 60 ns late in it — the comparer calls
   devirtualize only once PGO has data — and whichever scenario ran first looks
-  four times slower than its own twin.
+  four times slower than its own twin. **For at least 3 s, in passes**, not one
+  pass: a method goes tier 0, instrumented tier 0, tier 1, and the second step needs
+  calls after the first. After one pass the caret rows sat at instrumented tier 0
+  for whole runs once the background compiler had a long queue — ten times their
+  cost (2026-10-06; `DOTNET_TC_CallCountingDelayMs=0` put them back).
 - **Round-robin sampling.** Sample *n* of every scenario before sample *n+1* of
   any, so residual drift lands on all rows equally instead of on the first ones.
 
@@ -202,3 +206,42 @@ noise — what they pay is the memory the BiDi rows' memos hold in the same proc
 - **Full, the memo holds memory**: 60 widths of 1,000 ellipsized labels keep 11.6 MB
   against 4.9 MB on the reference path; wrapped paragraphs keep less than the reference,
   since a layout's lines share their runs with the remembered ones.
+
+## Capture: the styled path remembers between widths (2026-10-06)
+
+Same machine and method, with the time-based warm-up on both sides; before = the
+commit underneath. Mins of the second pair:
+
+| scenario | before (min) | after (min) | |
+|---|---:|---:|---|
+| `resize/styled-wrap` | 14.33 µs | 6.49 µs | **−55 %**, 29.3 → 5.2 KB per call |
+| `resize/styled-ellipsis-1line` | 8.88 µs | 4.76 µs | **−46 %**, 18.8 → 3.5 KB |
+| `resize/styled-bidi-ellipsis-1line` | 101.66 µs | 12.54 µs | **−88 %**, 40.8 → 6.1 KB |
+
+In `samples/HultUI.Samples.PerfSuite`: `text/styled wrap 150 paragraphs resize` 6.4 →
+2.1 ms, `text/styled ellipsis 1,000 labels resize` 56.7 → 17.9 ms, `text/styled bidi wrap
+150 paragraphs resize` 44.4 → 4.7 ms and `text/styled bidi ellipsis 1,000 labels resize`
+388 → 41 ms; every other scenario within ±5 %.
+
+Read the other rows of this pair with the same caution as the BiDi capture's: the
+styled rows' memos, kept for the whole run in this one process, made the plain and BiDi
+`resize/…` rows read 13–71 % higher on the after side (`resize/bidi-fit`, at 0.4 µs, the
+most), and the cold BiDi rows 4–19 %.
+Without the styled rows the same comparison is within noise, but for `resize/bidi-wrap`
+at +10 %, which the perf suite's `text/bidi wrap` (flat) does not show.
+
+### What the numbers caught
+
+- **The styled path did everything again at every width**, as the BiDi path had: every
+  segment measured anew — cut at the spans' edges, each piece itemized — every ellipsis
+  probe and every line. Right-to-left styled text, laid out by the BiDi path with its
+  spans, kept nothing at all, since that path's memo was keyed without spans.
+- **One memo now serves both paths.** A string's entry is keyed by its text, style and a
+  digest of its metric spans, and keeps the spans themselves: two span lists with one
+  digest never share an entry. Probes and lines go to the same bounded caches as the BiDi
+  path's, so the memory bound did not move. `WidthChangeEquivalenceTests` compare both
+  paths against the reference, bit for bit, with two span lists per text through the same
+  pipelines.
+- **A delegate over these parameters allocates on every call.** The first cut handed the
+  memo a lambda to build a missing line or width; C# allocates such a closure when the
+  method is entered, so every hit paid for it too. The lookups are plain code now.

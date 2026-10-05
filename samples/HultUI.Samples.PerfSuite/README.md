@@ -141,6 +141,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-05-e91d72f-opacity-ellipsis-after.json` | After them: e91d72f, median of 3 runs interleaved with the line above under the same idle rule. Compare these two: 0 slower, 6 faster. |
 | `2026-10-05-0091c80-bidi-before.json` | Before the BiDi path remembered anything between widths: 0091c80, which adds the `text/bidi` scenarios. `text/` and `layout/resize` only; the second of two runs. |
 | `2026-10-05-7d2d341-bidi-after.json` | After it: 7d2d341, interleaved with the line above. Compare these two: 0 slower, 2 faster. |
+| `2026-10-06-9c579ca-styled-before.json` | Before the styled path remembered anything between widths: 9c579ca, which adds the `text/styled` scenarios. `text/` and `layout/resize` only; the second of two runs. |
+| `2026-10-06-a68de67-styled-after.json` | After it: a68de67, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -187,6 +189,12 @@ resize` 214 → 17 ms (90 → 7.6 MB a frame). The rest of `text/` and `layout/r
 within ±8 %; `text/create 2,000 unique labels` — whose em dash puts every label on this
 path, each laid out once — went through a version where making the memo for a string cost
 it +10 %, which is why a string now gets one only at its second layout.
+
+**The styled path, before → after.** Metric spans — bold, italic, a size — send text
+to the styled path, or to the BiDi path with its spans; neither kept anything between
+widths. Both now share the BiDi memo, keyed by the spans too: `text/styled wrap` 6.4 →
+2.1 ms, `text/styled ellipsis` 56.7 → 17.9 ms, `text/styled bidi wrap` 44.4 → 4.7 ms,
+`text/styled bidi ellipsis` 388 → 41 ms (178 → 22 MB a frame); the rest within ±5 %.
 
 **What the suite turned up on its first run**, for follow-up:
 

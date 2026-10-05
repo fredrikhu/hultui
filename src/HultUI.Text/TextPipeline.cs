@@ -123,10 +123,10 @@ public sealed class TextPipeline
                 _cache.Clear();
                 _shapeCache.Clear();
                 _minContentCache.Clear();
-                _bidiCache.Clear();
-                _bidiWidths.Clear();
-                _bidiLines.Clear();
-                Array.Clear(_bidiSeen);
+                _memos.Clear();
+                _memoWidths.Clear();
+                _memoLines.Clear();
+                Array.Clear(_seen);
             }
             _culture = culture;
         }
@@ -192,6 +192,7 @@ public sealed class TextPipeline
         // styled path below is left-to-right only — it used to get this text too, and one
         // bold word was enough to lay a Hebrew paragraph out left to right.
         bool needsBidi = NeedsBidi(text, style);
+        int digest = MetricDigest(spans!);
 
         // Styled text skips the width-independent single-line fast path for now and
         // goes straight to the width-keyed cache; the digest keeps styled and plain
@@ -199,14 +200,14 @@ public sealed class TextPipeline
         // and an Auto layout of the same text apart, as on the plain BiDi path.
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
-            style.LetterSpacing, MetricDigest(spans!), needsBidi ? style.TextDirection : TextDirection.Ltr);
+            style.LetterSpacing, digest, needsBidi ? style.TextDirection : TextDirection.Ltr);
         if (_cache.TryGet(key, out var cached))
             return cached;
 
-        // No per-string memo here: it is keyed without spans (BidiTextOf).
+        var memo = MemoOf(text, style, spans, digest, bidi: needsBidi);
         var layout = needsBidi
-            ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, bidi: null, spans)
-            : ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow);
+            ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, memo, spans)
+            : ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow, memo);
         _cache.Put(key, layout);
         return layout;
     }
@@ -235,7 +236,8 @@ public sealed class TextPipeline
                 style.LetterSpacing, 0, style.TextDirection);
             if (_cache.TryGet(bidiKey, out var cachedBidi))
                 return cachedBidi;
-            var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, BidiTextOf(text, style));
+            var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow,
+                MemoOf(text, style, spans: null, spanDigest: 0, bidi: true));
             _cache.Put(bidiKey, bidiLayout);
             return bidiLayout;
         }
@@ -519,29 +521,29 @@ public sealed class TextPipeline
     // for the ellipsis, plus the ellipsis. Width is monotonic in prefix length, so
     // this converges in O(log n) measurements however long the tail is.
     private TextLine BuildStyledEllipsizedLine(string text, int start, int tailEnd,
-        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth)
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, TextMemo? memo)
     {
         float ellipsisWidth = MeasureString(EllipsisString, style);
         int lo = start, hi = tailEnd, best = start;
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (MeasureStyled(text, start, mid, style, spans) + ellipsisWidth <= maxWidth)
+            if (MeasureStyled(text, start, mid, style, spans, memo) + ellipsisWidth <= maxWidth)
             {
                 best = mid;
                 lo = mid + 1;
             }
             else hi = mid - 1;
         }
-        return ShapeStyledLine(text, start, SnapPrefix(text, best), style, spans, appendEllipsis: true);
+        return StyledLine(text, start, SnapPrefix(text, best), style, spans, memo, appendEllipsis: true);
     }
 
     // Styled twin of FitPrefix: gallop out, then bisect, measuring with spans.
     private int StyledFitPrefix(string text, int from, int to,
-        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth)
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, TextMemo? memo)
     {
         int span = 1;
-        while (from + span < to && MeasureStyled(text, from, from + span, style, spans) <= maxWidth)
+        while (from + span < to && MeasureStyled(text, from, from + span, style, spans, memo) <= maxWidth)
             span <<= 1;
 
         int lo = from + Math.Min(span >> 1, to - from);
@@ -550,7 +552,7 @@ public sealed class TextPipeline
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (MeasureStyled(text, from, mid, style, spans) <= maxWidth) { best = mid; lo = mid + 1; }
+            if (MeasureStyled(text, from, mid, style, spans, memo) <= maxWidth) { best = mid; lo = mid + 1; }
             else hi = mid - 1;
         }
         return SnapPrefix(text, best);
@@ -560,9 +562,9 @@ public sealed class TextPipeline
     // measurement and line shaping made span-aware, same truncation policy.
     private TextLayout ComputeWrappedStyled(string text, ResolvedInheritedStyle style,
         IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, int? maxLines,
-        TextOverflow overflow)
+        TextOverflow overflow, TextMemo? memo)
     {
-        var allBreaks = BreakOffsets(text);
+        var allBreaks = memo?.Breaks ?? BreakOffsets(text);
 
         var lines = new List<TextLine>();
         int textOffset = 0;
@@ -575,18 +577,18 @@ public sealed class TextPipeline
 
             if (segEnd - segStart == 1 && text[segStart] == '\n')
             {
-                lines.Add(ShapeStyledLine(text, textOffset, segStart, style, spans));
+                lines.Add(StyledLine(text, textOffset, segStart, style, spans, memo));
                 textOffset = segEnd;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
                 continue;
             }
 
-            float segWidth = MeasureStyled(text, segStart, segEnd, style, spans);
+            float segWidth = StyledSegmentWidth(text, allBreaks, s, style, spans, memo);
 
             if (lineWidth + segWidth > maxWidth && lineWidth > 0)
             {
-                lines.Add(ShapeStyledLine(text, textOffset, segStart, style, spans));
+                lines.Add(StyledLine(text, textOffset, segStart, style, spans, memo));
                 textOffset = segStart;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
@@ -597,14 +599,14 @@ public sealed class TextPipeline
                 // Unbreakable overlong segment: cut by character, span-aware.
                 while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 {
-                    int fit = StyledFitPrefix(text, textOffset, segEnd, style, spans, maxWidth);
+                    int fit = StyledFitPrefix(text, textOffset, segEnd, style, spans, maxWidth, memo);
                     if (fit <= textOffset) fit = NextCodePoint(text, textOffset);
                     if (fit >= segEnd) break;
-                    lines.Add(ShapeStyledLine(text, textOffset, fit, style, spans));
+                    lines.Add(StyledLine(text, textOffset, fit, style, spans, memo));
                     textOffset = fit;
                 }
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
-                lineWidth = MeasureStyled(text, textOffset, segEnd, style, spans);
+                lineWidth = MeasureStyled(text, textOffset, segEnd, style, spans, memo);
                 continue;
             }
 
@@ -612,7 +614,7 @@ public sealed class TextPipeline
         }
 
         if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
-            lines.Add(ShapeStyledLine(text, textOffset, text.Length, style, spans));
+            lines.Add(StyledLine(text, textOffset, text.Length, style, spans, memo));
 
         float totalHeight = 0, maxLineWidth = 0;
         foreach (var line in lines)
@@ -624,7 +626,7 @@ public sealed class TextPipeline
         var styledLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight));
         return overflow == TextOverflow.Ellipsis
             ? ApplyEllipsis(text, styledLayout, maxWidth,
-                (start, tailEnd) => BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth))
+                (start, tailEnd) => BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth, memo))
             : styledLayout;
     }
 
@@ -716,153 +718,236 @@ public sealed class TextPipeline
         return order;
     }
 
-    // ── What a string on the BiDi path keeps between widths ──
+    // ── What a string keeps between widths: the BiDi and the styled paths ──
     //
-    // Right-to-left runs bypass the word cache, so every measure and every line on this path
-    // is HarfBuzz shaping from scratch: ~4 µs for one Hebrew word, ~25 µs for a 75-character
-    // label (measured; an LTR word is under 1 µs). A resize drag paid all of it at each width
-    // — the UAX #9 levels, the break offsets, every segment's width, every ellipsis probe and
-    // every line — though each is a function of the text, its style and the range, and the
-    // same ranges come back width after width: a segment always, a line or a probe whenever
-    // the width moves less than a word. So they are memoized — the code that computes them
-    // unchanged, the output the same.
+    // Right-to-left runs bypass the word cache, so every measure and every line on the BiDi
+    // path is HarfBuzz shaping from scratch: ~4 µs for one Hebrew word, ~25 µs for a
+    // 75-character label (measured; an LTR word is under 1 µs). The styled path (metric
+    // spans) is word-cached, but still cuts every measure at the spans' edges and itemizes
+    // each piece. A resize drag paid all of it at each width — the UAX #9 levels, the break
+    // offsets, every segment's width, every ellipsis probe and every line — though each is a
+    // function of the text, its style, its metric spans and the range, and the same ranges
+    // come back width after width: a segment always, a line or a probe whenever the width
+    // moves less than a word. So they are memoized — the code that computes them unchanged,
+    // the output the same. (The plain path has its own: BreakSegments, PrefixWidths.)
     //
-    // What every layout of a string needs lives on its entry: levels, breaks, segment widths
-    // and the line of the whole text, which is all a label that fits ever asks for. Probes
-    // and partial lines go to caches shared by all strings, bounded, and sized for two frames
-    // of 1,000 ellipsized labels (~8 probes and 2 lines each). A first cut with half the
-    // lines, and segment widths in the shared cache too, thrashed (111 ms a frame against
-    // 17); twice these sizes was no faster. Full, they hold ~7 MB more than the reference
-    // path does for such a list (measured: 60 widths of 1,000 labels, 4.9 against 11.6 MB);
-    // for wrapped paragraphs less, since copies share their runs with the remembered lines.
+    // What every layout of a string needs lives on its entry: levels (BiDi only), breaks,
+    // segment widths and the line of the whole text, which is all a label that fits ever
+    // asks for. Probes and partial lines go to caches shared by all strings and both paths,
+    // bounded, and sized for two frames of 1,000 ellipsized labels (~8 probes and 2 lines
+    // each). A first cut with half the lines, and segment widths in the shared cache too,
+    // thrashed (111 ms a frame against 17); twice these sizes was no faster. Full, they hold
+    // ~7 MB more than the reference path does for such a list (measured: 60 widths of 1,000
+    // BiDi labels, 4.9 against 11.6 MB); for wrapped paragraphs less, since copies share
+    // their runs with the remembered lines.
     //
-    // A string gets its entry at its second layout, not its first. Most text on this path is
-    // not right-to-left at all — an em dash, an arrow or an emoji is enough to send a label
-    // here — and most is laid out at one width, once; the entry's lookup, insert and eviction
-    // cost such a label ~0.3 µs, measured at +10 % on 2,000 new labels. So the first layout
-    // only notes its key's hash in _bidiSeen. The note can be wrong both ways — a slot taken
-    // by another string, two keys with one hash — which moves when reuse starts, never what
-    // a layout returns. An entry, once made, is used whatever the note says.
+    // A string gets its entry at its second layout, not its first. Most text on the BiDi path
+    // is not right-to-left at all — an em dash, an arrow or an emoji is enough to send a label
+    // there — and most is laid out at one width, once; the entry's lookup, insert and
+    // eviction cost such a label ~0.3 µs, measured at +10 % on 2,000 new labels. So the first
+    // layout only notes its key's hash in _seen. The note can be wrong both ways — a slot
+    // taken by another string, two keys with one hash — which moves when reuse starts, never
+    // what a layout returns. An entry, once made, is used whatever the note says.
 
-    private readonly LruCache<BidiKey, BidiText> _bidiCache = new(capacity: 4096);
-    private readonly int[] _bidiSeen = new int[16384];
+    private readonly LruCache<MemoKey, TextMemo> _memos = new(capacity: 4096);
+    private readonly LruCache<MemoRange, float> _memoWidths = new(capacity: 16384);
+    private readonly LruCache<MemoRange, TextLine> _memoLines = new(capacity: 4096);
+    private readonly int[] _seen = new int[16384];
 
-    // Whether a key with this hash has been laid out on this path before; notes it if not.
-    // Two slots per hash, and a note goes where it displaces nothing: with one, two strings
-    // on the same slot took it from each other at every layout and neither ever got an
-    // entry (measured: 137 of 1,000 labels, laid out from scratch every frame).
+    // Whether a key with this hash has been laid out before; notes it if not. Two slots per
+    // hash, and a note goes where it displaces nothing: with one, two strings on the same
+    // slot took it from each other at every layout and neither ever got an entry (measured:
+    // 137 of 1,000 labels, laid out from scratch every frame).
     private bool SeenBefore(int hash)
     {
-        int mask = _bidiSeen.Length - 1;
-        ref int first = ref _bidiSeen[hash & mask];
-        ref int second = ref _bidiSeen[(int)((uint)(hash * -1640531535) >> 18) & mask];
+        int mask = _seen.Length - 1;
+        ref int first = ref _seen[hash & mask];
+        ref int second = ref _seen[(int)((uint)(hash * -1640531535) >> 18) & mask];
         if (first == hash || second == hash) return true;
         if (second == 0 && first != 0) second = hash;
         else first = hash;
         return false;
     }
-    private readonly LruCache<BidiRange, float> _bidiWidths = new(capacity: 16384);
-    private readonly LruCache<BidiRange, TextLine> _bidiLines = new(capacity: 4096);
 
-    private readonly record struct BidiKey(string Text, string FontFamily, float FontSize, FontWeight FontWeight,
-        FontSlant FontSlant, float LineHeight, float LetterSpacing, TextDirection Direction);
+    // SpanDigest is MetricDigest's hash of the metric spans, 0 without spans; the entry
+    // keeps the spans themselves, so two span lists with one digest never share it.
+    private readonly record struct MemoKey(string Text, string FontFamily, float FontSize, FontWeight FontWeight,
+        FontSlant FontSlant, float LineHeight, float LetterSpacing, TextDirection Direction, int SpanDigest);
 
     // A range of one string's text; Owner compares by reference, so a string laid out again
     // after its entry was evicted starts with nothing remembered. Ellipsis tells a line
     // with the mark from the same range without it, and is false for widths.
-    private readonly record struct BidiRange(BidiText Owner, int From, int To, bool Ellipsis);
+    private readonly record struct MemoRange(TextMemo Owner, int From, int To, bool Ellipsis);
 
-    private sealed class BidiText
+    // A metric span as layout sees it: what EffectiveStyleAt and NextStyleBoundary read.
+    private readonly record struct MetricSpan(int Start, int Length, FontWeight? Weight, FontSlant? Slant, float? FontSize);
+
+    private sealed class TextMemo
     {
-        public readonly byte[] Levels;
+        // Null on the styled path, which is left-to-right only.
+        public readonly byte[]? Levels;
         public readonly bool RtlParagraph;
         public readonly List<int> Breaks;
-        // MeasureBidi of segment s (Breaks[s - 1]..Breaks[s]); NaN until a pass reaches it.
+        // The metric spans this entry was made for, in order; null without spans.
+        public readonly MetricSpan[]? Spans;
+        // The width of segment s (Breaks[s - 1]..Breaks[s]); NaN until a pass reaches it.
         public readonly float[] SegmentWidths;
-        // ShapeBidiLine of the whole text: the one line of every width it fits.
+        // The line of the whole text: the one line of every width it fits.
         public TextLine? WholeLine;
 
-        public BidiText(byte[] levels, bool rtlParagraph, List<int> breaks)
+        public TextMemo(byte[]? levels, bool rtlParagraph, List<int> breaks, MetricSpan[]? spans)
         {
             Levels = levels;
             RtlParagraph = rtlParagraph;
             Breaks = breaks;
+            Spans = spans;
             SegmentWidths = new float[breaks.Count];
             Array.Fill(SegmentWidths, float.NaN);
         }
     }
 
-    // Null on the reference path, where every layout works its levels, breaks, widths and
-    // lines out afresh.
-    private BidiText? BidiTextOf(string text, ResolvedInheritedStyle style)
+    private static MetricSpan[]? MetricSpansOf(IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    {
+        if (spans is null) return null;
+        var kept = new List<MetricSpan>();
+        for (int i = 0; i < spans.Count; i++)
+            if (spans[i].IsMetricAffecting)
+                kept.Add(new MetricSpan(spans[i].Start, spans[i].Length, spans[i].Weight, spans[i].Slant, spans[i].FontSize));
+        return kept.Count == 0 ? null : kept.ToArray();
+    }
+
+    private static bool SameMetricSpans(MetricSpan[]? kept, IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    {
+        int k = 0;
+        if (spans is not null)
+            for (int i = 0; i < spans.Count; i++)
+            {
+                var span = spans[i];
+                if (!span.IsMetricAffecting) continue;
+                if (kept is null || k >= kept.Length
+                    || kept[k] != new MetricSpan(span.Start, span.Length, span.Weight, span.Slant, span.FontSize))
+                    return false;
+                k++;
+            }
+        return (kept?.Length ?? 0) == k;
+    }
+
+    // The string's entry for the BiDi path (bidi) or the styled one. Null on the reference
+    // path, where every layout works its levels, breaks, widths and lines out afresh, and at
+    // a string's first layout.
+    private TextMemo? MemoOf(string text, ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan>? spans, int spanDigest, bool bidi)
     {
         if (!ReuseAcrossWidths) return null;
-        var key = new BidiKey(text, style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant,
-            style.LineHeight, style.LetterSpacing, style.TextDirection);
-        if (_bidiCache.TryGet(key, out var bidi)) return bidi;
+        var key = new MemoKey(text, style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant,
+            style.LineHeight, style.LetterSpacing, style.TextDirection, spanDigest);
+        if (_memos.TryGet(key, out var memo))
+        {
+            if (SameMetricSpans(memo.Spans, spans)) return memo;
+            // Other spans with the same digest: this layout's entry takes the key over.
+            memo = NewMemo(text, style, spans, bidi);
+            _memos.Put(key, memo);
+            return memo;
+        }
         if (!SeenBefore(key.GetHashCode())) return null;
+        memo = NewMemo(text, style, spans, bidi);
+        _memos.Add(key, memo);
+        return memo;
+    }
+
+    private static TextMemo NewMemo(string text, ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan>? spans, bool bidi)
+    {
+        if (!bidi) return new TextMemo(null, false, BreakOffsets(text), MetricSpansOf(spans));
         var (levels, rtlParagraph) = BidiAnalyzer.Levels(text, style.TextDirection);
-        bidi = new BidiText(levels, rtlParagraph, BreakOffsets(text));
-        _bidiCache.Add(key, bidi);
-        return bidi;
+        return new TextMemo(levels, rtlParagraph, BreakOffsets(text), MetricSpansOf(spans));
+    }
+
+    // Each layout gets a line of its own — a layout sets its lines' OffsetY — over the same
+    // runs, which nothing changes once the line is built (the plain path's one-line layout
+    // shares its runs the same way). The layout that builds a line keeps it; later ones get
+    // copies, which read everything of it but the OffsetY that layout may have set.
+    private static TextLine CopyOf(TextLine line) =>
+        new(line.Runs, line.Width, line.Ascent, line.Descent, line.Leading) { Start = line.Start, Length = line.Length };
+
+    // A remembered line, copied for this layout, or null. No delegates here: a lambda over
+    // these parameters would allocate its closure on every call, hits included.
+    private TextLine? RememberedLine(TextMemo memo, string text, int from, int to, bool appendEllipsis)
+    {
+        if (from == 0 && to == text.Length && !appendEllipsis)
+            return memo.WholeLine is { } whole ? CopyOf(whole) : null;
+        return _memoLines.TryGet(new MemoRange(memo, from, to, appendEllipsis), out var line) ? CopyOf(line) : null;
+    }
+
+    // Remembers a line RememberedLine did not have, and hands it to the layout that built it.
+    private TextLine Remember(TextMemo memo, string text, int from, int to, bool appendEllipsis, TextLine line)
+    {
+        if (from == 0 && to == text.Length && !appendEllipsis) memo.WholeLine = line;
+        else _memoLines.Add(new MemoRange(memo, from, to, appendEllipsis), line);
+        return line;
     }
 
     // MeasureBidi of break segment s.
     private float BidiSegmentWidth(string text, List<int> breaks, int s, ResolvedInheritedStyle style,
-        byte[] levels, BidiText? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans)
+        byte[] levels, TextMemo? memo, IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
-        if (bidi is null) return MeasureBidi(text, breaks[s - 1], breaks[s], style, levels, spans);
-        float width = bidi.SegmentWidths[s];
+        if (memo is null) return MeasureBidi(text, breaks[s - 1], breaks[s], style, levels, spans);
+        float width = memo.SegmentWidths[s];
         if (float.IsNaN(width))
-            bidi.SegmentWidths[s] = width = MeasureBidi(text, breaks[s - 1], breaks[s], style, levels);
+            memo.SegmentWidths[s] = width = MeasureBidi(text, breaks[s - 1], breaks[s], style, levels, spans);
         return width;
     }
 
-    // With spans there is no memo (bidi is null): it is keyed without them.
-    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels, BidiText? bidi,
+    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels, TextMemo? memo,
         IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
-        if (bidi is null) return MeasureBidi(text, from, to, style, levels, spans);
-        var key = new BidiRange(bidi, from, to, Ellipsis: false);
-        if (!_bidiWidths.TryGet(key, out float width))
+        if (memo is null) return MeasureBidi(text, from, to, style, levels, spans);
+        var key = new MemoRange(memo, from, to, Ellipsis: false);
+        if (!_memoWidths.TryGet(key, out float width))
         {
-            width = MeasureBidi(text, from, to, style, levels);
-            _bidiWidths.Add(key, width);
+            width = MeasureBidi(text, from, to, style, levels, spans);
+            _memoWidths.Add(key, width);
         }
         return width;
     }
 
-    // ShapeBidiLine, remembered when the string has an entry. Each layout gets a line of its
-    // own — a layout sets its lines' OffsetY — over the same runs, which nothing changes once
-    // the line is built (the plain path's one-line layout shares its runs the same way). The
-    // layout that builds a line keeps it; later ones get copies, which read everything of it
-    // but the OffsetY that layout may have set.
     private TextLine BidiLine(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels,
-        BidiText? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans, bool appendEllipsis = false, bool rtlParagraph = false)
+        TextMemo? memo, IReadOnlyList<Core.Rendering.TextSpan>? spans, bool appendEllipsis = false, bool rtlParagraph = false)
     {
-        if (bidi is null) return ShapeBidiLine(text, from, to, style, levels, spans, appendEllipsis, rtlParagraph);
-        TextLine? line;
-        if (from == 0 && to == text.Length && !appendEllipsis)
+        if (memo is null) return ShapeBidiLine(text, from, to, style, levels, spans, appendEllipsis, rtlParagraph);
+        return RememberedLine(memo, text, from, to, appendEllipsis)
+            ?? Remember(memo, text, from, to, appendEllipsis,
+                ShapeBidiLine(text, from, to, style, levels, spans, appendEllipsis, rtlParagraph));
+    }
+
+    // The styled path's twins of the three above.
+    private float StyledSegmentWidth(string text, List<int> breaks, int s, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan> spans, TextMemo? memo)
+    {
+        if (memo is null) return MeasureStyled(text, breaks[s - 1], breaks[s], style, spans);
+        float width = memo.SegmentWidths[s];
+        if (float.IsNaN(width))
+            memo.SegmentWidths[s] = width = MeasureStyled(text, breaks[s - 1], breaks[s], style, spans);
+        return width;
+    }
+
+    private float MeasureStyled(string text, int from, int to, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan> spans, TextMemo? memo)
+    {
+        if (memo is null) return MeasureStyled(text, from, to, style, spans);
+        var key = new MemoRange(memo, from, to, Ellipsis: false);
+        if (!_memoWidths.TryGet(key, out float width))
         {
-            if (bidi.WholeLine is null)
-                return bidi.WholeLine = ShapeBidiLine(text, from, to, style, levels, spans: null);
-            line = bidi.WholeLine;
+            width = MeasureStyled(text, from, to, style, spans);
+            _memoWidths.Add(key, width);
         }
-        else
-        {
-            var key = new BidiRange(bidi, from, to, appendEllipsis);
-            if (!_bidiLines.TryGet(key, out line))
-            {
-                line = ShapeBidiLine(text, from, to, style, levels, spans: null, appendEllipsis, rtlParagraph);
-                _bidiLines.Add(key, line);
-                return line;
-            }
-        }
-        return new TextLine(line.Runs, line.Width, line.Ascent, line.Descent, line.Leading)
-        {
-            Start = line.Start,
-            Length = line.Length,
-        };
+        return width;
+    }
+
+    private TextLine StyledLine(string text, int from, int to, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan> spans, TextMemo? memo, bool appendEllipsis = false)
+    {
+        if (memo is null) return ShapeStyledLine(text, from, to, style, spans, appendEllipsis);
+        return RememberedLine(memo, text, from, to, appendEllipsis)
+            ?? Remember(memo, text, from, to, appendEllipsis, ShapeStyledLine(text, from, to, style, spans, appendEllipsis));
     }
 
     private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels,
@@ -980,7 +1065,7 @@ public sealed class TextPipeline
     // the end of the text, not the right of the line — and the mark is placed by
     // ShapeBidiLine according to the paragraph's direction.
     private TextLine BuildBidiEllipsizedLine(string text, int start, int tailEnd,
-        ResolvedInheritedStyle style, byte[] levels, bool rtlParagraph, float maxWidth, BidiText? bidi,
+        ResolvedInheritedStyle style, byte[] levels, bool rtlParagraph, float maxWidth, TextMemo? bidi,
         IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         float ellipsisWidth = MeasureString(EllipsisString, style);
@@ -1003,16 +1088,15 @@ public sealed class TextPipeline
     // logical order, measurement and line shaping direction-resolved, same
     // truncation policy.
     private TextLayout ComputeWrappedBidi(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, BidiText? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
+        TextOverflow overflow, TextMemo? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
     {
-        System.Diagnostics.Debug.Assert(bidi is null || spans is null, "the memo is keyed without spans");
         // One UAX #9 resolution for the whole paragraph; every line, break
         // candidate and prefix measurement below slices into it. With the string's
         // entry it is the resolution made the first time, and the breaks, widths and
         // lines below are remembered from earlier widths too.
         var (levels, rtlParagraph) = bidi is null
             ? BidiAnalyzer.Levels(text, style.TextDirection)
-            : (bidi.Levels, bidi.RtlParagraph);
+            : (bidi.Levels!, bidi.RtlParagraph);
         var allBreaks = bidi?.Breaks ?? BreakOffsets(text);
 
         var lines = new List<TextLine>();
@@ -1079,7 +1163,7 @@ public sealed class TextPipeline
     }
 
     private int BidiFitPrefix(string text, int from, int to,
-        ResolvedInheritedStyle style, byte[] levels, float maxWidth, BidiText? bidi,
+        ResolvedInheritedStyle style, byte[] levels, float maxWidth, TextMemo? bidi,
         IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         int span = 1;
