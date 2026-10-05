@@ -643,13 +643,13 @@ HeadlessElement Find(string text) =>
     ?? throw new InvalidOperationException(
         $"nothing on screen reads \"{text}\" — run with no steps, or add a dump step, to see the tree");
 
-// ScreenBorderBox, not the layout box: inside a scrolled view the two differ by the scroll
-// amount, and a `click:@Something` aimed at the layout box lands on whatever else is there and
+// WindowBorderBox, not the layout box: inside a scrolled view the two differ by the scroll
+// amount (and inside a popover by the popover's place), and a `click:@Something` aimed at the layout box lands on whatever else is there and
 // silently does nothing. The steps here need a point rather than a click, so they cannot just
 // call session.Window.Click(element).
 (float X, float Y) Center(HeadlessElement e)
 {
-    var b = e.Element.ScreenBorderBox;
+    var b = e.Element.WindowBorderBox;
     return (b.X + b.Width / 2f, b.Y + b.Height / 2f);
 }
 

@@ -330,43 +330,45 @@ public partial class CommanderApp
     }
 
     // ── Recent-folders popover (caret click / cluster right-click) ───────
-    // An anchored Nocturne card of the current folder + Back stack, each row a real
-    // folder icon + full path (collapsed to C:\…\last\few when it won't fit).
-    private (char side, float x, float y, float w)? _historyPop;
+    // The framework's popover, right-aligned under the back · caret · forward cluster: the
+    // current folder and the Back stack, each row a folder icon + full path (collapsed to
+    // C:\…\last\few when it won't fit). It takes the keyboard — ↑ ↓ walk the rows, Enter
+    // jumps, Esc closes, Alt+← / Alt+→ still go back and forward — and a press on the cluster
+    // while it is open only closes it.
+    private Popover? _historyPopover;
+    private char _historySide;
+
+    private Popover HistoryPopover => _historyPopover ??= new Popover(BuildHistoryPopover)
+    {
+        Alignment = PopoverAlignment.End,
+        ArrowKeys = true,
+        AccessibleName = "Recent folders",
+        AutomationId = "history-pop",
+    };
 
     private void OpenHistoryPopover(char side, Element anchor)
     {
-        const float w = 300f;
-        var box = anchor.Layout.AbsoluteBorderBox;
-        float x = Math.Max(8f, box.X + box.Width - w);   // right edge aligns with the cluster
-        float y = box.Y + box.Height + 4f;
-        _historyPop = (side, x, y, w);
-        MarkDirty();
+        _historySide = side;
+        HistoryPopover.Open(anchor);
     }
 
-    private void CloseHistoryPopover() { _historyPop = null; MarkDirty(); }
+    private void CloseHistoryPopover() => _historyPopover?.Close();
 
-    private Element BuildHistoryPopover((char side, float x, float y, float w) hp)
+    private Element BuildHistoryPopover()
     {
-        var (side, x, y, w) = hp;
+        const float w = 300f;
+        char side = _historySide;
         var tab = ActiveTab(side);
 
-        // Full-screen transparent catcher: any click outside the card dismisses.
-        var layer = Box.New().Width(Dimension.Percent(100)).Height(Dimension.Percent(100)).ZIndex(60);
-        layer.Position.Type = PositionType.Absolute;
-        layer.Position.Top = Dimension.Px(0);
-        layer.Position.Left = Dimension.Px(0);
-        layer.On<ClickEvent>(_ => CloseHistoryPopover());
-        layer.On<PointerDownEvent>(e => { if (e.Button == PointerEvent.RightButton) CloseHistoryPopover(); });
-
-        var card = Flex.Column(gap: 0).Width(w)
-            .Background(Nocturne.Surface).BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusMd).BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
-            .Padding(new Thickness(4, 4, 4, 4));
-        card.Position.Type = PositionType.Absolute;
-        card.Position.Left = Dimension.Px(x);
-        card.Position.Top = Dimension.Px(y);
-        card.On<ClickEvent>(e => e.StopPropagation = true);   // clicks inside stay inside
+        var card = Flex.Column(gap: 0).Width(w);
+        // Back and forward from the keyboard, as in the pane: they go, and the popover with them.
+        card.On<KeyDownEvent>(e =>
+        {
+            if (!e.Modifiers.HasFlag(KeyModifiers.Alt) || e.Key is not (KeyCode.Left or KeyCode.Right)) return;
+            e.StopPropagation = true;
+            CloseHistoryPopover();
+            if (e.Key == KeyCode.Left) GoBack(side); else GoForward(side);
+        });
 
         float budget = w - 60f;   // room for the folder icon, gaps, padding and trailing bullet
 
@@ -383,9 +385,7 @@ public partial class CommanderApp
         foot.AddChild(Box.New().FlexGrow(1));
         foot.AddChild(Ui.Kbd("↵")); foot.AddChild(Ui.Mono("jump", 10.5f, Nocturne.Neutral500));
         card.AddChild(foot);
-
-        layer.AddChild(card);
-        return layer;
+        return card;
     }
 
     private Element HistoryRow(char side, string path, bool active, float budget)
@@ -402,8 +402,21 @@ public partial class CommanderApp
             row.AddChild(Ui.Icon(Glyphs.Dot, 9f, Nocturne.Accent).GridColumn(2));
         else
         {
-            row.OnClick(_ => { CloseHistoryPopover(); _active = side; NavigateTo(side, path); });
+            void Jump() { CloseHistoryPopover(); _active = side; NavigateTo(side, path); }
+            // A row the keyboard can reach: ↑ ↓ (the popover's arrow keys) and Tab land on it,
+            // lit like the hover, and Enter or Space jumps.
+            row.IsFocusable = true;
+            row.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+            row.AccessibleName = path;
+            row.OnClick(_ => Jump());
+            row.On<KeyDownEvent>(e =>
+            {
+                if (e.Key is not (KeyCode.Enter or KeyCode.Space) || e.Modifiers.HasFlag(KeyModifiers.Alt)) return;
+                e.StopPropagation = true;
+                Jump();
+            });
             row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+            row.OnFocus(r => r.Background(Nocturne.Neutral900));
         }
         return row;
     }

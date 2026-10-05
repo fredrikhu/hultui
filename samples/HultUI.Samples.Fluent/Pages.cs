@@ -2,6 +2,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Icons;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -263,6 +264,7 @@ public static class Pages
                 F.Button(p, "Standard button", () => app.ClickCount++),
                 F.Button(p, "With an icon", () => app.ClickCount++, icon: Icons.Update),
                 F.SubtleIconButton(p, Icons.Search, "Search", () => app.ClickCount++),
+                FlyoutButton(p, app),
                 F.Body(p, $"Clicked {app.ClickCount} times").TextColor(p.TextSecondary))));
 
         items.Add(Section(p, "Toggles and selection",
@@ -307,6 +309,15 @@ public static class Pages
             ToggleRow(p, "Store", app.NotifyStore, v => app.NotifyStore = v)));
 
         return Column([.. items]);
+    }
+
+    /// <summary>A button with a flyout under it — the framework's popover in WinUI's look.</summary>
+    private static Element FlyoutButton(FluentPalette p, FluentApp app)
+    {
+        var button = F.Button(p, "Empty bin", () => { });
+        button.On<ClickEvent>(e => app.EmptyBinFlyout.Toggle(e.CurrentTarget));
+        button.AccessibleExpanded = app.EmptyBinFlyout.IsOpen;
+        return button;
     }
 
     private static Element ToggleRow(FluentPalette p, string label, bool on, Action<bool> onChanged) =>

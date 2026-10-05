@@ -77,12 +77,14 @@ The corollary: a bare `for (…) session.PumpFrame();` loop is **not** a way to 
 
 All coordinates are layout units — the space element bounds live in.
 
-An element-targeted click aims at `Element.ScreenBorderBox`, not at the layout box. A scroll
+An element-targeted click aims at `Element.WindowBorderBox`, not at the layout box. A scroll
 view does not move its children's boxes; it offsets them when painting and hit-testing, so the
 centre of a laid-out box inside a scrolled view is not where that element is on screen. A
 click that misses hits nothing and reports nothing, so getting this wrong shows up as a test
 that passes with its handler never having run — scroll the target into view, then click it.
-When a test needs the point itself rather than the click, read `ScreenBorderBox` too.
+Inside a popover the overlay's own place is added too, which `ScreenBorderBox` (the space the
+element's pointer events arrive in) leaves out. When a test needs the point itself rather than
+the click, read `WindowBorderBox` too.
 
 ```csharp
 window.Click(element);                    // center of laid-out bounds, less ancestor scroll

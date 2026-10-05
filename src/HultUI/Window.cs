@@ -82,6 +82,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // measure end-to-end update latency (mutation → painted) and to react once a
     // frame is on screen. Registering one guarantees a frame renders.
     private readonly List<Action> _postFrameCallbacks = [];
+    /// <summary>The button whose release is dropped: its press only closed an anchored overlay
+    /// from that overlay's own anchor. -1 for none.</summary>
+    private int _swallowedRelease = -1;
 
     // ──── Overlay state ────
     private readonly List<OverlayEntry> _overlays = [];
@@ -294,21 +297,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// <summary>
     /// Where <paramref name="element"/>'s content box is in this window, in layout units:
     /// <see cref="Element.ScreenContentBox"/> — every ancestor scroll applied — plus the
-    /// position of the overlay the element is in, if it is in one. An overlay's content is
-    /// laid out from its own origin, so <c>ScreenContentBox</c> alone is off by exactly that
-    /// much for anything in a popup or dialog. Multiply by <see cref="DisplayScale"/> for
+    /// position of the overlay the element is in, if it is in one: its
+    /// <see cref="Element.WindowContentBox"/>. Multiply by <see cref="DisplayScale"/> for
     /// device pixels.
     /// </summary>
-    public Rect ContentBoxInWindow(Element element)
-    {
-        var box = element.ScreenContentBox;
-        var root = element;
-        while (root.Parent is not null) root = root.Parent;
-        foreach (var overlay in _overlays)
-            if (ReferenceEquals(overlay.Content, root))
-                return new Rect(box.X + overlay.X, box.Y + overlay.Y, box.Width, box.Height);
-        return box;
-    }
+    public Rect ContentBoxInWindow(Element element) => element.WindowContentBox;
 
     /// <summary>
     /// The user's zoom on top of the OS scaling: 1.0 is "as the system says", 1.25 draws
@@ -1197,6 +1190,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 if (button.IsDown)
                     HideTooltip();
 
+                // The release of a press that only closed an anchored overlay goes nowhere.
+                if (!button.IsDown && button.Button == _swallowedRelease)
+                {
+                    _swallowedRelease = -1;
+                    break;
+                }
+
                 // The release ends a pointer capture: it goes to the captured element
                 // (with the click, if that element was also pressed), then hover catches
                 // up with wherever the pointer is now.
@@ -1300,9 +1300,23 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     // follows is not keyboard focus, and the ring stays down until the next Tab.
                     _focusFromKeyboard = false;
 
-                    // Dismiss overlays when clicking outside them
-                    if (!isOverlayHit && _overlays.Count > 0)
-                        DismissOverlaysOnOutsideClick();
+                    // Dismiss overlays when clicking outside them. A press in an overlay is
+                    // outside the anchored overlays above it (a popover opened from a dialog
+                    // closes on a press elsewhere in the dialog); the others keep the old rule
+                    // and close only on a press in the main tree.
+                    if (_overlays.Count > 0)
+                    {
+                        int hitLevel = isOverlayHit ? OverlayIndexOf(overlayTarget!) : -1;
+                        bool onAnchor = PressIsOnAnchorAbove(pos, hitLevel);
+                        DismissOverlaysOnOutsideClick(hitLevel);
+                        // A press on the anchor of the overlay it closed does nothing else: the
+                        // button that opened the overlay would open it again on the click.
+                        if (onAnchor)
+                        {
+                            _swallowedRelease = button.Button;
+                            break;
+                        }
+                    }
 
                     // Check if click is on a scrollbar — walk up from target to find a ScrollViewElement
                     if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
@@ -2299,12 +2313,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
     // ──── Overlay system (IOverlayHost) ────
 
-    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null, bool modal = false)
-    {
-        var id = _nextOverlayId++;
-        var entry = new OverlayEntry
+    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null, bool modal = false) =>
+        Show(new OverlayEntry
         {
-            Id = id,
+            Id = _nextOverlayId++,
             Content = content,
             X = x,
             Y = y,
@@ -2313,7 +2325,25 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             IsModal = modal,
             OnDismissed = onDismissed,
             FocusBefore = _focusManager.FocusedElement,
-        };
+        });
+
+    public OverlayHandle ShowAnchoredOverlay(Element content, Element anchor, Func<Size, Size, Point> place,
+        bool dismissOnOutsideClick = true, Action? onDismissed = null, bool modal = false) =>
+        Show(new OverlayEntry
+        {
+            Id = _nextOverlayId++,
+            Content = content,
+            DismissOnOutsideClick = dismissOnOutsideClick,
+            IsModal = modal,
+            OnDismissed = onDismissed,
+            FocusBefore = _focusManager.FocusedElement,
+            Anchor = anchor,
+            Place = place,
+        });
+
+    private OverlayHandle Show(OverlayEntry entry)
+    {
+        var content = entry.Content;
 
         // Set overlay host so elements inside the overlay can show/close overlays
         content.OverlayHost = this;
@@ -2329,17 +2359,42 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         _layoutEngine.PerformLayout(content, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
         entry.LayoutDone = true;
 
-        // Clamp to viewport so the overlay stays on screen
-        float vw = PlatformWindow.LayoutWidth;
-        float vh = PlatformWindow.LayoutHeight;
-        if (entry.X + content.Layout.Width > vw)
-            entry.X = Math.Max(0, vw - content.Layout.Width);
-        if (entry.Y + content.Layout.Height > vh)
-            entry.Y = Math.Max(0, vh - content.Layout.Height);
+        if (entry.Place is not null)
+        {
+            PlaceOverlay(entry);
+        }
+        else
+        {
+            // Clamp to viewport so the overlay stays on screen
+            float vw = PlatformWindow.LayoutWidth;
+            float vh = PlatformWindow.LayoutHeight;
+            float x = entry.X + content.Layout.Width > vw ? Math.Max(0, vw - content.Layout.Width) : entry.X;
+            float y = entry.Y + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.Y;
+            MoveOverlay(entry, x, y);
+        }
 
         _overlays.Add(entry);
         _root?.MarkPaintDirty();
-        return new OverlayHandle { Id = id };
+        return new OverlayHandle { Id = entry.Id };
+    }
+
+    /// <summary>Puts an overlay at a point, and tells its tree where that is, so the window boxes
+    /// of the elements in it (<see cref="Element.WindowBorderBox"/>) are where they are drawn.</summary>
+    private static void MoveOverlay(OverlayEntry entry, float x, float y)
+    {
+        entry.X = x;
+        entry.Y = y;
+        entry.Content.OverlayOrigin = new Point(x, y);
+    }
+
+    /// <summary>Asks an anchored overlay where it goes now: its anchor may have scrolled, the
+    /// window may have changed size, or its own content may have grown.</summary>
+    private void PlaceOverlay(OverlayEntry entry)
+    {
+        var content = entry.Content;
+        var at = entry.Place!(new Size(content.Layout.Width, content.Layout.Height),
+            new Size(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight));
+        MoveOverlay(entry, at.X, at.Y);
     }
 
     public void CloseOverlay(OverlayHandle handle)
@@ -2435,8 +2490,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             if (_overlays[i].Id == handle.Id)
             {
-                _overlays[i].X = x;
-                _overlays[i].Y = y;
+                MoveOverlay(_overlays[i], x, y);
                 _root?.MarkPaintDirty();
                 return;
             }
@@ -2464,7 +2518,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         var fv = Application.Theme.FocusVisual;
         if (fv.KeyboardOnly && !_focusFromKeyboard) return;
 
-        var box = focused.ScreenBorderBox;
+        var box = focused.WindowBorderBox;
         if (box.Width <= 0 || box.Height <= 0) return;
 
         float radius = focused is BoxElement b ? b.CornerRadius.TopLeft : 0f;
@@ -2505,6 +2559,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 overlay.LayoutDone = true;
             }
 
+            // Every frame, not only on a relayout: the anchor moves with the page under it.
+            if (overlay.Place is not null)
+                PlaceOverlay(overlay);
+
             ctx.PushTranslate(overlay.X, overlay.Y);
             ElementRenderer.RenderTree(content, ctx);
             ctx.Pop();
@@ -2526,11 +2584,29 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         return (null, default);
     }
 
-    private void DismissOverlaysOnOutsideClick()
+    /// <summary>Whether <paramref name="pos"/> is on the anchor of a light-dismiss overlay above
+    /// level <paramref name="above"/> (-1 for the main tree).</summary>
+    private bool PressIsOnAnchorAbove(Point pos, int above)
     {
-        for (int i = _overlays.Count - 1; i >= 0; i--)
+        for (int i = _overlays.Count - 1; i > above; i--)
         {
-            if (_overlays[i].DismissOnOutsideClick)
+            var overlay = _overlays[i];
+            if (overlay.DismissOnOutsideClick && overlay.Anchor is { IsHosted: true } anchor
+                && anchor.WindowBorderBox.Contains(pos))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Closes the light-dismiss overlays above level <paramref name="above"/>: all of
+    /// them for a press in the main tree (-1), only anchored ones for a press in an overlay.</summary>
+    private void DismissOverlaysOnOutsideClick(int above = -1)
+    {
+        for (int i = _overlays.Count - 1; i > above; i--)
+        {
+            // A dismissal callback can close other overlays.
+            if (i >= _overlays.Count) continue;
+            if (_overlays[i].DismissOnOutsideClick && (above < 0 || _overlays[i].Anchor is not null))
             {
                 // Clear context menu state if this overlay is the context menu
                 if (_overlays[i].Id == _contextMenuOverlay.Id)
@@ -2599,10 +2675,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     .TextColor(tt.TextColor)
             );
 
-        // Position below the owner element. Screen box rather than layout box: a tooltip on a
+        // Position below the owner element. Window box rather than layout box: a tooltip on a
         // row in a scrolled list would otherwise appear beside where that row would be if
-        // nothing had scrolled.
-        var ownerBox = owner.ScreenContentBox;
+        // nothing had scrolled, and one in a popover where the popover's corner is.
+        var ownerBox = owner.WindowContentBox;
         float x = ownerBox.X;
         float y = ownerBox.Y + owner.Layout.Height + tt.Gap;
 

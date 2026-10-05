@@ -1,6 +1,29 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Popover** — `src/HultUI.Core/Builders/Popover.cs` (+ `PopoverTheme`): a non-modal card of any
+  content against an anchor. Placement (Below/Above/Right/Left × Start/Center/End) flips when it
+  does not fit and the other side has more room, slides to stay in the window, lands on whole
+  pixels, and is redone every frame so it follows a scrolling anchor; closes when a rebuild drops
+  the anchor. Takes the keyboard (first control, else the card), Tab stays in, Esc closes and the
+  window hands the keyboard back; `ArrowKeys` for row lists. Card is a dialog, anchor reports
+  expanded. Host: `IOverlayHost.ShowAnchoredOverlay(content, anchor, place)` — placed every frame
+  in `RenderOverlays`; a press on the anchor of a light-dismiss overlay closes it and is swallowed
+  (press and release), so a toggle button does not reopen it (Dropdown and DatePicker each had a
+  flag for this); a press inside a lower overlay closes the anchored overlays above it (a popover
+  opened from a dialog closed only on Esc before). New `Element.WindowBorderBox`/`WindowContentBox`
+  (the overlay's place added): dropdowns, date pickers and tooltips placed their popups from
+  `ScreenBorderBox`, which inside an overlay is overlay-relative — the space pointer events use,
+  so it stays — and opened off by the popover's offset; the focus ring, headless `Click` and the
+  driver's `@` clicks were off the same way. (First tried folding the origin into
+  `ScreenBorderBox`: the WebView's overlay test caught pointer mapping counting it twice.) Vesper's recent-folders popover is now
+  one (rows focusable, ↑ ↓ Enter work as its footer always claimed, Esc, Alt+←/→ kept, a press on
+  the cluster only closes it). Fluent sample: a WinUI flyout under "Empty bin". Survey: Junction's
+  and Meridian's popovers are anchored item menus, a menu-button job, not converted. Tests: 10
+  headless, 5 placement, 3 Vesper, 1 Fluent; controls (9): anchor press passing through, placed
+  once, dialog press keeping it, window box ignoring the overlay, dropdown placing from the
+  overlay-relative box, keyboard not taken, no flip, staying open without its anchor, Vesper rows
+  unfocusable — each fails its test.
 - **Expander** — `src/HultUI.Core/Elements/ExpanderElement.cs` (+ `Builders/Expander.cs`,
   `ExpanderTheme`): a header (chevron, title or any element, actions that do not toggle) over a
   body that slides open with the chevron turning in step. Keeps its own state across rebuilds, or

@@ -21,6 +21,22 @@ public interface IOverlayHost
     /// Shift+Tab stay inside it, and keys go to it even when the focus is somewhere it does not
     /// reach — so nothing behind a dialog acts on a key pressed while the dialog is up.</param>
     OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null, bool modal = false);
+    /// <summary>
+    /// Puts <paramref name="content"/> on top of the window where <paramref name="place"/> says
+    /// — given the content's laid-out size and the window's, it returns the top-left corner in
+    /// window coordinates — and asks again every frame, so the overlay follows
+    /// <paramref name="anchor"/> when it scrolls or moves. A press on the anchor while the
+    /// overlay is open closes it (raising <paramref name="onDismissed"/>) and goes no further, so
+    /// the control that opened it does not open it again. A press in an overlay below this one
+    /// counts as outside it.
+    /// </summary>
+    OverlayHandle ShowAnchoredOverlay(Element content, Element anchor, Func<Primitives.Size, Primitives.Size, Primitives.Point> place,
+        bool dismissOnOutsideClick = true, Action? onDismissed = null, bool modal = false)
+    {
+        var box = anchor.WindowBorderBox;
+        return ShowOverlay(content, box.X, box.Bottom, dismissOnOutsideClick, hitTestable: true, onDismissed, modal);
+    }
+
     void CloseOverlay(OverlayHandle handle);
     void UpdateOverlayPosition(OverlayHandle handle, float x, float y);
     Theme? ActiveTheme { get; }

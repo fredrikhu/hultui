@@ -162,7 +162,9 @@ public abstract class Element
 
     /// <summary>
     /// This element's border box in window coordinates — where it actually is on screen, with
-    /// every ancestor's scroll applied.
+    /// every ancestor's scroll applied. Inside an overlay it is relative to the overlay, which is
+    /// the space the overlay's pointer events arrive in; <see cref="WindowBorderBox"/> is where it
+    /// is in the window.
     ///
     /// <para>This is what anything positioning itself <i>against</i> an element wants: an
     /// overlay, a tooltip, a synthesized click. Using the layout box instead is silently
@@ -187,6 +189,49 @@ public abstract class Element
             var offset = AncestorScrollOffset;
             var box = Layout.AbsoluteContentBox;
             return new Rect(box.X - offset.X, box.Y - offset.Y, box.Width, box.Height);
+        }
+    }
+
+    /// <summary>
+    /// Where this element is in the window, overlay or not: <see cref="ScreenBorderBox"/> plus,
+    /// inside an overlay, the overlay's place. What anything positioned in the window against an
+    /// element wants — another overlay opened from it, a focus ring, a synthesized click. Using
+    /// <see cref="ScreenBorderBox"/> for those is right in the main tree and in a dialog (whose
+    /// overlay covers the window from its corner), and off by the overlay's offset in a popover:
+    /// a dropdown in one opened that far away.
+    /// </summary>
+    public Rect WindowBorderBox
+    {
+        get
+        {
+            var box = ScreenBorderBox;
+            var origin = TreeOrigin;
+            return new Rect(box.X + origin.X, box.Y + origin.Y, box.Width, box.Height);
+        }
+    }
+
+    /// <summary><see cref="WindowBorderBox"/> less this element's own border and padding.</summary>
+    public Rect WindowContentBox
+    {
+        get
+        {
+            var box = ScreenContentBox;
+            var origin = TreeOrigin;
+            return new Rect(box.X + origin.X, box.Y + origin.Y, box.Width, box.Height);
+        }
+    }
+
+    /// <summary>Where the overlay this element is the root of sits in the window, kept by the
+    /// host; zero for the main tree.</summary>
+    internal Point OverlayOrigin { get; set; }
+
+    private Point TreeOrigin
+    {
+        get
+        {
+            var top = this;
+            while (top.Parent is { } parent) top = parent;
+            return top.OverlayOrigin;
         }
     }
 
