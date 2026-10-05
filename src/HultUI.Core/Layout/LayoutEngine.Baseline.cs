@@ -157,10 +157,10 @@ public sealed partial class LayoutEngine
             }
             else
             {
-                float lineMain = 0;
-                for (int i = 0; i < line.Items.Count; i++)
-                    lineMain += line.Items[i].MainSize + (i > 0 ? mainGap : 0);
-                float top = ComputeJustifyOffset(flex.JustifyContent, mainDistribute, lineMain, line.Items.Count);
+                var justifyBounds = JustifyBounds(resolvedH, contentAvailH, box.MinHeight, box.MaxHeight,
+                    constraint.AvailableHeight, outerSpacing.Vertical);
+                float top = ComputeJustifyOffset(flex.JustifyContent, JustifySpace(lines, mainGap, justifyBounds),
+                    LineMain(line, mainGap), line.Items.Count);
 
                 float? fw = stretch && child.BoxRead.Width.IsAuto ? line.CrossSize - margin.Horizontal : null;
                 float borderH = item.MainSize - margin.Vertical;

@@ -66,6 +66,28 @@ public class InspectorWindowTests
         Assert.False(session.Window.Window.IsDevToolsWindow);
     }
 
+    /// <summary>The twisty opens and closes a node and a click anywhere else on the row selects
+    /// it, so the twisty spans the row's height with its glyph centred — not just the glyph's.</summary>
+    [Fact]
+    public void ATreeRowsTwistySpansTheRowWithItsGlyphCentred()
+    {
+        using var session = HeadlessSession.Create(width: 300, height: 200);
+        BuildApp(session);
+
+        session.Application.OpenInspector();
+        session.PumpFrame();
+
+        var panel = Assert.Single(session.Application.Windows, w => w.IsDevToolsWindow);
+        var glyph = LayoutProbe.Descendants<TextElement>(panel.Root, t => t.Content is "▾" or "▸").First();
+        var twisty = LayoutProbe.Painted(glyph.Parent!);
+        var row = LayoutProbe.Inner(glyph.Parent!.Parent!);
+        var g = LayoutProbe.Painted(glyph);
+        Assert.InRange(row.Height, g.Height + 4f, 60f);
+
+        Assert.Equal(row.Height, twisty.Height, 0.01f);
+        Assert.Equal(g.Y - twisty.Y, twisty.Bottom - g.Bottom, 0.01f);
+    }
+
     [Fact]
     public void OpenInspector_TwiceReusesTheSamePanel()
     {

@@ -300,7 +300,9 @@ public partial class CommanderApp
     {
         var d = r.Data;
         bool conflict = d.Rel == SyncEngine.Rel.Conflict;
-        var row = Grid.Of(SyncCols, gap: 8).Height(RowHeight).AlignItems(AlignItems.Center)
+        // One 1fr track, so the cells centre in the whole row — the default auto track hugs
+        // the tallest cell and leaves them along the row's top (docs/GRID.md §6).
+        var row = Grid.Of(SyncCols, rows: "1fr", gap: 8).Height(RowHeight).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(Nocturne.RadiusSm)
             .Cursor(CursorType.Pointer);
         if (selected)
@@ -319,9 +321,11 @@ public partial class CommanderApp
             .TextAlign(TextAlign.Right).GridColumn(1));
         row.AddChild(Ui.Mono(d.LeftExists ? $"{d.LeftTime:MM-dd HH:mm}" : "", 10.5f, Nocturne.On(0.45)).GridColumn(2));
 
-        // Center rail — glyph + color; clicking cycles the direction.
+        // Center rail — glyph + color; clicking cycles the direction. It spans the row's
+        // height, so the whole cell is the click target, not just the glyph.
         var (glyph, color) = SyncRail(r);
-        var rail = Box.New().AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+        var rail = Box.New().AlignSelf(AlignSelf.Stretch)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Cursor(CursorType.Pointer).Children(Ui.Mono(glyph, 12f, color));
         rail.OnClick(ev => { ev.StopPropagation = true; CycleSyncDir(r); });
         row.AddChild(rail.GridColumn(3));

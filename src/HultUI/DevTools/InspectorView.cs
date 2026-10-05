@@ -199,7 +199,9 @@ internal sealed class InspectorView : Component
 
         var twisty = node.HasChildren
             ? Box.New()
-                .Width(14).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+                // The row's full height, so the whole of the twisty's strip toggles.
+                .Width(14).AlignSelf(AlignSelf.Stretch)
+                .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
                 .Cursor(CursorType.Pointer)
                 .OnClick(e =>
                 {

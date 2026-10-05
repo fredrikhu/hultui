@@ -174,4 +174,23 @@ public class BaselineAlignTests
         Assert.Equal(0, label.Layout.X);
         Assert.Equal(18, label.Layout.Width);        // its own width, not the column's 300
     }
+
+    /// <summary>A centred column sized by its content has no free space, so its text sits at
+    /// its top — and the baseline the row aligns by has to be measured the same way, or the
+    /// row lowers the other text to a baseline nothing is drawn on.</summary>
+    [Fact]
+    public void AnAutoHeightCentredColumnOffersTheBaselineItLaysOut()
+    {
+        var label = Label("Total", 12);
+        var inner = Label("items", 12);
+        var column = Flex.Column().JustifyContent(JustifyContent.Center).Children(inner);
+        var row = Flex.Row().Height(40f).AlignItems(AlignItems.Baseline).Children(label, column);
+
+        Lay(row);
+
+        Assert.Equal(15, column.Layout.Height);
+        Assert.Equal(0, label.Layout.Y);
+        Assert.Equal(0, inner.Layout.AbsoluteY);
+        Assert.Equal(BaselineOf(label), BaselineOf(inner));
+    }
 }

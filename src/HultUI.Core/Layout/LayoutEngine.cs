@@ -100,14 +100,18 @@ public sealed partial class LayoutEngine
         {
             // Pass whether cross dimension is definite so single-line
             // containers with auto cross use natural content sizes
-            bool hasDefiniteCross = (element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse)
-                ? resolvedHeight != null
-                : resolvedWidth != null;
+            bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+            bool hasDefiniteCross = isRow ? resolvedHeight != null : resolvedWidth != null;
+            var justifyBounds = isRow
+                ? JustifyBounds(resolvedWidth, contentAvailW, box.MinWidth, box.MaxWidth,
+                    constraint.AvailableWidth, outerSpacing.Horizontal)
+                : JustifyBounds(resolvedHeight, contentAvailH, box.MinHeight, box.MaxHeight,
+                    constraint.AvailableHeight, outerSpacing.Vertical);
 
             contentSize = LayoutFlexChildren(element, children, contentAvailW, contentAvailH,
                 contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
                 contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
-                hasDefiniteCross: hasDefiniteCross);
+                justifyBounds, hasDefiniteCross: hasDefiniteCross);
         }
 
         // Final element size
@@ -175,9 +179,11 @@ public sealed partial class LayoutEngine
         return false;
     }
 
+    /// <param name="justifyBounds">The container's own main size, as a content-box range — see
+    /// <see cref="JustifyBounds"/>. Lines are justified within it.</param>
     private Size LayoutFlexChildren(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY,
-        bool hasDefiniteCross = true)
+        (float Min, float Max) justifyBounds, bool hasDefiniteCross = true)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -237,6 +243,7 @@ public sealed partial class LayoutEngine
             // ── Phase 6: Position items within each line ──
             float actualTotalMain = 0;
             float actualTotalCross = 0;
+            float justifySpace = JustifySpace(lines, mainGap, justifyBounds);
 
             // Determine line iteration order for wrap-reverse
             for (int lineIdx = 0; lineIdx < lines.Count; lineIdx++)
@@ -244,16 +251,9 @@ public sealed partial class LayoutEngine
                 int actualLineIdx = isWrapReverse ? lines.Count - 1 - lineIdx : lineIdx;
                 var line = lines[actualLineIdx];
 
-                // Compute line's total main size for justify
-                float lineTotalMain = 0;
-                for (int i = 0; i < line.Items.Count; i++)
-                {
-                    lineTotalMain += line.Items[i].MainSize;
-                    if (i > 0) lineTotalMain += mainGap;
-                }
-
-                float mainOffset = ComputeJustifyOffset(flex.JustifyContent, mainDistribute, lineTotalMain, line.Items.Count);
-                float justifyGap = ComputeJustifyGap(flex.JustifyContent, mainDistribute, lineTotalMain, line.Items.Count, mainGap);
+                float lineTotalMain = LineMain(line, mainGap);
+                float mainOffset = ComputeJustifyOffset(flex.JustifyContent, justifySpace, lineTotalMain, line.Items.Count);
+                float justifyGap = ComputeJustifyGap(flex.JustifyContent, justifySpace, lineTotalMain, line.Items.Count, mainGap);
 
                 for (int i = 0; i < line.Items.Count; i++)
                 {
@@ -595,12 +595,7 @@ public sealed partial class LayoutEngine
                 totalCross += line.CrossSize;
                 if (li > 0) totalCross += crossGap;
 
-                float lineMain = 0;
-                for (int i = 0; i < line.Items.Count; i++)
-                {
-                    lineMain += line.Items[i].MainSize;
-                    if (i > 0) lineMain += mainGap;
-                }
+                float lineMain = LineMain(line, mainGap);
                 if (lineMain > totalMain) totalMain = lineMain;
             }
 
@@ -1080,6 +1075,47 @@ public sealed partial class LayoutEngine
         value = float.MaxNative(value, min.ResolveOr(reference, -1f));
         value = float.MinNative(value, max.ResolveOr(reference, float.MaxValue));
         return value;
+    }
+
+    /// <summary>
+    /// A flex container's own content-box main size, as the range it will settle in: a definite
+    /// size is both ends of it; a size taken from the content is wherever the content puts it
+    /// within the container's min and max, which <see cref="JustifySpace"/> works out once the
+    /// lines are known.
+    /// <para><b>JustifyContent distributes the space between a line and this size</b>, never the
+    /// space merely available to the container. An auto-sized container doesn't take that up:
+    /// justified against it, a centred column in a 32px row moved its 17px of text down by half
+    /// the difference and then, sized from where the text ended, came out 24.6px tall with the
+    /// text at its bottom — while the measure pass, which doesn't justify, had said 17. A scroll
+    /// container is the other way round: its children are distributed against unbounded space,
+    /// so they can overflow it, but its own size is its viewport, and content that fits is
+    /// centred in that.</para>
+    /// </summary>
+    private static (float Min, float Max) JustifyBounds(float? resolved, float contentAvailable,
+        Dimension min, Dimension max, float available, float spacing) =>
+        resolved is null
+            ? (min.ResolveOr(available, -1f) - spacing, max.ResolveOr(available, float.MaxValue) - spacing)
+            : (contentAvailable, contentAvailable);
+
+    /// <summary>The main size the lines are justified in: the longest line held within
+    /// <paramref name="bounds"/>, the way ComputeLayout sizes an auto container from it.</summary>
+    private static float JustifySpace(List<FlexLine> lines, float gap, (float Min, float Max) bounds)
+    {
+        if (bounds.Min == bounds.Max) return bounds.Min;
+        float longest = 0;
+        foreach (var line in lines)
+            longest = float.MaxNative(longest, LineMain(line, gap));
+        // ApplyMinMax's order, so a max below the min wins as it does there.
+        return float.MinNative(float.MaxNative(longest, bounds.Min), bounds.Max);
+    }
+
+    /// <summary>A line's outer main size: its items and the gaps between them.</summary>
+    private static float LineMain(FlexLine line, float gap)
+    {
+        float main = 0;
+        for (int i = 0; i < line.Items.Count; i++)
+            main += line.Items[i].MainSize + (i > 0 ? gap : 0);
+        return main;
     }
 
     private static float ComputeJustifyOffset(JustifyContent justify, float available, float used, int itemCount)

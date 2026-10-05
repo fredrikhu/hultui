@@ -132,6 +132,19 @@ All values:
 | `SpaceAround` | Equal space around each child (half-size at edges) |
 | `SpaceEvenly` | Equal space between all children and edges |
 
+> **`JustifyContent` distributes free space in the container's own main size,
+> so a container sized by its content has none.** A column with no height that
+> its parent doesn't stretch — say a `Flex.Column` inside a
+> `Flex.Row().Height(32).AlignItems(AlignItems.Center)` — is exactly as tall as
+> its children, and `JustifyContent.Center` on it changes nothing; the row's
+> `AlignItems` is what centres it. To centre within a size, give the container
+> that size: a `Height`, a stretch from its parent, or a `MinHeight` (an auto
+> container justifies within its min and max). A scroll view justifies within
+> its viewport, so content that fits is centred and content that overflows
+> starts at the top. Until 2026-10-05 an auto-sized container justified against
+> the space its parent offered and then grew to where its last child ended —
+> 24.6px tall around 17.3px of text, with the text at the bottom.
+
 ---
 
 ## 4. Cross Axis Alignment (AlignItems)

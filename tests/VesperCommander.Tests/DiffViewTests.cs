@@ -337,6 +337,39 @@ public class DiffViewTests
         Assert.False(t.Field<bool>("_syncOpen"));
     }
 
+    /// <summary>The rail is where a click cycles a file's direction — anywhere else on the row
+    /// selects it — so it spans the row's height with its glyph centred, rather than being only
+    /// as tall as the glyph.</summary>
+    [Fact]
+    public void TheSyncRailSpansItsRowWithItsGlyphCentred()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "one\n");
+        t.Open();
+        t.Press(KeyCode.F9);
+
+        HultUI.Core.Elements.TextElement? Glyph(string text) =>
+            LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(t.Root, l => l.Content == text).FirstOrDefault();
+        t.Session.PumpUntil(() => Glyph("+→") != null);
+
+        var glyph = Glyph("+→")!;
+        var rail = LayoutProbe.Painted(glyph.Parent!);
+        var row = LayoutProbe.Inner(glyph.Parent!.Parent!);
+        var g = LayoutProbe.Painted(glyph);
+        Assert.InRange(row.Height, 18f, 30f);
+        Assert.Equal(row.Height, rail.Height, 0.01f);
+        Assert.Equal(g.Y - rail.Y, rail.Bottom - g.Bottom, 0.01f);
+        // And the file's name beside it is centred in the row too, not along its top.
+        var name = LayoutProbe.Painted(LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(
+            glyph.Parent!.Parent!, l => l.Content == "a.txt").Single());
+        Assert.Equal(name.Y - row.Y, row.Bottom - name.Bottom, 0.01f);
+
+        // Near the top of the row, well clear of the glyph, a click still cycles the direction.
+        t.Session.Window.Click(rail.X + rail.Width / 2, row.Y + 1.5f);
+        t.Session.PumpFrame();
+        Assert.NotNull(Glyph("∅"));
+    }
+
     [Fact]
     public void TheSameNamedFileInTheOtherFolderIsPreferred()
     {
@@ -1145,9 +1178,15 @@ public class DiffViewTests
             settings.DiffWrap = wrap;
             Call("NavigateTo", 'L', Left, null, false);
             Call("NavigateTo", 'R', Right, null, false);
-            _session.Application.SetRoot(_app.Mount());
+            _root = _app.Mount();
+            _session.Application.SetRoot(_root);
             _session.PumpUntil(() => Rows('L').Count > 0 && Rows('R').Count > 0);
         }
+
+        private HultUI.Core.Elements.Element _root = null!;
+
+        /// <summary>The mounted app, for finding an element by descent.</summary>
+        public HultUI.Core.Elements.Element Root => _root;
 
         /// <summary>Put the left pane's cursor on a file and press F3 the way a user would.</summary>
         public void OpenDiffOn(string name)
