@@ -41,6 +41,8 @@ public sealed class Theme
     public CalendarTheme Calendar { get => Get<CalendarTheme>(); init => Set(value); }
     public TimeFieldTheme TimeField { get => Get<TimeFieldTheme>(); init => Set(value); }
     public FindBarTheme FindBar { get => Get<FindBarTheme>(); init => Set(value); }
+    public KbdTheme Kbd { get => Get<KbdTheme>(); init => Set(value); }
+    public CommandPaletteTheme CommandPalette { get => Get<CommandPaletteTheme>(); init => Set(value); }
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;

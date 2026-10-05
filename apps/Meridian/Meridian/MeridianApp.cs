@@ -191,12 +191,6 @@ public partial class MeridianApp : Component, IDisposable
             options.Key = "options";
             root.AddChild(options);
         }
-        if (_paletteOpen)
-        {
-            var palette = BuildPalette();
-            palette.Key = "palette";
-            root.AddChild(palette);
-        }
         if (_dialog is { } dialogSpec)
         {
             var dialog = BuildDialog(dialogSpec);
@@ -227,11 +221,6 @@ public partial class MeridianApp : Component, IDisposable
         {
             _pendingUrlFocus = false;
             _urlRef.Current?.Focus();
-        }
-        if (_pendingPaletteFocus)
-        {
-            _pendingPaletteFocus = false;
-            _paletteRef.Current?.Focus();
         }
         if (_pendingDialogFocus)
         {
@@ -581,12 +570,6 @@ public partial class MeridianApp : Component, IDisposable
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
 
-        // The palette owns the keyboard while it is up.
-        if (_paletteOpen && HandlePaletteKey(e))
-        {
-            e.StopPropagation = true;
-            return;
-        }
         if (_optionsOpen && e.Key == KeyCode.Escape)
         {
             _optionsOpen = false;

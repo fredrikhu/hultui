@@ -1415,3 +1415,61 @@ their automation ids — `find-input`, `find-status`, `find-case`, `find-regex`,
 
 **The count** (`FindBar.Status`): "3 of 41"; "20,000+" when the scan stopped at
 `TextSearch.MaxHits`; the pattern's error when it does not compile or ran too long; "no matches".
+
+---
+
+## 20. CommandPalette
+
+A query field over everything the app can do, narrowed as the person types and run with Enter
+or a click — a modal dialog near the top of the window. It replaced three apps' own palettes.
+
+```csharp
+_palette = new CommandPalette(Commands)
+{
+    ToggleKeys = shortcuts["palette"].Keys,      // the key that opened it closes it
+    GroupStyle = PaletteGroupStyle.Trailing,     // a kind tag after the title (Leading: a column)
+    SearchIcon = () => Icon(Icons.MagnifyingGlass),
+    Footer = "Repositories · Branches · Actions",
+};
+if (shortcuts.Matches("palette", e)) _palette.Toggle(window);
+
+IEnumerable<PaletteCommand> Commands() =>
+[
+    new("Push", DoPush) { Keys = shortcuts.Keys("push") },
+    new("Checkout tidy", () => Checkout("tidy")) { Group = "Branch", Detail = "feature/cleanup" },
+];
+```
+
+| `PaletteCommand` | |
+|---|---|
+| `Title`, `Run` | the row and what choosing it does — the palette closes first |
+| `Group` | kind or category: a tag, a column, or nothing (`GroupStyle`); searched |
+| `Detail` | a second line — a path, a count, where it leads; searched |
+| `Keys` | the key chip; read it from the app's `ShortcutMap` so it cannot go stale |
+| `Icon`, `Keywords` | a leading element (built per row), and words it is found by but does not show |
+
+- **The list is taken when it opens**, so a provider can count things or ask a repository; it
+  is not called per keystroke.
+- **Matching** is `FuzzyMatch.Score` (subsequence, "gtr" finds "Go to Runner") on the title,
+  then on the group, detail and keywords, ranked after every title match. Ties go to the shorter
+  title, then list order. `CommandPalette.Filter` is the same ranking, for tests.
+- **Keys:** ↑ ↓ and Page Up/Down move, Enter runs, Esc or a click outside closes, and so does
+  any of `ToggleKeys` — the dialog is modal, so the app's handler never sees them. The chosen row
+  is kept in view. `MaxRows` (100) rows show; the rest are counted.
+- **State:** `IsOpen`, `Query` (settable), `Matches`, `SelectedIndex`, `Move`, `Run`, `Close`,
+  and `Closed`, raised however it closes — at once, not a frame later.
+- **Accessibility:** one dialog named `AccessibleName` ("Command palette"); rows are buttons
+  named "Title (Group)". Automation ids: `palette`, `palette-card`, `palette-input`,
+  `palette-row-N`, `palette-no-match`.
+
+**Looks** come from `Theme.CommandPalette` (`CommandPaletteTheme`): width, maximum height, offset
+from the top, scrim, card, rules, row heights (one line and two), colours of the chosen and
+hovered rows, the title, detail and group. The card fits a short list and scrolls a long one.
+It shows through `Dialog.Show` with `DialogOptions.TopOffset`, which any dialog can use to sit
+under the top edge rather than in the middle.
+
+## 21. Kbd and KbdElement
+
+`Kbd.New("Ctrl+P")` is a key chip — the keys in a small outlined box — for anywhere a key is
+named. Its look is `Theme.Kbd` (`KbdTheme`): fill (transparent for an outline only), outline,
+text colour and face, size, padding and radius; null colours come from the palette.

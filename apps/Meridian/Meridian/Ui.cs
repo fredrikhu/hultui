@@ -83,12 +83,8 @@ public static class Ui
     }
 
     /// <summary>Key-hint chip: mono 10, az-border box (the sheet's kbd idiom).</summary>
-    public static BoxElement Kbd(string text) =>
-        Box.New()
-            .Padding(new Thickness(2, 5, 2, 5))
-            .CornerRadius(Azimuth.Radius1)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .Children(Mono(text, 10f, Azimuth.TextMuted));
+    /// <summary>The framework's key chip; its look is <c>Kbd</c> in <see cref="Azimuth.ToHultTheme"/>.</summary>
+    public static KbdElement Kbd(string text) => HultUI.Core.Builders.Kbd.New(text);
 
     // ── Buttons ──────────────────────────────────────────────────────────
     // The framework's ButtonElement in the families Azimuth.ToHultTheme() gives its

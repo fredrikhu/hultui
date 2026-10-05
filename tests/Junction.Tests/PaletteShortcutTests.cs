@@ -82,7 +82,8 @@ public class PaletteShortcutTests
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────
-    private static bool PaletteOpen(JunctionApp app) => Field<bool>(app, "_paletteOpen");
+    private static bool PaletteOpen(JunctionApp app) =>
+        Field<HultUI.Core.Builders.CommandPalette?>(app, "_palette") is { IsOpen: true };
 
     private static T Field<T>(JunctionApp app, string name) =>
         (T)typeof(JunctionApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!

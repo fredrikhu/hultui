@@ -210,6 +210,27 @@ public static class Nocturne
             Height = 5f,
             Track = Neutral900,
         },
+        // Every key named in the app, as Ui.Kbd drew it: filled, a neutral outline, mono keys.
+        Kbd = new KbdTheme
+        {
+            Background = Surface, Border = Neutral700, Text = Neutral300,
+            FontFamily = VesperCommander.Fonts.Mono, FontSize = 10f,
+            Padding = new Thickness(1, 5, 2, 5), CornerRadius = 4f,
+        },
+        // The palette as the Overlays drew it: the dialog card near the top, plain rows, the
+        // chosen one washed in the accent.
+        CommandPalette = new CommandPaletteTheme
+        {
+            Width = 520f, MaxHeight = 480f, TopOffset = 90f,
+            Scrim = Alpha(Color.FromHex("#05060c"), 0.62),
+            Background = Surface, Border = Neutral700, CornerRadius = RadiusLg, Divider = Divider,
+            HeaderHeight = 44f, FieldFontSize = 13f,
+            ListPadding = new Thickness(6), RowHeight = 30f, RowCornerRadius = RadiusSm,
+            RowPadding = new Thickness(0, 10, 0, 10), RowGap = 8f,
+            SelectedBackground = Alpha(Accent500, 0.13), HoverBackground = Neutral900,
+            TitleFontSize = 12f, Title = Text,
+            Muted = On(0.40), MutedFontSize = 12f,
+        },
         // The find bar over the viewer and the comparison, as CommanderApp.FindBar drew it by
         // hand: the count in monospace, the option chips as outlined mono labels lit in the
         // accent, and small outlined icon buttons that wash on hover.

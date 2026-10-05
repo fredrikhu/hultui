@@ -89,7 +89,7 @@ public partial class JunctionApp
         };
         PrefillCreateMr(form);
         _createMr = form;
-        _paletteOpen = false;
+        ClosePalette();
         _popover = null;
         _mrPanelOpen = false;
         Rerender();   // activates the member/label loaders

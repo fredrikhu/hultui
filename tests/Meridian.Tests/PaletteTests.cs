@@ -1,4 +1,5 @@
 using HultUI.Core.Accessibility;
+using HultUI.Core.Builders;
 using HultUI.Core.Events;
 using HultUI.Headless;
 using Meridian.Tests.Fixtures;
@@ -85,14 +86,14 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
     [InlineData("environments", "Go to Environments")]
     public void SubsequenceMatchingFindsCommands(string query, string expected)
     {
-        var commands = new List<MeridianApp.Command>
+        var commands = new List<PaletteCommand>
         {
-            new("Go to Requests", "Go", "1", () => { }),
-            new("Go to Runner", "Go", "2", () => { }),
-            new("Go to Environments", "Go", "5", () => { }),
+            new PaletteCommand("Go to Requests", () => { }) { Group = "Go", Keys = "1" },
+            new PaletteCommand("Go to Runner", () => { }) { Group = "Go", Keys = "2" },
+            new PaletteCommand("Go to Environments", () => { }) { Group = "Go", Keys = "5" },
         };
 
-        Assert.Equal(expected, MeridianApp.Filter(commands, query).First().Title);
+        Assert.Equal(expected, CommandPalette.Filter(commands, query).First().Title);
     }
 
     [Theory]
@@ -101,20 +102,20 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
     [InlineData("rennur")]           // the right letters, the wrong order
     public void AQueryThatDoesNotMatchReturnsNothing(string query)
     {
-        var commands = new List<MeridianApp.Command> { new("Go to Runner", "Go", "", () => { }) };
-        Assert.Empty(MeridianApp.Filter(commands, query));
+        var commands = new List<PaletteCommand> { new PaletteCommand("Go to Runner", () => { }) { Group = "Go" } };
+        Assert.Empty(CommandPalette.Filter(commands, query));
     }
 
     [Fact]
     public void TighterMatchesRankFirst()
     {
-        var commands = new List<MeridianApp.Command>
+        var commands = new List<PaletteCommand>
         {
-            new("Save the whole environment set", "Environment", "", () => { }),
-            new("Save", "Request", "", () => { }),
+            new PaletteCommand("Save the whole environment set", () => { }) { Group = "Environment" },
+            new PaletteCommand("Save", () => { }) { Group = "Request" },
         };
 
-        Assert.Equal("Save", MeridianApp.Filter(commands, "save").First().Title);
+        Assert.Equal("Save", CommandPalette.Filter(commands, "save").First().Title);
     }
 
     // ── The palette ──────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
             // Ask the same filter the palette uses which command sits third,
             // rather than guessing a ranking — the assertion is "two Downs
             // select index 2", not "index 2 happens to be view X".
-            var third = MeridianApp.Filter(app.Commands(), "go to")[2].Title;
+            var third = CommandPalette.Filter(app.Commands(), "go to")[2].Title;
             Assert.StartsWith("Go to ", third);
 
             Press(session, KeyCode.P, KeyModifiers.Ctrl);

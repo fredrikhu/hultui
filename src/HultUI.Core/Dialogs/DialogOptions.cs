@@ -28,4 +28,9 @@ public sealed class DialogOptions
 
     /// <summary>Scrim colour. Null uses a default translucent black.</summary>
     public Color? ScrimColor { get; init; }
+
+    /// <summary>Anchors the dialog this far below the top of the window, centred across it,
+    /// instead of in the middle — where a palette or a quick-open box sits, so its list grows
+    /// down from a field that stays put. Null centres it.</summary>
+    public float? TopOffset { get; init; }
 }

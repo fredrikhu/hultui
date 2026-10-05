@@ -95,13 +95,8 @@ public static class Ui
     };
 
     /// <summary>A keycap chip (10px mono, hairline border) as in the design's <c>.kbd</c>.</summary>
-    public static BoxElement Kbd(string text) =>
-        Box.New()
-            .Padding(new Thickness(1, 5, 2, 5))
-            .CornerRadius(4f)
-            .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .Children(Mono(text, 10f, Nocturne.Neutral300));
+    /// <summary>The framework's key chip; its look is <c>Kbd</c> in <see cref="Nocturne.ToHultTheme"/>.</summary>
+    public static KbdElement Kbd(string text) => HultUI.Core.Builders.Kbd.New(text);
 
     /// <summary>The canonical hover idiom: tint the background while hovered.
     /// Declarative (Interaction system): the tint is re-applied after any rebuild,

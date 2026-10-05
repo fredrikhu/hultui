@@ -1,6 +1,24 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **One command palette** — `CommandPalette` + `PaletteCommand` + `FuzzyMatch`
+  (`src/HultUI.Core/Builders`), themed by `CommandPaletteTheme`, replace Junction's, Vesper's and
+  Meridian's own; `Kbd` + `KbdTheme` replace four apps' key chips (Aperture's was dead code). Each
+  app had something the others lacked: Meridian ranked fuzzy matches and named its dialog,
+  Junction scrolled to the chosen row and showed a second line, Vesper read its keys from the
+  keymap. Each also had a gap: Meridian's selection walked out of view past its 60-row cap,
+  Vesper's list had no scroll view at all, Junction and Vesper searched by substring and
+  announced nothing to a screen reader. The framework one is a modal `Dialog` (new
+  `DialogOptions.TopOffset`) with a component that rebuilds itself; the list is taken once on
+  open; matches rank titles before groups, details and keywords; the chosen row stays in view
+  (fixed row heights, so the band is known before layout); a long list shows 100 and counts the
+  rest; Esc, a click outside or the opening key close it and `Closed` fires at once. Each app's
+  look moved into its theme. Two fixes on the way: the dialog was announced twice (the
+  `Dialog.Show` panel and the card inside it), and a full-height card for a one-row list. Found
+  and filed separately: `JustifyContent(Center)` on an auto-height column inside a fixed-height
+  row measures it half a row too tall and drops its child to the floor. Tests: 11 headless
+  (two controls: no reveal, a growing list), Meridian's palette tests on the framework filter,
+  Vesper's harness on `PaletteCommand`, Junction's toggle tests; driver shots of all three.
 - **Shortcuts in the framework** — `KeyChord` and `ShortcutMap` (`src/HultUI.Core/Events`, docs
   in FOCUS.md). Junction's display-only `Shortcuts` table and Vesper's `Keybindings` keymap both
   became `ShortcutMap`s that dispatch and display read; Meridian, Reel, Aperture and the
