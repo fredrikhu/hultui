@@ -94,6 +94,7 @@ public static class SevenZip
             var psi = Psi(ExtractArgs(archiveFile, internalPath, password));
             if (psi is null) return null;
             psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
             var p = Process.Start(psi);
             return p is null ? null : new ProcessStdoutStream(p);
         }
@@ -224,8 +225,11 @@ public static class SevenZip
     internal static string[] ListArgs(string archiveFile, string? password) =>
         ["l", "-slt", PwdArg(password), EndOfSwitches, archiveFile];
 
+    /// <summary><c>-bso2</c> sends 7-Zip's messages to the error stream, where the reader checks for
+    /// "No files to process": with <c>-so</c> they would otherwise be lost, and a member that is not
+    /// there would read as an empty one.</summary>
     internal static string[] ExtractArgs(string archiveFile, string internalPath, string? password) =>
-        ["x", "-so", PwdArg(password), EndOfSwitches, archiveFile, internalPath.Replace('\\', '/')];
+        ["x", "-so", "-bso2", PwdArg(password), EndOfSwitches, archiveFile, internalPath.Replace('\\', '/')];
 
     internal static string[] DeleteArgs(string archiveFile, IReadOnlyList<string> members, string? password) =>
         [.. new[] { "d", PwdArg(password), EndOfSwitches, archiveFile }, .. members];
@@ -392,12 +396,14 @@ public static class SevenZip
             string outText = readAll ? p.StandardOutput.ReadToEnd() : "";
             string errText = p.StandardError.ReadToEnd();
             p.WaitForExit();
-            bool wrong = errText.Contains("Wrong password", StringComparison.OrdinalIgnoreCase)
-                      || errText.Contains("password", StringComparison.OrdinalIgnoreCase) && p.ExitCode != 0;
-            return (p.ExitCode == 0, outText, wrong);
+            return (p.ExitCode == 0, outText, SaysWrongPassword(errText, p.ExitCode));
         }
         catch { return (false, "", false); }
     }
+
+    private static bool SaysWrongPassword(string errText, int exitCode) =>
+        errText.Contains("Wrong password", StringComparison.OrdinalIgnoreCase)
+        || errText.Contains("password", StringComparison.OrdinalIgnoreCase) && exitCode != 0;
 
     private readonly record struct Member(string Path, long Size, long Packed, DateTime Modified, bool IsDir);
 
@@ -427,22 +433,66 @@ public static class SevenZip
         return list;
     }
 
-    /// <summary>Reads a child process's stdout and reaps it on dispose.</summary>
-    private sealed class ProcessStdoutStream(Process p) : Stream
+    /// <summary>
+    /// A member's bytes from <c>7z x -so</c>; the process is reaped on dispose.
+    ///
+    /// <para>7-Zip says it failed only once the output is over: in its exit code (a wrong
+    /// password, a damaged archive) or, for a member that is not there, only in its messages
+    /// ("No files to process"), exiting 0. The end of the output used to look the same as an
+    /// empty member, so a copy out wrote an empty file and reported success. The end is now
+    /// checked against both, and a read that failed throws there.</para>
+    /// </summary>
+    private sealed class ProcessStdoutStream : Stream
     {
+        private readonly Process _p;
+        // Read alongside the output, or 7-Zip could fill the error pipe and both sides would wait.
+        private readonly Task<string> _messages;
+        private bool _ended;
+
+        public ProcessStdoutStream(Process p)
+        {
+            _p = p;
+            _messages = p.StandardError.ReadToEndAsync();
+        }
+
         public override bool CanRead => true;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException();
         public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
-        public override int Read(byte[] buffer, int offset, int count) => p.StandardOutput.BaseStream.Read(buffer, offset, count);
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int n = _p.StandardOutput.BaseStream.Read(buffer, offset, count);
+            if (n == 0 && count > 0 && !_ended)
+            {
+                _ended = true;
+                ThrowIfFailed();
+            }
+            return n;
+        }
+
+        private void ThrowIfFailed()
+        {
+            _p.WaitForExit();
+            string messages = _messages.GetAwaiter().GetResult();
+            if (_p.ExitCode != 0)
+                throw new IOException(SaysWrongPassword(messages, _p.ExitCode) ? "Wrong password"
+                    : FirstError(messages) ?? $"7-Zip could not extract the member (exit code {_p.ExitCode})");
+            if (messages.Contains("No files to process", StringComparison.Ordinal))
+                throw new IOException("archive member not found");
+        }
+
+        private static string? FirstError(string messages) =>
+            messages.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("ERROR:", StringComparison.Ordinal));
+
         public override void Flush() { }
         public override long Seek(long o, SeekOrigin r) => throw new NotSupportedException();
         public override void SetLength(long v) => throw new NotSupportedException();
         public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { try { if (!p.HasExited) p.Kill(); } catch { } p.Dispose(); }
+            if (disposing) { try { if (!_p.HasExited) _p.Kill(); } catch { } _p.Dispose(); }
             base.Dispose(disposing);
         }
     }
