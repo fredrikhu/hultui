@@ -33,6 +33,30 @@ public class PathProbeTests : IDisposable
 
     // ── Shape parsing ────────────────────────────────────────────────────
 
+    /// <summary>Which mount a path is on, the drive picker's volume and a Linux path's
+    /// remoteness both rest on this. Written with the platform's separator, so it holds on both.</summary>
+    [Theory]
+    [InlineData("mnt/data", "mnt/data", true)]          // the mount point itself
+    [InlineData("mnt/data/x/y", "mnt/data", true)]
+    [InlineData("mnt/data/", "mnt/data", true)]         // a trailing separator is the same place
+    [InlineData("mnt/database", "mnt/data", false)]     // a longer name is not inside it
+    [InlineData("mnt", "mnt/data", false)]              // the parent is not inside it
+    public void IsUnder_MeansInsideAtASeparator(string path, string root, bool expected)
+    {
+        string top = Path.GetPathRoot(Path.GetTempPath())!;
+        string Full(string p) => top + p.Replace('/', Path.DirectorySeparatorChar);
+        Assert.Equal(expected, PathProbe.IsUnder(Full(path), Full(root)));
+    }
+
+    /// <summary>A volume root contains everything on it: "/" every absolute path, "C:\" all of C:.</summary>
+    [Fact]
+    public void IsUnder_AVolumeRootContainsItsWholeVolume()
+    {
+        string top = Path.GetPathRoot(Path.GetTempPath())!;
+        Assert.True(PathProbe.IsUnder(Path.GetTempPath(), top));
+        Assert.True(PathProbe.IsUnder(top, top));
+    }
+
     [Theory]
     [InlineData(@"\\server\share\folder\sub", "server")]
     [InlineData(@"\\server\share", "server")]

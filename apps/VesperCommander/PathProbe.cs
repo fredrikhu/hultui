@@ -43,9 +43,10 @@ public static class PathProbe
 
     // ── Remote classification ────────────────────────────────────────────
 
-    /// <summary>True when reaching <paramref name="path"/> means going over the network — a
-    /// UNC path, or a drive letter mapped to a share. Everything else answers in microseconds
-    /// and needs none of the machinery here.</summary>
+    /// <summary>True when reaching <paramref name="path"/> means asking something that may not
+    /// answer — a UNC path, a drive letter mapped to a share, or on Linux a path under a network
+    /// or FUSE mount. Everything else answers in microseconds and needs none of the machinery
+    /// here.</summary>
     public static bool IsRemote(string? path)
     {
         if (string.IsNullOrEmpty(path)) return false;
@@ -57,7 +58,80 @@ public static class PathProbe
             return p.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase);
 
         if (p.StartsWith(@"\\", StringComparison.Ordinal)) return true;
-        return p.Length >= 2 && p[1] == ':' && char.IsAsciiLetter(p[0]) && IsNetworkDrive(p[0]);
+        if (p.Length >= 2 && p[1] == ':' && char.IsAsciiLetter(p[0])) return IsNetworkDrive(p[0]);
+        return !OperatingSystem.IsWindows() && OnRemoteMount(path);
+    }
+
+    /// <summary>Whether <paramref name="path"/> is <paramref name="root"/> or inside it — inside
+    /// at a separator, so "/mnt/database" is not under "/mnt/data". "/" contains every absolute
+    /// path.</summary>
+    public static bool IsUnder(string path, string root)
+    {
+        static string Norm(string s) => s.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        var cmp = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string p = Norm(path), r = Norm(root).TrimEnd(Path.DirectorySeparatorChar);
+        return p.Equals(r, cmp)
+            || p.StartsWith(r + Path.DirectorySeparatorChar, cmp)
+            || r.Length == 0 && p.StartsWith(Path.DirectorySeparatorChar);
+    }
+
+    // ── Linux mounts ─────────────────────────────────────────────────────
+
+    // Mount point → "answered by another machine or another process". Rebuilt on the drive TTL,
+    // from the mount table alone: IsReady or a size would ask the mount itself, which is the
+    // question a mount that has stopped answering never returns from.
+    private static List<(string Root, bool Remote)>? _mounts;
+    private static long _mountsExpire;
+
+    /// <summary>Kernel filesystems that go over the network whatever .NET's own table says.</summary>
+    private static readonly HashSet<string> NetworkFormats = new(StringComparer.Ordinal)
+        { "nfs", "nfs4", "cifs", "smb3", "smbfs", "ceph", "afs", "9p", "glusterfs", "lustre" };
+
+    /// <summary>
+    /// Whether the mount <paramref name="path"/> is under can stop answering. .NET calls a
+    /// mount Network only for kernel network filesystems in its own table, and an sshfs mount
+    /// (<c>fuse.sshfs</c>) comes back Unknown — so any FUSE filesystem counts as well: whatever
+    /// its kind, its answers come from another process, and a process can stop.
+    /// </summary>
+    private static bool OnRemoteMount(string path)
+    {
+        List<(string Root, bool Remote)> mounts;
+        lock (DriveLock)
+        {
+            long now = Environment.TickCount64;
+            if (_mounts is null || now >= _mountsExpire)
+            {
+                var list = new List<(string, bool)>();
+                try
+                {
+                    foreach (var d in DriveInfo.GetDrives())
+                        list.Add((d.Name, IsRemoteMount(d)));
+                }
+                catch { /* mount table unavailable — treat everything as local */ }
+                _mounts = list;
+                _mountsExpire = now + DriveTtlMs;
+            }
+            mounts = _mounts;
+        }
+
+        // The mount a path is on is the longest mount point that contains it.
+        string? on = null;
+        bool remote = false;
+        foreach (var (root, isRemote) in mounts)
+            if (IsUnder(path, root) && (on is null || root.Length > on.Length)) { on = root; remote = isRemote; }
+        return remote;
+    }
+
+    private static bool IsRemoteMount(DriveInfo d)
+    {
+        try
+        {
+            string format = d.DriveFormat;
+            return d.DriveType == DriveType.Network
+                || format.StartsWith("fuse.", StringComparison.Ordinal)
+                || NetworkFormats.Contains(format);
+        }
+        catch { return false; }
     }
 
     /// <summary>The server name in a UNC path, or null when it is not one. Handles the bare
@@ -255,6 +329,6 @@ public static class PathProbe
     internal static void ResetCaches()
     {
         lock (HostLock) HostCache.Clear();
-        lock (DriveLock) { _driveKinds = null; _driveKindsExpire = 0; }
+        lock (DriveLock) { _driveKinds = null; _driveKindsExpire = 0; _mounts = null; _mountsExpire = 0; }
     }
 }

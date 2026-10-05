@@ -42,7 +42,13 @@ public static class FileSystem
 {
     /// <summary>All mounted volumes for the drive picker. Unready volumes (empty
     /// card readers, disconnected network drives) come back with Ready=false and no
-    /// sizes, so the UI can dim them.</summary>
+    /// sizes, so the UI can dim them.
+    ///
+    /// <para>On Linux a network or FUSE mount is listed without being asked anything: whether
+    /// it is ready, and its sizes, are questions only it can answer, and one that has stopped
+    /// answering held the picker — and the window — for as long as the kernel waits, which for
+    /// a hard NFS mount is for ever. It shows as a network volume with no sizes; opening it is
+    /// the pane's business, off the UI thread.</para></summary>
     public static IReadOnlyList<DriveEntry> Drives()
     {
         var list = new List<DriveEntry>();
@@ -50,6 +56,11 @@ public static class FileSystem
         {
             try
             {
+                if (!OperatingSystem.IsWindows() && PathProbe.IsRemote(d.Name))
+                {
+                    list.Add(new DriveEntry(d.RootDirectory.FullName, DriveKindLabel(DriveType.Network), 0, 0, d.DriveFormat, Ready: true));
+                    continue;
+                }
                 bool ready = d.IsReady;
                 list.Add(new DriveEntry(
                     d.RootDirectory.FullName,
