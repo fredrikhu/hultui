@@ -193,4 +193,22 @@ public class BaselineAlignTests
         Assert.Equal(0, inner.Layout.AbsoluteY);
         Assert.Equal(BaselineOf(label), BaselineOf(inner));
     }
+
+    /// <summary>The cross-axis twin: a wrapping row sized by its lines has no space to align
+    /// them in, and its baseline must be measured that way too.</summary>
+    [Fact]
+    public void AnAutoHeightWrappingRowOffersTheBaselineItLaysOut()
+    {
+        var label = Label("Total", 12);
+        var inner = Label("items", 12);
+        var wrapped = Flex.Row().Width(200f).FlexWrap(FlexWrap.Wrap).AlignContent(AlignContent.Center).Children(inner);
+        var row = Flex.Row().Height(40f).AlignItems(AlignItems.Baseline).Children(label, wrapped);
+
+        Lay(row);
+
+        Assert.Equal(15, wrapped.Layout.Height);
+        Assert.Equal(0, label.Layout.Y);
+        Assert.Equal(0, inner.Layout.AbsoluteY);
+        Assert.Equal(BaselineOf(label), BaselineOf(inner));
+    }
 }
