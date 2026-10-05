@@ -13,6 +13,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Shared with the scenario suite: pins scripted runs to a hybrid CPU's performance cores. -->
+    <Compile Include="..\HultUI.Samples.PerfSuite\CorePinning.cs" Link="CorePinning.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj"
                       OutputItemType="Analyzer"
