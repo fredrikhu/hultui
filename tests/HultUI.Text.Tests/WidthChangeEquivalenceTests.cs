@@ -49,6 +49,7 @@ public class WidthChangeEquivalenceTests
         "Ελληνικόκείμενοεδώ",                   // one run, in the fallback font
         "Ελληνικό κείμενο εδώ",                 // more than one run: the spaces are the primary's
         "mixed Ελλη and latin text",
+        "Ελλη first and latin after",            // a line of the fallback font alone, at narrow widths
         "W",
         "Wi",
         "line one\nline two is longer",          // a newline: never the one-line shortcut
@@ -70,11 +71,12 @@ public class WidthChangeEquivalenceTests
         (3, TextOverflow.Clip),
     ];
 
-    public static TheoryData<bool> FontSets => new() { false, true };
+    // negativeDescent, shortFallback: see TwoFonts.
+    public static TheoryData<bool, bool> FontSets => new() { { false, false }, { true, false }, { false, true } };
 
     [Theory]
     [MemberData(nameof(FontSets))]
-    public void Reuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent)
+    public void Reuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent, bool shortFallback)
     {
         int compared = 0;
         foreach (var (maxLines, overflow) in Modes)
@@ -82,7 +84,7 @@ public class WidthChangeEquivalenceTests
             // Fresh pipelines per mode, so each string's first truncation (which builds its
             // tables) is part of what is compared, shared by every style, so a cache key that
             // left out a style field would hand one style another's result and fail here.
-            var fonts = new TwoFonts(negativeDescent);
+            var fonts = new TwoFonts(negativeDescent, shortFallback);
             var reference = new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = false };
             var reuse = new TextPipeline(fonts, new ContextShaper());
 
@@ -110,7 +112,7 @@ public class WidthChangeEquivalenceTests
 
     [Theory]
     [MemberData(nameof(FontSets))]
-    public void StyledReuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent)
+    public void StyledReuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent, bool shortFallback)
     {
         // Metric spans: the styled path for left-to-right text, the BiDi path with spans for
         // the rest. Two span lists per text through the same pipelines, so one list's work
@@ -118,7 +120,7 @@ public class WidthChangeEquivalenceTests
         int compared = 0;
         foreach (var (maxLines, overflow) in Modes)
         {
-            var fonts = new TwoFonts(negativeDescent);
+            var fonts = new TwoFonts(negativeDescent, shortFallback);
             var reference = new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = false };
             var reuse = new TextPipeline(fonts, new ContextShaper());
 
@@ -210,6 +212,29 @@ public class WidthChangeEquivalenceTests
     }
 
     [Fact]
+    public void OneLineEllipsis_OfAMultiFontLabel_MeasuresTheLineItReplaces_AndShapesOnlyTheOneItShows()
+    {
+        var reuse = Counted(reuse: true, out var fonts);
+        var reference = Counted(reuse: false, out var referenceFonts);
+        const string text = "mixed Ελλη and latin words here today";   // Greek is the fallback font's
+
+        // Widest first, so every segment a narrower width reaches is measured already.
+        reuse.Layout(text, Base, 240f, 1, TextOverflow.Ellipsis);
+        reference.Layout(text, Base, 240f, 1, TextOverflow.Ellipsis);
+        int before = fonts.Resolves, referenceBefore = referenceFonts.Resolves, widths = 0;
+        for (int w = 235; w >= 90; w -= 5, widths++)
+        {
+            reuse.Layout(text, Base, w, 1, TextOverflow.Ellipsis);
+            reference.Layout(text, Base, w, 1, TextOverflow.Ellipsis);
+        }
+
+        // Per width: the measured line's fonts, and the ellipsized line's itemization.
+        Assert.Equal(2 * widths, fonts.Resolves - before);
+        Assert.True(referenceFonts.Resolves - referenceBefore > 8 * widths,
+            $"reference path itemized {referenceFonts.Resolves - referenceBefore} times over {widths} widths");
+    }
+
+    [Fact]
     public void OneLineClip_ItemizesOnlyTheLineItShows_AtEachNewWidth()
     {
         var reuse = Counted(reuse: true, out var fonts);
@@ -297,16 +322,21 @@ public class WidthChangeEquivalenceTests
 
     /// <summary>
     /// A primary face with everything but Greek, CJK and emoji, and a fallback with those and
-    /// other metrics. <c>negativeDescent</c> gives the primary a descent below zero, where an
-    /// empty line and a line of glyphs come out at different heights.
+    /// other metrics, taller in every one. <c>negativeDescent</c> gives the primary a descent
+    /// below zero, where an empty line and a line of glyphs come out at different heights.
+    /// <c>shortFallback</c> makes the fallback shorter in every metric instead, so a line of
+    /// both fonts is as tall as one of the primary alone and only a line of the fallback alone
+    /// is not.
     /// </summary>
-    private sealed class TwoFonts(bool negativeDescent) : IFontCollection
+    private sealed class TwoFonts(bool negativeDescent, bool shortFallback = false) : IFontCollection
     {
         private static bool InFallback(int cp) => cp is >= 0x0370 and <= 0x03FF or >= 0x3000 and <= 0x9FFF or >= 0x1F000;
 
         private readonly TestFont _primary = new("Primary", -0.75f, negativeDescent ? -0.05f : 0.25f, 0f,
             cp => !InFallback(cp));
-        private readonly TestFont _fallback = new("Fallback", -0.9f, 0.3f, 0.05f, InFallback);
+        private readonly TestFont _fallback = shortFallback
+            ? new("Fallback", -0.6f, 0.2f, 0f, InFallback)
+            : new("Fallback", -0.9f, 0.3f, 0.05f, InFallback);
 
         public int Resolves;
 

@@ -276,7 +276,8 @@ public sealed class TextPipeline
             layout = ClipToWidth(text, style, maxWidth, shaped);
         }
         else if (maxLines == 1 && overflow == TextOverflow.Ellipsis && !shaped.HasNewline
-            && EllipsizeOneLine(text, style, shaped, maxWidth) is { } oneLine)
+            && (EllipsizeOneLine(text, style, shaped, maxWidth)
+                ?? EllipsizeMeasuredLine(text, style, shaped, maxWidth)) is { } oneLine)
         {
             layout = oneLine;
         }
@@ -356,7 +357,8 @@ public sealed class TextPipeline
     /// <c>text[from..to]</c>, for the first cut only.</para>
     /// </summary>
     private int SplitByCharacter(string text, int from, int to, ResolvedInheritedStyle style,
-        float maxWidth, List<TextLine> lines, int? maxLines, PrefixWidths? prefixes = null)
+        float maxWidth, List<TextLine> lines, int? maxLines, PrefixWidths? prefixes = null,
+        PrefixWidths? measureOnly = null)
     {
         while (from < to && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
@@ -366,7 +368,9 @@ public sealed class TextPipeline
             // character per line is the sane floor, and what a browser does.
             if (fit <= from) fit = NextCodePoint(text, from);
             if (fit >= to) break;             // what is left fits a line of its own
-            lines.Add(ShapeLineText(text[from..fit], style, from));
+            lines.Add(measureOnly is null
+                ? ShapeLineText(text[from..fit], style, from)
+                : MeasureLineText(text, from, fit, style, measureOnly));
             from = fit;
         }
         return from;
@@ -1217,25 +1221,18 @@ public sealed class TextPipeline
     {
         public readonly List<int> Offsets;
         public readonly float[] Widths;
-        // False when the whole text is more than one font run, so its last line is not
-        // worth itemizing in the hope of a prefix table (BuildPrefixWidths would say no).
-        public readonly bool MaybeOneRun;
 
-        public BreakSegments(List<int> offsets, bool maybeOneRun)
+        public BreakSegments(List<int> offsets)
         {
             Offsets = offsets;
             Widths = new float[offsets.Count];
             Array.Fill(Widths, float.NaN);
-            MaybeOneRun = maybeOneRun;
         }
     }
 
     // Null on the reference path, where every pass finds and measures its segments afresh.
     private BreakSegments? BreakSegmentsOf(ShapedText shaped, string text) =>
-        ReuseAcrossWidths
-            ? shaped.BreakSegments ??= new BreakSegments(BreakOffsets(text),
-                maybeOneRun: shaped.SingleLine is not { } single || single.Lines[0].Runs.Count == 1)
-            : null;
+        ReuseAcrossWidths ? shaped.BreakSegments ??= new BreakSegments(BreakOffsets(text)) : null;
 
     // MeasureString of segment s (offsets[s - 1]..offsets[s]), from the cache when there is one.
     private float SegmentWidth(string text, List<int> offsets, BreakSegments? cached, int s, ResolvedInheritedStyle style)
@@ -1403,55 +1400,69 @@ public sealed class TextPipeline
     internal bool ReuseAcrossWidths { get; init; } = true;
 
     /// <summary>
-    /// The space / non-space segments of a string that itemizes to ONE font run — the same
-    /// segments <see cref="ShapeByWords"/> cuts it into — with the running sums it adds them
-    /// up with. Only one run, because FontItemizer decides each character from the ones
-    /// before it and never looks ahead: so every prefix of a one-run string (not cut inside
-    /// a surrogate pair) itemizes to that run cut short, and is measured from these.
+    /// A string's font runs, and in each the space / non-space segments
+    /// <see cref="ShapeByWords"/> cuts it into, with the running sums MeasureString and
+    /// ShapeByWords add them up with. FontItemizer decides each character from the ones
+    /// before it and never looks ahead, so every prefix of a string (not cut inside a
+    /// surrogate pair) itemizes to the same runs, the last one cut short — and is measured
+    /// from these.
     /// </summary>
-    private sealed class PrefixWidths(string text, IResolvedFont font, float fontSize, float letterSpacing,
-        PrefixSegment[] segments)
+    private sealed class PrefixWidths(string text, float fontSize, float letterSpacing,
+        PrefixRun[] runs, PrefixSegment[] segments)
     {
         public readonly string Text = text;
-        public readonly IResolvedFont Font = font;
         public readonly float FontSize = fontSize;
         public readonly float LetterSpacing = letterSpacing;
+        public readonly PrefixRun[] Runs = runs;
         public readonly PrefixSegment[] Segments = segments;
     }
 
-    // X is where the segment starts: ShapeByWords' running x, summed in its order.
-    // GlyphsBefore counts the glyphs before it, for letter spacing.
+    // Start..End of the text in one font. Before is MeasureString's running width where the
+    // run starts (the runs before it, added in order); its segments start at FirstSegment.
+    private readonly record struct PrefixRun(int Start, int End, IResolvedFont Font, float Before, int FirstSegment);
+
+    // X is where the segment starts in its run: ShapeByWords' running x, summed in its order.
+    // GlyphsBefore counts the run's glyphs before it, for letter spacing.
     private readonly record struct PrefixSegment(int Start, float X, float Width, int GlyphsBefore, int Glyphs);
 
     private PrefixWidths? BuildPrefixWidths(string text, ResolvedInheritedStyle style)
     {
         if (text.Length == 0) return null;
-        var runs = Itemize(text, style);
-        if (runs.Count != 1) return null;
-
-        var font = runs[0].Font;
+        var fontRuns = Itemize(text, style);
+        var runs = new PrefixRun[fontRuns.Count];
         var segments = new List<PrefixSegment>();
-        float x = 0;
-        int glyphs = 0, i = 0;
-        while (i < text.Length)
+        float before = 0;
+        int runStart = 0;
+        for (int r = 0; r < fontRuns.Count; r++)
         {
-            bool isSpace = text[i] == ' ';
-            int start = i;
-            while (i < text.Length && (text[i] == ' ') == isSpace) i++;
-            var seg = GetOrShapeSegment(text[start..i], font, style.FontSize);
-            segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs.Length));
-            x += seg.Width;
-            glyphs += seg.Glyphs.Length;
+            var fr = fontRuns[r];
+            int runEnd = runStart + fr.Text.Length;
+            runs[r] = new PrefixRun(runStart, runEnd, fr.Font, before, segments.Count);
+            float x = 0;
+            int glyphs = 0;
+            for (int i = runStart; i < runEnd;)
+            {
+                bool isSpace = text[i] == ' ';
+                int start = i;
+                while (i < runEnd && (text[i] == ' ') == isSpace) i++;
+                var seg = GetOrShapeSegment(text[start..i], fr.Font, style.FontSize);
+                segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs.Length));
+                x += seg.Width;
+                glyphs += seg.Glyphs.Length;
+            }
+            // The run's width as ShapeWithSpacing gives it, added as MeasureString adds it.
+            before += style.LetterSpacing == 0f || glyphs == 0 ? x : x + style.LetterSpacing * glyphs;
+            runStart = runEnd;
         }
-        return new PrefixWidths(text, font, style.FontSize, style.LetterSpacing, segments.ToArray());
+        return new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs, segments.ToArray());
     }
 
     /// <summary>
-    /// <c>MeasureString(p.Text[..length])</c>, to the bit: the same segment widths, added in
-    /// the same order, letter spacing applied the same way. Complete segments are read off
-    /// the table; only a word the prefix cuts in two is looked up (through the word cache,
-    /// as MeasureString would) — never its share of the whole word's glyph advances, which
-    /// carry the kerning and ligatures of the letters cut off.
+    /// <c>MeasureString(p.Text[..length])</c>, to the bit: the same run and segment widths,
+    /// added in the same order, letter spacing applied the same way. Complete runs and
+    /// segments are read off the table; only a word the prefix cuts in two is looked up
+    /// (through the word cache, as MeasureString would) — never its share of the whole word's
+    /// glyph advances, which carry the kerning and ligatures of the letters cut off.
     /// </summary>
     private float PrefixWidth(PrefixWidths p, int length, ResolvedInheritedStyle style)
     {
@@ -1463,9 +1474,22 @@ public sealed class TextPipeline
         if (length < text.Length && char.IsLowSurrogate(text[length]) && char.IsHighSurrogate(text[length - 1]))
             return MeasureString(text[..length], style);
 
-        // The last segment starting before the cut.
+        // The run the cut falls in: the last starting before it.
+        var runs = p.Runs;
+        int lo = 0, hi = runs.Length - 1;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) >> 1;
+            if (runs[mid].Start < length) lo = mid;
+            else hi = mid - 1;
+        }
+        var run = runs[lo];
+
+        // Its last segment starting before the cut.
         var segments = p.Segments;
-        int lo = 0, hi = segments.Length - 1;
+        int runSegmentsEnd = lo + 1 < runs.Length ? runs[lo + 1].FirstSegment : segments.Length;
+        lo = run.FirstSegment;
+        hi = runSegmentsEnd - 1;
         while (lo < hi)
         {
             int mid = (lo + hi + 1) >> 1;
@@ -1473,7 +1497,7 @@ public sealed class TextPipeline
             else hi = mid - 1;
         }
         var seg = segments[lo];
-        int end = lo + 1 < segments.Length ? segments[lo + 1].Start : text.Length;
+        int end = lo + 1 < runSegmentsEnd ? segments[lo + 1].Start : run.End;
 
         float width;
         int glyphs;
@@ -1484,19 +1508,20 @@ public sealed class TextPipeline
         }
         else
         {
-            var part = GetOrShapeSegment(text[seg.Start..length], p.Font, p.FontSize);
+            var part = GetOrShapeSegment(text[seg.Start..length], run.Font, p.FontSize);
             width = part.Width;
             glyphs = part.Glyphs.Length;
         }
 
-        // ShapeByWords' running sum, then ShapeWithSpacing's letter spacing.
+        // ShapeByWords' running sum, then ShapeWithSpacing's letter spacing, then
+        // MeasureString's sum over the runs.
         float x = seg.X + width;
         int total = seg.GlyphsBefore + glyphs;
-        return p.LetterSpacing == 0f || total == 0 ? x : x + p.LetterSpacing * total;
+        return run.Before + (p.LetterSpacing == 0f || total == 0 ? x : x + p.LetterSpacing * total);
     }
 
     // The string's prefix widths, built the first time it is truncated and kept with its
-    // shaping; null when it is more than one font run (or the reference path is on).
+    // shaping; null on the reference path.
     private PrefixWidths? PrefixWidthsOf(ShapedText shaped, string text, ResolvedInheritedStyle style)
     {
         if (!ReuseAcrossWidths) return null;
@@ -1553,11 +1578,36 @@ public sealed class TextPipeline
         float ellipsisWidth = MeasureString(EllipsisString, style);
         float height = shaped.SingleLine!.Lines[0].Height;
 
-        bool exact = prefixes is not null
+        bool exact = prefixes is { Runs.Length: 1 }
             && text.Length >= 2
             && height == EmptyLineOfHeight(style).Size.Height
             && BreakSegmentSumsArePositive(text, style, BreakSegmentsOf(shaped, text)!);
         return new OneLineEllipsis(exact, prefixes, ellipsisWidth, height);
+    }
+
+    /// <summary>
+    /// One-line Ellipsis for a string the shortcut above cannot prove — more than one font
+    /// run, where the replaced line's height depends on which fonts it reached; or a first
+    /// segment of no width; or a single character — without shaping the line it replaces: the
+    /// wrap pass as it is, its line measured and not shaped (<see cref="MeasureLineText"/>),
+    /// then ApplyEllipsis as it is. ApplyEllipsis reads only that line's extent, width and
+    /// height, all exact, and replaces it; where it would keep it instead (the line is the
+    /// whole text and fits) the measured layout is no layout, and the caller takes the
+    /// reference path. Null then, and on the reference path.
+    /// </summary>
+    private TextLayout? EllipsizeMeasuredLine(string text, ResolvedInheritedStyle style, ShapedText shaped, float maxWidth)
+    {
+        if (!ReuseAcrossWidths) return null;
+        var prefixes = PrefixWidthsOf(shaped, text, style);
+        float ellipsisWidth = (shaped.OneLineEllipsis ??= ProveOneLineEllipsis(text, style, shaped)).EllipsisWidth;
+        var measured = BreakIntoLines(text, style, maxWidth, 1, BreakSegmentsOf(shaped, text), prefixes);
+        var layout = ApplyEllipsis(text, measured, maxWidth, (start, tailEnd) =>
+        {
+            string tail = text[start..tailEnd];
+            return BuildEllipsizedLine(tail, start, style, maxWidth,
+                start == 0 && tailEnd == text.Length ? prefixes : BuildPrefixWidths(tail, style), ellipsisWidth);
+        });
+        return ReferenceEquals(layout, measured) ? null : layout;
     }
 
     private bool BreakSegmentSumsArePositive(string text, ResolvedInheritedStyle style, BreakSegments segments)
@@ -1783,8 +1833,10 @@ public sealed class TextPipeline
         return new TextLayout([line], new Size(totalWidth, line.Height));
     }
 
+    // measureOnly, the whole text's prefix widths, makes every line a measured one
+    // (MeasureLineText) for EllipsizeMeasuredLine: the same pass, nothing shaped.
     private TextLayout BreakIntoLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        BreakSegments? segments)
+        BreakSegments? segments, PrefixWidths? measureOnly = null)
     {
         var lines = new List<TextLine>();
         int textOffset = 0;
@@ -1803,8 +1855,7 @@ public sealed class TextPipeline
             if (isNewline)
             {
                 // Emit current line
-                string lineText = text[textOffset..allBreaks[s - 1]];
-                lines.Add(ShapeLineText(lineText, style, textOffset));
+                lines.Add(NewLine(textOffset, allBreaks[s - 1]));
                 textOffset = segEnd;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
@@ -1817,8 +1868,7 @@ public sealed class TextPipeline
             if (lineWidth + segWidth > maxWidth && lineWidth > 0)
             {
                 // Break here — emit line up to previous segment
-                string lineText = text[textOffset..allBreaks[s - 1]];
-                lines.Add(ShapeLineText(lineText, style, textOffset));
+                lines.Add(NewLine(textOffset, allBreaks[s - 1]));
                 textOffset = allBreaks[s - 1];
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
@@ -1830,7 +1880,8 @@ public sealed class TextPipeline
             // of a line — anywhere else the block above has just broken.
             if (lineWidth == 0 && segWidth > maxWidth)
             {
-                textOffset = SplitByCharacter(text, allBreaks[s - 1], segEnd, style, maxWidth, lines, maxLines);
+                textOffset = SplitByCharacter(text, allBreaks[s - 1], segEnd, style, maxWidth, lines, maxLines,
+                    measureOnly: measureOnly);
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
                     break;
                 lineWidth = MeasureString(text[textOffset..segEnd], style);
@@ -1849,12 +1900,13 @@ public sealed class TextPipeline
             // several prefixes over: from the line's own segments, that is one measure, and
             // the probes cost a word-cache lookup each. Not for a line that does not fit —
             // possibly a 25,000-character token, which the gallop exists not to measure whole.
-            var lastLine = segments is { MaybeOneRun: true } && lineWidth <= maxWidth
+            var lastLine = segments is not null && lineWidth <= maxWidth
                 ? BuildPrefixWidths(text[textOffset..], style)
                 : null;
-            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLine);
+            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLine,
+                measureOnly);
             if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
-                lines.Add(ShapeLineText(text[textOffset..], style, textOffset));
+                lines.Add(NewLine(textOffset, text.Length));
         }
 
         // Position lines vertically
@@ -1868,6 +1920,10 @@ public sealed class TextPipeline
         }
 
         return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
+
+        TextLine NewLine(int from, int to) => measureOnly is null
+            ? ShapeLineText(text[from..to], style, from)
+            : MeasureLineText(text, from, to, style, measureOnly);
     }
 
     // Cached width-independent shaping of a string. <see cref="SingleLine"/> is
@@ -1893,7 +1949,6 @@ public sealed class TextPipeline
 
         var runs = new List<ShapedRun>();
         float width = 0;
-        float maxAscent = 0, maxDescent = 0, maxLeading = 0;
 
         foreach (var fr in fontRuns)
         {
@@ -1901,14 +1956,26 @@ public sealed class TextPipeline
             shaped.OffsetX = width;
             width += shaped.Width;
             runs.Add(shaped);
-            // Font metrics are at reference size 1 — scale by actual fontSize
+        }
+
+        var (ascent, descent, leading) = LineMetrics(fontRuns, style);
+        return new TextLine(runs, width, ascent, descent, leading) { Start = start, Length = lineText.Length };
+    }
+
+    // A line's vertical metrics from its font runs: the largest of each over the runs at the
+    // style's size (font metrics are at reference size 1), the primary font's for a line with
+    // none, then the line height. ShapeLineText and MeasureLineText both take them from here.
+    private (float Ascent, float Descent, float Leading) LineMetrics(List<FontRun> fontRuns, ResolvedInheritedStyle style)
+    {
+        float maxAscent = 0, maxDescent = 0, maxLeading = 0;
+        foreach (var fr in fontRuns)
+        {
             maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * style.FontSize);
             maxDescent = Math.Max(maxDescent, fr.Font.Descent * style.FontSize);
             maxLeading = Math.Max(maxLeading, fr.Font.Leading * style.FontSize);
         }
 
-        // If no runs (empty line), use primary font metrics scaled by fontSize
-        if (runs.Count == 0)
+        if (fontRuns.Count == 0)
         {
             var primaryFont = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
             maxAscent = Math.Abs(primaryFont.Ascent) * style.FontSize;
@@ -1917,6 +1984,18 @@ public sealed class TextPipeline
         }
 
         (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, style.LineHeight);
-        return new TextLine(runs, width, maxAscent, maxDescent, maxLeading) { Start = start, Length = lineText.Length };
+        return (maxAscent, maxDescent, maxLeading);
+    }
+
+    // ShapeLineText(text[from..to]) without the shaping: the same Start, Length, width and
+    // metrics, and no runs. Its width is MeasureString of the trimmed text, which is what
+    // ShapeLineText adds up, read off the whole text's prefix widths when the line starts at 0.
+    private TextLine MeasureLineText(string text, int from, int to, ResolvedInheritedStyle style, PrefixWidths prefixes)
+    {
+        string lineText = text[from..to];
+        string trimmed = lineText.TrimEnd();
+        var (ascent, descent, leading) = LineMetrics(Itemize(trimmed, style), style);
+        float width = from == 0 ? PrefixWidth(prefixes, trimmed.Length, style) : MeasureString(trimmed, style);
+        return new TextLine([], width, ascent, descent, leading) { Start = from, Length = lineText.Length };
     }
 }
