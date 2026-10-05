@@ -294,14 +294,17 @@ public static class Pages
                     F.Secondary(p, "Downloading update — 68%"),
                     F.ProgressBar(p, 0.68f)))));
 
+        int notifying = (app.NotifyMail ? 1 : 0) + (app.NotifyCalendar ? 1 : 0) + (app.NotifyStore ? 1 : 0);
         items.Add(Box.New().Height(24f).FlexShrink(0));
         items.Add(F.SectionHeader(p, "Expander"));
         items.Add(F.Expander(p, Icons.Notifications, "Notifications",
-            app.ExpanderOpen ? "Showing per-app settings" : "3 apps allowed to notify you",
+            app.ExpanderOpen
+                ? "Showing per-app settings"
+                : $"{notifying} {(notifying == 1 ? "app" : "apps")} allowed to notify you",
             app.ExpanderOpen, () => app.ExpanderOpen = !app.ExpanderOpen,
-            ToggleRow(p, "Mail", true, _ => { }),
-            ToggleRow(p, "Calendar", true, _ => { }),
-            ToggleRow(p, "Store", false, _ => { })));
+            ToggleRow(p, "Mail", app.NotifyMail, v => app.NotifyMail = v),
+            ToggleRow(p, "Calendar", app.NotifyCalendar, v => app.NotifyCalendar = v),
+            ToggleRow(p, "Store", app.NotifyStore, v => app.NotifyStore = v)));
 
         return Column([.. items]);
     }
