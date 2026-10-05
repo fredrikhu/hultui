@@ -459,9 +459,22 @@ public static class FileOps
             : CopyFileStreamed(e.FullPath, dest, overwrite, onBytes, cancelled, sevenZip, password);
     }
 
+    /// <summary>
+    /// Copies one file, from disk or out of an archive, and never leaves a failed copy behind:
+    /// a file this copy created is deleted when the copy fails.
+    ///
+    /// <para>An archive member's read fails as a matter of course — a wrong password, a member
+    /// gone from the archive — and only once the destination is open. Writing straight over an
+    /// existing file emptied it first, so a failed read cost the user that file. A member that
+    /// replaces a file is therefore extracted beside it first, and the file is overwritten in
+    /// place only once the whole member is in; overwriting in place, not renaming over it, keeps
+    /// the file's links and permissions and reports a locked file as in use, as before. A file
+    /// from disk is still written straight over: its reads fail only when the disk does.</para>
+    /// </summary>
     private static string? CopyFileStreamed(string src, string dest, bool overwrite,
         Action<long> onBytes, Func<bool> cancelled, bool sevenZip = false, string? password = null)
     {
+        string? created = null;   // a file this copy made, removed if the copy fails
         try
         {
             // Ensure the target folder exists — lets callers copy to a nested relative
@@ -471,27 +484,49 @@ public static class FileOps
 
             // An archive member reads from the VFS; a real file from disk.
             var ap = ArchivePath.TryParse(src);
+            bool replaces = File.Exists(dest);
+            string target = ap is not null && overwrite && replaces ? PartialBeside(dest) : dest;
             Stream s = ap is { } a
                 ? ArchiveVfs.OpenEntry(a.ArchiveFile, a.Internal, password, sevenZip) ?? throw new IOException("archive member unreadable")
                 : new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, ChunkSize);
             using (s)
-            using (var d = new FileStream(dest, overwrite ? FileMode.Create : FileMode.CreateNew,
+            using (var d = new FileStream(target, overwrite ? FileMode.Create : FileMode.CreateNew,
                        FileAccess.Write, FileShare.None, ChunkSize))
             {
+                if (target != dest || !replaces) created = target;
                 var buf = new byte[ChunkSize];
                 int n;
                 while ((n = s.Read(buf, 0, buf.Length)) > 0)
                 {
-                    if (cancelled()) { d.Dispose(); TryDelete(dest); return "cancelled"; }
+                    if (cancelled()) { d.Dispose(); TryDelete(target); return "cancelled"; }
                     d.Write(buf, 0, n);
                     onBytes(n);
                 }
             }
+
+            if (target != dest)
+            {
+                // The whole member is in: now the existing file can take it.
+                using (var staged = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.None, ChunkSize))
+                using (var d = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize))
+                    staged.CopyTo(d, ChunkSize);
+                TryDelete(target);
+            }
+            created = null;
             if (ap is null) { try { File.SetLastWriteTimeUtc(dest, File.GetLastWriteTimeUtc(src)); } catch { } }
             return null;
         }
-        catch (Exception ex) { return Fail(ex); }
+        catch (Exception ex)
+        {
+            if (created is not null) TryDelete(created);
+            return Fail(ex);
+        }
     }
+
+    /// <summary>Where a member that replaces <paramref name="dest"/> is extracted first: beside it,
+    /// on the same disk, so space and permissions are the destination's own.</summary>
+    private static string PartialBeside(string dest) =>
+        Path.Combine(Path.GetDirectoryName(dest) ?? "", $".{Path.GetFileName(dest)}.{Guid.NewGuid():N}.partial");
 
     private static string? CopyDirStreamed(string src, string dest, bool overwrite,
         Action<long> onBytes, Func<bool> cancelled, bool sevenZip = false, string? password = null)

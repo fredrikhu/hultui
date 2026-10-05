@@ -99,6 +99,49 @@ public sealed class SevenZipStreamTests : IDisposable
         Assert.Equal("Wrong password", e.Message);
     }
 
+    /// <summary>
+    /// The read fails only once the destination is open, so writing straight over the file
+    /// there emptied it before the failure was known: a wrong password cost the user their file.
+    /// It is replaced only once the whole member is in, and nothing is left beside it.
+    /// </summary>
+    [SevenZipFact]
+    public void AFailedReadLeavesTheFileItWouldHaveReplaced()
+    {
+        var source = Path.Combine(_dir, "notes.txt");
+        File.WriteAllText(source, "from the archive");
+        var archive = Path.Combine(_dir, "locked.7z");
+        Assert.Null(SevenZip.Create([(source, "notes.txt")], archive, CompressionLevel.Optimal, "right"));
+        var dest = Directory.CreateDirectory(Path.Combine(_dir, "out")).FullName;
+        File.WriteAllText(Path.Combine(dest, "notes.txt"), "the user's own");
+        var member = new FileEntry("notes.txt", ArchivePath.Combine(archive, "notes.txt"), IsDir: false, Size: 16, Modified: DateTime.Now);
+
+        var error = FileOps.CopyStreamed(member, dest, overwrite: true, onBytes: _ => { }, cancelled: () => false,
+            sevenZip: true, password: "wrong");
+
+        Assert.Equal("Wrong password", error);
+        Assert.Equal("the user's own", File.ReadAllText(Path.Combine(dest, "notes.txt")));
+        Assert.Equal(["notes.txt"], Directory.GetFiles(dest).Select(Path.GetFileName));
+
+        Assert.Null(FileOps.CopyStreamed(member, dest, overwrite: true, onBytes: _ => { }, cancelled: () => false,
+            sevenZip: true, password: "right"));
+        Assert.Equal("from the archive", File.ReadAllText(Path.Combine(dest, "notes.txt")));
+        Assert.Equal(["notes.txt"], Directory.GetFiles(dest).Select(Path.GetFileName));
+    }
+
+    /// <summary>A file the failed copy itself created goes again: an empty file named like the
+    /// member would read as a copy that worked.</summary>
+    [SevenZipFact]
+    public void AFailedReadLeavesNoFileOfItsOwn()
+    {
+        var zip = Zip(("inside.txt", "x"));
+        var dest = Directory.CreateDirectory(Path.Combine(_dir, "out")).FullName;
+        var ghost = new FileEntry("ghost.txt", ArchivePath.Combine(zip, "ghost.txt"), IsDir: false, Size: 1, Modified: DateTime.Now);
+
+        Assert.NotNull(FileOps.CopyStreamed(ghost, dest, overwrite: true, onBytes: _ => { }, cancelled: () => false, sevenZip: true));
+
+        Assert.Empty(Directory.GetFiles(dest));
+    }
+
     /// <summary>Through the copy: a member that cannot be read is a failed copy, with a reason,
     /// not a success that leaves an empty file.</summary>
     [SevenZipFact]
