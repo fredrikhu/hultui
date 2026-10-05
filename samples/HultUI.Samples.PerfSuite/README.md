@@ -134,9 +134,9 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 |---|---|
 | `2026-10-05-e5a2206-before.json` | Before the 35-merge feature batch of 2026-10-04/05: e5a2206, median of 3 runs. The 11 scenarios whose APIs postdate it are absent. |
 | `2026-10-05-90730ee-after.json` | After it: 90730ee, median of 3 runs interleaved with the line above. Compare these two. |
-| `2026-10-05-f84891b.json` | The first full capture, all 64 scenarios, one later run. It reads 3–5 % above the pair on every row, paint included — drift between sessions, which is why a before/after must be interleaved. |
+| `2026-10-05-f84891b.json` | The first full capture, all 64 scenarios, one later run. It reads 3–5 % above the pair on every row, paint included. A game was running on the machine for part of that evening, the likely cause; the quiet recheck below shows no such shift. Use its allocations, not its times. |
 | `2026-10-05-16fc7f6-zorder-before.json` | Before the z-order closure fix: 16fc7f6 (main), median of 3 runs. All 64 scenarios. |
-| `2026-10-05-f184580-zorder-after.json` | After it: f184580, median of 3 runs interleaved with the line above. Compare these two. Both read 5–24 % slower than the 90730ee pair (median 9 %): another session and the tabs and focus commits apart, so compare them with each other only. |
+| `2026-10-05-f184580-zorder-after.json` | After it: f184580, median of 3 runs interleaved with the line above. Compare these two. Both read 5–24 % slower than the 90730ee pair (median 9 %). The quiet recheck below puts main at the 90730ee times, so it was the machine — a game was running for part of that evening — not those commits; compare the pair with each other only. |
 | `2026-10-05-f184580-opacity-ellipsis-before.json` | Before the opacity-group and truncation fixes: f184580 again, median of 3 runs, each started after 60 s of idle (under 12 % CPU). |
 | `2026-10-05-e91d72f-opacity-ellipsis-after.json` | After them: e91d72f, median of 3 runs interleaved with the line above under the same idle rule. Compare these two: 0 slower, 6 faster. |
 | `2026-10-05-0091c80-bidi-before.json` | Before the BiDi path remembered anything between widths: 0091c80, which adds the `text/bidi` scenarios. `text/` and `layout/resize` only; the second of two runs. |
@@ -145,12 +145,16 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-a68de67-styled-after.json` | After it: a68de67, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
 | `2026-10-06-4ba5c4f-multifont-before.json` | Before multi-font labels took the one-line ellipsis shortcut: 4ba5c4f, which adds `text/multi-font ellipsis`. `text/` and `layout/resize` only; the second of two runs. |
 | `2026-10-06-7b9835c-multifont-after.json` | After it: 7b9835c, interleaved with the line above. Compare these two: 0 slower, 1 faster. |
+| `2026-10-06-e5a2206-recheck.json` | **Quiet recheck**, three points measured together: e5a2206 (60 scenarios; the 11 whose APIs postdate it absent) … |
+| `2026-10-06-90730ee-recheck.json` | … 90730ee, after the feature batch (71 scenarios) … |
+| `2026-10-06-449ecd0-recheck.json` | … and main at 449ecd0, after the fixes above. Median of 3 runs each, interleaved across the three, every run started on an idle machine (under 8 % CPU, no test host, no game running). The reference for "before the batch" and "now". |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
 single-line cross clamp and more): 51 shared scenarios, none past ±10 %. The two that
 moved consistently in every run are flex relayouts — `layout/resize 2,000-row list` +7 %
-and `layout/deep nesting leaf edit` +12 % on the minimum. A sweep over the merges
+and `layout/deep nesting leaf edit` +12 % on the minimum; the quiet recheck puts them at
++13 % and +12 %, and has them unchanged on main. A sweep over the merges
 that touched layout code puts no single cause behind it: align-content (189d176) +6 %,
 aspect ratio (82377dc) +3 %, baseline (a0dd054) and the JustifyContent fix (b5c8916)
 +2 % each. Grid, text, scroll, virtual lists, components, input, overlays, themes,
@@ -204,6 +208,29 @@ shortcut, which needs one run, and measured every candidate cut from scratch. Pr
 now cover any number of runs, and such a label runs the wrap pass with measured lines that
 are never shaped: `text/multi-font ellipsis` 41.4 → 11.8 ms (−81 % allocated); the rest
 within ±6 %.
+
+**Before the batch → now: the quiet recheck** (e5a2206 → 90730ee → 449ecd0, minimums,
+ms). What the day bought, and the one cost still open:
+
+| Scenario | e5a2206 | 90730ee | 449ecd0 | Total |
+|---|---:|---:|---:|---:|
+| `anim/60 looping tweens frame` | 27.5 | 27.3 | 0.21 | −99 % |
+| `paint/tiles transform + opacity` | 135.2 | 134.6 | 2.10 | −98 % |
+| `text/bidi ellipsis 1,000 labels resize` | 220.7 | 220.2 | 16.9 | −92 % |
+| `text/ellipsis 1,000 labels resize` | 51.9 | 52.0 | 7.5 | −85 % |
+| `text/styled ellipsis 1,000 labels resize` | 76.3 | 76.9 | 17.4 | −77 % |
+| `text/wrap 150 paragraphs resize` | 8.81 | 8.87 | 3.00 | −66 % |
+| `text/create 2,000 unique labels` | 16.5 | 16.9 | 9.2 | −45 % |
+| `layout/cards create 300` | 8.74 | 8.88 | 5.34 | −39 % |
+| `layout/shrink 300 overfull rows resize` | 7.03 | 7.31 | 5.66 | −20 % |
+| `layout/resize 2,000-row list` | 4.83 | 5.45 | 5.44 | **+13 %** |
+| `layout/deep nesting leaf edit` | 0.553 | 0.621 | 0.620 | **+12 %** |
+| `controls/tabs switch` | 1.26 | 1.36 | 1.33 | +6 % |
+
+The rest of `text/` fell too (BiDi wrap −91 %, multi-font ellipsis −83 %, styled wrap
+−71 %, styled BiDi −29 to −37 %); the other 43 shared rows are within ±7 %, and every
+rendered frame allocates what it did at e5a2206 again. The flex-relayout cost the batch
+added is the one thing main has not won back.
 
 **What the suite turned up on its first run**, for follow-up:
 
