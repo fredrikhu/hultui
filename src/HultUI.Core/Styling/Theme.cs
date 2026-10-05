@@ -44,6 +44,7 @@ public sealed class Theme
     public KbdTheme Kbd { get => Get<KbdTheme>(); init => Set(value); }
     public CommandPaletteTheme CommandPalette { get => Get<CommandPaletteTheme>(); init => Set(value); }
     public MenuBarTheme MenuBar { get => Get<MenuBarTheme>(); init => Set(value); }
+    public ExpanderTheme Expander { get => Get<ExpanderTheme>(); init => Set(value); }
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;

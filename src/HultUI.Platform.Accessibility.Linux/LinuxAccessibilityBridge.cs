@@ -266,6 +266,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             case AccessibilityProperties.IsFocused:
                 _bus!.EmitStateChanged(path, "focused", change.Node.IsFocused);
                 return true;
+            case AccessibilityProperties.IsExpanded:
+                _bus!.EmitStateChanged(path, "expanded", change.Node.Expanded == true);
+                return true;
             case AccessibilityProperties.IsEnabled:
                 _bus!.EmitStateChanged(path, "enabled", change.Node.IsEnabled);
                 _bus!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);

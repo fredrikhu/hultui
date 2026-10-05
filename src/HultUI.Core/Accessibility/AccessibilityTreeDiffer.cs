@@ -99,6 +99,8 @@ public static class AccessibilityTreeDiffer
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsToggled));
         if (prev.IsEnabled != curr.IsEnabled)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsEnabled));
+        if (prev.Expanded != curr.Expanded)
+            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsExpanded));
         if (prev.IsFocused != curr.IsFocused)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
         if (prev.NativeContent != curr.NativeContent)

@@ -1,6 +1,27 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Expander** — `src/HultUI.Core/Elements/ExpanderElement.cs` (+ `Builders/Expander.cs`,
+  `ExpanderTheme`): a header (chevron, title or any element, actions that do not toggle) over a
+  body that slides open with the chevron turning in step. Keeps its own state across rebuilds, or
+  the app's with `Expanded(bool)` (Tabs' controlled/uncontrolled rule); a closed body leaves the
+  tree but an element body is kept and patched, a function body is built only while open; a
+  closing body hands the keyboard to the header. Owns its children (`ManagesOwnChildren`), patching
+  the app's parts into live ones. Default look a disclosure (leading chevron, hover fill); the
+  Fluent sample's card is a theme (trailing chevron, shared border, rule between header and
+  body) and replaces its hand-rolled one; the accessibility sample's "Details" tree item is one
+  too (its UIA ExpandCollapse UiTest passes on a real window). Six hand-rolled expanders surveyed;
+  Junction's are list rows with precomputed heights or mixed-content toggles and stay. Also fixed:
+  expanded state was never announced — no UIA ExpandCollapseState change event, and AT-SPI's
+  expandable/expanded states were defined but never sent, so Orca read every expander, tree
+  folder, dropdown and menu-bar title as a plain button. New `AccessibilityProperties.IsExpanded`,
+  differ compares `Expanded`, `AtSpiMarshal.StateBits` testable. Trap: hover/press restore the look
+  they captured when they began, corner radius included — a card closed while hovered kept square
+  bottom corners once the pointer left; the header re-snapshots whenever its shape changes. Tests:
+  10 headless, 1 differ, 2 AT-SPI state; controls (10): differ blind, AT-SPI bits dropped, action
+  toggles, NumLock as a modifier, rebuild overriding own state, focus left in a closing body,
+  title read twice, body never sliding, no re-snapshot, bare disclosure squaring its corners —
+  each fails its test.
 - **MenuBar** — `src/HultUI.Core/Builders/MenuBar.cs` (+ `MenuBarItem`, `MenuBarElement`,
   `MenuTitleElement`, `MenuBarTheme`): titles that open the existing context menus as
   dropdowns. Pointer: press to open/close, hover switches while one is open. Keyboard the

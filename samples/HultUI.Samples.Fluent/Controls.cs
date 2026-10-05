@@ -138,46 +138,16 @@ public static class F
     /// </summary>
     public static Element Expander(
         FluentPalette p, Icon icon, string title, string? description, bool expanded,
-        Action onToggle, params Element[] content)
-    {
-        var chevron = IconRenderer.Draw(Icons.ChevronDown, 12f, p.TextSecondary);
-        chevron.Rotate(expanded ? 180f : 0f).Transition(TransitionProperty.Transform, 160f);
-
-        var header = Focusable(Card(p)
-            .MinHeight(68f)
-            .CornerRadius(expanded
-                ? new CornerRadius(Fluent.ControlRadius, Fluent.ControlRadius, 0, 0)
-                : new CornerRadius(Fluent.ControlRadius))
-            .Padding(new Thickness(12, 16, 12, 16))
-            .FlexDirection(FlexDirection.Row)
-            .Gap(16f)
-            .AlignItems(AlignItems.Center)
-            .Cursor(CursorType.Pointer)
-            .OnHover(b => b.Background(p.CardHover))
-            .OnClick(_ => onToggle())
-            .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName(title)
-            .AccessibleExpanded(expanded)
-            .Children(
+        Action<bool> onChanged, params Element[] content) =>
+        // The framework's expander, in the card look FluentTheme gives it; the header is
+        // WinUI's: an icon, the title, and a second line under it.
+        HultUI.Core.Builders.Expander.New(title, Flex.Column(gap: 12).Children(content))
+            .Header(Flex.Row(gap: 16).AlignItems(AlignItems.Center).Children(
                 IconRenderer.Draw(icon, 20f, p.TextPrimary),
                 Flex.Column(gap: 2).FlexGrow(1).Children(
-                    description is null ? [Body(p, title)] : new[] { Body(p, title), Secondary(p, description) }),
-                Box.New().Width(32f).Height(32f).CornerRadius(Fluent.ControlRadius)
-                    .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-                    .Children(chevron)), onToggle);
-
-        if (!expanded) return header;
-
-        var panel = Box.New().FlexShrink(0)
-            .Background(p.IsDark ? p.Layer : Color.White)
-            .Border(new Thickness(0, 1, 1, 1), p.CardStroke)
-            .CornerRadius(new CornerRadius(0, 0, Fluent.ControlRadius, Fluent.ControlRadius))
-            .Padding(new Thickness(16, 16, 16, 16))
-            .Gap(12f)
-            .Children(content);
-
-        return Flex.Column(gap: 0).FlexShrink(0).Children(header, panel);
-    }
+                    description is null ? [Body(p, title)] : new[] { Body(p, title), Secondary(p, description) })))
+            .Expanded(expanded)
+            .OnExpandedChanged(onChanged);
 
     // ──────────────────────────────────────────────────────────────────────
     // Buttons

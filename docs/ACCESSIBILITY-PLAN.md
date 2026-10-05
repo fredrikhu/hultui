@@ -265,7 +265,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **Value** — text inputs.
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
-  Expand/Collapse reuse the element's click-to-toggle.
+  Expand/Collapse reuse the element's click-to-toggle. A change raises the
+  ExpandCollapseState property event (2026-10-05), and on Linux the node carries AT-SPI's
+  `expandable` state, plus `expanded` while open, with a `state-changed:expanded` signal —
+  before that, Orca read every expandable node as a plain button.
 - **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 - **Scroll** — scroll views and virtualized lists; read scroll percent/view size

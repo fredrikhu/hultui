@@ -14,6 +14,9 @@ public static class AccessibilityProperties
     public const string IsSelected = "IsSelected";
     public const string IsFocused = "IsFocused";
     public const string IsEnabled = "IsEnabled";
+    /// <summary><see cref="AccessibilityNode.Expanded"/> changed: an expander, a tree item, a
+    /// dropdown or a menu-bar title opened or closed.</summary>
+    public const string IsExpanded = "IsExpanded";
     public const string BoundingRect = "BoundingRect";
 
     /// <summary>

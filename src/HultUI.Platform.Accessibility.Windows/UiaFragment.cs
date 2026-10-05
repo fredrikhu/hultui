@@ -168,6 +168,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
             UiaInterop.UIA_ToggleToggleStatePropertyId when _isToggled is { } t
                 => UiaVariant.FromInt(t ? UiaInterop.ToggleState_On : UiaInterop.ToggleState_Off),
+            UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId when _expanded is { } e
+                => UiaVariant.FromInt(e ? UiaInterop.ExpandCollapseState_Expanded : UiaInterop.ExpandCollapseState_Collapsed),
             _ => UiaVariant.Empty,
         };
         return 0;
