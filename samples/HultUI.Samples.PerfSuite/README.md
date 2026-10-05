@@ -139,6 +139,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-05-f184580-zorder-after.json` | After it: f184580, median of 3 runs interleaved with the line above. Compare these two. Both read 5–24 % slower than the 90730ee pair (median 9 %): another session and the tabs and focus commits apart, so compare them with each other only. |
 | `2026-10-05-f184580-opacity-ellipsis-before.json` | Before the opacity-group and truncation fixes: f184580 again, median of 3 runs, each started after 60 s of idle (under 12 % CPU). |
 | `2026-10-05-e91d72f-opacity-ellipsis-after.json` | After them: e91d72f, median of 3 runs interleaved with the line above under the same idle rule. Compare these two: 0 slower, 6 faster. |
+| `2026-10-05-0091c80-bidi-before.json` | Before the BiDi path remembered anything between widths: 0091c80, which adds the `text/bidi` scenarios. `text/` and `layout/resize` only; the second of two runs. |
+| `2026-10-05-7d2d341-bidi-after.json` | After it: 7d2d341, interleaved with the line above. Compare these two: 0 slower, 2 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -174,6 +176,17 @@ KB allocated per step: 24 bytes less for each element drawn or hit-tested in a f
 a light step — and no time moved past ±10 %. The rows still above e5a2206 are those that
 create elements, 8 bytes per element: `Element.OverlayOrigin` (popover, 3f14903) took
 `BoxElement` from 600 to 608 B.
+
+**The BiDi path, before → after.** Text with any character at or above U+0590 — Hebrew
+and Arabic, but also an em dash, an arrow or an emoji — is laid out by the BiDi path, whose
+right-to-left runs bypass the word cache, so every measure and line there was HarfBuzz
+shaping from scratch at every width (~4 µs for one Hebrew word, ~25 µs for a label). The
+levels, breaks, segment widths, ellipsis probes and lines are remembered now:
+`text/bidi wrap 150 paragraphs resize` 37.6 → 3.6 ms and `text/bidi ellipsis 1,000 labels
+resize` 214 → 17 ms (90 → 7.6 MB a frame). The rest of `text/` and `layout/resize` stayed
+within ±8 %; `text/create 2,000 unique labels` — whose em dash puts every label on this
+path, each laid out once — went through a version where making the memo for a string cost
+it +10 %, which is why a string now gets one only at its second layout.
 
 **What the suite turned up on its first run**, for follow-up:
 
