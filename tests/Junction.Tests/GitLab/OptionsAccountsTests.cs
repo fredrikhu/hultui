@@ -226,6 +226,11 @@ public class OptionsAccountsTests
                 credentialStore: store, gitLabHandler: _ => handler);
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
+            // The repository's summary says whether its remote is on GitLab, and it lands a frame
+            // or more after mount (later when a file event restarts the load); until it does,
+            // every GitLab command answers "not on GitLab". The mark by the repository's name is
+            // how the app shows it knows, and a user cannot reach those commands before it.
+            if (gitlabOrigin) session.PumpUntil(() => ById(session, "gitlab-mark") is not null, TimeSpan.FromSeconds(15));
             body(repo, session, app, settings, store);
         }
         finally { app?.Dispose(); }
