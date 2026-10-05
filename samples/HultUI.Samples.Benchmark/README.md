@@ -227,32 +227,45 @@ Reading it:
   cost of the workload the benchmark *chooses* to measure vs. what an app pays in
   practice.
 
-### Framework feature batch, before and after (2026-10-05)
+### Framework feature batch, before and after (2026-10-05, rechecked 2026-10-06)
 
 The 35 merges from e5a2206 (2026-10-04) to 90730ee (2026-10-05): undo, scroll
 chaining, dialog Esc/focus, baseline alignment, find bar, settings, window
 placement, single instance, shortcuts, command palette, menu bar, expander,
 popover, table, aspect ratio, align-content, sticky, the single-line cross clamp,
-golden images. Both commits built Release and run alternately, 8 times each, on
-the 8 performance cores (see below). Median of each run's min / median of each
-run's median, ms:
+golden images. Then main at 449ecd0, after the evening's performance fixes
+(opacity groups, z-order, truncation, BiDi/styled/multi-font memos).
 
-| Operation             | a11y off: before | after | Δ min | Δ median | a11y on: before | after |
-| --------------------- | ---------------: | ----: | ----: | -------: | --------------: | ----: |
-| create 1,000          |            11.15 | 11.83 |  +6 % |     0 %  |           15.67 | 15.96 |
-| update every 10th     |             1.08 |  1.13 |  +4 % |    −3 %  |            6.78 |  7.25 |
-| select row            |             0.36 |  0.29 | −21 % |   −37 %  |            0.43 |  0.43 |
-| swap rows             |             0.51 |  0.53 |  +3 % |    +1 %  |            2.25 |  2.21 |
-| remove row            |             1.61 |  1.68 |  +4 % |    −5 %  |            3.13 |  2.96 |
-| create 10,000         |            132.9 | 140.9 |  +6 % |    +1 %  |           169.7 | 157.5 |
-| append 1,000 → 1,000  |             7.19 |  7.74 |  +8 % |    +5 %  |            9.44 |  9.95 |
-| clear 1,000           |             0.57 |  0.55 |  −4 % |   −11 %  |            0.55 |  0.56 |
+Measured on 2026-10-06 with the machine otherwise idle: all three built Release,
+run in turn 6 times each on the 8 performance cores (see below), every run started
+only once the machine was under 8 % CPU with no test host or game running. Median
+of each run's minimum (median of each run's median), ms, a11y off:
 
-Nothing moved past the ±10 % session noise. The bulk, layout-bound operations sit
-4–8 % higher on their minimums in both this run and an unpinned one, and the
-`--profile` layout column of create 10,000 agrees (79.5 → 82.8 ms); the in-place
-operations are flat. The [scenario suite](../HultUI.Samples.PerfSuite/README.md)
-puts the same small cost on flex relayout and none anywhere else.
+| Operation             |      e5a2206 |      90730ee |   449ecd0 | batch |  since |
+| --------------------- | -----------: | -----------: | --------: | ----: | -----: |
+| create 1,000          | 11.37 (15.6) |  9.59 (15.2) | 7.81 (13.7) | −16 % | −19 % |
+| update every 10th     |  1.08 (1.18) |  0.96 (1.20) | 0.97 (1.24) | −11 % |  +1 % |
+| select row            |  0.30 (0.39) |  0.29 (0.37) | 0.34 (0.86) |  −3 % | +16 % |
+| swap rows             |  0.54 (0.64) |  0.55 (0.63) | 0.53 (1.17) |  +2 % |  −5 % |
+| remove row            |  1.70 (1.94) |  1.73 (1.89) | 1.64 (2.12) |  +2 % |  −5 % |
+| create 10,000         |   130 (167)  |   139 (169)  |  141 (171)  |  +7 % |  +1 % |
+| append 1,000 → 1,000  |  7.21 (7.81) |  7.79 (8.64) | 7.79 (8.38) |  +8 % |   0 % |
+| clear 1,000           |  0.52 (3.23) |  0.62 (2.83) | 0.57 (2.98) | +19 % |  −7 % |
+
+The batch added 7–8 % to the layout-bound bulk operations, as the first,
+evening measurement (8 pinned runs per side) had found: create 10,000 +6 %,
+append +8 %. The scenario suite traces that to flex relayout, +12–13 %, spread
+over align-content, aspect ratio, baseline alignment and the JustifyContent fix
+([its README](../HultUI.Samples.PerfSuite/README.md)). Main has not won it back;
+its fixes went to text and paint, which this table barely exercises — except
+create 1,000, whose style pass fell from 1.4 to 0.4 ms (`--profile`). The
+sub-millisecond rows (select, swap, clear) are within their noise.
+
+With accessibility on (this machine's background UIA client attached), the bulk
+rows read alike (create 10,000: 167 / 162 / 161 ms) and the in-place rows 7–32 %
+lower after the batch. The evening table that stood here first agreed on the
+bulk rows but not on every small one; a game was open on the machine for part of
+that evening, so this quiet table replaces it.
 
 ## How the measurement works
 
