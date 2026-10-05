@@ -31,6 +31,7 @@ static class Report
         using var w = new Utf8JsonWriter(stream, new JsonWriterOptions
         {
             Indented = true,
+            NewLine = "\n",   // the repository stores LF; Windows would otherwise write CRLF
             // Captures are committed and read by people: keep "+", "×" and "—" as themselves.
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         });
