@@ -57,7 +57,15 @@ public enum AlignContent : byte
 public enum PositionType : byte
 {
     Relative,
-    Absolute
+    Absolute,
+    /// <summary>
+    /// In the flow like <see cref="Relative"/>, but held against an edge of the nearest scroll
+    /// view while it is scrolled past — a section header that stays in sight while its section
+    /// scrolls under it. <see cref="PositionStyle.Top"/> (or Bottom, Left, Right) says how far
+    /// from that edge; the element never leaves its parent's box, so the next section's header
+    /// pushes it off. It moves when drawn, hit and read, never in layout.
+    /// </summary>
+    Sticky,
 }
 
 public enum Overflow : byte

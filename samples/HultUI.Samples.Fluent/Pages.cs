@@ -333,7 +333,10 @@ public static class Pages
     /// <summary>A gallery section: a bold label, then a card holding the specimens.</summary>
     private static Element Section(FluentPalette p, string title, Element content) =>
         Flex.Column(gap: 8f).FlexShrink(0).Margin(new Thickness(24, 0, 0, 0)).Children(
-            F.SectionHeader(p, title),
+            // Held at the top of the page while its card scrolls under it, until the section
+            // ends; on the page's own fill, so the card does not show through.
+            Box.New().Background(p.Layer).Padding(new Thickness(0, 0, 8, 0)).Sticky()
+                .AutomationId("section-" + title).Children(F.SectionHeader(p, title)),
             F.Card(p).Padding(new Thickness(20, 20, 20, 20)).Children(content));
 
     // ──────────────────────────────────────────────────────────────────────

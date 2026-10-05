@@ -1,6 +1,23 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Sticky positioning** — `PositionType.Sticky` + `.Sticky(top, bottom, left, right)`: in the flow,
+  held against an edge of the nearest scroll view while it is scrolled past, never out of its
+  parent's content box (or, as the scroll view's own child, out of the scrolled content).
+  `Element.StickyShift` is worked out from the scroll offset when drawn (renderer translate),
+  hit (HitTester shifts point and clip), read (a11y builder threads it as negative scroll) and
+  measured (`ScreenBorderBox`, so popovers, tooltips, the focus ring and headless clicks follow);
+  layout never moves it. `ZOrderHelper` draws a sticky child after its siblings at its ZIndex — and
+  is stable now: it promised insertion order for equal z-indexes but used `List.Sort`, which only
+  looked stable while insertion-sorting 16 or fewer. `ScrollRangeIntoView` scrolls a revealed row
+  clear of a header held at the top. Adopted: Junction's change list (each section a column; Staged
+  / Changes / Conflicts / Hidden headers with Unstage all / Stage all stay in reach) and the Fluent
+  gallery's section titles. Survey: every pinned header in the apps is built outside its scroll
+  view; nothing tracked the scroll offset; VirtualList rows are not sections (a stuck group header
+  in a virtual list is a different feature — Junction's hunk headers, blame runs). Tests: 7
+  headless, 2 z-order, 1 Junction; controls (10): never shifting, drawn/hit/read in place, drawn
+  under its siblings, not held in its parent, unstable z-order, flat headers bounded by the
+  viewport, reveal landing under the header, Junction headers not sticky — each fails its test.
 - **Aspect ratio** — `BoxStyle.AspectRatio` + `.AspectRatio(w, h)` / `.AspectRatio(ratio)`: the
   side left auto follows the known one (given, stretched, flexed, or a grid cell's), within its
   min/max; both known → ignored; neither → height from the content's width. Width wins: rows and

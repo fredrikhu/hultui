@@ -85,4 +85,36 @@ public class ZOrderHelperTests
 
         Assert.Empty(result);
     }
+
+    /// <summary>Children with the same z-index keep their order in a long list too. The sort
+    /// claimed to be stable and was not: List.Sort only behaved so while it insertion-sorted
+    /// sixteen or fewer, which is all <see cref="EqualZIndex_PreservesInsertionOrder"/> tried.</summary>
+    [Fact]
+    public void EqualZIndexesKeepTheirOrder_InALongList()
+    {
+        var parent = BoxElement.New();
+        var raised = BoxElement.New();
+        raised.Position.ZIndex = 1;
+        parent.AddChild(raised);
+        var rest = Enumerable.Range(0, 40).Select(_ => BoxElement.New()).ToArray();
+        foreach (var child in rest) parent.AddChild(child);
+
+        var order = ZOrderHelper.GetChildrenInZOrder(parent);
+        Assert.Equal([.. rest, raised], order);
+    }
+
+    [Fact]
+    public void AStickyChildIsDrawnAfterItsSiblings_AtItsZIndex()
+    {
+        var parent = BoxElement.New();
+        var header = BoxElement.New();
+        header.Position.Type = PositionType.Sticky;
+        var a = BoxElement.New();
+        var b = BoxElement.New();
+        var above = BoxElement.New();
+        above.Position.ZIndex = 2;
+        parent.ReplaceChildren(header, a, above, b);
+
+        Assert.Equal([a, b, header, above], ZOrderHelper.GetChildrenInZOrder(parent));
+    }
 }

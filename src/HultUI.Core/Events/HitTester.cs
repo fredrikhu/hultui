@@ -23,6 +23,15 @@ public static class HitTester
         if (clipRect.HasValue && !clipRect.Value.Contains(point))
             return null;
 
+        // A sticky element is drawn moved by its shift: the point goes into its unmoved space,
+        // and the clip with it, for it and its subtree.
+        if (element.PositionRead.Type == Layout.PositionType.Sticky && element.StickyShift is { } stick
+            && (stick.X != 0 || stick.Y != 0))
+        {
+            point = new Point(point.X - stick.X, point.Y - stick.Y);
+            if (clipRect is { } c) clipRect = c.Translate(-stick.X, -stick.Y);
+        }
+
         // A transform maps this element and its subtree about its centre; invert it
         // so the point is in the element's own untransformed space for every bounds
         // check below. The parent's axis-aligned clip no longer applies here.
