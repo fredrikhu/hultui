@@ -101,7 +101,6 @@ public sealed partial class LayoutEngine
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
         bool isReverse = flex.Direction is FlexDirection.RowReverse or FlexDirection.ColumnReverse;
         bool isWrap = flex.Wrap is not FlexWrap.NoWrap;
-        bool hasDefiniteCross = isRow ? resolvedH != null : resolvedW != null;
         var ownSize = OwnSize(box, outerSpacing, constraint, resolvedW, contentAvailW, resolvedH, contentAvailH);
         var ownMain = isRow ? ownSize.Width : ownSize.Height;
         var ownCross = isRow ? ownSize.Height : ownSize.Width;
@@ -127,7 +126,7 @@ public sealed partial class LayoutEngine
             foreach (var l in lines)
                 RemeasureFlexedCrossSizes(l, isRow, mainDistribute, crossAvailable);
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
-            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap, hasDefiniteCross);
+            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap);
 
             float totalCross = 0;
             for (int i = 0; i < lines.Count; i++)

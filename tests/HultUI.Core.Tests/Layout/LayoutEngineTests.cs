@@ -697,6 +697,58 @@ public class LayoutEngineTests
         Assert.Equal(0, row.Children[0].Layout.AbsoluteY, 0.01f);
     }
 
+    // ──── Single line: held within the container's min and max cross size ────
+    // CSS Flexbox §9.4 step 8: a single-line container's line is clamped to its min and max
+    // cross size, so its items are aligned in the box it ends up as — not in a line only as
+    // tall as they are, at the top of a box its min made bigger.
+
+    [Fact]
+    public void SingleLine_AutoCrossSize_CentresInItsMinimum()
+    {
+        var row = Flex.Row().MinHeight(60).AlignItems(AlignItems.Center).Children(Box.New().Width(20).Height(20));
+        var root = Flex.Row().Width(400).Height(200).AlignItems(AlignItems.FlexStart).Children(row);
+        Layout(root);
+
+        Assert.Equal(60, row.Layout.Height, 0.01f);
+        Assert.Equal(20, row.Children[0].Layout.AbsoluteY, 0.01f);
+    }
+
+    [Fact]
+    public void SingleLine_AutoCrossSize_StretchesToItsMinimum()
+    {
+        // A card with a min width, centred where nothing stretches it: its children fill it.
+        var card = Flex.Column().MinWidth(320).Padding(new Thickness(0, 10, 0, 10)).Children(Box.New().Height(20));
+        var root = Flex.Column().Width(800).Height(200).AlignItems(AlignItems.Center).Children(card);
+        Layout(root);
+
+        Assert.Equal(320, card.Layout.Width, 0.01f);
+        Assert.Equal(300, card.Children[0].Layout.Width, 0.01f);
+    }
+
+    [Fact]
+    public void SingleLine_AutoCrossSize_StretchesNoFurtherThanItsMaximum()
+    {
+        var stretched = Box.New().Width(20);
+        var row = Flex.Row().MaxHeight(30).Children(stretched, Box.New().Width(20).Height(50));
+        var root = Flex.Row().Width(400).Height(200).AlignItems(AlignItems.FlexStart).Children(row);
+        Layout(root);
+
+        Assert.Equal(30, row.Layout.Height, 0.01f);
+        Assert.Equal(30, stretched.Layout.Height, 0.01f);
+    }
+
+    [Fact]
+    public void SingleLine_DefiniteCrossSize_IsUnchanged()
+    {
+        // Forced by its parent's stretch, the row is already its own height: the min is moot.
+        var row = Flex.Row().MinHeight(60).AlignItems(AlignItems.Center).Children(Box.New().Width(20).Height(20));
+        var root = Flex.Row().Width(400).Height(100).Children(row);
+        Layout(root);
+
+        Assert.Equal(100, row.Layout.Height, 0.01f);
+        Assert.Equal(40, row.Children[0].Layout.AbsoluteY, 0.01f);
+    }
+
     // ──── Phase 2: Reverse Directions ────
 
     [Fact]

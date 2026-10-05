@@ -194,6 +194,23 @@ public class BaselineAlignTests
         Assert.Equal(BaselineOf(label), BaselineOf(inner));
     }
 
+    /// <summary>A row with a min height centres its text in that height wherever it is placed,
+    /// and offers the baseline of the text where it is drawn.</summary>
+    [Fact]
+    public void AMinHeightRowOffersTheBaselineOfItsCentredText()
+    {
+        var label = Label("Total", 12);
+        var inner = Label("items", 12);
+        var minRow = Flex.Row().MinHeight(40f).AlignItems(AlignItems.Center).Children(inner);
+        var row = Flex.Row().Height(80f).AlignItems(AlignItems.Baseline).Children(label, minRow);
+
+        Lay(row);
+
+        Assert.Equal(40, minRow.Layout.Height);
+        Assert.Equal(12.5f, inner.Layout.AbsoluteY - minRow.Layout.AbsoluteY);   // (40 − 15) / 2
+        Assert.Equal(BaselineOf(label), BaselineOf(inner));
+    }
+
     /// <summary>The cross-axis twin: a wrapping row sized by its lines has no space to align
     /// them in, and its baseline must be measured that way too.</summary>
     [Fact]

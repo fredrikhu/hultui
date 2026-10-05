@@ -97,16 +97,12 @@ public sealed partial class LayoutEngine
         }
         else
         {
-            // Pass whether cross dimension is definite so single-line
-            // containers with auto cross use natural content sizes
-            bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
-            bool hasDefiniteCross = isRow ? resolvedHeight != null : resolvedWidth != null;
             var own = OwnSize(box, outerSpacing, constraint, resolvedWidth, contentAvailW, resolvedHeight, contentAvailH);
 
             contentSize = LayoutFlexChildren(element, children, contentAvailW, contentAvailH,
                 contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
                 contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
-                own.Width, own.Height, hasDefiniteCross: hasDefiniteCross);
+                own.Width, own.Height);
         }
 
         // Final element size
@@ -182,7 +178,7 @@ public sealed partial class LayoutEngine
     /// the cross one.</summary>
     private Size LayoutFlexChildren(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY,
-        SizeRange ownWidth, SizeRange ownHeight, bool hasDefiniteCross = true)
+        SizeRange ownWidth, SizeRange ownHeight)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -228,7 +224,7 @@ public sealed partial class LayoutEngine
 
             // ── Phase 4: Compute per-line cross sizes ──
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
-            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap, hasDefiniteCross);
+            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap);
 
             // ── Phase 5: Distribute lines along cross axis (AlignContent) ──
             float totalCrossSize = 0;
@@ -534,10 +530,9 @@ public sealed partial class LayoutEngine
         else
         {
             bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
-            bool hasDefiniteCross = isRow ? resolvedH != null : resolvedW != null;
             var own = OwnSize(box, outerSpacing, constraint, resolvedW, contentAvailW, resolvedH, contentAvailH);
             contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH,
-                isRow ? own.Height : own.Width, hasDefiniteCross);
+                isRow ? own.Height : own.Width);
         }
 
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
@@ -565,11 +560,11 @@ public sealed partial class LayoutEngine
     /// (measure items, collect lines, resolve grow/shrink, compute line cross
     /// sizes) and returns the resulting content (border-box) size. Skips Phase 6
     /// positioning entirely — descendants are not written. <paramref name="ownCross"/> is the
-    /// container's own cross size (<see cref="OwnSize"/>): what AlignContent.Stretch can grow
-    /// the lines to.
+    /// container's own cross size (<see cref="OwnSize"/>), which the lines are held in or,
+    /// with AlignContent.Stretch, grown to.
     /// </summary>
     private Size MeasureFlexChildrenSize(Element container, IReadOnlyList<Element> children,
-        float contentAvailW, float contentAvailH, SizeRange ownCross, bool hasDefiniteCross)
+        float contentAvailW, float contentAvailH, SizeRange ownCross)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -603,7 +598,7 @@ public sealed partial class LayoutEngine
             // As the layout pass does, or a row baseline alignment makes taller would be
             // measured shorter than it lays out.
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
-            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap, hasDefiniteCross);
+            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap);
 
             float totalMain = 0;
             float totalCross = 0;
@@ -977,11 +972,11 @@ public sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>Sizes each line across: its tallest item, or for a nowrap container with a
-    /// definite cross size, that size. <paramref name="ownCross"/> is the container's own cross
-    /// size (<see cref="OwnSize"/>), which AlignContent.Stretch grows wrapped lines to.</summary>
+    /// <summary>Sizes each line across: its tallest item, a nowrap container's one line held in
+    /// <paramref name="ownCross"/>, the container's own cross size (<see cref="OwnSize"/>) — which
+    /// is also what AlignContent.Stretch grows wrapped lines to.</summary>
     private static void ComputeLineCrossSizes(List<FlexLine> lines, SizeRange ownCross, float crossGap,
-        AlignContent alignContent, bool isWrap, bool hasDefiniteCross)
+        AlignContent alignContent, bool isWrap)
     {
         // Each line's cross size is the max cross size of its items — or, for the items that
         // align by baseline, the tallest above the shared baseline plus the deepest below it,
@@ -1004,13 +999,14 @@ public sealed partial class LayoutEngine
             };
         }
 
-        // If single line (nowrap), the line takes the full cross available
-        // when the container has a definite cross size. Per CSS spec, if the
-        // cross size is indefinite, use the max of items' natural cross sizes.
+        // A single line (nowrap) is held within the container's own cross size, so its items
+        // are aligned in the box the container ends up as (CSS Flexbox §9.4 step 8): all of a
+        // definite size, else its items' extent within the min and max. Without the min, a row
+        // with a min height whose height nothing forced lined its items up along its top, even
+        // centred, and a card with a min width left its stretched children their own width.
         if (!isWrap && lines.Count == 1)
         {
-            if (hasDefiniteCross)
-                lines[0] = lines[0] with { CrossSize = ownCross.Min };
+            lines[0] = lines[0] with { CrossSize = ownCross.Hold(lines[0].CrossSize) };
             return;
         }
 
