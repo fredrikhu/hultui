@@ -2,7 +2,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-/// <summary>The chip <see cref="Kbd.New"/> returns; it puts <see cref="KbdTheme"/> on itself
+/// <summary>The chip <see cref="Builders.Kbd.New"/> returns; it puts <see cref="KbdTheme"/> on itself
 /// and its text each style pass.</summary>
 public sealed class KbdElement : BoxElement
 {
