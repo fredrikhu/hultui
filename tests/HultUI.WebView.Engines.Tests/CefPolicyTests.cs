@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using HultUI.Core.Events;
@@ -33,24 +34,49 @@ public sealed class CefPolicyTests : IDisposable
         public void Post(Action action) => ThreadPool.QueueUserWorkItem(_ => action());
     }
 
-    private sealed class Server : IDisposable
+    internal sealed class Server : IDisposable
     {
-        private readonly HttpListener _listener = new();
+        private readonly HttpListener _listener;
         public readonly string Root;
         public static readonly byte[] File = Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("0123456789", 5000)));
 
-        public Server()
+        public Server() : this(FreePort) { }
+
+        /// <param name="nextPort">The port each attempt listens on; a test hands it a taken one.</param>
+        internal Server(Func<int> nextPort)
         {
+            // A failed Start disposes the listener, so each attempt takes a new one. The retry
+            // used to reuse it: the second attempt threw ObjectDisposedException, and one taken
+            // port failed the whole class.
             for (int attempt = 0; ; attempt++)
             {
-                int port = Random.Shared.Next(20_000, 60_000);
-                Root = $"http://127.0.0.1:{port}/";
-                _listener.Prefixes.Clear();
-                _listener.Prefixes.Add(Root);
-                try { _listener.Start(); break; }
-                catch (HttpListenerException) when (attempt < 10) { }
+                var listener = new HttpListener();
+                string root = $"http://127.0.0.1:{nextPort()}/";
+                listener.Prefixes.Add(root);
+                try
+                {
+                    listener.Start();
+                    _listener = listener;
+                    Root = root;
+                    break;
+                }
+                catch (HttpListenerException) when (attempt < 10) { listener.Close(); }
             }
             _ = Serve();
+        }
+
+        /// <summary>
+        /// A port the system says is free. HttpListener cannot listen on port 0 and say which
+        /// port it got, so a socket asks first; the system never hands out one it has reserved
+        /// (Hyper-V and WSL hold ranges in the middle of the dynamic ones, where a random pick
+        /// landed). Something can still take it before the listener starts, hence the retries.
+        /// </summary>
+        internal static int FreePort()
+        {
+            var probe = new TcpListener(IPAddress.Loopback, 0);
+            probe.Start();
+            try { return ((IPEndPoint)probe.LocalEndpoint).Port; }
+            finally { probe.Stop(); }
         }
 
         private async Task Serve()
