@@ -102,6 +102,9 @@ public sealed partial class LayoutEngine
         bool isReverse = flex.Direction is FlexDirection.RowReverse or FlexDirection.ColumnReverse;
         bool isWrap = flex.Wrap is not FlexWrap.NoWrap;
         bool hasDefiniteCross = isRow ? resolvedH != null : resolvedW != null;
+        var ownSize = OwnSize(box, outerSpacing, constraint, resolvedW, contentAvailW, resolvedH, contentAvailH);
+        var ownMain = isRow ? ownSize.Width : ownSize.Height;
+        var ownCross = isRow ? ownSize.Height : ownSize.Width;
 
         float mainAvailable = isRow ? contentAvailW : contentAvailH;
         float crossAvailable = isRow ? contentAvailH : contentAvailW;
@@ -124,7 +127,7 @@ public sealed partial class LayoutEngine
             foreach (var l in lines)
                 RemeasureFlexedCrossSizes(l, isRow, mainDistribute, crossAvailable);
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
-            ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
+            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap, hasDefiniteCross);
 
             float totalCross = 0;
             for (int i = 0; i < lines.Count; i++)
@@ -143,7 +146,8 @@ public sealed partial class LayoutEngine
 
             if (isRow)
             {
-                float lineTop = ComputeAlignContentOffset(flex.AlignContent, crossAvailable, totalCross, lines.Count);
+                float lineTop = ComputeAlignContentOffset(flex.AlignContent,
+                    AlignContentSpace(totalCross, ownCross, isWrap), totalCross, lines.Count);
                 if (HasBaselineItems(line))
                     return lineTop + line.MaxAscent;
 
@@ -157,9 +161,7 @@ public sealed partial class LayoutEngine
             }
             else
             {
-                var justifyBounds = JustifyBounds(resolvedH, contentAvailH, box.MinHeight, box.MaxHeight,
-                    constraint.AvailableHeight, outerSpacing.Vertical);
-                float top = ComputeJustifyOffset(flex.JustifyContent, JustifySpace(lines, mainGap, justifyBounds),
+                float top = ComputeJustifyOffset(flex.JustifyContent, JustifySpace(lines, mainGap, ownMain),
                     LineMain(line, mainGap), line.Items.Count);
 
                 float? fw = stretch && child.BoxRead.Width.IsAuto

@@ -298,7 +298,7 @@ When wrapping is enabled, `AlignContent` controls how the wrapped lines are
 distributed on the cross axis:
 
 ```csharp
-var grid = Flex.Row(gap: 8)
+var grid = Flex.Row(gap: 8).Height(240)
     .FlexWrap(FlexWrap.Wrap)
     .AlignContent(AlignContent.Center)
     .Children(/* ... */);
@@ -306,6 +306,17 @@ var grid = Flex.Row(gap: 8)
 
 `AlignContent` values: `FlexStart`, `FlexEnd`, `Center`, `Stretch`,
 `SpaceBetween`, `SpaceAround`.
+
+> **`AlignContent` works in the container's own cross size, as `JustifyContent`
+> does on the main axis (§3).** A wrapping row with no height that its parent
+> doesn't stretch is exactly as tall as its lines and gaps, so no value moves or
+> stretches them; give it a `Height`, a stretch, or a `MinHeight` to align them
+> in. A nowrap container has one line and `AlignContent` does nothing there, as
+> in CSS — use `AlignItems`. `Stretch` shares out what is left after the lines
+> *and the gaps between them*. Until 2026-10-05 a content-sized container aligned
+> its lines against the space it was offered and then grew to where they ended,
+> and `Stretch` grew them to fill that space — in a vertical scroll view, to half
+> of `float.MaxValue`.
 
 ---
 

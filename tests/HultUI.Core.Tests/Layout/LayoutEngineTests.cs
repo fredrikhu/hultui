@@ -616,6 +616,87 @@ public class LayoutEngineTests
         Assert.Equal(150, root.Children[2].Layout.AbsoluteY, 1f);
     }
 
+    [Fact]
+    public void AlignContent_Stretch_LeavesRoomForTheGaps()
+    {
+        var root = Flex.Row().Width(200).Height(300)
+            .FlexWrap(FlexWrap.Wrap).RowGap(20)
+            .AlignContent(AlignContent.Stretch)
+            .AlignItems(AlignItems.FlexStart)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40)
+            );
+        Layout(root);
+
+        // 300 - 80 of lines - 20 of gap = 200 to share: each line 140, the second at 160.
+        Assert.Equal(160, root.Children[2].Layout.AbsoluteY, 0.01f);
+    }
+
+    /// <summary>Two wrapped lines of 40 in a row whose height comes from them, which the
+    /// 300px row it sits in doesn't stretch — so there is no space to align them in.</summary>
+    private static (Element Wrapped, Element Root) WrappedLines(AlignContent align, float? minHeight = null)
+    {
+        var wrapped = Flex.Row().Width(200).FlexWrap(FlexWrap.Wrap).AlignContent(align)
+            .AlignItems(AlignItems.FlexStart)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40));
+        if (minHeight is { } min) wrapped.MinHeight(min);
+        var root = Flex.Row().Width(400).Height(300).AlignItems(AlignItems.FlexStart).Children(wrapped);
+        return (wrapped, root);
+    }
+
+    [Theory]
+    [InlineData(AlignContent.Center)]
+    [InlineData(AlignContent.FlexEnd)]
+    [InlineData(AlignContent.SpaceBetween)]
+    [InlineData(AlignContent.SpaceAround)]
+    [InlineData(AlignContent.Stretch)]
+    public void AlignContent_AutoCrossSize_HasNoFreeSpace(AlignContent align)
+    {
+        var (wrapped, root) = WrappedLines(align);
+        Layout(root);
+
+        Assert.Equal(80, wrapped.Layout.Height, 0.01f);
+        Assert.Equal(0, wrapped.Children[0].Layout.AbsoluteY, 0.01f);
+        Assert.Equal(40, wrapped.Children[2].Layout.AbsoluteY, 0.01f);
+    }
+
+    [Theory]
+    [InlineData(AlignContent.Center, 20, 60)]
+    [InlineData(AlignContent.FlexEnd, 40, 80)]
+    [InlineData(AlignContent.SpaceBetween, 0, 80)]
+    [InlineData(AlignContent.Stretch, 0, 60)]
+    public void AlignContent_AutoCrossSize_DistributesUpToItsMinimum(AlignContent align, float first, float second)
+    {
+        var (wrapped, root) = WrappedLines(align, minHeight: 120);
+        Layout(root);
+
+        Assert.Equal(120, wrapped.Layout.Height, 0.01f);
+        Assert.Equal(first, wrapped.Children[0].Layout.AbsoluteY, 0.01f);
+        Assert.Equal(second, wrapped.Children[2].Layout.AbsoluteY, 0.01f);
+    }
+
+    [Theory]
+    [InlineData(AlignContent.Center)]
+    [InlineData(AlignContent.FlexEnd)]
+    [InlineData(AlignContent.SpaceAround)]
+    public void AlignContent_OnASingleLine_HasNoEffect(AlignContent align)
+    {
+        // As in CSS: AlignContent places wrapped lines, and a nowrap row has one line.
+        var row = Flex.Row().AlignContent(align).Children(Box.New().Width(100).Height(40));
+        var root = Flex.Row().Width(400).Height(300).AlignItems(AlignItems.FlexStart).Children(row);
+        Layout(root);
+
+        Assert.Equal(40, row.Layout.Height, 0.01f);
+        Assert.Equal(0, row.Children[0].Layout.AbsoluteY, 0.01f);
+    }
+
     // ──── Phase 2: Reverse Directions ────
 
     [Fact]

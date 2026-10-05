@@ -101,16 +101,12 @@ public sealed partial class LayoutEngine
             // containers with auto cross use natural content sizes
             bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
             bool hasDefiniteCross = isRow ? resolvedHeight != null : resolvedWidth != null;
-            var justifyBounds = isRow
-                ? JustifyBounds(resolvedWidth, contentAvailW, box.MinWidth, box.MaxWidth,
-                    constraint.AvailableWidth, outerSpacing.Horizontal)
-                : JustifyBounds(resolvedHeight, contentAvailH, box.MinHeight, box.MaxHeight,
-                    constraint.AvailableHeight, outerSpacing.Vertical);
+            var own = OwnSize(box, outerSpacing, constraint, resolvedWidth, contentAvailW, resolvedHeight, contentAvailH);
 
             contentSize = LayoutFlexChildren(element, children, contentAvailW, contentAvailH,
                 contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
                 contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
-                justifyBounds, hasDefiniteCross: hasDefiniteCross);
+                own.Width, own.Height, hasDefiniteCross: hasDefiniteCross);
         }
 
         // Final element size
@@ -180,14 +176,18 @@ public sealed partial class LayoutEngine
         return false;
     }
 
-    /// <param name="justifyBounds">The container's own main size, as a content-box range — see
-    /// <see cref="JustifyBounds"/>. Lines are justified within it.</param>
+    /// <summary>Lays out a flex container's children. <paramref name="ownWidth"/> and
+    /// <paramref name="ownHeight"/> are its own content-box size, each as the range it settles
+    /// in (<see cref="OwnSize"/>): lines are justified in the main one and, wrapped, aligned in
+    /// the cross one.</summary>
     private Size LayoutFlexChildren(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY,
-        (float Min, float Max) justifyBounds, bool hasDefiniteCross = true)
+        SizeRange ownWidth, SizeRange ownHeight, bool hasDefiniteCross = true)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+        var ownMain = isRow ? ownWidth : ownHeight;
+        var ownCross = isRow ? ownHeight : ownWidth;
         bool isReverse = flex.Direction is FlexDirection.RowReverse or FlexDirection.ColumnReverse;
         bool isWrap = flex.Wrap is not FlexWrap.NoWrap;
         bool isWrapReverse = flex.Wrap is FlexWrap.WrapReverse;
@@ -228,7 +228,7 @@ public sealed partial class LayoutEngine
 
             // ── Phase 4: Compute per-line cross sizes ──
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
-            ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
+            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap, hasDefiniteCross);
 
             // ── Phase 5: Distribute lines along cross axis (AlignContent) ──
             float totalCrossSize = 0;
@@ -238,13 +238,14 @@ public sealed partial class LayoutEngine
                 if (i > 0) totalCrossSize += crossGap;
             }
 
-            float crossOffset = ComputeAlignContentOffset(flex.AlignContent, crossAvailable, totalCrossSize, lines.Count);
-            float alignContentGap = ComputeAlignContentGap(flex.AlignContent, crossAvailable, totalCrossSize, lines.Count, crossGap);
+            float alignSpace = AlignContentSpace(totalCrossSize, ownCross, isWrap);
+            float crossOffset = ComputeAlignContentOffset(flex.AlignContent, alignSpace, totalCrossSize, lines.Count);
+            float alignContentGap = ComputeAlignContentGap(flex.AlignContent, alignSpace, totalCrossSize, lines.Count, crossGap);
 
             // ── Phase 6: Position items within each line ──
             float actualTotalMain = 0;
             float actualTotalCross = 0;
-            float justifySpace = JustifySpace(lines, mainGap, justifyBounds);
+            float justifySpace = JustifySpace(lines, mainGap, ownMain);
 
             // Determine line iteration order for wrap-reverse
             for (int lineIdx = 0; lineIdx < lines.Count; lineIdx++)
@@ -532,10 +533,11 @@ public sealed partial class LayoutEngine
         }
         else
         {
-            bool hasDefiniteCross = (element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse)
-                ? resolvedH != null
-                : resolvedW != null;
-            contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH, hasDefiniteCross);
+            bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+            bool hasDefiniteCross = isRow ? resolvedH != null : resolvedW != null;
+            var own = OwnSize(box, outerSpacing, constraint, resolvedW, contentAvailW, resolvedH, contentAvailH);
+            contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH,
+                isRow ? own.Height : own.Width, hasDefiniteCross);
         }
 
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
@@ -562,10 +564,12 @@ public sealed partial class LayoutEngine
     /// Measure-only mirror of <see cref="LayoutFlexChildren"/>. Runs Phases 1-4
     /// (measure items, collect lines, resolve grow/shrink, compute line cross
     /// sizes) and returns the resulting content (border-box) size. Skips Phase 6
-    /// positioning entirely — descendants are not written.
+    /// positioning entirely — descendants are not written. <paramref name="ownCross"/> is the
+    /// container's own cross size (<see cref="OwnSize"/>): what AlignContent.Stretch can grow
+    /// the lines to.
     /// </summary>
     private Size MeasureFlexChildrenSize(Element container, IReadOnlyList<Element> children,
-        float contentAvailW, float contentAvailH, bool hasDefiniteCross)
+        float contentAvailW, float contentAvailH, SizeRange ownCross, bool hasDefiniteCross)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -599,7 +603,7 @@ public sealed partial class LayoutEngine
             // As the layout pass does, or a row baseline alignment makes taller would be
             // measured shorter than it lays out.
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
-            ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
+            ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap, hasDefiniteCross);
 
             float totalMain = 0;
             float totalCross = 0;
@@ -973,7 +977,10 @@ public sealed partial class LayoutEngine
         }
     }
 
-    private static void ComputeLineCrossSizes(List<FlexLine> lines, float crossAvailable,
+    /// <summary>Sizes each line across: its tallest item, or for a nowrap container with a
+    /// definite cross size, that size. <paramref name="ownCross"/> is the container's own cross
+    /// size (<see cref="OwnSize"/>), which AlignContent.Stretch grows wrapped lines to.</summary>
+    private static void ComputeLineCrossSizes(List<FlexLine> lines, SizeRange ownCross, float crossGap,
         AlignContent alignContent, bool isWrap, bool hasDefiniteCross)
     {
         // Each line's cross size is the max cross size of its items — or, for the items that
@@ -1003,18 +1010,22 @@ public sealed partial class LayoutEngine
         if (!isWrap && lines.Count == 1)
         {
             if (hasDefiniteCross)
-                lines[0] = lines[0] with { CrossSize = crossAvailable };
+                lines[0] = lines[0] with { CrossSize = ownCross.Min };
             return;
         }
 
-        // For AlignContent.Stretch with wrap, distribute remaining cross space
+        // AlignContent.Stretch shares out what is left of the container's own cross size after
+        // the lines and the gaps between them — for a size taken from the lines, nothing, unless
+        // a min size makes room. (It used to share out the space offered, gaps and all: lines in
+        // a fixed height overflowed it by their gaps, and an auto-height row grew to fill its
+        // parent, or, in a scroll view, to half of float.MaxValue.)
         if (alignContent == AlignContent.Stretch && lines.Count > 0)
         {
-            float totalCross = 0;
+            float totalCross = crossGap * (lines.Count - 1);
             foreach (var line in lines)
                 totalCross += line.CrossSize;
 
-            float remaining = crossAvailable - totalCross;
+            float remaining = ownCross.Hold(totalCross) - totalCross;
             if (remaining > 0)
             {
                 float extra = remaining / lines.Count;
@@ -1146,36 +1157,49 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// A flex container's own content-box main size, as the range it will settle in: a definite
-    /// size is both ends of it; a size taken from the content is wherever the content puts it
-    /// within the container's min and max, which <see cref="JustifySpace"/> works out once the
-    /// lines are known.
-    /// <para><b>JustifyContent distributes the space between a line and this size</b>, never the
-    /// space merely available to the container. An auto-sized container doesn't take that up:
-    /// justified against it, a centred column in a 32px row moved its 17px of text down by half
-    /// the difference and then, sized from where the text ended, came out 24.6px tall with the
-    /// text at its bottom — while the measure pass, which doesn't justify, had said 17. A scroll
-    /// container is the other way round: its children are distributed against unbounded space,
-    /// so they can overflow it, but its own size is its viewport, and content that fits is
-    /// centred in that.</para>
+    /// A flex container's own content-box width and height, each as the range it will settle in
+    /// (<see cref="SizeRange"/>): a definite size is both ends of it; a size taken from the
+    /// content is wherever the content puts it within the container's min and max.
+    /// <para><b>Free space is the space between the lines and this size</b>, never the space
+    /// merely offered to the container: JustifyContent distributes it along the main axis and
+    /// AlignContent across the wrapped lines. An auto-sized container doesn't take up what it is
+    /// offered. Justified against that, a centred column in a 32px row moved its 17px of text
+    /// down by half the difference and then, sized from where the text ended, came out 24.6px
+    /// tall with the text at its bottom — while the measure pass, which doesn't justify, had
+    /// said 17. A scroll container is the other way round on its scrolling axis: its children
+    /// are distributed against unbounded space, so they can overflow it, but its own size is
+    /// its viewport, and content that fits is centred in that.</para>
     /// </summary>
-    private static (float Min, float Max) JustifyBounds(float? resolved, float contentAvailable,
-        Dimension min, Dimension max, float available, float spacing) =>
-        resolved is null
-            ? (min.ResolveOr(available, -1f) - spacing, max.ResolveOr(available, float.MaxValue) - spacing)
-            : (contentAvailable, contentAvailable);
-
-    /// <summary>The main size the lines are justified in: the longest line held within
-    /// <paramref name="bounds"/>, the way ComputeLayout sizes an auto container from it.</summary>
-    private static float JustifySpace(List<FlexLine> lines, float gap, (float Min, float Max) bounds)
+    private static (SizeRange Width, SizeRange Height) OwnSize(BoxStyle box, Thickness spacing,
+        LayoutConstraint constraint, float? resolvedW, float contentAvailW, float? resolvedH, float contentAvailH)
     {
-        if (bounds.Min == bounds.Max) return bounds.Min;
+        return (Axis(resolvedW, contentAvailW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth, spacing.Horizontal),
+            Axis(resolvedH, contentAvailH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight, spacing.Vertical));
+
+        static SizeRange Axis(float? resolved, float contentAvailable, Dimension min, Dimension max,
+            float available, float spacing) =>
+            resolved is null
+                ? new(min.ResolveOr(available, -1f) - spacing, max.ResolveOr(available, float.MaxValue) - spacing)
+                : new(contentAvailable, contentAvailable);
+    }
+
+    /// <summary>The main size the lines are justified in: the longest line held in the
+    /// container's own main size, the way ComputeLayout sizes an auto container from it.</summary>
+    private static float JustifySpace(List<FlexLine> lines, float gap, SizeRange ownMain)
+    {
+        if (ownMain.Min == ownMain.Max) return ownMain.Min;
         float longest = 0;
         foreach (var line in lines)
             longest = float.MaxNative(longest, LineMain(line, gap));
-        // ApplyMinMax's order, so a max below the min wins as it does there.
-        return float.MinNative(float.MaxNative(longest, bounds.Min), bounds.Max);
+        return ownMain.Hold(longest);
     }
+
+    /// <summary>The cross size wrapped lines are aligned in: all of them and the gaps between,
+    /// held in the container's own cross size. A nowrap container's one line has nothing to be
+    /// aligned in — AlignContent is for wrapped lines, as in CSS — so it gets exactly its own
+    /// extent, and no free space.</summary>
+    private static float AlignContentSpace(float totalCross, SizeRange ownCross, bool isWrap) =>
+        isWrap ? ownCross.Hold(totalCross) : totalCross;
 
     /// <summary>A line's outer main size: its items and the gaps between them.</summary>
     private static float LineMain(FlexLine line, float gap)
@@ -1254,10 +1278,10 @@ public sealed partial class LayoutEngine
         };
     }
 
-    private static float ComputeAlignContentOffset(AlignContent align, float crossAvailable, float totalCross, int lineCount)
+    private static float ComputeAlignContentOffset(AlignContent align, float space, float totalCross, int lineCount)
     {
         if (lineCount == 0) return 0;
-        float free = crossAvailable - totalCross;
+        float free = space - totalCross;
         if (float.IsNegative(free)) free = 0;
 
         return align switch
@@ -1269,10 +1293,10 @@ public sealed partial class LayoutEngine
         };
     }
 
-    private static float ComputeAlignContentGap(AlignContent align, float crossAvailable, float totalCross, int lineCount, float gap)
+    private static float ComputeAlignContentGap(AlignContent align, float space, float totalCross, int lineCount, float gap)
     {
         if (lineCount <= 1) return 0;
-        float free = crossAvailable - totalCross;
+        float free = space - totalCross;
         if (float.IsNegative(free)) free = 0;
 
         return align switch
@@ -1303,6 +1327,16 @@ public sealed partial class LayoutEngine
 /// <param name="Baseline">For an item aligned by baseline in a row: how far below its outer
 /// (margin-box) top its first baseline sits. NaN for every other item.</param>
 internal record struct FlexItem(Element Element, float MainSize, float CrossSize, float BaseMain, float Baseline = float.NaN);
+
+/// <summary>The range a container's own content-box size along one axis settles in: one value
+/// when the size is definite (declared, or forced by its parent), else its min and max less its
+/// padding and border, with a size taken from the content landing between them.</summary>
+internal readonly record struct SizeRange(float Min, float Max)
+{
+    /// <summary>Where a size taken from content <paramref name="content"/> long settles: held
+    /// between the ends, the max winning over the min as it does in ApplyMinMax.</summary>
+    public float Hold(float content) => float.MinNative(float.MaxNative(content, Min), Max);
+}
 
 /// <param name="MaxAscent">The largest <see cref="FlexItem.Baseline"/> on the line: where the
 /// shared baseline sits below the line's top. 0 when nothing on it aligns by baseline.</param>
