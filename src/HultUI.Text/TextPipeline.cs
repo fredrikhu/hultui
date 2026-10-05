@@ -266,7 +266,7 @@ public sealed class TextPipeline
         }
         else
         {
-            layout = ComputeWrapped(text, style, maxWidth, maxLines);
+            layout = ComputeWrapped(text, style, maxWidth, maxLines, shaped);
             if (overflow == TextOverflow.Ellipsis)
                 layout = ApplyEllipsis(text, style, layout, maxWidth);
         }
@@ -302,8 +302,8 @@ public sealed class TextPipeline
     /// Gallops out from a short slice before bisecting, so every string measured stays within
     /// twice the answer. Bisecting the whole range instead would start by shaping half of what
     /// may be a 25,000-character line to discover that ~200 of them fit.
-    /// <para><paramref name="prefixes"/>, when given, measures <paramref name="text"/>'s
-    /// prefixes, so it is only passed with <paramref name="from"/> 0.</para>
+    /// <para><paramref name="prefixes"/>, when given, is the prefix widths of
+    /// <c>text[from..to]</c> (or of more of the text from <paramref name="from"/> on).</para>
     /// </remarks>
     private int FitPrefix(string text, int from, int to, ResolvedInheritedStyle style, float maxWidth,
         PrefixWidths? prefixes = null)
@@ -325,7 +325,7 @@ public sealed class TextPipeline
 
         float Measure(int end) => prefixes is null
             ? MeasureString(text[from..end], style)
-            : PrefixWidth(prefixes, end, style);
+            : PrefixWidth(prefixes, end - from, style);
     }
 
     /// <summary>
@@ -335,13 +335,17 @@ public sealed class TextPipeline
     /// <para>For a run with no break opportunity in it — a hash, a base64 blob, a path with
     /// no separators — this is the only thing that can make it fit. Without it the run is
     /// emitted as a single line wider than the box, and simply runs out of it.</para>
+    ///
+    /// <para><paramref name="prefixes"/>, when given, is the prefix widths of
+    /// <c>text[from..to]</c>, for the first cut only.</para>
     /// </summary>
     private int SplitByCharacter(string text, int from, int to, ResolvedInheritedStyle style,
-        float maxWidth, List<TextLine> lines, int? maxLines)
+        float maxWidth, List<TextLine> lines, int? maxLines, PrefixWidths? prefixes = null)
     {
         while (from < to && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
-            int fit = FitPrefix(text, from, to, style, maxWidth);
+            int fit = FitPrefix(text, from, to, style, maxWidth, prefixes);
+            prefixes = null;
             // A box too narrow for even one character would otherwise never advance. One
             // character per line is the sane floor, and what a browser does.
             if (fit <= from) fit = NextCodePoint(text, from);
@@ -385,9 +389,11 @@ public sealed class TextPipeline
     // Multi-line path: the text either contains explicit newlines or is wider
     // than the available width. BreakIntoLines measures segment by segment and
     // shapes each line it keeps; nothing here is shaped as a whole first, because
-    // nothing would read it.
-    private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
-        => BreakIntoLines(text, style, maxWidth, maxLines);
+    // nothing would read it. The segments and their widths come from the string's
+    // shaping-cache entry, so only the lines kept are new work at a new width.
+    private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        ShapedText shaped)
+        => BreakIntoLines(text, style, maxWidth, maxLines, BreakSegmentsOf(shaped, text));
 
     // ── Styled layout internals ──
     // A styled line is segments cut at metric-span boundaries, each itemized with its
@@ -915,13 +921,58 @@ public sealed class TextPipeline
         var offsets = new List<int> { 0 };
         for (int i = 0; i < text.Length; i++)
             if (text[i] == '\n') { offsets.Add(i); offsets.Add(i + 1); }
-        foreach (var bp in LineBreaker.FindBreakOpportunities(text))
-            if (!offsets.Contains(bp)) offsets.Add(bp);
+        offsets.AddRange(LineBreaker.FindBreakOpportunities(text));
         offsets.Add(text.Length);
         offsets.Sort();
-        for (int i = offsets.Count - 1; i > 0; i--)
-            if (offsets[i] == offsets[i - 1]) offsets.RemoveAt(i);
+        // Duplicates out in one pass. Checking each break against the list before adding
+        // it was quadratic: 33 µs for the 700 breaks of a 3,700-character paragraph, 7 µs
+        // this way (measured) — next to ICU's own 29 µs to find them.
+        int kept = 1;
+        for (int i = 1; i < offsets.Count; i++)
+            if (offsets[i] != offsets[kept - 1]) offsets[kept++] = offsets[i];
+        offsets.RemoveRange(kept, offsets.Count - kept);
         return offsets;
+    }
+
+    /// <summary>
+    /// A string's <see cref="BreakOffsets"/> and the width of each segment between them,
+    /// kept with its shaping: both depend on the text and its style, not on the width, so
+    /// re-wrapping at a new width (a resize drag) needs neither ICU nor any measuring for
+    /// them again. A width is filled the first time a pass reaches its segment — a pass
+    /// stopped by maxLines never measures the rest — and is NaN until then.
+    /// </summary>
+    private sealed class BreakSegments
+    {
+        public readonly List<int> Offsets;
+        public readonly float[] Widths;
+        // False when the whole text is more than one font run, so its last line is not
+        // worth itemizing in the hope of a prefix table (BuildPrefixWidths would say no).
+        public readonly bool MaybeOneRun;
+
+        public BreakSegments(List<int> offsets, bool maybeOneRun)
+        {
+            Offsets = offsets;
+            Widths = new float[offsets.Count];
+            Array.Fill(Widths, float.NaN);
+            MaybeOneRun = maybeOneRun;
+        }
+    }
+
+    // Null on the reference path, where every pass finds and measures its segments afresh.
+    private BreakSegments? BreakSegmentsOf(ShapedText shaped, string text) =>
+        ReuseAcrossWidths
+            ? shaped.BreakSegments ??= new BreakSegments(BreakOffsets(text),
+                maybeOneRun: shaped.SingleLine is not { } single || single.Lines[0].Runs.Count == 1)
+            : null;
+
+    // MeasureString of segment s (offsets[s - 1]..offsets[s]), from the cache when there is one.
+    private float SegmentWidth(string text, List<int> offsets, BreakSegments? cached, int s, ResolvedInheritedStyle style)
+    {
+        if (cached is null) return MeasureString(text[offsets[s - 1]..offsets[s]], style);
+        float width = cached.Widths[s];
+        if (float.IsNaN(width))
+            cached.Widths[s] = width = MeasureString(text[offsets[s - 1]..offsets[s]], style);
+        return width;
     }
 
     // ── Min-content width (docs/plans/13-min-content.md) ──
@@ -976,7 +1027,7 @@ public sealed class TextPipeline
         {
             string tail = text[start..tailEnd];
             return BuildEllipsizedLine(tail, start, style, maxWidth,
-                ShortcutTruncation ? BuildPrefixWidths(tail, style) : null, MeasureString(EllipsisString, style));
+                ReuseAcrossWidths ? BuildPrefixWidths(tail, style) : null, MeasureString(EllipsisString, style));
         });
 
     /// <summary>
@@ -1071,11 +1122,12 @@ public sealed class TextPipeline
     // MeasureString would have — so the cut lands where it always did.
 
     /// <summary>
-    /// When false, truncation takes the reference path: every candidate prefix measured
-    /// from scratch, one-line Ellipsis through the line breaker. The output is the same
-    /// either way; tests hold the two paths to that.
+    /// When false, a layout at a new width works everything out from scratch — the
+    /// reference path: a wrap finds and measures its break segments afresh, truncation
+    /// measures every candidate prefix anew, one-line Ellipsis goes through the line
+    /// breaker. The output is the same either way; tests hold the two paths to that.
     /// </summary>
-    internal bool ShortcutTruncation { get; init; } = true;
+    internal bool ReuseAcrossWidths { get; init; } = true;
 
     /// <summary>
     /// The space / non-space segments of a string that itemizes to ONE font run — the same
@@ -1174,7 +1226,7 @@ public sealed class TextPipeline
     // shaping; null when it is more than one font run (or the reference path is on).
     private PrefixWidths? PrefixWidthsOf(ShapedText shaped, string text, ResolvedInheritedStyle style)
     {
-        if (!ShortcutTruncation) return null;
+        if (!ReuseAcrossWidths) return null;
         if (!shaped.PrefixWidthsKnown)
         {
             shaped.PrefixWidths = BuildPrefixWidths(text, style);
@@ -1197,7 +1249,7 @@ public sealed class TextPipeline
     /// </summary>
     private TextLayout? EllipsizeOneLine(string text, ResolvedInheritedStyle style, ShapedText shaped, float maxWidth)
     {
-        if (!ShortcutTruncation) return null;
+        if (!ReuseAcrossWidths) return null;
         var e = shaped.OneLineEllipsis ??= ProveOneLineEllipsis(text, style, shaped);
         if (!e.Exact) return null;
 
@@ -1231,17 +1283,16 @@ public sealed class TextPipeline
         bool exact = prefixes is not null
             && text.Length >= 2
             && height == EmptyLineOfHeight(style).Size.Height
-            && BreakSegmentSumsArePositive(text, style);
+            && BreakSegmentSumsArePositive(text, style, BreakSegmentsOf(shaped, text)!);
         return new OneLineEllipsis(exact, prefixes, ellipsisWidth, height);
     }
 
-    private bool BreakSegmentSumsArePositive(string text, ResolvedInheritedStyle style)
+    private bool BreakSegmentSumsArePositive(string text, ResolvedInheritedStyle style, BreakSegments segments)
     {
-        var offsets = BreakOffsets(text);
         float lineWidth = 0;
-        for (int s = 1; s < offsets.Count; s++)
+        for (int s = 1; s < segments.Offsets.Count; s++)
         {
-            lineWidth += MeasureString(text[offsets[s - 1]..offsets[s]], style);
+            lineWidth += SegmentWidth(text, segments.Offsets, segments, s, style);
             if (!(lineWidth > 0f)) return false;
         }
         return true;
@@ -1459,12 +1510,13 @@ public sealed class TextPipeline
         return new TextLayout([line], new Size(totalWidth, line.Height));
     }
 
-    private TextLayout BreakIntoLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    private TextLayout BreakIntoLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        BreakSegments? segments)
     {
         var lines = new List<TextLine>();
         int textOffset = 0;
 
-        var allBreaks = BreakOffsets(text);
+        var allBreaks = segments?.Offsets ?? BreakOffsets(text);
 
         // Greedy line breaking
         float lineWidth = 0;
@@ -1472,10 +1524,9 @@ public sealed class TextPipeline
         for (int s = 1; s < allBreaks.Count; s++)
         {
             int segEnd = allBreaks[s];
-            string segment = text[allBreaks[s - 1]..segEnd];
 
             // Check for explicit newline
-            bool isNewline = segment.Length == 1 && segment[0] == '\n';
+            bool isNewline = segEnd - allBreaks[s - 1] == 1 && text[allBreaks[s - 1]] == '\n';
             if (isNewline)
             {
                 // Emit current line
@@ -1488,7 +1539,7 @@ public sealed class TextPipeline
                 continue;
             }
 
-            float segWidth = MeasureString(segment, style);
+            float segWidth = SegmentWidth(text, allBreaks, segments, s, style);
 
             if (lineWidth + segWidth > maxWidth && lineWidth > 0)
             {
@@ -1521,7 +1572,14 @@ public sealed class TextPipeline
         // because there is no following segment to trigger a break.
         if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
-            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines);
+            // The last line usually fits, and then the search for its cut measures all of it,
+            // several prefixes over: from the line's own segments, that is one measure, and
+            // the probes cost a word-cache lookup each. Not for a line that does not fit —
+            // possibly a 25,000-character token, which the gallop exists not to measure whole.
+            var lastLine = segments is { MaybeOneRun: true } && lineWidth <= maxWidth
+                ? BuildPrefixWidths(text[textOffset..], style)
+                : null;
+            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLine);
             if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 lines.Add(ShapeLineText(text[textOffset..], style, textOffset));
         }
@@ -1550,6 +1608,8 @@ public sealed class TextPipeline
         public PrefixWidths? PrefixWidths;
         public bool PrefixWidthsKnown;
         public OneLineEllipsis? OneLineEllipsis;
+        // Filled the first time the string is wrapped: its break segments and their widths.
+        public BreakSegments? BreakSegments;
     }
 
     private TextLine ShapeLineText(string lineText, ResolvedInheritedStyle style, int start)

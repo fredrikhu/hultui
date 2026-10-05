@@ -5,13 +5,14 @@ using Xunit;
 namespace HultUI.Text.Tests;
 
 /// <summary>
-/// Truncation (Clip and Ellipsis) finds the longest prefix that fits from a string's own
-/// segments and, for one ellipsized line, skips breaking the text into lines. Its output must
-/// be what the reference path — every candidate prefix measured from scratch, one line
-/// through the line breaker — produced, to the bit. These hold the two to that over a shaper
+/// The same string at a new width reuses what earlier widths worked out: wrapping keeps its
+/// break segments and their widths, truncation (Clip and Ellipsis) finds the longest prefix
+/// that fits from the string's own segments and, for one ellipsized line, skips breaking the
+/// text into lines. The output must be what the reference path — everything worked out from
+/// scratch at each width — produced, to the bit. These hold the two to that over a shaper
 /// that kerns, ligates and has zero-width marks, and two fonts.
 /// </summary>
-public class TruncationEquivalenceTests
+public class WidthChangeEquivalenceTests
 {
     private static readonly ResolvedInheritedStyle Base = new(
         FontFamily: "TestFont", FontSize: 16f, FontWeight: FontWeight.Regular,
@@ -26,10 +27,11 @@ public class TruncationEquivalenceTests
     ];
 
     // Everything here but the last group is below U+0590, so it takes the plain path the
-    // shortcut lives on; anything at or above it is laid out by the BiDi path.
+    // reuse lives on; anything at or above it is laid out by the BiDi path.
     private static readonly string[] Texts =
     [
         "pretty red table chair house keyboard",
+        "a longer paragraph of plain words that wraps to several lines at most of the widths tried here, office AV To",
         "AVA To Wa office fifty fine",          // kern pairs and the fi ligature, inside and across cuts
         "supercalifragilisticexpialidocious",   // one word: every cut is mid-word
         "well-known x-ray re-entry co-op",      // break opportunities inside words
@@ -52,18 +54,20 @@ public class TruncationEquivalenceTests
         "emoji \U0001F600 in the \U0001F680 middle",
     ];
 
-    private static readonly (int MaxLines, TextOverflow Overflow)[] Modes =
+    private static readonly (int? MaxLines, TextOverflow Overflow)[] Modes =
     [
         (1, TextOverflow.Ellipsis),
         (2, TextOverflow.Ellipsis),
         (1, TextOverflow.Clip),
+        (null, TextOverflow.Clip),
+        (3, TextOverflow.Clip),
     ];
 
     public static TheoryData<bool> FontSets => new() { false, true };
 
     [Theory]
     [MemberData(nameof(FontSets))]
-    public void Shortcut_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent)
+    public void Reuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent)
     {
         int compared = 0;
         foreach (var style in Styles)
@@ -72,8 +76,8 @@ public class TruncationEquivalenceTests
             // Fresh pipelines per style and mode, so each string's first truncation (which
             // builds its tables) is part of what is compared.
             var fonts = new TwoFonts(negativeDescent);
-            var reference = new TextPipeline(fonts, new ContextShaper()) { ShortcutTruncation = false };
-            var shortcut = new TextPipeline(fonts, new ContextShaper());
+            var reference = new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = false };
+            var reuse = new TextPipeline(fonts, new ContextShaper());
 
             foreach (var text in Texts)
             {
@@ -87,7 +91,7 @@ public class TruncationEquivalenceTests
                 foreach (var w in widths.Concat(Enumerable.Reverse(widths)))
                 {
                     var expected = reference.Layout(text, style, w, maxLines, overflow);
-                    var actual = shortcut.Layout(text, style, w, maxLines, overflow);
+                    var actual = reuse.Layout(text, style, w, maxLines, overflow);
                     LayoutAssert.Same(expected, actual, $"\"{text}\" w={w} lines={maxLines} {overflow} {style}");
                     compared++;
                 }
@@ -99,17 +103,17 @@ public class TruncationEquivalenceTests
     [Fact]
     public void OneLineEllipsis_ItemizesOnlyTheLineItShows_AtEachNewWidth()
     {
-        var shortcut = Counted(shortcutOn: true, out var fonts);
-        var reference = Counted(shortcutOn: false, out var referenceFonts);
+        var reuse = Counted(reuse: true, out var fonts);
+        var reference = Counted(reuse: false, out var referenceFonts);
         const string text = "pretty red table chair house keyboard";
 
         // The first width works the string out once; every later one only shapes its line.
-        shortcut.Layout(text, Base, 150f, 1, TextOverflow.Ellipsis);
+        reuse.Layout(text, Base, 150f, 1, TextOverflow.Ellipsis);
         reference.Layout(text, Base, 150f, 1, TextOverflow.Ellipsis);
         int before = fonts.Resolves, referenceBefore = referenceFonts.Resolves;
         for (int w = 40; w < 150; w += 5)
         {
-            shortcut.Layout(text, Base, w, 1, TextOverflow.Ellipsis);
+            reuse.Layout(text, Base, w, 1, TextOverflow.Ellipsis);
             reference.Layout(text, Base, w, 1, TextOverflow.Ellipsis);
         }
 
@@ -122,21 +126,46 @@ public class TruncationEquivalenceTests
     [Fact]
     public void OneLineClip_ItemizesOnlyTheLineItShows_AtEachNewWidth()
     {
-        var shortcut = Counted(shortcutOn: true, out var fonts);
+        var reuse = Counted(reuse: true, out var fonts);
         const string text = "pretty red table chair house keyboard";
 
-        shortcut.Layout(text, Base, 150f, 1, TextOverflow.Clip);
+        reuse.Layout(text, Base, 150f, 1, TextOverflow.Clip);
         int before = fonts.Resolves;
         for (int w = 40; w < 150; w += 5)
-            shortcut.Layout(text, Base, w, 1, TextOverflow.Clip);
+            reuse.Layout(text, Base, w, 1, TextOverflow.Clip);
 
         Assert.Equal(22, fonts.Resolves - before);
     }
 
-    private static TextPipeline Counted(bool shortcutOn, out TwoFonts fonts)
+    [Fact]
+    public void Rewrapping_ItemizesOnlyTheLinesItKeeps_AtEachNewWidth()
+    {
+        var reuse = Counted(reuse: true, out var fonts);
+        var reference = Counted(reuse: false, out var referenceFonts);
+        const string text = "pretty red table chair house keyboard pretty red table chair house keyboard";
+
+        // The first width finds the segments and measures them. A later one shapes the lines it
+        // keeps and measures its last line once, for the search that cuts it — at widths where
+        // every word fits; a word too wide for the box is cut by measuring it.
+        reuse.Layout(text, Base, 400f, null);
+        reference.Layout(text, Base, 400f, null);
+        int before = fonts.Resolves, referenceBefore = referenceFonts.Resolves, lines = 0, widths = 0;
+        for (int w = 100; w < 400; w += 7, widths++)
+        {
+            lines += reuse.Layout(text, Base, w, null).Lines.Count;
+            reference.Layout(text, Base, w, null);
+        }
+
+        Assert.Equal(lines + widths, fonts.Resolves - before);
+        // The counting is real: the reference path itemizes every segment at every width too.
+        Assert.True(referenceFonts.Resolves - referenceBefore > lines * 2,
+            $"reference path itemized {referenceFonts.Resolves - referenceBefore} times for {lines} lines");
+    }
+
+    private static TextPipeline Counted(bool reuse, out TwoFonts fonts)
     {
         fonts = new TwoFonts(negativeDescent: false);
-        return new TextPipeline(fonts, new ContextShaper()) { ShortcutTruncation = shortcutOn };
+        return new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = reuse };
     }
 
     /// <summary>
@@ -232,6 +261,9 @@ public class TruncationEquivalenceTests
         {
             ('A', 'V') or ('V', 'A') => -2.25f,
             ('T', 'o') or ('W', 'a') or ('W', 'i') => -1.75f,
+            // Across a hyphen, where a line may break: "x-ray" shaped whole is wider than
+            // "x-" and "ray" apart, so a last line can fit by its segments and not as a line.
+            ('-', 'r') or ('-', 'e') or ('-', 'o') or ('-', 'k') => 2.5f,
             ('e', '…') or ('y', '…') => -1.5f,
             _ => 0f,
         };
