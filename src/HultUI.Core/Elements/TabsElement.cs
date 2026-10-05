@@ -428,9 +428,20 @@ public sealed class TabsElement : BoxElement
     {
         _panelKey = key;
         if (ReferenceEquals(panel, _panel)) return;
+        // A panel that leaves with the keyboard in it hands the keyboard to the strip, as an
+        // expander's closing body does to its header: its tab closed, most likely by a shortcut.
+        if (_panel is not null && FocusManager?.FocusedElement is { } focused && Contains(_panel, focused))
+            _keyboardLeft = true;
         _panel = panel;
         if (panel is null) _panelHost.ReplaceChildren();
         else _panelHost.ReplaceChildren(panel);
+    }
+
+    private static bool Contains(Element root, Element element)
+    {
+        for (Element? e = element; e is not null; e = e.Parent)
+            if (ReferenceEquals(e, root)) return true;
+        return false;
     }
 
     // ──── Look ────
