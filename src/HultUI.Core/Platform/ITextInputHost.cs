@@ -19,6 +19,14 @@ public interface ITextInputHost
     void StartTextInput();
 
     /// <summary>
+    /// Enables text input for a field of <paramref name="kind"/>. Called again with the other
+    /// kind while input is on, it switches: focus moving from a password field to an ordinary
+    /// one, or a focused field masked or revealed. The default ignores the kind, for a host
+    /// with nothing to tell its platform.
+    /// </summary>
+    void StartTextInput(TextInputKind kind) => StartTextInput();
+
+    /// <summary>
     /// Disables OS text input routing for the window.
     /// </summary>
     void StopTextInput();

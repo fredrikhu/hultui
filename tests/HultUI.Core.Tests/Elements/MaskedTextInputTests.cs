@@ -4,6 +4,8 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Xunit;
 
@@ -112,6 +114,201 @@ public class MaskedTextInputTests
         // A disabled item is still an action someone could run; it must not copy either.
         Item(field, "Copy").Action!();
         Assert.Equal(masked ? "before" : Secret, clipboard.Text);
+    }
+
+    // ──── The screen ────
+    //
+    // What a masked field draws, highlights and hits has to be measured on the bullets. The
+    // text's own widths are the text: a highlight as wide as "iii" rather than three bullets,
+    // or a caret that lands by the real glyphs, gives away what the bullets hide.
+
+    private static void Press(Element field, KeyCode key) =>
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = key }, field);
+
+    /// <summary>The input-method preedit is drawn in the middle of the value, and the value
+    /// around it was drawn as itself — the whole password in clear for as long as a
+    /// composition lasted. The preedit stays visible: it is being typed, and the input
+    /// method's own candidate window shows it anyway.</summary>
+    [Theory]
+    [InlineData(false, "hunniter2")]
+    [InlineData(true, "●●●ni●●●●")]
+    public void ComposingShowsThePreeditAmongTheBullets(bool masked, string drawn)
+    {
+        var field = Field(Secret, masked);
+        Press(field, KeyCode.Home);
+        for (int i = 0; i < 3; i++) Press(field, KeyCode.Right);
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, field);
+
+        var ctx = new GlyphContext();
+        field.Render(ctx);
+
+        Assert.Equal(drawn, Assert.Single(ctx.Texts));
+    }
+
+    [Theory]
+    [InlineData(false, 42f)] // h u n t e r 2: six wide each
+    [InlineData(true, 56f)]  // seven bullets: eight wide each
+    public void TheSelectionCoversTheBullets(bool masked, float width)
+    {
+        var field = Field(Secret, masked);
+        Ctrl(field, KeyCode.A);
+
+        var ctx = new GlyphContext();
+        field.Render(ctx);
+
+        var highlight = Assert.Single(ctx.Rects, r => r.Fill == field.SelectionColor);
+        Assert.Equal(width, highlight.Rect.Width);
+    }
+
+    /// <summary>Two bullets in is index 2. Measured on "WWWW" it was index 1: the caret
+    /// landed somewhere the bullets do not say, and where it landed told the glyph widths.</summary>
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    public void AClickLandsBetweenTheBulletsItHits(bool masked, int caret)
+    {
+        var field = Field("WWWW", masked);
+        field.Render(new GlyphContext()); // the field hit-tests with the context it last drew with
+
+        var box = field.Layout.AbsoluteContentBox;
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(box.X + 16, box.Y + 5), Button = 0 }, field);
+
+        Assert.Equal(caret, field.CursorPosition);
+    }
+
+    /// <summary>A field with no width of its own grows with its content; that has to be the
+    /// bullets' width, or the field's edge traces the text.</summary>
+    [Theory]
+    [InlineData(false, 20 * 14f)]
+    [InlineData(true, 20 * 8f)]
+    public void ANaturalWidthIsTheBulletsWidth(bool masked, float textWidth)
+    {
+        var field = Field(new string('W', 20), masked);
+
+        var size = field.MeasureContent(float.PositiveInfinity, float.PositiveInfinity, new GlyphContext());
+
+        Assert.Equal(textWidth + field.CursorWidth, size.Width);
+    }
+
+    /// <summary>The arrow keys move the caret visually on a line that mixes directions —
+    /// which, worked out on the text, would trace where its right-to-left runs are.</summary>
+    [Theory]
+    [InlineData(false, Secret)]
+    [InlineData(true, "●●●●●●●")]
+    public void TheArrowKeysMoveOverWhatIsShown(bool masked, string measured)
+    {
+        var field = Field(Secret, masked);
+        var ctx = new GlyphContext();
+        field.Render(ctx);
+
+        Press(field, KeyCode.Left);
+
+        Assert.Equal(measured, ctx.MovedOver);
+    }
+
+    // ──── One word ────
+    //
+    // A masked value is one word, as a browser's password field is. Anything that stops at a
+    // word boundary — a Ctrl+arrow, a Ctrl+Backspace, a double-click, an undo — would count out
+    // where the password's spaces are. Each unmasked twin stops inside the value, so the masked
+    // cases are not passing on a value with no boundary in it.
+
+    private const string Phrase = "correct horse";
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CtrlArrowsGoToTheEnds(bool masked)
+    {
+        var field = Field(Phrase, masked);
+
+        Ctrl(field, KeyCode.Left);
+        int left = field.CursorPosition;
+        Press(field, KeyCode.Home);
+        Ctrl(field, KeyCode.Right);
+        int right = field.CursorPosition;
+
+        if (masked)
+        {
+            Assert.Equal(0, left);
+            Assert.Equal(Phrase.Length, right);
+        }
+        else
+        {
+            Assert.InRange(left, 1, Phrase.Length - 1);
+            Assert.InRange(right, 1, Phrase.Length - 1);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, "correct ")]
+    [InlineData(true, "")]
+    public void CtrlBackspaceErasesTheWholeWord(bool masked, string left)
+    {
+        var field = Field(Phrase, masked);
+
+        Ctrl(field, KeyCode.Backspace);
+
+        Assert.Equal(left, field.Text);
+    }
+
+    [Theory]
+    [InlineData(false, "horse")]
+    [InlineData(true, Phrase)]
+    public void ADoubleClickSelectsTheWholeWord(bool masked, string selected)
+    {
+        var field = Field(Phrase, masked);
+        field.Render(new GlyphContext());
+
+        // Inside "horse": index 10, at the width each glyph is drawn.
+        var box = field.Layout.AbsoluteContentBox;
+        float x = box.X + (masked ? 8 : 6) * 10 + 1;
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(x, box.Y + 5), Button = 0, ClickCount = 2 }, field);
+
+        Assert.Equal(selected, field.SelectedText);
+    }
+
+    [Theory]
+    [InlineData(false, "correct ")]
+    [InlineData(true, "")]
+    public void UndoTakesBackTheWholeRun(bool masked, string left)
+    {
+        var field = Field("", masked);
+        foreach (char c in Phrase)
+            EventDispatcher.Dispatch(new TextInputEvent { Text = c.ToString() }, field);
+
+        Ctrl(field, KeyCode.Z);
+
+        Assert.Equal(left, field.Text);
+    }
+
+    /// <summary>Widths that differ per glyph, unlike the stub's even ones, so a highlight or a
+    /// hit measured on the text cannot pass for one measured on the bullets.</summary>
+    private sealed class GlyphContext : NullRenderContext, IRenderContext, IMeasureContext
+    {
+        public List<string> Texts { get; } = [];
+        public List<(Rect Rect, Color Fill)> Rects { get; } = [];
+        public string? MovedOver { get; private set; }
+
+        private static float Width(char c) => c switch { '●' => 8f, 'i' => 2f, 'W' => 14f, _ => 6f };
+
+        public override Size MeasureText(string text, ResolvedInheritedStyle style) =>
+            new(text.Sum(Width), style.FontSize);
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip) => new(text.Sum(Width), style.FontSize);
+
+        public override void DrawText(string text, Rect bounds, ResolvedInheritedStyle style,
+            TextOverflow overflow, int? maxLines) => Texts.Add(text);
+
+        public override void DrawRect(Rect rect, Color fill) => Rects.Add((rect, fill));
+
+        bool IRenderContext.TryMoveCaretVisually(string lineText, ResolvedInheritedStyle style, int offset, bool right, out int result)
+        {
+            MovedOver = lineText;
+            result = offset;
+            return false;
+        }
     }
 
     // ──── Assistive tech ────

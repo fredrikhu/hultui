@@ -130,6 +130,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private CursorType _currentCursor = CursorType.Default;
     private GCHandle _gcHandle;
     private bool _textInputActive;
+    private TextInputKind _textInputKind;
     private SDL3Clipboard? _clipboard;
     private SDL3FileDialogs? _fileDialogs;
     private SDL3TextInputHost? _textInputHost;
@@ -708,7 +709,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     // do real work (read a file, open a dialog) without running inside the
                     // event pump.
                     if (_registry.TryGetValue(evt.window.windowID, out var focusWin))
+                    {
                         focusWin.ActivatedPending = true;
+                        // SDL has just started text input again for the focused window, which
+                        // on Windows re-arms the input method in a password field.
+                        focusWin.KeepInputMethodOut();
+                    }
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
@@ -1467,11 +1473,47 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
     }
 
-    public void StartTextInput()
+    public void StartTextInput() => StartTextInput(TextInputKind.Text);
+
+    /// <summary>
+    /// Text input for a field of <paramref name="kind"/>. A switch restarts it, because SDL's
+    /// Windows backend arms its input method only on a start. A password goes to SDL as
+    /// <c>TEXT_PASSWORD_HIDDEN</c>, which its Wayland backend hands the input method as the
+    /// password purpose; its Windows backend ignores the type, so <see cref="KeepInputMethodOut"/>
+    /// does what a native password box does there.
+    /// </summary>
+    public void StartTextInput(TextInputKind kind)
     {
-        if (_textInputActive) return;
+        if (_textInputActive && _textInputKind == kind) return;
+        if (_textInputActive) SDL_StopTextInput(_window);
         _textInputActive = true;
-        SDL_StartTextInput(_window);
+        _textInputKind = kind;
+
+        if (kind != TextInputKind.Password)
+        {
+            SDL_StartTextInput(_window);
+            return;
+        }
+
+        // SDL copies the properties into the window, so they are ours to destroy.
+        var props = SDL_CreateProperties();
+        fixed (byte* name = SDL_PROP_TEXTINPUT_TYPE_NUMBER)
+            SDL_SetNumberProperty(props, name, (long)SDL_TextInputType.SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN);
+        SDL_StartTextInputWithProperties(_window, props);
+        SDL_DestroyProperties(props);
+        KeepInputMethodOut();
+    }
+
+    /// <summary>
+    /// On Windows, while a password field has input, the window has no input context: no
+    /// composition, and nothing for an input method to learn — what an <c>ES_PASSWORD</c> edit
+    /// control does for itself. SDL associates its context again whenever the window regains
+    /// keyboard focus, so the focus-gained event calls this too.
+    /// </summary>
+    private void KeepInputMethodOut()
+    {
+        if (OperatingSystem.IsWindows() && _textInputActive && _textInputKind == TextInputKind.Password)
+            WindowsInputMethod.Detach(GetWin32Hwnd());
     }
 
     public void StopTextInput()

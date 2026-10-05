@@ -152,12 +152,19 @@ public class TextInputElement : BoxElement
         {
             if (_masked == value) return;
             _masked = value;
+            _history.BreaksAtWords = !value;
+            MarkLayoutDirty(); // the content is measured on what is shown
             MarkPaintDirty();
             // A reveal toggle must reach a reader now, not on the next layout-driven rebuild.
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsPassword);
+            // And the platform's input method, if the field has the keyboard.
+            if (_focused) TextInputHost?.StartTextInput(InputKind);
         }
     }
     private bool _masked;
+
+    /// <summary>What this field asks of the platform's text input when it has focus.</summary>
+    internal TextInputKind InputKind => Masked ? TextInputKind.Password : TextInputKind.Text;
 
     /// <summary>What stands in for each character of a masked value.</summary>
     internal const char MaskGlyph = '●';
@@ -523,7 +530,7 @@ public class TextInputElement : BoxElement
     /// press that started the drag settled on.</summary>
     private (int Start, int End) UnitRangeAt(int pos) => _dragUnit switch
     {
-        SelectionUnit.Word => WordBoundary.RangeAt(_text, pos),
+        SelectionUnit.Word => Masked ? (0, _text.Length) : WordBoundary.RangeAt(_text, pos),
         // One line is the whole value here — an input holds no line breaks to divide it.
         SelectionUnit.Line => (0, _text.Length),
         _ => (pos, pos),
@@ -577,9 +584,10 @@ public class TextInputElement : BoxElement
         // On a line that mixes directions the arrow keys move the caret VISUALLY:
         // pressing Right on the last Latin character before a Hebrew word lands on
         // the right-hand end of that word, because that is what is next on screen.
-        // A line that reads left to right says so and keeps the logical step below.
+        // A line that reads left to right says so and keeps the logical step below — as a masked
+        // value's bullets do, so the caret's path cannot trace where the text changes direction.
         if (_renderCtx is not null
-            && _renderCtx.TryMoveCaretVisually(_text, ResolvedInherited, _cursorPos, delta > 0, out int visual))
+            && _renderCtx.TryMoveCaretVisually(ShownText, ResolvedInherited, _cursorPos, delta > 0, out int visual))
         {
             _cursorPos = SnapToBoundary(Math.Clamp(visual, 0, _text.Length));
             if (!extendSelection)
@@ -611,9 +619,11 @@ public class TextInputElement : BoxElement
         MoveCursorTo(FindWordBoundaryRight(_cursorPos), extendSelection);
     }
 
-    private int FindWordBoundaryLeft(int from) => WordBoundary.WordLeft(_text, from);
+    // A masked value is one word, as a browser's password field is: a caret that stopped at
+    // its word boundaries would show where its spaces and punctuation are.
+    private int FindWordBoundaryLeft(int from) => Masked ? 0 : WordBoundary.WordLeft(_text, from);
 
-    private int FindWordBoundaryRight(int from) => WordBoundary.WordRight(_text, from);
+    private int FindWordBoundaryRight(int from) => Masked ? _text.Length : WordBoundary.WordRight(_text, from);
 
     private void DeleteSelection()
     {
@@ -632,31 +642,33 @@ public class TextInputElement : BoxElement
     /// </summary>
     private int HitTestTextPosition(float x)
     {
-        if (string.IsNullOrEmpty(_text)) return 0;
+        // Hit what is drawn: bullets, for a masked value.
+        var shown = ShownText;
+        if (shown.Length == 0) return 0;
 
         var style = ResolvedInherited;
         if (_renderCtx is not null)
-            return _renderCtx.TextOffsetAtX(_text, style, x);
+            return _renderCtx.TextOffsetAtX(shown, style, x);
 
         // No render context (tests): fall back to the same nearest-boundary search
         // over the estimated widths MeasureSubstring hands out.
-        int lo = 0, hi = _text.Length;
+        int lo = 0, hi = shown.Length;
         while (lo < hi)
         {
             int mid = (lo + hi) / 2;
-            if (MeasureSubstring(0, mid, style) < x) lo = mid + 1;
+            if (MeasureSubstring(shown, mid, style) < x) lo = mid + 1;
             else hi = mid;
         }
         int before = Math.Max(0, lo - 1);
-        return Math.Abs(MeasureSubstring(0, before, style) - x) <= Math.Abs(MeasureSubstring(0, lo, style) - x)
+        return Math.Abs(MeasureSubstring(shown, before, style) - x) <= Math.Abs(MeasureSubstring(shown, lo, style) - x)
             ? before
             : lo;
     }
 
-    private float MeasureSubstring(int start, int length, ResolvedInheritedStyle style)
+    private float MeasureSubstring(string text, int length, ResolvedInheritedStyle style)
     {
         if (length == 0) return 0;
-        var sub = _text.Substring(start, length);
+        var sub = text[..length];
         if (_renderCtx is not null)
             return _renderCtx.MeasureText(sub, style).Width;
         return sub.Length * style.FontSize * 0.6f; // fallback for tests
@@ -678,9 +690,11 @@ public class TextInputElement : BoxElement
         // A default content width keeps an ungrown input visible; a flex-grown or
         // explicitly-sized input still wins (grow and forced sizing override the
         // measured content size).
+        // The bullets' width for a masked value: a field that grows with its content would
+        // otherwise trace the text with its edge.
         float textWidth = string.IsNullOrEmpty(_text)
             ? 0f
-            : ctx.MeasureText(_text, style, float.PositiveInfinity, 1).Width;
+            : ctx.MeasureText(ShownText, style, float.PositiveInfinity, 1).Width;
         float width = Math.Max(textWidth + CursorWidth, DefaultContentWidth);
 
         return new Size(width, lineHeight);
@@ -724,10 +738,14 @@ public class TextInputElement : BoxElement
         // When composing, the preedit is visually inserted at the caret but not
         // part of _text. displayText contains both for measurement/rendering.
         bool composing = _composition.IsActive;
-        // Password masking: bullets for the value (not while composing).
+        // Bullets for a masked value, the preedit among them while an input method composes —
+        // it is what is being typed, and the input method's own window shows it anyway. Every
+        // width below is measured on this, never on _text: a highlight or a caret placed by the
+        // real glyphs would trace what the bullets hide.
+        string shown = ShownText;
         string displayText = composing
-            ? string.Concat(_text.AsSpan(0, _cursorPos), _composition.Text, _text.AsSpan(_cursorPos))
-            : ShownText;
+            ? string.Concat(shown.AsSpan(0, _cursorPos), _composition.Text, shown.AsSpan(_cursorPos))
+            : shown;
 
         // IME caret placement. SDL's start/length are ambiguous (Wayland
         // sends cursor_begin/cursor_end, other backends send active-segment
@@ -774,7 +792,7 @@ public class TextInputElement : BoxElement
         {
             // One rect per contiguous visual stretch: a selection spanning a
             // direction change covers two pieces of the line, not the gap between.
-            foreach (var r in ctx.TextSelectionRanges(_text, style, SelectionStart, SelectionEnd))
+            foreach (var r in ctx.TextSelectionRanges(shown, style, SelectionStart, SelectionEnd))
                 ctx.DrawRect(new Rect(
                     contentBox.X + r.X0 - _scrollOffset, contentBox.Y,
                     r.X1 - r.X0, contentBox.Height), SelectionColor);

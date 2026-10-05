@@ -54,6 +54,10 @@ internal sealed class TextUndoHistory
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
 
+    /// <summary>Whether a run of typing ends where the next word starts. Off for a password,
+    /// whose words an undo taking them back one at a time would count out.</summary>
+    public bool BreaksAtWords { get; set; } = true;
+
     /// <summary>
     /// Records an edit about to be applied: the range at <paramref name="start"/> holding
     /// <paramref name="removed"/> becomes <paramref name="inserted"/>. The caret and anchor are
@@ -82,7 +86,7 @@ internal sealed class TextUndoHistory
         };
     }
 
-    private static bool TryMerge(Step top, EditKind kind, int start, string removed, string inserted)
+    private bool TryMerge(Step top, EditKind kind, int start, string removed, string inserted)
     {
         if (kind != top.Kind) return false;
 
@@ -93,7 +97,7 @@ internal sealed class TextUndoHistory
                 if (removed.Length != 0 || start != top.Start + top.Inserted.Length) return false;
                 if (IsMoreThanOneCodePoint(inserted)) return false;
                 // A word starts a new step, so "hello world" undoes as "world", then "hello ".
-                if (top.Inserted.Length > 0 && char.IsWhiteSpace(top.Inserted[^1]) && !char.IsWhiteSpace(inserted[0]))
+                if (BreaksAtWords && top.Inserted.Length > 0 && char.IsWhiteSpace(top.Inserted[^1]) && !char.IsWhiteSpace(inserted[0]))
                     return false;
                 top.Inserted += inserted;
                 return true;

@@ -606,7 +606,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             textInput.Clipboard = Clipboard;
             textInput.TextInputHost = TextInputHost;
-            TextInputHost.StartTextInput();
+            TextInputHost.StartTextInput(textInput.InputKind);
         }
         else if (element is TextAreaElement textArea)
         {
