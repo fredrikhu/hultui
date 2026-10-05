@@ -291,6 +291,16 @@ static class Scenarios
                 i => p.Layout(labels[Idx(i, 100)], auto, DragWidth(i), null));
         }
 
+        // Labels of several font runs: a monospace face without IPA (Windows' Cascadia Mono),
+        // an IPA word in every third place, from a fallback face.
+        {
+            var p = Pipeline();
+            var mono = ltr with { FontFamily = FontFamilies.Monospace };
+            var labels = MultiFontLabels(100, words: 14);
+            yield return new("resize/multifont-ellipsis-1line", 100,
+                i => p.Layout(labels[Idx(i, 100)], mono, DragWidth(i), 1, TextOverflow.Ellipsis));
+        }
+
         // And with metric spans, every third word bold and larger: the styled path for Latin,
         // the BiDi path with spans for Hebrew. Widths from DragWidth, as above.
         {
@@ -373,6 +383,17 @@ static class Scenarios
         for (int n = 0; n < count; n++)
             labels[n] = string.Join(' ', Enumerable.Range(n, words)
                 .Select(k => k % 3 == 2 ? latin[k % latin.Length] : hebrew[k % hebrew.Length])) + $" {Alpha(n)}";
+        return labels;
+    }
+
+    private static string[] MultiFontLabels(int count, int words)
+    {
+        string[] ipa = ["ɐɓɖ", "ɠɦɨ", "ɯɰɱ", "ɕɗɘ", "ɜɝɞ", "ɟɡɤ", "ɥɧɭ", "ɮɳɐ"];
+        var latin = Latin.Split(' ');
+        var labels = new string[count];
+        for (int n = 0; n < count; n++)
+            labels[n] = string.Join(' ', Enumerable.Range(n, words)
+                .Select(k => k % 3 == 2 ? ipa[k % ipa.Length] : latin[k % latin.Length])) + $" {Alpha(n)}";
         return labels;
     }
 

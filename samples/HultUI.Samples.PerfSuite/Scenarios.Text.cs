@@ -128,6 +128,21 @@ static partial class Scenarios
             "text/bidi ellipsis with every third word bold and larger: styled labels on the BiDi path, truncated again",
             ctx => StyledLabels(ctx, () => Ui.BidiParagraph(ctx.Rng, 14)));
 
+        yield return new Scenario("text/multi-font ellipsis 1,000 labels resize",
+            "text/ellipsis in a monospace face without IPA, an IPA word in every third place: labels of several font runs",
+            ctx =>
+            {
+                var rows = new Element[1_000];
+                for (int i = 0; i < rows.Length; i++)
+                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
+                        Text.New(Ui.MultiFontParagraph(ctx.Rng, 14)).FontFamily(FontFamilies.Monospace).FontSize(13f)
+                            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1).FlexShrink(1),
+                        Text.New($"{i}").FontSize(12f).TextColor(Ui.Muted).FlexShrink(0));
+                var pane = Flex.Column().Width(Dimension.Percent(50)).FlexShrink(0).Children(rows);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(pane));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
         yield return new Scenario("text/spans recolor (paint only)",
             "Re-colour the highlight spans of 40 of 200 paragraphs — syntax highlighting, search hits: paint-only spans",
             ctx =>
