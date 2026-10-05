@@ -71,6 +71,13 @@ layout/resize 2,000-row list  12002    5.271    5.723    0.11    0.00    4.85   
   0.5 KB, rows that create or rebuild elements vary by up to ~1 %, and the theme switches
   by ~5 %. A change of a few KB shows in one pair of runs; a change in time needs
   interleaved runs.
+- **alloc can move with no change to the scenario's code.** .NET 10's JIT keeps some
+  short-lived objects off the heap when inlining lets it see they do not escape, and what
+  it inlines follows the profile the run built up. `input/tab through 300 fields` read
+  33.0 KB at e5a2206, 29.9 at 16fc7f6, 28.2 at f184580 and 33.0 again at e91d72f, while
+  nothing a Tab does changed: with `DOTNET_JitObjectStackAllocation=0` f184580 reads 34,
+  and filtered runs read 33 on f184580 and on the opacity merge after it alike. Before
+  calling a few KB a regression, check it in a filtered run and with that switch off.
 - A row that ends in `! n/m steps rendered nothing` timed nothing: the scenario's change
   never dirtied anything. Fix the scenario.
 
@@ -92,6 +99,11 @@ Each rule is here because its absence produced a wrong number first.
   Windows reads each core's efficiency class, Linux each core's maximum frequency.
   `--no-pin` turns it off.
 - **High process priority**, invariant culture.
+- **An idle machine**, which the harness cannot enforce. One run taken while another
+  session's tests ran (64 % CPU) read medians 20–55 % high on every row and flagged 18
+  rows slower; the interleaved A/B on an idle machine put all 18 within ±4 % on the
+  minimum. Check the load first (no test runs, builds or games), and wait it out rather
+  than capture through it.
 - **A check after every untimed step** (`Op.Check`): the dialog really opened, the
   character reached the `TextArea`, the wheel really scrolled. An input that misses its
   target still renders a frame and times something; only the check tells. `--verify`
@@ -125,6 +137,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-05-f84891b.json` | The first full capture, all 64 scenarios, one later run. It reads 3–5 % above the pair on every row, paint included — drift between sessions, which is why a before/after must be interleaved. |
 | `2026-10-05-16fc7f6-zorder-before.json` | Before the z-order closure fix: 16fc7f6 (main), median of 3 runs. All 64 scenarios. |
 | `2026-10-05-f184580-zorder-after.json` | After it: f184580, median of 3 runs interleaved with the line above. Compare these two. Both read 5–24 % slower than the 90730ee pair (median 9 %): another session and the tabs and focus commits apart, so compare them with each other only. |
+| `2026-10-05-f184580-opacity-ellipsis-before.json` | Before the opacity-group and truncation fixes: f184580 again, median of 3 runs, each started after 60 s of idle (under 12 % CPU). |
+| `2026-10-05-e91d72f-opacity-ellipsis-after.json` | After them: e91d72f, median of 3 runs interleaved with the line above under the same idle rule. Compare these two: 0 slower, 6 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -163,13 +177,17 @@ create elements, 8 bytes per element: `Element.OverlayOrigin` (popover, 3f14903)
 
 **What the suite turned up on its first run**, for follow-up:
 
-- **Opacity is expensive to paint.** `SkiaRenderContext.PushOpacity` opens its
-  `SaveLayer` with no bounds, so every element under 100 % opacity gets an offscreen
-  layer the size of the window. `paint/tiles transform + opacity` renders in ~132 ms
-  against 0.3 ms plain, and `anim/60 looping tweens frame` (a quarter of them fading)
-  in ~27 ms.
-- **Ellipsis truncation re-shapes on every width.** `text/ellipsis 1,000 labels resize`
-  costs ~53 ms and 71 MB per frame, against ~5 ms and 4 MB for 2,000 untruncated rows.
+- **Opacity was expensive to paint — fixed in 945931c.** `SkiaRenderContext.PushOpacity`
+  opened its `SaveLayer` with no bounds, so every element under 100 % opacity got an
+  offscreen layer the size of the window. The group is now sized to what the subtree
+  paints: `paint/tiles transform + opacity` 134.9 → 2.1 ms, `anim/60 looping tweens
+  frame` (a quarter of them fading) 27.6 → 0.21 ms.
+- **Ellipsis truncation measured every candidate cut from scratch — fixed in 66c2fc5.**
+  Each prefix the search tried was itemized and assembled anew, and one-line ellipsis
+  opened an ICU line breaker only to replace the line. `text/ellipsis 1,000 labels
+  resize` 54.7 → 7.8 ms and 71 → 7.8 MB per frame; the same commit took `text/wrap 150
+  paragraphs resize` 9.1 → 6.7 ms, `layout/shrink 300 overfull rows resize` 7.5 →
+  5.8 ms (8.2 → 4.0 MB) and `layout/cards create 300` 9.0 → 7.0 ms.
 - **Shadows are the dearest common effect**: 400 shadowed tiles paint in 4.5 ms against
   0.9 ms rounded-with-border and 1.4 ms gradient (CPU raster; the order is the signal).
 - **Opening a dialog costs ~3 ms**, almost all of it overlay layout and paint ("other"),
