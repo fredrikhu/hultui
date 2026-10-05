@@ -1672,13 +1672,30 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    private int IndexOfDrive(string dir)
+    private int IndexOfDrive(string dir) => Math.Max(0, VolumeIndexOf(dir));
+
+    /// <summary>
+    /// The listed volume <paramref name="path"/> is on: the longest drive root that contains it,
+    /// or -1. A volume is the mount a path is under, not its path root — on Linux every root is
+    /// "/", so picking "/" followed the other pane onto whatever mount it was on, and picking the
+    /// mount it really was on never did; Windows mounts volumes in folders too. A path no listed
+    /// root contains (an unmapped share) falls back to its path root.
+    /// </summary>
+    private int VolumeIndexOf(string path)
     {
-        var root = System.IO.Path.GetPathRoot(dir);
+        int best = -1, bestLength = -1;
         for (int i = 0; i < _drives.Count; i++)
-            if (PathEquals(_drives[i].Root, root)) return i;
-        return 0;
+        {
+            var root = _drives[i].Root;
+            if (PathProbe.IsUnder(path, root) && root.Length > bestLength) { best = i; bestLength = root.Length; }
+        }
+        if (best >= 0) return best;
+        var pathRoot = System.IO.Path.GetPathRoot(path);
+        for (int i = 0; i < _drives.Count; i++)
+            if (PathEquals(_drives[i].Root, pathRoot)) return i;
+        return -1;
     }
+
 
     private bool AnyOverlayOpen => _drivePicker != null || _palette is { IsOpen: true } || _bookmarksOpen
         || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
@@ -2827,7 +2844,8 @@ public partial class CommanderApp : Component, IDisposable
     private string SameDriveTargetFor(char target, string root)
     {
         var otherDir = Dir(target == 'L' ? 'R' : 'L');
-        return PathEquals(System.IO.Path.GetPathRoot(otherDir), root) ? otherDir : root;
+        int volume = VolumeIndexOf(otherDir);
+        return volume >= 0 && PathEquals(_drives[volume].Root, root) ? otherDir : root;
     }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
