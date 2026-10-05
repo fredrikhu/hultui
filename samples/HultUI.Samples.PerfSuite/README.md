@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: ~60 scenarios over every feature area | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 64 scenarios over every feature area | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -30,7 +30,7 @@ below). `--list` prints every scenario, `--help` every option.
 
 | Group | What its scenarios time |
 |---|---|
-| `layout/` | Resize drags over long lists, deep nesting, flex wrap, baseline alignment, aspect-ratio tiles; building 300 cards |
+| `layout/` | Resize drags over long lists, deep nesting, flex wrap, baseline alignment, aspect-ratio tiles, overfull rows and columns (flex shrink); building 300 cards |
 | `grid/` | Creating, resizing and editing a 1,800-cell grid with `auto` and `fr` columns |
 | `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans |
 | `scroll/` | Wheel and jumps through a 5,000-row list, sticky section headers, nested scroll chaining |
@@ -107,6 +107,43 @@ live in [`captures/`](captures/); add one when a change moves numbers on purpose
 project into it, delete the scenarios whose APIs it lacks, and capture both sides
 alternately (base, current, base, current…) — the interleaving spreads any drift in the
 machine over both. Scenario names are the join key, so keep a name once captures use it.
+
+### The captures so far
+
+All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Windows 11,
+.NET 10, Release.
+
+| File | What it is |
+|---|---|
+| `2026-10-05-e5a2206-before.json` | Before the 35-merge feature batch of 2026-10-04/05: e5a2206, median of 3 runs. The 11 scenarios whose APIs postdate it are absent. |
+| `2026-10-05-90730ee-after.json` | After it: 90730ee, median of 3 runs interleaved with the line above. Compare these two. |
+| `2026-10-05-f84891b.json` | The first full capture, all 64 scenarios, one later run. It reads 3–5 % above the pair on every row, paint included — drift between sessions, which is why a before/after must be interleaved. |
+
+**The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
+bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
+single-line cross clamp and more): 51 shared scenarios, none past ±10 %. The two that
+moved consistently in every run are flex relayouts — `layout/resize 2,000-row list` +7 %
+and `layout/deep nesting leaf edit` +12 % on the minimum. A sweep over the merges
+that touched layout code puts no single cause behind it: align-content (189d176) +6 %,
+aspect ratio (82377dc) +3 %, baseline (a0dd054) and the JustifyContent fix (b5c8916)
++2 % each. Grid, text, scroll, virtual lists, components, input, overlays, themes,
+animation, paint and accessibility were flat. Allocation, which does not drift, did
+move: every rendered frame allocates 3–6 KB more since the sticky merge (b8102e4), and
+a keystroke in a `TextInput` 28 KB more.
+
+**What the suite turned up on its first run**, for follow-up:
+
+- **Opacity is expensive to paint.** `SkiaRenderContext.PushOpacity` opens its
+  `SaveLayer` with no bounds, so every element under 100 % opacity gets an offscreen
+  layer the size of the window. `paint/tiles transform + opacity` renders in ~132 ms
+  against 0.3 ms plain, and `anim/60 looping tweens frame` (a quarter of them fading)
+  in ~27 ms.
+- **Ellipsis truncation re-shapes on every width.** `text/ellipsis 1,000 labels resize`
+  costs ~53 ms and 71 MB per frame, against ~5 ms and 4 MB for 2,000 untruncated rows.
+- **Shadows are the dearest common effect**: 400 shadowed tiles paint in 4.5 ms against
+  0.9 ms rounded-with-border and 1.4 ms gradient (CPU raster; the order is the signal).
+- **Opening a dialog costs ~3 ms**, almost all of it overlay layout and paint ("other"),
+  against ~0.5 ms for a popover, menu or dropdown.
 
 ## Adding a scenario
 
