@@ -19,7 +19,16 @@ public sealed class HeadlessTextInputHost : ITextInputHost
     /// <summary>Number of times an in-flight composition was cancelled (focus left a text input mid-preedit).</summary>
     public int CompositionClearCount { get; private set; }
 
-    public void StartTextInput() => IsTextInputActive = true;
+    /// <summary>The kind of field the most recent start was for.</summary>
+    public TextInputKind Kind { get; private set; }
+
+    public void StartTextInput() => StartTextInput(TextInputKind.Text);
+
+    public void StartTextInput(TextInputKind kind)
+    {
+        IsTextInputActive = true;
+        Kind = kind;
+    }
 
     public void StopTextInput() => IsTextInputActive = false;
 

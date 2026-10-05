@@ -19,7 +19,9 @@ public sealed class SDL3TextInputHost : ITextInputHost
         _window = window;
     }
 
-    public void StartTextInput() => _window.StartTextInput();
+    public void StartTextInput() => _window.StartTextInput(TextInputKind.Text);
+
+    public void StartTextInput(TextInputKind kind) => _window.StartTextInput(kind);
 
     public void StopTextInput()
     {

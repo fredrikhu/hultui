@@ -152,13 +152,19 @@ public class TextInputElement : BoxElement
         {
             if (_masked == value) return;
             _masked = value;
+            _history.BreaksAtWords = !value;
             MarkLayoutDirty(); // the content is measured on what is shown
             MarkPaintDirty();
             // A reveal toggle must reach a reader now, not on the next layout-driven rebuild.
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsPassword);
+            // And the platform's input method, if the field has the keyboard.
+            if (_focused) TextInputHost?.StartTextInput(InputKind);
         }
     }
     private bool _masked;
+
+    /// <summary>What this field asks of the platform's text input when it has focus.</summary>
+    internal TextInputKind InputKind => Masked ? TextInputKind.Password : TextInputKind.Text;
 
     /// <summary>What stands in for each character of a masked value.</summary>
     internal const char MaskGlyph = '●';
@@ -524,7 +530,7 @@ public class TextInputElement : BoxElement
     /// press that started the drag settled on.</summary>
     private (int Start, int End) UnitRangeAt(int pos) => _dragUnit switch
     {
-        SelectionUnit.Word => WordBoundary.RangeAt(_text, pos),
+        SelectionUnit.Word => Masked ? (0, _text.Length) : WordBoundary.RangeAt(_text, pos),
         // One line is the whole value here — an input holds no line breaks to divide it.
         SelectionUnit.Line => (0, _text.Length),
         _ => (pos, pos),
@@ -613,9 +619,11 @@ public class TextInputElement : BoxElement
         MoveCursorTo(FindWordBoundaryRight(_cursorPos), extendSelection);
     }
 
-    private int FindWordBoundaryLeft(int from) => WordBoundary.WordLeft(_text, from);
+    // A masked value is one word, as a browser's password field is: a caret that stopped at
+    // its word boundaries would show where its spaces and punctuation are.
+    private int FindWordBoundaryLeft(int from) => Masked ? 0 : WordBoundary.WordLeft(_text, from);
 
-    private int FindWordBoundaryRight(int from) => WordBoundary.WordRight(_text, from);
+    private int FindWordBoundaryRight(int from) => Masked ? _text.Length : WordBoundary.WordRight(_text, from);
 
     private void DeleteSelection()
     {

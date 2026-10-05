@@ -8,7 +8,7 @@ namespace HultUI.WinForms.Services;
 /// Drives the Windows IME for a hosted control, through IMM32.
 /// </summary>
 /// <remarks>
-/// The framework calls <see cref="StartTextInput"/> when a text element takes focus and
+/// The framework calls <see cref="StartTextInput(TextInputKind)"/> when a text element takes focus and
 /// <see cref="StopTextInput"/> when it loses it. Both matter: an IME left armed over
 /// non-text UI consumes dead keys and the IME-toggle hotkey, so arming is not something
 /// to do once at start-up.
@@ -29,12 +29,19 @@ internal sealed class WinFormsTextInputHost : ITextInputHost, IDisposable
         _scale = scale;
     }
 
-    public void StartTextInput()
+    public void StartTextInput() => StartTextInput(TextInputKind.Text);
+
+    /// <summary>
+    /// A password field leaves the control with no input context, as a native password box
+    /// does: no composition, and nothing for an input method to learn.
+    /// </summary>
+    public void StartTextInput(TextInputKind kind)
     {
         var hwnd = _hwnd();
         if (hwnd == IntPtr.Zero) return;
         _association ??= new Imm.Association(hwnd);
-        _association.Arm();
+        if (kind == TextInputKind.Password) _association.Detach();
+        else _association.Arm();
     }
 
     public void StopTextInput()

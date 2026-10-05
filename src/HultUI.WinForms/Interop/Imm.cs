@@ -165,6 +165,14 @@ internal static class Imm
             _armed = false;
         }
 
+        /// <summary>No input context at all, armed or not: a window starts out holding the
+        /// thread's default one, which <see cref="Disarm"/> leaves alone when nothing was armed.</summary>
+        internal void Detach()
+        {
+            ImmAssociateContext(hwnd, IntPtr.Zero);
+            _armed = false;
+        }
+
         public void Dispose()
         {
             Disarm();

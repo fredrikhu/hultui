@@ -206,6 +206,82 @@ public class MaskedTextInputTests
         Assert.Equal(measured, ctx.MovedOver);
     }
 
+    // ──── One word ────
+    //
+    // A masked value is one word, as a browser's password field is. Anything that stops at a
+    // word boundary — a Ctrl+arrow, a Ctrl+Backspace, a double-click, an undo — would count out
+    // where the password's spaces are. Each unmasked twin stops inside the value, so the masked
+    // cases are not passing on a value with no boundary in it.
+
+    private const string Phrase = "correct horse";
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CtrlArrowsGoToTheEnds(bool masked)
+    {
+        var field = Field(Phrase, masked);
+
+        Ctrl(field, KeyCode.Left);
+        int left = field.CursorPosition;
+        Press(field, KeyCode.Home);
+        Ctrl(field, KeyCode.Right);
+        int right = field.CursorPosition;
+
+        if (masked)
+        {
+            Assert.Equal(0, left);
+            Assert.Equal(Phrase.Length, right);
+        }
+        else
+        {
+            Assert.InRange(left, 1, Phrase.Length - 1);
+            Assert.InRange(right, 1, Phrase.Length - 1);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, "correct ")]
+    [InlineData(true, "")]
+    public void CtrlBackspaceErasesTheWholeWord(bool masked, string left)
+    {
+        var field = Field(Phrase, masked);
+
+        Ctrl(field, KeyCode.Backspace);
+
+        Assert.Equal(left, field.Text);
+    }
+
+    [Theory]
+    [InlineData(false, "horse")]
+    [InlineData(true, Phrase)]
+    public void ADoubleClickSelectsTheWholeWord(bool masked, string selected)
+    {
+        var field = Field(Phrase, masked);
+        field.Render(new GlyphContext());
+
+        // Inside "horse": index 10, at the width each glyph is drawn.
+        var box = field.Layout.AbsoluteContentBox;
+        float x = box.X + (masked ? 8 : 6) * 10 + 1;
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(x, box.Y + 5), Button = 0, ClickCount = 2 }, field);
+
+        Assert.Equal(selected, field.SelectedText);
+    }
+
+    [Theory]
+    [InlineData(false, "correct ")]
+    [InlineData(true, "")]
+    public void UndoTakesBackTheWholeRun(bool masked, string left)
+    {
+        var field = Field("", masked);
+        foreach (char c in Phrase)
+            EventDispatcher.Dispatch(new TextInputEvent { Text = c.ToString() }, field);
+
+        Ctrl(field, KeyCode.Z);
+
+        Assert.Equal(left, field.Text);
+    }
+
     /// <summary>Widths that differ per glyph, unlike the stub's even ones, so a highlight or a
     /// hit measured on the text cannot pass for one measured on the bullets.</summary>
     private sealed class GlyphContext : NullRenderContext, IRenderContext, IMeasureContext
