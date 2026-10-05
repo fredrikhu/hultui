@@ -1,4 +1,5 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Styling;
 using Xunit;
@@ -63,8 +64,7 @@ public class TabsTests
 
         // A rebuild with no explicit index must not reset the user's selection.
         var incoming = Tabs.New().Tab("A", () => Text.New("panelA")).Tab("B", () => Text.New("panelB"));
-        live.PatchFrom(incoming);
-        live.OnReconciled();
+        Assert.True(TreeDiffer.TryPatch(live, incoming));
 
         Assert.Equal(1, live.SelectedIndex);
         Assert.Equal("panelB", ContentText(live));
@@ -79,10 +79,51 @@ public class TabsTests
             .Tab("A", () => Text.New("panelA"))
             .Tab("B", () => Text.New("panelB"))
             .Selected(1); // explicitly controlled
-        live.PatchFrom(incoming);
-        live.OnReconciled();
+        Assert.True(TreeDiffer.TryPatch(live, incoming));
 
         Assert.Equal(1, live.SelectedIndex);
         Assert.Equal("panelB", ContentText(live));
+    }
+
+    /// <summary>A kept panel goes with its tab through a rename while it is hidden, and is the
+    /// one shown when the tab opens again: not built a second time.</summary>
+    [Fact]
+    public void AKeptPanel_FollowsItsTabThroughARename()
+    {
+        int built = 0;
+        TabsElement Build(string label) => Tabs.New()
+            .Tab(label, () => { built++; return Text.New("a"); }, keepAlive: true)
+            .Tab("B", () => Text.New("b"));
+
+        var live = Build("A");
+        live.ApplyTheme(Theme.Light);
+        var kept = live.Children[^1].Children[0];
+        live.SetSelected(1);
+
+        Assert.True(TreeDiffer.TryPatch(live, Build("A •")));
+        live.SetSelected(0);
+
+        Assert.Same(kept, live.Children[^1].Children[0]);
+        Assert.Equal(1, built);
+    }
+
+    /// <summary>A theme swap restyles the tabs it has; it does not build new ones.</summary>
+    [Fact]
+    public void ATheme_RestylesTheTabsInPlace()
+    {
+        var tabs = TwoTabs();
+        var strip = tabs.Children[0];
+        var headers = strip.Children.ToArray();
+        var open = (BoxElement)headers[0];
+        var label = (TextElement)open.Children[0];
+        Assert.Equal(Theme.Light.Primary, label.Inherited.TextColor);
+
+        tabs.ApplyTheme(Theme.Dark);
+
+        Assert.Same(strip, tabs.Children[0]);
+        Assert.Equal(headers, strip.Children);
+        Assert.Same(label, open.Children[0]);
+        Assert.Equal(Theme.Dark.Primary, label.Inherited.TextColor);
+        Assert.Equal(Theme.Dark.Primary, open.BorderColor);
     }
 }
