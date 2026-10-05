@@ -26,6 +26,8 @@ public class WidthChangeEquivalenceTests
         Base with { LineHeight = 24f },
         Base with { FontSize = 13f, FontWeight = FontWeight.Bold },
         Base with { FontFamily = FontFamilies.Monospace },
+        Base with { TextDirection = TextDirection.Rtl },
+        Base with { TextDirection = TextDirection.Auto, FontSize = 13f },
     ];
 
     private static readonly string[] Texts =
@@ -46,7 +48,11 @@ public class WidthChangeEquivalenceTests
         "W",
         "Wi",
         "first line\nsecond line is longer",
-        // The BiDi path, untouched: here only to show it stays so.
+        // The BiDi path in any style.
+        "שלום עולם ספר בית מחשב חלון קובץ תיקייה שורה טקסט",
+        "commit שלום merged by אבג into main, then (דהו) 123",
+        "مرحبا بالعالم هذا نص عربي طويل للاختبار",
+        "שורה ראשונה\nשורה שנייה ארוכה יותר",
         "日本語のテキストを表示",
         "commit שלום merged",
     ];
@@ -66,12 +72,15 @@ public class WidthChangeEquivalenceTests
         var fonts = new SkiaFontCollection();
         var shaper = new SkiaTextShaper();
         int compared = 0;
-        foreach (var style in Styles)
         foreach (var (maxLines, overflow) in Modes)
         {
+            // Fresh pipelines per mode, so each string's first truncation (which builds its
+            // tables) is part of what is compared, shared by every style, so a cache key that
+            // left out a style field would hand one style another's result and fail here.
             var reference = new TextPipeline(fonts, shaper) { ReuseAcrossWidths = false };
-            var shortcut = new TextPipeline(fonts, shaper);
+            var reuse = new TextPipeline(fonts, shaper);
 
+            foreach (var style in Styles)
             foreach (var text in Texts)
             {
                 float natural = reference.Layout(text, style, float.PositiveInfinity, null).Size.Width;
@@ -82,7 +91,7 @@ public class WidthChangeEquivalenceTests
                 foreach (var w in widths.Concat(Enumerable.Reverse(widths)))
                 {
                     var expected = reference.Layout(text, style, w, maxLines, overflow);
-                    var actual = shortcut.Layout(text, style, w, maxLines, overflow);
+                    var actual = reuse.Layout(text, style, w, maxLines, overflow);
                     LayoutAssert.Same(expected, actual, $"\"{text}\" w={w} lines={maxLines} {overflow} {style}");
                     compared++;
                 }
