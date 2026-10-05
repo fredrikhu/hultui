@@ -172,6 +172,15 @@ All values:
 | `Center` | Center children on the cross axis |
 | `Baseline` | Align children along their text baseline (rows only — see below) |
 
+> **A nowrap container aligns its children within its own cross size — min and
+> max included.** A `Flex.Row().MinHeight(48).AlignItems(AlignItems.Center)`
+> centres its children in the 48px even where nothing stretches it, and a
+> `Flex.Column().MinWidth(320)` card stretches its children to 320 (CSS Flexbox
+> §9.4 step 8). A `MaxHeight` likewise caps how far `Stretch` stretches them.
+> Until 2026-10-05, where the parent didn't force the cross size, the line was
+> only as big as the children: they sat along the top (or start) of a box its
+> min had made bigger, centred or not.
+
 **Baseline.** In a row, the children set to `Baseline` are placed so the first line of
 text in each sits on one baseline — a big number beside its small unit, a label beside the
 text in a field, text beside an icon:
@@ -192,7 +201,7 @@ Flex.Row(gap: 6).AlignItems(AlignItems.Baseline).Children(
   sitting on an icon's bottom hangs its descenders under it, and the row is tall enough to
   hold them. The measure pass knows this, so a parent sizing the row gets the real height.
 - **The group sits at the top of the row**; in a row taller than the group (a fixed
-  height), the space is left below it.
+  height, or a min height), the space is left below it.
 - **In a column it is `FlexStart`**, as CSS does: a column has no baseline across its line.
   Grid items are not baseline-aligned yet (they start-align), and a grid container
   reports no baseline of its own, so it is treated like a box.
