@@ -1718,7 +1718,8 @@ Tabs.New().Selected(_tab).OnTabChanged(i => _tab = i)
   strip (Left/Right, or Up/Down for a strip at the side) move to the next tab, round the ends,
   and open it; Home and End go to the first and last. Enter or Space opens a tab that has focus
   without being open. Delete closes a closable tab. With Ctrl, Alt or Super held, the keys are
-  left for the app's shortcuts. When the tab with the keyboard closes, the open tab takes it.
+  left for the app's shortcuts. When the tab with the keyboard closes, the keyboard on its header
+  or in its panel, the open tab's header takes it.
 - **Elements:** the strip, the headers and the panel's host are kept, not rebuilt: a switch
   restyles two headers and swaps the panel.
 - **Accessibility:** the strip is a `TabList`, each header a `Tab` with `AccessibleSelected`,

@@ -47,6 +47,25 @@ and its last on `Previous`.
 
 ---
 
+## The focus ring
+
+`ShowsFocusVisual` asks the window to draw the theme's two-ring visual
+(`Theme.FocusVisual`) around the element while it holds focus. With `KeyboardOnly`, the
+default, the ring shows only while the keyboard is in use, the rule browsers use for
+`:focus-visible`:
+
+- **A pointer press hides it**, so a clicked button does not wear a ring.
+- **Any key press shows it**, on whatever has focus and wherever a handler moves focus
+  next: Tab, an arrow through a tab strip, Escape closing a dialog. Until 2026-10-05 only
+  Tab and Shift+Tab did, so a control whose arrow keys move focus moved it unseen after
+  a click.
+- **A modifier alone does not, nor a chord with Ctrl, Alt or Super**: Ctrl+C after a click
+  stays ringless. Shift counts (Shift+Tab, Shift+arrow).
+
+`KeyboardOnly = false` draws it however focus arrived.
+
+---
+
 ## Tab reaches your handler first
 
 On Tab the window dispatches an ordinary bubbling `KeyDownEvent` to the focused

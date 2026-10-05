@@ -189,6 +189,35 @@ public class TabsRebuildTests
         Assert.Same(headers[2], Focused(session));
     }
 
+    /// <summary>
+    /// The open tab closing with the keyboard in its panel — typing in it, then a shortcut —
+    /// hands the keyboard to the tab now open, as closing a focused tab's header does. It was
+    /// dropped: the keys went to the window's root and the next Tab started from the top.
+    /// </summary>
+    [Fact]
+    public void ClosingTheTabWhosePanelHasTheKeyboard_PutsItOnTheOneNowOpen()
+    {
+        using var session = HeadlessSession.Create(480, 240);
+        var docs = new Documents();
+        var root = docs.Mount();
+        session.Application.SetRoot(root);
+        session.PumpFrames(2);
+
+        var tabs = Find<TabsElement>(root);
+        session.Window.Click(Strip(tabs).Children[1]);
+        session.PumpFrames(2);
+        session.Window.Click(Panel(tabs));
+        Assert.Same(Panel(tabs), Focused(session));
+        var headerC = Strip(tabs).Children[2];
+
+        docs.Names.Remove("B");
+        docs.Rebuild();
+        session.PumpFrames(2);
+
+        Assert.Equal("c", ((TextInputElement)Panel(tabs)).Text);
+        Assert.Same(headerC, Focused(session));
+    }
+
     /// <summary>A tab renamed — a "•" for unsaved changes — is the same tab, and its panel is
     /// kept and renamed with it.</summary>
     [Fact]
