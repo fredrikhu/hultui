@@ -1,0 +1,90 @@
+using HultUI.Core.Layout;
+using HultUI.Core.Styling;
+using HultUI.Text;
+using HultUI.Text.Tests;
+using Xunit;
+
+namespace HultUI.Rendering.Skia.Tests;
+
+/// <summary>
+/// The real-font twin of HultUI.Text.Tests' TruncationEquivalenceTests: truncation that
+/// measures prefixes from a string's own segments, and one ellipsized line without the line
+/// breaker, against the reference path that measured every candidate from scratch — through
+/// HarfBuzz and the system's fonts, with their actual kerning and ligatures. Same output, to
+/// the bit, at every width.
+/// </summary>
+public class TruncationEquivalenceTests
+{
+    private static readonly ResolvedInheritedStyle Base = new(
+        FontFamily: "sans-serif", FontSize: 16f, FontWeight: FontWeight.Regular,
+        TextColor: new(0, 0, 0, 255), TextDirection: TextDirection.Ltr, Cursor: CursorType.Default);
+
+    private static readonly ResolvedInheritedStyle[] Styles =
+    [
+        Base,
+        Base with { LetterSpacing = 0.6f },
+        Base with { LineHeight = 24f },
+        Base with { FontSize = 13f, FontWeight = FontWeight.Bold },
+        Base with { FontFamily = FontFamilies.Monospace },
+    ];
+
+    private static readonly string[] Texts =
+    [
+        "The quick brown fox jumps over the lazy dog",
+        "AVA To Wa Ty Yo office affine flow fjord",   // kern pairs and ligatures, cut anywhere
+        "Incomprehensibilities",
+        "well-known x-ray https://example.com/a/b/c.txt",
+        "C:\\Users\\someone\\source\\repos\\project\\File.cs",
+        "   leading spaces then words",
+        "trailing spaces   ",
+        "\u00ADsoft hyphen first",
+        "cafe\u0301 re\u0301sume\u0301 nai\u0308ve",
+        "12345 67890 1029384756",
+        "Ελληνικό κείμενο εδώ",
+        "Привет, мир, как дела",
+        "W",
+        "Wi",
+        "first line\nsecond line is longer",
+        // The BiDi path, untouched: here only to show it stays so.
+        "日本語のテキストを表示",
+        "commit שלום merged",
+    ];
+
+    private static readonly (int MaxLines, TextOverflow Overflow)[] Modes =
+    [
+        (1, TextOverflow.Ellipsis),
+        (2, TextOverflow.Ellipsis),
+        (1, TextOverflow.Clip),
+    ];
+
+    [Fact]
+    public void Shortcut_MatchesTheReferencePath_AtEveryWidth()
+    {
+        var fonts = new SkiaFontCollection();
+        var shaper = new SkiaTextShaper();
+        int compared = 0;
+        foreach (var style in Styles)
+        foreach (var (maxLines, overflow) in Modes)
+        {
+            var reference = new TextPipeline(fonts, shaper) { ShortcutTruncation = false };
+            var shortcut = new TextPipeline(fonts, shaper);
+
+            foreach (var text in Texts)
+            {
+                float natural = reference.Layout(text, style, float.PositiveInfinity, null).Size.Width;
+                float step = text.Length <= 3 ? 0.25f : 1.3f;
+                var widths = new List<float> { -1f, 0f };
+                for (float w = 0.5f; w < natural + 3f; w += step) widths.Add(w);
+
+                foreach (var w in widths.Concat(Enumerable.Reverse(widths)))
+                {
+                    var expected = reference.Layout(text, style, w, maxLines, overflow);
+                    var actual = shortcut.Layout(text, style, w, maxLines, overflow);
+                    LayoutAssert.Same(expected, actual, $"\"{text}\" w={w} lines={maxLines} {overflow} {style}");
+                    compared++;
+                }
+            }
+        }
+        Assert.True(compared > 10_000, $"compared only {compared} layouts");
+    }
+}

@@ -21,4 +21,8 @@
     <ProjectReference Include="..\..\src\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\HultUI.Text.Tests\LayoutAssert.cs" Link="LayoutAssert.cs" />
+  </ItemGroup>
+
 </Project>
