@@ -319,7 +319,11 @@ TextInput.New("initial text") // Pre-filled
 | `Clipboard` | -- | `IClipboard?` | Set by Application |
 | `CanUndo`, `CanRedo` | -- | `bool` (read-only) | |
 
-**`Masked`** makes a password field. The value is drawn as bullets; a screen reader is told
+**`Masked`** makes a password field. The value is drawn as bullets — while an input method
+composes, its preedit shows among them, the rest stays bullets — and everything about the
+field's geometry is measured on the bullets too: the selection highlight, where a click puts
+the caret, how the arrow keys step, and the width a field without one of its own grows to.
+Measured on the text, each of those would trace what the bullets hide. A screen reader is told
 the field is a password (UIA's `IsPassword`, AT-SPI's `password text` role) and is given the
 bullets as its value, never the text; and Cut and Copy do nothing — the keys and the menu
 items alike, greyed out in the menu — because any application can read the clipboard. Paste
