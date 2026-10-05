@@ -28,9 +28,10 @@ public sealed class OpacityLayerTests
 
     // A group starts on its own pixel, and Skia places a path's edges on a 1/64-pixel grid in the
     // group's pixels: moved from the window's corner to the content's, an antialiased glyph edge
-    // can shade a step differently (one pixel did, by 8). Pinning the groups' origin back at the
-    // corner made every frame match within the default. Content cut off is a strip of pixels.
-    private static readonly GoldenTolerance MovedOrigin = new(Channel: 2, Pixels: 4);
+    // can shade a step or two differently — up to 9 levels, 1 pixel on Windows and 8 on Linux.
+    // Pinning the groups' origin back at the corner made every frame match within the default.
+    // Content cut off differs by far more than 16: it is ink against background.
+    private static readonly GoldenTolerance MovedOrigin = new(Channel: 16, Pixels: 0);
 
     private static HeadlessSession Session(int width, int height) =>
         HeadlessSession.Create(width, height, options: HeadlessOptions.Golden());
