@@ -74,8 +74,8 @@ public class ExpanderElement : BoxElement
         _header = new HeaderRowElement(this);
         _titleSlot.Flex.FlexGrow = 1;
         _titleSlot.Flex.FlexShrink = 1;
-        // No JustifyContent: on a column of auto height it pushes the title down (the
-        // header's AlignItems centres the slot, which is what is wanted).
+        // No JustifyContent: the slot is as tall as its title, so it has no space to centre
+        // in. The header's AlignItems centres the slot, which is what is wanted.
         _titleSlot.Flex.Direction = FlexDirection.Column;
         _actions.Flex.Direction = FlexDirection.Row;
         _actions.Flex.AlignItems = AlignItems.Center;

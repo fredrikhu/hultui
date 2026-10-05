@@ -374,8 +374,9 @@ public sealed partial class ReelApp : Component, IDisposable
 
         if (!broken)
         {
-            // Sized rather than left to stretch: the column centres its children, but a
-            // button with nothing to size it fills the width of the window.
+            // A fixed width, kept from when an unsized button in this centring column came out
+            // about half the window wide (a layout bug fixed 2026-10-05). Without it the button
+            // is as wide as its label.
             var open = Button.New("Open…")
                 .Width(160f)
                 .OnClick(_ => OpenDialog())

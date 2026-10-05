@@ -327,8 +327,8 @@ public sealed class CommandPalette
         }
         if (command.Icon is { } icon) row.AddChild(icon().FlexShrink(0));
 
-        // Centred by the row, not by JustifyContent: on an auto-height column that measured the
-        // column a half row taller and set the title on its floor.
+        // Centred by the row. The column is as tall as its lines, so JustifyContent on it would
+        // have no free space to centre in (see docs/LAYOUT.md §3).
         var text = Flex.Column(gap: 1).FlexGrow(1).FlexShrink(1);
         var title = Ellipsis(Text.New(command.Title).FontSize(t.TitleFontSize));
         if (t.Title is { } titleColor) title.TextColor(titleColor);

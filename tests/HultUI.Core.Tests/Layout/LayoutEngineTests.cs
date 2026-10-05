@@ -845,6 +845,56 @@ public class LayoutEngineTests
         Assert.Equal(275, root.Children[1].Layout.AbsoluteX, 1f);
     }
 
+    [Theory]
+    [InlineData(JustifyContent.Center)]
+    [InlineData(JustifyContent.FlexEnd)]
+    [InlineData(JustifyContent.SpaceBetween)]
+    [InlineData(JustifyContent.SpaceAround)]
+    [InlineData(JustifyContent.SpaceEvenly)]
+    public void JustifyContent_AutoMainSize_HasNoFreeSpace(JustifyContent justify)
+    {
+        // The column's height comes from its children, so it has none to distribute — not
+        // the row's 100px it happens to sit in, which AlignItems.Center doesn't stretch it to.
+        var column = Flex.Column(gap: 4).JustifyContent(justify).Children(
+            Box.New().Width(50).Height(20),
+            Box.New().Width(50).Height(10));
+        var root = Flex.Row().Width(400).Height(100).AlignItems(AlignItems.Center).Children(column);
+        Layout(root);
+
+        Assert.Equal(34, column.Layout.Height, 0.01f);
+        Assert.Equal(33, column.Layout.AbsoluteY, 0.01f);   // (100 - 34) / 2
+        Assert.Equal(33, column.Children[0].Layout.AbsoluteY, 0.01f);
+        Assert.Equal(57, column.Children[1].Layout.AbsoluteY, 0.01f);
+    }
+
+    [Fact]
+    public void JustifyContent_AutoMainSize_DistributesUpToItsMinimum()
+    {
+        var column = Flex.Column().MinHeight(60).JustifyContent(JustifyContent.FlexEnd).Children(
+            Box.New().Width(50).Height(20));
+        var root = Flex.Row().Width(400).Height(100).AlignItems(AlignItems.FlexStart).Children(column);
+        Layout(root);
+
+        Assert.Equal(60, column.Layout.Height, 0.01f);
+        Assert.Equal(40, column.Children[0].Layout.AbsoluteY, 0.01f);
+    }
+
+    [Fact]
+    public void JustifyContent_AutoMainSize_DistributesWithinItsMaximum()
+    {
+        // An auto-width wrapping row is as wide as its longest line, capped by its max, and
+        // every line is justified within that width — not within its longest line.
+        var row = Flex.Row().FlexWrap(FlexWrap.Wrap).MaxWidth(150).JustifyContent(JustifyContent.Center).Children(
+            Box.New().Width(200).Height(10).FlexShrink(0),
+            Box.New().Width(60).Height(10));
+        var root = Flex.Column().Width(400).Height(100).AlignItems(AlignItems.FlexStart).Children(row);
+        Layout(root);
+
+        Assert.Equal(150, row.Layout.Width, 0.01f);
+        Assert.Equal(0, row.Children[0].Layout.AbsoluteX, 0.01f);    // overflows: no free space
+        Assert.Equal(45, row.Children[1].Layout.AbsoluteX, 0.01f);   // (150 - 60) / 2
+    }
+
     // ──── Phase 2: NoWrap overflow ────
 
     [Fact]

@@ -63,8 +63,8 @@ public partial class JunctionApp
     private Element GitLabMark(GitLabRemote remote, float size = 12f)
     {
         bool connected = _gitlab.HasAccount(remote.Host);
-        // The glyph itself, not a box around it: wrapped, the box took the row's height and
-        // sat the glyph at its bottom, so the mark hung under the name it follows.
+        // The glyph itself, not a box around it: the row's AlignItems centres it beside the
+        // name it follows.
         var mark = Ui.Icon(Icons.GitLabLogo, size, Nocturne.On(connected ? 0.55 : 0.26))
             .FlexShrink(0)
             .Tooltip(connected
