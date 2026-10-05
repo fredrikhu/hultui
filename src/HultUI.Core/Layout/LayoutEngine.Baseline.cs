@@ -94,10 +94,8 @@ public sealed partial class LayoutEngine
     {
         var box = container.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;
-        var (resolvedW, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
-            constraint.AvailableWidth, outerSpacing.Horizontal);
-        var (resolvedH, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
-            constraint.AvailableHeight, outerSpacing.Vertical);
+        var (resolvedW, contentAvailW, resolvedH, contentAvailH) = ResolveBox(container, forcedWidth, forcedHeight,
+            constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -149,7 +147,9 @@ public sealed partial class LayoutEngine
                 if (HasBaselineItems(line))
                     return lineTop + line.MaxAscent;
 
-                float? fh = stretch && child.BoxRead.Height.IsAuto ? line.CrossSize - margin.Vertical : null;
+                // As Phase 6: a ratio box is not stretched down.
+                float? fh = stretch && child.BoxRead.Height.IsAuto && !(RatioOf(child) > 0f)
+                    ? line.CrossSize - margin.Vertical : null;
                 float borderH = fh ?? item.CrossSize - margin.Vertical;
                 float own = MeasureFirstBaseline(child, childConstraint, item.MainSize - margin.Horizontal, fh)
                     ?? margin.Top + borderH;
@@ -162,7 +162,9 @@ public sealed partial class LayoutEngine
                 float top = ComputeJustifyOffset(flex.JustifyContent, JustifySpace(lines, mainGap, justifyBounds),
                     LineMain(line, mainGap), line.Items.Count);
 
-                float? fw = stretch && child.BoxRead.Width.IsAuto ? line.CrossSize - margin.Horizontal : null;
+                float? fw = stretch && child.BoxRead.Width.IsAuto
+                        && (!(RatioOf(child) > 0f) || (child.BoxRead.Height.IsAuto && !LayoutSpace.IsUnbounded(crossAvailable)))
+                    ? line.CrossSize - margin.Horizontal : null;
                 float borderH = item.MainSize - margin.Vertical;
                 float own = MeasureFirstBaseline(child, childConstraint, fw, borderH) ?? margin.Top + borderH;
                 return top + own;

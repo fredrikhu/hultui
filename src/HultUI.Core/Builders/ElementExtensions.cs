@@ -17,6 +17,12 @@ public static class ElementExtensions
     public static T MinHeight<T>(this T el, Dimension h) where T : Element { el.Box.MinHeight = h; return el; }
     public static T MaxWidth<T>(this T el, Dimension w) where T : Element { el.Box.MaxWidth = w; return el; }
     public static T MaxHeight<T>(this T el, Dimension h) where T : Element { el.Box.MaxHeight = h; return el; }
+
+    /// <summary>Keeps the box at <paramref name="ratio"/>, width over height: the side left auto
+    /// follows the one that is set, stretched or flexed. See <see cref="Layout.BoxStyle.AspectRatio"/>.</summary>
+    public static T AspectRatio<T>(this T el, float ratio) where T : Element { el.Box.AspectRatio = ratio; return el; }
+    /// <summary>Keeps the box at <paramref name="width"/>:<paramref name="height"/> — <c>AspectRatio(16, 9)</c>.</summary>
+    public static T AspectRatio<T>(this T el, float width, float height) where T : Element { el.Box.AspectRatio = width / height; return el; }
     public static T Size<T>(this T el, Dimension w, Dimension h) where T : Element { el.Box.Width = w; el.Box.Height = h; return el; }
 
     // ──── Spacing ────

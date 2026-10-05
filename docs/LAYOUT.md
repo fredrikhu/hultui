@@ -345,6 +345,42 @@ in a 1400-wide parent is 720 wide, and its children are laid out across 720; tex
 `MaxWidth` wraps at it and is as tall as its wrapped lines. The same holds for a size the
 parent forces — a stretched flex item, a scroll view's content — and on both axes.
 
+### Aspect ratio
+
+`AspectRatio(width, height)` (or `AspectRatio(ratio)`, width over height) keeps a box's border
+box at a shape: the side left auto follows the one that is known.
+
+```csharp
+// A poster as wide as its column, as tall as 2:3 makes it.
+Flex.Column(gap: 6).Children(Box.New().AspectRatio(2, 3).Children(artwork), caption)
+
+// A thumbnail 90 tall, as wide as 16:9 makes it.
+Box.New().Height(90).AspectRatio(16, 9)
+
+// Three tiles sharing a row, each as tall as it is wide.
+Flex.Row(gap: 8).Children(tile.FlexGrow(1).FlexBasis(0).AspectRatio(1), …)
+```
+
+- **One side known, the other auto:** the other follows — whether the known side was given,
+  stretched by the parent, flexed, or set by a grid cell — within its own min and max.
+- **Both known:** the ratio is ignored.
+- **Neither:** the width comes from the content, the height from that.
+- **Width wins.** A parent stretches a ratio box across, never down: a row does not stretch its
+  height, a grid cell gives it its width and puts it at the top. In a column a ratio box of auto
+  width and height takes the room the column has, as a block does — nested columns included.
+  Given a height, the height decides.
+- **In a column that runs short** it keeps its shape and overflows rather than squash: the height
+  its width makes is its floor when the column shrinks (as CSS's transferred minimum). That floor
+  is for a ratio box that is itself the shrinking item; one inside a wrapper is not seen from the
+  wrapper's floor.
+- **Pictures** have a shape of their own. An `Image` given only a width is as tall as the picture
+  is at that width, and given only a height as wide — as an HTML image is. Given both, or
+  neither (stretched across a column), it lays out as it always did and its `Fit` draws it.
+  A box's own `AspectRatio` takes precedence.
+
+A virtual list still needs its row heights before it lays the rows out, so a grid of ratio tiles
+in a `VirtualListElement` computes its row stride from the cell width as before.
+
 ---
 
 ## 9. Gap

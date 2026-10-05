@@ -1230,6 +1230,11 @@ public abstract class Element
     public bool IsHitTestVisible { get; set; } = true;
 
     // ──── Measurement (overridden by leaf elements) ────
+    /// <summary>The shape this element's content has of its own — a picture's width over its
+    /// height — or 0 for none. The layout keeps it when the app gives one side and leaves the
+    /// other auto (see <see cref="BoxStyle.AspectRatio"/>, which takes precedence).</summary>
+    internal virtual float NaturalAspectRatio => 0f;
+
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;
 

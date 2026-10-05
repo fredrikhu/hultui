@@ -20,6 +20,16 @@ public sealed class BoxStyle
     public Overflow OverflowX { get; set; } = Overflow.Visible;
     public Overflow OverflowY { get; set; } = Overflow.Visible;
 
+    /// <summary>
+    /// Width over height of the border box, or 0 for none. With one side definite — given,
+    /// stretched by the parent, or flexed — the other follows from it; with both definite it
+    /// is ignored; with neither, the width comes from the content and the height from that.
+    /// Width wins: a parent stretches a ratio box across, never down, and in a column a ratio
+    /// box of auto width and height takes the room the column has, as a block does. Given a
+    /// height, the height decides.
+    /// </summary>
+    public float AspectRatio { get; set; }
+
     internal void CopyFrom(BoxStyle source)
     {
         Width = source.Width;
@@ -33,5 +43,6 @@ public sealed class BoxStyle
         Margin = source.Margin;
         OverflowX = source.OverflowX;
         OverflowY = source.OverflowY;
+        AspectRatio = source.AspectRatio;
     }
 }

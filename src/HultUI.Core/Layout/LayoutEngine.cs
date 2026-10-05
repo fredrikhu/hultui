@@ -63,11 +63,10 @@ public sealed partial class LayoutEngine
         var outerSpacing = padding + border;
 
         // Resolve definite width/height (a forced size, from flex resolution, takes priority)
-        // and the content area available for children — with min and max already applied.
-        var (resolvedWidth, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
-            constraint.AvailableWidth, outerSpacing.Horizontal);
-        var (resolvedHeight, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
-            constraint.AvailableHeight, outerSpacing.Vertical);
+        // and the content area available for children — with min and max already applied,
+        // and an aspect ratio's missing side filled in.
+        var (resolvedWidth, contentAvailW, resolvedHeight, contentAvailH) = ResolveBox(element, forcedWidth, forcedHeight,
+            constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
         // Count flow vs absolute children without allocating partition lists
         var children = element.Children;
@@ -118,6 +117,8 @@ public sealed partial class LayoutEngine
         var finalW = resolvedWidth ?? (contentSize.Width + outerSpacing.Horizontal);
         var finalH = resolvedHeight ?? (contentSize.Height + outerSpacing.Vertical);
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
+        if (RatioOf(element) is > 0f and var ratio && resolvedWidth is null && resolvedHeight is null)
+            finalH = finalW / ratio;
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
 
         element.Layout = new LayoutResult(0, 0, finalW, finalH, padding, border, margin)
@@ -282,15 +283,20 @@ public sealed partial class LayoutEngine
                     // subtract the child's margins to convert.
                     var childMargin = child.BoxRead.Margin;
                     float? forcedW, forcedH;
+                    // A ratio box is stretched across, never down — its height follows its width —
+                    // and across only a bounded width, the one Phase 1 measured it at, and only when
+                    // its height is not given: then the height decides the width.
+                    bool hasRatio = RatioOf(child) > 0f;
                     if (isRow)
                     {
                         forcedW = item.MainSize - childMargin.Horizontal;
-                        forcedH = (alignSelf == AlignItems.Stretch && child.BoxRead.Height.IsAuto)
+                        forcedH = (alignSelf == AlignItems.Stretch && child.BoxRead.Height.IsAuto && !hasRatio)
                             ? (float?)(line.CrossSize - childMargin.Vertical) : null;
                     }
                     else
                     {
-                        forcedW = (alignSelf == AlignItems.Stretch && child.BoxRead.Width.IsAuto)
+                        forcedW = (alignSelf == AlignItems.Stretch && child.BoxRead.Width.IsAuto
+                                && (!hasRatio || (child.BoxRead.Height.IsAuto && !LayoutSpace.IsUnbounded(crossAvailable))))
                             ? (float?)(line.CrossSize - childMargin.Horizontal) : null;
                         forcedH = item.MainSize - childMargin.Vertical;
                     }
@@ -402,6 +408,14 @@ public sealed partial class LayoutEngine
             float hypotheticalMain;
             float hypotheticalCross;
 
+            // A ratio box in a column is as wide as the column's room for it, as a block is, and
+            // so as tall as that width makes it: measured at that width, or it would be measured
+            // from its content — a box with none at no height — and Phase 6 would force that.
+            // The line it is on is then that wide, so Phase 6 stretches it to the same width.
+            float? stretchedWidth = !isRow && StretchesAcross(child, containerAlign, crossAvailable)
+                ? float.MaxNative(0f, crossAvailable - childBox.Margin.Horizontal)
+                : null;
+
             // Both MainSize and CrossSize on FlexItem are the outer (margin-box)
             // size. MeasureLeafSize and ComputeLayout already return outer sizes,
             // so the code below just reads measured.Width/Height directly. The
@@ -420,7 +434,7 @@ public sealed partial class LayoutEngine
             {
                 var constraintW = isRow ? mainAvailable : crossAvailable;
                 var constraintH = isRow ? crossAvailable : mainAvailable;
-                float? fw = hasBasisOrSize ? (isRow ? basisOrSize : null) : null;
+                float? fw = hasBasisOrSize && isRow ? basisOrSize : stretchedWidth;
                 float? fh = hasBasisOrSize ? (isRow ? null : basisOrSize) : null;
                 measured = MeasureLeafSize(child, constraintW, constraintH, fw, fh);
             }
@@ -431,7 +445,7 @@ public sealed partial class LayoutEngine
                 var childConstraint = isRow
                     ? new LayoutConstraint(mainAvailable, crossAvailable)
                     : new LayoutConstraint(crossAvailable, mainAvailable);
-                float? fw = isRow ? (float?)basisOrSize : null;
+                float? fw = isRow ? (float?)basisOrSize : stretchedWidth;
                 float? fh = isRow ? null : (float?)basisOrSize;
                 measured = MeasureSize(child, childConstraint, fw, fh);
             }
@@ -440,7 +454,7 @@ public sealed partial class LayoutEngine
                 var childConstraint = isRow
                     ? new LayoutConstraint(mainAvailable, crossAvailable)
                     : new LayoutConstraint(crossAvailable, mainAvailable);
-                measured = MeasureSize(child, childConstraint);
+                measured = MeasureSize(child, childConstraint, stretchedWidth);
             }
 
             hypotheticalMain = isRow ? measured.Width : measured.Height;
@@ -493,10 +507,8 @@ public sealed partial class LayoutEngine
         var margin = box.Margin;
 
         // The same resolution ComputeLayout makes, or the measured size is not the laid-out one.
-        var (resolvedW, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
-            constraint.AvailableWidth, outerSpacing.Horizontal);
-        var (resolvedH, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
-            constraint.AvailableHeight, outerSpacing.Vertical);
+        var (resolvedW, contentAvailW, resolvedH, contentAvailH) = ResolveBox(element, forcedWidth, forcedHeight,
+            constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
         var children = element.Children;
         bool hasFlow = false;
@@ -529,6 +541,8 @@ public sealed partial class LayoutEngine
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
         var finalH = resolvedH ?? (contentSize.Height + outerSpacing.Vertical);
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
+        if (RatioOf(element) is > 0f and var ratio && resolvedW is null && resolvedH is null)
+            finalH = finalW / ratio;
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
@@ -634,16 +648,16 @@ public sealed partial class LayoutEngine
 
         // As in ComputeLayout: a max width is what text wraps at, so it has to be in the
         // width the text is measured in — not applied to a box measured on one long line.
-        var (resolvedW, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
-            constraintW, outerSpacing.Horizontal);
-        var (resolvedH, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
-            constraintH, outerSpacing.Vertical);
+        var (resolvedW, contentAvailW, resolvedH, contentAvailH) = ResolveBox(element, forcedWidth, forcedHeight,
+            constraintW, constraintH, outerSpacing);
 
         var contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
 
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
         var finalH = resolvedH ?? (contentSize.Height + outerSpacing.Vertical);
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraintW);
+        if (RatioOf(element) is > 0f and var ratio && resolvedW is null && resolvedH is null)
+            finalH = finalW / ratio;
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraintH);
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
@@ -809,6 +823,14 @@ public sealed partial class LayoutEngine
 
         float crossAvail = Math.Max(0f, crossAvailable - (isRow ? margin.Vertical : margin.Horizontal));
         float content = isRow ? MinContentWidth(child) : MinContentHeight(child, crossAvail);
+
+        // A ratio box in a column keeps its shape: its width is set (given, or the column's),
+        // and the height that width makes is its floor — CSS's transferred minimum.
+        if (!isRow && RatioOf(child) is > 0f and var ratio && !LayoutSpace.IsUnbounded(crossAvail))
+        {
+            float width = box.Width.Resolve(crossAvail) ?? crossAvail;
+            content = Math.Max(content, ApplyMinMax(width / ratio, box.MinHeight, box.MaxHeight, mainAvailable));
+        }
         return content + marginMain;
     }
 
@@ -1070,6 +1092,52 @@ public sealed partial class LayoutEngine
         return (resolved, float.IsNegative(extent) ? 0 : extent);
     }
 
+    /// <summary>
+    /// Both axes as <see cref="ResolveAxis"/> resolves them, then the aspect ratio: with one
+    /// side definite and the other not, the other follows from it, within its own min and max,
+    /// and so does the room it leaves its content. Both definite, the ratio is ignored; neither,
+    /// and the callers derive the height from the content's width once they have it.
+    /// </summary>
+    private static (float? Width, float ContentW, float? Height, float ContentH) ResolveBox(Element element,
+        float? forcedWidth, float? forcedHeight, float availableWidth, float availableHeight, Thickness spacing)
+    {
+        var box = element.BoxRead;
+        var (width, contentW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
+            availableWidth, spacing.Horizontal);
+        var (height, contentH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
+            availableHeight, spacing.Vertical);
+
+        float ratio = RatioOf(element);
+        if (ratio > 0f)
+        {
+            if (width is { } w && height is null)
+            {
+                height = ApplyMinMax(w / ratio, box.MinHeight, box.MaxHeight, availableHeight);
+                contentH = float.MaxNative(0f, height.Value - spacing.Vertical);
+            }
+            else if (height is { } h && width is null)
+            {
+                width = ApplyMinMax(h * ratio, box.MinWidth, box.MaxWidth, availableWidth);
+                contentW = float.MaxNative(0f, width.Value - spacing.Horizontal);
+            }
+        }
+        return (width, contentW, height, contentH);
+    }
+
+    /// <summary>
+    /// The shape a box keeps: its own <see cref="BoxStyle.AspectRatio"/>, or — for content with a
+    /// shape of its own, a picture — that shape when the app gave one side and left the other,
+    /// as an HTML image does. Only then: a picture stretched across a column, or given both
+    /// sides, is laid out as it always was and drawn by its fit.
+    /// </summary>
+    private static float RatioOf(Element element)
+    {
+        var box = element.BoxRead;
+        if (box.AspectRatio > 0f) return box.AspectRatio;
+        if (box.Width.IsAuto == box.Height.IsAuto) return 0f;
+        return element.NaturalAspectRatio;
+    }
+
     private static float ApplyMinMax(float value, Dimension min, Dimension max, float reference)
     {
         value = float.MaxNative(value, min.ResolveOr(reference, -1f));
@@ -1133,6 +1201,15 @@ public sealed partial class LayoutEngine
             _ => 0
         };
     }
+
+    /// <summary>Whether a column stretches <paramref name="child"/>, a ratio box of auto width,
+    /// across the room it has — the case where that width decides its height.</summary>
+    private static bool StretchesAcross(Element child, AlignItems containerAlign, float crossAvailable) =>
+        RatioOf(child) > 0f
+        && child.BoxRead.Width.IsAuto
+        && child.BoxRead.Height.IsAuto
+        && !LayoutSpace.IsUnbounded(crossAvailable)
+        && ResolveAlignSelf(child.FlexRead.AlignSelf, containerAlign) == AlignItems.Stretch;
 
     private static AlignItems ResolveAlignSelf(AlignSelf alignSelf, AlignItems containerAlignItems)
     {

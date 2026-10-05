@@ -51,8 +51,8 @@ var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.App
             MakeSidebarItem("#1E293B", "#1E293B", "Dashboard"),
             MakeSidebarItem("#334155", "#334155", "Components"),
             MakeSidebarItem("#475569", "#475569", "Settings"),
-            // TODO: This must be able to be done nicer
-            Box.New().Children(Image.New(imageSource).Size(Dimension.Percent(100), 164f * imageSource.IntrinsicSize.Height / imageSource.IntrinsicSize.Width)).Padding(10),
+            // Given only its width, a picture is as tall as its own shape makes it.
+            Box.New().Children(Image.New(imageSource).Width(Dimension.Percent(100))).Padding(10),
             sidebarFill = Box.New().FlexGrow(1).Background(Color.FromHex("#0F172A")).CornerRadius(6f)
         ),
 

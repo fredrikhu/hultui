@@ -86,6 +86,21 @@ public class ImageElement : Element
     public static ImageElement New(IImageSource? source = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
         new ImageElement { Source = source }.WithOrigin(file, line);
 
+    /// <summary>
+    /// The picture's shape — the crop's, under <see cref="SourceRect"/> — so an image given only a
+    /// width is as tall as the picture is at that width, and one given only a height as wide.
+    /// None until it loads, and none under <see cref="ScaleDownToFit"/>, which sizes itself.
+    /// </summary>
+    internal override float NaturalAspectRatio
+    {
+        get
+        {
+            if (_scaleDownToFit || Source is not { IsLoaded: true } source) return 0f;
+            var size = _sourceRect is { } crop ? new Size(crop.Width, crop.Height) : source.IntrinsicSize;
+            return size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 0f;
+        }
+    }
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
         if (Source is null || !Source.IsLoaded)

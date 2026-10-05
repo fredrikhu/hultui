@@ -350,9 +350,10 @@ public sealed class VideoPlayer : Component
 
         var size = frame.Source is { } crop ? new Size(crop.Width, crop.Height) : frame.Image.IntrinsicSize;
         float width = PreviewWidth;
-        float height = size.Width > 0 ? width * size.Height / size.Width : width * 9f / 16f;
 
-        var picture = HultUI.Core.Builders.Image.New(frame.Image).Width(width).Height(height);
+        // The frame's own shape at the preview's width; 16:9 for a frame that has not said.
+        var picture = HultUI.Core.Builders.Image.New(frame.Image).Width(width)
+            .AspectRatio(size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 16f / 9f);
         picture.SourceRect = frame.Source;
 
         var card = Flex.Column(gap: 2)
