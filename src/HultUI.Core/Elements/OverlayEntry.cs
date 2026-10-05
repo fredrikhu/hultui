@@ -17,6 +17,12 @@ internal sealed class OverlayEntry
     /// <summary>What had the focus when the overlay opened: where it goes back to when the
     /// overlay closes holding it.</summary>
     public Element? FocusBefore { get; init; }
+    /// <summary>The element an anchored overlay belongs to: a press on it while the overlay is
+    /// open closes the overlay and goes no further.</summary>
+    public Element? Anchor { get; init; }
+    /// <summary>Where an anchored overlay goes, from its laid-out size and the window's; asked
+    /// again every frame, so the overlay follows its anchor.</summary>
+    public Func<Primitives.Size, Primitives.Size, Primitives.Point>? Place { get; init; }
     public bool StyleResolved { get; set; }
     public bool LayoutDone { get; set; }
 }

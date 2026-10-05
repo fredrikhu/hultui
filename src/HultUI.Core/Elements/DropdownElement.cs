@@ -213,9 +213,9 @@ public class DropdownElement : Element
         popup.Box.MinWidth = Dimension.Px(Layout.Width);
         popup.SetHoveredIndex(_selectedIndex);
 
-        // Screen box, not layout box: an overlay is placed in window coordinates, and inside a
-        // scrolled page the two differ by however far the page has been scrolled.
-        var box = ScreenBorderBox;
+        // The window box, not the layout box: an overlay is placed in window coordinates, and
+        // inside a scrolled page — or inside a popover — the two differ.
+        var box = WindowBorderBox;
         _popupHandle = OverlayHost.ShowOverlay(popup, box.X, box.Bottom + _popupGap,
             dismissOnOutsideClick: true, hitTestable: true, onDismissed: OnPopupDismissed);
         _popup = popup;

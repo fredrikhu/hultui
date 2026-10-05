@@ -62,10 +62,22 @@ public sealed partial class FluentApp : Component
 
     private readonly MenuBar _menus;
 
+    /// <summary>The gallery's flyout: WinUI's "are you sure" card under a button.</summary>
+    public readonly Popover EmptyBinFlyout;
+
     public FluentApp(Application app, Window window)
     {
         _app = app;
         _window = window;
+        EmptyBinFlyout = new Popover(() =>
+        {
+            var p = Palette;
+            return Flex.Column(gap: 12f).Width(260f).Children(
+                F.Body(p, "All 12 items will be deleted for good. Empty the Recycle Bin?"),
+                // In a row, at its own width: the Fluent button's two boxes do not stretch together.
+                Flex.Row(gap: 0).Children(
+                    F.Button(p, "Yes, empty it", () => { ClickCount++; EmptyBinFlyout!.Close(); }, accent: true)));
+        });
         _menus = new MenuBar(
         [
             new("&File",

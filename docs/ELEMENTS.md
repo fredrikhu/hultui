@@ -1558,3 +1558,49 @@ before the title (right when closed, down when open), a hover fill, the body lin
 title. `Chevron = Trailing` puts it at the far end (down, then up); `Border`, `HeaderBackground`
 and `BodyBackground` make it a card whose header and body share the border and are joined by a
 rule, the header giving up its bottom corners while open — the Fluent sample's is one.
+
+## 24. Popover
+
+A card of any content that opens next to the element it belongs to — a filter panel under a
+toolbar button, recent folders under a caret — and closes on a press outside it or Esc. Not
+modal: the rest of the window stays live.
+
+```csharp
+_filters = new Popover(() => Flex.Column(gap: 8).Children(query, onlyMine, applyButton))
+{
+    Placement = PopoverPlacement.Below, Alignment = PopoverAlignment.End,
+};
+// In the build: toggle from the anchor's click, and say whether it is open.
+Button.New("Filters").OnClick(e => _filters.Toggle(e.CurrentTarget)).AccessibleExpanded(_filters.IsOpen)
+```
+
+- **Content:** the function is asked when it opens, on `Refresh()`, and whenever reactive state
+  it reads changes; the result is patched into the open card, so focus and what is typed stay.
+  A row that has done its work calls `Close()`.
+- **Placement:** `Placement` (Below, Above, Right, Left) and `Alignment` (Start, Center, End),
+  a theme gap from the anchor. It flips to the other side when it does not fit there and fits
+  better on the other; slides along to stay in the window; is placed again every frame, so it
+  follows an anchor that scrolls or a window that resizes; and closes if a rebuild drops its
+  anchor (key the anchor if its siblings can come and go — by position, a removed sibling
+  before it hands its element to the next one). `ActualPlacement` says which side it took.
+- **Closing:** a press outside closes it and goes on to whatever was pressed; a press on its
+  own anchor only closes it, so the toggle does not reopen it. Opened from a dialog, a press
+  elsewhere in the dialog counts as outside. Esc closes it. `Closed` runs however it closed.
+- **Keyboard:** opening moves the keyboard to its first control (the card itself when it has
+  none), Tab stays inside, and closing with the keyboard inside hands it back to the anchor.
+  `ArrowKeys = true` lets ↑ ↓ walk the controls, for a list of rows. With nothing focusable in
+  it, the card holds the keyboard, so a key handler on the content never sees a key.
+- **Accessibility:** the card is a dialog named by `AccessibleName`, else by its anchor; the
+  anchor reports expanded while it is open.
+
+**Looks** come from `Theme.Popover` (`PopoverTheme`): fill, border, corner radius, padding,
+shadows, the gap to the anchor and the margin kept from the window's edges.
+
+**Under it**, for other anchored surfaces: `IOverlayHost.ShowAnchoredOverlay(content, anchor,
+place, …)` places an overlay with `place(contentSize, windowSize)` every frame, and swallows a
+press on the anchor that closes it. `Element.WindowBorderBox` / `WindowContentBox` say where an
+element is in the window, overlay or not — what anything placed in the window against it wants
+(another overlay, the focus ring, a synthesized click). `ScreenBorderBox` stays in the space the
+element's own pointer events arrive in, which inside an overlay is the overlay's; dropdowns, date
+pickers and tooltips used it to place their popups, so inside a popover they opened as far off as
+the popover is from the window's corner.

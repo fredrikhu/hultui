@@ -326,6 +326,34 @@ public class FluentSampleTests
     private static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) * (c.A / 255.0);
 
     /// <summary>
+    /// The gallery's flyout is the framework popover in WinUI's look: it opens under its button
+    /// with the Flyout fill, its button says it is expanded, and the button inside it works and
+    /// closes it.
+    /// </summary>
+    [Fact]
+    public void TheFlyoutOpensUnderItsButton_AndItsButtonClosesIt()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+        GoTo(session, "Controls gallery");
+
+        var anchor = session.Window.FindByRole(AccessibilityRole.Button, "Empty bin")!;
+        anchor.Click();
+        session.PumpFrames(2);
+        Assert.True(app.EmptyBinFlyout.IsOpen);
+        Assert.Equal(true, session.Window.FindByRole(AccessibilityRole.Button, "Empty bin")!.Node.Expanded);
+
+        var card = (BoxElement)app.EmptyBinFlyout.Card!;
+        Assert.Equal(app.Palette.Flyout, card.BackgroundColor);
+        Assert.Equal(MathF.Round(anchor.Element.WindowBorderBox.Bottom + 4f), card.WindowBorderBox.Y);
+
+        session.Window.FindByRole(AccessibilityRole.Button, "Yes, empty it")!.Click();
+        session.PumpFrames(2);
+        Assert.False(app.EmptyBinFlyout.IsOpen);
+        Assert.Equal(1, app.ClickCount);
+    }
+
+    /// <summary>
     /// The expander opens, and its header gives up its bottom corners when it does. That is
     /// what makes the header and the panel below it read as one object rather than as two
     /// stacked cards — a header that keeps all four corners open looks like a bug.

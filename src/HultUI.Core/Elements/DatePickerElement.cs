@@ -178,7 +178,7 @@ public class DatePickerElement : Element
         // which is what hands the calendar its CalendarTheme.
 
         // Screen box, not layout box — see the same line in DropdownElement.
-        var box = ScreenBorderBox;
+        var box = WindowBorderBox;
         _popupHandle = OverlayHost.ShowOverlay(calendar, box.X, box.Bottom + _theme.PopupGap,
             dismissOnOutsideClick: true, hitTestable: true, onDismissed: OnPopupDismissed);
         _calendar = calendar;

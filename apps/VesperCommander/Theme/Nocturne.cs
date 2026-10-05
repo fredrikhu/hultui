@@ -183,6 +183,17 @@ public static class Nocturne
             SeparatorColor = Divider,
             ShortcutTextColor = On(0.55),
         },
+        // The recent-folders popover's card, as it was drawn by hand: a raised surface with
+        // a deep shadow, close under its anchor.
+        Popover = new PopoverTheme
+        {
+            Background = Surface,
+            Border = Neutral700,
+            CornerRadius = RadiusMd,
+            Padding = new Thickness(4),
+            Gap = 4f,
+            Shadows = [new BoxShadow(0, 16, 40, 0, new Color(0, 0, 0, 166))],
+        },
         Checkbox = new CheckboxTheme
         {
             Size = 16f,

@@ -352,6 +352,16 @@ public sealed record FluentPalette
             BodyPadding = new Thickness(16), BodyBackground = IsDark ? Layer : Color.White,
             Border = CardStroke, BorderWidth = 1f, CornerRadius = Fluent.ControlRadius,
         },
+        // WinUI's Flyout: the acrylic fill, the overlay corner, a soft shadow, 4px off its button.
+        Popover = new PopoverTheme
+        {
+            Background = Flyout,
+            Border = IsDark ? Hex("#3B3B3B") : Hex("#E0E0E0"),
+            CornerRadius = Fluent.OverlayRadius,
+            Padding = new Thickness(16),
+            Gap = 4f,
+            Shadows = [new BoxShadow(0, 8, 16, 0, new Color(0, 0, 0, (byte)(IsDark ? 67 : 36)))],
+        },
         ContextMenu = new ContextMenuTheme
         {
             Background = Flyout,

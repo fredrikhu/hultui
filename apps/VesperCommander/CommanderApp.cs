@@ -806,10 +806,6 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildNamePrompt(np); o.Key = "name-prompt"; root.AddChild(o);
         }
-        if (_historyPop is { } hp)
-        {
-            var o = BuildHistoryPopover(hp); o.Key = "history-pop"; root.AddChild(o);
-        }
         return root;
     }
 
@@ -1686,7 +1682,7 @@ public partial class CommanderApp : Component, IDisposable
 
     private bool AnyOverlayOpen => _drivePicker != null || _palette is { IsOpen: true } || _bookmarksOpen
         || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
-        || _findOpen || _packOpen || _pwOpen || _renameOpen || _historyPop != null;
+        || _findOpen || _packOpen || _pwOpen || _renameOpen || _historyPopover is { IsOpen: true };
 
     private void CloseOverlays()
     {
@@ -1700,7 +1696,7 @@ public partial class CommanderApp : Component, IDisposable
         _packOpen = false;
         _pwOpen = false;
         _renameOpen = false;
-        _historyPop = null;
+        _historyPopover?.Close();
         if (_findOpen) { _findOpen = false; StopFind(); PersistFindDefaults(); }
         MarkDirty();
     }
@@ -2844,14 +2840,6 @@ public partial class CommanderApp : Component, IDisposable
         // Modal overlays own the keyboard while open. The palette keeps its query
         // field focused, so its handler consumes only nav/Enter/Escape and lets text
         // keys fall through to the field.
-        // Recent-folders popover: Esc closes; Alt+←/→ still navigate (and close it).
-        if (_historyPop is { } hpk)
-        {
-            if (e.Key == KeyCode.Escape) CloseHistoryPopover();
-            else if (e.Key == KeyCode.Left && e.Modifiers.HasFlag(KeyModifiers.Alt)) { CloseHistoryPopover(); GoBack(hpk.side); }
-            else if (e.Key == KeyCode.Right && e.Modifiers.HasFlag(KeyModifiers.Alt)) { CloseHistoryPopover(); GoForward(hpk.side); }
-            e.StopPropagation = true; return;
-        }
         // Most-modal first: the overwrite prompt and confirm dialog swallow keys.
         if (_overwriteOpen)
         {
