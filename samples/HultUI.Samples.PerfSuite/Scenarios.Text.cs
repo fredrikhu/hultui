@@ -88,6 +88,46 @@ static partial class Scenarios
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 
+        yield return new Scenario("text/styled wrap 150 paragraphs resize",
+            "text/wrap with every third word bold and larger: 150 paragraphs on the styled path broken into lines again",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 10).FlexShrink(0).Padding(16);
+                var paragraphs = new Element[150];
+                for (int i = 0; i < paragraphs.Length; i++)
+                {
+                    var text = Ui.Paragraph(ctx.Rng, 60);
+                    paragraphs[i] = Text.New(text).FontSize(13f).LineHeight(19f).Spans(Highlights(text, Ui.Accent, metric: true));
+                }
+                column.ReplaceChildren(paragraphs);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
+        yield return new Scenario("text/styled ellipsis 1,000 labels resize",
+            "text/ellipsis with every third word bold and larger: 1,000 labels on the styled path, truncated again at each width",
+            ctx => StyledLabels(ctx, () => Ui.Paragraph(ctx.Rng, 14)));
+
+        yield return new Scenario("text/styled bidi wrap 150 paragraphs resize",
+            "text/bidi wrap with every third word bold and larger: styled text on the BiDi path broken into lines again",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 10).FlexShrink(0).Padding(16);
+                var paragraphs = new Element[150];
+                for (int i = 0; i < paragraphs.Length; i++)
+                {
+                    var text = Ui.BidiParagraph(ctx.Rng, 60);
+                    paragraphs[i] = Text.New(text).FontSize(13f).LineHeight(19f).Spans(Highlights(text, Ui.Accent, metric: true));
+                }
+                column.ReplaceChildren(paragraphs);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
+        yield return new Scenario("text/styled bidi ellipsis 1,000 labels resize",
+            "text/bidi ellipsis with every third word bold and larger: styled labels on the BiDi path, truncated again",
+            ctx => StyledLabels(ctx, () => Ui.BidiParagraph(ctx.Rng, 14)));
+
         yield return new Scenario("text/spans recolor (paint only)",
             "Re-colour the highlight spans of 40 of 200 paragraphs — syntax highlighting, search hits: paint-only spans",
             ctx =>
@@ -127,6 +167,23 @@ static partial class Scenarios
                     },
                 };
             });
+    }
+
+    // 1,000 one-line labels with metric spans in half a window: truncated at every width of the drag.
+    private static Op StyledLabels(Ctx ctx, Func<string> label)
+    {
+        var rows = new Element[1_000];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            var text = label();
+            rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
+                Text.New(text).FontSize(13f).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
+                    .Spans(Highlights(text, Ui.Accent, metric: true)).FlexGrow(1).FlexShrink(1),
+                Text.New($"{i}").FontSize(12f).TextColor(Ui.Muted).FlexShrink(0));
+        }
+        var pane = Flex.Column().Width(Dimension.Percent(50)).FlexShrink(0).Children(rows);
+        ctx.Mount(ScrollView.New().FlexGrow(1).Children(pane));
+        return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
     }
 
     private static TextElement[] SpanParagraphs(Random rng, int count)

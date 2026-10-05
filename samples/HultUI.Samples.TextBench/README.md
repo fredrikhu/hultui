@@ -37,7 +37,11 @@ wrong invents regressions that are not there:
   reaches tier-1 and dynamic PGO gets data first. Without it the same LRU cache
   hit reads 250 ns early in a run and 60 ns late in it — the comparer calls
   devirtualize only once PGO has data — and whichever scenario ran first looks
-  four times slower than its own twin.
+  four times slower than its own twin. **For at least 3 s, in passes**, not one
+  pass: a method goes tier 0, instrumented tier 0, tier 1, and the second step needs
+  calls after the first. After one pass the caret rows sat at instrumented tier 0
+  for whole runs once the background compiler had a long queue — ten times their
+  cost (2026-10-06; `DOTNET_TC_CallCountingDelayMs=0` put them back).
 - **Round-robin sampling.** Sample *n* of every scenario before sample *n+1* of
   any, so residual drift lands on all rows equally instead of on the first ones.
 

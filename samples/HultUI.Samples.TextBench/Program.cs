@@ -36,8 +36,22 @@ var scenarios = Scenarios.All().ToList();
 // reads 250 ns early in a run and 60 ns late in it. That is a five-fold swing
 // with nothing to do with the code under test, and it is enough to invent
 // regressions that are not there.
-foreach (var s in scenarios)
-    for (int i = 0; i < s.Batch; i++) s.Op(-1 - i);
+//
+// Passes for a length of time, not one pass. With tiered PGO a method goes tier 0,
+// then instrumented tier 0, then tier 1, and the second step needs calls after the
+// first: one pass left the caret rows (3 ns of work) at instrumented tier 0 for the
+// whole measurement whenever the background compiler had a long queue — ten times
+// their cost, in run after run, gone with DOTNET_TC_CallCountingDelayMs=0. The
+// passes reuse the warm-up's own indices, so the cold rows' strings stay unseen.
+var warm = Stopwatch.StartNew();
+int passes = 0;
+do
+{
+    foreach (var s in scenarios)
+        for (int i = 0; i < s.Batch; i++) s.Op(-1 - i);
+    passes++;
+}
+while (passes < 2 || warm.Elapsed < TimeSpan.FromSeconds(3));
 Thread.Sleep(500);   // let the background JIT publish the tier-1 bodies
 
 var results = Bench.RunAll(scenarios);
@@ -277,6 +291,30 @@ static class Scenarios
                 i => p.Layout(labels[Idx(i, 100)], auto, DragWidth(i), null));
         }
 
+        // And with metric spans, every third word bold and larger: the styled path for Latin,
+        // the BiDi path with spans for Hebrew. Widths from DragWidth, as above.
+        {
+            var p = Pipeline();
+            var labels = Labels(100, words: 30);
+            var spans = labels.Select(BoldEveryThirdWord).ToArray();
+            yield return new("resize/styled-wrap", 100,
+                i => p.Layout(labels[Idx(i, 100)], ltr, DragWidth(i), null, TextOverflow.Clip, spans[Idx(i, 100)]));
+        }
+        {
+            var p = Pipeline();
+            var labels = Labels(100, words: 14);
+            var spans = labels.Select(BoldEveryThirdWord).ToArray();
+            yield return new("resize/styled-ellipsis-1line", 100,
+                i => p.Layout(labels[Idx(i, 100)], ltr, DragWidth(i), 1, TextOverflow.Ellipsis, spans[Idx(i, 100)]));
+        }
+        {
+            var p = Pipeline();
+            var labels = BidiLabels(100, words: 14);
+            var spans = labels.Select(BoldEveryThirdWord).ToArray();
+            yield return new("resize/styled-bidi-ellipsis-1line", 100,
+                i => p.Layout(labels[Idx(i, 100)], rtl, DragWidth(i), 1, TextOverflow.Ellipsis, spans[Idx(i, 100)]));
+        }
+
         // ── caret: the offset↔x mapping a caret, a click and a selection
         // highlight go through (docs/plans/14-bidi.md, stage 2), measured on an
         // already-laid-out line so this is the mapping alone. The line lookup that
@@ -336,6 +374,22 @@ static class Scenarios
             labels[n] = string.Join(' ', Enumerable.Range(n, words)
                 .Select(k => k % 3 == 2 ? latin[k % latin.Length] : hebrew[k % hebrew.Length])) + $" {Alpha(n)}";
         return labels;
+    }
+
+    // Every third word bold and two points larger: spans that change shaping and line breaks.
+    private static HultUI.Core.Rendering.TextSpan[] BoldEveryThirdWord(string text)
+    {
+        var spans = new List<HultUI.Core.Rendering.TextSpan>();
+        int word = 0, start = 0;
+        for (int i = 0; i <= text.Length; i++)
+        {
+            if (i < text.Length && text[i] != ' ') continue;
+            if (word++ % 3 == 1)
+                spans.Add(new(start, i - start, new HultUI.Core.Primitives.Color(0, 0, 0, 255),
+                    Weight: FontWeight.Bold, FontSize: 16f));
+            start = i + 1;
+        }
+        return spans.ToArray();
     }
 
     // A drag: one width per batch of 100 calls, 3 px on from the last, never the same twice
