@@ -240,7 +240,7 @@ pct set 210 --features nesting=1,keyctl=1
 Inside the container, as root:
 
 ```bash
-apt update && apt install -y curl git ca-certificates libicu74 libssl3 zlib1g libfontconfig1 fonts-noto-cjk
+apt update && apt install -y curl git ca-certificates libicu74 libssl3 zlib1g libfontconfig1 fonts-noto-cjk 7zip
 ```
 
 `libfontconfig1` is the non-obvious one. The renderer references
@@ -256,6 +256,14 @@ Traditional) have nothing to choose between without it. They skip rather than fa
 with this package named in the reason — so a run that reports three skipped Skia tests is a
 runner missing this package, and the feature is going untested on Linux until it is
 installed. It is about 90 MB.
+
+`7zip` is for Vesper Commander. With a `7z` on the path, Vesper reads archives through it, zips
+included, and the tests of that path (`[SevenZipFact]` in `VesperCommander.Tests`: a member that
+is not there, a wrong password, a failed copy over an existing file) need one. Without it they
+skip, naming this package, and that path goes untested on Linux: the Windows runner covers it
+only because it has 7-Zip in Program Files. Noble's `7zip` (23.01) provides `/usr/bin/7z`;
+`p7zip-full` is now a transitional package for it. Added 2026-10-05, after the read that ignored
+7-Zip's failures had been caught only on a Fedora machine that happened to have it.
 
 The `cef natives` workflow (`native/cef/build.sh`) needs three more, besides `curl` above:
 

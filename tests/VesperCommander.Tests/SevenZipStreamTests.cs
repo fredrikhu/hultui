@@ -15,7 +15,7 @@ public sealed class SevenZipFactAttribute : FactAttribute
 
     public SevenZipFactAttribute()
     {
-        if (Exe is null) Skip = "7-Zip is not installed.";
+        if (Exe is null) Skip = "7-Zip is not installed (the Linux runner needs the 7zip package; see docs/SELF-HOSTED-RUNNERS.md).";
     }
 
     private static string? Find()
