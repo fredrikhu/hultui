@@ -54,6 +54,9 @@ public sealed partial class FluentApp : Component
     [Reactive] public partial double Volume { get; set; }
     [Reactive] public partial int ComboChoice { get; set; }
     [Reactive] public partial bool ExpanderOpen { get; set; }
+    [Reactive] public partial bool NotifyMail { get; set; }
+    [Reactive] public partial bool NotifyCalendar { get; set; }
+    [Reactive] public partial bool NotifyStore { get; set; }
     [Reactive] public partial bool InfoBarShown { get; set; }
     [Reactive] public partial int ClickCount { get; set; }
 
@@ -99,6 +102,8 @@ public sealed partial class FluentApp : Component
         ToggleA = true;
         Volume = 62;
         ComboChoice = 1;
+        NotifyMail = true;
+        NotifyCalendar = true;
         InfoBarShown = true;
 
         // Set here as well as in Program.cs, so anything that hosts this component directly —

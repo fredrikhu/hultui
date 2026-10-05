@@ -358,6 +358,46 @@ public class FluentSampleTests
     }
 
     /// <summary>
+    /// The switches inside the expander hold state, and the collapsed header counts them. The
+    /// switch is controlled, so a row wired to a constant and a no-op handler draws fine and
+    /// ignores every click — which is how these three shipped.
+    /// </summary>
+    [Fact]
+    public void TheExpanderSwitchesFlipAndTheHeaderCountsThem()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+
+        GoTo(session, "Controls gallery");
+        session.Window.Wheel(800, 600, 0, -20);
+        session.PumpFrames(6);
+        session.Window.FindByRole(AccessibilityRole.Button, "Notifications")!.Click();
+        session.PumpFrames(3);
+        // The panel opened below the header; bring it into view before clicking in it.
+        session.Window.Wheel(800, 600, 0, -20);
+        session.PumpFrames(6);
+
+        Assert.True(app.NotifyMail);
+        Assert.False(app.NotifyStore);
+
+        session.Window.FindByRole(AccessibilityRole.Switch, "Mail")!.Click();
+        session.PumpFrames(3);
+        session.Window.FindByRole(AccessibilityRole.Switch, "Store")!.Click();
+        session.PumpFrames(3);
+
+        Assert.False(app.NotifyMail);
+        Assert.True(app.NotifyStore);
+
+        session.Window.FindByRole(AccessibilityRole.Switch, "Calendar")!.Click();
+        session.PumpFrames(3);
+        session.Window.FindByRole(AccessibilityRole.Button, "Notifications")!.Click();
+        session.PumpFrames(3);
+
+        Assert.False(app.ExpanderOpen);
+        Assert.NotNull(FirstOfType<TextElement>(root, t => t.Content == "1 app allowed to notify you"));
+    }
+
+    /// <summary>
     /// The composed controls are real controls: Tab reaches them, they ask for the focus
     /// visual, and Space works them.
     ///
