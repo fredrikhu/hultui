@@ -245,3 +245,30 @@ at +10 %, which the perf suite's `text/bidi wrap` (flat) does not show.
 - **A delegate over these parameters allocates on every call.** The first cut handed the
   memo a lambda to build a missing line or width; C# allocates such a closure when the
   method is entered, so every hit paid for it too. The lookups are plain code now.
+
+## Capture: multi-font labels take the one-line ellipsis shortcut (2026-10-06)
+
+Same machine and method; before = the commit underneath, which adds the row. Mins of the
+second pair:
+
+| scenario | before (min) | after (min) | |
+|---|---:|---:|---|
+| `resize/multifont-ellipsis-1line` | 10.98 µs | 2.58 µs | **−77 %**, 13.4 → 2.7 KB per call |
+
+In `samples/HultUI.Samples.PerfSuite`, `text/multi-font ellipsis 1,000 labels resize` went
+from 41.4 to 11.8 ms (−81 % allocated); every other scenario within ±6 %. In this run
+`cold/latin-wrapped` read 22–28 % higher on the after side — the cross-row effect of the
+captures above: run with only the cold and warm rows, it is within noise.
+
+### What changed
+
+- **Prefix widths cover any number of font runs.** A prefix of any string itemizes to its
+  runs, the last one cut short, so each run keeps its segments and the running width
+  MeasureString adds the runs up with. Clip, multi-line Ellipsis and the wrap pass's last
+  line use them for multi-font text too.
+- **One-line Ellipsis no longer shapes the line it replaces**, whatever the string. The
+  proven shortcut stays one-run: a replaced line's height depends on the fonts it
+  reached. Everything else runs the wrap pass as it is with measured lines (extent,
+  width and metrics, no glyphs) and then ApplyEllipsis as it is. `LineMetrics` is the one
+  source of a line's metrics for both kinds of line. A layout ApplyEllipsis would have kept
+  unchanged takes the reference path instead.

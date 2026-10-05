@@ -55,6 +55,23 @@ static class Ui
         return string.Join(' ', parts);
     }
 
+    // IPA letters Cascadia Mono (Windows' monospace) has no glyph for: in a monospace label
+    // they come from a fallback face, so the label is several font runs.
+    private static readonly string[] IpaWords = ["ɐɓɖ", "ɠɦɨ", "ɯɰɱ", "ɕɗɘ", "ɜɝɞ", "ɟɡɤ", "ɥɧɭ", "ɮɳɐ"];
+
+    /// <summary>
+    /// Vocabulary words with an IPA "word" in every third place — a label of more than one font
+    /// run when set in a face without IPA, as Windows' monospace is. Below U+0590 throughout,
+    /// so the plain path lays it out.
+    /// </summary>
+    public static string MultiFontParagraph(Random rng, int words)
+    {
+        var parts = new string[words];
+        for (int i = 0; i < words; i++)
+            parts[i] = i % 3 == 2 ? IpaWords[rng.Next(IpaWords.Length)] : Nouns[rng.Next(Nouns.Length)];
+        return string.Join(' ', parts);
+    }
+
     public static readonly Color Muted = Color.FromHex("#94A3B8");
     public static readonly Color Accent = Color.FromHex("#4F46E5");
     public static readonly Color Selected = Color.FromHex("#DBEAFE");
