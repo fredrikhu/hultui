@@ -32,7 +32,7 @@ below). `--list` prints every scenario, `--help` every option.
 |---|---|
 | `layout/` | Resize drags over long lists, deep nesting, flex wrap, baseline alignment, aspect-ratio tiles, overfull rows and columns (flex shrink); building 300 cards |
 | `grid/` | Creating, resizing and editing a 1,800-cell grid with `auto` and `fr` columns |
-| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans |
+| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out |
 | `scroll/` | Wheel and jumps through a 5,000-row list, sticky section headers, nested scroll chaining |
 | `virtual/`, `table/` | `VirtualListElement` with 100,000 items; `TableView` with 10,000 rows: sort, wheel, column resize |
 | `component/` | Keyed and unkeyed rebuilds of 1,000 rows, reverse, a small component in a big tree, 300 mounts, a signal read by 500 effects |
