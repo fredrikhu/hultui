@@ -177,6 +177,28 @@ public static class Azimuth
         },
         // The response find bar, as MeridianApp.Response drew it by hand: a ground field with the
         // query in mono, the count in mono, and the small secondary buttons the request bar uses.
+        // A key named anywhere: an outline, no fill, the keys in mono.
+        Kbd = new KbdTheme
+        {
+            Background = Color.Transparent, Border = Border, Text = TextMuted,
+            FontFamily = Meridian.Fonts.Mono, FontSize = 10f,
+            Padding = new Thickness(2, 5, 2, 5), CornerRadius = Radius1,
+        },
+        // The palette as MeridianApp.Palette drew it: a card under the top edge, the group in a
+        // mono column, the chosen row raised.
+        CommandPalette = new CommandPaletteTheme
+        {
+            Width = 560f, MaxHeight = 420f, TopOffset = 90f,
+            Scrim = Alpha(Bg, 0.62),
+            Background = Surface, Border = BorderStrong, CornerRadius = Radius2, Divider = Border,
+            HeaderHeight = 38f, FieldFontSize = 13f,
+            ListPadding = new Thickness(S1), RowHeight = RowRun, DetailRowHeight = RowRun + 14f,
+            RowCornerRadius = Radius1, RowPadding = new Thickness(0, S3, 0, S3), RowGap = S2,
+            SelectedBackground = Raised, HoverBackground = Raised,
+            TitleFontSize = 12.5f, Title = TextDim,
+            Group = TextFaint, GroupFontFamily = Meridian.Fonts.Mono, GroupFontSize = 9.5f, GroupWidth = 84f,
+            Muted = TextMuted, MutedFontSize = 12f,
+        },
         FindBar = new FindBarTheme
         {
             Background = Surface,

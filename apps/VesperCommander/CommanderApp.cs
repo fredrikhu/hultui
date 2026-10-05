@@ -107,12 +107,8 @@ public partial class CommanderApp : Component, IDisposable
     private int _driveCur;
     private IReadOnlyList<DriveEntry> _drives = [];
 
-    // Command palette (Ctrl+P): a fuzzy list of actions over a focused query field.
-    private bool _paletteOpen;
-    private string _paletteQuery = "";
-    private int _paletteSel;
-    private readonly Ref<HultUI.Core.Elements.TextInputElement> _paletteRef = new();
-    private bool _pendingPaletteFocus;
+    // Command palette (Ctrl+P): the framework's, over Commands().
+    private CommandPalette? _palette;
 
     // Bookmarks: quick jumps for the active pane. Seeded from real folders; the
     // manager (Ctrl+D / rail +) adds/removes them and Ctrl+1..9 jump by index.
@@ -770,10 +766,6 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildDrivePicker(dp); o.Key = "drive-picker"; root.AddChild(o);
         }
-        if (_paletteOpen)
-        {
-            var o = BuildPalette(); o.Key = "palette"; root.AddChild(o);
-        }
         if (_findOpen)
         {
             var o = BuildFind(); o.Key = "find"; root.AddChild(o);
@@ -835,7 +827,6 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingPaneScroll > 0 && !FullShellOpen) RestorePaneScroll();
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
-        if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
         if (_pendingNamePromptFocus)
         {
             _pendingNamePromptFocus = false;
@@ -1693,14 +1684,14 @@ public partial class CommanderApp : Component, IDisposable
         return 0;
     }
 
-    private bool AnyOverlayOpen => _drivePicker != null || _paletteOpen || _bookmarksOpen
+    private bool AnyOverlayOpen => _drivePicker != null || _palette is { IsOpen: true } || _bookmarksOpen
         || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
         || _findOpen || _packOpen || _pwOpen || _renameOpen || _historyPop != null;
 
     private void CloseOverlays()
     {
         _drivePicker = null;
-        _paletteOpen = false;
+        _palette?.Close();
         _bookmarksOpen = false;
         _confirm = null;
         _optionsOpen = false;
@@ -2184,7 +2175,7 @@ public partial class CommanderApp : Component, IDisposable
     // ── Bookmarks ────────────────────────────────────────────────────────
     private void OpenBookmarks()
     {
-        _drivePicker = null; _paletteOpen = false;
+        _drivePicker = null; _palette?.Close();
         _bookmarksOpen = true;
         _bookmarkSel = Math.Clamp(_bookmarkSel, 0, Math.Max(0, _bookmarks.Count - 1));
         MarkDirty();
@@ -2240,26 +2231,30 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     // ── Command palette ──────────────────────────────────────────────────
+    /// <summary>The framework's palette over <see cref="Commands"/>: a row's key chip comes from
+    /// the live keymap, and the palette key closes it again.</summary>
+    private CommandPalette PaletteDialog => _palette ??= new CommandPalette(Commands)
+    {
+        Placeholder = "Type a command…",
+        ToggleKeys = _keys[nameof(Cmd.Palette)].Keys,
+        GroupStyle = PaletteGroupStyle.None,
+    };
+
     private void TogglePalette()
     {
-        _paletteOpen = !_paletteOpen;
-        if (_paletteOpen)
-        {
-            _drivePicker = null;
-            _paletteQuery = "";
-            _paletteSel = 0;
-            _pendingPaletteFocus = true;
-        }
+        if (!PaletteDialog.IsOpen) _drivePicker = null;
+        PaletteDialog.Toggle(_window);
         MarkDirty();
     }
 
-    /// <summary>A palette action: label, optional shortcut caption, and what it does.</summary>
-    private readonly record struct Command(string Label, string? Shortcut, Action Run);
+    /// <summary>A palette row: label, the keys that run it without the palette (null for none),
+    /// and what it does.</summary>
+    private static PaletteCommand C(string label, string? keys, Action run) => new(label, run) { Keys = keys };
 
     /// <summary>The caption for a rebindable command's chord, read from the live keymap rather
     /// than written out here — a palette row that still advertises the default after the user
     /// has rebound it is worse than one showing nothing. Null when the command is unbound,
-    /// which <see cref="Overlays.PaletteRow"/> renders as no chip at all.</summary>
+    /// which the palette shows as no chip at all.</summary>
     private string? Key(Cmd cmd) =>
         KeyText(cmd) is { Length: > 0 } keys ? keys : null;
 
@@ -2267,7 +2262,7 @@ public partial class CommanderApp : Component, IDisposable
     /// keymap can reach is here, so the palette is a complete second route to the app's
     /// commands and not a shortlist; the structural keys (Tab, Backspace, Ctrl+A) that aren't
     /// rebindable keep their literal captions.</summary>
-    private IReadOnlyList<Command> Commands()
+    private IReadOnlyList<PaletteCommand> Commands()
     {
         char side = _active, other = _active == 'L' ? 'R' : 'L';
         // What the file operations would act on, so their rows say how much is at stake rather
@@ -2279,89 +2274,56 @@ public partial class CommanderApp : Component, IDisposable
         [
             // Navigation. Backspace also goes up, but it is structural and can't be rebound —
             // the chip shows the rebindable chord, which is the one that can stop being true.
-            new("Go up one folder", Key(Cmd.GoUpFolder), () => GoUp(side)),
-            new("Enter folder under cursor", Key(Cmd.IntoFolder), () => DescendCursor(side)),
-            new("Go to path…", Key(Cmd.GotoPath), () => OpenGotoPrompt(side)),
-            new("Open drive…", "Alt+F1", () => OpenDrivePicker(side)),
-            new("Bookmarks…", Key(Cmd.Bookmarks), OpenBookmarks),
-            new("Refresh", Key(Cmd.Refresh), () => RefreshPane(side)),
+            C("Go up one folder", Key(Cmd.GoUpFolder), () => GoUp(side)),
+            C("Enter folder under cursor", Key(Cmd.IntoFolder), () => DescendCursor(side)),
+            C("Go to path…", Key(Cmd.GotoPath), () => OpenGotoPrompt(side)),
+            C("Open drive…", "Alt+F1", () => OpenDrivePicker(side)),
+            C("Bookmarks…", Key(Cmd.Bookmarks), OpenBookmarks),
+            C("Refresh", Key(Cmd.Refresh), () => RefreshPane(side)),
 
             // Panes, tabs and view.
-            new($"{(_settings.ShowHidden ? "Hide" : "Show")} hidden files", Key(Cmd.ToggleHidden), ToggleHidden),
-            new("Swap left and right panes", Key(Cmd.Swap), SwapPanes),
-            new("Open this folder in the other pane", Key(Cmd.OpenInOther), () => NavigateTo(other, Dir(side))),
-            new("Focus other pane", "Tab", () => { _active = other; }),
-            new("New tab", Key(Cmd.NewTab), () => NewTab(side)),
-            new("Close tab", Key(Cmd.CloseTab), () => CloseTab(side, TabIndex(side))),
-            new("View: Detail", Key(Cmd.ViewDetail), () => SetView(side, ViewMode.Detail)),
-            new("View: Brief", Key(Cmd.ViewBrief), () => SetView(side, ViewMode.Brief)),
-            new("View: Thumbnails", Key(Cmd.ViewThumbnails), () => SetView(side, ViewMode.Thumbnails)),
-            new("Toggle preview panel", Key(Cmd.Preview), TogglePreview),
+            C($"{(_settings.ShowHidden ? "Hide" : "Show")} hidden files", Key(Cmd.ToggleHidden), ToggleHidden),
+            C("Swap left and right panes", Key(Cmd.Swap), SwapPanes),
+            C("Open this folder in the other pane", Key(Cmd.OpenInOther), () => NavigateTo(other, Dir(side))),
+            C("Focus other pane", "Tab", () => { _active = other; }),
+            C("New tab", Key(Cmd.NewTab), () => NewTab(side)),
+            C("Close tab", Key(Cmd.CloseTab), () => CloseTab(side, TabIndex(side))),
+            C("View: Detail", Key(Cmd.ViewDetail), () => SetView(side, ViewMode.Detail)),
+            C("View: Brief", Key(Cmd.ViewBrief), () => SetView(side, ViewMode.Brief)),
+            C("View: Thumbnails", Key(Cmd.ViewThumbnails), () => SetView(side, ViewMode.Thumbnails)),
+            C("Toggle preview panel", Key(Cmd.Preview), TogglePreview),
 
             // File operations.
-            new($"Copy to other pane ({n})", Key(Cmd.Copy), StartCopy),
-            new($"Move to other pane ({n})", Key(Cmd.Move), StartMove),
-            new($"Delete ({n})", Key(Cmd.Delete), StartDelete),
-            new("New folder…", Key(Cmd.NewFolder), () => OpenNewFolderPrompt(side)),
-            new("Rename…", Key(Cmd.Rename), () => OpenRenamePrompt(side)),
-            new($"Multi-rename… ({targets} files)", Key(Cmd.MultiRename), OpenRename),
+            C($"Copy to other pane ({n})", Key(Cmd.Copy), StartCopy),
+            C($"Move to other pane ({n})", Key(Cmd.Move), StartMove),
+            C($"Delete ({n})", Key(Cmd.Delete), StartDelete),
+            C("New folder…", Key(Cmd.NewFolder), () => OpenNewFolderPrompt(side)),
+            C("Rename…", Key(Cmd.Rename), () => OpenRenamePrompt(side)),
+            C($"Multi-rename… ({targets} files)", Key(Cmd.MultiRename), OpenRename),
 
             // Archives.
-            new($"Pack into archive… ({n})", Key(Cmd.Pack), OpenPack),
-            new("Extract archive…", Key(Cmd.Extract), ExtractCursorArchive),
+            C($"Pack into archive… ({n})", Key(Cmd.Pack), OpenPack),
+            C("Extract archive…", Key(Cmd.Extract), ExtractCursorArchive),
 
             // Tools.
-            new("Find files…", Key(Cmd.Find), () => OpenFind(side)),
-            new("Compare files (diff)", Key(Cmd.Diff), () => OpenDiff(side)),
-            new("View file", Key(Cmd.View), () => OpenViewer(side)),
-            new("Edit file in external editor", Key(Cmd.Edit), () => EditFocused(side)),
-            new("Synchronize folders", Key(Cmd.Sync), OpenSync),
-            new("Open terminal here", null, OpenTerminalHere),
-            new("Open in git client", null, OpenGitClientHere),
-            new("Properties…", Key(Cmd.Properties), () => ShowProperties(side)),
-            new("Context menu…", Key(Cmd.ContextMenu), () => ShowContextMenuAtCursor(side)),
-            new("Who has this file open?", Key(Cmd.Holders), () => ShowHolders(side)),
+            C("Find files…", Key(Cmd.Find), () => OpenFind(side)),
+            C("Compare files (diff)", Key(Cmd.Diff), () => OpenDiff(side)),
+            C("View file", Key(Cmd.View), () => OpenViewer(side)),
+            C("Edit file in external editor", Key(Cmd.Edit), () => EditFocused(side)),
+            C("Synchronize folders", Key(Cmd.Sync), OpenSync),
+            C("Open terminal here", null, OpenTerminalHere),
+            C("Open in git client", null, OpenGitClientHere),
+            C("Properties…", Key(Cmd.Properties), () => ShowProperties(side)),
+            C("Context menu…", Key(Cmd.ContextMenu), () => ShowContextMenuAtCursor(side)),
+            C("Who has this file open?", Key(Cmd.Holders), () => ShowHolders(side)),
 
             // Selection and totals.
-            new("Mark all", "Ctrl+A", () => MarkAll(side)),
-            new("Mark files by pattern…", Key(Cmd.MarkPattern), () => OpenMarkPatternPrompt(side)),
-            new("Measure all folder sizes", Key(Cmd.MeasureAll), () => MeasureAllDirs(side)),
+            C("Mark all", "Ctrl+A", () => MarkAll(side)),
+            C("Mark files by pattern…", Key(Cmd.MarkPattern), () => OpenMarkPatternPrompt(side)),
+            C("Measure all folder sizes", Key(Cmd.MeasureAll), () => MeasureAllDirs(side)),
 
-            new("Open Options…", Key(Cmd.Options), OpenOptions),
+            C("Open Options…", Key(Cmd.Options), OpenOptions),
         ];
-    }
-
-    /// <summary>Commands matching the current query (case-insensitive substring).</summary>
-    private List<Command> FilteredCommands()
-    {
-        var all = Commands();
-        if (_paletteQuery.Length == 0) return all.ToList();
-        return all.Where(c => c.Label.Contains(_paletteQuery, StringComparison.OrdinalIgnoreCase)).ToList();
-    }
-
-    private void RunPaletteSelection()
-    {
-        var cmds = FilteredCommands();
-        if (_paletteSel >= 0 && _paletteSel < cmds.Count)
-        {
-            var run = cmds[_paletteSel].Run;
-            CloseOverlays();
-            run();
-            MarkDirty();
-        }
-    }
-
-    private void HandlePaletteKey(KeyDownEvent e)
-    {
-        int count = FilteredCommands().Count;
-        switch (e.Key)
-        {
-            case KeyCode.Escape: CloseOverlays(); e.StopPropagation = true; break;
-            case KeyCode.Up: _paletteSel = Math.Max(0, _paletteSel - 1); MarkDirty(); e.StopPropagation = true; break;
-            case KeyCode.Down: _paletteSel = Math.Min(Math.Max(0, count - 1), _paletteSel + 1); MarkDirty(); e.StopPropagation = true; break;
-            case KeyCode.Enter: RunPaletteSelection(); e.StopPropagation = true; break;
-            // Other keys (text) fall through to the focused query field.
-        }
     }
 
     // ── Navigation / view actions (also palette targets) ─────────────────
@@ -2949,7 +2911,6 @@ public partial class CommanderApp : Component, IDisposable
             else if (e.Key == KeyCode.Escape) { CloseNamePrompt(); e.StopPropagation = true; }
             return;
         }
-        if (_paletteOpen) { HandlePaletteKey(e); return; }
         if (_findOpen) { HandleFindKey(e); return; }
         if (_packOpen) { HandlePackKey(e); return; }
         if (_renameOpen) { HandleRenameKey(e); return; }

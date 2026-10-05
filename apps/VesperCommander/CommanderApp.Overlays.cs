@@ -126,59 +126,6 @@ public partial class CommanderApp
         return -1;
     }
 
-    // ── Command palette (Ctrl+P) ─────────────────────────────────────────
-    private Element BuildPalette()
-    {
-        var cmds = FilteredCommands();
-        if (_paletteSel >= cmds.Count) _paletteSel = Math.Max(0, cmds.Count - 1);
-
-        var card = DialogCard(520);
-
-        // Query field: a search glyph + borderless input (the theme flattens inputs).
-        var queryRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(10, 14, 10, 14))
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        queryRow.AddChild(Ui.Icon(Glyphs.Search, 15f, Nocturne.On(0.45)));
-        var input = Ui.Field(TextInput.New(_paletteQuery));
-        input.PlaceholderText("Type a command…");
-        input.OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; MarkDirty(); });
-        input.WithRef(_paletteRef);
-        queryRow.AddChild(input);
-        card.AddChild(queryRow);
-
-        var listBox = Flex.Column(gap: 0).Padding(new Thickness(6, 6, 6, 6));
-        if (cmds.Count == 0)
-            listBox.AddChild(Text.New("No matching commands").FontSize(12f)
-                .TextColor(Nocturne.On(0.40)).Padding(new Thickness(8, 8, 8, 8)));
-        for (int i = 0; i < cmds.Count; i++)
-            listBox.AddChild(PaletteRow(cmds[i], i, i == _paletteSel));
-        card.AddChild(listBox);
-
-        return Backdrop(card, topAligned: true, topPad: 90f);
-    }
-
-    private Element PaletteRow(Command cmd, int index, bool selected)
-    {
-        // Flex, not a grid, on purpose: the list is a plain column in a card the backdrop
-        // clamps, and the rows only fit because flex lets them shrink below their 30px.
-        // Grid rows hold their height, and the palette's tail would clip off the card.
-        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(30)
-            .Padding(new Thickness(0, 10, 0, 10)).CornerRadius(Nocturne.RadiusSm)
-            .Cursor(CursorType.Pointer);
-        if (selected)
-            row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13))
-               .BorderColor(Nocturne.Accent600).BorderWidth(1f);
-
-        row.AddChild(Text.New(cmd.Label).FontSize(12f)
-            .TextColor(selected ? Nocturne.Text : Nocturne.On(0.80)));
-        row.AddChild(Box.New().FlexGrow(1));
-        if (cmd.Shortcut != null)
-            row.AddChild(Ui.Kbd(cmd.Shortcut));
-
-        row.OnClick(_ => { _paletteSel = index; RunPaletteSelection(); });
-        return row;
-    }
-
     // ── Buttons (footer / detail actions) ────────────────────────────────
     // Thin adapters over the shared Ui.* button family so every call site here and
     // across the app renders one consistent, Junction-matching button set.

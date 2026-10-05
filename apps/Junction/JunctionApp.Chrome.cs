@@ -125,13 +125,8 @@ public partial class JunctionApp
         return b.HoverBg(hoverBg, Color.Transparent);
     }
 
-    private static BoxElement Kbd(string text) =>
-        Box.New()
-            .Padding(new Thickness(2, 5, 2, 5))
-            .CornerRadius(4f)
-            .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .Children(Ui.Mono(text, 10f, Nocturne.On(0.55)));
+    /// <summary>The framework's key chip; its look is <c>Kbd</c> in <see cref="Nocturne.ToHultTheme"/>.</summary>
+    private static KbdElement Kbd(string text) => HultUI.Core.Builders.Kbd.New(text);
 
     // ── Toolbar (view tabs + git actions) ────────────────────────────────
 

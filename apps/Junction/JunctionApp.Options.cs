@@ -46,7 +46,7 @@ public partial class JunctionApp
             ? wanted
             : OptionsRail.First(r => OptionsSectionBuilt(r.Section)).Section;
         _optionsOpen = true;
-        _paletteOpen = false;
+        ClosePalette();
         _popover = null;
         MarkDirty();
     }

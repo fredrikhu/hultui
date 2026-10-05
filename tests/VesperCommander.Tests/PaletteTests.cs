@@ -105,23 +105,13 @@ public class PaletteTests
         private object App => typeof(DiffViewTests.Fixture)
             .GetField("_app", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(_t)!;
 
-        /// <summary>The palette's command list. Command is a private nested record, so each row
-        /// is flattened to the two things these tests care about.</summary>
-        public List<(string Label, string? Shortcut)> Commands()
-        {
-            var method = typeof(CommanderApp).GetMethod("Commands",
-                BindingFlags.NonPublic | BindingFlags.Instance)!;
-            var rows = (System.Collections.IEnumerable)method.Invoke(App, null)!;
-            var result = new List<(string, string?)>();
-            foreach (var row in rows)
-            {
-                var type = row.GetType();
-                result.Add((
-                    (string)type.GetProperty("Label")!.GetValue(row)!,
-                    (string?)type.GetProperty("Shortcut")!.GetValue(row)));
-            }
-            return result;
-        }
+        /// <summary>The palette's command list, flattened to the two things these tests care about.</summary>
+        public List<(string Label, string? Shortcut)> Commands() =>
+            Rows().Select(c => (c.Title, c.Keys)).ToList();
+
+        private IReadOnlyList<HultUI.Core.Builders.PaletteCommand> Rows() =>
+            (IReadOnlyList<HultUI.Core.Builders.PaletteCommand>)typeof(CommanderApp)
+                .GetMethod("Commands", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(App, null)!;
 
         public string? ShortcutOf(Func<string, bool> label) =>
             Commands().Single(c => label(c.Label)).Shortcut;
@@ -129,18 +119,8 @@ public class PaletteTests
         /// <summary>Invoke a palette row the way selecting it does.</summary>
         public void Run(Func<string, bool> label)
         {
-            var method = typeof(CommanderApp).GetMethod("Commands",
-                BindingFlags.NonPublic | BindingFlags.Instance)!;
-            var rows = (System.Collections.IEnumerable)method.Invoke(App, null)!;
-            foreach (var row in rows)
-            {
-                var type = row.GetType();
-                if (!label((string)type.GetProperty("Label")!.GetValue(row)!)) continue;
-                ((Action)type.GetProperty("Run")!.GetValue(row)!)();
-                _t.Session.PumpFrame();
-                return;
-            }
-            Assert.Fail("no palette row matched");
+            Rows().First(c => label(c.Title)).Run();
+            _t.Session.PumpFrame();
         }
     }
 }

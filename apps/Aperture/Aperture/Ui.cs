@@ -55,14 +55,6 @@ public static class Ui
     public static T HoverBg<T>(this T el, Color hover) where T : BoxElement =>
         el.OnHover(b => b.BackgroundColor = hover);
 
-    /// <summary>Key-hint chip: mono 10 in a bordered box.</summary>
-    public static BoxElement Kbd(string text) =>
-        Box.New()
-            .Padding(new Thickness(2, 5, 2, 5))
-            .CornerRadius(Halide.Radius1)
-            .BorderColor(Halide.Border).BorderWidth(1f)
-            .Children(Mono(text, 10f, Halide.TextMuted));
-
     /// <summary>A metadata chip: year, rating certificate, runtime, "4K". Outlined, never
     /// filled — a row of filled chips under a poster competes with the artwork.</summary>
     public static BoxElement Chip(string text, Color? color = null)

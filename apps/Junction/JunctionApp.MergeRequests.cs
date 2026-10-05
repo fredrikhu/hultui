@@ -58,7 +58,7 @@ public partial class JunctionApp
         if (filter is { } f) { _mrFilter = f; _mrSel = 0; }
         _mrPanelOpen = true;
         _mrOpen = null;
-        _paletteOpen = false;
+        ClosePalette();
         _popover = null;
         RefreshHostedIfStale(_activeRepoPath, RefreshOnSwitchAfter);
         // Rerender, not MarkDirty: opening activates this repo's hosted loaders for the first
@@ -73,7 +73,7 @@ public partial class JunctionApp
         if (GitLabRemoteFor(_activeRepoPath) is not { } remote || !_gitlab.HasAccount(remote.Host)) return;
         _mrPanelOpen = true;
         _mrOpen = (_activeRepoPath, iid);
-        _paletteOpen = false;
+        ClosePalette();
         _popover = null;
         Rerender();
     }

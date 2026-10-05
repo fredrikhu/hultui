@@ -43,6 +43,8 @@ public static class Dialog
             .AlignItems(AlignItems.Center);
         if (options.ShowScrim)
             scrim.Background(options.ScrimColor ?? DefaultScrim);
+        if (options.TopOffset is { } top)
+            scrim.JustifyContent(JustifyContent.FlexStart).Padding(new Thickness(top, 0, 0, 0));
 
         var panel = content(controller);
         // Clicks inside the panel must not fall through to the scrim's dismiss.

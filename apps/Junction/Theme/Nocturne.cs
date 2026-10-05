@@ -227,6 +227,29 @@ public static class Nocturne
             CheckedBackground = Accent,
             CheckMarkColor = Accent100,
         },
+        // A key named anywhere — the Options pane, the chrome, the palette: filled, a hairline
+        // outline, mono keys.
+        Kbd = new KbdTheme
+        {
+            Background = Surface, Border = Divider, Text = On(0.55),
+            FontFamily = Junction.Fonts.Mono, FontSize = 10f,
+            Padding = new Thickness(2, 5, 2, 5), CornerRadius = 4f,
+        },
+        // The palette as JunctionApp.Palette drew it: a wide card under the top edge, rows with a
+        // tinted kind square, a second line and a kind tag, the chosen row washed in the accent.
+        CommandPalette = new CommandPaletteTheme
+        {
+            Width = 600f, MaxHeight = 460f, TopOffset = 96f,
+            Scrim = new Color(0, 0, 0, 140),
+            Background = Surface, Border = Neutral700, CornerRadius = RadiusLg, Divider = Divider,
+            HeaderHeight = 56f, FieldFontSize = 14f,
+            ListPadding = new Thickness(6), RowHeight = 42f, DetailRowHeight = 50f,
+            RowCornerRadius = RadiusMd, RowPadding = new Thickness(0, 10, 0, 10), RowGap = 11f,
+            SelectedBackground = Alpha(Accent, 0.14), HoverBackground = Neutral900,
+            TitleFontSize = 13.5f, DetailFontSize = 11f, Detail = On(0.45),
+            Group = Neutral100, GroupBackground = Neutral800, GroupFontSize = 9f,
+            Muted = On(0.42), MutedFontSize = 11f,
+        },
         // The find bar over the diff and the Files view, as JunctionApp.FindBar drew it by hand:
         // the count in the chrome's monospace, the two option chips as outlined mono labels that
         // light up in the accent, and square 26px icon buttons.

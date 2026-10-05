@@ -106,7 +106,7 @@ public partial class JunctionApp
     {
         _todosOpen = true;
         _todoSel = 0;
-        _paletteOpen = false;
+        ClosePalette();
         _popover = null;
         RefreshTodos();
         Rerender();

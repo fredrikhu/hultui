@@ -249,13 +249,6 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<Element> _fileSelRef = new();
 
     // Command palette.
-    private bool _paletteOpen;
-    private string _paletteQuery = "";
-    private int _paletteSel;
-    private readonly Ref<TextInputElement> _paletteRef = new();
-    private bool _pendingPaletteFocus;
-    private readonly Ref<ScrollViewElement> _paletteScrollRef = new();
-    private readonly Ref<Element> _paletteSelRef = new();
 
     // Modal text-input dialog (new branch / rename / set upstream…).
     private DialogSpec? _dialog;
@@ -817,7 +810,6 @@ public partial class JunctionApp : Component, IDisposable
 
         if (_diffFull) Overlay("fullscreen-diff", BuildFullscreenDiff());
         if (_toasts.Build() is { } toast) Overlay("toast", toast);
-        if (_paletteOpen) Overlay("palette", BuildPalette());
         if (_worktreesOpen) Overlay("worktrees", BuildWorktreesPanel());
         if (_reflogOpen) Overlay("reflog", BuildReflogPanel());
         if (_submodulesOpen) Overlay("submodules", BuildSubmodulesPanel());
@@ -886,11 +878,6 @@ public partial class JunctionApp : Component, IDisposable
         ServiceBranchFromIssue();
         ServiceSpinner();
 
-        if (_pendingPaletteFocus)
-        {
-            _pendingPaletteFocus = false;
-            _paletteRef.Current?.Focus();
-        }
 
         if (_pendingHistorySearchFocus)
         {
@@ -966,22 +953,20 @@ public partial class JunctionApp : Component, IDisposable
         if (_pendingScrollToSelected)
         {
             _pendingScrollToSelected = false;
-            if (View == JunctionView.History && !_paletteOpen)
+            if (View == JunctionView.History)
             {
                 // Fixed row height, so index math needs no per-row layout.
                 EnsureSelectedCommitVisible();
             }
-            else if (_paletteOpen || View is JunctionView.Commit or JunctionView.Changes)
+            else if (View is JunctionView.Commit or JunctionView.Changes)
             {
                 // OnAfterBuild runs before the layout pass, so the selected row's box
                 // for this frame isn't available yet (and the file row, re-keyed on
                 // selection, is a fresh element with no prior layout at all). Read it
                 // in a post-frame callback, once the frame has been laid out.
-                var changes = !_paletteOpen && View == JunctionView.Changes;
-                var scrollRef = _paletteOpen ? _paletteScrollRef
-                    : changes ? _changeScrollRef : _fileScrollRef;
-                var rowRef = _paletteOpen ? _paletteSelRef
-                    : changes ? _changeFocusRef : _fileSelRef;
+                var changes = View == JunctionView.Changes;
+                var scrollRef = changes ? _changeScrollRef : _fileScrollRef;
+                var rowRef = changes ? _changeFocusRef : _fileSelRef;
                 _window.RequestPostFrameCallback(() => ScrollRowIntoView(scrollRef, rowRef));
             }
         }
@@ -1348,11 +1333,6 @@ public partial class JunctionApp : Component, IDisposable
             return;
         }
 
-        if (_paletteOpen)
-        {
-            if (e.Key == KeyCode.Escape) { ClosePalette(); e.StopPropagation = true; }
-            return;
-        }
 
         // The worktrees panel is modal while open: Esc closes it, everything else
         // is swallowed (its own buttons/rows drive the actions).
