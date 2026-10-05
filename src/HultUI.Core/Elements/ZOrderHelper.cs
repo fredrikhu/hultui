@@ -28,9 +28,14 @@ internal static class ZOrderHelper
             }
         }
 
-        if (!hasZIndex)
-            return children;
+        return hasZIndex ? Sorted(children) : children;
+    }
 
+    // A method of its own: the comparison captures `children`, and C# allocates a captured
+    // local's closure where the local's scope begins — in GetChildrenInZOrder that is its
+    // first line, which every element of every rendered frame runs.
+    private static Element[] Sorted(IReadOnlyList<Element> children)
+    {
         // By ZIndex, then sticky last, then insertion order. The index is part of the key because
         // List.Sort is not stable: it only looked stable while insertion sort handled sixteen or fewer.
         var order = new int[children.Count];

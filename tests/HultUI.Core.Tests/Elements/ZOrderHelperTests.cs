@@ -22,6 +22,28 @@ public class ZOrderHelperTests
         Assert.Same(parent.Children, result);
     }
 
+    /// <summary>The renderer and the hit tester ask for every element of every frame, so the
+    /// common case allocates nothing at all. The sort's comparison captured the child list, and
+    /// C# allocated that closure on the method's first line — 24 bytes per element per frame
+    /// with no z-index or sticky child in sight.</summary>
+    [Fact]
+    public void NoZIndex_AllocatesNothing()
+    {
+        var parent = BoxElement.New();
+        parent.ReplaceChildren(BoxElement.New(), BoxElement.New(), BoxElement.New());
+        var leaf = BoxElement.New();
+        ZOrderHelper.GetChildrenInZOrder(parent);
+        ZOrderHelper.GetChildrenInZOrder(leaf);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            ZOrderHelper.GetChildrenInZOrder(parent);
+            ZOrderHelper.GetChildrenInZOrder(leaf);
+        }
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
     [Fact]
     public void SingleChild_ReturnsOriginalList()
     {
