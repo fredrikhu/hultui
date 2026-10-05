@@ -246,6 +246,13 @@ its runs against an already-warm V8. Under NativeAOT the pre-warm is a cheap
 no-op (there is no tiering); under JIT it is what stops the first metric from
 absorbing tier-up and reading ~2× high.
 
+`--auto` and `--profile` **pin the process to the performance cores** of a hybrid
+CPU (since 2026-10-05; `--no-pin` turns it off). This machine's i7-14700K has 8
+performance and 12 efficiency cores; an efficiency core runs the UI thread ~1.8×
+slower, and the scheduler moves a lone busy thread between the two kinds, so an
+unpinned run mixes both speeds into its samples. The pinning code is shared with
+the [scenario suite](../HultUI.Samples.PerfSuite/README.md).
+
 ## Reading the comparison fairly
 
 - **Apples to apples:** the table is *not* virtualized. Both HultUI and the

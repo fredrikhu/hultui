@@ -32,6 +32,12 @@ bool auto = args.Contains("--auto");
 bool profile = args.Contains("--profile");
 bool virtualMode = args.Contains("--virtual");
 
+// Scripted runs stay on the performance cores of a hybrid CPU: the scheduler otherwise
+// moves the UI thread between core kinds, and an efficiency core runs it ~1.8× slower
+// (see samples/HultUI.Samples.PerfSuite/CorePinning.cs). --no-pin opts out.
+if ((auto || profile) && !args.Contains("--no-pin") && PerfSuite.CorePinning.PinToFastestCores() is { } pinning)
+    Console.WriteLine(pinning);
+
 using var app = new Application("HultUI Benchmark", 1040, 760);
 app.Theme = Theme.Light;
 
