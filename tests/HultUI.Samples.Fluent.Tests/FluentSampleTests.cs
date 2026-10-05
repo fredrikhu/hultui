@@ -326,6 +326,30 @@ public class FluentSampleTests
     private static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) * (c.A / 255.0);
 
     /// <summary>
+    /// The gallery's table is the framework table: its headers are column headers that sort,
+    /// the largest download first for Size, and its rows are named by their columns.
+    /// </summary>
+    [Fact]
+    public void TheTableSortsFromItsHeaders()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+        GoTo(session, "Controls gallery");
+        // Below the fold: a click aimed off the viewport hits nothing.
+        session.Window.Wheel(800, 600, 0, -6);
+        session.PumpFrames(6);
+
+        session.Window.FindByRole(AccessibilityRole.ColumnHeader, "Size")!.Click();
+        session.PumpFrames(2);
+        Assert.Equal("size", app.Downloads.SortColumn);
+        Assert.NotNull(session.Window.FindByRole(AccessibilityRole.ColumnHeader, "Size, sorted descending"));
+
+        var list = FirstOfType<VirtualListElement<FluentApp.Download>>(root, _ => true)!;
+        Assert.Equal("Holiday photos.zip", list.Items[0].Name);
+        Assert.Equal("README.txt", list.Items[^1].Name);
+    }
+
+    /// <summary>
     /// The gallery's flyout is the framework popover in WinUI's look: it opens under its button
     /// with the Flyout fill, its button says it is expanded, and the button inside it works and
     /// closes it.

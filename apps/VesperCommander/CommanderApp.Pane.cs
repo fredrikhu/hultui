@@ -742,8 +742,22 @@ public partial class CommanderApp
             .ItemHeight((int)RowHeight)
             .Items(list)
             .RenderWith(e => FileRow(side, e, cursorPath, marks.Contains(MarkKey(e)), partnerPath))
+            // The list names its rows to assistive tech by this alone, off-screen ones included.
+            // Without it each row was read out as the FileEntry record's ToString().
+            .AccessibleItemLabel(e => FileLabel(e, marks.Contains(MarkKey(e))))
             .WithRef(VList(side))
             .FlexGrow(1);
+    }
+
+    /// <summary>A row as a screen reader says it: the name, what it is, its size and date, and
+    /// whether it is marked.</summary>
+    private static string FileLabel(FileEntry e, bool marked)
+    {
+        if (e.IsParent) return "Parent folder";
+        var label = e.IsDir
+            ? $"{e.Name}, folder"
+            : $"{e.Name}, {FileSystem.ByteCount(e.Size)}, modified {e.Modified:g}";
+        return marked ? label + ", marked" : label;
     }
 
     private Element FileRow(char side, FileEntry e, string? cursorPath, bool marked,

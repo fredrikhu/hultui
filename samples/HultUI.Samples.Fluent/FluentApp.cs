@@ -65,10 +65,50 @@ public sealed partial class FluentApp : Component
     /// <summary>The gallery's flyout: WinUI's "are you sure" card under a button.</summary>
     public readonly Popover EmptyBinFlyout;
 
+    /// <summary>One row of the gallery's table.</summary>
+    public sealed record Download(string Name, string Type, long Size, DateTime Added);
+
+    /// <summary>The gallery's table: sorts from its headers, resizes from their edges, and hides
+    /// columns from a right press on the header.</summary>
+    public readonly TableView<Download> Downloads;
+
+    public static readonly Download[] DownloadRows =
+    [
+        new("Quarterly report.pdf", "PDF document", 2_480_312, new DateTime(2026, 10, 2, 9, 41, 0)),
+        new("Holiday photos.zip", "Compressed folder", 384_902_144, new DateTime(2026, 9, 28, 18, 5, 0)),
+        new("setup-x64.msi", "Windows Installer", 92_110_848, new DateTime(2026, 10, 4, 21, 12, 0)),
+        new("Budget 2027.xlsx", "Excel workbook", 88_064, new DateTime(2026, 10, 5, 8, 2, 0)),
+        new("Meeting notes.docx", "Word document", 41_472, new DateTime(2026, 9, 30, 14, 30, 0)),
+        new("wallpaper-dark.png", "PNG image", 6_201_344, new DateTime(2026, 8, 17, 11, 0, 0)),
+        new("podcast-episode-112.mp3", "MP3 audio", 58_720_256, new DateTime(2026, 9, 3, 7, 15, 0)),
+        new("README.txt", "Text document", 1_024, new DateTime(2026, 7, 21, 16, 48, 0)),
+    ];
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} bytes",
+        < 1024 * 1024 => $"{bytes / 1024.0:0} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.0} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):0.0} GB",
+    };
+
     public FluentApp(Application app, Window window)
     {
         _app = app;
         _window = window;
+        Downloads = new TableView<Download>(
+        [
+            new TableColumn<Download> { Id = "name", Header = "Name", Fill = 1, CanHide = false,
+                Text = d => d.Name, Compare = (a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase) },
+            new TableColumn<Download> { Id = "type", Header = "Type", Width = 150,
+                Text = d => d.Type, Compare = (a, b) => string.Compare(a.Type, b.Type, StringComparison.CurrentCultureIgnoreCase) },
+            new TableColumn<Download> { Id = "size", Header = "Size", Width = 96, Align = ColumnAlign.End,
+                Text = d => FormatSize(d.Size), Compare = (a, b) => a.Size.CompareTo(b.Size),
+                FirstSort = SortDirection.Descending },
+            new TableColumn<Download> { Id = "added", Header = "Date added", Width = 150,
+                Text = d => d.Added.ToString("g"), Compare = (a, b) => a.Added.CompareTo(b.Added),
+                FirstSort = SortDirection.Descending },
+        ], MarkDirty) { RowHeight = 36f };
         EmptyBinFlyout = new Popover(() =>
         {
             var p = Palette;

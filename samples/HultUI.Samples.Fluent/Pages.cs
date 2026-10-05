@@ -287,6 +287,11 @@ public static class Pages
             Flex.Row(gap: 12f).FlexWrap(FlexWrap.Wrap).AlignItems(AlignItems.Center).Children(
                 input, combo)));
 
+        items.Add(Section(p, "Table",
+            Flex.Column(gap: 0).Height(250f).Children(
+                app.Downloads.Header(),
+                app.Downloads.Body(FluentApp.DownloadRows).FlexGrow(1))));
+
         items.Add(Section(p, "Ranges",
             Flex.Column(gap: 16f).Children(
                 Flex.Row(gap: 16f).AlignItems(AlignItems.Center).Children(
