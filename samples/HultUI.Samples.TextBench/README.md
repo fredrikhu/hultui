@@ -126,3 +126,35 @@ Every other row is within noise of its own before. `samples/HultUI.Samples.PerfS
   Where that is provably the same answer — one font run, two or more characters, no
   zero-width leading segment, an empty line as tall as a full one — the line breaker is
   skipped; anything else takes the old path.
+
+## Capture: re-wrapping from kept segments (2026-10-05)
+
+Same machine and method as above; before = the commit underneath. Mins of the second pair:
+
+| scenario | before (min) | after (min) | |
+|---|---:|---:|---|
+| `resize/wrap` | 20.19 µs | 5.95 µs | **−71 %**, 32 → 12 KB per call |
+| `resize/ellipsis-2lines` | 15.23 µs | 7.09 µs | **−53 %** |
+| `cold/latin-wrapped` | 37.75 µs | 32.59 µs | **−14 %** |
+| `cold/mixed-38` | 20.33 µs | 16.66 µs | **−18 %** — the BiDi path breaks lines too |
+| `cold/hebrew-25` | 30.63 µs | 26.96 µs | **−12 %** |
+| `auto/mixed-cold` | 19.39 µs | 15.62 µs | **−19 %** |
+
+Every other row is within noise. In `samples/HultUI.Samples.PerfSuite`, `text/wrap 150
+paragraphs resize` went from 7.1 to 3.1 ms (−69 % allocated) and `text/create 2,000 unique
+labels` from 17.6 to 9.8 ms: each new label's min-content width found its breaks with an
+iterator of its own.
+
+### What the numbers caught
+
+- **Opening an ICU line-break iterator costs ~6 µs** — more than finding every break in a
+  90-character label with it — and `LineBreaker` opened one per call. It now keeps one per
+  thread and points it at each text with `ubrk_setText`. `LineBreakerTests` hold a reused
+  iterator to a fresh one's breaks, across texts and with eight threads breaking at once.
+- **A string's break offsets and segment widths do not depend on the width**, so they are
+  kept with its shaping: a new width only does the greedy arithmetic and shapes the lines it
+  keeps, plus one measure of its last line for the search that cuts it (which used to gallop
+  over that line with ~8 fresh measures). `WidthChangeEquivalenceTests` compare against the
+  reference path, wrapping included, bit for bit.
+- **Removing duplicate break offsets was quadratic**: 33 µs for the 700 breaks of a
+  3,700-character paragraph, 7 µs in one pass, next to ICU's own 29 µs to find them.

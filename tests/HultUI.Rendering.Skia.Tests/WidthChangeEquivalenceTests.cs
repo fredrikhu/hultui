@@ -7,13 +7,13 @@ using Xunit;
 namespace HultUI.Rendering.Skia.Tests;
 
 /// <summary>
-/// The real-font twin of HultUI.Text.Tests' TruncationEquivalenceTests: truncation that
-/// measures prefixes from a string's own segments, and one ellipsized line without the line
-/// breaker, against the reference path that measured every candidate from scratch — through
-/// HarfBuzz and the system's fonts, with their actual kerning and ligatures. Same output, to
-/// the bit, at every width.
+/// The real-font twin of HultUI.Text.Tests' WidthChangeEquivalenceTests: wrapping from a
+/// string's kept break segments, truncation that measures prefixes from its own segments,
+/// and one ellipsized line without the line breaker, against the reference path that worked
+/// everything out from scratch at each width — through HarfBuzz and the system's fonts, with
+/// their actual kerning and ligatures. Same output, to the bit, at every width.
 /// </summary>
-public class TruncationEquivalenceTests
+public class WidthChangeEquivalenceTests
 {
     private static readonly ResolvedInheritedStyle Base = new(
         FontFamily: "sans-serif", FontSize: 16f, FontWeight: FontWeight.Regular,
@@ -31,6 +31,7 @@ public class TruncationEquivalenceTests
     private static readonly string[] Texts =
     [
         "The quick brown fox jumps over the lazy dog",
+        "Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump! The five boxing wizards jump quickly.",
         "AVA To Wa Ty Yo office affine flow fjord",   // kern pairs and ligatures, cut anywhere
         "Incomprehensibilities",
         "well-known x-ray https://example.com/a/b/c.txt",
@@ -50,15 +51,17 @@ public class TruncationEquivalenceTests
         "commit שלום merged",
     ];
 
-    private static readonly (int MaxLines, TextOverflow Overflow)[] Modes =
+    private static readonly (int? MaxLines, TextOverflow Overflow)[] Modes =
     [
         (1, TextOverflow.Ellipsis),
         (2, TextOverflow.Ellipsis),
         (1, TextOverflow.Clip),
+        (null, TextOverflow.Clip),
+        (3, TextOverflow.Clip),
     ];
 
     [Fact]
-    public void Shortcut_MatchesTheReferencePath_AtEveryWidth()
+    public void Reuse_MatchesTheReferencePath_AtEveryWidth()
     {
         var fonts = new SkiaFontCollection();
         var shaper = new SkiaTextShaper();
@@ -66,7 +69,7 @@ public class TruncationEquivalenceTests
         foreach (var style in Styles)
         foreach (var (maxLines, overflow) in Modes)
         {
-            var reference = new TextPipeline(fonts, shaper) { ShortcutTruncation = false };
+            var reference = new TextPipeline(fonts, shaper) { ReuseAcrossWidths = false };
             var shortcut = new TextPipeline(fonts, shaper);
 
             foreach (var text in Texts)
