@@ -66,6 +66,11 @@ layout/resize 2,000-row list  12002    5.271    5.723    0.11    0.00    4.85   
   real window.
 - **elems** is the tree's element count after the steps, overlays not included. A
   `TextArea` counts as one element however many lines it holds.
+- **alloc** is the managed bytes the UI thread allocated per step, mutation and frames
+  together. It is far steadier than time, though not exact: most rows repeat within
+  0.5 KB, rows that create or rebuild elements vary by up to ~1 %, and the theme switches
+  by ~5 %. A change of a few KB shows in one pair of runs; a change in time needs
+  interleaved runs.
 - A row that ends in `! n/m steps rendered nothing` timed nothing: the scenario's change
   never dirtied anything. Fix the scenario.
 
@@ -118,6 +123,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-05-e5a2206-before.json` | Before the 35-merge feature batch of 2026-10-04/05: e5a2206, median of 3 runs. The 11 scenarios whose APIs postdate it are absent. |
 | `2026-10-05-90730ee-after.json` | After it: 90730ee, median of 3 runs interleaved with the line above. Compare these two. |
 | `2026-10-05-f84891b.json` | The first full capture, all 64 scenarios, one later run. It reads 3–5 % above the pair on every row, paint included — drift between sessions, which is why a before/after must be interleaved. |
+| `2026-10-05-16fc7f6-zorder-before.json` | Before the z-order closure fix: 16fc7f6 (main), median of 3 runs. All 64 scenarios. |
+| `2026-10-05-f184580-zorder-after.json` | After it: f184580, median of 3 runs interleaved with the line above. Compare these two. Both read 5–24 % slower than the 90730ee pair (median 9 %): another session and the tabs and focus commits apart, so compare them with each other only. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -127,9 +134,32 @@ and `layout/deep nesting leaf edit` +12 % on the minimum. A sweep over the merge
 that touched layout code puts no single cause behind it: align-content (189d176) +6 %,
 aspect ratio (82377dc) +3 %, baseline (a0dd054) and the JustifyContent fix (b5c8916)
 +2 % each. Grid, text, scroll, virtual lists, components, input, overlays, themes,
-animation, paint and accessibility were flat. Allocation, which does not drift, did
-move: every rendered frame allocates 3–6 KB more since the sticky merge (b8102e4), and
-a keystroke in a `TextInput` 28 KB more.
+animation, paint and accessibility were flat. Allocation did move: every rendered frame
+allocated 3–6 KB more since the sticky merge (b8102e4), and a keystroke in a `TextInput`
+28 KB more — one cause, fixed in f184580 (below).
+
+**The z-order closure, before → after.** Sticky gave `ZOrderHelper.GetChildrenInZOrder`
+a stable sort whose comparison captures the local child list. C# allocates a captured
+local's closure where the local's scope begins — the method's first line — so every call
+paid 24 bytes, the no-z-index fast path included, and the renderer and hit tester call it
+for every element of every frame. The `TextInput` keystroke repaints 1,204 elements:
+1,204 × 24 B is the whole 28 KB, so undo recording costs under 0.1 KB a keystroke. With
+the sort in a method of its own, every scenario that only re-lays out or repaints
+allocates what it did at e5a2206, within 0.2 KB:
+
+| Scenario | e5a2206 | 16fc7f6 | f184580 |
+|---|---:|---:|---:|
+| `layout/deep nesting leaf edit` | 333.5 | 364.6 | 333.5 |
+| `grid/resize 300x6` | 16.8 | 22.4 | 16.8 |
+| `input/type in TextInput` | 46.4 | 74.6 | 46.4 |
+| `anim/hover transitions` | 36.6 | 55.6 | 36.6 |
+| `paint/tiles plain` | 5.8 | 9.2 | 5.8 |
+
+KB allocated per step: 24 bytes less for each element drawn or hit-tested in a frame —
+1.5 KB on the lightest step, 31 KB on the 1,323 elements of deep nesting, up to 58 % of
+a light step — and no time moved past ±10 %. The rows still above e5a2206 are those that
+create elements, 8 bytes per element: `Element.OverlayOrigin` (popover, 3f14903) took
+`BoxElement` from 600 to 608 B.
 
 **What the suite turned up on its first run**, for follow-up:
 
