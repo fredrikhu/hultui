@@ -344,7 +344,7 @@ public sealed class TextPipeline
             int fit = FitPrefix(text, from, to, style, maxWidth);
             // A box too narrow for even one character would otherwise never advance. One
             // character per line is the sane floor, and what a browser does.
-            if (fit <= from) fit = SnapPrefix(text, from + 1);
+            if (fit <= from) fit = NextCodePoint(text, from);
             if (fit >= to) break;             // what is left fits a line of its own
             lines.Add(ShapeLineText(text[from..fit], style, from));
             from = fit;
@@ -578,7 +578,7 @@ public sealed class TextPipeline
                 while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 {
                     int fit = StyledFitPrefix(text, textOffset, segEnd, style, spans, maxWidth);
-                    if (fit <= textOffset) fit = SnapPrefix(text, textOffset + 1);
+                    if (fit <= textOffset) fit = NextCodePoint(text, textOffset);
                     if (fit >= segEnd) break;
                     lines.Add(ShapeStyledLine(text, textOffset, fit, style, spans));
                     textOffset = fit;
@@ -855,7 +855,7 @@ public sealed class TextPipeline
                 while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 {
                     int fit = BidiFitPrefix(text, textOffset, segEnd, style, levels, maxWidth);
-                    if (fit <= textOffset) fit = SnapPrefix(text, textOffset + 1);
+                    if (fit <= textOffset) fit = NextCodePoint(text, textOffset);
                     if (fit >= segEnd) break;
                     lines.Add(ShapeBidiLine(text, textOffset, fit, style, levels));
                     textOffset = fit;
@@ -1424,6 +1424,15 @@ public sealed class TextPipeline
         float half = extra / 2f;
         return (ascent + half, half);
     }
+
+    // One code point on from index: how far a line that fits nothing advances. A line of
+    // SnapPrefix(index + 1) stopped short of a surrogate pair by stepping back off it, so a
+    // pair wider than the box (an emoji in a narrow column) gave an empty line that never
+    // moved on, and wrapping with no line limit added such lines until memory ran out.
+    private static int NextCodePoint(string text, int index) =>
+        index + 1 < text.Length && char.IsHighSurrogate(text[index]) && char.IsLowSurrogate(text[index + 1])
+            ? index + 2
+            : index + 1;
 
     // Moves an index back off the trailing half of a surrogate pair.
     private static int SnapPrefix(string text, int index) =>
