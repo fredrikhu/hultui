@@ -272,8 +272,8 @@ public class NestedUnmountTests
     }
 
     /// <summary>
-    /// Tabs with <c>keepAlive</c> cache the panel and rebuild the content host around it on
-    /// every switch, so the panel leaves inside the old host and comes back into a new one.
+    /// Tabs with <c>keepAlive</c> cache the panel: a switch takes it out of the panel's host and
+    /// another puts it back.
     /// </summary>
     [Fact]
     public void KeepAliveTab_ComponentStopsWhileHiddenAndWorksWhenShownAgain()

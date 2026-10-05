@@ -491,14 +491,6 @@ public abstract class Element
     }
 
     /// <summary>
-    /// Called by the reconciler after this element has been patched and its children
-    /// reconciled. Self-managing elements (e.g. Tabs) override this to re-assert
-    /// their internally-owned subtree, which the child reconciliation may have
-    /// altered. Default is a no-op.
-    /// </summary>
-    internal virtual void OnReconciled() { }
-
-    /// <summary>
     /// True for an element that creates its children itself rather than receiving them from
     /// a build — a virtualised list, whose rows are realized from a template during layout.
     /// The reconciler then leaves the live children alone when it patches the element: the

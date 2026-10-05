@@ -281,7 +281,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   named from its content, as a button is. Role `TabPanel` is the content shown for a tab:
   UIA `Pane`, AT-SPI `scroll pane`. (`Tab` used to be UIA's strip type and `TabPanel`
   AT-SPI's tab list.) `TabsElement` uses all three: each header is a tab with
-  `AccessibleSelected` set, and the panel is named after the tab it shows.
+  `AccessibleSelected` set, and the panel is named after the tab it shows. Its headers are kept
+  across a switch, so a reader is told the selection moved rather than the tabs being replaced,
+  and they are keyboard-reachable the ARIA way: Tab stops at the open tab, arrows move and open
+  (2026-10-05).
 - **Selected** — `Element.AccessibleSelected` (`null` = not selectable) for one of a set —
   a tab; a `RadioButtonElement` is selected when checked. The node's `IsSelected` gives UIA
   the SelectionItem pattern (a tab's container is its strip; `Select` clicks the element)

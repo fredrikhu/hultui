@@ -1684,3 +1684,44 @@ Flex.Column(gap: 0).Children(_files.Header(), _files.Body(rows).FlexGrow(1))
 **Looks** come from `Theme.Table` (`TableTheme`): header height, fill, hover, text colour, size,
 weight and letter spacing; the divider; cell padding (header and rows alike, so they line up);
 the sort mark; the grip's width.
+
+## 26. Tabs
+
+A strip of tab headers and the open tab's panel. Three looks (`TabStyle.Underline`, `Pill`,
+`Enclosed`) and four placements of the strip (`TabPlacement.Top`, `Bottom`, `Left`, `Right`).
+
+```csharp
+Tabs.New().Style(TabStyle.Underline)
+    .Tab("Changes", () => ChangesView(), badge: count.ToString())
+    .Tab("History", () => HistoryView(), keepAlive: true)
+    .Tab("README.md", () => Preview(), onClose: () => CloseReadme())
+
+// The app's state: every build says which tab is open.
+Tabs.New().Selected(_tab).OnTabChanged(i => _tab = i)
+    .Tab("General", () => General())
+    .Tab("Advanced", () => Advanced())
+```
+
+- **State:** left alone, the element keeps the open tab across rebuilds. `Selected(index)` hands
+  it to the app, as `Expander.Expanded` does: every build says which tab is open, so pair it with
+  `OnTabChanged`, which reports the user's choices either way.
+- **Panels:** a tab's function is called when the tab opens, and again on each rebuild while it
+  is open; what it returns patches the panel showing, as a child in any build is patched, so a
+  text box in it keeps its focus and undo history. A panel that is not showing is dropped, unless
+  the tab is `keepAlive`: that panel is kept while hidden and shown again as it was.
+- **Which tab is which:** across a rebuild a tab is known by its label, or, when no tab came or
+  went, by its place, so a tab renamed with a "•" for unsaved changes is still itself. Its
+  header, its kept panel and the selection go with it: the open tab stays open when tabs close
+  around it, and when it closes, the tab now in its place opens. A panel is only ever patched
+  from its own tab's function.
+- **Keyboard** (the ARIA tab pattern): Tab stops at the open tab only. The arrow keys along the
+  strip (Left/Right, or Up/Down for a strip at the side) move to the next tab, round the ends,
+  and open it; Home and End go to the first and last. Enter or Space opens a tab that has focus
+  without being open. Delete closes a closable tab. With Ctrl, Alt or Super held, the keys are
+  left for the app's shortcuts. When the tab with the keyboard closes, the open tab takes it.
+- **Elements:** the strip, the headers and the panel's host are kept, not rebuilt: a switch
+  restyles two headers and swaps the panel.
+- **Accessibility:** the strip is a `TabList`, each header a `Tab` with `AccessibleSelected`,
+  named from its label and badge (a closable tab by those outright, so its "×" is not read; the
+  close button is "Close <label>"), and the panel a `TabPanel` named after the open tab. UIA's
+  SelectionItem `Select` opens a tab.

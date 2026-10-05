@@ -110,9 +110,6 @@ internal static class TreeDiffer
         // and wiping the live ones here would unmount rows the element is about to put back.
         if (!existing.ManagesOwnChildren)
             ReconcileChildren(existing, incoming);
-        // Child reconciliation may have altered a self-managing element's
-        // internally-owned subtree (e.g. Tabs); let it re-assert its live state.
-        existing.OnReconciled();
 
         // The incoming element has now handed everything it had to the live one and is
         // garbage. Saying so is what turns "my scrollbar does nothing" into a stack trace:

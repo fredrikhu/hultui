@@ -1023,6 +1023,22 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         return overlayTarget ?? (_root is null ? null : HitTester.HitTest(_root, pos));
     }
 
+    /// <summary>A modifier on its own is not keyboard use, nor a chord with Ctrl, Alt or Super:
+    /// Ctrl+C after a click is the mouse user's shortcut, not navigation.</summary>
+    private static bool IsKeyboardUse(InputEvent.KeyInput key) =>
+        key.KeyCode is not (KeyCode.ShiftLeft or KeyCode.ShiftRight or KeyCode.CtrlLeft or KeyCode.CtrlRight
+            or KeyCode.AltLeft or KeyCode.AltRight or KeyCode.SuperLeft or KeyCode.SuperRight
+            or KeyCode.CapsLock or KeyCode.NumLock or KeyCode.ScrollLock)
+        && (key.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super)) == 0;
+
+    /// <summary>Flips the ring on or off, repainting when something that shows one has focus.</summary>
+    private void SetFocusFromKeyboard(bool value)
+    {
+        if (_focusFromKeyboard == value) return;
+        _focusFromKeyboard = value;
+        if (_focusManager.FocusedElement is { ShowsFocusVisual: true }) _root?.MarkPaintDirty();
+    }
+
     private static KeyDownEvent NewKeyDown(InputEvent.KeyInput key) => new()
     {
         Key = key.KeyCode,
@@ -1297,8 +1313,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 if (button.IsDown)
                 {
                     // A press is the pointer taking over, whatever it lands on: the focus that
-                    // follows is not keyboard focus, and the ring stays down until the next Tab.
-                    _focusFromKeyboard = false;
+                    // follows is not keyboard focus, and the ring stays down until the keyboard is used.
+                    SetFocusFromKeyboard(false);
 
                     // Dismiss overlays when clicking outside them. A press in an overlay is
                     // outside the anchored overlays above it (a popover opened from a dialog
@@ -1488,6 +1504,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
             case InputEvent.KeyInput key:
             {
+                // Any key that means something on its own is the keyboard taking over, as a
+                // browser's :focus-visible has it: the focus shows its ring from now on, wherever
+                // a handler moves it — an arrow through a tab strip, not only Tab.
+                if (key.IsDown && IsKeyboardUse(key))
+                    SetFocusFromKeyboard(true);
+
                 // F12 cycles DevTools: enabled → enabled + continuous redraw → disabled
                 if (key.IsDown && key.KeyCode == KeyCode.F12 && Application.DevToolsHotkeysEnabled)
                 {
