@@ -257,7 +257,12 @@ public sealed class TextPipeline
             // JSON line — ends the line far short of the box and reads as though the
             // text simply stopped. Clipping is what the caller asked for; breaking is
             // what Ellipsis does, minus the ellipsis.
-            layout = ClipToWidth(text, style, maxWidth);
+            layout = ClipToWidth(text, style, maxWidth, shaped);
+        }
+        else if (maxLines == 1 && overflow == TextOverflow.Ellipsis && !shaped.HasNewline
+            && EllipsizeOneLine(text, style, shaped, maxWidth) is { } oneLine)
+        {
+            layout = oneLine;
         }
         else
         {
@@ -272,7 +277,7 @@ public sealed class TextPipeline
     // The longest prefix of <paramref name="text"/> that fits <paramref name="maxWidth"/>.
     // Only whole characters are kept: DrawText does not clip to its bounds, so emitting the
     // glyph that straddles the edge would let it spill out of the box.
-    private TextLayout ClipToWidth(string text, ResolvedInheritedStyle style, float maxWidth)
+    private TextLayout ClipToWidth(string text, ResolvedInheritedStyle style, float maxWidth, ShapedText shaped)
     {
         // Not even one character fits. The line is still a line: it occupies its font's
         // height, and an empty layout here would tell MeasureContent that a non-empty
@@ -281,7 +286,7 @@ public sealed class TextPipeline
         // collapses whatever contains the text.
         if (maxWidth <= 0) return EmptyLineOfHeight(style);
 
-        int best = FitPrefix(text, 0, text.Length, style, maxWidth);
+        int best = FitPrefix(text, 0, text.Length, style, maxWidth, PrefixWidthsOf(shaped, text, style));
         if (best == 0) return EmptyLineOfHeight(style);
 
         var line = ShapeLineText(text[..best], style, 0);
@@ -297,11 +302,14 @@ public sealed class TextPipeline
     /// Gallops out from a short slice before bisecting, so every string measured stays within
     /// twice the answer. Bisecting the whole range instead would start by shaping half of what
     /// may be a 25,000-character line to discover that ~200 of them fit.
+    /// <para><paramref name="prefixes"/>, when given, measures <paramref name="text"/>'s
+    /// prefixes, so it is only passed with <paramref name="from"/> 0.</para>
     /// </remarks>
-    private int FitPrefix(string text, int from, int to, ResolvedInheritedStyle style, float maxWidth)
+    private int FitPrefix(string text, int from, int to, ResolvedInheritedStyle style, float maxWidth,
+        PrefixWidths? prefixes = null)
     {
         int span = 1;
-        while (from + span < to && MeasureString(text[from..(from + span)], style) <= maxWidth)
+        while (from + span < to && Measure(from + span) <= maxWidth)
             span <<= 1;
 
         int lo = from + Math.Min(span >> 1, to - from);
@@ -310,10 +318,14 @@ public sealed class TextPipeline
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (MeasureString(text[from..mid], style) <= maxWidth) { best = mid; lo = mid + 1; }
+            if (Measure(mid) <= maxWidth) { best = mid; lo = mid + 1; }
             else hi = mid - 1;
         }
         return SnapPrefix(text, best);   // never split a surrogate pair
+
+        float Measure(int end) => prefixes is null
+            ? MeasureString(text[from..end], style)
+            : PrefixWidth(prefixes, end, style);
     }
 
     /// <summary>
@@ -371,21 +383,11 @@ public sealed class TextPipeline
     }
 
     // Multi-line path: the text either contains explicit newlines or is wider
-    // than the available width. BreakIntoLines re-shapes per line, so it does not
-    // reuse the cached single-line shaping.
+    // than the available width. BreakIntoLines measures segment by segment and
+    // shapes each line it keeps; nothing here is shaped as a whole first, because
+    // nothing would read it.
     private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
-    {
-        var fontRuns = Itemize(text, style);
-        if (fontRuns.Count == 0)
-            return TextLayout.Empty;
-
-        var shapedRuns = new List<ShapedRun>(fontRuns.Count);
-        foreach (var run in fontRuns)
-            shapedRuns.Add(ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing));
-
-        var breakPoints = LineBreaker.FindBreakOpportunities(text);
-        return BreakIntoLines(text, shapedRuns, fontRuns, style, breakPoints, maxWidth, maxLines);
-    }
+        => BreakIntoLines(text, style, maxWidth, maxLines);
 
     // ── Styled layout internals ──
     // A styled line is segments cut at metric-span boundaries, each itemized with its
@@ -970,8 +972,12 @@ public sealed class TextPipeline
     // unbreakable token is wider than the available width. Only the final line
     // is touched; earlier lines keep their exact shaping and positions.
     private TextLayout ApplyEllipsis(string text, ResolvedInheritedStyle style, TextLayout clip, float maxWidth)
-        => ApplyEllipsis(text, clip, maxWidth,
-            (start, tailEnd) => BuildEllipsizedLine(text[start..tailEnd], start, style, maxWidth));
+        => ApplyEllipsis(text, clip, maxWidth, (start, tailEnd) =>
+        {
+            string tail = text[start..tailEnd];
+            return BuildEllipsizedLine(tail, start, style, maxWidth,
+                ShortcutTruncation ? BuildPrefixWidths(tail, style) : null, MeasureString(EllipsisString, style));
+        });
 
     /// <summary>
     /// One truncation policy for all three layout paths; only the line builder
@@ -1017,11 +1023,12 @@ public sealed class TextPipeline
 
     // Builds a single line holding the longest prefix of <paramref name="tail"/>
     // that leaves room for the ellipsis within <paramref name="maxWidth"/>,
-    // followed by the ellipsis glyph.
-    private TextLine BuildEllipsizedLine(string tail, int start, ResolvedInheritedStyle style, float maxWidth)
+    // followed by the ellipsis glyph. <paramref name="prefixes"/>, when the tail
+    // has them, measures each candidate prefix without itemizing or shaping it
+    // again; <paramref name="ellipsisWidth"/> is MeasureString of the mark.
+    private TextLine BuildEllipsizedLine(string tail, int start, ResolvedInheritedStyle style, float maxWidth,
+        PrefixWidths? prefixes, float ellipsisWidth)
     {
-        float ellipsisWidth = MeasureString(EllipsisString, style);
-
         // Binary search for the widest prefix that fits alongside the ellipsis.
         // Width is monotonic in prefix length, so this converges in O(log n)
         // shaping calls even for a pathologically long unbreakable token.
@@ -1029,7 +1036,7 @@ public sealed class TextPipeline
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            float width = MeasureString(tail[..mid], style);
+            float width = prefixes is null ? MeasureString(tail[..mid], style) : PrefixWidth(prefixes, mid, style);
             if (width + ellipsisWidth <= maxWidth)
             {
                 best = mid;
@@ -1047,6 +1054,197 @@ public sealed class TextPipeline
 
         string content = tail[..best] + EllipsisString;
         return ShapeLineText(content, style, start);
+    }
+
+    // ── Truncation without re-shaping ──
+    //
+    // Clip and Ellipsis both look for the longest prefix that fits, and both used to find
+    // it by measuring candidate prefixes from scratch: each one a new substring, itemized
+    // and shaped through the word cache, ~7 of them per truncated label per width. And a
+    // one-line Ellipsis first broke the whole text into lines only to replace the line it
+    // got. A resize drag over 1,000 truncated labels paid that for every label, every
+    // frame (samples/HultUI.Samples.PerfSuite, text/ellipsis).
+    //
+    // Now a string's prefix widths come from its own segments, worked out once and kept
+    // with its shaping, and only a partial last word is looked up per candidate. The
+    // searches are unchanged, probe for probe, and each probe returns the number
+    // MeasureString would have — so the cut lands where it always did.
+
+    /// <summary>
+    /// When false, truncation takes the reference path: every candidate prefix measured
+    /// from scratch, one-line Ellipsis through the line breaker. The output is the same
+    /// either way; tests hold the two paths to that.
+    /// </summary>
+    internal bool ShortcutTruncation { get; init; } = true;
+
+    /// <summary>
+    /// The space / non-space segments of a string that itemizes to ONE font run — the same
+    /// segments <see cref="ShapeByWords"/> cuts it into — with the running sums it adds them
+    /// up with. Only one run, because FontItemizer decides each character from the ones
+    /// before it and never looks ahead: so every prefix of a one-run string (not cut inside
+    /// a surrogate pair) itemizes to that run cut short, and is measured from these.
+    /// </summary>
+    private sealed class PrefixWidths(string text, IResolvedFont font, float fontSize, float letterSpacing,
+        PrefixSegment[] segments)
+    {
+        public readonly string Text = text;
+        public readonly IResolvedFont Font = font;
+        public readonly float FontSize = fontSize;
+        public readonly float LetterSpacing = letterSpacing;
+        public readonly PrefixSegment[] Segments = segments;
+    }
+
+    // X is where the segment starts: ShapeByWords' running x, summed in its order.
+    // GlyphsBefore counts the glyphs before it, for letter spacing.
+    private readonly record struct PrefixSegment(int Start, float X, float Width, int GlyphsBefore, int Glyphs);
+
+    private PrefixWidths? BuildPrefixWidths(string text, ResolvedInheritedStyle style)
+    {
+        if (text.Length == 0) return null;
+        var runs = Itemize(text, style);
+        if (runs.Count != 1) return null;
+
+        var font = runs[0].Font;
+        var segments = new List<PrefixSegment>();
+        float x = 0;
+        int glyphs = 0, i = 0;
+        while (i < text.Length)
+        {
+            bool isSpace = text[i] == ' ';
+            int start = i;
+            while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+            var seg = GetOrShapeSegment(text[start..i], font, style.FontSize);
+            segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs.Length));
+            x += seg.Width;
+            glyphs += seg.Glyphs.Length;
+        }
+        return new PrefixWidths(text, font, style.FontSize, style.LetterSpacing, segments.ToArray());
+    }
+
+    /// <summary>
+    /// <c>MeasureString(p.Text[..length])</c>, to the bit: the same segment widths, added in
+    /// the same order, letter spacing applied the same way. Complete segments are read off
+    /// the table; only a word the prefix cuts in two is looked up (through the word cache,
+    /// as MeasureString would) — never its share of the whole word's glyph advances, which
+    /// carry the kerning and ligatures of the letters cut off.
+    /// </summary>
+    private float PrefixWidth(PrefixWidths p, int length, ResolvedInheritedStyle style)
+    {
+        string text = p.Text;
+        if (length == 0) return 0;
+        // A cut inside a surrogate pair leaves a lone surrogate, which itemizes on its own
+        // terms: that prefix is measured the long way. (Not reached today — a surrogate is
+        // above U+0590, so its text takes the BiDi path — but this keeps the table honest.)
+        if (length < text.Length && char.IsLowSurrogate(text[length]) && char.IsHighSurrogate(text[length - 1]))
+            return MeasureString(text[..length], style);
+
+        // The last segment starting before the cut.
+        var segments = p.Segments;
+        int lo = 0, hi = segments.Length - 1;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) >> 1;
+            if (segments[mid].Start < length) lo = mid;
+            else hi = mid - 1;
+        }
+        var seg = segments[lo];
+        int end = lo + 1 < segments.Length ? segments[lo + 1].Start : text.Length;
+
+        float width;
+        int glyphs;
+        if (length == end)
+        {
+            width = seg.Width;
+            glyphs = seg.Glyphs;
+        }
+        else
+        {
+            var part = GetOrShapeSegment(text[seg.Start..length], p.Font, p.FontSize);
+            width = part.Width;
+            glyphs = part.Glyphs.Length;
+        }
+
+        // ShapeByWords' running sum, then ShapeWithSpacing's letter spacing.
+        float x = seg.X + width;
+        int total = seg.GlyphsBefore + glyphs;
+        return p.LetterSpacing == 0f || total == 0 ? x : x + p.LetterSpacing * total;
+    }
+
+    // The string's prefix widths, built the first time it is truncated and kept with its
+    // shaping; null when it is more than one font run (or the reference path is on).
+    private PrefixWidths? PrefixWidthsOf(ShapedText shaped, string text, ResolvedInheritedStyle style)
+    {
+        if (!ShortcutTruncation) return null;
+        if (!shaped.PrefixWidthsKnown)
+        {
+            shaped.PrefixWidths = BuildPrefixWidths(text, style);
+            shaped.PrefixWidthsKnown = true;
+        }
+        return shaped.PrefixWidths;
+    }
+
+    /// <summary>
+    /// What one-line Ellipsis needs of a string at any width, worked out once.
+    /// <see cref="Exact"/> says the shortcut gives the reference path's answer for it.
+    /// </summary>
+    private sealed record OneLineEllipsis(bool Exact, PrefixWidths? Prefixes, float EllipsisWidth, float Height);
+
+    /// <summary>
+    /// One-line Ellipsis without breaking the text into lines first: exactly what
+    /// <see cref="ComputeWrapped"/> + <see cref="ApplyEllipsis(string, ResolvedInheritedStyle, TextLayout, float)"/>
+    /// return, or null for a string where that is not proven (the caller then takes them).
+    /// Only reached for a text with no newline that is wider than <paramref name="maxWidth"/>.
+    /// </summary>
+    private TextLayout? EllipsizeOneLine(string text, ResolvedInheritedStyle style, ShapedText shaped, float maxWidth)
+    {
+        if (!ShortcutTruncation) return null;
+        var e = shaped.OneLineEllipsis ??= ProveOneLineEllipsis(text, style, shaped);
+        if (!e.Exact) return null;
+
+        // ApplyEllipsis on the wrap pass's one line, which starts at 0: the line rebuilt
+        // with an ellipsis, in a layout keeping the wrapped line's height.
+        var line = BuildEllipsizedLine(text, 0, style, maxWidth, e.Prefixes, e.EllipsisWidth);
+        return new TextLayout([line], new Size(Math.Max(0f, line.Width), e.Height));
+    }
+
+    // With maxLines 1 the wrap pass keeps one line L, and ApplyEllipsis replaces it with
+    // BuildEllipsizedLine(text[L.Start..]) in a layout of L's height — unless L is the whole
+    // text and fits, when the wrapped layout stands. So the shortcut is exact for a string
+    // when, at every width the text overflows:
+    //  - L.Start is 0. The pass starts a line past 0 only at a segment it reaches having
+    //    emitted nothing with a line width of exactly 0 — when the running sum of the break
+    //    segments' widths (BreakIntoLines' own lineWidth) comes to 0, as after a leading
+    //    soft hyphen of no width. Checked below: every running sum is positive.
+    //  - L is never the whole text. With L.Start 0, every line the pass emits ends short of
+    //    the text's end (FitPrefix never answers the end of a text wider than the box), and
+    //    the last resort of one character per line is short of it unless the text IS one
+    //    character. Checked: two or more.
+    //  - L's height is known. L is a prefix of a one-run string, so it is that run cut
+    //    short, or nothing (a line of spaces, trimmed), which has the primary font's
+    //    height. Checked: the two heights are the same number.
+    private OneLineEllipsis ProveOneLineEllipsis(string text, ResolvedInheritedStyle style, ShapedText shaped)
+    {
+        var prefixes = PrefixWidthsOf(shaped, text, style);
+        float ellipsisWidth = MeasureString(EllipsisString, style);
+        float height = shaped.SingleLine!.Lines[0].Height;
+
+        bool exact = prefixes is not null
+            && text.Length >= 2
+            && height == EmptyLineOfHeight(style).Size.Height
+            && BreakSegmentSumsArePositive(text, style);
+        return new OneLineEllipsis(exact, prefixes, ellipsisWidth, height);
+    }
+
+    private bool BreakSegmentSumsArePositive(string text, ResolvedInheritedStyle style)
+    {
+        var offsets = BreakOffsets(text);
+        float lineWidth = 0;
+        for (int s = 1; s < offsets.Count; s++)
+        {
+            lineWidth += MeasureString(text[offsets[s - 1]..offsets[s]], style);
+            if (!(lineWidth > 0f)) return false;
+        }
+        return true;
     }
 
     // Total advance width of a string, itemized and shaped the same way as a line.
@@ -1252,11 +1450,8 @@ public sealed class TextPipeline
         return new TextLayout([line], new Size(totalWidth, line.Height));
     }
 
-    private TextLayout BreakIntoLines(string text, List<ShapedRun> shapedRuns, List<FontRun> fontRuns,
-        ResolvedInheritedStyle style, List<int> breakPoints, float maxWidth, int? maxLines)
+    private TextLayout BreakIntoLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
     {
-        // Build a character→width map from shaped runs
-        // For simplicity, we re-shape segments when breaking lines
         var lines = new List<TextLine>();
         int textOffset = 0;
 
@@ -1284,11 +1479,7 @@ public sealed class TextPipeline
                 continue;
             }
 
-            // Measure segment
-            var segRuns = Itemize(segment, style);
-            float segWidth = 0;
-            foreach (var run in segRuns)
-                segWidth += ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing).Width;
+            float segWidth = MeasureString(segment, style);
 
             if (lineWidth + segWidth > maxWidth && lineWidth > 0)
             {
@@ -1342,7 +1533,15 @@ public sealed class TextPipeline
     // Cached width-independent shaping of a string. <see cref="SingleLine"/> is
     // the prebuilt layout used whenever the text fits one line; it is null only
     // when the text contains an explicit newline (which always needs breaking).
-    private sealed record ShapedText(float TotalWidth, bool HasNewline, TextLayout? SingleLine);
+    private sealed record ShapedText(float TotalWidth, bool HasNewline, TextLayout? SingleLine)
+    {
+        // Filled in the first time the string is truncated (Clip or Ellipsis at one line),
+        // then reused at every other width: what a resize drag would otherwise rework per
+        // frame. Width-independent, and keyed with the shaping, so it lives and dies with it.
+        public PrefixWidths? PrefixWidths;
+        public bool PrefixWidthsKnown;
+        public OneLineEllipsis? OneLineEllipsis;
+    }
 
     private TextLine ShapeLineText(string lineText, ResolvedInheritedStyle style, int start)
     {

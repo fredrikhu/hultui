@@ -14,4 +14,10 @@
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- TextPipeline.ShortcutTruncation: the reference path the truncation tests compare against. -->
+    <InternalsVisibleTo Include="HultUI.Text.Tests" />
+    <InternalsVisibleTo Include="HultUI.Rendering.Skia.Tests" />
+  </ItemGroup>
+
 </Project>

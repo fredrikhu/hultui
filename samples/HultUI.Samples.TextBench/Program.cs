@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HultUI.Core.Layout;
 using HultUI.Core.Styling;
 using HultUI.Rendering.Skia;
 using HultUI.Text;
@@ -223,6 +224,35 @@ static class Scenarios
             yield return new("auto/mixed-cold", 200, i => p.Layout(mixedTexts[Idx(i, mixedTexts.Length)], auto, 10_000, null));
         }
 
+        // ── resize: strings already shaped, laid out at a width the layout cache
+        // has not seen — the steady state of a window or pane being dragged. 100
+        // labels × 40 widths is more keys than the width-keyed cache holds, so
+        // every call misses it while the shape and word caches stay warm.
+        {
+            var p = Pipeline();
+            var labels = Labels(100, words: 14);
+            yield return new("resize/ellipsis-1line", 100,
+                i => p.Layout(labels[Idx(i, 100)], ltr, ResizeWidth(i), 1, TextOverflow.Ellipsis));
+        }
+        {
+            var p = Pipeline();
+            var labels = Labels(100, words: 30);
+            yield return new("resize/ellipsis-2lines", 100,
+                i => p.Layout(labels[Idx(i, 100)], ltr, ResizeWidth(i), 2, TextOverflow.Ellipsis));
+        }
+        {
+            var p = Pipeline();
+            var labels = Labels(100, words: 14);
+            yield return new("resize/clip-1line", 100,
+                i => p.Layout(labels[Idx(i, 100)], ltr, ResizeWidth(i), 1, TextOverflow.Clip));
+        }
+        {
+            var p = Pipeline();
+            var labels = Labels(100, words: 30);
+            yield return new("resize/wrap", 100,
+                i => p.Layout(labels[Idx(i, 100)], ltr, ResizeWidth(i), null));
+        }
+
         // ── caret: the offset↔x mapping a caret, a click and a selection
         // highlight go through (docs/plans/14-bidi.md, stage 2), measured on an
         // already-laid-out line so this is the mapping alone. The line lookup that
@@ -260,4 +290,17 @@ static class Scenarios
     }
 
     private static int Idx(int i, int length) => (i % length + length) % length;
+
+    // Distinct paragraphs from the same vocabulary, each starting a word further in.
+    private static string[] Labels(int count, int words)
+    {
+        var w = Latin.Split(' ');
+        var labels = new string[count];
+        for (int n = 0; n < count; n++)
+            labels[n] = string.Join(' ', Enumerable.Range(n, words).Select(k => w[k % w.Length])) + $" {Alpha(n)}";
+        return labels;
+    }
+
+    // One width per batch of 100 calls, stepping through 40 widths that all truncate.
+    private static float ResizeWidth(int i) => 120f + 5f * (Idx(i, 4_000) / 100);
 }

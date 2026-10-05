@@ -19,6 +19,7 @@ dotnet run -c Release --project samples/HultUI.Samples.TextBench
 | `warm/…` | The same string laid out over and over — the steady state a scrolling list reaches, where everything downstream of the layout cache is already paid for. |
 | `cold/…` | Every call is a string the pipeline has never seen — a freshly built list of labels. Shaping dominates. |
 | `auto/…` | The same work with `TextDirection.Auto`, where the paragraph direction comes from the content. |
+| `resize/…` | Already-shaped labels laid out at widths the layout cache has not seen — a window or pane being dragged: one-line Ellipsis and Clip, a two-line Ellipsis, plain wrapping. |
 | `caret/…` | The offset↔x mapping behind a caret, a click and a selection highlight, measured on an already-laid-out line. |
 | `recheck/…` | The warm rows again, on fresh pipelines: the harness's control group. |
 
@@ -88,3 +89,40 @@ the UAX #9 analysis that was already happening:
   the classifier could run once per string instead of once per call. Measured, it
   buys 0.16 µs on a 4,700-character warm layout and costs every warm BiDi lookup
   ~45%. Left alone; the note is in `TextPipeline.Layout` so nobody re-derives it.
+
+## Capture: truncation from prefix widths (2026-10-05)
+
+`i7-14700K, Windows 11, .NET 10, Release`, pinned to the performance cores. Before = the
+parent commit, built from a second worktree with this project copied in; the two sides run
+alternately, twice each. Mins of the second pair:
+
+| scenario | before (min) | after (min) | |
+|---|---:|---:|---|
+| `resize/ellipsis-1line` | 19.86 µs | 1.66 µs | **−92 %**, 21.5 → 2.2 KB per call |
+| `resize/clip-1line` | 6.48 µs | 1.78 µs | **−73 %**, 14.2 → 2.3 KB |
+| `resize/ellipsis-2lines` | 26.54 µs | 15.10 µs | **−43 %** |
+| `resize/wrap` | 28.39 µs | 19.41 µs | **−32 %** |
+| `cold/latin-wrapped` | 53.10 µs | 37.88 µs | **−29 %** |
+
+Every other row is within noise of its own before. `samples/HultUI.Samples.PerfSuite`'s
+`text/ellipsis 1,000 labels resize` went from 56.8 ms and 71 MB per frame to 8.4 ms and 7.8 MB.
+
+### What the numbers caught
+
+- **Shaping was not the cost.** A resize drag over truncated labels made almost no
+  HarfBuzz calls: every partial word the binary search tried was a word-cache hit by the
+  second frame. The cost was everything around it — ~40,000 itemizations a frame (each a
+  `HasGlyph` per character), a fresh substring and glyph list per candidate prefix, and
+  ~3,400 ICU line-break iterators, each opened from scratch at ~4.7 µs.
+- **Half of those ICU calls read nothing.** `ComputeWrapped` itemized and shaped the whole
+  text and found its break opportunities, then handed them to `BreakIntoLines`, which
+  ignored them and found them again. Gone; that alone is the `wrap` rows' gain.
+- **Now a truncated string's prefix widths come from its own segments**, worked out once
+  and kept with its shaping; a candidate cut costs one word-cache lookup for the partial
+  word it ends in. The searches are the same probe for probe and each probe returns
+  `MeasureString`'s number to the bit — tests hold it to the old path's output
+  (`TruncationEquivalenceTests`, stub shaper and HarfBuzz both).
+- **One-line Ellipsis no longer breaks the text into lines first** to throw the line away.
+  Where that is provably the same answer — one font run, two or more characters, no
+  zero-width leading segment, an empty line as tall as a full one — the line breaker is
+  skipped; anything else takes the old path.
