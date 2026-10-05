@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <Compile Include="..\HultUI.Text.Tests\LayoutAssert.cs" Link="LayoutAssert.cs" />
+    <Compile Include="..\HultUI.Text.Tests\TestSpans.cs" Link="TestSpans.cs" />
   </ItemGroup>
 
 </Project>

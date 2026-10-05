@@ -99,4 +99,35 @@ public class WidthChangeEquivalenceTests
         }
         Assert.True(compared > 10_000, $"compared only {compared} layouts");
     }
+
+    [Fact]
+    public void StyledReuse_MatchesTheReferencePath_AtEveryWidth()
+    {
+        var fonts = new SkiaFontCollection();
+        var shaper = new SkiaTextShaper();
+        int compared = 0;
+        foreach (var (maxLines, overflow) in Modes)
+        {
+            var reference = new TextPipeline(fonts, shaper) { ReuseAcrossWidths = false };
+            var reuse = new TextPipeline(fonts, shaper);
+
+            foreach (var style in Styles)
+            foreach (var text in Texts)
+            foreach (var spans in TestSpans.Variants(text))
+            {
+                float natural = reference.Layout(text, style, float.PositiveInfinity, null, TextOverflow.Clip, spans).Size.Width;
+                var widths = new List<float> { -1f, 0f };
+                for (float w = 0.5f; w < natural + 3f; w += 2.1f) widths.Add(w);
+
+                foreach (var w in widths.Concat(Enumerable.Reverse(widths)))
+                {
+                    var expected = reference.Layout(text, style, w, maxLines, overflow, spans);
+                    var actual = reuse.Layout(text, style, w, maxLines, overflow, spans);
+                    LayoutAssert.Same(expected, actual, $"\"{text}\" spans {spans.Length} w={w} lines={maxLines} {overflow} {style}");
+                    compared++;
+                }
+            }
+        }
+        Assert.True(compared > 10_000, $"compared only {compared} layouts");
+    }
 }

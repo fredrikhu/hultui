@@ -108,6 +108,84 @@ public class WidthChangeEquivalenceTests
         Assert.True(compared > 10_000, $"compared only {compared} layouts");
     }
 
+    [Theory]
+    [MemberData(nameof(FontSets))]
+    public void StyledReuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent)
+    {
+        // Metric spans: the styled path for left-to-right text, the BiDi path with spans for
+        // the rest. Two span lists per text through the same pipelines, so one list's work
+        // handed to the other would fail here.
+        int compared = 0;
+        foreach (var (maxLines, overflow) in Modes)
+        {
+            var fonts = new TwoFonts(negativeDescent);
+            var reference = new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = false };
+            var reuse = new TextPipeline(fonts, new ContextShaper());
+
+            foreach (var style in Styles)
+            foreach (var text in Texts)
+            foreach (var spans in TestSpans.Variants(text))
+            {
+                float natural = reference.Layout(text, style, float.PositiveInfinity, null, TextOverflow.Clip, spans).Size.Width;
+                var widths = new List<float> { -1f, 0f };
+                for (float w = 0.5f; w < natural + 3f; w += 2.3f) widths.Add(w);
+
+                foreach (var w in widths.Concat(Enumerable.Reverse(widths)))
+                {
+                    var expected = reference.Layout(text, style, w, maxLines, overflow, spans);
+                    var actual = reuse.Layout(text, style, w, maxLines, overflow, spans);
+                    LayoutAssert.Same(expected, actual, $"\"{text}\" spans {spans.Length} w={w} lines={maxLines} {overflow} {style}");
+                    compared++;
+                }
+            }
+        }
+        Assert.True(compared > 10_000, $"compared only {compared} layouts");
+    }
+
+    [Fact]
+    public void AStyledLabelThatFits_IsNotItemizedAgain_AtANewWidth()
+    {
+        var reuse = Counted(reuse: true, out var fonts);
+        var reference = Counted(reuse: false, out var referenceFonts);
+        const string label = "pretty red table chair";
+        var spans = TestSpans.Variants(label).First();
+
+        // The entry comes at the second layout; from the third on, nothing is measured or shaped.
+        foreach (float w in new[] { 500f, 499f })
+        {
+            reuse.Layout(label, Base, w, 1, TextOverflow.Ellipsis, spans);
+            reference.Layout(label, Base, w, 1, TextOverflow.Ellipsis, spans);
+        }
+        int before = fonts.Resolves, referenceBefore = referenceFonts.Resolves;
+        for (int w = 300; w < 500; w += 7)
+        {
+            reuse.Layout(label, Base, w, 1, TextOverflow.Ellipsis, spans);
+            reference.Layout(label, Base, w, 1, TextOverflow.Ellipsis, spans);
+        }
+
+        Assert.Equal(0, fonts.Resolves - before);
+        Assert.True(referenceFonts.Resolves - referenceBefore > 29,
+            $"reference path itemized {referenceFonts.Resolves - referenceBefore} times");
+    }
+
+    [Fact]
+    public void AStyledRightToLeftLabelThatFits_IsNotShapedAgain_AtANewWidth()
+    {
+        var shaper = new CountingShaper(new ContextShaper());
+        var reuse = new TextPipeline(new TwoFonts(negativeDescent: false), shaper);
+        var rtl = Base with { TextDirection = TextDirection.Rtl };
+        const string label = "שלום עולם ספר בית";
+        var spans = TestSpans.Variants(label).First();
+
+        foreach (float w in new[] { 500f, 499f })
+            reuse.Layout(label, rtl, w, 1, TextOverflow.Ellipsis, spans);
+        int before = shaper.Calls;
+        for (int w = 300; w < 500; w += 7)
+            reuse.Layout(label, rtl, w, 1, TextOverflow.Ellipsis, spans);
+
+        Assert.Equal(0, shaper.Calls - before);
+    }
+
     [Fact]
     public void OneLineEllipsis_ItemizesOnlyTheLineItShows_AtEachNewWidth()
     {
