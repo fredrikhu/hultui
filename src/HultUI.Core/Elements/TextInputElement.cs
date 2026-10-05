@@ -141,10 +141,30 @@ public class TextInputElement : BoxElement
     public Color FocusBorderColor { get; set; } = new(66, 135, 245, 255);
     public float CursorWidth { get; set; } = 1.5f;
 
-    /// <summary>Render the value as bullets (password entry). The real text is still held
-    /// in <see cref="Text"/> and reported through <see cref="TextChanged"/>; only the
-    /// on-screen glyphs are masked.</summary>
-    public bool Masked { get; set; }
+    /// <summary>Password entry: the value is drawn as bullets, assistive tech is told it is a
+    /// password and given the bullets too, and Cut and Copy do nothing (Paste still works).
+    /// The real text is still held in <see cref="Text"/> and reported through
+    /// <see cref="TextChanged"/>.</summary>
+    public bool Masked
+    {
+        get => _masked;
+        set
+        {
+            if (_masked == value) return;
+            _masked = value;
+            MarkPaintDirty();
+            // A reveal toggle must reach a reader now, not on the next layout-driven rebuild.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsPassword);
+        }
+    }
+    private bool _masked;
+
+    /// <summary>What stands in for each character of a masked value.</summary>
+    internal const char MaskGlyph = '●';
+
+    /// <summary>The value as it is shown: bullets while <see cref="Masked"/>, the text itself
+    /// otherwise. What a screen reader is given, so it learns no more than the screen shows.</summary>
+    internal string ShownText => Masked ? new string(MaskGlyph, _text.Length) : _text;
 
     /// <summary>Optional paint-only colour spans over the value (e.g. mask-token highlighting).
     /// The caret, selection, and clipboard still operate on the raw text; ignored while masked
@@ -291,7 +311,7 @@ public class TextInputElement : BoxElement
 
     private IReadOnlyList<ContextMenuItem> BuildContextMenuItems()
     {
-        bool hasSelection = HasSelection;
+        bool canCopy = HasSelection && !Masked;
         bool hasClipboard = Clipboard?.GetText() is not null;
 
         return
@@ -301,9 +321,9 @@ public class TextInputElement : BoxElement
             new ContextMenuItem { Label = "Redo", ShortcutHint = "Ctrl+Y", IsDisabled = !CanRedo,
                 Action = () => Redo() },
             ContextMenuItem.Separator(),
-            new ContextMenuItem { Label = "Cut", ShortcutHint = "Ctrl+X", IsDisabled = !hasSelection,
+            new ContextMenuItem { Label = "Cut", ShortcutHint = "Ctrl+X", IsDisabled = !canCopy,
                 Action = () => { Cut(); MarkPaintDirty(); } },
-            new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
+            new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !canCopy,
                 Action = Copy },
             new ContextMenuItem { Label = "Paste", ShortcutHint = "Ctrl+V", IsDisabled = !hasClipboard,
                 Action = () => { Paste(); MarkPaintDirty(); } },
@@ -425,15 +445,18 @@ public class TextInputElement : BoxElement
         }
     }
 
+    // A masked value never reaches the clipboard, where any application can read it — what
+    // browsers do with a password field. Cut does nothing at all, rather than delete what it
+    // would not copy.
     private void Copy()
     {
-        if (HasSelection && Clipboard is not null)
+        if (HasSelection && !Masked && Clipboard is not null)
             Clipboard.SetText(SelectedText);
     }
 
     private void Cut()
     {
-        if (!HasSelection || Clipboard is null) return;
+        if (!HasSelection || Masked || Clipboard is null) return;
         Clipboard.SetText(SelectedText);
         DeleteSelection();
         NotifyChanged();
@@ -701,11 +724,10 @@ public class TextInputElement : BoxElement
         // When composing, the preedit is visually inserted at the caret but not
         // part of _text. displayText contains both for measurement/rendering.
         bool composing = _composition.IsActive;
+        // Password masking: bullets for the value (not while composing).
         string displayText = composing
             ? string.Concat(_text.AsSpan(0, _cursorPos), _composition.Text, _text.AsSpan(_cursorPos))
-            : _text;
-        // Password masking: substitute bullets for the value (not while composing).
-        if (Masked && !composing) displayText = new string('●', _text.Length);
+            : ShownText;
 
         // IME caret placement. SDL's start/length are ambiguous (Wayland
         // sends cursor_begin/cursor_end, other backends send active-segment
@@ -835,6 +857,10 @@ public class TextInputElement : BoxElement
             FocusBackground = input.FocusBackground;
             CursorWidth = input.CursorWidth;
             TextChanged = input.TextChanged;
+            // Unkeyed siblings match by position, so the live element patched here can be one
+            // that was built unmasked — a username field the password field moved into.
+            Masked = input.Masked;
+            Spans = input.Spans;
 
             // Preserve the caret and selection across a reconcile patch. The Text
             // setter resets both to an end-collapsed default, which would wipe a

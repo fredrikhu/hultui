@@ -151,6 +151,11 @@ public static class ElementExtensions
     /// unreachable, because <c>input.Chromeless()</c> would bind to invoking the bool.</summary>
     public static T Chromeless<T>(this T el, bool value = true) where T : TextInputElement { el.DrawsChrome = !value; return el; }
     public static T OnTextChanged<T>(this T el, Action<string> handler) where T : TextInputElement { el.TextChanged = handler; return el; }
+
+    /// <summary>A password field: the value drawn as bullets, announced as a password, and kept
+    /// off the clipboard. Sets <see cref="TextInputElement.Masked"/>, under another name for the
+    /// reason <see cref="Chromeless{T}"/> has one.</summary>
+    public static T Password<T>(this T el, bool masked = true) where T : TextInputElement { el.Masked = masked; return el; }
     /// <summary>A reusable look for this field, layered over the theme's; see <see cref="TextInputStyle"/>.</summary>
     public static T Style<T>(this T el, TextInputStyle? style) where T : TextInputElement { el.Style = style; return el; }
 

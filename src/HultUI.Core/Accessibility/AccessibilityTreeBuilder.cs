@@ -91,7 +91,8 @@ public static class AccessibilityTreeBuilder
             isToggled: ResolveIsToggled(element),
             value: ResolveValue(element),
             automationId: element.AutomationId,
-            expanded: element.AccessibleExpanded);
+            expanded: element.AccessibleExpanded,
+            isPassword: element is TextInputElement { Masked: true });
         node.NativeContent = element.NativeAccessibleContent;
         if (element.AccessibleTextSource is { } text)
         {
@@ -386,7 +387,7 @@ public static class AccessibilityTreeBuilder
 
     internal static string? ResolveValue(Element element) => element switch
     {
-        TextInputElement ti => ti.Text,
+        TextInputElement ti => ti.ShownText,
         TextAreaElement ta => ta.Text,
         NumericUpDownElement n => n.DisplayText,
         // The pickers carry a value a reader needs and a name that describes the control,

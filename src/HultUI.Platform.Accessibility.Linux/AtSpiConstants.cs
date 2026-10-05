@@ -97,6 +97,9 @@ internal static class AtSpiConstants
     public const uint RolePageTab = 37;
     public const uint RolePageTabList = 38;
     public const uint RolePanel = 39;
+    /// <summary>A text input whose <see cref="AccessibilityNode.IsPassword"/> is set — a node
+    /// flag, not an <see cref="AccessibilityRole"/>, so <see cref="MapRole"/> never returns it.</summary>
+    public const uint RolePasswordText = 40;
     public const uint RolePushButton = 43;
     public const uint RoleRadioButton = 44;
     public const uint RoleScrollPane = 49;
@@ -163,6 +166,7 @@ internal static class AtSpiConstants
         RolePageTab => "page tab",
         RolePageTabList => "page tab list",
         RolePanel => "panel",
+        RolePasswordText => "password text",
         RolePushButton => "push button",
         RoleRadioButton => "radio button",
         RoleScrollPane => "scroll pane",

@@ -95,6 +95,8 @@ public static class AccessibilityTreeDiffer
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
         if (prev.Value != curr.Value)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
+        if (prev.IsPassword != curr.IsPassword)
+            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsPassword));
         if (prev.IsToggled != curr.IsToggled)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsToggled));
         if (prev.IsEnabled != curr.IsEnabled)

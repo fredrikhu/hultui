@@ -17,6 +17,9 @@ public static class AccessibilityProperties
     /// <summary><see cref="AccessibilityNode.Expanded"/> changed: an expander, a tree item, a
     /// dropdown or a menu-bar title opened or closed.</summary>
     public const string IsExpanded = "IsExpanded";
+    /// <summary><see cref="AccessibilityNode.IsPassword"/> changed: a field was masked or
+    /// revealed. On AT-SPI that is a role change.</summary>
+    public const string IsPassword = "IsPassword";
     public const string BoundingRect = "BoundingRect";
 
     /// <summary>

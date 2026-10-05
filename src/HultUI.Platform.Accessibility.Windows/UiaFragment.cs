@@ -36,6 +36,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private bool? _isToggled;
     private bool? _expanded;
     private bool _isOffscreen;
+    private bool _isPassword;
     private bool _hasText;
 
     /// <summary>Snapshot expand state (null = not expandable), read by the ExpandCollapse provider.</summary>
@@ -69,6 +70,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _isToggled = node.IsToggled;
         _expanded = node.Expanded;
         _isOffscreen = node.IsOffscreen;
+        _isPassword = node.IsPassword;
         _hasText = node.TextSource is not null || node.Text is not null;
     }
 
@@ -165,6 +167,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_isFocused),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(_isOffscreen),
+            UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
             UiaInterop.UIA_ToggleToggleStatePropertyId when _isToggled is { } t
                 => UiaVariant.FromInt(t ? UiaInterop.ToggleState_On : UiaInterop.ToggleState_Off),

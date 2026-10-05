@@ -193,6 +193,11 @@ internal sealed class AtSpiBus : IDisposable
         EmitEvent("PropertyChange", path, atSpiProperty, 0, 0,
             (ref MessageWriter w) => w.WriteVariantString(newValue));
 
+    /// <summary>The role, as at-spi2-atk sends it: a uint32, where the other properties are strings.</summary>
+    public void EmitRoleChange(string path, uint role) =>
+        EmitEvent("PropertyChange", path, AtSpiConstants.PropAccessibleRole, 0, 0,
+            (ref MessageWriter w) => w.WriteVariantUInt32(role));
+
     public void EmitStateChanged(string path, string state, bool active) =>
         EmitEvent("StateChanged", path, state, active ? 1 : 0, 0,
             static (ref MessageWriter w) => w.WriteVariantInt32(0));
