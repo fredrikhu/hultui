@@ -60,6 +60,34 @@ static partial class Scenarios
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 
+        yield return new Scenario("text/bidi wrap 150 paragraphs resize",
+            "text/wrap with Hebrew and Latin mixed: 150 paragraphs on the BiDi path broken into lines again",
+            ctx =>
+            {
+                var column = Flex.Column(gap: 10).FlexShrink(0).Padding(16);
+                var paragraphs = new Element[150];
+                for (int i = 0; i < paragraphs.Length; i++)
+                    paragraphs[i] = Text.New(Ui.BidiParagraph(ctx.Rng, 60)).FontSize(13f).LineHeight(19f);
+                column.ReplaceChildren(paragraphs);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
+        yield return new Scenario("text/bidi ellipsis 1,000 labels resize",
+            "text/ellipsis with Hebrew and Latin mixed: 1,000 labels on the BiDi path, truncated again at each width",
+            ctx =>
+            {
+                var rows = new Element[1_000];
+                for (int i = 0; i < rows.Length; i++)
+                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(2, 8)).Children(
+                        Text.New(Ui.BidiParagraph(ctx.Rng, 14)).FontSize(13f).MaxLines(1)
+                            .TextOverflow(TextOverflow.Ellipsis).FlexGrow(1).FlexShrink(1),
+                        Text.New($"{i}").FontSize(12f).TextColor(Ui.Muted).FlexShrink(0));
+                var pane = Flex.Column().Width(Dimension.Percent(50)).FlexShrink(0).Children(rows);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(pane));
+                return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
+            });
+
         yield return new Scenario("text/spans recolor (paint only)",
             "Re-colour the highlight spans of 40 of 200 paragraphs — syntax highlighting, search hits: paint-only spans",
             ctx =>

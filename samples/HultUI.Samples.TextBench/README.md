@@ -19,7 +19,7 @@ dotnet run -c Release --project samples/HultUI.Samples.TextBench
 | `warm/…` | The same string laid out over and over — the steady state a scrolling list reaches, where everything downstream of the layout cache is already paid for. |
 | `cold/…` | Every call is a string the pipeline has never seen — a freshly built list of labels. Shaping dominates. |
 | `auto/…` | The same work with `TextDirection.Auto`, where the paragraph direction comes from the content. |
-| `resize/…` | Already-shaped labels laid out at widths the layout cache has not seen — a window or pane being dragged: one-line Ellipsis and Clip, a two-line Ellipsis, plain wrapping. |
+| `resize/…` | Already-shaped labels laid out at widths the layout cache has not seen — a window or pane being dragged: one-line Ellipsis and Clip, a two-line Ellipsis, plain wrapping; and `resize/bidi-…`, Hebrew with Latin on the BiDi path: labels that fit, one ellipsized line, wrapping. The last two drag through widths never met before in the run, since that path remembers lines by range. |
 | `caret/…` | The offset↔x mapping behind a caret, a click and a selection highlight, measured on an already-laid-out line. |
 | `recheck/…` | The warm rows again, on fresh pipelines: the harness's control group. |
 
@@ -158,3 +158,47 @@ iterator of its own.
   reference path, wrapping included, bit for bit.
 - **Removing duplicate break offsets was quadratic**: 33 µs for the 700 breaks of a
   3,700-character paragraph, 7 µs in one pass, next to ICU's own 29 µs to find them.
+
+## Capture: the BiDi path remembers between widths (2026-10-05)
+
+Same machine and method; before = the commit underneath, which adds the `resize/bidi-…`
+rows. Mins of the second pair:
+
+| scenario | before (min) | after (min) | |
+|---|---:|---:|---|
+| `resize/bidi-fit` | 23.43 µs | 0.45 µs | **−98 %**, 10.6 → 1.0 KB per call |
+| `resize/bidi-ellipsis-1line` | 81.38 µs | 9.49 µs | **−88 %**, 31.9 → 5.2 KB |
+| `resize/bidi-wrap` | 130.98 µs | 11.56 µs | **−91 %**, 58.3 → 9.0 KB |
+
+The cold rows — strings laid out once — are within noise. In
+`samples/HultUI.Samples.PerfSuite`, `text/bidi wrap 150 paragraphs resize` went from 37.6
+to 3.6 ms and `text/bidi ellipsis 1,000 labels resize` from 214 to 17 ms (90 → 7.6 MB).
+
+One cost to read the other rows with: in this run the plain `resize/…` rows read 3–13 %
+higher on the after side. Run without the BiDi rows, the same comparison is within
+noise — what they pay is the memory the BiDi rows' memos hold in the same process
+(every Gen0 collection walks more), not any change to the plain path.
+
+### What the numbers caught
+
+- **Right-to-left shaping is the cost, and it was paid at every width.** RTL runs bypass
+  the word cache, and HarfBuzz takes ~4 µs for a six-letter Hebrew word, ~25 µs for a
+  75-character label (an LTR word: under 1 µs). Every segment measure, every ellipsis
+  probe and every line was shaped again at each width. ICU was not the cost: levels
+  0.85 µs, breaks 0.67 µs a call.
+- **All of it is a function of the text, its style and a range**, so it is memoized:
+  levels, breaks, segment widths and the whole-text line on the string's entry; probe
+  widths and partial lines in caches shared by all strings (16,384 and 4,096 entries).
+  `WidthChangeEquivalenceTests` hold it to the reference path over Hebrew, Arabic and
+  mixed text in RTL and auto styles, now with every style through the same pipelines so
+  a key missing a style field would fail.
+- **A memo costs the strings it never helps.** Most text on this path is a label with an
+  em dash, laid out once: making its entry cost ~0.3 µs, +10 % on 2,000 new labels. A
+  string now gets its entry at its second layout; the first only notes its hash. The
+  first version of that note took one slot per hash, and two strings on one slot took it
+  from each other forever: 137 of 1,000 labels never got an entry and were shaped from
+  scratch every frame (27 ms where 17 was due). Two slots, and an entry is always used
+  once made.
+- **Full, the memo holds memory**: 60 widths of 1,000 ellipsized labels keep 11.6 MB
+  against 4.9 MB on the reference path; wrapped paragraphs keep less than the reference,
+  since a layout's lines share their runs with the remembered ones.

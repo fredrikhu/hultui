@@ -253,6 +253,30 @@ static class Scenarios
                 i => p.Layout(labels[Idx(i, 100)], ltr, ResizeWidth(i), null));
         }
 
+        // The same for right-to-left and mixed text, which takes the BiDi path: labels that
+        // fit at every width (a resizable column of short labels), one ellipsized line, and
+        // wrapped paragraphs. The last two never meet a width twice (DragWidth): that path
+        // remembers lines and probes by range, and the 40 widths of ResizeWidth come round
+        // again and again, which would time a replay rather than a drag.
+        {
+            var p = Pipeline();
+            var labels = BidiLabels(100, words: 5);
+            yield return new("resize/bidi-fit", 100,
+                i => p.Layout(labels[Idx(i, 100)], rtl, ResizeWidth(i) + 300f, 1, TextOverflow.Ellipsis));
+        }
+        {
+            var p = Pipeline();
+            var labels = BidiLabels(100, words: 14);
+            yield return new("resize/bidi-ellipsis-1line", 100,
+                i => p.Layout(labels[Idx(i, 100)], rtl, DragWidth(i), 1, TextOverflow.Ellipsis));
+        }
+        {
+            var p = Pipeline();
+            var labels = BidiLabels(100, words: 30);
+            yield return new("resize/bidi-wrap", 100,
+                i => p.Layout(labels[Idx(i, 100)], auto, DragWidth(i), null));
+        }
+
         // ── caret: the offset↔x mapping a caret, a click and a selection
         // highlight go through (docs/plans/14-bidi.md, stage 2), measured on an
         // already-laid-out line so this is the mapping alone. The line lookup that
@@ -300,6 +324,23 @@ static class Scenarios
             labels[n] = string.Join(' ', Enumerable.Range(n, words).Select(k => w[k % w.Length])) + $" {Alpha(n)}";
         return labels;
     }
+
+    // Hebrew paragraphs with a Latin word in every third place, as a commit list or a file
+    // browser in a right-to-left UI shows them.
+    private static string[] BidiLabels(int count, int words)
+    {
+        string[] hebrew = ["שלום", "עולם", "ספר", "בית", "מחשב", "חלון", "קובץ", "תיקייה", "שורה", "טקסט", "מסך", "עכבר"];
+        var latin = Latin.Split(' ');
+        var labels = new string[count];
+        for (int n = 0; n < count; n++)
+            labels[n] = string.Join(' ', Enumerable.Range(n, words)
+                .Select(k => k % 3 == 2 ? latin[k % latin.Length] : hebrew[k % hebrew.Length])) + $" {Alpha(n)}";
+        return labels;
+    }
+
+    // A drag: one width per batch of 100 calls, 3 px on from the last, never the same twice
+    // in a run (25 samples plus the warm-up), all of them truncating.
+    private static float DragWidth(int i) => 120f + 3f * (Idx(i, 1 << 20) / 100 % 60);
 
     // One width per batch of 100 calls, stepping through 40 widths that all truncate.
     private static float ResizeWidth(int i) => 120f + 5f * (Idx(i, 4_000) / 100);

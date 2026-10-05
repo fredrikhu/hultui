@@ -40,6 +40,21 @@ static class Ui
         return string.Join(' ', parts);
     }
 
+    private static readonly string[] HebrewWords =
+        ["שלום", "עולם", "ספר", "בית", "מחשב", "חלון", "קובץ", "תיקייה", "שורה", "טקסט", "מסך", "עכבר"];
+
+    /// <summary>
+    /// Hebrew with a vocabulary word in every third place: right-to-left text with left-to-right
+    /// runs in it, laid out by the BiDi path.
+    /// </summary>
+    public static string BidiParagraph(Random rng, int words)
+    {
+        var parts = new string[words];
+        for (int i = 0; i < words; i++)
+            parts[i] = i % 3 == 2 ? Nouns[rng.Next(Nouns.Length)] : HebrewWords[rng.Next(HebrewWords.Length)];
+        return string.Join(' ', parts);
+    }
+
     public static readonly Color Muted = Color.FromHex("#94A3B8");
     public static readonly Color Accent = Color.FromHex("#4F46E5");
     public static readonly Color Selected = Color.FromHex("#DBEAFE");

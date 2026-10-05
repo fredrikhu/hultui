@@ -73,6 +73,22 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
         _map[key] = node;
     }
 
+    /// <summary>
+    /// <see cref="Put"/> for a key that <see cref="TryGet"/> has just failed to find: it skips
+    /// looking the key up again. On a path that meets most strings once, the lookups of a
+    /// TryGet-then-Put pair are a measurable part of what the cache costs.
+    /// </summary>
+    public void Add(TKey key, TValue value)
+    {
+        if (_map.Count >= _capacity)
+        {
+            var last = _order.Last!;
+            _order.RemoveLast();
+            _map.Remove(last.Value.Key);
+        }
+        _map.Add(key, _order.AddFirst(new CacheEntry(key, value)));
+    }
+
     public void Clear()
     {
         _map.Clear();

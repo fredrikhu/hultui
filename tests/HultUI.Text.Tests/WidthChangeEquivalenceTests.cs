@@ -24,10 +24,13 @@ public class WidthChangeEquivalenceTests
         Base with { LetterSpacing = 1.25f },
         Base with { LineHeight = 26f },
         Base with { FontSize = 13f },
+        // Every text on the BiDi path, the plain ones included.
+        Base with { TextDirection = TextDirection.Rtl },
+        Base with { TextDirection = TextDirection.Auto, LetterSpacing = 0.75f },
     ];
 
-    // Everything here but the last group is below U+0590, so it takes the plain path the
-    // reuse lives on; anything at or above it is laid out by the BiDi path.
+    // The first group is below U+0590, so in a left-to-right style it takes the plain path;
+    // anything at or above it, and everything in a right-to-left style, the BiDi path.
     private static readonly string[] Texts =
     [
         "pretty red table chair house keyboard",
@@ -49,7 +52,11 @@ public class WidthChangeEquivalenceTests
         "W",
         "Wi",
         "line one\nline two is longer",          // a newline: never the one-line shortcut
-        // The BiDi path, untouched: here only to show it stays so.
+        // The BiDi path in any style.
+        "שלום עולם ספר בית מחשב חלון קובץ תיקייה",
+        "commit שלום merged by אבג into main and then some",
+        "אבג 123 (דהו) [זחט] 4.5% done",
+        "שורה ראשונה\nשורה שנייה ארוכה יותר",
         "日本語のテキストを表示",
         "emoji \U0001F600 in the \U0001F680 middle",
     ];
@@ -70,15 +77,16 @@ public class WidthChangeEquivalenceTests
     public void Reuse_MatchesTheReferencePath_AtEveryWidth(bool negativeDescent)
     {
         int compared = 0;
-        foreach (var style in Styles)
         foreach (var (maxLines, overflow) in Modes)
         {
-            // Fresh pipelines per style and mode, so each string's first truncation (which
-            // builds its tables) is part of what is compared.
+            // Fresh pipelines per mode, so each string's first truncation (which builds its
+            // tables) is part of what is compared, shared by every style, so a cache key that
+            // left out a style field would hand one style another's result and fail here.
             var fonts = new TwoFonts(negativeDescent);
             var reference = new TextPipeline(fonts, new ContextShaper()) { ReuseAcrossWidths = false };
             var reuse = new TextPipeline(fonts, new ContextShaper());
 
+            foreach (var style in Styles)
             foreach (var text in Texts)
             {
                 float natural = reference.Layout(text, style, float.PositiveInfinity, null).Size.Width;
@@ -160,6 +168,47 @@ public class WidthChangeEquivalenceTests
         // The counting is real: the reference path itemizes every segment at every width too.
         Assert.True(referenceFonts.Resolves - referenceBefore > lines * 2,
             $"reference path itemized {referenceFonts.Resolves - referenceBefore} times for {lines} lines");
+    }
+
+    [Fact]
+    public void ARightToLeftLabelThatFits_IsNotShapedAgain_AtANewWidth()
+    {
+        var shaper = new CountingShaper(new ContextShaper());
+        var reuse = new TextPipeline(new TwoFonts(negativeDescent: false), shaper);
+        var referenceShaper = new CountingShaper(new ContextShaper());
+        var reference = new TextPipeline(new TwoFonts(negativeDescent: false), referenceShaper) { ReuseAcrossWidths = false };
+        var rtl = Base with { TextDirection = TextDirection.Rtl };
+        const string label = "שלום עולם ספר";
+
+        // A string on this path gets its entry at its second layout; from the third on, a new
+        // width that the label fits shapes nothing.
+        foreach (float w in new[] { 500f, 499f })
+        {
+            reuse.Layout(label, rtl, w, 1, TextOverflow.Ellipsis);
+            reference.Layout(label, rtl, w, 1, TextOverflow.Ellipsis);
+        }
+        int before = shaper.Calls, referenceBefore = referenceShaper.Calls;
+        for (int w = 300; w < 500; w += 7)
+        {
+            reuse.Layout(label, rtl, w, 1, TextOverflow.Ellipsis);
+            reference.Layout(label, rtl, w, 1, TextOverflow.Ellipsis);
+        }
+
+        Assert.Equal(0, shaper.Calls - before);
+        // The counting is real: the reference path shapes the label again at every width.
+        Assert.True(referenceShaper.Calls - referenceBefore > 29,
+            $"reference path shaped {referenceShaper.Calls - referenceBefore} times");
+    }
+
+    private sealed class CountingShaper(ITextShaper inner) : ITextShaper
+    {
+        public int Calls;
+
+        public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
+        {
+            Calls++;
+            return inner.Shape(text, font, fontSize, rtl);
+        }
     }
 
     private static TextPipeline Counted(bool reuse, out TwoFonts fonts)
