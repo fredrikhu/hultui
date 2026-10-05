@@ -15,6 +15,8 @@ using PerfSuite;
 //   … -- --compare captures/before.json captures/after.json
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Δ, ×, ⇄ in the report: without this a Windows console on its legacy code page prints "?".
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 System.Globalization.CultureInfo.DefaultThreadCurrentCulture =
     System.Globalization.CultureInfo.InvariantCulture;
 System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;

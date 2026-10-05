@@ -28,7 +28,12 @@ static class Report
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         using var stream = File.Create(path);
-        using var w = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+        using var w = new Utf8JsonWriter(stream, new JsonWriterOptions
+        {
+            Indented = true,
+            // Captures are committed and read by people: keep "+", "×" and "—" as themselves.
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
         w.WriteStartObject();
         w.WriteString("label", label ?? "");
         w.WriteString("date", DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm zzz"));

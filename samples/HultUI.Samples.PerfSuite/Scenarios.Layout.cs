@@ -143,7 +143,7 @@ static partial class Scenarios
                 };
             });
 
-        yield return new Scenario("grid/create 300×6",
+        yield return new Scenario("grid/create 300x6",
             "Replace a grid's 1,800 cells (columns 60px auto 1fr 2fr auto 80px)",
             ctx =>
             {
@@ -156,7 +156,7 @@ static partial class Scenarios
                 };
             });
 
-        yield return new Scenario("grid/resize 300×6",
+        yield return new Scenario("grid/resize 300x6",
             "The same 1,800-cell grid during a resize drag: auto columns reused, fr columns redistributed",
             ctx =>
             {
