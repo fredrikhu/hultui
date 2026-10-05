@@ -187,16 +187,26 @@ public sealed class TextPipeline
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
 
+        // Right-to-left script, or an Rtl paragraph, takes the direction-aware path with its
+        // spans: direction runs, then style runs, then font runs (docs/plans/14-bidi.md). The
+        // styled path below is left-to-right only — it used to get this text too, and one
+        // bold word was enough to lay a Hebrew paragraph out left to right.
+        bool needsBidi = NeedsBidi(text, style);
+
         // Styled text skips the width-independent single-line fast path for now and
         // goes straight to the width-keyed cache; the digest keeps styled and plain
-        // results apart without touching plain keys.
+        // results apart without touching plain keys, and the direction keeps an Rtl
+        // and an Auto layout of the same text apart, as on the plain BiDi path.
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
             style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
-            style.LetterSpacing, MetricDigest(spans!));
+            style.LetterSpacing, MetricDigest(spans!), needsBidi ? style.TextDirection : TextDirection.Ltr);
         if (_cache.TryGet(key, out var cached))
             return cached;
 
-        var layout = ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow);
+        // No per-string memo here: it is keyed without spans (BidiTextOf).
+        var layout = needsBidi
+            ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, bidi: null, spans)
+            : ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow);
         _cache.Put(key, layout);
         return layout;
     }
@@ -799,18 +809,20 @@ public sealed class TextPipeline
 
     // MeasureBidi of break segment s.
     private float BidiSegmentWidth(string text, List<int> breaks, int s, ResolvedInheritedStyle style,
-        byte[] levels, BidiText? bidi)
+        byte[] levels, BidiText? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
-        if (bidi is null) return MeasureBidi(text, breaks[s - 1], breaks[s], style, levels);
+        if (bidi is null) return MeasureBidi(text, breaks[s - 1], breaks[s], style, levels, spans);
         float width = bidi.SegmentWidths[s];
         if (float.IsNaN(width))
             bidi.SegmentWidths[s] = width = MeasureBidi(text, breaks[s - 1], breaks[s], style, levels);
         return width;
     }
 
-    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels, BidiText? bidi)
+    // With spans there is no memo (bidi is null): it is keyed without them.
+    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels, BidiText? bidi,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
-        if (bidi is null) return MeasureBidi(text, from, to, style, levels);
+        if (bidi is null) return MeasureBidi(text, from, to, style, levels, spans);
         var key = new BidiRange(bidi, from, to, Ellipsis: false);
         if (!_bidiWidths.TryGet(key, out float width))
         {
@@ -826,14 +838,14 @@ public sealed class TextPipeline
     // layout that builds a line keeps it; later ones get copies, which read everything of it
     // but the OffsetY that layout may have set.
     private TextLine BidiLine(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels,
-        BidiText? bidi, bool appendEllipsis = false, bool rtlParagraph = false)
+        BidiText? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans, bool appendEllipsis = false, bool rtlParagraph = false)
     {
-        if (bidi is null) return ShapeBidiLine(text, from, to, style, levels, appendEllipsis, rtlParagraph);
+        if (bidi is null) return ShapeBidiLine(text, from, to, style, levels, spans, appendEllipsis, rtlParagraph);
         TextLine? line;
         if (from == 0 && to == text.Length && !appendEllipsis)
         {
             if (bidi.WholeLine is null)
-                return bidi.WholeLine = ShapeBidiLine(text, from, to, style, levels);
+                return bidi.WholeLine = ShapeBidiLine(text, from, to, style, levels, spans: null);
             line = bidi.WholeLine;
         }
         else
@@ -841,7 +853,7 @@ public sealed class TextPipeline
             var key = new BidiRange(bidi, from, to, appendEllipsis);
             if (!_bidiLines.TryGet(key, out line))
             {
-                line = ShapeBidiLine(text, from, to, style, levels, appendEllipsis, rtlParagraph);
+                line = ShapeBidiLine(text, from, to, style, levels, spans: null, appendEllipsis, rtlParagraph);
                 _bidiLines.Add(key, line);
                 return line;
             }
@@ -853,14 +865,23 @@ public sealed class TextPipeline
         };
     }
 
-    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels)
+    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
     {
         if (to <= from) return 0;
         float width = 0;
         foreach (var (s, e, level) in SegmentsIn(levels, from, to))
-            foreach (var fr in Itemize(text[s..e], style))
-                width += ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing,
-                    rtl: (level & 1) == 1).Width;
+        {
+            // One piece per style run of the direction run; with no spans, the whole run.
+            for (int i = s, b; i < e; i = b)
+            {
+                b = spans is null ? e : NextStyleBoundary(spans, i, e);
+                var eff = spans is null ? style : EffectiveStyleAt(style, spans, i);
+                foreach (var fr in Itemize(text[i..b], eff))
+                    width += ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing,
+                        rtl: (level & 1) == 1).Width;
+            }
+        }
         return width;
     }
 
@@ -869,10 +890,12 @@ public sealed class TextPipeline
     /// placed in visual order. <see cref="TextLine.Runs"/> stays in LOGICAL order —
     /// painting reads each run's own <see cref="ShapedRun.OffsetX"/>, and the
     /// char→x mapping (spans, selection) walks runs logically — only the offsets
-    /// carry the reordering.
+    /// carry the reordering. With metric <paramref name="spans"/>, each direction
+    /// segment is cut at their edges too and each piece shaped in its own style, the
+    /// pieces of a right-to-left segment placed right to left like its font runs.
     /// </summary>
     private TextLine ShapeBidiLine(string text, int from, int to, ResolvedInheritedStyle style, byte[] paraLevels,
-        bool appendEllipsis = false, bool rtlParagraph = false)
+        IReadOnlyList<Core.Rendering.TextSpan>? spans, bool appendEllipsis = false, bool rtlParagraph = false)
     {
         int sourceLength = to - from + (appendEllipsis ? 1 : 0);
         while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
@@ -887,15 +910,22 @@ public sealed class TextPipeline
             var (segStart, segEnd, level) = segments[s];
             levels[s] = level;
             var runs = new List<ShapedRun>();
-            foreach (var fr in Itemize(text[segStart..segEnd], style))
+            // One piece per style run of the segment; with no spans, the whole segment. A
+            // larger-size piece raises the line, the max-across-runs rule fallback follows.
+            for (int i = segStart, b; i < segEnd; i = b)
             {
-                var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing,
-                    rtl: (level & 1) == 1);
-                shaped.Level = level;
-                runs.Add(shaped);
-                maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * style.FontSize);
-                maxDescent = Math.Max(maxDescent, fr.Font.Descent * style.FontSize);
-                maxLeading = Math.Max(maxLeading, fr.Font.Leading * style.FontSize);
+                b = spans is null ? segEnd : NextStyleBoundary(spans, i, segEnd);
+                var eff = spans is null ? style : EffectiveStyleAt(style, spans, i);
+                foreach (var fr in Itemize(text[i..b], eff))
+                {
+                    var shaped = ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing,
+                        rtl: (level & 1) == 1);
+                    shaped.Level = level;
+                    runs.Add(shaped);
+                    maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * eff.FontSize);
+                    maxDescent = Math.Max(maxDescent, fr.Font.Descent * eff.FontSize);
+                    maxLeading = Math.Max(maxLeading, fr.Font.Leading * eff.FontSize);
+                }
             }
             segRuns[s] = runs;
         }
@@ -950,21 +980,22 @@ public sealed class TextPipeline
     // the end of the text, not the right of the line — and the mark is placed by
     // ShapeBidiLine according to the paragraph's direction.
     private TextLine BuildBidiEllipsizedLine(string text, int start, int tailEnd,
-        ResolvedInheritedStyle style, byte[] levels, bool rtlParagraph, float maxWidth, BidiText? bidi)
+        ResolvedInheritedStyle style, byte[] levels, bool rtlParagraph, float maxWidth, BidiText? bidi,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         float ellipsisWidth = MeasureString(EllipsisString, style);
         int lo = start, hi = tailEnd, best = start;
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (MeasureBidi(text, start, mid, style, levels, bidi) + ellipsisWidth <= maxWidth)
+            if (MeasureBidi(text, start, mid, style, levels, bidi, spans) + ellipsisWidth <= maxWidth)
             {
                 best = mid;
                 lo = mid + 1;
             }
             else hi = mid - 1;
         }
-        return BidiLine(text, start, SnapPrefix(text, best), style, levels, bidi,
+        return BidiLine(text, start, SnapPrefix(text, best), style, levels, bidi, spans,
             appendEllipsis: true, rtlParagraph);
     }
 
@@ -972,8 +1003,9 @@ public sealed class TextPipeline
     // logical order, measurement and line shaping direction-resolved, same
     // truncation policy.
     private TextLayout ComputeWrappedBidi(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        TextOverflow overflow, BidiText? bidi)
+        TextOverflow overflow, BidiText? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
     {
+        System.Diagnostics.Debug.Assert(bidi is null || spans is null, "the memo is keyed without spans");
         // One UAX #9 resolution for the whole paragraph; every line, break
         // candidate and prefix measurement below slices into it. With the string's
         // entry it is the resolution made the first time, and the breaks, widths and
@@ -994,18 +1026,18 @@ public sealed class TextPipeline
 
             if (segEnd - segStart == 1 && text[segStart] == '\n')
             {
-                lines.Add(BidiLine(text, textOffset, segStart, style, levels, bidi));
+                lines.Add(BidiLine(text, textOffset, segStart, style, levels, bidi, spans));
                 textOffset = segEnd;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
                 continue;
             }
 
-            float segWidth = BidiSegmentWidth(text, allBreaks, s, style, levels, bidi);
+            float segWidth = BidiSegmentWidth(text, allBreaks, s, style, levels, bidi, spans);
 
             if (lineWidth + segWidth > maxWidth && lineWidth > 0)
             {
-                lines.Add(BidiLine(text, textOffset, segStart, style, levels, bidi));
+                lines.Add(BidiLine(text, textOffset, segStart, style, levels, bidi, spans));
                 textOffset = segStart;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
@@ -1015,14 +1047,14 @@ public sealed class TextPipeline
             {
                 while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 {
-                    int fit = BidiFitPrefix(text, textOffset, segEnd, style, levels, maxWidth, bidi);
+                    int fit = BidiFitPrefix(text, textOffset, segEnd, style, levels, maxWidth, bidi, spans);
                     if (fit <= textOffset) fit = NextCodePoint(text, textOffset);
                     if (fit >= segEnd) break;
-                    lines.Add(BidiLine(text, textOffset, fit, style, levels, bidi));
+                    lines.Add(BidiLine(text, textOffset, fit, style, levels, bidi, spans));
                     textOffset = fit;
                 }
                 if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
-                lineWidth = MeasureBidi(text, textOffset, segEnd, style, levels, bidi);
+                lineWidth = MeasureBidi(text, textOffset, segEnd, style, levels, bidi, spans);
                 continue;
             }
 
@@ -1030,7 +1062,7 @@ public sealed class TextPipeline
         }
 
         if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
-            lines.Add(BidiLine(text, textOffset, text.Length, style, levels, bidi));
+            lines.Add(BidiLine(text, textOffset, text.Length, style, levels, bidi, spans));
 
         float totalHeight = 0, maxLineWidth = 0;
         foreach (var line in lines)
@@ -1042,15 +1074,16 @@ public sealed class TextPipeline
         var bidiLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight), rtlParagraph);
         return overflow == TextOverflow.Ellipsis
             ? ApplyEllipsis(text, bidiLayout, maxWidth,
-                (start, tailEnd) => BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi))
+                (start, tailEnd) => BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans))
             : bidiLayout;
     }
 
     private int BidiFitPrefix(string text, int from, int to,
-        ResolvedInheritedStyle style, byte[] levels, float maxWidth, BidiText? bidi)
+        ResolvedInheritedStyle style, byte[] levels, float maxWidth, BidiText? bidi,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         int span = 1;
-        while (from + span < to && MeasureBidi(text, from, from + span, style, levels, bidi) <= maxWidth)
+        while (from + span < to && MeasureBidi(text, from, from + span, style, levels, bidi, spans) <= maxWidth)
             span <<= 1;
 
         int lo = from + Math.Min(span >> 1, to - from);
@@ -1059,7 +1092,7 @@ public sealed class TextPipeline
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (MeasureBidi(text, from, mid, style, levels, bidi) <= maxWidth) { best = mid; lo = mid + 1; }
+            if (MeasureBidi(text, from, mid, style, levels, bidi, spans) <= maxWidth) { best = mid; lo = mid + 1; }
             else hi = mid - 1;
         }
         return SnapPrefix(text, best);

@@ -89,6 +89,15 @@ then correctness beats reuse. LTR text keeps every cache and fast path untouched
     at the left edge in a right-to-left paragraph, with everything already
     placed shifted right to make room. The prefix kept is logical, because
     truncation removes the end of the text, not the right of the line.
+  - **Metric spans** (2026-10-05). Text with a bold, italic or resized span went
+    to the styled path, which is left-to-right only: one bold word laid a Hebrew
+    paragraph out left to right, every run at level 0 and `IsRtlParagraph`
+    false. Styled text that needs BiDi now takes the direction-aware path with
+    its spans — each direction run cut at the spans' edges, each piece shaped in
+    its own style, the pieces of a right-to-left run placed right to left: the
+    segmentation order above (direction, then style, then font runs), now for
+    real. Left-to-right styled text keeps its own path, unchanged.
+    `StyledBidiTests` (real fonts) and `StyledBidiLayoutTests` (exact geometry).
   - **RTL scrollbar/gutter layout — not this project.** Mirroring the interface
     is logical-vs-physical box sides across the whole layout API, not a text
     concern; the verdict and its reasoning are in docs/DECISIONS.md, and it is
