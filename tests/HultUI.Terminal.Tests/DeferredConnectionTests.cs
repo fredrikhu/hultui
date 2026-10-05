@@ -88,6 +88,54 @@ public sealed class DeferredConnectionTests : IDisposable
         Assert.Null(deferred.Failure); // cancelled is not failed
     }
 
+    /// <summary>A pseudoterminal is best started at the size it is shown at: resized as its
+    /// program starts, Git for Windows' programs can lose the first key (TERMINAL.md, problem 22).
+    /// So this one is made only once the terminal has its size, at that size, and not told the
+    /// same size again afterwards.</summary>
+    [Fact]
+    public void AConnectionMadeAtTheTerminalsSize_WaitsForIt_AndIsNotToldItAgain()
+    {
+        (int Columns, int Rows)? madeAt = null;
+        var program = new FakeConnection();
+        var deferred = new DeferredConnection((size, _) =>
+        {
+            madeAt = size;
+            return Task.FromResult<ITerminalConnection>(program);
+        });
+        using var controller = new TerminalController(deferred);
+
+        _session.PumpFrames(3);
+        Assert.Null(madeAt);   // no size yet, so no connection
+
+        controller.Resize(100, 30);
+        WaitFor(() => deferred.Connection is not null);
+        Assert.Equal((100, 30), madeAt);
+        Assert.Empty(program.Resizes);
+
+        controller.Resize(90, 30);
+        Assert.Equal([(90, 30)], program.Resizes);
+    }
+
+    /// <summary>The controller starts at 80 × 24, and a grid of that size was no change, so the
+    /// connection never heard of it: a connection waiting for its size waited for good.</summary>
+    [Fact]
+    public void TheFirstGrid_ReachesTheConnection_EvenAtTheSizeTheControllerStartsAt()
+    {
+        (int Columns, int Rows)? madeAt = null;
+        var deferred = new DeferredConnection((size, _) =>
+        {
+            madeAt = size;
+            return Task.FromResult<ITerminalConnection>(new FakeConnection());
+        });
+        using var controller = new TerminalController(deferred);
+        Assert.Equal((80, 24), (controller.Columns, controller.Rows));
+
+        controller.Resize(80, 24);
+
+        WaitFor(() => deferred.Connection is not null);
+        Assert.Equal((80, 24), madeAt);
+    }
+
     private static string ReadToEnd(Stream stream)
     {
         using var all = new MemoryStream();

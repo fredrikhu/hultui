@@ -11,10 +11,15 @@ namespace HultUI.Terminal;
 /// <para><b>Why.</b> A <see cref="TerminalController"/> needs its connection when it is made,
 /// and making some takes a while and asks the user things on the way: an SSH host's key, a
 /// password. Made on the UI thread, the questions would wait for the thread that is waiting for
-/// them. Made here, <paramref name="connect"/> runs on a pool thread, and its prompts can show
-/// their dialogs on the UI thread while the terminal waits.</para>
+/// them. Made here, the connecting runs on a pool thread, and its prompts can show their dialogs
+/// on the UI thread while the terminal waits.</para>
 /// <para><b>Meanwhile.</b> What is typed is kept and sent once connected, and the last size the
 /// element asked for is applied then. <see cref="Terminate"/> cancels the connecting.</para>
+/// <para><b>At the terminal's size.</b> The other constructor waits for the size the terminal
+/// first lays out and makes the connection at it. A pseudoterminal started at some other size
+/// and resized a moment later has the resize land while its program starts, and Git for
+/// Windows' programs (Git Bash, its vim) miss about one resize in six that way, then throw away
+/// the first key typed.</para>
 /// <para><b>Traits</b> are the connection's once it is made, and none before.</para>
 /// </remarks>
 /// <example>
@@ -36,6 +41,8 @@ public sealed class DeferredConnection : ITerminalConnection
     private readonly MemoryStream _pendingInput = new();
     private ITerminalConnection? _inner;
     private (int Columns, int Rows)? _size;
+    private readonly TaskCompletionSource<(int Columns, int Rows)> _firstSize = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private (int Columns, int Rows)? _madeAt; // the size a connection made at the terminal's size was made at
     private bool _ended;
     private bool _sentPending; // under _pendingInput's lock
 
@@ -46,12 +53,42 @@ public sealed class DeferredConnection : ITerminalConnection
     /// Nothing is written when it was cancelled.</param>
     public DeferredConnection(Func<CancellationToken, Task<ITerminalConnection>> connect, string? connecting = null,
         Func<Exception, string>? describeFailure = null)
+        : this(connecting)
     {
         ArgumentNullException.ThrowIfNull(connect);
+        _ = Run(connect, describeFailure ?? (ex => ex.Message));
+    }
+
+    /// <summary>A connection made once the terminal has its size, and at that size.</summary>
+    /// <param name="connectAtSize">Makes the connection at the columns and rows the terminal
+    /// first lays out; on a pool thread, cancelled by <see cref="Terminate"/>.</param>
+    /// <param name="connecting">Written first, while it connects; null writes nothing.</param>
+    /// <param name="describeFailure">What a failure writes; the exception's message by default.
+    /// Nothing is written when it was cancelled.</param>
+    /// <example>
+    /// <code>
+    /// var shell = new TerminalController(new DeferredConnection(
+    ///     async (size, ct) => await PtyConnection.StartAsync(launch, size.Columns, size.Rows, ct)));
+    /// </code>
+    /// </example>
+    public DeferredConnection(Func<(int Columns, int Rows), CancellationToken, Task<ITerminalConnection>> connectAtSize,
+        string? connecting = null, Func<Exception, string>? describeFailure = null)
+        : this(connecting)
+    {
+        ArgumentNullException.ThrowIfNull(connectAtSize);
+        _ = Run(async ct =>
+        {
+            var size = await _firstSize.Task.WaitAsync(ct).ConfigureAwait(false);
+            _madeAt = size;
+            return await connectAtSize(size, ct).ConfigureAwait(false);
+        }, describeFailure ?? (ex => ex.Message));
+    }
+
+    private DeferredConnection(string? connecting)
+    {
         Output = new OutputStream(this);
         Input = new InputStream(this);
         if (connecting is not null) Notice(connecting);
-        _ = Run(connect, describeFailure ?? (ex => ex.Message));
     }
 
     /// <summary>The connection, once made; null before, and if it failed.</summary>
@@ -100,7 +137,8 @@ public sealed class DeferredConnection : ITerminalConnection
                 return;
             }
             _inner = inner;
-            if (_size is { } size) inner.Resize(size.Columns, size.Rows);
+            // The size the terminal has now, unless it is the one the connection was made at.
+            if (_size is { } size && size != _madeAt) inner.Resize(size.Columns, size.Rows);
         }
         inner.Exited += code => _exit.Raise(code);
         SendPendingInput(inner);
@@ -146,6 +184,7 @@ public sealed class DeferredConnection : ITerminalConnection
             _size = (columns, rows);
             inner = _inner;
         }
+        _firstSize.TrySetResult((columns, rows));
         inner?.Resize(columns, rows);
     }
 

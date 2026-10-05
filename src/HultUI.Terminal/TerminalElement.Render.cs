@@ -163,7 +163,7 @@ public sealed partial class TerminalElement
         int columns = Math.Max(1, (int)(box.Width / _cellWidth));
         int rows = Math.Max(1, (int)(box.Height / _cellHeight));
         var have = controller.GridSize;
-        if ((columns, rows) == have)
+        if ((columns, rows) == have && controller.ConnectionSized)
         {
             StopResizeHold();
             return;

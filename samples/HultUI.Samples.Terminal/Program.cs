@@ -126,6 +126,8 @@ internal static class Program
             return 1;
         }
 
+        // The shell starts once the terminal has laid out its grid, at that size.
+        Pump(() => sample.Shell is not null || sample.Problem.Value is not null || c.State == TerminalState.Exited);
         if (sample.Shell is not { } shell) return Fail(sample.Problem.Value ?? "no shell started");
         var name = Path.GetFileNameWithoutExtension(shell.Program).ToLowerInvariant();
         var (command, answer) = name switch

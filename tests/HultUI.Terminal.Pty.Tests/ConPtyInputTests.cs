@@ -26,18 +26,12 @@ public class ConPtyInputTests
             // next input arrives, throwing away its first key (problem 22). In vim that key was
             // the first round's A: `hello` ran as normal-mode commands, its o opened a line in
             // insert mode, and the file came out a hello short — on CI once, and 4 of 30 times
-            // here with a resize forced into vim's start. Resized to the same size afterwards, as
-            // the deferred connection does, ConPTY reports nothing.
-            var grid = new TaskCompletionSource<(int Columns, int Rows)>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Controller = new TerminalController(new DeferredConnection(async _ =>
-            {
-                var (columns, rows) = await grid.Task.ConfigureAwait(false);
-                return PtyConnection.Start(launch, columns, rows);
-            }));
+            // here with a resize forced into vim's start.
+            Controller = new TerminalController(new DeferredConnection(
+                async (size, ct) => await PtyConnection.StartAsync(launch, size.Columns, size.Rows, ct)));
             var element = TerminalElement.New(Controller).FlexGrow(1);
             Session.Window.SetRoot(Flex.Column().Children(element));
             Session.PumpFrames(2);
-            grid.SetResult((Controller.Columns, Controller.Rows));
             element.Focus();
             Session.PumpFrame();
         }
