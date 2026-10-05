@@ -48,5 +48,15 @@ public readonly record struct Rect(float X, float Y, float Width, float Height)
         return right > x && bottom > y ? new Rect(x, y, right - x, bottom - y) : Zero;
     }
 
+    /// <summary>The smallest rect that contains both rects.</summary>
+    public Rect Union(Rect other)
+    {
+        float x = X < other.X ? X : other.X;
+        float y = Y < other.Y ? Y : other.Y;
+        float right = Right > other.Right ? Right : other.Right;
+        float bottom = Bottom > other.Bottom ? Bottom : other.Bottom;
+        return new Rect(x, y, right - x, bottom - y);
+    }
+
     public static Rect Zero => default;
 }

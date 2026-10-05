@@ -10,6 +10,9 @@ public class CanvasElement : BoxElement
     public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
         new CanvasElement { Draw = draw }.WithOrigin(file, line);
 
+    /// <summary>Unbounded: the callback draws wherever it likes, unclipped.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         // Render background/border from BoxElement

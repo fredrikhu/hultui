@@ -1158,6 +1158,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     internal override float? MeasureBaseline(Size borderBox, IMeasureContext ctx) =>
         ContentTop + ctx.MeasureFirstBaseline("X", ResolvedInherited, float.PositiveInfinity, 1);
 
+    /// <summary>The box's — the text is clipped to it — while the scrollbar fits inside it.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) =>
+        _bar.PaintsInside(Layout.AbsoluteContentBox, vertical: true) ? base.PaintBounds(ctx) : null;
+
     public override void Render(IRenderContext ctx)
     {
         if (_renderCtx != ctx)

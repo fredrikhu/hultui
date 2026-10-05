@@ -154,6 +154,10 @@ public class ToggleSwitchElement : Element
             ? null
             : ContentTop + ctx.MeasureFirstBaseline(Label, ResolvedInherited, float.PositiveInfinity, null, TextOverflow.Ellipsis);
 
+    /// <summary>Unbounded: the focus ring stands 3 past the track, and a label squeezed into a
+    /// short box runs out of it.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;

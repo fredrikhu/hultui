@@ -149,6 +149,9 @@ public class ProgressBarElement : Element, IRangeValueElement
 
     private static bool IsBounded(float w) => !float.IsInfinity(w) && !float.IsNaN(w) && w < float.MaxValue / 2;
 
+    /// <summary>Unbounded: a box shorter than the bar still draws the whole bar, centred.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;

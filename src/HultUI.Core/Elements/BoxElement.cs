@@ -116,7 +116,7 @@ public class BoxElement : Element
         }
 
         var w = BoxRead.BorderWidth;
-        bool hasBorder = BorderColor.A > 0 && (w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0);
+        bool hasBorder = HasBorder;
         bool uniformWidth = w.Top == w.Right && w.Right == w.Bottom && w.Bottom == w.Left;
         // The simple case (uniform width, solid style) uses the combined draw call
         // and keeps its existing centered-stroke geometry, so nothing regresses.
@@ -155,5 +155,56 @@ public class BoxElement : Element
             ctx.DrawRoundedRect(ring, radius.Inflate(outer), Color.Transparent,
                 _outline.Color, new Thickness(_outline.Width));
         }
+    }
+
+    private bool HasBorder
+    {
+        get
+        {
+            var w = BoxRead.BorderWidth;
+            return BorderColor.A > 0 && (w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0);
+        }
+    }
+
+    /// <summary>The border box, grown by what <see cref="Render"/> paints beyond it: the
+    /// shadows and the outline.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx)
+    {
+        var box = Layout.AbsoluteBorderBox;
+        var bounds = box;
+        if (_boxShadows is { Count: > 0 } shadows)
+        {
+            foreach (var shadow in shadows)
+            {
+                if (shadow.Color.A == 0) continue;
+                // As DrawBoxShadow draws it: grown by the spread, moved by the offset, then
+                // blurred with a sigma of half the blur — and a Gaussian reaches three sigmas.
+                float reach = shadow.Spread + shadow.Blur * 1.5f;
+                bounds = bounds.Union(new Rect(
+                    box.X - reach + shadow.OffsetX, box.Y - reach + shadow.OffsetY,
+                    box.Width + reach * 2f, box.Height + reach * 2f));
+            }
+        }
+        if (_outline.IsVisible && _outline.Offset + _outline.Width > 0f)
+            bounds = bounds.Union(box.Inflate(new Thickness(_outline.Offset + _outline.Width)));
+        return bounds;
+    }
+
+    /// <summary>A plain box that only fills its background paints one shape, so it fades by
+    /// filling in a fainter colour. Not a subclass: its <see cref="Render"/> may add more.</summary>
+    internal override bool RenderWithOpacity(IRenderContext ctx, float opacity)
+    {
+        if (GetType() != typeof(BoxElement) || _boxShadows is { Count: > 0 } || _backgroundGradient is not null
+            || _outline.IsVisible || HasBorder)
+            return false;
+
+        if (BackgroundColor.A > 0)
+        {
+            var box = Layout.AbsoluteBorderBox;
+            var c = BackgroundColor;
+            ctx.DrawRoundedRect(box, RenderCornerRadius(in box),
+                c with { A = (byte)MathF.Round(c.A * opacity) }, Color.Transparent, default);
+        }
+        return true;
     }
 }

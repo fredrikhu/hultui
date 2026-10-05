@@ -554,6 +554,61 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         }
     }
 
+    public Rect? TextPaintBounds(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
+        int? maxLines, IReadOnlyList<TextSpan>? spans)
+    {
+        if (string.IsNullOrEmpty(text) || _pipeline is null) return new Rect(bounds.X, bounds.Y, 0f, 0f);
+
+        // The same layout and the same placement as the DrawText overloads above.
+        var layout = spans is { Count: > 0 }
+            ? _pipeline.Layout(text, style, bounds.Width, maxLines, overflow, spans)
+            : _pipeline.Layout(text, style, bounds.Width, maxLines, overflow);
+        float alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
+        // Decorations hang below the baseline by a fraction of the size (DrawDecorationRects).
+        float underlineBottom = Math.Max(1f, style.FontSize * 0.12f) + Math.Max(1f, style.FontSize * 0.07f);
+
+        // Indexed: these are interfaces, and foreach over one allocates an enumerator per line.
+        var ink = new Rect(bounds.X, bounds.Y, 0f, 0f);
+        var lines = layout.Lines;
+        for (int li = 0; li < lines.Count; li++)
+        {
+            var line = lines[li];
+            float alignOffset = alignFactor > 0f && bounds.Width > line.Width
+                ? (bounds.Width - line.Width) * alignFactor
+                : 0f;
+            float baseX = bounds.X + alignOffset;
+            float lineTop = bounds.Y + line.OffsetY;
+            float lineY = lineTop + line.Ascent;
+
+            // The line box holds span backgrounds; the underline can sit below it.
+            ink = ink.Union(new Rect(baseX, lineTop, line.Width,
+                Math.Max(line.Height, line.Ascent + underlineBottom)));
+
+            // Glyph ink: the blob's bounds are Skia's conservative ones, from the font's bounding
+            // box at each glyph's position, so an overhang or a stacked mark is inside them.
+            var runs = line.Runs;
+            for (int ri = 0; ri < runs.Count; ri++)
+            {
+                var run = runs[ri];
+                SKRect r;
+                if (TextAsOutlines)
+                {
+                    if (BuildShapedPath(run) is not { } path) continue;
+                    r = path.Bounds;
+                }
+                else
+                {
+                    if (BuildShapedBlob(run) is not { } blob) continue;
+                    r = blob.Bounds;
+                }
+                if (r.IsEmpty) continue;
+                float x = baseX + run.OffsetX;
+                ink = ink.Union(new Rect(x + r.Left, lineY + r.Top, r.Width, r.Height));
+            }
+        }
+        return ink;
+    }
+
     // Draws one laid-out line as constant-color segments split at span boundaries.
     // Glyphs are never re-shaped or moved: each segment clips to its x-range and
     // draws the same cached blobs, so kerning and ligatures render exactly as the
@@ -1086,6 +1141,18 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Reset();
         _pooledPaint.Color = new SKColor(255, 255, 255, (byte)(opacity * 255));
         _saveStack.Push(Canvas.SaveLayer(_pooledPaint));
+    }
+
+    public void PushOpacity(float opacity, Rect bounds)
+    {
+        _pooledPaint.Reset();
+        _pooledPaint.Color = new SKColor(255, 255, 255, (byte)(opacity * 255));
+        // Slack for pixel snapping, which can move an edge half a device pixel outward and widens
+        // a sliver to a whole one: 1/scale in layout units, transformed or not, since snapping
+        // ignores the transform. Skia rounds the bounds out to whole pixels itself.
+        float pad = 1f / _scale;
+        var rect = new SKRect(bounds.X - pad, bounds.Y - pad, bounds.Right + pad, bounds.Bottom + pad);
+        _saveStack.Push(Canvas.SaveLayer(rect, _pooledPaint));
     }
 
     public void PushTransform(System.Numerics.Matrix3x2 m)

@@ -388,6 +388,9 @@ public class CalendarElement : Element
             pad.Top + _theme.HeaderHeight + _theme.WeekdayHeight + Rows * _theme.CellHeight + pad.Bottom);
     }
 
+    /// <summary>Unbounded: laid out smaller than it measures, it draws its grid past the box.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

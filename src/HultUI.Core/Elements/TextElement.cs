@@ -568,6 +568,18 @@ public class TextElement : Element
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);
     }
 
+    /// <summary>The border box and the text's ink, which overflows it whenever the text is
+    /// longer than the box. A selection is left unbounded: its highlight runs past a line's
+    /// last glyph by a measure of its own.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx)
+    {
+        var box = Layout.AbsoluteBorderBox;
+        if (string.IsNullOrEmpty(Content)) return box;
+        if (_selectable && HasSelection) return null;
+        return ctx.TextPaintBounds(Content, Layout.AbsoluteContentBox, ResolvedInherited, Overflow, MaxLines, _spans)
+            is Rect ink ? box.Union(ink) : null;
+    }
+
     private void DrawSelection(IRenderContext ctx, ResolvedInheritedStyle style)
     {
         int selStart = SelectionStart, selEnd = SelectionEnd;

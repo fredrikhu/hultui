@@ -94,6 +94,9 @@ public class SpinnerElement : Element, IRangeValueElement
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         new(Size, Size);
 
+    /// <summary>Unbounded: a box smaller than the spinner still draws the whole spinner, centred.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         Start();

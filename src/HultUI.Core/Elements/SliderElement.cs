@@ -176,6 +176,9 @@ public class SliderElement : Element, IRangeValueElement
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         new(160f, Math.Max(20f, ThumbRadius * 2));
 
+    /// <summary>Unbounded: the thumb and its focus ring reach past the ends of the track.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;

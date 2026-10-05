@@ -572,6 +572,9 @@ public class ExpanderElement : BoxElement
         internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
             new(Size, Size);
 
+        /// <summary>Unbounded: turning about its centre, the chevron's ends swing past its box.</summary>
+        public override Rect? PaintBounds(IRenderContext ctx) => null;
+
         public override void Render(IRenderContext ctx)
         {
             var box = Layout.AbsoluteContentBox;

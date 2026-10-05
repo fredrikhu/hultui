@@ -381,6 +381,16 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         base.Render(ctx);
     }
 
+    /// <summary>The box's, while the scrollbars fit inside it; unbounded when one does not.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        if ((ShowScrollbarY && !_vBar.PaintsInside(contentBox, vertical: true))
+            || (ShowScrollbarX && !_hBar.PaintsInside(contentBox, vertical: false)))
+            return null;
+        return base.PaintBounds(ctx);
+    }
+
     public void RenderScrollbars(IRenderContext ctx)
     {
         var contentBox = Layout.AbsoluteContentBox;

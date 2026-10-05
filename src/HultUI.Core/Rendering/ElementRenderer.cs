@@ -1,3 +1,4 @@
+using System.Numerics;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
@@ -52,21 +53,36 @@ public static class ElementRenderer
             ? default
             : tracer.Begin("Render", element.GetType().Name, element.Key ?? element.Name);
 
-
-        float opacity = element.RenderOpacity;
-        bool hasOpacity = opacity < 1f;
-        if (hasOpacity)
-            ctx.PushOpacity(opacity);
-
         // A transform rotates/scales the element and its subtree about its centre.
         // Once transformed, the screen-axis-aligned cull rect no longer bounds the
         // content, so culling is disabled for the subtree.
         bool hasTransform = element.Transform is { } tf && !tf.IsIdentity;
         if (hasTransform)
         {
-            var b = element.Layout.AbsoluteBorderBox;
-            ctx.PushTransform(element.Transform!.Value.ToMatrix(b.X + b.Width * 0.5f, b.Y + b.Height * 0.5f));
+            ctx.PushTransform(TransformMatrix(element));
             cull = null;
+        }
+
+        // Opacity blends the subtree as one group, drawn offscreen and composited once. The
+        // group is sized to what the subtree paints — unbounded, it is the size of the clip,
+        // the whole window or viewport for every faded element. It is pushed inside the
+        // transform, so its bounds are in the element's own coordinates and the surface maps
+        // them through the transform. A lone shape needs no group at all: it fades itself.
+        float opacity = element.RenderOpacity;
+        bool hasOpacity = false;
+        if (opacity < 1f)
+        {
+            if (element.Children.Count == 0 && element.RenderWithOpacity(ctx, opacity))
+            {
+                if (hasTransform)
+                    ctx.Pop();
+                return;
+            }
+            if (SubtreePaintBounds(element, ctx, offsetX, offsetY, cull) is Rect bounds)
+                ctx.PushOpacity(opacity, bounds);
+            else
+                ctx.PushOpacity(opacity);
+            hasOpacity = true;
         }
 
         // Render self
@@ -98,9 +114,9 @@ public static class ElementRenderer
 
             scrollView.RenderScrollbars(ctx);
 
-            if (hasTransform)
-                ctx.Pop();
             if (hasOpacity)
+                ctx.Pop();
+            if (hasTransform)
                 ctx.Pop();
             return;
         }
@@ -130,10 +146,70 @@ public static class ElementRenderer
         if (needsClip)
             ctx.Pop();
 
-        if (hasTransform)
-            ctx.Pop();
-
         if (hasOpacity)
             ctx.Pop();
+
+        if (hasTransform)
+            ctx.Pop();
+    }
+
+    private static Matrix3x2 TransformMatrix(Element element)
+    {
+        var b = element.Layout.AbsoluteBorderBox;
+        return element.Transform!.Value.ToMatrix(b.X + b.Width * 0.5f, b.Y + b.Height * 0.5f);
+    }
+
+    // What `element` and the part of its subtree RenderInPlace would draw paint inside, in the
+    // element's own coordinates (inside its transform); null when an element in it cannot say
+    // (Element.PaintBounds). The walk follows the render's: the same cull, the same offsets.
+    private static Rect? SubtreePaintBounds(Element element, IRenderContext ctx,
+        float offsetX, float offsetY, Rect? cull)
+    {
+        if (element.PaintBounds(ctx) is not Rect bounds)
+            return null;
+
+        // A clipping element cuts its children to its content box, whatever they paint.
+        if (element is ScrollViewElement
+            || element.BoxRead.OverflowX == Overflow.Hidden || element.BoxRead.OverflowY == Overflow.Hidden)
+            return bounds.Union(element.Layout.AbsoluteContentBox);
+
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+        {
+            var child = children[i];
+            float childOffsetX = offsetX, childOffsetY = offsetY;
+            Point shift = default;
+            if (child.PositionRead.Type == PositionType.Sticky)
+            {
+                shift = child.StickyShift;
+                childOffsetX += shift.X;
+                childOffsetY += shift.Y;
+            }
+            if (cull is Rect clip &&
+                !child.Layout.AbsoluteBorderBox.Translate(childOffsetX, childOffsetY).IntersectsWith(clip))
+                continue; // culled: RenderInPlace skips it, subtree and all
+
+            bool transformed = child.Transform is { } tf && !tf.IsIdentity;
+            if (SubtreePaintBounds(child, ctx, childOffsetX, childOffsetY, transformed ? null : cull) is not Rect sub)
+                return null;
+            if (transformed)
+                sub = Transformed(sub, TransformMatrix(child));
+            bounds = bounds.Union(sub.Translate(shift.X, shift.Y));
+        }
+        return bounds;
+    }
+
+    /// <summary>The axis-aligned box around <paramref name="r"/> mapped through <paramref name="m"/>.</summary>
+    private static Rect Transformed(Rect r, Matrix3x2 m)
+    {
+        var a = Vector2.Transform(new Vector2(r.X, r.Y), m);
+        var b = Vector2.Transform(new Vector2(r.Right, r.Y), m);
+        var c = Vector2.Transform(new Vector2(r.X, r.Bottom), m);
+        var d = Vector2.Transform(new Vector2(r.Right, r.Bottom), m);
+        float minX = MathF.Min(MathF.Min(a.X, b.X), MathF.Min(c.X, d.X));
+        float minY = MathF.Min(MathF.Min(a.Y, b.Y), MathF.Min(c.Y, d.Y));
+        float maxX = MathF.Max(MathF.Max(a.X, b.X), MathF.Max(c.X, d.X));
+        float maxY = MathF.Max(MathF.Max(a.Y, b.Y), MathF.Max(c.Y, d.Y));
+        return new Rect(minX, minY, maxX - minX, maxY - minY);
     }
 }

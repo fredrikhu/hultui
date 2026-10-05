@@ -1299,6 +1299,26 @@ public abstract class Element
     // ──── Rendering ────
     public virtual void Render(IRenderContext ctx) { }
 
+    /// <summary>
+    /// The rect that <see cref="Render"/> paints inside, in the coordinates it paints in: the
+    /// window's layout space, before this element's own <see cref="Transform"/>. Its children
+    /// are not included. The border box unless the element paints beyond it — a shadow, an
+    /// outline, text longer than its box — in which case it must say so here; null when it
+    /// cannot tell.
+    /// <para>An opacity group is drawn into an offscreen image the size of this rect unioned
+    /// over its subtree, so whatever is painted outside it is cut off. Null makes the group
+    /// as large as the clip, which is always right and on a raster surface slow.</para>
+    /// </summary>
+    public virtual Rect? PaintBounds(IRenderContext ctx) => Layout.AbsoluteBorderBox;
+
+    /// <summary>
+    /// Paints the element at <paramref name="opacity"/> without an offscreen group, when what
+    /// it paints is a single shape: blending one shape at an opacity is the same as drawing it
+    /// in a colour that much more transparent. Called only for an element with no children;
+    /// returns false, having drawn nothing, when it paints more than one shape.
+    /// </summary>
+    internal virtual bool RenderWithOpacity(IRenderContext ctx, float opacity) => false;
+
     public virtual bool HitTest(Point point) =>
         Layout.AbsoluteBorderBox.Contains(point);
 

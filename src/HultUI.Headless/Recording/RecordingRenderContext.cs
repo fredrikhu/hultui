@@ -195,6 +195,10 @@ public sealed class RecordingRenderContext : IRenderContext
 
     public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => _inner.HasGlyph(style, codePoint);
 
+    public Rect? TextPaintBounds(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
+        int? maxLines, IReadOnlyList<TextSpan>? spans)
+        => _inner.TextPaintBounds(text, bounds, style, overflow, maxLines, spans);
+
     // ──── State stack ────
     // Each push records at the current depth then indents; Pop outdents first,
     // so a push/pop pair brackets its children in the log.
@@ -225,6 +229,13 @@ public sealed class RecordingRenderContext : IRenderContext
         Record("PushOpacity", F(opacity));
         _depth++;
         _inner.PushOpacity(opacity);
+    }
+
+    public void PushOpacity(float opacity, Rect bounds)
+    {
+        Record("PushOpacity", $"{F(opacity)} bounds={Fmt(bounds)}");
+        _depth++;
+        _inner.PushOpacity(opacity, bounds);
     }
 
     public void PushTransform(Matrix3x2 matrix)

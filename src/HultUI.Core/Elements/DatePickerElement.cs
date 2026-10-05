@@ -308,6 +308,9 @@ public class DatePickerElement : Element
         _theme.Padding.Top + ctx.MeasureFirstBaseline(DisplayText,
             ResolvedInherited with { FontSize = _theme.FontSize }, float.PositiveInfinity, 1, TextOverflow.Ellipsis);
 
+    /// <summary>Unbounded: laid out shorter than it measures, it draws its text past the box.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

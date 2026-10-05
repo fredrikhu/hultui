@@ -338,6 +338,9 @@ public class DropdownElement : Element
         _padding.Top + ctx.MeasureFirstBaseline(SelectedItem ?? Placeholder,
             ResolvedInherited with { FontSize = _fontSize }, float.PositiveInfinity, 1, TextOverflow.Ellipsis);
 
+    /// <summary>Unbounded: laid out shorter than it measures, it draws its text past the box.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

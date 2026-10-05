@@ -164,6 +164,22 @@ panel, say) mounts it and everything under it again, even if it is a descendant 
 removed subtree and still has its old parent. A mounted element added somewhere else is
 moved and hears neither.
 
+### Opacity and what an element paints
+
+`.Opacity(value)` below 1 draws the element and its subtree into an offscreen group and
+blends the group once, so overlapping children do not show through each other. The group
+is sized to what the subtree paints — each element's `PaintBounds`, unioned down the tree
+until a clip (`Overflow.Hidden`, a scroll view) cuts the children off. A plain `Box` with
+no children and one fill skips the group and fills in a fainter colour.
+
+`PaintBounds` is the border box unless the element says otherwise. `BoxElement` adds its
+shadows and outline, `TextElement` the ink of text longer than its box. **A custom element
+whose `Render` paints outside its border box must override `PaintBounds`** — whatever falls
+outside it is cut off under opacity. Return `null` when the extent is not known cheaply:
+the group is then as large as the clip, which is always right and, on a CPU surface, slow
+(a window-sized image per faded element). The framework's controls with focus rings or
+thumbs past their box (checkbox, slider, toggle and others) return `null`.
+
 ---
 
 ## 1. BoxElement

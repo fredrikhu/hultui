@@ -130,6 +130,10 @@ public class ImageElement : Element
     }
     private Rect? _sourceRect;
 
+    /// <summary>Unbounded for <see cref="ImageFit.None"/>, which draws the source at its own size,
+    /// centred and uncropped.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => Fit == ImageFit.None ? null : base.PaintBounds(ctx);
+
     public override void Render(IRenderContext ctx)
     {
         if (Source is null || !Source.IsLoaded) return;

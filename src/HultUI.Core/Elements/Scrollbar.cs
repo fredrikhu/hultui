@@ -192,6 +192,14 @@ internal sealed class Scrollbar
 
     // ──── Paint ────
 
+    /// <summary>Whether <see cref="Paint"/> stays inside the content box. It does unless the
+    /// viewport is shorter than the shortest thumb, the bar is thicker than the box, or the thumb
+    /// is wider than its track.</summary>
+    public bool PaintsInside(Rect contentBox, bool vertical) =>
+        Viewport(contentBox, vertical) >= MinThumbLength
+        && ThumbWidthNow <= TrackWidthNow
+        && TrackWidthNow <= (vertical ? contentBox.Width : contentBox.Height);
+
     public void Paint(IRenderContext ctx, Rect contentBox, float contentLength, float offset, bool vertical)
     {
         if (!IsVisible(contentBox, contentLength, vertical)) return;

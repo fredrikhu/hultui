@@ -174,7 +174,30 @@ public interface IRenderContext
     void PushClip(Rect clipRect);
     void PushRoundedClip(Rect clipRect, CornerRadius radius);
     void PushTranslate(float x, float y);
+
+    /// <summary>
+    /// Draws everything up to the matching <see cref="Pop"/> into a group, then blends the
+    /// group at <paramref name="opacity"/>. Without bounds the group is as large as the
+    /// current clip — on a raster surface, a window-sized offscreen image per call.
+    /// </summary>
     void PushOpacity(float opacity);
+
+    /// <summary>
+    /// <see cref="PushOpacity(float)"/> for content known to paint only inside
+    /// <paramref name="bounds"/>, in the current coordinates: the group is allocated at that
+    /// size. Anything drawn outside it is lost. The default ignores the bounds.
+    /// </summary>
+    void PushOpacity(float opacity, Rect bounds) => PushOpacity(opacity);
+
+    /// <summary>
+    /// The rect that <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?, IReadOnlyList{TextSpan}?)"/>
+    /// with the same arguments paints inside: every glyph's ink, decorations and span
+    /// backgrounds. It can reach past <paramref name="bounds"/> — a word too long for its line,
+    /// more lines than the box holds, an italic overhang. Null when the context cannot say,
+    /// which is the default.
+    /// </summary>
+    Rect? TextPaintBounds(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines,
+        IReadOnlyList<TextSpan>? spans) => null;
 
     /// <summary>
     /// Concatenates a 2D affine transform onto the current matrix (paired with

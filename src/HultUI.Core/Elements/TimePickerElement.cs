@@ -520,6 +520,9 @@ public class TimePickerElement : Element
         _boxTheme.Padding.Top + ctx.MeasureFirstBaseline("0",
             ResolvedInherited with { FontSize = _boxTheme.FontSize }, float.PositiveInfinity, 1);
 
+    /// <summary>Unbounded: laid out smaller than it measures, it draws its parts past the box.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) => null;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;
