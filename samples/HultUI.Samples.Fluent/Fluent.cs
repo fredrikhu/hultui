@@ -332,13 +332,23 @@ public sealed record FluentPalette
             ChevronShape = ChevronShape.Stroke,
             ChevronStrokeWidth = 1f,
         },
+        // WinUI's MenuBar: bare titles, the subtle fill on hover and while a menu is open.
+        MenuBar = new MenuBarTheme
+        {
+            Height = 32f, Padding = new Thickness(0), TitlePadding = new Thickness(0, 10, 0, 10),
+            TitleCornerRadius = Fluent.ControlRadius, FontSize = 14f, Text = TextPrimary,
+            HoverBackground = SubtleHover, OpenBackground = SubtlePressed,
+        },
         ContextMenu = new ContextMenuTheme
         {
             Background = Flyout,
             BorderColor = IsDark ? Hex("#3B3B3B") : Hex("#E0E0E0"),
             TextColor = TextPrimary,
             DisabledTextColor = TextDisabled,
-            HoverBackground = SubtleHover,
+            // SubtleFillColorSecondary over the flyout, not over the window: SubtleHover is that
+            // fill already laid on the window's background, a shade from the flyout's own
+            // (#2D2D2D on #2C2C2C), so the row the keyboard was on did not show at all.
+            HoverBackground = IsDark ? Hex("#383838") : Hex("#EEEEEE"),
             SeparatorColor = Divider,
             ShortcutTextColor = TextTertiary,
         },

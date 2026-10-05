@@ -1473,3 +1473,46 @@ under the top edge rather than in the middle.
 `Kbd.New("Ctrl+P")` is a key chip — the keys in a small outlined box — for anywhere a key is
 named. Its look is `Theme.Kbd` (`KbdTheme`): fill (transparent for an outline only), outline,
 text colour and face, size, padding and radius; null colours come from the palette.
+
+## 22. MenuBar
+
+A row of menus across the top of a window — File, Edit, View — whose dropdowns are context
+menus (`ContextMenuItem`: separators, disabled and danger items, check marks, icons, shortcut
+hints, one level of submenus).
+
+```csharp
+_menus = new MenuBar(
+[
+    new("&File", [new() { Label = "Open…", ShortcutHint = keys.Keys("open"), Action = Open }]),
+    new("&View", () => [new() { Label = "Word wrap", IsChecked = _wrap, Action = ToggleWrap }]),
+]);
+titleBar.AddChild(_menus.Mount());
+// On the element given to SetRoot, where keys land when nothing has the focus:
+host.On<KeyDownEvent>(e => { if (_menus.HandleKey(e)) e.StopPropagation = true; });
+host.On<KeyUpEvent>(e => _menus.HandleKeyUp(e));
+```
+
+- **Titles:** `&` marks the Alt letter (`&&` is an ampersand). Items given as a function are
+  asked for on every open, so checks and disabled states follow the app.
+- **Pointer:** a press opens a menu, another closes it; while one is open, moving to another
+  title opens that one. Labels are not hit-testable, so a bar inside a `WindowDrag()` title bar
+  opens rather than dragging the window.
+- **Keyboard (the Windows model):** F10, or Alt pressed and let go alone, gives the bar the keys:
+  ← → between titles, ↓ ↑ Enter Space open, a title's letter opens it, Esc / F10 / Alt leave.
+  Alt+letter opens a menu from anywhere. In an open menu ← → move to the neighbouring menu when
+  there is no submenu to close or open; Esc goes back to the titles. Mnemonics are underlined
+  while Alt is held or the bar has the keys. Focus returns to what had it. Right Alt reported
+  as AltGr is ignored.
+- **State:** `OpenIndex`, `HighlightIndex`, `IsActive`, `Open(i)`, `Close()`, `Menus` (settable).
+- **Accessibility:** roles `MenuBar` and `MenuItem` (new; UIA MenuBar/MenuItem, AT-SPI
+  menu bar/menu item); a title reports `Expanded` while its menu is open. Automation ids
+  `menubar-N`.
+
+**Looks** come from `Theme.MenuBar` (`MenuBarTheme`): fill, divider, height, padding, title
+padding and radius, font size, text colour, hover and open fills. The menus take
+`ContextMenuTheme`.
+
+**For other menu owners:** `IOverlayHost.OpenMenu(items, position, MenuRequest)` opens a context
+menu that reports why it closed (`MenuCloseReason`: Chosen, Escape, Dismissed, Replaced) and
+hands back ← → (`Navigate`) when it has no use for them; `HighlightFirst` starts on the first
+item for a menu opened from the keyboard. `CloseMenu()` closes it.

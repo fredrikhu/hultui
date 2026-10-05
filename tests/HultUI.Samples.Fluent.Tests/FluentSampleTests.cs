@@ -722,4 +722,35 @@ public class FluentSampleTests
                 return found;
         return null;
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // The menu bar
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>The menu bar in the title bar opens from the keyboard as the first thing the
+    /// window is asked, and its View menu checks what is in force.</summary>
+    [Fact]
+    public void AltVOpensTheViewMenu_WithDarkModeChecked()
+    {
+        var (session, app, _) = Start();
+        using var _s = session;
+        session.Window.PressKey(KeyCode.V, KeyModifiers.Alt);
+        session.PumpFrames(3);
+
+        var bar = MenuBarOf(app);
+        Assert.Equal(1, bar.OpenIndex);
+        var dark = Walk(session.Window.AccessibilityTree).Single(n => n.Name == "Dark mode");
+        Assert.Equal(true, dark.IsToggled);
+
+        session.Window.PressKey(KeyCode.Enter);
+        session.PumpFrames(3);
+        Assert.False(app.Dark);
+        Assert.Equal(-1, bar.OpenIndex);
+    }
+
+    private static MenuBar MenuBarOf(FluentApp app) =>
+        (MenuBar)typeof(FluentApp).GetField("_menus", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(app)!;
+
+    private static IEnumerable<AccessibilityNode> Walk(AccessibilityNode node) =>
+        node.Children.SelectMany(Walk).Prepend(node);
 }

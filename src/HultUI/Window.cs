@@ -95,7 +95,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // ──── Context menu state ────
     private OverlayHandle _contextMenuOverlay;
     private ContextMenuElement? _contextMenuElement;
-    private Action? _contextMenuClosed;
+    private Action<MenuCloseReason>? _contextMenuClosed;
+    // ← and → for the menu's owner when the menu has no use for them (OpenMenu).
+    private Action<int>? _contextMenuNavigate;
     // One level of nesting: the flyout for a root item with Children.
     private OverlayHandle _contextSubmenuOverlay;
     private ContextMenuElement? _contextSubmenuElement;
@@ -1529,9 +1531,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                                 OnContextMenuHover(_contextMenuElement, _contextMenuElement.HoveredIndex);
                                 _contextSubmenuElement?.MoveSelection(1);
                             }
+                            // Nothing to open here: a menu bar moves to the next menu.
+                            else _contextMenuNavigate?.Invoke(1);
                             break;
                         case KeyCode.Left:
-                            CloseContextSubmenu();
+                            if (_contextSubmenuElement is not null) CloseContextSubmenu();
+                            else _contextMenuNavigate?.Invoke(-1);
                             break;
                         case KeyCode.Enter:
                         {
@@ -1544,7 +1549,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                         }
                         case KeyCode.Escape:
                             if (_contextSubmenuElement is not null) CloseContextSubmenu();
-                            else CloseContextMenu();
+                            else CloseContextMenu(MenuCloseReason.Escape);
                             break;
                         default:
                             goto normalKeyHandling;
@@ -2532,7 +2537,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 {
                     _contextMenuOverlay = default;
                     _contextMenuElement = null;
-                    NotifyContextMenuClosed();
+                    _contextMenuNavigate = null;
+                    NotifyContextMenuClosed(MenuCloseReason.Dismissed);
                 }
                 if (_overlays[i].Id == _contextSubmenuOverlay.Id)
                 {
@@ -2657,8 +2663,27 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             if (onClosed is not null) Application.InvokeOnMainThread(onClosed);
             return;
         }
-        ShowContextMenu(items, pos, onClosed);
+        ShowContextMenu(items, pos, onClosed is null ? null : _ => onClosed());
     }
+
+    /// <inheritdoc/>
+    /// <remarks>The menu is a context menu with an owner: it is told why the menu closed, and
+    /// gets ← and → when the menu has no submenu to close or open — which is how a menu bar
+    /// walks from one menu to the next.</remarks>
+    public void OpenMenu(IReadOnlyList<ContextMenuItem> items, Point position, MenuRequest? request = null)
+    {
+        if (items.Count == 0)
+        {
+            if (request?.Closed is { } closed) Application.InvokeOnMainThread(() => closed(MenuCloseReason.Dismissed));
+            return;
+        }
+        ShowContextMenu(items, position, request?.Closed);
+        _contextMenuNavigate = request?.Navigate;
+        if (request?.HighlightFirst == true) _contextMenuElement?.MoveSelection(1);
+    }
+
+    /// <inheritdoc/>
+    public void CloseMenu() => CloseContextMenu(MenuCloseReason.Dismissed);
 
     private void TryShowContextMenu(Element target, Point pos)
     {
@@ -2670,14 +2695,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         ShowContextMenu(items, pos, onClosed: null);
     }
 
-    private void ShowContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action? onClosed)
+    private void ShowContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action<MenuCloseReason>? onClosed)
     {
         // Close any existing context menu first
-        CloseContextMenu();
+        CloseContextMenu(MenuCloseReason.Replaced);
         _contextMenuClosed = onClosed;
 
         var theme = Application.Theme;
-        var menuElement = new ContextMenuElement(items, theme.ContextMenu, CloseContextMenu);
+        var menuElement = new ContextMenuElement(items, theme.ContextMenu, () => CloseContextMenu(MenuCloseReason.Chosen));
         menuElement.HoverChanged = index => OnContextMenuHover(menuElement, index);
         _contextMenuElement = menuElement;
         _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
@@ -2699,7 +2724,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
         CloseContextSubmenu();
         var theme = Application.Theme;
-        var sub = new ContextMenuElement(item.Children!, theme.ContextMenu, CloseContextMenu);
+        var sub = new ContextMenuElement(item.Children!, theme.ContextMenu, () => CloseContextMenu(MenuCloseReason.Chosen));
         _contextSubmenuElement = sub;
         menu.PinnedIndex = index;
 
@@ -2726,7 +2751,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             _contextMenuElement.PinnedIndex = -1;
     }
 
-    private void CloseContextMenu()
+    private void CloseContextMenu(MenuCloseReason reason = MenuCloseReason.Dismissed)
     {
         CloseContextSubmenu();
         if (_contextMenuOverlay.IsValid)
@@ -2735,7 +2760,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             _contextMenuOverlay = default;
         }
         _contextMenuElement = null;
-        NotifyContextMenuClosed();
+        _contextMenuNavigate = null;
+        NotifyContextMenuClosed(reason);
     }
 
     /// <summary>
@@ -2743,11 +2769,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// the menu first and runs its action after, and the owner must see the action before the
     /// close, or it would take every choice for a dismissal.
     /// </summary>
-    private void NotifyContextMenuClosed()
+    private void NotifyContextMenuClosed(MenuCloseReason reason)
     {
         var closed = _contextMenuClosed;
         _contextMenuClosed = null;
-        if (closed is not null) Application.InvokeOnMainThread(closed);
+        if (closed is not null) Application.InvokeOnMainThread(() => closed(reason));
     }
 
     private static (Element? owner, Func<IReadOnlyList<ContextMenuItem>>? itemsProvider) FindContextMenuOwner(Element? element)

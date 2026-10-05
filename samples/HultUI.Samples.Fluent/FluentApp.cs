@@ -57,10 +57,38 @@ public sealed partial class FluentApp : Component
     [Reactive] public partial bool InfoBarShown { get; set; }
     [Reactive] public partial int ClickCount { get; set; }
 
+    private readonly MenuBar _menus;
+
     public FluentApp(Application app, Window window)
     {
         _app = app;
         _window = window;
+        _menus = new MenuBar(
+        [
+            new("&File",
+            [
+                new ContextMenuItem { Label = "Home", Action = () => Current = Page.Home },
+                ContextMenuItem.Separator(),
+                new ContextMenuItem { Label = "Exit", ShortcutHint = "Alt+F4", Action = () => _window.Close() },
+            ]),
+            // Asked for on each open, so the checks follow the state.
+            new("&View", () =>
+            [
+                new ContextMenuItem { Label = "Dark mode", IsChecked = Dark, Action = () => SetDark(!Dark) },
+                new ContextMenuItem { Label = "Animations", IsChecked = Animations, Action = () => Animations = !Animations },
+                ContextMenuItem.Separator(),
+                new ContextMenuItem { Label = "Personalization", IsChecked = Current == Page.Personalization, Action = () => Current = Page.Personalization },
+                new ContextMenuItem { Label = "Controls gallery", IsChecked = Current == Page.Gallery, Action = () => Current = Page.Gallery },
+            ]),
+            new("&Help", [new ContextMenuItem { Label = "About", Action = () => Current = Page.About }]),
+        ]);
+
+        // The menu bar's keys come through the window's: F10, Alt, and Alt with a title's letter.
+        // On the host, where keys land when nothing has the focus — a handler on the column
+        // inside it never sees a key aimed at the host.
+        var host = Mount();
+        host.On<KeyDownEvent>(e => { if (_menus.HandleKey(e)) e.StopPropagation = true; });
+        host.On<KeyUpEvent>(e => _menus.HandleKeyUp(e));
 
         Current = Page.Home;
         Dark = true;
@@ -124,6 +152,8 @@ public sealed partial class FluentApp : Component
                 IconRenderer.Draw(Icons.Personalize, 16f, p.Accent),
                 Box.New().Width(12f).FlexShrink(0),
                 Text.New("Fluent Sample").FontSize(Fluent.CaptionSize).TextColor(p.TextPrimary),
+                Box.New().Width(16f).FlexShrink(0),
+                _menus.Mount(),
                 Box.New().FlexGrow(1),
                 caption);
     }

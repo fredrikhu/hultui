@@ -33,4 +33,9 @@ public enum AccessibilityRole : byte
     SpinButton,
     /// <summary>A document, such as a web page's root: AT-SPI's "document web".</summary>
     Document,
+    /// <summary>A row of menus across the top of a window (File, Edit, …).</summary>
+    MenuBar,
+    /// <summary>An entry in a menu or a menu bar; one that opens a menu reports
+    /// <see cref="Elements.Element.AccessibleExpanded"/>.</summary>
+    MenuItem,
 }
