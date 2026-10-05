@@ -29,8 +29,9 @@ public class DrivePickerTests
     }
 
     /// <summary>The other half of the rule: a volume the other pane is not on opens where the
-    /// picker says. The temp folder stands in for a second volume — it is a real, navigable
-    /// path that is not the other pane's root, which is the only property the rule tests.</summary>
+    /// picker says. A folder beside the panes stands in for a second volume — a real, navigable
+    /// path that does not contain the other pane, which is the only property the rule tests.
+    /// (It was the temp folder, which does contain it: a volume is the mount a path is under.)</summary>
     [Fact]
     public void PickingAnotherDriveOpensWhatThePickerNames()
     {
@@ -38,7 +39,7 @@ public class DrivePickerTests
         t.Open();
 
         t.Press(KeyCode.F1, KeyModifiers.Alt);
-        var elsewhere = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+        var elsewhere = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(t.Left)!, "elsewhere")).FullName;
         Only(t, Drive(elsewhere));
         t.Press(KeyCode.Enter);
 
@@ -91,6 +92,46 @@ public class DrivePickerTests
         t.Press(KeyCode.S);
 
         Assert.Equal(1, t.Field<int>("_driveCur"));
+    }
+
+    /// <summary>
+    /// A volume is the mount a path is under, not its root. On Linux every path's root is "/",
+    /// so the rule above went wrong both ways: picking "/" always followed the other pane, onto
+    /// whatever mount it was on, and picking the mount it was really on never did. Windows
+    /// mounts volumes in folders too. The fixture's folder stands in for a mount here, which
+    /// is all the rule looks at, so this runs on both.
+    /// </summary>
+    [Fact]
+    public void TheVolumeIsTheMountAPathIsUnder_NotItsRoot()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.Open();
+        var mount = Path.GetDirectoryName(t.Right)!;
+        var top = Path.GetPathRoot(t.Right)!;
+
+        // The other pane is on the mount: picking it follows that pane in.
+        t.Press(KeyCode.F1, KeyModifiers.Alt);
+        Only(t, Drive(top), Drive(mount));
+        t.SetField("_driveCur", 1);
+        t.Press(KeyCode.Enter);
+        Assert.Equal(t.Right, t.Dir('L'));
+
+        // It is not on the top volume, so picking that opens its root.
+        t.Press(KeyCode.F1, KeyModifiers.Alt);
+        Only(t, Drive(top), Drive(mount));
+        t.Press(KeyCode.Enter);
+        Assert.Equal(top.TrimEnd(Path.DirectorySeparatorChar), t.Dir('L').TrimEnd(Path.DirectorySeparatorChar));
+    }
+
+    /// <summary>The picker opens on the volume the pane is on, by the same rule.</summary>
+    [Fact]
+    public void ThePickerOpensOnTheMountThePaneIsUnder()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.Open();
+        t.SetField("_drives", new List<DriveEntry> { Drive(Path.GetPathRoot(t.Left)!), Drive(Path.GetDirectoryName(t.Left)!) });
+
+        Assert.Equal(1, (int)t.Invoke("IndexOfDrive", t.Left)!);
     }
 
     /// <summary>Replace the real volume list with a known one. The picker reads it on every
