@@ -17,6 +17,49 @@ public sealed class SkiaFontCollection : IFontCollection
     // same face, so reference identity is the right key.
     private readonly Dictionary<SKTypeface, SkiaResolvedFont> _fallbackFonts = new(ReferenceEqualityComparer.Instance);
 
+    // Faces added from files or streams, found by their family name before the OS is asked.
+    private readonly List<SKTypeface> _registered = [];
+    private bool _pinned;
+
+    /// <summary>
+    /// A collection that knows only <paramref name="faces"/>: every family name — a generic one,
+    /// a list, one that names nothing — resolves to one of them, the nearest in weight (a
+    /// fixed-pitch face for <see cref="FontFamilies.Monospace"/>), and no character falls back to
+    /// the operating system's fonts. What text looks like then depends on these files alone,
+    /// not on what a machine has installed — the half of a golden image the fonts decide.
+    /// </summary>
+    public static SkiaFontCollection Pinned(params SKTypeface[] faces)
+    {
+        if (faces.Length == 0) throw new ArgumentException("A pinned collection needs at least one face.", nameof(faces));
+        var collection = new SkiaFontCollection { _pinned = true };
+        foreach (var face in faces) collection.Register(face);
+        return collection;
+    }
+
+    /// <summary>Whether this collection knows only the faces registered with it.</summary>
+    public bool IsPinned => _pinned;
+
+    /// <summary>
+    /// Adds a face the collection finds by its own family name ahead of the installed ones — a
+    /// font an app ships rather than one the machine has.
+    /// </summary>
+    public void Register(SKTypeface typeface)
+    {
+        ArgumentNullException.ThrowIfNull(typeface);
+        _registered.Add(typeface);
+        _fontCache.Clear();
+        _fallbackCache.Clear();
+    }
+
+    /// <summary>Adds a face read from <paramref name="stream"/> (a .ttf or .otf).</summary>
+    public SKTypeface Register(Stream stream)
+    {
+        var typeface = SKTypeface.FromStream(stream)
+            ?? throw new ArgumentException("The stream is not a font Skia can read.", nameof(stream));
+        Register(typeface);
+        return typeface;
+    }
+
     public IResolvedFont Resolve(string familyName, FontWeight weight, FontSlant slant)
     {
         var key = new FontKey(familyName, weight, slant);
@@ -43,6 +86,9 @@ public sealed class SkiaFontCollection : IFontCollection
     /// </summary>
     private SKTypeface Match(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant)
     {
+        if (_registered.Count > 0 && MatchRegistered(familyName, weight, slant) is { } registered)
+            return registered;
+
         if (!familyName.Contains(',') && !IsMonospace(familyName))
             return Legacy(familyName, weight, slant);
 
@@ -56,6 +102,44 @@ public sealed class SkiaFontCollection : IFontCollection
             if (typeface is not null) return typeface;
         }
         return Legacy(first ?? "", weight, slant);
+    }
+
+    /// <summary>
+    /// A registered face for a family string: the first listed name some registered face
+    /// carries, slanted or upright as asked where it can be, then nearest in weight. Pinned,
+    /// every name finds one — a fixed-pitch face for the monospace generic or a name that is
+    /// one, otherwise the proportional faces first.
+    /// </summary>
+    private SKTypeface? MatchRegistered(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant)
+    {
+        bool wantsFixed = false;
+        foreach (var part in familyName.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var name = part.Trim('"', '\'');
+            if (IsMonospace(name)) { wantsFixed = true; continue; }
+            if (Nearest(_registered.Where(f => string.Equals(f.FamilyName, name, StringComparison.OrdinalIgnoreCase)), weight, slant) is { } named)
+                return named;
+        }
+        if (!_pinned) return null;
+        return Nearest(_registered.Where(f => f.IsFixedPitch == wantsFixed), weight, slant)
+            ?? Nearest(_registered, weight, slant);
+    }
+
+    // The slant decides before the weight does: an italic asked for in bold that only has a
+    // regular italic and an upright bold gets the italic, which is the difference a reader sees.
+    // Italic and oblique count as the same.
+    private static SKTypeface? Nearest(IEnumerable<SKTypeface> faces, SKFontStyleWeight weight, SKFontStyleSlant slant)
+    {
+        bool slanted = slant != SKFontStyleSlant.Upright;
+        SKTypeface? best = null;
+        int bestDistance = int.MaxValue;
+        foreach (var face in faces)
+        {
+            int distance = Math.Abs(face.FontWeight - (int)weight)
+                + ((face.FontSlant != SKFontStyleSlant.Upright) == slanted ? 0 : 10_000);
+            if (distance < bestDistance) { best = face; bestDistance = distance; }
+        }
+        return best;
     }
 
     private static SKTypeface Legacy(string familyName, SKFontStyleWeight weight, SKFontStyleSlant slant) =>
@@ -92,6 +176,10 @@ public sealed class SkiaFontCollection : IFontCollection
         // The language is part of the key because it can change under a codepoint: Han
         // follows the paragraph (kana beside it) or else the UI culture, and the same
         // ideograph must not keep the first answer's glyphs.
+        // Pinned, nothing comes from the OS: a character the faces lack draws as their
+        // missing-glyph box, the same on every machine.
+        if (_pinned) return null;
+
         string? language = ScriptLanguage.ForCodepoint(codepoint, hanContext);
         var key = new FallbackKey(codepoint, weight, slant, language);
         if (_fallbackCache.TryGetValue(key, out var cached))

@@ -48,6 +48,18 @@ jobs:
       - name: Run tests
         run: dotnet test HultUI.slnx -c Release --no-build
 
+      # A golden-image mismatch leaves the frame, its baseline and a diff in
+      # bin/**/golden-failures (GoldenImage.FailureDirectory) — what is needed to see what moved.
+      - name: Upload golden-image failures
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures-windows
+          path: tests/**/bin/**/golden-failures/
+          if-no-files-found: ignore
+          retention-days: 7
+
   test-linux:
     runs-on: [self-hosted, linux, x64]
     steps:
@@ -55,6 +67,18 @@ jobs:
 
       - name: Run tests
         run: dotnet test HultUI.CrossPlatform.slnf -c Release
+
+      # A golden-image mismatch leaves the frame, its baseline and a diff in
+      # bin/**/golden-failures (GoldenImage.FailureDirectory) — what is needed to see what moved.
+      - name: Upload golden-image failures
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures-linux
+          path: tests/**/bin/**/golden-failures/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The API reference is generated from the XML docs, so a bad <see cref="..."/>
   # or a link to a page that moved is a build break here rather than a broken

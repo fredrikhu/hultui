@@ -103,7 +103,16 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
         if (string.IsNullOrEmpty(text) || color.A == 0) return;
         var font = _owner.PooledCanvasFont;
         font.Size = fontSize;
-        Canvas.DrawText(text, Bounds.X + position.X, Bounds.Y + position.Y + fontSize, font, Fill(color));
+        if (_owner.CanvasTypeface is { } pinned) font.Typeface = pinned;
+        float x = Bounds.X + position.X, y = Bounds.Y + position.Y + fontSize;
+        if (_owner.TextAsOutlines)
+        {
+            // As the text renderer does under TextAsOutlines: the same pixels on every OS.
+            using var path = font.GetTextPath(text, new SKPoint(x, y));
+            Canvas.DrawPath(path, Fill(color));
+            return;
+        }
+        Canvas.DrawText(text, x, y, font, Fill(color));
     }
 
     // Coordinates in ICanvasDrawingContext are relative to Bounds

@@ -9,6 +9,18 @@
     <Description>HultUI headless testing: run a full application with no window or display — manual frame pump, virtual clock, input injection, accessibility-tree queries, raster capture.</Description>
   </PropertyGroup>
 
+  <!-- The pinned faces golden images are drawn in (HeadlessOptions.Golden): DejaVu Sans 2.37 in
+       four styles and DejaVu Sans Mono, under the Bitstream Vera / Arev licence in
+       LICENSE-DejaVu.txt. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts\DejaVuSans.ttf" LogicalName="HultUI.Headless.Fonts.DejaVuSans.ttf" />
+    <EmbeddedResource Include="Fonts\DejaVuSans-Bold.ttf" LogicalName="HultUI.Headless.Fonts.DejaVuSans-Bold.ttf" />
+    <EmbeddedResource Include="Fonts\DejaVuSans-Oblique.ttf" LogicalName="HultUI.Headless.Fonts.DejaVuSans-Oblique.ttf" />
+    <EmbeddedResource Include="Fonts\DejaVuSans-BoldOblique.ttf" LogicalName="HultUI.Headless.Fonts.DejaVuSans-BoldOblique.ttf" />
+    <EmbeddedResource Include="Fonts\DejaVuSansMono.ttf" LogicalName="HultUI.Headless.Fonts.DejaVuSansMono.ttf" />
+    <None Include="Fonts\LICENSE-DejaVu.txt" Pack="true" PackagePath="licenses\" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />

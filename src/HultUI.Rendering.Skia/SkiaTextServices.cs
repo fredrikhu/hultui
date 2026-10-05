@@ -20,9 +20,13 @@ public sealed class SkiaTextServices
     public TextPipeline Pipeline { get; }
     public SkiaMeasureContext MeasureContext { get; }
 
-    public SkiaTextServices()
+    public SkiaTextServices() : this(new SkiaFontCollection()) { }
+
+    /// <summary>Text services over <paramref name="fonts"/> — a collection with faces of its own
+    /// registered, or a pinned one (<see cref="SkiaFontCollection.Pinned"/>).</summary>
+    public SkiaTextServices(SkiaFontCollection fonts)
     {
-        Fonts = new SkiaFontCollection();
+        Fonts = fonts;
         Shaper = new SkiaTextShaper();
         Pipeline = new TextPipeline(Fonts, Shaper);
         MeasureContext = new SkiaMeasureContext(Pipeline);

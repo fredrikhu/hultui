@@ -59,6 +59,23 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new();
     private const int RunBlobCacheMaxSize = 2048;
 
+    // The same runs as glyph outlines, for TextAsOutlines.
+    private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new();
+    private readonly SKFont _outlineFont = new() { Hinting = SKFontHinting.None, Subpixel = true, LinearMetrics = true };
+
+    /// <summary>
+    /// Draws text as its glyphs' outlines through Skia's own path rasteriser, rather than
+    /// through the platform's glyph scaler. DirectWrite on Windows and FreeType on Linux shade
+    /// the same font file differently — thousands of pixels over a few lines, even unhinted —
+    /// while the outlines come out byte for byte the same. Slower, and without hinting; for
+    /// golden images, which have to match on every machine.
+    /// </summary>
+    public bool TextAsOutlines { get; set; }
+
+    /// <summary>The face canvas-element text draws in, when not the platform's default — a
+    /// pinned collection's, so that text is pinned too.</summary>
+    internal SKTypeface? CanvasTypeface { get; set; }
+
     // The device scale of the frame being drawn. The canvas carries it as a transform, so
     // everything below works in layout units and never sees device pixels — except the border
     // snapping, which is entirely about where a band lands on the device grid.
@@ -492,11 +509,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             float lineY = bounds.Y + line.OffsetY + line.Ascent;
 
             foreach (var run in line.Runs)
-            {
-                var blob = BuildShapedBlob(run);
-                if (blob is not null)
-                    Canvas.DrawText(blob, baseX + run.OffsetX, lineY, _pooledPaint);
-            }
+                DrawRun(run, baseX + run.OffsetX, lineY);
 
             if (style.Decoration != TextDecoration.None)
                 DrawTextDecoration(style, baseX, lineY, line);
@@ -629,9 +642,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             foreach (var run in line.Runs)
             {
                 if (run.OffsetX >= r.X1 || run.OffsetX + run.Width <= r.X0) continue;
-                var blob = BuildShapedBlob(run);
-                if (blob is not null)
-                    Canvas.DrawText(blob, baseX + run.OffsetX, baselineY, _pooledPaint);
+                DrawRun(run, baseX + run.OffsetX, baselineY);
             }
             Canvas.RestoreToCount(save);
         }
@@ -1103,6 +1114,55 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     // ── Text blob building (positioned from HarfBuzz-shaped glyphs) ──
 
+    /// <summary>One shaped run at a baseline, in <see cref="_pooledPaint"/>: as a text blob, or
+    /// as outlines under <see cref="TextAsOutlines"/>.</summary>
+    private void DrawRun(ShapedRun run, float x, float y)
+    {
+        if (TextAsOutlines)
+        {
+            if (BuildShapedPath(run) is not { } path) return;
+            Canvas.Save();
+            Canvas.Translate(x, y);
+            _pooledPaint.Style = SKPaintStyle.Fill;
+            Canvas.DrawPath(path, _pooledPaint);
+            Canvas.Restore();
+            return;
+        }
+        var blob = BuildShapedBlob(run);
+        if (blob is not null)
+            Canvas.DrawText(blob, x, y, _pooledPaint);
+    }
+
+    private SKPath? BuildShapedPath(ShapedRun run)
+    {
+        if (_runPathCache.TryGetValue(run, out var cached))
+            return cached;
+        if (run.Glyphs.Length == 0)
+            return null;
+
+        _outlineFont.Typeface = (SKTypeface)run.Font.NativeHandle;
+        _outlineFont.Size = run.FontSize;
+        var path = new SKPath();
+        foreach (var glyph in run.Glyphs)
+        {
+            using var outline = _outlineFont.GetGlyphPath((ushort)glyph.GlyphId);
+            if (outline is not null)
+                path.AddPath(outline, glyph.X, glyph.Y);
+        }
+
+        if (_runPathCache.Count >= RunBlobCacheMaxSize)
+            ClearRunPathCache();
+        _runPathCache[run] = path;
+        return path;
+    }
+
+    private void ClearRunPathCache()
+    {
+        foreach (var path in _runPathCache.Values)
+            path?.Dispose();
+        _runPathCache.Clear();
+    }
+
     private SKTextBlob? BuildShapedBlob(ShapedRun run)
     {
         if (_runBlobCache.TryGetValue(run, out var cached))
@@ -1183,6 +1243,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         foreach (var wrapped in _wrappedTextures.Values) wrapped.Image.Dispose();
         _wrappedTextures.Clear();
         ClearRunBlobCache();
+        ClearRunPathCache();
+        _outlineFont.Dispose();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
         _pooledRoundRect.Dispose();
