@@ -456,6 +456,37 @@ centered.Position.Left = Dimension.Percent(50);
 
 The default position type is `Relative`, which keeps the element in normal flow.
 
+### Sticky
+
+`Sticky()` (`PositionType.Sticky`) keeps an element in the flow but holds it against an edge
+of the nearest scroll view while that has scrolled past it — a section header that stays in
+sight while its section scrolls under it.
+
+```csharp
+ScrollView.Vertical().Children(Flex.Column(gap: 0).Children(
+    sections.Select(s => Flex.Column(gap: 0).Children(
+        Text.New(s.Title).Background(Theme.Surface).Sticky(),   // held at the top
+        s.Rows))));
+
+footer.Sticky(top: null, bottom: 0);   // held at the bottom until its place scrolls into view
+```
+
+- **The inset** is `Top` (or `Bottom`, `Left`, `Right`): how far from the viewport's edge it is
+  held. `Sticky(top: 8)` holds it 8 below the top.
+- **It never leaves its parent's box,** so give each section its own container: when a section's
+  end reaches the header, the header goes with it and the next one takes over. A sticky element
+  that is the scroll view's own child is held across everything that scrolls, and a later one
+  is drawn over an earlier one.
+- **Revealing keeps clear of it:** `ScrollIntoView` and `ScrollRangeIntoView` leave a revealed row
+  below a header held at the top, rather than under it.
+- **It is drawn over what scrolls under it** — after its siblings at its `ZIndex` — so give it a
+  background, or the rows show through.
+- **Layout does not move it.** The shift is worked out from the scroll offset whenever it is drawn,
+  hit, read by a screen reader or measured (`ScreenBorderBox`), so a popover or tooltip anchored
+  to a stuck header opens where the header is.
+- Outside a scroll view it stays where it is. Rows of a `VirtualListElement` are not sections; a
+  stuck group header in a virtual list is a different feature.
+
 ---
 
 ## 11. Overflow

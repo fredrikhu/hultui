@@ -107,28 +107,36 @@ public static class AccessibilityTreeBuilder
     {
         foreach (var child in element.Children)
         {
-            // The child's own box sits in the parent's scroll space; its own
-            // scroll (if it's a ScrollView) applies to its descendants.
-            var (cx, cy) = ChildScroll(child, scrollX, scrollY);
-            var childClip = ClipForChildren(child, clip, scrollX, scrollY);
-            if (IsSemantic(child))
-            {
-                var childNode = CreateNode(child, focusManager, scrollX, scrollY);
-                childNode.IsOffscreen = !RectsIntersect(clip, childNode.BoundingRect);
-                parent.AddChild(childNode);
-                // A virtualized list only materializes on-screen rows as elements;
-                // expose every item to assistive tech instead. Otherwise, unless a
-                // text-only button folded its text into its own name (which would
-                // double-announce), walk the real children.
-                if (!TryBuildContent(child, childNode, cx, cy, childClip)
-                    && !TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
-                    BuildChildren(child, childNode, focusManager, cx, cy, childClip);
-            }
-            else
-            {
-                // Flatten: promote this element's children directly into parent
-                BuildChildren(child, parent, focusManager, cx, cy, childClip);
-            }
+            // A sticky child is moved by its shift, subtree and all — to the builder, a negative scroll.
+            var stick = child.PositionRead.Type == Layout.PositionType.Sticky ? child.StickyShift : default;
+            BuildChild(child, parent, focusManager, scrollX - stick.X, scrollY - stick.Y, clip);
+        }
+    }
+
+    private static void BuildChild(Element child, AccessibilityNode parent, FocusManager? focusManager,
+        float scrollX, float scrollY, Rect clip)
+    {
+        // The child's own box sits in the parent's scroll space; its own
+        // scroll (if it's a ScrollView) applies to its descendants.
+        var (cx, cy) = ChildScroll(child, scrollX, scrollY);
+        var childClip = ClipForChildren(child, clip, scrollX, scrollY);
+        if (IsSemantic(child))
+        {
+            var childNode = CreateNode(child, focusManager, scrollX, scrollY);
+            childNode.IsOffscreen = !RectsIntersect(clip, childNode.BoundingRect);
+            parent.AddChild(childNode);
+            // A virtualized list only materializes on-screen rows as elements;
+            // expose every item to assistive tech instead. Otherwise, unless a
+            // text-only button folded its text into its own name (which would
+            // double-announce), walk the real children.
+            if (!TryBuildContent(child, childNode, cx, cy, childClip)
+                && !TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
+                BuildChildren(child, childNode, focusManager, cx, cy, childClip);
+        }
+        else
+        {
+            // Flatten: promote this element's children directly into parent
+            BuildChildren(child, parent, focusManager, cx, cy, childClip);
         }
     }
 

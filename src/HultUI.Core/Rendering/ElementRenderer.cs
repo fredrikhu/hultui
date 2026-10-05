@@ -29,6 +29,21 @@ public static class ElementRenderer
     private static void RenderElement(Element element, IRenderContext ctx, FrameTracer? tracer,
         float offsetX, float offsetY, Rect? cull)
     {
+        // A sticky element is drawn moved by its shift, subtree and all; culled where it is drawn.
+        if (element.PositionRead.Type == PositionType.Sticky && element.StickyShift is { } stick
+            && (stick.X != 0 || stick.Y != 0))
+        {
+            ctx.PushTranslate(stick.X, stick.Y);
+            RenderInPlace(element, ctx, tracer, offsetX + stick.X, offsetY + stick.Y, cull);
+            ctx.Pop();
+            return;
+        }
+        RenderInPlace(element, ctx, tracer, offsetX, offsetY, cull);
+    }
+
+    private static void RenderInPlace(Element element, IRenderContext ctx, FrameTracer? tracer,
+        float offsetX, float offsetY, Rect? cull)
+    {
         if (cull is Rect clip &&
             !element.Layout.AbsoluteBorderBox.Translate(offsetX, offsetY).IntersectsWith(clip))
             return; // fully outside the visible clip region — skip the subtree

@@ -530,11 +530,16 @@ public partial class JunctionApp
         // every row that offers an action labels itself with it ("Stage 3 files").
         _changeSelFileCount = ChangeSelectionPaths(data).Count;
 
+        // Each section is a column of its own: its header is held at the top of the list while
+        // its rows scroll under it — Stage all / Unstage all stay in reach in a long list — and
+        // the next section's header pushes it off.
+
         // Conflicts first — selecting one opens its resolution pane on the right.
         if (data.Conflicted.Count > 0)
         {
-            scroll.AddChild(SectionHeader($"Conflicts · {data.Conflicted.Count}", Nocturne.DangerText, "", null));
-            AddChangeRows(scroll, ChangeSection.Conflicted, data.Conflicted);
+            var conflicts = SectionColumn(SectionHeader($"Conflicts · {data.Conflicted.Count}", Nocturne.DangerText, "", null));
+            AddChangeRows(conflicts, ChangeSection.Conflicted, data.Conflicted);
+            scroll.AddChild(conflicts);
         }
 
         if (data.Staged.Count == 0 && data.Unstaged.Count == 0)
@@ -546,13 +551,15 @@ public partial class JunctionApp
         }
         else
         {
-            scroll.AddChild(SectionHeader($"Staged · {data.Staged.Count}", Nocturne.Accent300,
+            var staged = SectionColumn(SectionHeader($"Staged · {data.Staged.Count}", Nocturne.Accent300,
                 "Unstage all", data.Staged.Count > 0 ? UnstageAll : null, topGap: data.Conflicted.Count > 0));
-            AddChangeRows(scroll, ChangeSection.Staged, data.Staged);
+            AddChangeRows(staged, ChangeSection.Staged, data.Staged);
+            scroll.AddChild(staged);
 
-            scroll.AddChild(SectionHeader($"Changes · {data.Unstaged.Count}", Nocturne.On(0.42),
+            var unstaged = SectionColumn(SectionHeader($"Changes · {data.Unstaged.Count}", Nocturne.On(0.42),
                 "Stage all", data.Unstaged.Count > 0 ? StageAll : null, topGap: true));
-            AddChangeRows(scroll, ChangeSection.Unstaged, data.Unstaged);
+            AddChangeRows(unstaged, ChangeSection.Unstaged, data.Unstaged);
+            scroll.AddChild(unstaged);
         }
 
         // Assume-unchanged files are hidden from status, so surface them here with a
@@ -560,10 +567,11 @@ public partial class JunctionApp
         // never seen again).
         if (data.AssumeUnchanged.Count > 0)
         {
-            scroll.AddChild(SectionHeader($"Hidden · {data.AssumeUnchanged.Count}", Nocturne.On(0.42),
+            var hidden = SectionColumn(SectionHeader($"Hidden · {data.AssumeUnchanged.Count}", Nocturne.On(0.42),
                 "", null, topGap: data.Staged.Count > 0 || data.Unstaged.Count > 0 || data.Conflicted.Count > 0));
             foreach (var path in data.AssumeUnchanged)
-                scroll.AddChild(HiddenFileRow(path));
+                hidden.AddChild(HiddenFileRow(path));
+            scroll.AddChild(hidden);
         }
 
         col.AddChild(scroll);
@@ -571,10 +579,18 @@ public partial class JunctionApp
         return col;
     }
 
+    /// <summary>A section of the list: its header, then its rows. A column of its own, so the
+    /// header is held only while its own rows go by.</summary>
+    private static BoxElement SectionColumn(Element header) =>
+        Flex.Column(gap: 0).FlexShrink(0).Children(header);
+
     private Element SectionHeader(string label, Color labelColor, string action, Action? onAction, bool topGap = false)
     {
+        // Held at the top of the list while its section scrolls under it, on the list's own
+        // fill so the rows going by do not show through.
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(topGap ? 14 : 7, 8, 5, 8));
+            .Padding(new Thickness(topGap ? 14 : 7, 8, 5, 8))
+            .Background(Nocturne.Bg).Sticky();
         row.AddChild(Text.New(label.ToUpperInvariant()).FontSize(10f).TextColor(labelColor).FlexGrow(1));
         if (onAction != null)
             row.AddChild(Ui.GhostButton(action, null, onAction, 11f));

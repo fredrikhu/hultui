@@ -176,8 +176,9 @@ public abstract class Element
         get
         {
             var offset = AncestorScrollOffset;
+            var stuck = StickyShiftWithAncestors;
             var box = Layout.AbsoluteBorderBox;
-            return new Rect(box.X - offset.X, box.Y - offset.Y, box.Width, box.Height);
+            return new Rect(box.X - offset.X + stuck.X, box.Y - offset.Y + stuck.Y, box.Width, box.Height);
         }
     }
 
@@ -187,8 +188,9 @@ public abstract class Element
         get
         {
             var offset = AncestorScrollOffset;
+            var stuck = StickyShiftWithAncestors;
             var box = Layout.AbsoluteContentBox;
-            return new Rect(box.X - offset.X, box.Y - offset.Y, box.Width, box.Height);
+            return new Rect(box.X - offset.X + stuck.X, box.Y - offset.Y + stuck.Y, box.Width, box.Height);
         }
     }
 
@@ -232,6 +234,73 @@ public abstract class Element
             var top = this;
             while (top.Parent is { } parent) top = parent;
             return top.OverlayOrigin;
+        }
+    }
+
+    /// <summary>
+    /// How far a <see cref="PositionType.Sticky"/> element is moved from its place in the flow
+    /// right now; zero for any other. Worked out from the nearest scroll view's offset each time
+    /// it is asked — scrolling moves it, layout does not — and applied by the renderer, the hit
+    /// tester and the accessibility tree alike, and by <see cref="ScreenBorderBox"/>.
+    /// </summary>
+    internal Point StickyShift
+    {
+        get
+        {
+            var pos = PositionRead;
+            if (pos.Type != PositionType.Sticky || Parent is not { } parent) return default;
+            ScrollViewElement? scroller = null;
+            for (var e = parent; e is not null; e = e.Parent)
+                if (e is ScrollViewElement sv) { scroller = sv; break; }
+            if (scroller is null) return default;
+
+            // The viewport, in the layout space the content is laid out in: the scroll view's
+            // content box, moved along by how far it has scrolled.
+            var view = scroller.Layout.AbsoluteContentBox;
+            var box = Layout.AbsoluteBorderBox;
+            // The parent's content box bounds it — unless the parent is the scroll view itself,
+            // whose box is only the viewport: then it is held across everything that scrolls.
+            var room = ReferenceEquals(parent, scroller)
+                ? new Rect(view.X, view.Y, MathF.Max(view.Width, scroller.ContentWidth), MathF.Max(view.Height, scroller.ContentHeight))
+                : parent.Layout.AbsoluteContentBox;
+            float dx = Stick(box.X, box.Right, view.X + scroller.ScrollOffsetX, view.Right + scroller.ScrollOffsetX,
+                pos.Left, pos.Right, room.X, room.Right, view.Width);
+            float dy = Stick(box.Y, box.Bottom, view.Y + scroller.ScrollOffsetY, view.Bottom + scroller.ScrollOffsetY,
+                pos.Top, pos.Bottom, room.Y, room.Bottom, view.Height);
+            return new Point(dx, dy);
+        }
+    }
+
+    /// <summary>
+    /// One axis of <see cref="StickyShift"/>: pushed in to the start inset while the viewport has
+    /// passed the element's start, or back to the end inset while its end is beyond the
+    /// viewport's — never out of the parent's content box.
+    /// </summary>
+    private static float Stick(float start, float end, float viewStart, float viewEnd,
+        Dimension startInset, Dimension endInset, float roomStart, float roomEnd, float viewSize)
+    {
+        if (startInset.Resolve(viewSize) is { } s && start < viewStart + s)
+            return MathF.Min(viewStart + s - start, MathF.Max(0f, roomEnd - end));
+        if (endInset.Resolve(viewSize) is { } e && end > viewEnd - e)
+            return MathF.Max(viewEnd - e - end, MathF.Min(0f, roomStart - start));
+        return 0f;
+    }
+
+    /// <summary>The sticky shifts of this element and every ancestor: what moves it on screen
+    /// besides the scroll views.</summary>
+    private Point StickyShiftWithAncestors
+    {
+        get
+        {
+            float x = 0, y = 0;
+            for (Element? e = this; e is not null; e = e.Parent)
+            {
+                if (e.PositionRead.Type != PositionType.Sticky) continue;
+                var shift = e.StickyShift;
+                x += shift.X;
+                y += shift.Y;
+            }
+            return new Point(x, y);
         }
     }
 

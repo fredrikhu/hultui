@@ -289,6 +289,38 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         // (The setter clamps, so an over-shoot near the ends is corrected.)
         if (top < cur) ScrollOffsetY = top;
         else if (bottom > cur + viewportHeight) ScrollOffsetY = bottom - viewportHeight;
+
+        // A sticky header held at the top would now cover the band's top — a row revealed by
+        // arrowing up would land under its own section's header. Scroll back by as much.
+        float covered = StuckHeaderReach() - (top - _scrollOffsetY);
+        if (covered > 0.5f) ScrollOffsetY = _scrollOffsetY - covered;
+    }
+
+    /// <summary>
+    /// How far below the viewport's top edge the sticky elements held against it reach, at the
+    /// current offset; 0 when none is held. A shallow walk — sections are a level or two down —
+    /// run on a reveal, never per frame; nested scroll views hold their own.
+    /// </summary>
+    private float StuckHeaderReach()
+    {
+        float viewTop = Layout.AbsoluteContentBox.Y + _scrollOffsetY;
+        float reach = 0f;
+        Walk(this, 0);
+        return reach;
+
+        void Walk(Element element, int depth)
+        {
+            var children = element.Children;
+            for (int i = 0; i < children.Count; i++)
+            {
+                var child = children[i];
+                if (child is ScrollViewElement) continue;
+                var pos = child.PositionRead;
+                if (pos.Type == HultUI.Core.Layout.PositionType.Sticky && !pos.Top.IsNone && child.StickyShift.Y > 0f)
+                    reach = MathF.Max(reach, child.Layout.AbsoluteBorderBox.Bottom + child.StickyShift.Y - viewTop);
+                if (depth < 3) Walk(child, depth + 1);
+            }
+        }
     }
 
     /// <summary>A reveal that arrived before this view knew its own size, waiting for the

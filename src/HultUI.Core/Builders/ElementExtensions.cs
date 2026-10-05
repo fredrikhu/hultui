@@ -18,6 +18,25 @@ public static class ElementExtensions
     public static T MaxWidth<T>(this T el, Dimension w) where T : Element { el.Box.MaxWidth = w; return el; }
     public static T MaxHeight<T>(this T el, Dimension h) where T : Element { el.Box.MaxHeight = h; return el; }
 
+    /// <summary>
+    /// Holds the element <paramref name="top"/> from the top of the nearest scroll view while it
+    /// is scrolled past, within its parent's box — a section header that stays in sight while its
+    /// section scrolls under it. Give it a background, or what scrolls under shows through.
+    /// <paramref name="bottom"/> holds it to the bottom edge instead (pass <c>top: null</c>);
+    /// <paramref name="left"/> and <paramref name="right"/> do the same sideways.
+    /// See <see cref="Layout.PositionType.Sticky"/>.
+    /// </summary>
+    public static T Sticky<T>(this T el, float? top = 0f, float? bottom = null, float? left = null, float? right = null)
+        where T : Element
+    {
+        el.Position.Type = Layout.PositionType.Sticky;
+        el.Position.Top = top is { } t ? Dimension.Px(t) : Dimension.None;
+        el.Position.Bottom = bottom is { } b ? Dimension.Px(b) : Dimension.None;
+        el.Position.Left = left is { } l ? Dimension.Px(l) : Dimension.None;
+        el.Position.Right = right is { } r ? Dimension.Px(r) : Dimension.None;
+        return el;
+    }
+
     /// <summary>Keeps the box at <paramref name="ratio"/>, width over height: the side left auto
     /// follows the one that is set, stretched or flexed. See <see cref="Layout.BoxStyle.AspectRatio"/>.</summary>
     public static T AspectRatio<T>(this T el, float ratio) where T : Element { el.Box.AspectRatio = ratio; return el; }
