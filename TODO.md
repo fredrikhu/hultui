@@ -783,7 +783,7 @@
   is not understood yet. Changing `Card` also forces `CardHover`, and the Gallery labels the
   hover brush `CardBackgroundTertiary` while showing a warning on it. Not worth guessing at:
   what would settle it is a hover measurement on a Settings card, which needs the real pointer.
-- **Automatic minimum size for flex items** (CSS `min-height:auto`) — content can still be crushed below its own size inside a bounded container. Needs a real recursive min-content pass in which scroll containers contribute zero; approximating it from the flex Phase 1 measurement was tried and reverted, because for a container that measurement is its full content extent, so an ancestor wrapping a scroll view gets pinned to the whole scrollable height (14,640px tall, 1007 draw calls instead of 47). `FlexShrinkTests` carries a skipped case. Add a shrink-heavy benchmark first — the current suite barely exercises the shrink path, so it would not catch the cost.
+- **Automatic minimum size for flex items** (CSS `min-height:auto`) — content can still be crushed below its own size inside a bounded container. Needs a real recursive min-content pass in which scroll containers contribute zero; approximating it from the flex Phase 1 measurement was tried and reverted, because for a container that measurement is its full content extent, so an ancestor wrapping a scroll view gets pinned to the whole scrollable height (14,640px tall, 1007 draw calls instead of 47). `FlexShrinkTests` carries a skipped case. The shrink-heavy benchmark this needed exists since 2026-10-05: the scenario suite's `layout/shrink …` rows (`samples/HultUI.Samples.PerfSuite -- --filter layout/shrink`) — capture them before and after.
 - **Render-log element attribution** — recorded ops carry no element identity, so "what did this element draw?" means matching on coordinates. `ElementRenderer` has a single per-element call site to hook.
 - UIA `ITextProvider` (word-by-word reader navigation) — currently exposed via `IValueProvider`. Would also let selectable labels (`TextElement.Selectable`) report their selected sub-range to assistive tech via `GetSelection`/`RangeFromPoint`; today mouse/keyboard selection works but a screen reader reads the label as a whole.
 - AT-SPI `Text` / `EditableText` interfaces.
@@ -804,7 +804,10 @@ and benchmark work.
   `--auto --virtual`, in one session, with `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0` so the
   window doesn't steal focus. Unit tests passed straight through a viewport-collapsing
   regression that only the benchmark caught. Compare within a single session only;
-  cross-session numbers are noise.
+  cross-session numbers are noise. For the breadth, also the scenario suite
+  (`samples/HultUI.Samples.PerfSuite -- --filter layout,grid,text --json …` on both
+  sides, then `--compare`): it covers grid, wrap, baseline, shrink, text and resize
+  paths the table never takes.
 - **Snapshot baselines in raw string literals carry the source file's line endings**
   (CRLF on Windows, LF on Linux under autocrlf), so a baseline can pass one CI leg and
   fail the other. Normalise with `ReplaceLineEndings("\n")`.

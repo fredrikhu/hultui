@@ -74,6 +74,56 @@ static partial class Scenarios
                 return new Op { Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760) };
             });
 
+        // The flex-shrink path, which nothing else here exercises: every container below
+        // holds more than fits, so each resize step redistributes the overflow by shrink
+        // factor. TODO.md asks for this before an automatic minimum size (CSS
+        // min-width:auto) is attempted, so that its cost shows.
+        yield return new Scenario("layout/shrink 300 overfull rows resize",
+            "300 rows of 8 items whose bases add up to more than the width (mixed shrink factors), resize drag",
+            ctx =>
+            {
+                var rows = new Element[300];
+                for (int r = 0; r < rows.Length; r++)
+                {
+                    var items = new Element[8];
+                    for (int i = 0; i < items.Length; i++)
+                        items[i] = Box.New().FlexBasis(Dimension.Px(150 + 20 * i)).FlexShrink(1 + i % 3)
+                            .MinWidth(Dimension.Px(24)).Padding(new Thickness(2, 6)).Background(i % 2 == 0 ? Ui.Selected : Ui.CardFill)
+                            .Children(Text.New(Ui.Label(ctx.Rng)).FontSize(12f).MaxLines(1).TextOverflow(TextOverflow.Clip));
+                    rows[r] = Flex.Row(gap: 4).FlexShrink(0).Padding(2).Children(items);
+                }
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+                var first = rows[0].Children[0];
+                return new Op
+                {
+                    Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760),
+                    Check = _ => first.Layout.Width < 150 ? null : $"the first item kept its 150 px basis ({first.Layout.Width:0} px): nothing shrank",
+                };
+            });
+
+        yield return new Scenario("layout/shrink bounded columns resize",
+            "Six fixed-height columns of 60 items each, too tall to fit, during a vertical resize drag",
+            ctx =>
+            {
+                var columns = new Element[6];
+                for (int c = 0; c < columns.Length; c++)
+                {
+                    var items = new Element[60];
+                    for (int i = 0; i < items.Length; i++)
+                        items[i] = Box.New().Height(Dimension.Px(24 + i % 4 * 6)).FlexShrink(1 + i % 2)
+                            .Background(i % 2 == 0 ? Ui.Selected : Ui.CardFill)
+                            .Children(Text.New(Ui.Label(ctx.Rng)).FontSize(11f));
+                    columns[c] = Flex.Column(gap: 2).FlexGrow(1).FlexBasis(Dimension.Px(0)).Children(items);
+                }
+                ctx.Mount(Flex.Row(gap: 8).FlexGrow(1).Padding(8).Children(columns));
+                var first = columns[0].Children[0];
+                return new Op
+                {
+                    Run = step => ctx.Window.SetClientSize(1040, 760 - 4 * (1 + step % 40)),
+                    Check = _ => first.Layout.Height < 24 ? null : $"the first item kept its 24 px height ({first.Layout.Height:0} px): nothing shrank",
+                };
+            });
+
         yield return new Scenario("layout/cards create 300",
             "Replace a wrapping panel with 300 fresh cards (title, wrapped text, footer)",
             ctx =>
