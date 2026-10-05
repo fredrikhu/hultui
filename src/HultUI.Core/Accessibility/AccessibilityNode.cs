@@ -38,6 +38,10 @@ public sealed class AccessibilityNode
     /// <summary>Expanded state for an expandable node, or null if not expandable.</summary>
     public bool? Expanded { get; }
 
+    /// <summary>Selected state for one of a set — a radio button, a tab — or null for a node
+    /// that is not selectable that way. List items answer through their list instead.</summary>
+    public bool? IsSelected { get; }
+
     /// <summary>True when the node is scrolled/clipped out of the visible viewport.</summary>
     public bool IsOffscreen { get; internal set; }
 
@@ -87,7 +91,8 @@ public sealed class AccessibilityNode
         string? value = null,
         string? automationId = null,
         bool? expanded = null,
-        bool isPassword = false)
+        bool isPassword = false,
+        bool? isSelected = null)
     {
         ElementId = elementId;
         Role = role;
@@ -102,6 +107,7 @@ public sealed class AccessibilityNode
         AutomationId = automationId;
         Expanded = expanded;
         IsPassword = isPassword;
+        IsSelected = isSelected;
     }
 
     internal void AddChild(AccessibilityNode child)

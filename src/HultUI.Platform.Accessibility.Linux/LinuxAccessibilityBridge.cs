@@ -279,7 +279,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 _bus!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);
                 return true;
             case AccessibilityProperties.IsSelected:
-                _bus!.EmitStateChanged(path, "selected", change.Node.IsToggled == true);
+                _bus!.EmitStateChanged(path, "selected", change.Node.IsSelected == true);
                 return true;
             case AccessibilityProperties.Text:
             {

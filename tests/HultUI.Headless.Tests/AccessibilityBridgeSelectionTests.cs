@@ -80,6 +80,16 @@ public sealed class WindowsFactAttribute : FactAttribute
     }
 }
 
+/// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="WindowsFactAttribute"/>.</summary>
+public sealed class WindowsTheoryAttribute : TheoryAttribute
+{
+    public WindowsTheoryAttribute()
+    {
+        if (!OperatingSystem.IsWindows())
+            Skip = "Windows-only: UI Automation bridge.";
+    }
+}
+
 /// <summary>A real, hidden Win32 window — the bridge subclasses its window procedure.</summary>
 internal sealed class TestHwnd : IDisposable
 {

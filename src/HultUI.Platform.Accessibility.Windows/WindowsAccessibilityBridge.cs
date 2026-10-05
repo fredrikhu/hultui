@@ -268,9 +268,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         return false;
     }
 
-    /// <summary>The selection container (owning list, as Simple) of a list item, or null.</summary>
+    /// <summary>The selection container (as Simple) of a list item — its list — or of a tab —
+    /// the strip that holds it; null for anything else.</summary>
     internal IntPtr ItemSelectionContainer(ElementId itemId)
-        => TryResolveItem(itemId, out var listId, out _) ? NativeFragmentSimple(listId) : IntPtr.Zero;
+    {
+        if (TryResolveItem(itemId, out var listId, out _)) return NativeFragmentSimple(listId);
+        return _wrappers.TryGetValue(itemId, out var w) && w.Node.Parent is { Role: AccessibilityRole.TabList } strip
+            ? NativeFragmentSimple(strip.ElementId)
+            : IntPtr.Zero;
+    }
+
+    /// <summary>The snapshot selected state of a node that is not a list item — a radio
+    /// button, a tab — or null for one that has none.</summary>
+    internal bool? GetSelected(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Selected : null;
 
     /// <summary>
     /// Resolves an <c>ItemContainer.FindItemByProperty</c> <c>pStartAfter</c>
@@ -533,6 +543,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             AccessibilityProperties.Description => UiaInterop.UIA_HelpTextPropertyId,
             AccessibilityProperties.Value => UiaInterop.UIA_ValueValuePropertyId,
             AccessibilityProperties.IsPassword => UiaInterop.UIA_IsPasswordPropertyId,
+            AccessibilityProperties.IsSelected => UiaInterop.UIA_SelectionItemIsSelectedPropertyId,
             AccessibilityProperties.IsToggled => UiaInterop.UIA_ToggleToggleStatePropertyId,
             AccessibilityProperties.IsExpanded => UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId,
             AccessibilityProperties.IsEnabled => UiaInterop.UIA_IsEnabledPropertyId,

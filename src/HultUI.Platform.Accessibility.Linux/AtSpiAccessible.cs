@@ -134,10 +134,11 @@ internal sealed class AtSpiAccessible
             Focused = node.IsFocused,
             Enabled = node.IsEnabled,
             Offscreen = node.IsOffscreen,
-            Selectable = node.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab
-                or AccessibilityRole.ListItem or AccessibilityRole.TreeItem,
-            Selected = node.IsToggled == true &&
-                node.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab,
+            Selectable = node.IsSelected is not null || node.Role is AccessibilityRole.RadioButton
+                or AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem,
+            // From the node's selected state, which a checked radio and a selected tab carry. It
+            // was read from IsToggled, which neither ever had: no radio or tab read as selected.
+            Selected = node.IsSelected == true,
             Toggled = node.IsToggled,
             Expanded = node.Expanded,
             Text = node.Text,

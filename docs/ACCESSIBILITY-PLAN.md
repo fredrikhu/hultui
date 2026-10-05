@@ -276,6 +276,18 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   before that, Orca read every expandable node as a plain button.
 - **Table column headers** — role `ColumnHeader` (UIA HeaderItem, AT-SPI table column header),
   Invoke/click sorts (`TableView<T>`, 2026-10-05).
+- **Tabs** — per W3C Core-AAM 1.1 (2026-10-05). Role `TabList` is the strip: UIA `Tab`,
+  AT-SPI `page tab list`. Role `Tab` is one tab: UIA `TabItem`, AT-SPI `page tab`; it is
+  named from its content, as a button is. Role `TabPanel` is the content shown for a tab:
+  UIA `Pane`, AT-SPI `scroll pane`. (`Tab` used to be UIA's strip type and `TabPanel`
+  AT-SPI's tab list.) `TabsElement` uses all three: each header is a tab with
+  `AccessibleSelected` set, and the panel is named after the tab it shows.
+- **Selected** — `Element.AccessibleSelected` (`null` = not selectable) for one of a set —
+  a tab; a `RadioButtonElement` is selected when checked. The node's `IsSelected` gives UIA
+  the SelectionItem pattern (a tab's container is its strip; `Select` clicks the element)
+  and its IsSelected property and change event, and AT-SPI the `selectable` and `selected`
+  states. AT-SPI's `selected` used to come from `IsToggled`, which no radio or tab carried,
+  so neither was ever announced as selected.
 - **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 - **Scroll** — scroll views and virtualized lists; read scroll percent/view size

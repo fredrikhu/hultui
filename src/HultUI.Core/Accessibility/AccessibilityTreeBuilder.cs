@@ -92,7 +92,8 @@ public static class AccessibilityTreeBuilder
             value: ResolveValue(element),
             automationId: element.AutomationId,
             expanded: element.AccessibleExpanded,
-            isPassword: element is TextInputElement { Masked: true });
+            isPassword: element is TextInputElement { Masked: true },
+            isSelected: ResolveIsSelected(element));
         node.NativeContent = element.NativeAccessibleContent;
         if (element.AccessibleTextSource is { } text)
         {
@@ -171,7 +172,9 @@ public static class AccessibilityTreeBuilder
             isEnabled: data.IsEnabled,
             isToggled: data.IsToggled,
             value: data.Value,
-            expanded: data.Expanded)
+            expanded: data.Expanded,
+            // Described content says checked for a radio or a tab; for those, that is selected.
+            isSelected: data.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab ? data.IsToggled : null)
         {
             IsOffscreen = !RectsIntersect(clip, rect),
         };
@@ -329,10 +332,10 @@ public static class AccessibilityTreeBuilder
     /// <summary>
     /// Roles whose accessible name is derived from descendant text when no
     /// explicit <see cref="Element.AccessibleName"/> is set (as in the UIA/HTML
-    /// "name from content" rule). Currently buttons.
+    /// "name from content" rule). Currently buttons and tabs, which ARIA names from content too.
     /// </summary>
     private static bool IsNameFromContentRole(AccessibilityRole role)
-        => role == AccessibilityRole.Button;
+        => role is AccessibilityRole.Button or AccessibilityRole.Tab;
 
     /// <summary>
     /// Concatenates the text of an element's descendant <see cref="TextElement"/>s
@@ -391,6 +394,14 @@ public static class AccessibilityTreeBuilder
         CheckboxElement cb => cb.IsChecked,
         ToggleSwitchElement ts => ts.IsOn,
         _ => null
+    };
+
+    /// <summary>Selected, for one of a set: a radio button is when it is checked; anything
+    /// else says so with <see cref="Element.AccessibleSelected"/>.</summary>
+    internal static bool? ResolveIsSelected(Element element) => element switch
+    {
+        RadioButtonElement rb => rb.IsChecked,
+        _ => element.AccessibleSelected,
     };
 
     internal static string? ResolveValue(Element element) => element switch

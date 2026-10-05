@@ -262,6 +262,7 @@ internal sealed class CefAccessibleTree
         "progressIndicator" or "meter" => AccessibilityRole.ProgressBar,
         "tab" => AccessibilityRole.Tab,
         "tabPanel" => AccessibilityRole.TabPanel,
+        "tabList" => AccessibilityRole.TabList,
         "dialog" or "alertDialog" => AccessibilityRole.Dialog,
         "alert" or "status" => AccessibilityRole.Alert,
         "splitter" or "separator" => AccessibilityRole.Separator,

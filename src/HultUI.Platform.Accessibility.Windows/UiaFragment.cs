@@ -37,10 +37,15 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private bool? _expanded;
     private bool _isOffscreen;
     private bool _isPassword;
+    private bool? _isSelected;
     private bool _hasText;
 
     /// <summary>Snapshot expand state (null = not expandable), read by the ExpandCollapse provider.</summary>
     public bool? Expanded => _expanded;
+
+    /// <summary>Snapshot selected state (null = not selectable that way), read by the
+    /// SelectionItem provider for anything that is not a list item.</summary>
+    public bool? Selected => _isSelected;
 
     public UiaFragment(WindowsAccessibilityBridge bridge, AccessibilityNode node)
     {
@@ -71,6 +76,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _expanded = node.Expanded;
         _isOffscreen = node.IsOffscreen;
         _isPassword = node.IsPassword;
+        _isSelected = node.IsSelected;
         _hasText = node.TextSource is not null || node.Text is not null;
     }
 
@@ -116,6 +122,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             _ when patternId == UiaInterop.UIA_TogglePatternId && _isToggled is not null
                 => new UiaToggleProvider(_bridge, ElementId),
             AccessibilityRole.RadioButton when patternId == UiaInterop.UIA_SelectionItemPatternId
+                => new UiaSelectionItemProvider(_bridge, ElementId),
+            // Anything else that is one of a set — a tab — says so with a selected state.
+            _ when patternId == UiaInterop.UIA_SelectionItemPatternId && _isSelected is not null
                 => new UiaSelectionItemProvider(_bridge, ElementId),
             AccessibilityRole.TextInput when patternId == UiaInterop.UIA_ValuePatternId
                 => new UiaValueProvider(_bridge, ElementId),
@@ -168,6 +177,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(_isOffscreen),
             UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),
+            UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected
+                => UiaVariant.FromBool(selected),
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
             UiaInterop.UIA_ToggleToggleStatePropertyId when _isToggled is { } t
                 => UiaVariant.FromInt(t ? UiaInterop.ToggleState_On : UiaInterop.ToggleState_Off),
@@ -296,7 +307,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.TreeItem => UiaInterop.UIA_TreeItemControlTypeId,
         AccessibilityRole.ScrollView => UiaInterop.UIA_PaneControlTypeId,
         AccessibilityRole.Group => UiaInterop.UIA_GroupControlTypeId,
-        AccessibilityRole.Tab => UiaInterop.UIA_TabControlTypeId,
+        // One tab. UIA's Tab control type is the strip of them (W3C Core-AAM, as Chromium maps it).
+        AccessibilityRole.Tab => UiaInterop.UIA_TabItemControlTypeId,
+        AccessibilityRole.TabList => UiaInterop.UIA_TabControlTypeId,
         AccessibilityRole.Separator => UiaInterop.UIA_SeparatorControlTypeId,
         AccessibilityRole.Application => UiaInterop.UIA_WindowControlTypeId,
         AccessibilityRole.Link => UiaInterop.UIA_HyperlinkControlTypeId,

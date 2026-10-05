@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Events;
@@ -153,6 +154,7 @@ public sealed class TabsElement : BoxElement
     {
         var strip = (horizontal ? FlexBuild.Row(gap: _style == TabStyle.Enclosed ? 4f : 2f) : FlexBuild.Column(gap: 2f))
             .FlexShrink(0);
+        strip.Role = AccessibilityRole.TabList;
 
         if (_style == TabStyle.Pill)
         {
@@ -182,6 +184,13 @@ public sealed class TabsElement : BoxElement
             .Padding(new Thickness(7, 14, 7, 14))
             .AlignItems(AlignItems.Center)
             .Cursor(CursorType.Pointer);
+        // A tab, and whether it is the one showing: without these a reader heard a button,
+        // and could not tell which tab was open. It is named from its text, label and badge;
+        // a closable tab is named outright, or the close button's "×" would join the name.
+        header.Role = AccessibilityRole.Tab;
+        header.AccessibleSelected = active;
+        if (tab.OnClose is not null)
+            header.AccessibleName = tab.Badge is { } count ? $"{tab.Label} {count}" : tab.Label;
 
         ApplyHeaderStyle(header, active);
 
@@ -199,7 +208,7 @@ public sealed class TabsElement : BoxElement
             header.AddChild(BuildBadge(badge, active));
 
         if (tab.OnClose is { } onClose)
-            header.AddChild(BuildClose(onClose));
+            header.AddChild(BuildClose(onClose, tab.Label));
 
         header.OnOwn<ClickEvent>(_ => SetSelected(index));
         return header;
@@ -236,11 +245,15 @@ public sealed class TabsElement : BoxElement
     private Element BuildContent()
     {
         var host = BoxBuild.New().FlexGrow(1);
+        host.Role = AccessibilityRole.TabPanel;
         if (_style == TabStyle.Enclosed)
             host.Background(_theme.Surface).BorderColor(_theme.Border).BorderWidth(new Thickness(1));
 
         if (_tabs.Count > 0)
+        {
+            host.AccessibleName = _tabs[_selectedIndex].Label;
             host.ReplaceChildren(GetPanel(_selectedIndex));
+        }
 
         return host;
     }
@@ -268,9 +281,10 @@ public sealed class TabsElement : BoxElement
             .Children(TextBuild.New(text).FontSize(11f).FontWeight(FontWeight.SemiBold).TextColor(fg));
     }
 
-    private Element BuildClose(Action onClose)
+    private Element BuildClose(Action onClose, string label)
     {
         var close = BoxBuild.New()
+            .AccessibleName($"Close {label}")
             .Width(16).Height(16).CornerRadius(4f)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Cursor(CursorType.Pointer)

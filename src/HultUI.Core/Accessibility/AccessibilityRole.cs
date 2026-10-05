@@ -40,4 +40,8 @@ public enum AccessibilityRole : byte
     MenuItem,
     /// <summary>A table column's header, which sorts the column when it is pressed.</summary>
     ColumnHeader,
+    /// <summary>The strip that holds a set of <see cref="Tab"/>s: UIA's Tab control type,
+    /// AT-SPI's page tab list. One tab is <see cref="Tab"/>; what it shows is
+    /// <see cref="TabPanel"/>.</summary>
+    TabList,
 }
