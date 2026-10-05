@@ -21,7 +21,7 @@ public class AtSpiConstantsTests
     [InlineData(AccessibilityRole.Image, 27u, "image")]
     [InlineData(AccessibilityRole.ScrollView, 49u, "scroll pane")]
     [InlineData(AccessibilityRole.Slider, 51u, "slider")]
-    [InlineData(AccessibilityRole.ProgressBar, 46u, "progress bar")]
+    [InlineData(AccessibilityRole.ProgressBar, 42u, "progress bar")]
     [InlineData(AccessibilityRole.SpinButton, 52u, "spin button")]
     [InlineData(AccessibilityRole.Switch, 62u, "toggle button")]
     [InlineData(AccessibilityRole.Tab, 37u, "page tab")]
@@ -37,6 +37,7 @@ public class AtSpiConstantsTests
     [InlineData(AccessibilityRole.Application, 75u, "application")]
     [InlineData(AccessibilityRole.MenuBar, 34u, "menu bar")]
     [InlineData(AccessibilityRole.MenuItem, 35u, "menu item")]
+    [InlineData(AccessibilityRole.ColumnHeader, 57u, "table column header")]
     public void MapRole_MatchesAtSpiAbi(AccessibilityRole role, uint expectedCode, string expectedName)
     {
         uint code = AtSpiConstants.MapRole(role);

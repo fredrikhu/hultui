@@ -46,6 +46,7 @@ public sealed class Theme
     public MenuBarTheme MenuBar { get => Get<MenuBarTheme>(); init => Set(value); }
     public ExpanderTheme Expander { get => Get<ExpanderTheme>(); init => Set(value); }
     public PopoverTheme Popover { get => Get<PopoverTheme>(); init => Set(value); }
+    public TableTheme Table { get => Get<TableTheme>(); init => Set(value); }
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;

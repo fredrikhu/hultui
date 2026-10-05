@@ -157,7 +157,7 @@ internal sealed class AtSpiAccessible
 
     private static AtSpiActionKind? ActionFor(AccessibilityRole role) => role switch
     {
-        AccessibilityRole.Button or AccessibilityRole.Link => AtSpiActionKind.Click,
+        AccessibilityRole.Button or AccessibilityRole.Link or AccessibilityRole.ColumnHeader => AtSpiActionKind.Click,
         AccessibilityRole.Checkbox or AccessibilityRole.Switch => AtSpiActionKind.Toggle,
         AccessibilityRole.RadioButton => AtSpiActionKind.Select,
         AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem => AtSpiActionKind.Click,

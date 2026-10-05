@@ -101,7 +101,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // and later edit fields.
             _ when patternId is UiaInterop.UIA_TextPatternId or UiaInterop.UIA_TextPattern2Id && _hasText
                 => new UiaTextProvider(_bridge, ElementId),
-            AccessibilityRole.Button when patternId == UiaInterop.UIA_InvokePatternId
+            AccessibilityRole.Button or AccessibilityRole.ColumnHeader when patternId == UiaInterop.UIA_InvokePatternId
                 => new UiaInvokeProvider(_bridge, ElementId),
             // List items are invokable so assistive tech can activate any row —
             // including virtualized ones whose id routes back to the owning list —
@@ -306,6 +306,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.ComboBox => UiaInterop.UIA_ComboBoxControlTypeId,
         AccessibilityRole.MenuBar => UiaInterop.UIA_MenuBarControlTypeId,
         AccessibilityRole.MenuItem => UiaInterop.UIA_MenuItemControlTypeId,
+        AccessibilityRole.ColumnHeader => UiaInterop.UIA_HeaderItemControlTypeId,
         // Toggle switches read as check boxes (with toggle state) to UIA.
         AccessibilityRole.Switch => UiaInterop.UIA_CheckBoxControlTypeId,
         // No dedicated UIA control type: headings/alerts are text, dialogs are

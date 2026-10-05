@@ -38,4 +38,6 @@ public enum AccessibilityRole : byte
     /// <summary>An entry in a menu or a menu bar; one that opens a menu reports
     /// <see cref="Elements.Element.AccessibleExpanded"/>.</summary>
     MenuItem,
+    /// <summary>A table column's header, which sorts the column when it is pressed.</summary>
+    ColumnHeader,
 }

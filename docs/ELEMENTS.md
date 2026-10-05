@@ -1620,3 +1620,50 @@ element is in the window, overlay or not — what anything placed in the window 
 element's own pointer events arrive in, which inside an overlay is the overlay's; dropdowns, date
 pickers and tooltips used it to place their popups, so inside a popover they opened as far off as
 the popover is from the window's corner.
+
+## 25. TableView (columns over a virtual list)
+
+The stateful half of a table, like `TreeView<T>`: columns, which are shown and how wide, and
+how the rows sort. It builds the header and lays each row's cells on the header's grid; the app
+keeps the list, the selection, and anything else its rows do.
+
+```csharp
+_files = new TableView<FileRow>(
+[
+    new() { Id = "name", Header = "Name", Fill = 1, CanHide = false, Text = f => f.Name,
+            Compare = (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase) },
+    new() { Id = "size", Header = "Size", Width = 90, Align = ColumnAlign.End, Text = f => Size(f),
+            Compare = (a, b) => a.Size.CompareTo(b.Size), FirstSort = SortDirection.Descending },
+], MarkDirty) { Group = f => f.IsDir ? 0 : 1, StateChanged = () => Save(_files.State) };
+
+// In the build:
+Flex.Column(gap: 0).Children(_files.Header(), _files.Body(rows).FlexGrow(1))
+```
+
+- **Columns** (`TableColumn<T>`): `Id` (names it in saved state), `Header`, a `Text` or a `Cell`
+  element, `Width` or `Fill` (a share of what the fixed columns leave), `MinWidth`/`MaxWidth`,
+  `Align` (end for numbers), `Compare` (sortable when set), `FirstSort`, `Resizable`, `CanHide`,
+  `HiddenByDefault`. Header and rows share one set of grid tracks — never `auto`, which would
+  size each row on its own — so a cell cannot drift from its header.
+- **Sorting:** a press on a sortable header (or Enter/Space on it) sorts by it, again the other
+  way. `Sort(items)` is stable and memoized on the list's identity. `Group` pins rows whatever the
+  direction (a file list's ".." and folders). An app that sorts its own rows (Vesper keeps a sort
+  per tab) calls `SetSort` to tell the header, and passes `sort: false` to `Body`.
+- **Widths:** drag the grip at a column's edge; a double click puts its own width back. Columns
+  before the fill resize from their end edge, columns after it from their start edge — the fixed
+  columns after a fill are pinned to the table's end, so their end edge cannot follow a drag.
+- **Columns shown:** a right press on the header lists the columns that can be hidden, checked
+  when shown.
+- **State:** `State` (sort, dragged widths, hidden and shown columns) for a settings file;
+  `Restore` puts it back and skips columns that no longer exist; `StateChanged` runs when a click
+  or a drag settles, not on every move.
+- **Keyboard:** sortable headers are Tab stops unless `HeadersTakeFocus` is off — off for a list
+  that owns Tab itself.
+- **Accessibility:** headers have the new `ColumnHeader` role (UIA header item, AT-SPI table column
+  header), invokable, named with their sort ("Size, sorted descending"). `Body` names each row by
+  `RowLabel` ("a.txt, Size 100 B"), which a virtual list needs: its rows reach a screen reader by
+  that label alone.
+
+**Looks** come from `Theme.Table` (`TableTheme`): header height, fill, hover, text colour, size,
+weight and letter spacing; the divider; cell padding (header and rows alike, so they line up);
+the sort mark; the grip's width.

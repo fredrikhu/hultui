@@ -94,6 +94,7 @@ internal static class AtSpiConstants
     public const uint RoleListItem = 32;
     public const uint RoleMenuBar = 34;
     public const uint RoleMenuItem = 35;
+    public const uint RoleTableColumnHeader = 57;
     public const uint RolePageTab = 37;
     public const uint RolePageTabList = 38;
     public const uint RolePanel = 39;
@@ -105,7 +106,9 @@ internal static class AtSpiConstants
     public const uint RoleScrollPane = 49;
     public const uint RoleSeparator = 50;
     public const uint RoleSlider = 51;
-    public const uint RoleProgressBar = 46;
+    // 42, between POPUP_MENU (41) and PUSH_BUTTON (43); it was 46, ROOT_PANE, so a reader
+    // called every progress bar a root pane.
+    public const uint RoleProgressBar = 42;
     public const uint RoleSpinButton = 52;
     public const uint RoleText = 61;
     public const uint RoleToggleButton = 62;
@@ -145,6 +148,7 @@ internal static class AtSpiConstants
         AccessibilityRole.Document => RoleDocumentWeb,
         AccessibilityRole.MenuBar => RoleMenuBar,
         AccessibilityRole.MenuItem => RoleMenuItem,
+        AccessibilityRole.ColumnHeader => RoleTableColumnHeader,
         _ => RolePanel,
     };
 
@@ -163,6 +167,7 @@ internal static class AtSpiConstants
         RoleListItem => "list item",
         RoleMenuBar => "menu bar",
         RoleMenuItem => "menu item",
+        RoleTableColumnHeader => "table column header",
         RolePageTab => "page tab",
         RolePageTabList => "page tab list",
         RolePanel => "panel",

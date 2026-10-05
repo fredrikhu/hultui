@@ -352,6 +352,14 @@ public sealed record FluentPalette
             BodyPadding = new Thickness(16), BodyBackground = IsDark ? Layer : Color.White,
             Border = CardStroke, BorderWidth = 1f, CornerRadius = Fluent.ControlRadius,
         },
+        // A WinUI list's column headers: secondary text, the subtle fill under the pointer, the
+        // divider colour for the rule and the marks between columns.
+        Table = new TableTheme
+        {
+            HeaderHeight = 32f, HeaderText = TextSecondary, HeaderFontSize = 12f,
+            HeaderFontWeight = FontWeight.Regular, HeaderHoverBackground = SubtleHover,
+            Divider = Divider, CellPadding = new Thickness(0, 12), SortMark = TextSecondary,
+        },
         // WinUI's Flyout: the acrylic fill, the overlay corner, a soft shadow, 4px off its button.
         Popover = new PopoverTheme
         {

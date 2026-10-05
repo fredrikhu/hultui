@@ -1,6 +1,25 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Table / column model** — `TableView<T>` + `TableColumn<T>` + `TableState` + `TableTheme`
+  (`src/HultUI.Core/Builders`): a model like `TreeView<T>`, header and rows on one set of grid
+  tracks (fixed px or fill fr, never auto). Sort from the header (press, Enter/Space), stable,
+  memoized on list identity, `Group` pins rows regardless of direction, `SetSort` for app-owned
+  sorts; resize by a grip (end edge before the fill column, start edge after it — the fixed
+  columns after a fill are pinned to the end), double-click resets; right press on the header
+  hides/shows columns; `State`/`Restore`/`StateChanged` (once per settle); `Body(items)` a
+  configured virtual list with `RowLabel` names. New a11y role `ColumnHeader` (UIA HeaderItem
+  50035, AT-SPI 57), invokable. Fluent sample: a sortable, resizable "Downloads" table. Survey: 4
+  real tables (Vesper pane + Sync, Junction Branches + Tags) all share one template string; not
+  converted — Junction's are tree-shaped with custom styled cells, Vesper's owns Tab and per-tab
+  sort; candidates for follow-up. Fixed in passing: AT-SPI `RoleProgressBar` was 46 (ROOT_PANE),
+  pinned by its own test — progress bars were read as "root pane"; now 42. Vesper's file rows had
+  no accessible label (read as the FileEntry record's ToString()); now "name, size, modified
+  …[, marked]". Traps: an absolute child does not stretch between top and bottom (height 0); its
+  right is measured from the content box; a parent with OverflowX hidden clips hit testing to its
+  content box — the grip in the padding was unreachable; a later sibling wins a press on a shared
+  edge; `Array.Sort` insertion-sorts ≤16 items, so stability needs a longer test list. Tests: 9
+  model, 6 headless, 1 Fluent, 1 Vesper, AT-SPI role rows; controls (10) each fail their test.
 - **Popover** — `src/HultUI.Core/Builders/Popover.cs` (+ `PopoverTheme`): a non-modal card of any
   content against an anchor. Placement (Below/Above/Right/Left × Start/Center/End) flips when it
   does not fit and the other side has more room, slides to stay in the window, lands on whole
