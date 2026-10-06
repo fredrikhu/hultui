@@ -115,7 +115,7 @@ public sealed partial class LayoutEngine
             || LayoutSpace.IsUnbounded(mainAvailable);
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount, anyBaseline, _) = MeasureFlexItems(container.Children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        var (itemsArray, itemCount, anyBaseline, _, _) = MeasureFlexItems(container.Children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
         List<FlexLine>? lines = null;
         try
         {

@@ -18,10 +18,25 @@ namespace HultUI.Core.Tests.Layout;
 /// </summary>
 public class LeafMeasureCacheTests
 {
-    /// <summary>Measures like the stub, scaled by font size, and counts the calls.</summary>
-    private sealed class CountingMeasureContext : IMeasureContext
+    /// <summary>Measures like the stub, scaled by font size, and counts the calls. With
+    /// <paramref name="saysWhereItHolds"/> it says, as the real pipeline does, that one line that
+    /// fits is the same at any width it fits in.</summary>
+    private sealed class CountingMeasureContext(bool saysWhereItHolds = false) : IMeasureContext
     {
         public int Calls;
+
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+        {
+            var size = MeasureText(text, style, maxWidth, maxLines, overflow);
+            sameFromWidth = saysWhereItHolds && size.Width <= maxWidth && size.Height <= LineHeightOf(style)
+                ? size.Width
+                : float.NaN;
+            return size;
+        }
+
+        private static float LineHeightOf(ResolvedInheritedStyle style) =>
+            (style.FontSize > 0 ? style.FontSize : 14f) * 1.2f;
 
         public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
             TextOverflow overflow = TextOverflow.Clip)
@@ -58,9 +73,28 @@ public class LeafMeasureCacheTests
         context.Calls = 0;
         engine.PerformLayout(root, 780, 600);
 
-        // Per row: the id once, the growing label twice (at the row's width while its flex base
-        // size is found, then at the width it grew to), the glyph once.
-        Assert.Equal(4 * rows.Length, context.Calls);
+        // Per row: the growing label three times — at the row's width while its flex base size is
+        // found, then at the width it grew to, once offered and once forced. The id and the glyph
+        // are in boxes of a set width, which hold at any width the row offers.
+        Assert.Equal(3 * rows.Length, context.Calls);
+    }
+
+    [Fact]
+    public void AResizedListOfLabelsThatFitMeasuresOnlyTheOneForcedToANewWidth()
+    {
+        // A label on one line that fits is the same at any width it fits in, so the row's new
+        // width and the width the label grew to find its measurement already taken. Only the
+        // layout pass forcing it to the width it grew to, a new one, measures it.
+        var context = new CountingMeasureContext(saysWhereItHolds: true);
+        var engine = new LayoutEngine(context);
+        var rows = Enumerable.Range(0, 50).Select(Row).ToArray();
+        var root = ScrollView.New().Children(Flex.Column().FlexShrink(0).Children(rows));
+        engine.PerformLayout(root, 800, 600);
+
+        context.Calls = 0;
+        engine.PerformLayout(root, 780, 600);
+
+        Assert.Equal(rows.Length, context.Calls);
     }
 
     [Fact]

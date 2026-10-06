@@ -180,10 +180,19 @@ public sealed class TextPipeline
     /// metric-affecting; spans are absolute offsets into <paramref name="text"/>.</summary>
     public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
         TextOverflow overflow, IReadOnlyList<Core.Rendering.TextSpan>? spans)
+        => Layout(text, style, maxWidth, maxLines, overflow, spans, out _);
+
+    /// <summary>Span-aware layout, and the least <paramref name="maxWidth"/> from which the same
+    /// layout comes back for every greater one (NaN when that is not known): see
+    /// <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow, out float)"/>.
+    /// Styled text has no single-line fast path, so it never knows.</summary>
+    public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<Core.Rendering.TextSpan>? spans, out float sameFromWidth)
     {
-        BeginParagraph(text);
         if (!AnyMetricAffecting(spans))
-            return Layout(text, style, maxWidth, maxLines, overflow);
+            return Layout(text, style, maxWidth, maxLines, overflow, out sameFromWidth);
+        sameFromWidth = float.NaN;
+        BeginParagraph(text);
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
 
@@ -214,7 +223,16 @@ public sealed class TextPipeline
 
     public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
         TextOverflow overflow = TextOverflow.Clip)
+        => Layout(text, style, maxWidth, maxLines, overflow, out _);
+
+    /// <summary>Layout, and the least <paramref name="maxWidth"/> from which the same layout comes
+    /// back for every greater one: for one line that fits, its own width — the fast path below
+    /// returns the same single line for any width it fits in. NaN otherwise: wrapped and truncated
+    /// text, and text on the BiDi path, are laid out again at each width.</summary>
+    public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, out float sameFromWidth)
     {
+        sameFromWidth = float.NaN;
         BeginParagraph(text);
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
@@ -254,7 +272,10 @@ public sealed class TextPipeline
         // shaped result is returned directly for any width that accommodates it.
         // Nothing is truncated, so the overflow mode is irrelevant here.
         if (!shaped.HasNewline && shaped.TotalWidth <= maxWidth)
+        {
+            sameFromWidth = shaped.TotalWidth;
             return shaped.SingleLine!;
+        }
 
         // Explicit newlines or overflow: line breaking depends on the width, so
         // fall back to the width-keyed cache. Overflow is part of the key because

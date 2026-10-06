@@ -33,6 +33,17 @@ public sealed class StubMeasureContext(float charWidth = 7f, float lineHeight = 
         return new Size(width, lineCount * lineHeight);
     }
 
+    // One line that fits is the same at any width it fits in, as in the real pipeline; so the
+    // layout tests exercise measurements kept for a range of widths.
+    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+    {
+        var size = MeasureText(text, style, maxWidth, maxLines, overflow);
+        float totalWidth = (text?.Length ?? 0) * charWidth;
+        sameFromWidth = totalWidth <= maxWidth ? totalWidth : float.NaN;
+        return size;
+    }
+
     /// <summary>
     /// The widest word, matching what the real pipeline answers. The default
     /// interface implementation would measure at zero width and, because
