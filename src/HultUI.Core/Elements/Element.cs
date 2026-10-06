@@ -874,6 +874,11 @@ public abstract class Element
     // and MeasureCache for the full rationale.
     internal MeasureCache MeasureCache;
 
+    /// <summary>Where the layout engine filed this container's flex resolution from the measure
+    /// pass, for its layout pass to take (LayoutEngine.TakePlan). Only good within one
+    /// PerformLayout, and checked against the container there.</summary>
+    internal int FlexPlan;
+
     /// <summary>
     /// Marks this element (and ancestors up to root) as needing layout on the next frame.
     /// Call this after directly mutating <see cref="Flex"/>, <see cref="Box"/>, or
