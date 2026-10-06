@@ -104,4 +104,90 @@ public class TextLinkTests
         ClickAt(session, label, Link.Start + Link.Length / 2);
         Assert.Equal(["issue://second"], reopened);
     }
+
+    // ── Links after styled text (docs/plans/12-rich-text-spans.md's hit-testing gap) ──
+    //
+    // A click used to be mapped by measuring prefixes in the label's own style. A larger or
+    // bolder run ahead of a link is wider than that, so everything after it mapped to an
+    // offset further on than where it was drawn — on a paragraph of Junction's markdown, a
+    // click on a link after a heading-sized word landed past its end.
+
+    private const string Styled = "Release notes here ABCD-4291 today";
+    private static readonly TextLink StyledLink =
+        new(Styled.IndexOf("ABCD", System.StringComparison.Ordinal), 9, "issue://4291");
+    private const int BigEnd = 19;   // "Release notes here ", drawn larger than the rest
+
+    // Twice the size moves the old mapping past the whole link; a few pixels more moves it a
+    // few characters on, which from just before the link lands inside it. Each size is the one
+    // its test fails under on the old code.
+    private const float Twice = 28f, Slightly = 17f;
+
+    private static (TextElement label, List<string> opened) BuildStyled(HeadlessSession session, bool selectable,
+        float bigSize = Twice)
+    {
+        var opened = new List<string>();
+        var label = TextElement.New(Styled);
+        label.Selectable = selectable;
+        label.Spans = [new Core.Rendering.TextSpan(0, BigEnd, default, FontSize: bigSize)];
+        label.Links = [StyledLink];
+        label.LinkActivated = opened.Add;
+        session.Window.SetRoot(Box.New().Width(800).Height(80).Children(label));
+        session.PumpFrame();
+        return (label, opened);
+    }
+
+    // Where the caret before `offset` is drawn: the big run at its size, the rest at the label's.
+    private static void ClickStyledAt(HeadlessSession session, TextElement label, int offset, float bigSize = Twice)
+    {
+        var box = label.Layout.AbsoluteContentBox;
+        var style = label.ResolvedInherited;
+        float x = box.X + Core.Rendering.TextMeasure.MeasureWidth(Styled[..Math.Min(offset, BigEnd)],
+            style with { FontSize = bigSize });
+        if (offset > BigEnd)
+            x += Core.Rendering.TextMeasure.MeasureWidth(Styled[BigEnd..offset], style);
+        session.Window.Click(x, box.Y + box.Height / 2f);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AfterLargerText_AClickOnTheLinkActivatesIt(bool selectable)
+    {
+        using var session = HeadlessSession.Create(width: 800, height: 200);
+        var (label, opened) = BuildStyled(session, selectable);
+
+        ClickStyledAt(session, label, StyledLink.Start + 2);
+
+        Assert.Equal(["issue://4291"], opened);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AfterLargerText_AClickJustBeforeTheLinkDoesNothing(bool selectable)
+    {
+        using var session = HeadlessSession.Create(width: 800, height: 200);
+        var (label, opened) = BuildStyled(session, selectable, Slightly);
+
+        ClickStyledAt(session, label, StyledLink.Start - 1, Slightly);
+
+        Assert.Empty(opened);
+    }
+
+    [Fact]
+    public void AfterLargerText_ADragSelectsWhatWasDrawnUnderThePointer()
+    {
+        using var session = HeadlessSession.Create(width: 800, height: 200);
+        var (label, _) = BuildStyled(session, selectable: true);
+        var box = label.Layout.AbsoluteContentBox;
+        var style = label.ResolvedInherited;
+        float big = Core.Rendering.TextMeasure.MeasureWidth(Styled[..BigEnd], style with { FontSize = Twice });
+        float y = box.Y + box.Height / 2f;
+
+        // From the end of the big run to the end of "ABCD-4291".
+        float to = big + Core.Rendering.TextMeasure.MeasureWidth(Styled[BigEnd..(StyledLink.Start + 9)], style);
+        session.Window.Drag(new Core.Primitives.Point(box.X + big, y), new Core.Primitives.Point(box.X + to, y));
+
+        Assert.Equal("ABCD-4291", label.SelectedText);
+    }
 }

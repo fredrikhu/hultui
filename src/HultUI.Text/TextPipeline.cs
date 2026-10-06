@@ -157,7 +157,7 @@ public sealed class TextPipeline
     {
         if (spans is null) return false;
         for (int i = 0; i < spans.Count; i++)
-            if (spans[i].Weight is not null || spans[i].Slant is not null || spans[i].FontSize is not null)
+            if (spans[i].IsMetricAffecting)
                 return true;
         return false;
     }
@@ -170,9 +170,9 @@ public sealed class TextPipeline
         for (int i = 0; i < spans.Count; i++)
         {
             var s = spans[i];
-            if (s.Weight is null && s.Slant is null && s.FontSize is null) continue;
+            if (!s.IsMetricAffecting) continue;
             hash.Add(s.Start); hash.Add(s.Length);
-            hash.Add(s.Weight); hash.Add(s.Slant); hash.Add(s.FontSize);
+            hash.Add(s.Weight); hash.Add(s.Slant); hash.Add(s.FontSize); hash.Add(s.FontFamily);
         }
         return hash.ToHashCode();
     }
@@ -312,6 +312,24 @@ public sealed class TextPipeline
         _cache.Put(key, layout);
         return layout;
     }
+
+    /// <summary>
+    /// <paramref name="text"/> as one paragraph at <paramref name="maxWidth"/>, kept for caret,
+    /// hit-test and selection questions
+    /// (docs/plans/16-rich-text-editor.md). The layout is the one <see cref="Layout(string,
+    /// ResolvedInheritedStyle, float, int?, TextOverflow, IReadOnlyList{Core.Rendering.TextSpan}?)"/>
+    /// returns and caches; only the empty line after a final newline is new.
+    /// </summary>
+    public PipelineTextParagraph LayoutParagraph(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans, int? maxLines = null, TextOverflow overflow = TextOverflow.Clip)
+    {
+        var layout = Layout(text, style, maxWidth, maxLines, overflow, spans);
+        return new PipelineTextParagraph(this, text, style, maxWidth, spans, maxLines, overflow, layout);
+    }
+
+    /// <summary>A line with no text at <paramref name="start"/>, as tall as the style's font
+    /// makes one: where a caret goes in an empty paragraph or after its final newline.</summary>
+    internal TextLine EmptyLine(ResolvedInheritedStyle style, int start) => ShapeLineText("", style, start);
 
     // The longest prefix of <paramref name="text"/> that fits <paramref name="maxWidth"/>.
     // Only whole characters are kept: DrawText does not clip to its bounds, so emitting the
@@ -454,6 +472,7 @@ public sealed class TextPipeline
                     FontWeight = s.Weight ?? style.FontWeight,
                     FontSlant = s.Slant ?? style.FontSlant,
                     FontSize = s.FontSize ?? style.FontSize,
+                    FontFamily = s.FontFamily ?? style.FontFamily,
                 };
         }
         return style;
@@ -843,7 +862,8 @@ public sealed class TextPipeline
     private readonly record struct MemoRange(TextMemo Owner, int From, int To, bool Ellipsis);
 
     // A metric span as layout sees it: what EffectiveStyleAt and NextStyleBoundary read.
-    private readonly record struct MetricSpan(int Start, int Length, FontWeight? Weight, FontSlant? Slant, float? FontSize);
+    private readonly record struct MetricSpan(int Start, int Length, FontWeight? Weight, FontSlant? Slant, float? FontSize,
+        string? FontFamily);
 
     private sealed class TextMemo
     {
@@ -875,7 +895,8 @@ public sealed class TextPipeline
         var kept = new List<MetricSpan>();
         for (int i = 0; i < spans.Count; i++)
             if (spans[i].IsMetricAffecting)
-                kept.Add(new MetricSpan(spans[i].Start, spans[i].Length, spans[i].Weight, spans[i].Slant, spans[i].FontSize));
+                kept.Add(new MetricSpan(spans[i].Start, spans[i].Length, spans[i].Weight, spans[i].Slant, spans[i].FontSize,
+                    spans[i].FontFamily));
         return kept.Count == 0 ? null : kept.ToArray();
     }
 
@@ -888,7 +909,8 @@ public sealed class TextPipeline
                 var span = spans[i];
                 if (!span.IsMetricAffecting) continue;
                 if (kept is null || k >= kept.Length
-                    || kept[k] != new MetricSpan(span.Start, span.Length, span.Weight, span.Slant, span.FontSize))
+                    || kept[k] != new MetricSpan(span.Start, span.Length, span.Weight, span.Slant, span.FontSize,
+                        span.FontFamily))
                     return false;
                 k++;
             }

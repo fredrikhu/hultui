@@ -93,9 +93,9 @@ public class TextElement : Element
     private (int Start, int End) _dragAnchor;
 
     // Cached from the last render so pointer handling can hit-test with the same
-    // wrapped layout and font metrics that were drawn.
-    private IRenderContext? _renderCtx;
-    private IReadOnlyList<TextLineBox> _lines = [];
+    // wrapped layout, spans and font metrics that were drawn. Null while there is
+    // nothing to hit: no text, or no render yet.
+    private TextParagraph? _paragraph;
     private Rect _contentBox;
 
     /// <summary>
@@ -158,7 +158,7 @@ public class TextElement : Element
     /// <summary>The link under a screen point, if any.</summary>
     private TextLink? LinkAt(Point screenPos)
     {
-        if (_links is not { Count: > 0 } || _renderCtx is null || _lines.Count == 0) return null;
+        if (_links is not { Count: > 0 } || _paragraph is null) return null;
         int offset = PositionFromPoint(screenPos);
         foreach (var link in _links)
             if (link.Contains(offset)) return link;
@@ -219,6 +219,9 @@ public class TextElement : Element
     internal (int Start, int End) DragAnchorRange => _dragAnchor;
     /// <summary>Maps a screen point to a caret offset in this label's text.</summary>
     internal int OffsetAt(Point screenPos) => PositionFromPoint(screenPos);
+    /// <summary>The paragraph the last render drew and hit-tests against; null when the label
+    /// is neither selectable nor linked, or has no text.</summary>
+    internal TextParagraph? DrawnParagraph => _paragraph;
     /// <summary>Sets this label's selection range directly (window group-drag driver).</summary>
     internal void SetSelectionRange(int anchor, int caret)
     {
@@ -451,39 +454,14 @@ public class TextElement : Element
     /// <summary>Called by the window when the pointer is released during a drag capture.</summary>
     public void EndDrag() => _isDragging = false;
 
-    // Maps a screen point to a character index in Content, using the wrapped
-    // line layout cached at render time.
+    // Maps a screen point to a character index in Content, through the paragraph
+    // laid out at render time: the drawn runs, so a bold word, a larger one or a
+    // centred line maps where it is seen.
     private int PositionFromPoint(Point screenPos)
     {
-        if (_renderCtx is null || _lines.Count == 0) return 0;
-        var style = ResolvedInherited;
-
-        float localY = screenPos.Y - _contentBox.Y;
-        var line = _lines[0];
-        for (int i = 0; i < _lines.Count; i++)
-        {
-            line = _lines[i];
-            if (localY < line.OffsetY + line.Height) break;
-        }
-
-        float localX = screenPos.X - _contentBox.X;
-        string lineStr = _content.Substring(line.Start, line.Length);
-        int k = HitTestInLine(lineStr, localX, style);
-        return SnapToBoundary(line.Start + k);
-    }
-
-    private int HitTestInLine(string lineStr, float x, ResolvedInheritedStyle style)
-    {
-        if (lineStr.Length == 0 || _renderCtx is null) return 0;
-        int lo = 0, hi = lineStr.Length;
-        while (lo < hi)
-        {
-            int mid = (lo + hi) / 2;
-            float w = _renderCtx.MeasureText(lineStr[..mid], style).Width;
-            if (w < x) lo = mid + 1;
-            else hi = mid;
-        }
-        return lo;
+        if (_paragraph is null || _paragraph.Text != _content) return 0;
+        int offset = _paragraph.OffsetAt(screenPos.X - _contentBox.X, screenPos.Y - _contentBox.Y);
+        return SnapToBoundary(Math.Clamp(offset, 0, _content.Length));
     }
 
     // If pos lands between halves of a surrogate pair, snap to the pair's start.
@@ -558,7 +536,7 @@ public class TextElement : Element
 
         if (string.IsNullOrEmpty(Content))
         {
-            if (hitTestable) { _renderCtx = ctx; _lines = []; }
+            _paragraph = null;
             return;
         }
 
@@ -567,12 +545,15 @@ public class TextElement : Element
 
         if (hitTestable)
         {
-            _renderCtx = ctx;
             _contentBox = contentBox;
-            _lines = ctx.LayoutTextLines(Content, style, contentBox.Width, MaxLines);
+            // The same layout DrawText draws below — same text, style, width, spans, line limit
+            // and overflow, so the same cache entry — kept so a click reads the drawn lines.
+            _paragraph = ctx.LayoutParagraph(Content, style, contentBox.Width, _spans, MaxLines, Overflow);
             if (_selectable && HasSelection)
-                DrawSelection(ctx, style);
+                DrawSelection(ctx, _paragraph, style);
         }
+        else
+            _paragraph = null;
 
         if (_spans is { Count: > 0 } spans)
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, spans);
@@ -592,34 +573,17 @@ public class TextElement : Element
             is Rect ink ? box.Union(ink) : null;
     }
 
-    private void DrawSelection(IRenderContext ctx, ResolvedInheritedStyle style)
+    // When the selection continues past a line (onto a wrapped or newline-separated
+    // one), its box runs a little past the last glyph so the spanned break reads as
+    // selected, like a browser's.
+    private void DrawSelection(IRenderContext ctx, TextParagraph paragraph, ResolvedInheritedStyle style)
     {
-        int selStart = SelectionStart, selEnd = SelectionEnd;
-        foreach (var line in _lines)
-        {
-            int ls = Math.Clamp(selStart - line.Start, 0, line.Length);
-            int le = Math.Clamp(selEnd - line.Start, 0, line.Length);
-            if (le <= ls && !SelectionCrossesLineEnd(line, selStart, selEnd)) continue;
-
-            string lineStr = _content.Substring(line.Start, line.Length);
-            float x0 = ls > 0 ? ctx.MeasureText(lineStr[..ls], style).Width : 0;
-            float x1 = le > 0 ? ctx.MeasureText(lineStr[..le], style).Width : 0;
-
-            // When the selection continues past this line (onto a wrapped or
-            // newline-separated line), extend a little past the last glyph so the
-            // spanned line break reads as selected, like a browser does.
-            if (SelectionCrossesLineEnd(line, selStart, selEnd))
-                x1 += style.FontSize * 0.35f;
-
-            if (x1 <= x0) continue;
-            ctx.DrawRect(new Rect(
-                _contentBox.X + x0, _contentBox.Y + line.OffsetY,
-                x1 - x0, line.Height), SelectionColor);
-        }
+        var boxes = _selectionBoxes ??= [];
+        boxes.Clear();
+        paragraph.SelectionBoxes(SelectionStart, SelectionEnd, boxes, style.FontSize * 0.35f);
+        foreach (var box in boxes)
+            ctx.DrawRect(box with { X = _contentBox.X + box.X, Y = _contentBox.Y + box.Y }, SelectionColor);
     }
 
-    // True when the selection starts at/before this line's text and extends
-    // beyond its end (i.e. the following line break is part of the selection).
-    private static bool SelectionCrossesLineEnd(TextLineBox line, int selStart, int selEnd) =>
-        selStart <= line.Start + line.Length && selEnd > line.Start + line.Length;
+    private List<Rect>? _selectionBoxes;
 }

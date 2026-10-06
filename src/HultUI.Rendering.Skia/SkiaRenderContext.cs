@@ -554,6 +554,55 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         }
     }
 
+    public TextParagraph LayoutParagraph(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<TextSpan>? spans = null, int? maxLines = null, TextOverflow overflow = TextOverflow.Clip) =>
+        _pipeline is null
+            ? TextParagraph.FromLines(this, text, style, maxWidth, spans, maxLines, overflow)
+            : _pipeline.LayoutParagraph(text, style, maxWidth, spans, maxLines, overflow);
+
+    // The span-aware DrawText's loop over lines the paragraph already holds: nothing is laid out
+    // again, and the empty line a paragraph adds after a final newline has no runs to draw.
+    public void DrawParagraph(TextParagraph paragraph, Point origin)
+    {
+        if (paragraph is not PipelineTextParagraph p)
+        {
+            float width = float.IsInfinity(paragraph.MaxWidth) ? paragraph.Size.Width : paragraph.MaxWidth;
+            DrawText(paragraph.Text, new Rect(origin.X, origin.Y, width, paragraph.Size.Height),
+                paragraph.Style, paragraph.Overflow, paragraph.MaxLines, paragraph.Spans);
+            return;
+        }
+
+        var style = p.Style;
+        var spans = p.Spans is { Count: > 0 } s ? s : null;
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+
+        var lines = p.TextLines;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (line.Runs.Count == 0) continue;
+            float baseX = origin.X + p.LineLeft(i);
+            float lineTop = origin.Y + line.OffsetY;
+            float lineY = lineTop + line.Ascent;
+
+            if (spans is not null)
+                DrawSpannedLine(line, spans, style, baseX, lineY, lineTop);
+            else
+            {
+                _pooledPaint.Color = ToSkColor(style.TextColor);
+                foreach (var run in line.Runs)
+                    DrawRun(run, baseX + run.OffsetX, lineY);
+            }
+
+            if (style.Decoration != TextDecoration.None)
+            {
+                _pooledPaint.Color = ToSkColor(style.TextColor);
+                DrawTextDecoration(style, baseX, lineY, line);
+            }
+        }
+    }
+
     public Rect? TextPaintBounds(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
         int? maxLines, IReadOnlyList<TextSpan>? spans)
     {

@@ -47,17 +47,16 @@ public static class LayoutProbe
     /// and how many lines it broke into. Read from the line boxes rather than the element,
     /// because the element's box is clamped by its container and so cannot show an overflow.
     /// <para>
-    /// Only populated for selectable labels — a <see cref="TextElement"/> records its lines
-    /// when it may have to draw a selection over them. Reports zeroes otherwise, so a test
-    /// that needs this must make its label selectable or assert something else.
+    /// Only populated for selectable or linked labels — a <see cref="TextElement"/> keeps its
+    /// lines when it may have to draw a selection over them or map a click through them.
+    /// Reports zeroes otherwise, so a test that needs this must make its label selectable or
+    /// assert something else.
     /// </para>
     /// </summary>
     public static (float Height, float Width, int LineCount) DrawnText(TextElement label)
     {
-        var lines = (IReadOnlyList<TextLineBox>?)typeof(TextElement)
-            .GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(label);
-        if (lines is null || lines.Count == 0) return (0f, 0f, 0);
+        var lines = DrawnLines(label);
+        if (lines.Count == 0) return (0f, 0f, 0);
 
         float bottom = 0f, widest = 0f;
         foreach (var line in lines)
@@ -67,6 +66,11 @@ public static class LayoutProbe
         }
         return (bottom, widest, lines.Count);
     }
+
+    /// <summary>The line boxes behind <see cref="DrawnText"/>: each line's text range, top,
+    /// height and width, as the label last drew them. Empty under the same conditions.</summary>
+    public static IReadOnlyList<TextLineBox> DrawnLines(TextElement label) =>
+        label.DrawnParagraph?.Lines ?? [];
 
     /// <summary>
     /// The row <paramref name="descendant"/> belongs to: the ancestor that is a direct child
