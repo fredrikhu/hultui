@@ -154,6 +154,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-c80711c-heightrange-after.json` | … and after it, with the flex line pool and the packed cache entry: c80711c, interleaved with the line above. Compare these two: 0 slower, 10 faster. |
 | `2026-10-06-cc29f80-flexplan-before.json` | Before the layout pass took the measure pass's flex resolution: main at cc29f80, median of 3 idle-gated runs … |
 | `2026-10-06-0bf5823-flexplan-after.json` | … and after it, with the min-content width kept until it changes: 0bf5823, interleaved with the line above. Compare these two: 0 slower, 3 faster (resize 2,000 rows is −10 % on both, a hair under the flag). |
+| `2026-10-06-4b4c733-widthrange-before.json` | Before a measurement held for a range of offered widths: main at 4b4c733, median of 3 idle-gated runs … |
+| `2026-10-06-98e0581-widthrange-after.json` | … and after it, with the layout pass keeping a set-size box's layout and the cache entry back at 28 bytes: 98e0581, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -312,6 +314,32 @@ was measured at — never takes it: `layout/wrap 1,000 chips resize` spends 0.03
 (+1 % of its frame), `layout/deep nesting leaf edit` +3 %. Making those hit takes a measurement
 that holds for a range of widths, as one now does for heights — which would also stop a resize
 measuring again every chip whose width never changes.
+
+**A measurement holds for a range of widths, before → after** (91f9e4b, with the layout pass
+keeping a set-size box's layout 1b49032 and the entry packed back 98e0581). A resize offered every
+box a new width, and every box was measured and laid out again at it — the row's 64 px id and its
+24 px glyph box as much as the label that grows. A cache entry now keeps the widths its answer
+holds for: any, for a box whose width is set; for one sized from its content, those its content
+holds at, which for text on one line is any width it fits in (the pipeline says so from its
+single-line fast path). A row holds where its children do and its items fit without growing, a
+column where its children do. And the layout pass keeps a clean box's layout, whatever it is
+offered, on an axis whose size is set. Every element box unchanged; minimum, median of 3 runs:
+
+| Scenario | 4b4c733 | 98e0581 | |
+|---|---:|---:|---:|
+| `layout/deep nesting leaf edit` | 0.466 | 0.282 | −39 % |
+| `layout/resize 2,000-row list` | 2.83 | 1.97 | −30 % |
+| `layout/wrap 1,000 chips resize` | 2.01 | 1.77 | −12 % |
+| `layout/baseline rows resize` | 1.07 | 0.94 | −12 % |
+| `grid/resize 300x6` | 2.76 | 2.55 | −7 % |
+| `grid/create 300x6` | 3.76 | 3.54 | −6 % |
+
+The resize's layout pass went from 2.25 to 1.38 ms, the chips' from 0.33 to 0.08. At 32 bytes an
+entry (1b49032) every element was 16 bytes larger, a 1,000-row component rebuild allocated 94 KB
+more and ran 3–5 % slower; the height measured at went, and allocation is back to main's in every
+row. Left: `icons/mount 600` and `controls/gallery mount`, fresh tiles every step, are 3 % slower
+(layout +0.02 to +0.06 ms), and stay so with the ranges switched off — the shape of the measuring
+code, not the work it does.
 
 **What the suite turned up on its first run**, for follow-up:
 

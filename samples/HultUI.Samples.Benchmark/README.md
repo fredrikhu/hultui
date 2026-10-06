@@ -312,6 +312,15 @@ is measuring new text for the first time, which this does not touch: their layou
 5 % shorter (create 10,000: 41.7 → 39.7 ms, 3 runs). The scenario suite's resize of the same rows,
 which only lays them out again, is −10 % overall.
 
+### A measurement holds for a range of widths (2026-10-06)
+
+91f9e4b, 1b49032 and 98e0581 (see the scenario suite's README), 8 interleaved runs each, a11y off,
+minimum: remove row 0.62 → 0.37 ms (−41 %), create 1,000 4.77 → 4.11 ms (−14 %), append 1,000 →
+1,000 5.54 → 4.79 ms (−14 %), create 10,000 100.2 → 99.4 ms (−1 %); update, swap, select and clear
+within two hundredths of a millisecond. A table row's 64 px id and 24 px remove button now hold
+their measurement and their layout at any width they are offered, and its label at any width it
+fits in.
+
 ## How the measurement works
 
 HultUI's whole pipeline — component rebuild → style → layout → render → present —
