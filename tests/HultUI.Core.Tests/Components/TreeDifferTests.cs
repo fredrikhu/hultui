@@ -127,6 +127,80 @@ public class TreeDifferTests
         Assert.Equal(2, existing.Children.Count);
     }
 
+    // A keyed row the way builds produce it: two keyed children around an unkeyed label.
+    private static BoxElement KeyedRow(string label, string first = "a", string last = "b")
+    {
+        var a = Box.New().Width(20);
+        a.Key = first;
+        var b = Box.New().Width(30);
+        b.Key = last;
+        return Box.New().Children(a, Text.New(label), b);
+    }
+
+    private static void ClearFlags(Element element)
+    {
+        element.DirtyFlags = DirtyFlags.None;
+        foreach (var child in element.Children) ClearFlags(child);
+    }
+
+    /// <summary>
+    /// A keyed list that comes back as it was — every child matched, in the same order — is
+    /// not a structural change. Replacing the children anyway told every ancestor its children
+    /// had changed and its layout was stale, and a structural change rebuilds the whole
+    /// accessibility tree that frame: on every rebuild of anything with a keyed list in it.
+    /// </summary>
+    [Fact]
+    public void Keyed_AListThatComesBackAsItWas_ChangesNoStructureAndNoLayout()
+    {
+        var parent = Box.New();
+        var existing = KeyedRow("label");
+        parent.AddChild(existing);
+        var children = existing.Children.ToArray();
+        ClearFlags(parent);   // as a frame leaves them
+
+        TreeDiffer.Reconcile(parent, existing, KeyedRow("label"));
+
+        Assert.Equal(children, existing.Children);
+        Assert.False(parent.DirtyFlags.HasFlag(DirtyFlags.Children));
+        Assert.False(existing.DirtyFlags.HasFlag(DirtyFlags.Children));
+        Assert.False(existing.DirtyFlags.HasFlag(DirtyFlags.Layout));
+    }
+
+    /// <summary>A child whose content changed marks its own way up; its siblings' order did
+    /// not change, so it is still not a structural change.</summary>
+    [Fact]
+    public void Keyed_AChangedChildInAnUnchangedList_IsNotAStructuralChange()
+    {
+        var parent = Box.New();
+        var existing = KeyedRow("before");
+        parent.AddChild(existing);
+        ClearFlags(parent);
+
+        TreeDiffer.Reconcile(parent, existing, KeyedRow("a longer label after"));
+
+        Assert.Equal("a longer label after", ((TextElement)existing.Children[1]).Content);
+        Assert.True(existing.DirtyFlags.HasFlag(DirtyFlags.Layout));   // the label's own change
+        Assert.False(parent.DirtyFlags.HasFlag(DirtyFlags.Children));
+    }
+
+    [Fact]
+    public void Keyed_AReorderIsStillAStructuralChange()
+    {
+        var parent = Box.New();
+        var existing = KeyedRow("label");
+        parent.AddChild(existing);
+        var (a, b) = (existing.Children[0], existing.Children[2]);
+        ClearFlags(parent);
+
+        TreeDiffer.Reconcile(parent, existing, KeyedRow("label", first: "b", last: "a"));
+
+        Assert.Same(b, existing.Children[0]);
+        Assert.Same(a, existing.Children[2]);
+        Assert.True(existing.DirtyFlags.HasFlag(DirtyFlags.Children));
+        Assert.True(parent.DirtyFlags.HasFlag(DirtyFlags.Children));
+        Assert.True(existing.DirtyFlags.HasFlag(DirtyFlags.Layout));
+    }
+
     [Fact]
     public void Keyed_MatchesByKey()
     {
