@@ -365,7 +365,12 @@ public static class Pages
                     editor,
                     Flex.Row(gap: 24f).AlignItems(AlignItems.Center).Children(
                         ToggleRow(p, "Read only", app.NotesReadOnly, v => app.NotesReadOnly = v),
-                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary)))));
+                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary)))),
+            // The same document as HultUI.RichText.Markdown writes it, as you type.
+            Section(p, "As Markdown",
+                TextArea.New(HultUI.RichText.Markdown.RichMarkdown.Write(doc)).ReadOnly()
+                    .FontFamily("monospace").FontSize(13f).Height(260f)
+                    .AutomationId("notes-markdown")));
     }
 
     /// <summary>What the rich text page opens with: one of everything.</summary>

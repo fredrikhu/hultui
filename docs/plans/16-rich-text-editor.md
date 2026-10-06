@@ -224,7 +224,35 @@ text labels (**B**, *I*, U̲, H1…) by default and takes app artwork per comman
    tints of the text colour: the palette's surface and border fills matched the Fluent field
    and drew nothing. Phosphor's text-formatting icons were not added.
 5. **Accessibility.** Text source, role, announcements for formatting toggles.
-6. **Markdown package.** Parse, write, `Raw`, round-trip corpus.
+6. **Markdown package.** Parse, write, `Raw`, round-trip corpus. **Done 2026-10-07**
+   (`src/HultUI.RichText.Markdown`: `RichMarkdown.Parse`/`Write`/`WriteInline`, `Features`;
+   53 tests). Decisions made on the way:
+   - **Line breaks.** A soft break reads as a space, which is how CommonMark and GitLab
+     render it. A hard break is `'\n'`, written as `\` + newline. Shift+Enter in the editor
+     therefore survives the round trip as a visible break.
+   - **Bare URLs stay text.** The autolink extension is off, so a pasted address round-trips
+     untouched and GitLab still links it. `<https://…>` reads as a link.
+   - **Raw blocks.** A raw block runs to the line before the next block, because Markdig's
+     span for a table stops at its header row. Container indentation is stripped up to the
+     block's column, and the writer puts it back.
+   - **Emphasis is checked, not trusted.** Delimiters are placed as insertions into the
+     escaped text, and each one is checked against CommonMark's flanking rules where it
+     lands. A style whose delimiters can't open or close there (`a*&*`, or `e~~**A`) is
+     written as `<strong>`/`<em>`/`<del>`, and the reader reads those tags back as marks.
+     The writer then reads each block back, and if a parser quirk still disagrees, writes
+     that block's styles as tags.
+   - **Minimal escaping.** `#12`, `~label` and `@user` stay as typed. A `*`, `_` or `~` at a
+     piece edge is escaped because a delimiter may sit beside it. `<` is escaped before
+     anything but a space (`<a@b.c>` is an autolink). `!` is escaped before a link. A
+     backtick next to a code span is written `&#96;`. A link whose text is ` `, `x` or `X`
+     spells it as an entity, since `[ ]` in a list item is a task box.
+
+   **Proven:** 3 seeds × 4,000 random documents per run, drawn from an alphabet of Markdown's
+   own characters. Each round-trips exactly, except a style starting or ending with a space:
+   the writer moves that space out of the style on purpose, so those are held to idempotence.
+   A one-off run at 3 × 50,000 passed. **Not representable, by design:** underline, colour,
+   highlight, size, face, alignment, empty paragraphs, spaces at a line's ends, a code mark
+   over a line break, an ordered list's start number, loose vs tight lists.
 7. **Adoption.** Fluent gallery page; Junction Create MR description on the Markdown
    profile (the posted body is the written Markdown). **Fluent page done 2026-10-06** (nav
    item "Rich text": toolbar, auto-height editor, read-only switch, word count). Junction
