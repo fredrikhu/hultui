@@ -347,6 +347,7 @@ public static class Pages
             .OnLinkRequested(app.NotesToolbar.OpenLinkEditor)
             .OnImageRequested(app.NotesToolbar.OpenPictureEditor)
             .Images(app.Picture)
+            .HighlightSearch(app.NotesFind.IsOpen ? app.NotesFind.Search : null)
             .OnLinkActivated(url => app.ClickCount++)
             .ReadOnly(app.NotesReadOnly)
             .PlaceholderText("Write something. # for a heading, - for a list, **bold**.")
@@ -360,17 +361,18 @@ public static class Pages
         return Column(
             F.Title(p, "Rich text").Margin(new Thickness(0, 0, 8, 0)),
             F.Body(p, "A RichTextEditor and its toolbar, on the framework's text pipeline. Markdown "
-                    + "shortcuts work as you type, Ctrl+B/I/U format, Ctrl+K adds a link, and Tab "
-                    + "nests a list item. In a table, Tab moves cell to cell and the context menu "
-                    + "adds rows and columns; a picture's address is a file path here.")
+                    + "shortcuts work as you type, Ctrl+B/I/U format, Ctrl+K adds a link, Ctrl+F "
+                    + "finds, and Tab nests a list item. In a table, Tab moves cell to cell and the "
+                    + "context menu adds rows and columns; a picture's address is a file path here.")
                 .TextColor(p.TextSecondary).Margin(new Thickness(0, 0, 16, 0)),
             Section(p, "Editor",
-                Flex.Column(gap: 10f).Children(
+                Flex.Column(gap: 10f).Children([
                     toolbar,
+                    .. app.NotesFind.IsOpen ? [app.NotesFind.Build()] : Array.Empty<Element>(),
                     editor,
                     Flex.Row(gap: 24f).AlignItems(AlignItems.Center).Children(
                         ToggleRow(p, "Read only", app.NotesReadOnly, v => app.NotesReadOnly = v),
-                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary)))),
+                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary))])),
             // The same document as HultUI.RichText.Markdown writes it, as you type.
             Section(p, "As Markdown",
                 TextArea.New(HultUI.RichText.Markdown.RichMarkdown.Write(doc)).ReadOnly()

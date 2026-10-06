@@ -13,6 +13,7 @@ static partial class Scenarios
             .Concat(Virtual())
             .Concat(Components())
             .Concat(Input())
+            .Concat(RichTextScenarios())
             .Concat(Overlays())
             .Concat(Controls())
             .Concat(Paint())

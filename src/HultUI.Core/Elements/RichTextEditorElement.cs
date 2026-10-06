@@ -217,6 +217,7 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         if (_autoHeight is not null) MarkLayoutDirty();
         MarkPaintDirty();
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
+        BindSearch();
         if (!_loading) DocumentChanged?.Invoke(_state.Document);
     }
 
@@ -250,6 +251,8 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         ImageRequested = e.ImageRequested;
         // Set every build, changed or not: a picture that has arrived since is drawn now.
         ImageResolver = e.ImageResolver;
+        Search = e.Search;
+        RefreshSearchTints();
         MiddleClickAutoScroll = e.MiddleClickAutoScroll;
         CursorWidth = e.CursorWidth;
         ScrollSpeed = e.ScrollSpeed;

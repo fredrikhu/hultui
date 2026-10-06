@@ -40,16 +40,23 @@ public sealed class RichDocument : IEquatable<RichDocument>
     public static RichDocument FromPlainText(string text) =>
         new(text.ReplaceLineEndings("\n").Split('\n').Select(line => RichBlock.Paragraph(line)));
 
-    /// <summary>The text with every block on its own line: the plain-text reading.</summary>
+    private string? _plainText;
+
+    /// <summary>The text with every block on its own line: the plain-text reading. Made once per
+    /// document — an assistive technology can ask for it several times a frame.</summary>
     public string ToPlainText()
     {
-        var sb = new StringBuilder();
-        for (int i = 0; i < Blocks.Length; i++)
+        // Written straight into the string: through a builder, a long document's text was made twice.
+        return _plainText ??= string.Create(Length, Blocks, static (chars, blocks) =>
         {
-            if (i > 0) sb.Append('\n');
-            sb.Append(Blocks[i].Text);
-        }
-        return sb.ToString();
+            int at = 0;
+            for (int i = 0; i < blocks.Length; i++)
+            {
+                if (i > 0) chars[at++] = '\n';
+                blocks[i].Text.AsSpan().CopyTo(chars[at..]);
+                at += blocks[i].Text.Length;
+            }
+        });
     }
 
     /// <summary>The length of <see cref="ToPlainText"/>.</summary>
@@ -101,10 +108,13 @@ public sealed class RichDocument : IEquatable<RichDocument>
     /// <paramref name="insert"/>. Every other block is the same instance.</summary>
     public RichDocument ReplaceBlocks(int index, int removeCount, IEnumerable<RichBlock> insert)
     {
-        var builder = Blocks.ToBuilder();
-        builder.RemoveRange(index, removeCount);
-        builder.InsertRange(index, insert);
-        return new RichDocument(builder.ToImmutable());
+        // One copy of the document's block list per edit, straight into its final size.
+        var inserted = insert as IReadOnlyCollection<RichBlock> ?? insert.ToList();
+        var builder = ImmutableArray.CreateBuilder<RichBlock>(Blocks.Length - removeCount + inserted.Count);
+        builder.AddRange(Blocks.AsSpan(0, index));
+        builder.AddRange(inserted);
+        builder.AddRange(Blocks.AsSpan()[(index + removeCount)..]);
+        return new RichDocument(builder.MoveToImmutable());
     }
 
     /// <summary>The blocks between two positions, cut at both ends: what Copy takes.</summary>

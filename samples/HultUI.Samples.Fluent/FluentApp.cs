@@ -71,6 +71,11 @@ public sealed partial class FluentApp : Component
     /// <summary>Builds again: what the toolbar asks for when the caret moves.</summary>
     public void Refresh() => MarkDirty();
 
+    /// <summary>Ctrl+F on the rich text page: the notes' matches tinted, Enter walking them.</summary>
+    public readonly FindBar NotesFind;
+
+    protected override void OnAfterBuild() => NotesFind.Service();
+
     private readonly Dictionary<string, IImageSource?> _pictures = new(StringComparer.Ordinal);
 
     /// <summary>The notes' pictures: <c>sample:</c> ones drawn here, anything else a file on
@@ -140,6 +145,15 @@ public sealed partial class FluentApp : Component
                 FirstSort = SortDirection.Descending },
         ], MarkDirty) { RowHeight = 36f };
         NotesToolbar = new RichTextToolbar(NotesEditor, MarkDirty);
+        NotesFind = new FindBar(MarkDirty)
+        {
+            Placeholder = "Find in the notes",
+            Body = () => NotesEditor.Current,
+            Selection = () => NotesEditor.Current?.FindSelection,
+            Reveal = () => NotesEditor.Current?.RevealSearchMatch(),
+            // Selecting the match scrolls the editor when it next draws: no layout to wait for.
+            RevealAfterLayout = false,
+        };
         EmptyBinFlyout = new Popover(() =>
         {
             var p = Palette;
@@ -174,7 +188,10 @@ public sealed partial class FluentApp : Component
         // On the host, where keys land when nothing has the focus — a handler on the column
         // inside it never sees a key aimed at the host.
         var host = Mount();
-        host.On<KeyDownEvent>(e => { if (_menus.HandleKey(e)) e.StopPropagation = true; });
+        host.On<KeyDownEvent>(e =>
+        {
+            if ((Current == Page.RichText && NotesFind.HandleKey(e)) || _menus.HandleKey(e)) e.StopPropagation = true;
+        });
         host.On<KeyUpEvent>(e => _menus.HandleKeyUp(e));
 
         Current = Page.Home;

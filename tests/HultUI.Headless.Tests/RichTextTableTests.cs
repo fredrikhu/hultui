@@ -213,6 +213,74 @@ public class RichTextTableTests
         Assert.Equal(2, editor.State.Document.BlockCount);
     }
 
+    // ── Layout after an edit ──
+
+    // After an edit only the blocks it replaced are laid out again; everything else keeps its
+    // layout and is moved. Whatever the edit, every block must then sit where a layout from
+    // scratch puts it: a fresh editor on the same document, beside it, is the reference.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void AfterAnyEdit_EveryBlockSitsWhereAFreshLayoutPutsIt(int seed)
+    {
+        var rng = new Random(seed);
+        var start = new RichDocument([
+            RichBlock.Heading(1, "Title"), P("intro"),
+            RichBlock.Of(BlockKind.NumberedItem, "one"), RichBlock.Of(BlockKind.NumberedItem, "two"),
+            .. Table(3, "a", "b", "c", "d", "e", "f"),
+            RichBlock.Picture(new RichImage("p")), RichBlock.Of(BlockKind.Quote, "quoted"),
+            .. Table(2, "x", "y"), P("end"),
+        ]);
+        using var session = HeadlessSession.Create(width: 900, height: 2400);
+        var editor = RichTextEditor.New(start).Width(400).Height(2300);
+        var row = Flex.Row(gap: 20).Width(900).Height(2400).Children(editor, Box.New());
+        session.Window.SetRoot(row);
+        session.PumpFrame();
+
+        for (int step = 0; step < 300; step++)
+        {
+            var s = editor.State;
+            var doc = s.Document;
+            RichPosition Any()
+            {
+                int b = rng.Next(doc.BlockCount);
+                return new RichPosition(b, rng.Next(doc[b].Text.Length + 1));
+            }
+            s.Select(rng.Next(4) == 0 ? new RichSelection(Any(), Any()) : RichSelection.Caret(Any()));
+            switch (rng.Next(12))
+            {
+                case 0: case 1: s.InsertText(rng.Next(3) == 0 ? "a much longer run of words that wraps the line " : "q"); break;
+                case 2: s.SplitBlock(); break;
+                case 3: s.DeleteBackward(); break;
+                case 4: s.DeleteForward(); break;
+                case 5: s.InsertRow(rng.Next(2) == 0); break;
+                case 6: s.InsertColumn(); break;
+                case 7: s.InsertTable(2, 2); break;
+                case 8: s.InsertImage(new RichImage("r")); break;
+                case 9: s.ToggleBlockKind(BlockKind.NumberedItem); break;
+                case 10: s.ToggleBlockKind(BlockKind.Heading, 2); break;
+                case 11: s.Undo(); break;
+            }
+            // The reference: a new editor, laid out from scratch.
+            var fresh = RichTextEditor.New(s.Document).Width(400).Height(2300);
+            row.ReplaceChildren(editor, fresh);
+            session.PumpFrame();
+
+            var a = editor.Layout.AbsoluteContentBox;
+            var b = fresh.Layout.AbsoluteContentBox;
+            for (int i = 0; i < s.Document.BlockCount; i++)
+                foreach (int offset in new[] { 0, s.Document[i].Text.Length })
+                {
+                    var p = new RichPosition(i, offset);
+                    var got = editor.CaretBounds(p);
+                    var want = fresh.CaretBounds(p);
+                    Assert.True(Math.Abs(got.X - a.X - (want.X - b.X)) < 0.01f && Math.Abs(got.Y - a.Y - (want.Y - b.Y)) < 0.01f
+                        && Math.Abs(got.Height - want.Height) < 0.01f,
+                        $"step {step}: block {i} offset {offset} at {got} in the edited editor, {want} laid out afresh\n{s.Document}");
+                }
+        }
+    }
+
     // ── Pictures ──
 
     private static SkiaImageSource Red(int width, int height)

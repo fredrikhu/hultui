@@ -53,11 +53,19 @@ public partial class RichTextEditorElement
         ctx.PushClip(content);
         float originX = content.X, originY = content.Y - _scrollY;
 
-        int first = BlockAt(_scrollY);
-        if (first > 0 && _blocks[first].Top > _scrollY) first--;
+        // The document's visible stretch: the viewport, cut down to what the clips above leave —
+        // an editor that grows with its document, inside a scroll view, is mostly off screen.
+        float top = _scrollY, bottom = _scrollY + content.Height;
+        if (ctx.ClipBounds is { } clip)
+        {
+            top = Math.Max(top, clip.Y - originY);
+            bottom = Math.Min(bottom, clip.Bottom - originY);
+        }
+
+        int first = BlockAt(top);
+        if (first > 0 && _blocks[first].Top > top) first--;
         // A row of a table is drawn from its first cell; BlockAt answers with its last.
         if (_blocks[first].Table is { } firstTable) first = firstTable.Range.IndexOf(_blocks[first].CellRow, 0);
-        float bottom = _scrollY + content.Height;
 
         var selection = _state.Selection;
         TableLayout? drawnTable = null;
@@ -71,6 +79,7 @@ public partial class RichTextEditorElement
                 drawnTable = table;
             }
             DrawChrome(ctx, i, bl, originX, originY, content.Width);
+            if (_search is not null) DrawSearchHits(ctx, i, bl, originX, originY);
             if (!selection.IsCollapsed) DrawSelection(ctx, i, bl, selection, originX, originY, content.Width);
             if (bl.Paragraph is { } para)
                 ctx.DrawParagraph(para, new Point(originX + bl.TextX, originY + bl.Top + bl.TextY));

@@ -238,6 +238,9 @@ public sealed class RecordingRenderContext : IRenderContext
         _inner.PushClip(clipRect);
     }
 
+    // A question, not a drawing call: not recorded.
+    public Rect? ClipBounds => _inner.ClipBounds;
+
     public void PushRoundedClip(Rect clipRect, CornerRadius radius)
     {
         Record("PushRoundedClip", $"{Fmt(clipRect)}{Radius(radius)}");

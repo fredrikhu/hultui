@@ -460,36 +460,51 @@ public sealed class TextPipeline
     // effective weight/slant and shaped at its effective size. Offsets are absolute
     // into the source string throughout, because span ranges are.
 
+    // Both lookups below binary-search the spans, which TextSpan requires sorted by start and
+    // apart. They are asked once per piece of every line, and a scan of every span for each
+    // made a long paragraph's layout quadratic: 600 spans, 1,300 pieces, a million steps a
+    // keystroke in a rich text editor.
+
     private ResolvedInheritedStyle EffectiveStyleAt(
         ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, int offset)
     {
-        for (int i = 0; i < spans.Count; i++)
+        int i = FirstSpanEndingAfter(spans, offset);
+        if (i >= spans.Count) return style;
+        var s = spans[i];
+        if (!s.IsMetricAffecting || offset < s.Start) return style;
+        return style with
         {
-            var s = spans[i];
-            if (s.IsMetricAffecting && offset >= s.Start && offset < s.End)
-                return style with
-                {
-                    FontWeight = s.Weight ?? style.FontWeight,
-                    FontSlant = s.Slant ?? style.FontSlant,
-                    FontSize = s.FontSize ?? style.FontSize,
-                    FontFamily = s.FontFamily ?? style.FontFamily,
-                };
-        }
-        return style;
+            FontWeight = s.Weight ?? style.FontWeight,
+            FontSlant = s.Slant ?? style.FontSlant,
+            FontSize = s.FontSize ?? style.FontSize,
+            FontFamily = s.FontFamily ?? style.FontFamily,
+        };
     }
 
-    // The nearest metric-span edge after <paramref name="offset"/>, clamped to limit.
+    // The nearest metric-span edge after <paramref name="offset"/>, clamped to limit: the end of
+    // the metric span holding it, else the start of the first one after it.
     private static int NextStyleBoundary(IReadOnlyList<Core.Rendering.TextSpan> spans, int offset, int limit)
     {
-        int next = limit;
-        for (int i = 0; i < spans.Count; i++)
+        for (int i = FirstSpanEndingAfter(spans, offset); i < spans.Count; i++)
         {
             var s = spans[i];
+            if (s.Start >= limit) break;
             if (!s.IsMetricAffecting) continue;
-            if (s.Start > offset && s.Start < next) next = s.Start;
-            if (s.End > offset && s.End < next) next = s.End;
+            return Math.Min(limit, s.Start > offset ? s.Start : s.End);
         }
-        return next;
+        return limit;
+    }
+
+    private static int FirstSpanEndingAfter(IReadOnlyList<Core.Rendering.TextSpan> spans, int offset)
+    {
+        int lo = 0, hi = spans.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (spans[mid].End <= offset) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
     }
 
     private float MeasureStyled(string text, int from, int to,

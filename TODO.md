@@ -1,6 +1,16 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Rich text editor, stage 8: measured, faster, and find** (docs/plans/16-rich-text-editor.md) —
+  ten perf-suite scenarios (`richtext/`, `a11y/type in rich text`); idle-gated A/B 0 slower, 11
+  faster (captures 2026-10-07 in the suite). A paragraph of 600 spans 19.2 → 2.7 ms per keystroke,
+  an auto-height editor 3.3 → 0.8 ms, every `text/` scenario 7–27 % faster. Fixes: a face remembers
+  which characters it has (Skia was asked per character per itemize), binary-searched span lookups
+  in layout and paint, one clip per colour, blobs kept by glyphs, `IRenderContext.ClipBounds` culling,
+  incremental editor layout (checked against a fresh layout over 8 × 300 random edits), auto-height
+  measured from that layout. Find: `editor.Search` / `.HighlightSearch(search)`, `RevealSearchMatch`,
+  `FindSelection`; Ctrl+F in Fluent's notes. Tests: 4 find, 2 layout-equivalence seeds; 2 goldens
+  moved one pixel (an italic overhang no longer cut at a same-colour span edge).
 - **Rich text editor, stage 9: pictures and tables** (docs/plans/16-rich-text-editor.md) — a picture
   is a void block (`BlockKind.Image`, `RichImage(Source, Alt, Title, Width, Link)`) whose pixels
   come from the app (`.Images(resolve)`, asked again every rebuild); a table is a run of
@@ -827,11 +837,12 @@
 - **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.
 
 ## Up Next (in order)
-- **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4, 6 and 7 (Fluent page, Junction
-  Create MR description) and 9 (pictures and tables) done. Next: measuring large documents
-  (stage 8); candidates for more adoption: Junction's review notes and replies. Left from stage 9:
+- **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4 and 6–9 done; stage 5 is the
+  entry below. Candidates for more adoption: Junction's review notes and replies. Left from stage 9:
   a Table button in Junction (needs Phosphor's `table` glyph in the bundle), pasting picture data
-  (an upload hook), dragging to resize pictures and columns.
+  (an upload hook), dragging to resize pictures and columns. Left from stage 8: opening a long
+  document lays every block out (5,000 blocks: 15.5 ms) — estimated heights off screen would make
+  it cost a screenful.
 - **Rich text editor: accessible text source** (plan 16, stage 5) — a screen reader gets the
   document as one value today, so it cannot move through it by word or line. Implement
   `IAccessibleTextSource` (`AccessibleText`, as `TextAreaElement` does) over the document's

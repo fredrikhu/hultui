@@ -65,6 +65,11 @@ public sealed class RichTextTheme : IThemeExtension<RichTextTheme>
     /// palette's secondary colour.</summary>
     public Color? RawTextColor { get; init; }
 
+    /// <summary>Behind a find bar's matches, and behind the current one. Null takes amber, the
+    /// colour find marks text with almost everywhere.</summary>
+    public Color? FindHitColor { get; init; }
+    public Color? FindCurrentColor { get; init; }
+
     /// <summary>The tallest a picture is drawn; a taller one is scaled down, narrowing with it.</summary>
     public float ImageMaxHeight { get; init; } = 480f;
     /// <summary>Around a selected picture.</summary>

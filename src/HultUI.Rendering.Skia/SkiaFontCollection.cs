@@ -253,9 +253,27 @@ internal sealed class SkiaResolvedFont : IResolvedFont
         _font = new SKFont(typeface, 1f);
     }
 
+    // Which codepoints of the Basic Multilingual Plane have been asked about (the first 1,024
+    // words) and which of those the face has (the next 1,024): two bits a codepoint, 16 KB a
+    // face, made on the first question. Itemizing asks for every character of every run it
+    // shapes, and each answer was a call into Skia; text is mostly a few hundred distinct
+    // characters asked about again and again. One array, so a question and its answer are
+    // always read from the same one, even if two threads race to make it.
+    private long[]? _glyphBits;
+
     public bool HasGlyph(int codepoint)
     {
-        return _typeface.GetGlyph(codepoint) != 0;
+        if ((uint)codepoint > 0xFFFF) return _typeface.GetGlyph(codepoint) != 0;
+        var bits = _glyphBits ??= new long[2048];
+        int word = codepoint >> 6;
+        long bit = 1L << (codepoint & 63);
+        // Asked before: the answer was written before the question was marked, and the read
+        // of the mark orders the read of the answer after it — layout can run off the UI thread.
+        if ((Volatile.Read(ref bits[word]) & bit) != 0) return (bits[1024 + word] & bit) != 0;
+        bool has = _typeface.GetGlyph(codepoint) != 0;
+        if (has) Interlocked.Or(ref bits[1024 + word], bit);
+        Interlocked.Or(ref bits[word], bit);
+        return has;
     }
 
     private void EnsureMetrics()

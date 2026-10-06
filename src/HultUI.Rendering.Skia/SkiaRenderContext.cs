@@ -52,15 +52,41 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     internal SKPath PooledPath => _pooledPath;
     internal SKFont PooledCanvasFont => _pooledCanvasFont;
 
-    // Cached positioned-blob per ShapedRun instance. Shaping itself is cached by
+    // Cached positioned-blob per run of glyphs. Shaping itself is cached by
     // TextPipeline.MeasurementCache — this cache is only to skip the blob-builder
-    // copy when the same run is drawn repeatedly (same frame, or across frames
-    // when the layout cache returns the same ShapedRun reference).
-    private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new();
+    // copy when the same run is drawn repeatedly (same frame, or across frames).
+    // Keyed by what the run draws, not by the run: a paragraph laid out again after
+    // an edit makes new runs for every line, the ones that did not change too.
+    private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new(SameGlyphs.Instance);
     private const int RunBlobCacheMaxSize = 2048;
 
     // The same runs as glyph outlines, for TextAsOutlines.
-    private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new();
+    private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new(SameGlyphs.Instance);
+
+    /// <summary>Two runs draw the same pixels when they hold the same glyphs at the same places,
+    /// in the same face and size, whichever layout made them.</summary>
+    private sealed class SameGlyphs : IEqualityComparer<ShapedRun>
+    {
+        public static readonly SameGlyphs Instance = new();
+
+        public bool Equals(ShapedRun? a, ShapedRun? b) =>
+            ReferenceEquals(a, b)
+            || (a is not null && b is not null && ReferenceEquals(a.Font, b.Font) && a.FontSize == b.FontSize
+                && (ReferenceEquals(a.Glyphs, b.Glyphs) || a.Glyphs.AsSpan().SequenceEqual(b.Glyphs)));
+
+        public int GetHashCode(ShapedRun run)
+        {
+            var hash = new HashCode();
+            hash.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(run.Font));
+            hash.Add(run.FontSize);
+            foreach (var g in run.Glyphs)
+            {
+                hash.Add(g.GlyphId);
+                hash.Add(g.X);
+            }
+            return hash.ToHashCode();
+        }
+    }
     private readonly SKFont _outlineFont = new() { Hinting = SKFontHinting.None, Subpixel = true, LinearMetrics = true };
 
     /// <summary>
@@ -577,13 +603,17 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
 
+        // Lines wholly above or below the clip draw nothing: a paragraph in an editor can run
+        // far past its viewport. A line's height of slack covers what hangs out of its box.
+        var clip = Canvas.LocalClipBounds;
         var lines = p.TextLines;
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
             if (line.Runs.Count == 0) continue;
-            float baseX = origin.X + p.LineLeft(i);
             float lineTop = origin.Y + line.OffsetY;
+            if (lineTop > clip.Bottom + line.Height || lineTop + 2 * line.Height < clip.Top) continue;
+            float baseX = origin.X + p.LineLeft(i);
             float lineY = lineTop + line.Ascent;
 
             if (spans is not null)
@@ -675,10 +705,19 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         var measurer = PrefixMeasurer(line, style);
 
+        // Only the spans that reach into this line: sorted and apart, so the first is a binary
+        // search away and the last is the one before the first that starts past the line. A long
+        // paragraph has hundreds of spans and dozens of lines; scanning every span for every
+        // line was most of drawing it.
+        int first = FirstSpanEndingAfter(spans, line.Start);
+        int stop = first;
+        while (stop < spans.Count && spans[stop].Start < line.Start + drawnLength) stop++;
+
         // Background pass first so every glyph (including ones whose ink crosses
         // a span boundary) draws on top of the finished highlight rects.
-        foreach (var span in spans)
+        for (int k = first; k < stop; k++)
         {
+            var span = spans[k];
             if (span.Background.A == 0) continue;
             int bs = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int be = Math.Clamp(span.End - line.Start, 0, drawnLength);
@@ -692,29 +731,41 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                     Canvas.DrawRect(SKRect.Create(baseX + r.X0, lineTop, r.X1 - r.X0, line.Height), _pooledPaint);
         }
 
-        int cursor = 0;
-        foreach (var span in spans)
+        // Glyphs, one stretch of one colour at a time. Spans that meet in the same colour — a bold
+        // word in the line's own colour, a code span — are one stretch under one clip: a clip and
+        // a redraw of the runs under it for every span edge was most of a styled line's cost.
+        int stretch = 0, at = 0;
+        var colour = style.TextColor;
+        for (int k = first; k < stop && at < drawnLength; k++)
         {
+            var span = spans[k];
             int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
-            if (e <= cursor) continue;
-            if (s > cursor)
-                DrawLineSegment(line, cursor, s, style.TextColor, style, baseX, baselineY, lineTop);
+            if (e <= at) continue;
+            if (s > at) Continue(at, style.TextColor);
             // Transparent span color = background-only span; glyphs keep the
             // element's text color.
-            var fg = span.Color.A == 0 ? style.TextColor : span.Color;
-            DrawLineSegment(line, Math.Max(s, cursor), e, fg, style, baseX, baselineY, lineTop);
-            cursor = e;
-            if (cursor >= drawnLength) break;
+            Continue(Math.Max(s, at), span.Color.A == 0 ? style.TextColor : span.Color);
+            at = e;
         }
-        if (cursor < drawnLength)
-            DrawLineSegment(line, cursor, drawnLength, style.TextColor, style, baseX, baselineY, lineTop);
+        if (at < drawnLength) Continue(at, style.TextColor);
+        DrawLineSegment(line, stretch, drawnLength, colour, style, baseX, baselineY, lineTop);
+
+        // From `from` on the text is `c`: the stretch before it is drawn when that changes its colour.
+        void Continue(int from, Color c)
+        {
+            if (c == colour) return;
+            DrawLineSegment(line, stretch, from, colour, style, baseX, baselineY, lineTop);
+            stretch = from;
+            colour = c;
+        }
 
         // Decorations last, over the glyphs — the same order the element-level
         // decoration draws in, so a spanned underline crosses descenders exactly
         // the way a whole-element one does.
-        foreach (var span in spans)
+        for (int k = first; k < stop; k++)
         {
+            var span = spans[k];
             if (span.Decoration == TextDecoration.None) continue;
             int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
@@ -727,6 +778,19 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                     DrawDecorationRects(span.Decoration, style.FontSize, line.Ascent,
                         baseX + r.X0, r.X1 - r.X0, baselineY);
         }
+    }
+
+    // The first of `spans` (sorted by start, apart) that ends after `offset`; Count when none does.
+    private static int FirstSpanEndingAfter(IReadOnlyList<TextSpan> spans, int offset)
+    {
+        int lo = 0, hi = spans.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (spans[mid].End <= offset) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
     }
 
     private void DrawLineSegment(TextLine line, int startChar, int endChar, Color color,
@@ -1177,6 +1241,15 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         _saveStack.Push(Canvas.Save());
         Canvas.ClipRoundRect(ToSkRoundRect(ToSkRect(clipRect), radius));
+    }
+
+    public Rect? ClipBounds
+    {
+        get
+        {
+            var r = Canvas.LocalClipBounds;
+            return new Rect(r.Left, r.Top, r.Width, r.Height);
+        }
     }
 
     public void PushTranslate(float x, float y)

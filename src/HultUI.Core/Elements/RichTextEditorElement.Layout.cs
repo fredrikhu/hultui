@@ -12,7 +12,7 @@ public partial class RichTextEditorElement
 
     private RichTextTheme _rt = new();
     private Color _linkColor, _codeBackground, _quoteBar, _quoteText, _checked, _checkedText, _rule, _rawText;
-    private Color _checkBorder, _tableBorder, _tableHeader, _ring;
+    private Color _checkBorder, _tableBorder, _tableHeader, _ring, _findHit, _findCurrent;
     private int _themeStamp;
 
     private void ApplyRichTheme(Theme theme)
@@ -33,16 +33,18 @@ public partial class RichTextEditorElement
         var tableBorder = rt.TableBorderColor ?? Tint(theme.TextColor, 48);
         var tableHeader = rt.TableHeaderBackground ?? Tint(theme.TextColor, 14);
         var ring = rt.ImageRingColor ?? theme.Primary;
+        var findHit = rt.FindHitColor ?? new Color(245, 158, 11, 61);
+        var findCurrent = rt.FindCurrentColor ?? new Color(245, 158, 11, 158);
 
         if (ReferenceEquals(rt, _rt) && link == _linkColor && code == _codeBackground && bar == _quoteBar
             && quote == _quoteText && check == _checked && checkedText == _checkedText && rule == _rule
             && raw == _rawText && checkBorder == _checkBorder && tableBorder == _tableBorder && tableHeader == _tableHeader
-            && ring == _ring)
+            && ring == _ring && findHit == _findHit && findCurrent == _findCurrent)
             return;
 
         (_rt, _linkColor, _codeBackground, _quoteBar, _quoteText) = (rt, link, code, bar, quote);
         (_checked, _checkedText, _rule, _rawText, _checkBorder) = (check, checkedText, rule, raw, checkBorder);
-        (_tableBorder, _tableHeader, _ring) = (tableBorder, tableHeader, ring);
+        (_tableBorder, _tableHeader, _ring, _findHit, _findCurrent) = (tableBorder, tableHeader, ring, findHit, findCurrent);
         _themeStamp++;
         MarkPaintDirty();
     }
@@ -193,9 +195,13 @@ public partial class RichTextEditorElement
     private float _documentHeight;
     private IRenderContext? _renderCtx;
 
-    /// <summary>Lays the document out at <paramref name="width"/> unless it already is. A block
-    /// laid out before at the same width, in the same style, keeps its paragraph; a table is laid
-    /// out whole, keeping the paragraphs of cells whose text and column did not change.</summary>
+    /// <summary>
+    /// Lays the document out at <paramref name="width"/> unless it already is. After an edit only
+    /// the blocks it replaced are laid out again: an edit shares every block it did not touch, so
+    /// the blocks the new document shares with the last one at either end keep their layouts and
+    /// only move. A table is laid out whole, keeping the paragraphs of cells whose text and column
+    /// did not change.
+    /// </summary>
     private void EnsureLayout(IRenderContext ctx, float width)
     {
         var doc = _state.Document;
@@ -204,56 +210,142 @@ public partial class RichTextEditorElement
             && ReferenceEquals(ctx, _renderCtx);
         if (sameFrame && ReferenceEquals(doc, _laidOutDocument)) return;
 
+        _renderCtx = ctx;
+        if (sameFrame && _laidOutDocument is { } old && old.BlockCount == _blocks.Length)
+            Relayout(ctx, old, doc, width, body);
+        else
+            LayoutAll(ctx, doc, width, body, keep: sameFrame);
+
+        _laidOutDocument = doc;
+        _laidOutWidth = width;
+        _laidOutStamp = _themeStamp;
+        _laidOutBody = body;
+    }
+
+    // Every block: the first layout, a new width or theme, a document handed in, a picture that
+    // arrived. With `keep`, a block laid out before at this width keeps its layout.
+    private void LayoutAll(IRenderContext ctx, RichDocument doc, float width, ResolvedInheritedStyle body, bool keep)
+    {
         Dictionary<RichBlock, BlockLayout>? reuse = null;
-        if (sameFrame && _blocks.Length > 0)
+        if (keep && _blocks.Length > 0)
         {
             reuse = new Dictionary<RichBlock, BlockLayout>(_blocks.Length, ReferenceEqualityComparer.Instance);
             foreach (var bl in _blocks)
                 if (!bl.Stale) reuse.TryAdd(bl.Block, bl);
         }
-
-        _renderCtx = ctx;
-        _pictures.Clear();
         var blocks = new BlockLayout[doc.BlockCount];
-        Span<int> counters = stackalloc int[RichBlock.MaxIndent + 2];
-        float y = 0;
-        for (int i = 0; i < blocks.Length; i++)
+        LayOut(ctx, doc, blocks, 0, blocks.Length, width, body, reuse);
+        _blocks = blocks;
+        Place(doc, 0);
+    }
+
+    // After an edit: what it replaced, widened to whole tables, is laid out; the rest is moved.
+    private void Relayout(IRenderContext ctx, RichDocument old, RichDocument doc, float width, ResolvedInheritedStyle body)
+    {
+        var a = old.Blocks;
+        var b = doc.Blocks;
+        int max = Math.Min(a.Length, b.Length);
+        int start = 0;
+        while (start < max && ReferenceEquals(a[start], b[start]) && !_blocks[start].Stale) start++;
+        int suffix = 0;
+        while (suffix < max - start && ReferenceEquals(a[^(suffix + 1)], b[^(suffix + 1)]) && !_blocks[a.Length - 1 - suffix].Stale)
+            suffix++;
+        int end = b.Length - suffix;
+        // A table is laid out as a unit, so the run is widened out to the edges of any table it
+        // cuts. Cells taken out or put in at a table's end leave every cell it keeps the same
+        // instance — an undone row — so a run that held cells before or holds them now takes the
+        // table just before it along too.
+        bool cells = false;
+        for (int i = start; i < a.Length - suffix && !cells; i++) cells = a[i].IsTableCell;
+        for (int i = start; i < end && !cells; i++) cells = b[i].IsTableCell;
+        if (cells && start > 0 && b[start - 1].IsTableCell && RichTable.At(b, start - 1) is { } previous)
+            start = previous.Start;
+        if (start < b.Length && b[start].IsTableCell && RichTable.At(b, start) is { } before) start = before.Start;
+        if (end > 0 && end < b.Length && b[end].IsTableCell && !RichTable.StartsTable(b, end)
+            && RichTable.At(b, end) is { } after)
+            end = after.End;
+        suffix = b.Length - end;
+        int oldEnd = a.Length - suffix;
+
+        // What the old run held, by block: a cell of a table being laid out again keeps its
+        // paragraph when its text and column have not changed.
+        Dictionary<RichBlock, BlockLayout>? reuse = null;
+        if (oldEnd > start)
+        {
+            reuse = new Dictionary<RichBlock, BlockLayout>(oldEnd - start, ReferenceEqualityComparer.Instance);
+            for (int i = start; i < oldEnd; i++)
+                if (!_blocks[i].Stale) reuse.TryAdd(_blocks[i].Block, _blocks[i]);
+        }
+
+        var blocks = b.Length == _blocks.Length ? _blocks : new BlockLayout[b.Length];
+        if (!ReferenceEquals(blocks, _blocks))
+        {
+            Array.Copy(_blocks, 0, blocks, 0, start);
+            Array.Copy(_blocks, oldEnd, blocks, end, suffix);
+        }
+        LayOut(ctx, doc, blocks, start, end, width, body, reuse);
+        _blocks = blocks;
+        Place(doc, start);
+    }
+
+    // Lays out blocks [from, to) into `into`, whole tables at a time.
+    private void LayOut(IRenderContext ctx, RichDocument doc, BlockLayout[] into, int from, int to, float width,
+        ResolvedInheritedStyle body, Dictionary<RichBlock, BlockLayout>? reuse)
+    {
+        for (int i = from; i < to; i++)
         {
             var block = doc[i];
-            float space = i == 0 ? 0 : SpaceBetween(doc[i - 1], block, BlockStyle(block, body).FontSize);
-            y += space;
-
             if (block.IsTableCell && doc.TableAt(i) is { } range)
             {
-                var table = BuildTable(ctx, doc, range, width, body, reuse, blocks);
-                table.Top = y;
-                for (int k = range.Start; k < range.End; k++)
-                {
-                    var cell = blocks[k];
-                    cell.Top = y + table.RowY[cell.CellRow] + table.Border;
-                    cell.SpaceAbove = k == range.Start ? space : 0;
-                    cell.Number = NumberOf(cell.Block, counters);
-                }
-                y += table.Height;
+                BuildTable(ctx, doc, range, width, body, reuse, into);
                 i = range.End - 1;
                 continue;
             }
+            into[i] = reuse is not null && reuse.Remove(block, out var kept) ? kept : Build(ctx, block, width, body);
+        }
+    }
 
-            var bl = reuse is not null && reuse.Remove(block, out var kept) ? kept : Build(ctx, block, width, body);
+    // Where each block sits from block `from` on — its gap, its top, a table's rows — and every
+    // numbered item's number, which counts from the start of its list.
+    private void Place(RichDocument doc, int from)
+    {
+        var blocks = _blocks;
+        Span<int> counters = stackalloc int[RichBlock.MaxIndent + 2];
+        for (int i = 0; i < blocks.Length; i++)
+            blocks[i].Number = NumberOf(doc[i], counters);
+
+        float y = 0;
+        if (from > 0)
+            y = blocks[from - 1].Table is { } previous ? previous.Top + previous.Height : blocks[from - 1].Bottom;
+        for (int i = from; i < blocks.Length; i++)
+        {
+            var bl = blocks[i];
+            float space = i == 0 ? 0 : SpaceBetween(doc[i - 1], bl.Block, bl.Style.FontSize);
+            y += space;
+            if (bl.Table is { } table)
+            {
+                // A table moved along by the edit keeps its layout; only its place changes.
+                if (table.Range.Start != i) table.Range = table.Range with { Start = i };
+                table.Top = y;
+                for (int k = i; k < table.Range.End; k++)
+                {
+                    var cell = blocks[k];
+                    cell.Top = y + table.RowY[cell.CellRow] + table.Border;
+                    cell.SpaceAbove = k == i ? space : 0;
+                }
+                y += table.Height;
+                i = table.Range.End - 1;
+                continue;
+            }
             bl.SpaceAbove = space;
             bl.Top = y;
             y += bl.Height;
-            bl.Number = NumberOf(block, counters);
-            if (block.Kind == BlockKind.Image) _pictures.Add(bl);
-            blocks[i] = bl;
         }
-
-        _blocks = blocks;
-        _laidOutDocument = doc;
-        _laidOutWidth = width;
-        _laidOutStamp = _themeStamp;
-        _laidOutBody = body;
         _documentHeight = y;
+
+        _pictures.Clear();
+        foreach (var bl in blocks)
+            if (bl.Block.Kind == BlockKind.Image) _pictures.Add(bl);
     }
 
     private BlockLayout Build(IRenderContext ctx, RichBlock block, float width, ResolvedInheritedStyle body)
@@ -622,7 +714,17 @@ public partial class RichTextEditorElement
         // The bounds are the editor's own height; what is measured here is inside its padding and border.
         float chrome = Box.Padding.Vertical + Box.BorderWidth.Vertical;
         float min = Math.Max(0, bounds.Min - chrome), max = Math.Max(min, bounds.Max - chrome);
-        return new Size(width, Math.Clamp(MeasureDocumentHeight(ctx, width), min, max));
+        // At the width it was last drawn at, the layout it draws from answers — after an edit,
+        // for the price of the blocks the edit replaced. A width it was not drawn at is measured.
+        float height;
+        if (_renderCtx is { } rc && width == _laidOutWidth)
+        {
+            EnsureLayout(rc, width);
+            height = _documentHeight;
+        }
+        else
+            height = MeasureDocumentHeight(ctx, width);
+        return new Size(width, Math.Clamp(height, min, max));
     }
 
     // The height EnsureLayout would come to, from the measure context: each block's text

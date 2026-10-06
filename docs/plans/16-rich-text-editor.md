@@ -276,6 +276,38 @@ assistive tool setting the value; DevTools showing the document; Up/Down through
 that mixes directions has had no test.
 8. **Measure.** Typing latency and paint on a 5,000-block document under the perf
    suite's rules (docs: perf-suite); find integration (`TextSearch` over global offsets).
+   **Done 2026-10-07:**
+   - **Scenarios.** Ten in the perf suite: nine `richtext/` (open, type and Enter in 5,000 blocks,
+     the wheel, Ctrl+A, a resize of 1,000, a paragraph of 600 spans, a 200-cell table, an
+     auto-height editor in a scroll view) and `a11y/type in rich text, bridge on`.
+   - **Result.** Idle-gated, three runs a side, interleaved: 0 slower, 11 faster. The paragraph
+     of 600 spans went from 19.2 to 2.7 ms, the auto-height editor from 3.3 to 0.8 ms; the rest
+     is in the suite's README.
+   - **Profiled, not guessed.** The span scan this plan named was third. First was a Skia call
+     per character asking a face for a glyph; a face now remembers the answers (a two-bit table
+     for the Basic Multilingual Plane), which also sped every `text/` scenario up by 7–27 %.
+     Second was three passes over every span for every painted line. Both span lookups now
+     binary-search, spans of one colour are clipped and drawn as one stretch, and blobs are
+     kept by the glyphs they draw, so a paragraph laid out again keeps its unchanged lines' blobs.
+   - **The editor.** After an edit, only the blocks it replaced are laid out: blocks shared by
+     reference at either end keep their layouts and move, and the run is widened to whole tables.
+     A random walk of 300 edits on each of eight seeds matched a fresh layout every time; one
+     case it caught was an undone row, which leaves the cells kept as the same instances.
+     `IRenderContext.ClipBounds` (new; Skia answers from its canvas) lets the editor draw only
+     the blocks and lines the clip leaves, which an editor that grows inside a scroll view needs.
+     An auto-height editor measures from that same layout at the width it was drawn. A document
+     makes its plain text once, in one copy.
+   - **Find.** `editor.Search` (`.HighlightSearch(search)`) takes a `FindBar`'s `TextSearch`: one
+     line a block, not global offsets, because the search and its hits are line-based and a
+     block is the editor's line. The editor binds it again after every edit, tints matches
+     behind the text (amber; `RichTextTheme.FindHitColor`/`FindCurrentColor`), and
+     `RevealSearchMatch` selects the current match, which scrolls it into view.
+     `FindSelection` seeds the bar from the selection. Fluent's notes have Ctrl+F.
+   - **Open.** Opening 5,000 blocks lays every block out once (15.5 ms, 18 MB). Estimated
+     heights for blocks off screen would make it cost what the screen does, at the price of a
+     scrollbar that settles as blocks are measured. While an assistive tool listens, each key
+     still copies the document's text once (1.6 MB at 5,000 blocks); stage 5's text source is
+     the fix.
 9. **Pictures and tables.** Brought into scope 2026-10-07. Both take the shape GitLab's Markdown
    gives them and Junction's Markdown viewer already draws. See [Pictures and tables](#pictures-and-tables).
    **Done 2026-10-07:**
@@ -378,8 +410,9 @@ equal. A cell holds inline text with marks and line breaks, which is what a GFM 
 ## Risks
 
 - **Styled layout cost per keystroke.** Only the edited block re-lays out, but a long
-  paragraph with many spans pays `EffectiveStyleAt`'s linear scan per segment. Measure in
-  stage 8; a sorted-span cursor is the known fix.
+  paragraph with many spans pays `EffectiveStyleAt`'s linear scan per segment. Measured in
+  stage 8: the scan was real but third in line, behind a Skia call per character to ask a
+  font for a glyph and a paint pass over every span for every line. All three are fixed.
 - **Ligature fallback** (`LineXAt` measures prefixes in the element style) can put a
   caret a hair off inside a styled ligature — plan 12's open note; code fonts with
   ligatures are the likely place to see it.

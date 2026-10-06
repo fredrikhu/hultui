@@ -40,6 +40,12 @@ public static class RichTextEditorExtensions
     public static RichTextEditorElement OnImageRequested(this RichTextEditorElement el, Action handler)
     { el.ImageRequested = handler; return el; }
 
+    /// <summary>Tints <paramref name="search"/>'s matches — a <see cref="FindBar"/>'s — and keeps
+    /// it bound to the document as it is edited; wire the bar's <see cref="FindBar.Reveal"/> to
+    /// <see cref="RichTextEditorElement.RevealSearchMatch"/>.</summary>
+    public static RichTextEditorElement HighlightSearch(this RichTextEditorElement el, TextSearch? search)
+    { el.Search = search; return el; }
+
     public static RichTextEditorElement Features(this RichTextEditorElement el, RichTextFeatures features)
     { el.Features = features; return el; }
 

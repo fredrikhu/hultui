@@ -204,6 +204,13 @@ public interface IRenderContext
     void PushTranslate(float x, float y);
 
     /// <summary>
+    /// What the clips pushed so far leave visible, in the current coordinates: how far an element
+    /// taller than its viewport — a long document in an editor that grows with it, inside a scroll
+    /// view — need draw. Null when the context cannot say, and then everything is drawn.
+    /// </summary>
+    Rect? ClipBounds => null;
+
+    /// <summary>
     /// Draws everything up to the matching <see cref="Pop"/> into a group, then blends the
     /// group at <paramref name="opacity"/>. Without bounds the group is as large as the
     /// current clip — on a raster surface, a window-sized offscreen image per call.
