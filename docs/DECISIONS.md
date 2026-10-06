@@ -179,6 +179,7 @@ firing on those would be noise, and warning noise is the failure these rules exi
 | IRenderContext abstraction | Backend-swappable. Core doesn't depend on SkiaSharp |
 | SKPaint pooling | Avoid per-draw-call allocation. Reuse paint objects |
 | **No damage rects** (2026-08-16) | Measured, not assumed — see below |
+| **A scroll reaches assistive tech on the resize schedule** (2026-10-06) | A scroll moves the bounds of everything under the view and changes nothing else, so it is a layout-only change: the accessibility tree is rebuilt as the scroll starts, at most every 100 ms while it goes on, and once after it stops — the batching browsers apply to location updates, and the one a resize already had. The scroll offset reported its change as a property change instead, which rebuilt the whole tree on every frame of a wheel turn. Junction's History list (Native AOT, a UIA client listening, 3 interleaved runs a side): a frame while scrolling 1.90 → 1.20 ms down and 1.76 → 0.98 ms up, the tree rebuilt on 100 % → 18 % of those frames, p95 4.4 → 2.3 ms; the accessibility time of the whole scripted session 131 → 63 ms. The coalescing runs on the platform clock, so a headless session's virtual time drives it and tests count the rebuilds exactly |
 
 ### Damage rects: measured and declined
 
