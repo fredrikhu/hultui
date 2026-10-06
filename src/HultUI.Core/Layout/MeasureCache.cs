@@ -80,10 +80,9 @@ internal struct MeasureCache
     }
 
     /// <summary>A forced size of none. No forced size is −∞, and a plain float is half a
-    /// <c>float?</c> — which matters more than it looks: four entries sit inline in every
-    /// element, and when ValidFromH was added beside two <c>float?</c> fields the element grew by
-    /// 16 bytes and the renderer's walk over a 1,000-row list (one cull test per row) took twice
-    /// as long. Packed, an entry is 28 bytes, 4 fewer than before ValidFromH.</summary>
+    /// <c>float?</c>: four entries sit inline in every element, so every byte here is paid per
+    /// element — ValidFromH beside two <c>float?</c> fields grew each element by 16 bytes.
+    /// Packed, an entry is 28 bytes, 4 fewer than before ValidFromH.</summary>
     private const float NotForced = float.NegativeInfinity;
 
     private struct Entry
