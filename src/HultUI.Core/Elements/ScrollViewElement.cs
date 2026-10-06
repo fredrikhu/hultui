@@ -401,6 +401,9 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             _hBar.Paint(ctx, contentBox, _contentWidth, _scrollOffsetX, vertical: false);
     }
 
+    // What it copies below is scrolling behaviour and the scrollbars' looks; layout reads none of it.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(ScrollViewElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

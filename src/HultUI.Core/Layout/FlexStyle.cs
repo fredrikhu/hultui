@@ -24,8 +24,24 @@ public sealed class FlexStyle
     public float ResolvedRowGap => RowGap > 0 ? RowGap : Gap;
     public float ResolvedColumnGap => ColumnGap > 0 ? ColumnGap : Gap;
 
-    internal void CopyFrom(FlexStyle source)
+    /// <returns>Whether anything changed: a patch that changes nothing in a layout style
+    /// leaves the element's layout standing (Element.PatchFrom).</returns>
+    internal bool CopyFrom(FlexStyle source)
     {
+        if (Direction == source.Direction
+            && Wrap == source.Wrap
+            && AlignItems == source.AlignItems
+            && AlignContent == source.AlignContent
+            && AlignSelf == source.AlignSelf
+            && JustifyContent == source.JustifyContent
+            && FlexGrow == source.FlexGrow
+            && FlexShrink == source.FlexShrink
+            && FlexBasis == source.FlexBasis
+            && Gap == source.Gap
+            && RowGap == source.RowGap
+            && ColumnGap == source.ColumnGap)
+            return false;
+
         Direction = source.Direction;
         Wrap = source.Wrap;
         AlignItems = source.AlignItems;
@@ -38,5 +54,6 @@ public sealed class FlexStyle
         Gap = source.Gap;
         RowGap = source.RowGap;
         ColumnGap = source.ColumnGap;
+        return true;
     }
 }

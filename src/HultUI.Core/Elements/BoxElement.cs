@@ -78,6 +78,9 @@ public class BoxElement : Element
 
     public static BoxElement New([OriginFile] string? file = null, [OriginLine] int line = 0) => new BoxElement().WithOrigin(file, line);
 
+    // What it copies below is paint.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(BoxElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

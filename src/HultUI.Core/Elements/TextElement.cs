@@ -492,11 +492,16 @@ public class TextElement : Element
             ? pos - 1
             : pos;
 
+    // Content and Spans mark their layout when they change; Overflow and MaxLines are checked below.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(TextElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);
         if (source is TextElement text)
         {
+            if (Overflow != text.Overflow || MaxLines != text.MaxLines)
+                MarkLayoutDirty();
             Content = text.Content;
             Overflow = text.Overflow;
             MaxLines = text.MaxLines;
