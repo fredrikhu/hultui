@@ -182,6 +182,39 @@ static partial class Scenarios
                     },
                 };
             });
+
+        yield return new Scenario("text/open a long document in a TextArea",
+            "A TextArea given a 900-line document whose paragraphs run to 1,700 characters: every line wrapped for the first time",
+            ctx =>
+            {
+                // Twelve documents in turn, so no line or prefix is still cached when its
+                // document comes round again — opening a file nobody has looked at yet.
+                var documents = new string[12];
+                for (int d = 0; d < documents.Length; d++) documents[d] = Document(ctx.Rng);
+                var area = TextArea.New("").FlexGrow(1);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                return new Op
+                {
+                    Run = step => area.Text = documents[step % documents.Length],
+                    Check = step => area.Text == documents[step % documents.Length] ? null : "the document did not reach the TextArea",
+                };
+
+                // Shaped like a project's notes file: headings, gaps, bullets, and a paragraph
+                // in every fourteen lines kept on one line however long it runs.
+                static string Document(Random rng)
+                {
+                    var lines = new string[900];
+                    for (int i = 0; i < lines.Length; i++)
+                        lines[i] = (i % 14) switch
+                        {
+                            0 => "## " + Ui.Label(rng),
+                            1 or 7 => "",
+                            4 => Ui.Paragraph(rng, 60 + rng.Next(180)),
+                            _ => "- " + Ui.Paragraph(rng, 6 + rng.Next(18)),
+                        };
+                    return string.Join('\n', lines);
+                }
+            });
     }
 
     // 1,000 one-line labels with metric spans in half a window: truncated at every width of the drag.
