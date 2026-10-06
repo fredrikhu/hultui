@@ -1150,6 +1150,15 @@ public sealed partial class LayoutEngine
     /// </summary>
     private float MinContentWidth(Element e)
     {
+        // Reads no constraint, so it is kept until the element or something in it changes.
+        if (e.MeasureCache.TryGetMinContentWidth(out var known)) return known;
+        float width = ComputeMinContentWidth(e);
+        e.MeasureCache.StoreMinContentWidth(width);
+        return width;
+    }
+
+    private float ComputeMinContentWidth(Element e)
+    {
         var box = e.BoxRead;
         if (box.OverflowX != Overflow.Visible) return 0f;
 
