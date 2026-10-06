@@ -968,6 +968,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return layout.Size;
     }
 
+    public ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) =>
+        _pipeline?.MeasurePrefixes(text, style);
+
     public FontMetrics MeasureFont(ResolvedInheritedStyle style) =>
         _pipeline?.MeasureFont(style) ?? FontMetrics.Estimate(style, Size.Zero);
 

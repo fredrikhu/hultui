@@ -86,6 +86,23 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("input/type in a wrapped 900-line TextArea",
+            "Type one character into a 900-line notes file whose paragraphs wrap: every line wrapped again",
+            ctx =>
+            {
+                var area = TextArea.New(Ui.Notes(ctx.Rng)).FlexGrow(1);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                ctx.Window.Click(area);
+                area.CursorPosition = area.Text.Length / 2;
+                ctx.Pump();
+                int initial = area.Text.Length;
+                return new Op
+                {
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = step => area.Text.Length == initial + step + 1 ? null : "the typed character did not reach the TextArea",
+                };
+            });
+
         yield return new Scenario("input/undo-redo in TextArea",
             "Ctrl+Z / Ctrl+Y in a 2,000-line TextArea that has 40 edits of history",
             ctx =>

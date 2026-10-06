@@ -40,6 +40,25 @@ static class Ui
         return string.Join(' ', parts);
     }
 
+    /// <summary>
+    /// A 900-line document shaped like a project's notes file: headings, gaps, bullets, and a
+    /// paragraph in every fourteen lines kept on one line however long it runs (up to 1,700
+    /// characters), so a TextArea wraps it.
+    /// </summary>
+    public static string Notes(Random rng)
+    {
+        var lines = new string[900];
+        for (int i = 0; i < lines.Length; i++)
+            lines[i] = (i % 14) switch
+            {
+                0 => "## " + Label(rng),
+                1 or 7 => "",
+                4 => Paragraph(rng, 60 + rng.Next(180)),
+                _ => "- " + Paragraph(rng, 6 + rng.Next(18)),
+            };
+        return string.Join('\n', lines);
+    }
+
     private static readonly string[] HebrewWords =
         ["שלום", "עולם", "ספר", "בית", "מחשב", "חלון", "קובץ", "תיקייה", "שורה", "טקסט", "מסך", "עכבר"];
 
