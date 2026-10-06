@@ -15,10 +15,24 @@ public partial class JunctionApp
 {
     private (string Repo, DateTime Stamp, string Host, IReadOnlyList<IssueTrackerRule> Rules) _issueRules = ("", default, "", []);
 
+    // Whether this build has looked at the rules file yet. Build clears it; the first asker
+    // looks, and the rest of the build — and the rows a list realizes until the next one —
+    // take the answer. Looking is two calls to the file system, 26 µs, and it was made for
+    // every rendered line: 18 History rows on each move of the selection, most of the cost
+    // of building them.
+    private bool _issueRulesLooked;
+
+    /// <summary>How many times the rules were asked for, and how many of those looked at the
+    /// file, for tests.</summary>
+    internal int IssueRulesAsks { get; private set; }
+    internal int IssueRulesLooks { get; private set; }
+
     /// <summary>
     /// The active repository's rules, re-read when the file changes. Cached because it is
     /// asked once per rendered line — every visible History row, every line of a message —
-    /// and the answer costs a subprocess.
+    /// and the answer costs a subprocess. Whether the file changed is asked once a build: a
+    /// change is seen by the next one, and the repository watcher rebuilds on any change in
+    /// the working tree.
     /// <para>A repository on GitLab gets two rules of its own after the file's: <c>#123</c>
     /// is an issue and <c>!123</c> a merge request on that project. The file's rules come
     /// first so a project that maps <c>#</c> elsewhere keeps its say.</para>
@@ -26,6 +40,10 @@ public partial class JunctionApp
     private IReadOnlyList<IssueTrackerRule> IssueRules()
     {
         if (!HasActiveRepo) return [];
+        IssueRulesAsks++;
+        if (_issueRulesLooked && _issueRules.Repo == _activeRepoPath) return _issueRules.Rules;
+        _issueRulesLooked = true;
+        IssueRulesLooks++;
         var file = System.IO.Path.Combine(_activeRepoPath, IssueTrackerFile.FileName);
         var stamp = System.IO.File.Exists(file) ? System.IO.File.GetLastWriteTimeUtc(file) : default;
         var remote = GitLabRemoteFor(_activeRepoPath);

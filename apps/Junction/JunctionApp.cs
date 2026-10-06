@@ -776,6 +776,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         SyncWindowTitle();
         _spinnerWanted = false;   // set again by any Spinner() built below
+        _issueRulesLooked = false;   // the rules file is looked at again, once (see IssueRules)
 
         // Track the revision signal so a Rerender() re-runs Build through the
         // Effect (re-subscribing to the active repo's loaders — see _revision).

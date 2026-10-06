@@ -81,6 +81,44 @@ public class HistoryIssueLinkTests
         });
     }
 
+    /// <summary>
+    /// The rules are asked for once per rendered line, and every move of the selection builds
+    /// the visible rows again. Whether the file changed is a question for the file system, two
+    /// calls of it, and it was asked for each of those rows — most of what building a row cost.
+    /// It is asked once a build now.
+    /// </summary>
+    [Fact]
+    public void MovingTheSelectionLooksAtTheRulesFileOnceNotOnceARow()
+    {
+        Hosted((session, app) =>
+        {
+            int asks = app.IssueRulesAsks, looks = app.IssueRulesLooks;
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(3);
+
+            // Every one of the thirteen rows asked: the rows were built again. Each build looks
+            // once — a move rebuilds once or twice as the commit's details arrive.
+            Assert.True(app.IssueRulesAsks - asks >= 13, $"{app.IssueRulesAsks - asks} asks");
+            Assert.InRange(app.IssueRulesLooks - looks, 1, 3);
+        }, extraCommits: 10);
+    }
+
+    /// <summary>Asking once a build must not mean never: a rules file that appears while the
+    /// app is open is in force from the build the repository watcher brings.</summary>
+    [Fact]
+    public void ARulesFileWrittenWhileOpenLinksTheSubjectsOnTheNextBuild()
+    {
+        Hosted((session, app, repo) =>
+        {
+            Assert.True(SubjectLabel(session, Linked).Links is null or { Count: 0 });
+
+            repo.Write(IssueTrackerFile.FileName, Rules);
+            session.PumpUntil(() => SubjectLabel(session, Linked).Links is { Count: 1 },
+                TimeSpan.FromSeconds(30));
+        }, withRules: false);
+    }
+
     private static int MidOf(TextLink link) => link.Start + link.Length / 2;
 
     private static void ClickAtOffset(HeadlessSession session, TextElement label, string text, int offset)
@@ -113,20 +151,28 @@ public class HistoryIssueLinkTests
         }
     }
 
-    private static void Hosted(Action<HeadlessSession, JunctionApp> body)
+    private const string Rules = """
+        [issuetracker "Tracker"]
+            regex = "ABCD-(\\d+)"
+            url = "https://example.invalid/browse/ABCD-$1"
+        """;
+
+    private static void Hosted(Action<HeadlessSession, JunctionApp> body, int extraCommits = 0) =>
+        Hosted((session, app, _) => body(session, app), extraCommits: extraCommits);
+
+    private static void Hosted(Action<HeadlessSession, JunctionApp, TempRepo> body,
+        bool withRules = true, int extraCommits = 0)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
-        repo.Write(IssueTrackerFile.FileName, """
-            [issuetracker "Tracker"]
-                regex = "ABCD-(\\d+)"
-                url = "https://example.invalid/browse/ABCD-$1"
-            """);
+        if (withRules) repo.Write(IssueTrackerFile.FileName, Rules);
         repo.Write("a.txt", "a\n");
         repo.Git("add", "-A");
         repo.Git("commit", "-m", Linked);
         repo.Write("b.txt", "b\n");
         repo.Git("add", "-A");
         repo.Git("commit", "-m", Plain);
+        for (int i = 0; i < extraCommits; i++)
+            repo.Git("commit", "--allow-empty", "-m", $"Filler {i}");
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;
@@ -147,7 +193,7 @@ public class HistoryIssueLinkTests
                 TimeSpan.FromSeconds(30));
             session.PumpFrames(2);
 
-            body(session, app);
+            body(session, app, repo);
         }
         finally { app?.Dispose(); }
     }
