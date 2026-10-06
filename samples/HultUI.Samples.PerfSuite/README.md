@@ -352,7 +352,8 @@ height it was measured at, and so did its tile's column, which the layout pass t
 another. A leaf whose height is set now holds at any height, as a container did; controls that
 never read the height say so (`Element.IgnoresAvailableHeight`); and a width range's ends step in
 only where rounding needs it, which every padless button laid out at its own width missed by one
-step. Content measurements per pass, icons: 1,031 → 516; gallery plans taken: 11 → 32 of 44.
+step. Content measurements per pass, icons: 1,031 → 516; gallery 387 → 215, its plans taken
+11 → 43 of 44 (32 with the rounding fix alone; the 44th is the root, which no parent measures).
 Minimum, median of 3 runs:
 
 | Scenario | ca425da | c451515 | | layout |
