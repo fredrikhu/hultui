@@ -607,8 +607,11 @@ public sealed partial class LayoutEngine
         {
             bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
             var own = OwnSize(box, outerSpacing, constraint, resolvedW, contentAvailW, resolvedH, contentAvailH);
+            // Only a box sized from its content reads the widths its content holds for (WidthsOffered).
+            bool widthFromContent = resolvedW is null
+                && box.MinWidth.Unit != DimensionUnit.Percent && box.MaxWidth.Unit != DimensionUnit.Percent;
             contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH,
-                isRow ? own.Height : own.Width, out contentHeightFrom, out contentWidthFrom);
+                isRow ? own.Height : own.Width, widthFromContent, out contentHeightFrom, out contentWidthFrom);
         }
 
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
@@ -652,8 +655,12 @@ public sealed partial class LayoutEngine
     /// container's own cross size (<see cref="OwnSize"/>), which the lines are held in or,
     /// with AlignContent.Stretch, grown to.
     /// </summary>
+    /// <param name="widthsWanted">Whether the widths the answer holds for are read: only for a
+    /// container sized from its content. One whose width is set holds at any width whatever its
+    /// content does, and is laid out at the one content width it always has.</param>
     private Size MeasureFlexChildrenSize(Element container, IReadOnlyList<Element> children,
-        float contentAvailW, float contentAvailH, SizeRange ownCross, out float heightFrom, out WidthRange widthFrom)
+        float contentAvailW, float contentAvailH, SizeRange ownCross, bool widthsWanted,
+        out float heightFrom, out WidthRange widthFrom)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -689,9 +696,14 @@ public sealed partial class LayoutEngine
                 childrenW = WidthRange.Both(childrenW, remeasuredW);
             }
 
-            heightFrom = FlexHeightFrom(container, isRow, isWrap, anyBaseline, lines, mainGap, mainDistribute, childrenFrom);
-            widthFrom = FlexWidthFrom(container, isRow, isWrap, anyBaseline, lines, mainGap, mainDistribute,
-                contentAvailW, childrenW).With(contentAvailW);
+            // Both ranges read the items' total and grow factors and the baselines: worked out once.
+            bool baselinesExact = anyBaseline && !BaselinesFromTextOnly(container, lines);
+            var totals = !isWrap && (widthsWanted || !isRow) ? LineTotals(lines[0], mainGap) : default;
+            heightFrom = FlexHeightFrom(container, isRow, isWrap, baselinesExact, mainDistribute, childrenFrom, totals);
+            widthFrom = widthsWanted
+                ? FlexWidthFrom(container, isRow, isWrap, baselinesExact, mainDistribute, childrenW, totals)
+                    .With(contentAvailW)
+                : WidthRange.At(contentAvailW);
 
             // As the layout pass does, or a row baseline alignment makes taller would be
             // measured shorter than it lays out.
@@ -859,15 +871,28 @@ public sealed partial class LayoutEngine
     /// and holds where they do, unless it shrinks them: their floors (MinContentHeight) are read
     /// at its width. Wrapping, and rows aligning anything but text on its baseline, hold at their
     /// own width only.</summary>
-    private static WidthRange FlexWidthFrom(Element container, bool isRow, bool isWrap, bool anyBaseline,
-        List<FlexLine> lines, float mainGap, float mainDistribute, float contentW, WidthRange children)
+    /// <remarks>An empty range stands for "its own width only": the caller widens it to take in
+    /// the width it was measured at.</remarks>
+    private static WidthRange FlexWidthFrom(Element container, bool isRow, bool isWrap, bool baselinesExact,
+        float mainDistribute, WidthRange children, FlexTotals totals)
     {
-        var only = WidthRange.At(contentW);
-        if (isWrap || (anyBaseline && !BaselinesFromTextOnly(container, lines))) return only;
+        var only = new WidthRange(float.PositiveInfinity, float.NegativeInfinity);
+        if (isWrap || baselinesExact) return only;
         if (isRow && container.BoxRead.OverflowX == Overflow.Scroll) return WidthRange.Any;
+        if (mainDistribute - totals.Total < 0f) return only;   // shrinks
+        if (!isRow) return children;
+        if (totals.Grow > 0f) return only;
+        return WidthRange.Both(children, new WidthRange(totals.Total, float.PositiveInfinity));
+    }
 
-        // The sum ResolveFlexGrowShrink compares with the space, in its order (FlexHeightFrom).
-        var items = lines[0].Items;
+    /// <summary>A line's items' total main size, gaps in, and their grow factors.</summary>
+    private readonly record struct FlexTotals(float Total, float Grow);
+
+    /// <summary>The sum ResolveFlexGrowShrink compares with the space, in its order, so "it fits"
+    /// is decided the same way for the ranges as there.</summary>
+    private static FlexTotals LineTotals(FlexLine line, float mainGap)
+    {
+        var items = line.Items;
         float total = 0, grow = 0;
         for (int i = 0; i < items.Count; i++)
         {
@@ -875,10 +900,7 @@ public sealed partial class LayoutEngine
             if (i > 0) total += mainGap;
             grow += items[i].Element.FlexRead.FlexGrow;
         }
-        if (mainDistribute - total < 0f) return only;   // shrinks
-        if (!isRow) return children;
-        if (grow > 0f) return only;
-        return WidthRange.Both(children, new WidthRange(total, float.PositiveInfinity));
+        return new FlexTotals(total, grow);
     }
 
     /// <summary>Both measurements hold from the higher floor; one that holds at its own height
@@ -911,26 +933,15 @@ public sealed partial class LayoutEngine
         return true;
     }
 
-    private static float FlexHeightFrom(Element container, bool isRow, bool isWrap, bool anyBaseline,
-        List<FlexLine> lines, float mainGap, float mainDistribute, float childrenFrom)
+    private static float FlexHeightFrom(Element container, bool isRow, bool isWrap, bool baselinesExact,
+        float mainDistribute, float childrenFrom, FlexTotals totals)
     {
-        if (anyBaseline && !BaselinesFromTextOnly(container, lines)) return ExactHeight;
+        if (baselinesExact) return ExactHeight;
         if (isRow) return childrenFrom;
         if (container.BoxRead.OverflowY == Overflow.Scroll) return AnyHeight;
         if (isWrap) return ExactHeight;
-
-        // The sum ResolveFlexGrowShrink compares with the space, in its order, so "it fits" is
-        // decided the same way here as there.
-        var items = lines[0].Items;
-        float total = 0, grow = 0;
-        for (int i = 0; i < items.Count; i++)
-        {
-            total += items[i].BaseMain;
-            if (i > 0) total += mainGap;
-            grow += items[i].Element.FlexRead.FlexGrow;
-        }
-        if (grow > 0f || mainDistribute - total < 0f) return ExactHeight;
-        return HeightFromBoth(childrenFrom, total);
+        if (totals.Grow > 0f || mainDistribute - totals.Total < 0f) return ExactHeight;
+        return HeightFromBoth(childrenFrom, totals.Total);
     }
 
     private static bool HasPercentHeight(BoxStyle box) =>
