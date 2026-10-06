@@ -10,6 +10,9 @@ namespace HultUI.Core.Elements;
 
 public class TextElement : Element
 {
+    // MeasureContent below reads the width only.
+    public TextElement() => MeasuresAtWidthOnly = true;
+
     private string _content = "";
 
     public string Content

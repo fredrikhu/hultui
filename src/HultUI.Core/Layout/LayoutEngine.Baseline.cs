@@ -94,7 +94,7 @@ public sealed partial class LayoutEngine
     {
         var box = container.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;
-        var (resolvedW, contentAvailW, resolvedH, contentAvailH) = ResolveBox(container, forcedWidth, forcedHeight,
+        var (resolvedW, contentAvailW, resolvedH, contentAvailH, _) = ResolveBox(container, forcedWidth, forcedHeight,
             constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
         var flex = container.FlexRead;
