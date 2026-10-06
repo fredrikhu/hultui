@@ -152,6 +152,15 @@ public sealed class RecordingRenderContext : IRenderContext
         _inner.DrawImage(source, destRect, sourceRect);
     }
 
+    public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling)
+    {
+        Record("DrawImage",
+            $"{Fmt(destRect)} source={Fmt(sourceRect)} sampling={sampling} intrinsic={F(source.IntrinsicSize.Width)}x{F(source.IntrinsicSize.Height)}"
+            + (source is IPixelImageSource frames ? $" version={frames.Version}" : "")
+            + (source.IsLoaded ? "" : " (not loaded)"));
+        _inner.DrawImage(source, destRect, sourceRect, sampling);
+    }
+
     // ──── Text ────
 
     public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines)

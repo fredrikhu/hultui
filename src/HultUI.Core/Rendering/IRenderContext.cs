@@ -56,6 +56,19 @@ public interface IRenderContext
     /// </summary>
     void DrawImage(IImageSource source, Rect destRect, Rect sourceRect)
         => DrawImage(source, destRect, ImageFit.Fill);
+
+    /// <summary>
+    /// Draws one rectangle of <paramref name="source"/> — in the image's own pixels — over
+    /// <paramref name="destRect"/>, resampled the way <paramref name="sampling"/> says. Unlike
+    /// the overload without sampling, a frame source (<see cref="IPixelImageSource"/>) is cut
+    /// to <paramref name="sourceRect"/> too, so a viewer can show part of a large picture, under
+    /// its own zoom and pan, without copying the part out first. Combined with
+    /// <see cref="PushTransform"/> this is how an image is shown rotated or flipped.
+    ///
+    /// <para>The default ignores the sampling, for a context with no notion of pixels.</para>
+    /// </summary>
+    void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling)
+        => DrawImage(source, destRect, sourceRect);
     void DrawLine(Point from, Point to, Color color, float strokeWidth);
 
     /// <summary>

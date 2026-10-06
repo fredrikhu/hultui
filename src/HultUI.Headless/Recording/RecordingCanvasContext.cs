@@ -73,4 +73,54 @@ internal sealed class RecordingCanvasContext : ICanvasDrawingContext
         Record("DrawText", $"{Quoted(text)} {Fmt(position)} size={F(fontSize)} {Fmt(color)}");
         _inner.DrawText(text, position, color, fontSize);
     }
+
+    public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling = ImageSampling.Default)
+    {
+        Record("DrawImage",
+            $"{Fmt(destRect)} source={Fmt(sourceRect)} sampling={sampling} intrinsic={F(source.IntrinsicSize.Width)}x{F(source.IntrinsicSize.Height)}"
+            + (source is IPixelImageSource frames ? $" version={frames.Version}" : "")
+            + (source.IsLoaded ? "" : " (not loaded)"));
+        _inner.DrawImage(source, destRect, sourceRect, sampling);
+    }
+
+    public void FillPolygon(ReadOnlySpan<Point> points, Color fill)
+    {
+        Record("FillPolygon", $"{Points(points)} {Fmt(fill)}");
+        _inner.FillPolygon(points, fill);
+    }
+
+    public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
+    {
+        Record("DrawPolyline", $"{Points(points)} {Fmt(color)} width={F(strokeWidth)}");
+        _inner.DrawPolyline(points, color, strokeWidth);
+    }
+
+    public void PushClip(Rect rect)
+    {
+        Record("PushClip", Fmt(rect));
+        _inner.PushClip(rect);
+    }
+
+    public void PushTransform(System.Numerics.Matrix3x2 m)
+    {
+        Record("PushTransform", $"[{F(m.M11)},{F(m.M12)},{F(m.M21)},{F(m.M22)},{F(m.M31)},{F(m.M32)}]");
+        _inner.PushTransform(m);
+    }
+
+    public void Pop()
+    {
+        Record("Pop", "");
+        _inner.Pop();
+    }
+
+    // Not recorded: it runs after every canvas callback, and a balanced callback (the
+    // usual case) gets nothing from it — logging it would add a line to every canvas.
+    public void PopAll() => _inner.PopAll();
+
+    private static string Points(ReadOnlySpan<Point> points)
+    {
+        var parts = new string[points.Length];
+        for (int i = 0; i < points.Length; i++) parts[i] = Fmt(points[i]);
+        return string.Join(" ", parts);
+    }
 }

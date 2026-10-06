@@ -1378,8 +1378,30 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     private void DrawPixelFrame(IPixelImageSource source, Rect destRect, ImageFit fit)
     {
-        if (!source.TryAcquire(out var frame))
+        if (!TryWrapPixelFrame(source, out var image, out var format))
             return;
+
+        var (drawRect, srcRect) = ComputeImageFit(fit, image.Width, image.Height,
+            destRect.Width, destRect.Height, destRect);
+
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        if (NeedsForcedOpacity(format)) _pooledPaint.ColorFilter = ForceOpaque;
+        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
+        _pooledPaint.ColorFilter = null;
+    }
+
+    /// <summary>
+    /// Borrows <paramref name="source"/>'s current frame and wraps it as an image without
+    /// copying. The borrow is held until the frame has been flushed — see
+    /// <see cref="_heldFrames"/> — so the caller only draws the image and never releases it.
+    /// </summary>
+    private bool TryWrapPixelFrame(IPixelImageSource source, out SKImage image, out PixelFormat format)
+    {
+        image = null!;
+        format = default;
+        if (!source.TryAcquire(out var frame))
+            return false;
 
         var (colorType, alphaType) = frame.Format switch
         {
@@ -1387,27 +1409,75 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             PixelFormat.Bgra8888 => (SKColorType.Bgra8888, SKAlphaType.Premul),
             PixelFormat.Rgbx8888 => (SKColorType.Rgba8888, SKAlphaType.Opaque),
             PixelFormat.Bgrx8888 => (SKColorType.Bgra8888, SKAlphaType.Opaque),
+            // Skia expands a grey level into all three channels at draw time, on the GPU
+            // as a swizzle of a one-channel texture, so a quarter of the bytes go up.
+            PixelFormat.Gray8 => (SKColorType.Gray8, SKAlphaType.Opaque),
             _ => throw new ArgumentOutOfRangeException(nameof(frame.Format), frame.Format, null),
         };
 
         var info = new SKImageInfo(frame.Width, frame.Height, colorType, alphaType);
         // No copy: the image is a view over the source's bytes, so the borrow
         // outlives this call — see _heldFrames.
-        var image = SKImage.FromPixels(info, frame.Pixels, frame.Stride);
-        if (image is null)
+        var wrapped = SKImage.FromPixels(info, frame.Pixels, frame.Stride);
+        if (wrapped is null)
         {
             source.Release(frame);
+            return false;
+        }
+        _heldFrames.Add(new HeldFrame(source, frame, wrapped));
+        image = wrapped;
+        format = frame.Format;
+        return true;
+    }
+
+    // Gray8 has no fourth byte to be garbage, so only the x formats need alpha forced.
+    private static bool NeedsForcedOpacity(PixelFormat format) =>
+        format is PixelFormat.Rgbx8888 or PixelFormat.Bgrx8888;
+
+    private static readonly SKSamplingOptions NearestSampling = new(SKFilterMode.Nearest, SKMipmapMode.None);
+    private static readonly SKSamplingOptions CubicSampling = new(SKCubicResampler.CatmullRom);
+
+    private static SKSamplingOptions ToSkSampling(ImageSampling sampling, bool frameSource) => sampling switch
+    {
+        ImageSampling.Nearest => NearestSampling,
+        ImageSampling.Linear => FrameSampling,
+        ImageSampling.Cubic => CubicSampling,
+        _ => frameSource ? FrameSampling : DownscaleSampling,
+    };
+
+    /// <summary>
+    /// A rectangle of a still image or of a frame source's current frame, resampled as asked.
+    /// A GPU source has no pixels here to cut from or to filter, so it draws whole as before.
+    /// </summary>
+    public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling)
+    {
+        SKImage image;
+        bool forceOpaque = false, frameSource = false;
+        if (source is IGpuImageSource && _glSurface is { SupportsExternalGL: true })
+        {
+            DrawImage(source, destRect, ImageFit.Fill);
             return;
         }
-        _heldFrames.Add(new HeldFrame(source, frame, image));
-
-        var (drawRect, srcRect) = ComputeImageFit(fit, frame.Width, frame.Height,
-            destRect.Width, destRect.Height, destRect);
+        if (source is IPixelImageSource pixelSource)
+        {
+            if (!TryWrapPixelFrame(pixelSource, out image, out var format))
+                return;
+            forceOpaque = NeedsForcedOpacity(format);
+            frameSource = true;
+        }
+        else if (source is SkiaImageSource { Image: { } still })
+        {
+            image = still;
+        }
+        else
+        {
+            return;
+        }
 
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
-        if (alphaType == SKAlphaType.Opaque) _pooledPaint.ColorFilter = ForceOpaque;
-        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
+        if (forceOpaque) _pooledPaint.ColorFilter = ForceOpaque;
+        Canvas.DrawImage(image, ToSkRect(sourceRect), ToSkRect(destRect), ToSkSampling(sampling, frameSource), _pooledPaint);
         _pooledPaint.ColorFilter = null;
     }
 

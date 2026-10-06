@@ -2,7 +2,10 @@ using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Rendering;
 
-/// <summary>Byte layout of a <see cref="PixelFrame"/>, four bytes per pixel.</summary>
+/// <summary>
+/// Byte layout of a <see cref="PixelFrame"/>: four bytes per pixel, except
+/// <see cref="Gray8"/>, which is one. <see cref="PixelFormats.BytesPerPixel"/> says which.
+/// </summary>
 public enum PixelFormat : byte
 {
     /// <summary>R, G, B, A in memory order; alpha premultiplied.</summary>
@@ -14,6 +17,46 @@ public enum PixelFormat : byte
     Rgbx8888,
     /// <summary>B, G, R, then an ignored byte; opaque. A decoder's <c>bgr0</c>.</summary>
     Bgrx8888,
+    /// <summary>
+    /// One byte per pixel, a grey level from black (0) to white (255); opaque. What a
+    /// monochrome image is after its grey-level mapping — a black-and-white photograph, a
+    /// thermal camera frame, a scanned page. A quarter of the bytes of the four-byte formats,
+    /// so a quarter of the upload on every draw, which is the point for a large image
+    /// whose levels change interactively.
+    /// </summary>
+    Gray8,
+}
+
+/// <summary>Facts about a <see cref="PixelFormat"/>.</summary>
+public static class PixelFormats
+{
+    /// <summary>Bytes one pixel occupies: one for <see cref="PixelFormat.Gray8"/>, four otherwise.</summary>
+    public static int BytesPerPixel(this PixelFormat format) => format == PixelFormat.Gray8 ? 1 : 4;
+
+    /// <summary>Whether the format has no alpha: the <c>x</c> formats and <see cref="PixelFormat.Gray8"/>.</summary>
+    public static bool IsOpaque(this PixelFormat format) =>
+        format is PixelFormat.Rgbx8888 or PixelFormat.Bgrx8888 or PixelFormat.Gray8;
+}
+
+/// <summary>
+/// How an image's pixels are resampled when it is drawn at a size or angle other than its
+/// own. The choice matters most for content whose individual pixels carry meaning: a
+/// technical image magnified to inspect single pixels wants <see cref="Nearest"/>, the
+/// same image fitted to a viewport wants <see cref="Cubic"/>.
+/// </summary>
+public enum ImageSampling : byte
+{
+    /// <summary>Whatever the renderer uses for the kind of source: smooth filtering, with
+    /// mipmaps for a still image and without them for a frame source.</summary>
+    Default,
+    /// <summary>Point sampling: each destination pixel takes the nearest source pixel, so a
+    /// magnified pixel is a hard-edged square.</summary>
+    Nearest,
+    /// <summary>Bilinear filtering, no mipmaps.</summary>
+    Linear,
+    /// <summary>Bicubic filtering (Catmull-Rom): sharper than bilinear when magnifying,
+    /// without the blockiness of point sampling.</summary>
+    Cubic,
 }
 
 /// <summary>
@@ -24,7 +67,8 @@ public enum PixelFormat : byte
 /// <param name="Pixels">First byte of the top-left pixel.</param>
 /// <param name="Width">Width in pixels.</param>
 /// <param name="Height">Height in pixels.</param>
-/// <param name="Stride">Bytes from one row to the next; at least <c>Width * 4</c>.</param>
+/// <param name="Stride">Bytes from one row to the next; at least <c>Width</c> times the
+/// format's <see cref="PixelFormats.BytesPerPixel"/>.</param>
 /// <param name="Format">Byte layout.</param>
 /// <param name="Slot">Opaque to the renderer: whatever the source needs to know which
 /// buffer is being handed back, typically an index into its ring.</param>

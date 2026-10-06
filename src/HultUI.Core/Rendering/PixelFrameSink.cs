@@ -107,7 +107,7 @@ public sealed class PixelFrameSink : IPixelImageSource, IDisposable
         }
 
         var slot = _slots[index];
-        int stride = checked(width * 4);
+        int stride = checked(width * format.BytesPerPixel());
         int length = checked(stride * height);
         if (slot.Buffer.Length < length)
             slot.Buffer = GC.AllocateUninitializedArray<byte>(length, pinned: true);
@@ -123,17 +123,18 @@ public sealed class PixelFrameSink : IPixelImageSource, IDisposable
     /// <summary>
     /// Copies a whole frame in and publishes it: the convenience for a producer that
     /// already has the pixels in a buffer of its own. <paramref name="stride"/> is the
-    /// source's row pitch, which may exceed <c>width * 4</c>.
+    /// source's row pitch, which may exceed a row's bytes (<c>width</c> times the format's
+    /// <see cref="PixelFormats.BytesPerPixel"/>).
     /// </summary>
     public void Write(int width, int height, PixelFormat format, ReadOnlySpan<byte> pixels, int stride)
     {
-        if (stride < width * 4)
+        int rowBytes = checked(width * format.BytesPerPixel());
+        if (stride < rowBytes)
             throw new ArgumentOutOfRangeException(nameof(stride), stride, "Stride is shorter than a row.");
-        if (pixels.Length < checked(stride * (height - 1) + width * 4))
+        if (pixels.Length < checked(stride * (height - 1) + rowBytes))
             throw new ArgumentException("Pixel buffer is shorter than the frame it describes.", nameof(pixels));
 
         using var writer = BeginWrite(width, height, format);
-        int rowBytes = width * 4;
         for (int y = 0; y < height; y++)
             pixels.Slice(y * stride, rowBytes).CopyTo(writer.Pixels.Slice(y * writer.Stride, rowBytes));
         writer.Publish();
@@ -246,7 +247,8 @@ public ref struct PixelFrameWriter
     public nint Address { get; }
     public int Width { get; }
     public int Height { get; }
-    /// <summary>Bytes from one row to the next; <c>Width * 4</c> for this sink.</summary>
+    /// <summary>Bytes from one row to the next: <c>Width</c> times the format's
+    /// <see cref="PixelFormats.BytesPerPixel"/> for this sink.</summary>
     public int Stride { get; }
     public PixelFormat Format { get; }
 
