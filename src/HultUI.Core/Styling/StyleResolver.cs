@@ -55,6 +55,13 @@ public static class StyleResolver
             LineHeight: own.LineHeight ?? parent.LineHeight,
             LetterSpacing: own.LetterSpacing ?? parent.LetterSpacing);
 
+        // What text is measured with changed — a theme with another font size, a FontSize set on
+        // a live element — so its measured size has: lay it out again. Without this the layout
+        // kept the old size until something else touched the element (the style pass is the only
+        // place that sees the change), and the measure cache, which answers for unchanged
+        // elements, kept it for good. A colour or decoration changes nothing measured.
+        if (!SameMetrics(element.ResolvedInherited, resolved))
+            element.MarkLayoutDirty();
         element.ResolvedInherited = resolved;
 
         foreach (var child in element.Children)
@@ -67,4 +74,15 @@ public static class StyleResolver
                 ResolveRecursive(child, resolved, theme);
         }
     }
+
+    /// <summary>Whether two styles measure text alike: everything shaping and line breaking
+    /// read, nothing only painting reads (colour, decoration, alignment, cursor).</summary>
+    private static bool SameMetrics(in ResolvedInheritedStyle a, in ResolvedInheritedStyle b) =>
+        a.FontSize == b.FontSize
+        && a.FontWeight == b.FontWeight
+        && a.FontSlant == b.FontSlant
+        && a.LineHeight == b.LineHeight
+        && a.LetterSpacing == b.LetterSpacing
+        && a.TextDirection == b.TextDirection
+        && string.Equals(a.FontFamily, b.FontFamily, StringComparison.Ordinal);
 }

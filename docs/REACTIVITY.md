@@ -412,16 +412,19 @@ pane.MarkLayoutDirty();
 ```
 
 `Inherited` (the text properties — font, colour, alignment, spacing) needs
-`MarkStyleDirty()`, which re-resolves the subtree. That re-resolves but does **not**
-re-measure, so anything that changes text metrics needs both:
+`MarkStyleDirty()`, which re-resolves the subtree. The style pass then lays out again every
+element it finds measuring differently — font family, size, weight, slant, line height,
+letter spacing or direction changed — so that one call is enough:
 
 ```csharp
 label.Inherited.FontSize = 20f;
-label.MarkStyleDirty();     // re-resolve the value…
-label.MarkLayoutDirty();    // …and re-measure, or the text draws at its old size
+label.MarkStyleDirty();     // re-resolves, and re-measures because the size changed
 ```
 
-`TextColor`, `Decoration` and `Cursor` move nothing, so those need only the style call.
+`TextColor`, `Decoration`, `TextAlign` and `Cursor` move nothing, and the style pass leaves
+layout alone for them. (Until 2026-10-06 the style pass never re-measured, and a metric
+change needed `MarkLayoutDirty()` as well; that call still does no harm. A theme whose
+font sizes differ from the last one's was laid out at the old sizes.)
 
 Auto-invalidating setters were considered and rejected: every style object would need a
 back-pointer to its element and every write would walk to the root, so static UI

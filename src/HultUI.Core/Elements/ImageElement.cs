@@ -6,6 +6,8 @@ namespace HultUI.Core.Elements;
 
 public class ImageElement : Element
 {
+    public ImageElement() => HasNaturalShape = true;
+
     // Self-marking: swapping the source at runtime (an async load completing)
     // changes the intrinsic size, so it invalidates layout as well as paint.
     private IImageSource? _source;

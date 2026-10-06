@@ -66,6 +66,8 @@ HultUI (meta-package)
 | Absolute positioning as escape hatch | Needed for popups, tooltips, overlays |
 | Grid layout deferred to later | More complex, flexbox covers most needs initially |
 | Layout is a pure function | Element tree + constraints in → LayoutResult on each node out. Fully testable without rendering |
+| A leaf is measured once per width, not once per pass (2026-10-06) | Text measures at a width, so the leaf measure cache leaves the offered height out of its key unless the box has a percentage height, works a forced height out from the unforced measurement, and a leaf's `ComputeLayout` reads the same cache instead of measuring again. A 2,000-row resize went from 22,000 text measurements to 8,000 and its layout pass from 5.1 to 4.1 ms; all 71 perf-suite scenarios lay out bit-identically. Sharing the cache made a gap matter: the style pass never invalidated layout, so a font size changed by a theme or `MarkStyleDirty` kept the old size. It now marks an element layout-dirty when a property text is measured with changes |
+| Aspect ratio kept, at its measured cost (2026-10-06) | Weighed against dropping it for speed. Knocked out of the current engine, flex relayout is 2–3 % faster; the +11 % its commit (f1fa4e4) measured when it landed was mostly code shape that later changes absorbed, and the leaf cache above more than repaid it. `VideoPlayer` sizes video by it, and pictures keep their shape when given one side (Aperture's posters, Junction's markdown images), so it stays. An element with no ratio and no picture answers `RatioOf` from a field, before any virtual call |
 
 ---
 

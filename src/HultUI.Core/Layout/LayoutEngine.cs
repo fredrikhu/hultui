@@ -62,12 +62,6 @@ public sealed partial class LayoutEngine
         var margin = box.Margin;
         var outerSpacing = padding + border;
 
-        // Resolve definite width/height (a forced size, from flex resolution, takes priority)
-        // and the content area available for children — with min and max already applied,
-        // and an aspect ratio's missing side filled in.
-        var (resolvedWidth, contentAvailW, resolvedHeight, contentAvailH) = ResolveBox(element, forcedWidth, forcedHeight,
-            constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
-
         // Count flow vs absolute children without allocating partition lists
         var children = element.Children;
         bool hasFlow = false;
@@ -83,35 +77,56 @@ public sealed partial class LayoutEngine
                 break;
         }
 
-        // If leaf node, measure intrinsic content
-        Size contentSize;
-        if (!hasFlow)
+        float finalW, finalH;
+        if (!hasFlow && margin.Horizontal == 0f && margin.Vertical == 0f)
         {
-            contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
-        }
-        else if (element.GridRead.HasTemplate)
-        {
-            contentSize = LayoutGridChildren(element, children, contentAvailW, contentAvailH,
-                contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
-                contentAbsY: absoluteY + outerSpacing.Top + margin.Top);
+            // A leaf's box is exactly what MeasureLeafSize works out, so it is taken from there —
+            // from the cache the measure pass filled, at the same constraint, rather than measured
+            // a second time. Only without a margin: the cache holds the margin box, and taking a
+            // margin back off is not always exact in floating point.
+            var outer = MeasureLeafSize(element, constraint.AvailableWidth, constraint.AvailableHeight,
+                forcedWidth, forcedHeight);
+            finalW = outer.Width;
+            finalH = outer.Height;
         }
         else
         {
-            var own = OwnSize(box, outerSpacing, constraint, resolvedWidth, contentAvailW, resolvedHeight, contentAvailH);
+            // Resolve definite width/height (a forced size, from flex resolution, takes priority)
+            // and the content area available for children — with min and max already applied,
+            // and an aspect ratio's missing side filled in.
+            var (resolvedWidth, contentAvailW, resolvedHeight, contentAvailH, ratio) = ResolveBox(element, forcedWidth, forcedHeight,
+                constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
-            contentSize = LayoutFlexChildren(element, children, contentAvailW, contentAvailH,
-                contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
-                contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
-                own.Width, own.Height);
+            // If leaf node, measure intrinsic content
+            Size contentSize;
+            if (!hasFlow)
+            {
+                contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
+            }
+            else if (element.GridRead.HasTemplate)
+            {
+                contentSize = LayoutGridChildren(element, children, contentAvailW, contentAvailH,
+                    contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
+                    contentAbsY: absoluteY + outerSpacing.Top + margin.Top);
+            }
+            else
+            {
+                var own = OwnSize(box, outerSpacing, constraint, resolvedWidth, contentAvailW, resolvedHeight, contentAvailH);
+
+                contentSize = LayoutFlexChildren(element, children, contentAvailW, contentAvailH,
+                    contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
+                    contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
+                    own.Width, own.Height);
+            }
+
+            // Final element size
+            finalW = resolvedWidth ?? (contentSize.Width + outerSpacing.Horizontal);
+            finalH = resolvedHeight ?? (contentSize.Height + outerSpacing.Vertical);
+            finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
+            if (ratio > 0f && resolvedWidth is null && resolvedHeight is null)
+                finalH = finalW / ratio;
+            finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
         }
-
-        // Final element size
-        var finalW = resolvedWidth ?? (contentSize.Width + outerSpacing.Horizontal);
-        var finalH = resolvedHeight ?? (contentSize.Height + outerSpacing.Vertical);
-        finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
-        if (RatioOf(element) is > 0f and var ratio && resolvedWidth is null && resolvedHeight is null)
-            finalH = finalW / ratio;
-        finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
 
         element.Layout = new LayoutResult(0, 0, finalW, finalH, padding, border, margin)
         {
@@ -482,6 +497,22 @@ public sealed partial class LayoutEngine
     private Size MeasureSize(Element element, LayoutConstraint constraint,
         float? forcedWidth = null, float? forcedHeight = null)
     {
+        // A leaf (nothing in flow; absolutely placed children don't count) is measured one way
+        // wherever the measuring starts — a grid cell, a flex item, a baseline probe — so its
+        // cache entries are shared, and keyed the way MeasureLeafSize keys them.
+        var children = element.Children;
+        bool hasFlow = false;
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (children[i].PositionRead.Type != PositionType.Absolute)
+            {
+                hasFlow = true;
+                break;
+            }
+        }
+        if (!hasFlow)
+            return MeasureLeafSize(element, constraint.AvailableWidth, constraint.AvailableHeight, forcedWidth, forcedHeight);
+
         // Cache hit: each ancestor's Phase 1 re-measures this element with a
         // small set of alternating (constraint, forced) inputs, so results are
         // reusable both within a pass and across frames. The cache is cleared
@@ -504,26 +535,11 @@ public sealed partial class LayoutEngine
         var margin = box.Margin;
 
         // The same resolution ComputeLayout makes, or the measured size is not the laid-out one.
-        var (resolvedW, contentAvailW, resolvedH, contentAvailH) = ResolveBox(element, forcedWidth, forcedHeight,
+        var (resolvedW, contentAvailW, resolvedH, contentAvailH, ratio) = ResolveBox(element, forcedWidth, forcedHeight,
             constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
-        var children = element.Children;
-        bool hasFlow = false;
-        for (int i = 0; i < children.Count; i++)
-        {
-            if (children[i].PositionRead.Type != PositionType.Absolute)
-            {
-                hasFlow = true;
-                break;
-            }
-        }
-
         Size contentSize;
-        if (!hasFlow)
-        {
-            contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
-        }
-        else if (element.GridRead.HasTemplate)
+        if (element.GridRead.HasTemplate)
         {
             contentSize = MeasureGridChildrenSize(element, children, contentAvailW, contentAvailH);
         }
@@ -538,7 +554,7 @@ public sealed partial class LayoutEngine
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
         var finalH = resolvedH ?? (contentSize.Height + outerSpacing.Vertical);
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
-        if (RatioOf(element) is > 0f and var ratio && resolvedW is null && resolvedH is null)
+        if (ratio > 0f && resolvedW is null && resolvedH is null)
             finalH = finalW / ratio;
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
 
@@ -635,19 +651,37 @@ public sealed partial class LayoutEngine
         // nesting level — and for text those MeasureContent calls dominate the pass.
         // The cache is keyed on (constraint, forced) and invalidated by
         // MarkLayoutDirty (which resets MeasureCache up the changed subtree).
-        if (element.MeasureCache.TryGet(constraintW, constraintH, forcedWidth, forcedHeight,
+        // The offered height is in the key only when it can change the answer. Text measures at a
+        // width, and a box with no percentage height resolves nothing against it; keyed on it, the
+        // measure pass (which offers a label unbounded height) and the layout pass (which offers
+        // it its line's) each measured every label again.
+        var box = element.BoxRead;
+        bool anyHeight = element.MeasuresAtWidthOnly && !HasPercentHeight(box);
+        float keyH = anyHeight ? AnyHeight : constraintH;
+
+        // For such a leaf a forced height changes nothing but the height: the width, and the
+        // wrapping it decides, come from the width alone. So the stretched label of the layout
+        // pass is the unforced one of the measure pass, with the height it was given held in its
+        // min and max — unless a ratio ties its width to that height.
+        if (anyHeight && forcedHeight is { } forcedH && box.AspectRatio <= 0f)
+        {
+            var natural = MeasureLeafSize(element, constraintW, constraintH, forcedWidth, null);
+            return new Size(natural.Width,
+                ApplyMinMax(forcedH, box.MinHeight, box.MaxHeight, constraintH) + box.Margin.Vertical);
+        }
+
+        if (element.MeasureCache.TryGet(constraintW, keyH, forcedWidth, forcedHeight,
                 out var cachedSize))
         {
             return cachedSize;
         }
 
-        var box = element.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;
         var margin = box.Margin;
 
         // As in ComputeLayout: a max width is what text wraps at, so it has to be in the
         // width the text is measured in — not applied to a box measured on one long line.
-        var (resolvedW, contentAvailW, resolvedH, contentAvailH) = ResolveBox(element, forcedWidth, forcedHeight,
+        var (resolvedW, contentAvailW, resolvedH, contentAvailH, ratio) = ResolveBox(element, forcedWidth, forcedHeight,
             constraintW, constraintH, outerSpacing);
 
         var contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
@@ -655,16 +689,24 @@ public sealed partial class LayoutEngine
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
         var finalH = resolvedH ?? (contentSize.Height + outerSpacing.Vertical);
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraintW);
-        if (RatioOf(element) is > 0f and var ratio && resolvedW is null && resolvedH is null)
+        if (ratio > 0f && resolvedW is null && resolvedH is null)
             finalH = finalW / ratio;
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraintH);
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
-        element.MeasureCache.Store(constraintW, constraintH, forcedWidth, forcedHeight, resultSize);
+        element.MeasureCache.Store(constraintW, keyH, forcedWidth, forcedHeight, resultSize);
 
         return resultSize;
     }
+
+    /// <summary>The measure-cache key height of a leaf whose size the offered height cannot change.</summary>
+    private const float AnyHeight = -1f;
+
+    private static bool HasPercentHeight(BoxStyle box) =>
+        box.Height.Unit == DimensionUnit.Percent
+        || box.MinHeight.Unit == DimensionUnit.Percent
+        || box.MaxHeight.Unit == DimensionUnit.Percent;
 
     private static List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
         float mainAvailable, float gap, bool isWrap)
@@ -1103,9 +1145,10 @@ public sealed partial class LayoutEngine
     /// Both axes as <see cref="ResolveAxis"/> resolves them, then the aspect ratio: with one
     /// side definite and the other not, the other follows from it, within its own min and max,
     /// and so does the room it leaves its content. Both definite, the ratio is ignored; neither,
-    /// and the callers derive the height from the content's width once they have it.
+    /// and the callers derive the height from the content's width once they have it — with the
+    /// <c>Ratio</c> returned here, so it is looked up once per call, not twice.
     /// </summary>
-    private static (float? Width, float ContentW, float? Height, float ContentH) ResolveBox(Element element,
+    private static (float? Width, float ContentW, float? Height, float ContentH, float Ratio) ResolveBox(Element element,
         float? forcedWidth, float? forcedHeight, float availableWidth, float availableHeight, Thickness spacing)
     {
         var box = element.BoxRead;
@@ -1128,7 +1171,7 @@ public sealed partial class LayoutEngine
                 contentW = float.MaxNative(0f, width.Value - spacing.Horizontal);
             }
         }
-        return (width, contentW, height, contentH);
+        return (width, contentW, height, contentH, ratio);
     }
 
     /// <summary>
@@ -1141,7 +1184,9 @@ public sealed partial class LayoutEngine
     {
         var box = element.BoxRead;
         if (box.AspectRatio > 0f) return box.AspectRatio;
-        if (box.Width.IsAuto == box.Height.IsAuto) return 0f;
+        // Layout asks this of every element on every measure, and almost none has a shape of
+        // its own: answer them on a field read, before the virtual call.
+        if (!element.HasNaturalShape || box.Width.IsAuto == box.Height.IsAuto) return 0f;
         return element.NaturalAspectRatio;
     }
 

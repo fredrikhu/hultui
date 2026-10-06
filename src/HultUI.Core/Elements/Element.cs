@@ -1336,6 +1336,19 @@ public abstract class Element
     /// other auto (see <see cref="BoxStyle.AspectRatio"/>, which takes precedence).</summary>
     internal virtual float NaturalAspectRatio => 0f;
 
+    /// <summary>Whether this kind of element can have a <see cref="NaturalAspectRatio"/> at all —
+    /// set by the ones that override it. Layout asks for the ratio on every measure of every
+    /// element; this lets the rest answer with a field read instead of a virtual call.</summary>
+    internal bool HasNaturalShape { get; private protected set; }
+
+    /// <summary>Whether <see cref="MeasureContent"/> ignores the available height — set by text,
+    /// which wraps at a width and is as tall as its lines. Layout then leaves the height out of
+    /// the leaf's measure-cache key (when its box has no percentage height), so the measure pass,
+    /// which offers a label unbounded height, and the layout pass, which offers it its line's,
+    /// share one measurement. An override of MeasureContent that reads the height must not set
+    /// this.</summary>
+    internal bool MeasuresAtWidthOnly { get; private protected set; }
+
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;
 

@@ -148,6 +148,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-e5a2206-recheck.json` | **Quiet recheck**, three points measured together: e5a2206 (60 scenarios; the 11 whose APIs postdate it absent) … |
 | `2026-10-06-90730ee-recheck.json` | … 90730ee, after the feature batch (71 scenarios) … |
 | `2026-10-06-449ecd0-recheck.json` | … and main at 449ecd0, after the fixes above. Median of 3 runs each, interleaved across the three, every run started on an idle machine (under 8 % CPU, no test host, no game running). The reference for "before the batch" and "now". |
+| `2026-10-06-f586c39-leafcache-before.json` | Before a leaf was measured once per width: main at f586c39, all 71 scenarios, median of 3 runs, idle-gated … |
+| `2026-10-06-4f8a3fc-leafcache-after.json` | … and after it, 4f8a3fc, interleaved with the line above. Compare these two: 0 slower, 11 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -230,7 +232,31 @@ ms). What the day bought, and the one cost still open:
 The rest of `text/` fell too (BiDi wrap −91 %, multi-font ellipsis −83 %, styled wrap
 −71 %, styled BiDi −29 to −37 %); the other 43 shared rows are within ±7 %, and every
 rendered frame allocates what it did at e5a2206 again. The flex-relayout cost the batch
-added is the one thing main has not won back.
+added is the one thing main had not won back — until the next entry.
+
+**A leaf measured once per width, before → after** (4f8a3fc). A per-commit bisect put the
+batch's flex cost on the aspect-ratio commit, but counting showed where layout time went:
+a 2,000-row resize measured each label 11 times, 22,000 text measurements where 8,000 are
+needed — the leaf cache keyed on the offered height, which text never reads, so the measure
+and layout passes missed each other, and a laid-out leaf measured itself once more. Shared
+now, with every element box of all 71 scenarios bit-identical to before:
+
+| Scenario | f586c39 | 4f8a3fc | |
+|---|---:|---:|---:|
+| `layout/baseline rows resize` | 1.84 | 1.40 | −24 % |
+| `layout/resize 2,000-row list` | 5.53 | 4.39 | −21 % |
+| `layout/shrink 300 overfull rows resize` | 5.71 | 4.59 | −20 % |
+| `component/reverse 1,000 keyed rows` | 4.28 | 3.55 | −17 % |
+| `controls/expander toggle (animated)` | 4.92 | 4.11 | −16 % |
+| `component/edit one of 1,000 keyed rows` | 4.15 | 3.49 | −16 % |
+| `controls/tabs switch` | 1.30 | 1.13 | −13 % |
+| `a11y/create 1,000 rows, bridge on` | 4.64 | 4.06 | −13 % |
+| `text/ellipsis 1,000 labels resize` | 7.58 | 6.64 | −12 % |
+| `layout/deep nesting leaf edit` | 0.639 | 0.575 | −10 % |
+
+Nothing moved up past +3 %. Against e5a2206, before the batch, the flex relayouts now
+read lower, not higher (`layout/resize 2,000-row list` 4.83 → 4.39). Aspect ratio stayed:
+knocked out of the engine it costs 2–3 % (docs/DECISIONS.md).
 
 **What the suite turned up on its first run**, for follow-up:
 
