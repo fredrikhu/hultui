@@ -131,6 +131,15 @@ start-up is roughly: 30 ms runtime + `SDL_Init`, 150 ms driver load, 17 ms
 context/surface/DPI plumbing, 29 ms app — within a few ms of the floor for a GL
 window on this machine.
 
+**Watch the stretch between `SDL_CreateWindow` and the GL context.** It is the place a
+display query lands, and one did: re-measured on 2026-10-06, the context came 150 ms after
+the window. Frame pacing (2026-09-20) reads the display's refresh rate as the window is
+sized, and it asked SDL for the *current* display mode — which makes SDL list every mode
+the display offers first, the first time for each display: 115–150 ms on a 4K HDR monitor.
+The desktop mode answers the same question for a window, which HultUI's fullscreen always
+is, without the list. Six AOT launches each way, first frame 419–531 ms (median ~445) →
+259–408 ms (median ~276); the context is current 5 ms after the window again.
+
 The very first run after a driver update pays more: the first frame compiles
 Skia's shader programs (~115 ms here rather than ~20 ms), after which the GPU
 driver's own on-disk program cache serves them. That cache is the driver's, not

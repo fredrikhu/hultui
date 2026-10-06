@@ -1577,7 +1577,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (displayScale <= 0f) displayScale = 1f;
 
         // Re-read here because this runs on every display change as well as every resize.
-        var mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(_window));
+        // The desktop's mode, not the "current" one: they differ only under an exclusive
+        // fullscreen mode, which HultUI never sets (its fullscreen is a window over the
+        // monitor), and asking for the current mode makes SDL list every mode the display
+        // offers first. The first time per display that took 115 ms on a 4K HDR monitor,
+        // on the way to the first frame — a quarter of the app's start-up.
+        var mode = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(_window));
         RefreshRate = mode is not null && mode->refresh_rate > 0f ? mode->refresh_rate : 0f;
 
         if (pw == PixelWidth && ph == PixelHeight
