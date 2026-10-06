@@ -273,6 +273,36 @@ create 10,000 141 → 131 ms (−7 %), append 7.6 → 6.5 ms (−15 %), remove r
 1.25 ms (−29 %), create 1,000 −7 %; the sub-millisecond rows unchanged on their
 minimums. Create 10,000 is back at its pre-batch e5a2206 level (130 ms).
 
+### A measurement holds for a range of heights (2026-10-06), and the harness fixed
+
+Container measurements are now shared between the measure and layout passes too
+(d6c0bd6, 5decd7f, 66e06f7 — see the scenario suite's README). Measuring them showed
+two flaws in this harness, both making a faster build read slower, fixed in f30d02c:
+the pre-warm was three fixed passes, so a faster build ran its first metrics on code
+still being JIT-promoted; and since the loop was paced to the display (b46e1cc,
+2026-09-20) a measured frame waited for its display slot whenever the setup frame
+before it fitted inside one interval. **Numbers before f30d02c are not comparable
+with numbers after it.** With the fixed harness in both builds, 8 interleaved runs
+each, a11y off, minimum (median), ms:
+
+| Operation             |  49a9b8b        |  c80711c        | min    |
+| --------------------- | --------------: | --------------: | -----: |
+| create 1,000          |   5.12 (9.39)   |   4.55 (4.96)   | −11 %  |
+| update every 10th     |   0.65 (0.72)   |   0.61 (0.66)   |  −6 %  |
+| select row            |   0.22 (0.28)   |   0.20 (0.27)   |  −9 %  |
+| swap rows             |   0.35 (0.41)   |   0.35 (0.38)   |  +1 %  |
+| remove row            |   1.00 (1.12)   |   0.62 (0.70)   | −38 %  |
+| create 10,000         |  125.4 (157.3)  |   97.1 (122.3)  | −23 %  |
+| append 1,000 → 1,000  |   6.02 (6.73)   |   5.72 (12.64)  |  −5 %  |
+| clear 1,000           |   0.20 (0.26)   |   0.20 (0.22)   |  −3 %  |
+
+Create 10,000's layout pass went from 71 to 39 ms. Append's median is the one row
+that rose: its layout is a quarter faster (4.6 → 3.5 ms), but layout no longer makes
+garbage, so the gen-0 collection that used to run during the setup frame now lands
+inside the measured append, copying both tables' fresh rows. With a gen-0 budget
+large enough that no collection runs mid-operation (`DOTNET_GCgen0size=0x10000000`),
+append reads 6.30 → 5.14 ms (−18 %) and every other row's minimum is level or better.
+
 ## How the measurement works
 
 HultUI's whole pipeline — component rebuild → style → layout → render → present —
@@ -282,10 +312,13 @@ before the mutation to just after that frame is presented, using
 span is the same "click → painted" interval the web benchmark records with
 `PerformanceObserver`.
 
-The `--auto` suite first runs a **global pre-warm** — the whole pipeline
-(build/style/layout/text/render) over large and small tables, then a dozen idle
-frames — so the shared framework code is JIT-tiered to steady state before any
-timing starts. It then gives each measured operation its own dedicated frame,
+The `--auto` suite first runs a **global pre-warm** — every measured operation
+over large and small tables, in passes until at least three are done and three
+seconds have passed, then a 500 ms pause — so the shared framework code is
+JIT-tiered to steady state before any timing starts (by time, not by a count of
+passes: since f30d02c, see above). Scripted runs render **unpaced**, so a measured
+frame renders as soon as its mutation is made instead of waiting for its display
+slot. It then gives each measured operation its own dedicated frame,
 runs a couple of per-metric warm-up iterations, forces a GC between metrics, and
 reports the **median** of 5 runs — matching how js-framework-benchmark isolates
 its runs against an already-warm V8. Under NativeAOT the pre-warm is a cheap

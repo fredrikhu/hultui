@@ -150,6 +150,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-449ecd0-recheck.json` | … and main at 449ecd0, after the fixes above. Median of 3 runs each, interleaved across the three, every run started on an idle machine (under 8 % CPU, no test host, no game running). The reference for "before the batch" and "now". |
 | `2026-10-06-f586c39-leafcache-before.json` | Before a leaf was measured once per width: main at f586c39, all 71 scenarios, median of 3 runs, idle-gated … |
 | `2026-10-06-4f8a3fc-leafcache-after.json` | … and after it, 4f8a3fc, interleaved with the line above. Compare these two: 0 slower, 11 faster. |
+| `2026-10-06-49a9b8b-heightrange-before.json` | Before a measurement held for a range of offered heights: main at 49a9b8b, median of 3 idle-gated runs … |
+| `2026-10-06-c80711c-heightrange-after.json` | … and after it, with the flex line pool and the packed cache entry: c80711c, interleaved with the line above. Compare these two: 0 slower, 10 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -257,6 +259,32 @@ now, with every element box of all 71 scenarios bit-identical to before:
 Nothing moved up past +3 %. Against e5a2206, before the batch, the flex relayouts now
 read lower, not higher (`layout/resize 2,000-row list` 4.83 → 4.39). Aspect ratio stayed:
 knocked out of the engine it costs 2–3 % (docs/DECISIONS.md).
+
+**A measurement holds for a range of heights, before → after** (d6c0bd6, with the flex line
+pool 5decd7f and the packed cache entry 66e06f7). Containers had the leaves' problem one level
+up: a 2,000-row resize ran a container's flex measurement 22,001 times for 6,000 containers,
+14,000 of them misses on the offered height alone that came out the same. Each cache entry now
+records the least height its answer holds at (a row: where its children hold; a column: at or
+above its items' total when nothing grows or shrinks), and the flex line lists are pooled
+instead of allocated per pass. 8,001 measurements; every element box unchanged;
+`LayoutPathIndependenceTests` lays 1,000 random trees out through growing and shrinking windows
+against fresh layouts:
+
+| Scenario | 49a9b8b | c80711c | |
+|---|---:|---:|---:|
+| `layout/resize 2,000-row list` | 4.27 | 3.12 | −27 % |
+| `text/styled ellipsis 1,000 labels resize` | 16.57 | 12.27 | −26 % |
+| `controls/expander toggle (animated)` | 4.06 | 3.11 | −23 % |
+| `layout/deep nesting leaf edit` | 0.563 | 0.432 | −23 % |
+| `layout/shrink 300 overfull rows resize` | 4.59 | 3.76 | −18 % |
+| `component/reverse 1,000 keyed rows` | 3.58 | 2.98 | −17 % |
+| `controls/tabs switch` | 1.11 | 0.94 | −15 % |
+| `a11y/create 1,000 rows, bridge on` | 3.83 | 3.35 | −13 % |
+| `layout/baseline rows resize` | 1.39 | 1.22 | −12 % |
+
+Nothing moved up past +2 %, and a resize step of the 2,000-row list allocates 9 KB instead of
+4.2 MB. What is left, measured: the layout pass re-runs each container's flex phases 1–4 after
+the measure pass ran them at the same inputs, about a fifth of that resize's layout pass.
 
 **What the suite turned up on its first run**, for follow-up:
 

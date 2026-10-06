@@ -115,12 +115,13 @@ public sealed partial class LayoutEngine
             || LayoutSpace.IsUnbounded(mainAvailable);
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(container.Children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        var (itemsArray, itemCount, anyBaseline, _) = MeasureFlexItems(container.Children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        List<FlexLine>? lines = null;
         try
         {
             if (itemCount == 0) return null;
 
-            var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+            lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
             foreach (var l in lines)
                 ResolveFlexGrowShrink(l, mainDistribute, mainGap, isRow, crossAvailable);
             foreach (var l in lines)
@@ -174,6 +175,7 @@ public sealed partial class LayoutEngine
         finally
         {
             ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+            if (lines is not null) ReturnLines(lines);
         }
     }
 

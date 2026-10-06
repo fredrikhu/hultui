@@ -223,11 +223,12 @@ public sealed partial class LayoutEngine
         // inside a ScrollView would resolve itself against the viewport and shrink
         // its own children to fit. Percentages against it resolve to auto (see
         // Dimension.Resolve), so no absurd sizes leak out.
-        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        var (itemsArray, itemCount, anyBaseline, _) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        List<FlexLine>? lines = null;
         try
         {
             // ── Phase 2: Collect items into lines ──
-            var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+            lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
             // ── Phase 3: Resolve flex grow/shrink per line ──
             foreach (var line in lines)
@@ -385,21 +386,25 @@ public sealed partial class LayoutEngine
         finally
         {
             ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+            if (lines is not null) ReturnLines(lines);
         }
     }
 
     // ── Flex helpers ──
 
-    /// <returns>The items, and whether any of them aligns by baseline in a row — noted here, in
+    /// <returns>The items; whether any of them aligns by baseline in a row — noted here, in
     /// the loop that already visits every item, so a row that never asks for baseline alignment
-    /// pays one comparison per item for it rather than a pass of its own.</returns>
-    private (FlexItem[] Array, int Count, bool AnyBaseline) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
+    /// pays one comparison per item for it rather than a pass of its own; and the least height
+    /// the children are offered (the cross size in a row, the main size in a column) at which
+    /// all their measurements hold (see <see cref="MeasureCache"/>).</returns>
+    private (FlexItem[] Array, int Count, bool AnyBaseline, float HeightFrom) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
         float mainAvailable, float crossAvailable, AlignItems containerAlign)
     {
         var array = ArrayPool<FlexItem>.Shared.Rent(Math.Max(1, children.Count));
         int count = 0;
         bool anyBaseline = false;
         bool rowAlignsByBaseline = isRow && containerAlign == AlignItems.Baseline;
+        float heightFrom = AnyHeight;
 
         for (int i = 0; i < children.Count; i++)
         {
@@ -416,6 +421,9 @@ public sealed partial class LayoutEngine
                 ? (isRow ? childBox.Width.ResolveOr(mainAvailable, -1f) : childBox.Height.ResolveOr(mainAvailable, -1f))
                 : childFlex.FlexBasis.ResolveOr(mainAvailable, -1f);
             bool hasBasisOrSize = basisOrSize >= 0f;
+            // In a column a percentage basis is a share of the height offered, resolved right here.
+            if (!isRow && (childFlex.FlexBasis.IsAuto ? childBox.Height : childFlex.FlexBasis).Unit == DimensionUnit.Percent)
+                heightFrom = ExactHeight;
 
             float hypotheticalMain;
             float hypotheticalCross;
@@ -468,6 +476,7 @@ public sealed partial class LayoutEngine
                     : new LayoutConstraint(crossAvailable, mainAvailable);
                 measured = MeasureSize(child, childConstraint, stretchedWidth);
             }
+            heightFrom = HeightFromBoth(heightFrom, _measuredFromH);
 
             hypotheticalMain = isRow ? measured.Width : measured.Height;
             hypotheticalCross = isRow ? measured.Height : measured.Width;
@@ -483,7 +492,7 @@ public sealed partial class LayoutEngine
             array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross, hypotheticalMain);
         }
 
-        return (array, count, anyBaseline);
+        return (array, count, anyBaseline, heightFrom);
     }
 
     /// <summary>
@@ -521,8 +530,9 @@ public sealed partial class LayoutEngine
         // to consult DirtyFlags.Layout (that flag belongs to ComputeLayout's
         // cache, which gates whether descendant positions need re-writing).
         if (element.MeasureCache.TryGet(constraint.AvailableWidth, constraint.AvailableHeight,
-                forcedWidth, forcedHeight, out var cachedSize))
+                forcedWidth, forcedHeight, out var cachedSize, out var cachedFrom))
         {
+            _measuredFromH = cachedFrom;
             return cachedSize;
         }
 
@@ -539,16 +549,18 @@ public sealed partial class LayoutEngine
             constraint.AvailableWidth, constraint.AvailableHeight, outerSpacing);
 
         Size contentSize;
+        float contentHeightFrom;
         if (element.GridRead.HasTemplate)
         {
             contentSize = MeasureGridChildrenSize(element, children, contentAvailW, contentAvailH);
+            contentHeightFrom = ExactHeight;   // not worked out for grids
         }
         else
         {
             bool isRow = element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
             var own = OwnSize(box, outerSpacing, constraint, resolvedW, contentAvailW, resolvedH, contentAvailH);
             contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH,
-                isRow ? own.Height : own.Width);
+                isRow ? own.Height : own.Width, out contentHeightFrom);
         }
 
         var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
@@ -560,8 +572,18 @@ public sealed partial class LayoutEngine
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
+        // The heights it holds for. A percentage height, min or max reads the height offered: that
+        // height only. A definite height — given, forced, or made from the width by a ratio —
+        // offers the content the same room whatever this box is offered: any height. Otherwise
+        // the content is offered this height less padding and border, so the content's floor plus
+        // those is this box's (a ratio then makes the height from the content's width, which the
+        // offered height does not touch).
+        float heightFrom = HasPercentHeight(box) ? ExactHeight
+            : resolvedH is not null ? AnyHeight
+            : contentHeightFrom + outerSpacing.Vertical;
         element.MeasureCache.Store(constraint.AvailableWidth, constraint.AvailableHeight,
-            forcedWidth, forcedHeight, resultSize);
+            forcedWidth, forcedHeight, resultSize, heightFrom);
+        _measuredFromH = heightFrom;
 
         // Do NOT clear DirtyFlags.Layout here — it belongs to ComputeLayout,
         // which uses it to decide whether to re-lay out descendant positions.
@@ -580,7 +602,7 @@ public sealed partial class LayoutEngine
     /// with AlignContent.Stretch, grown to.
     /// </summary>
     private Size MeasureFlexChildrenSize(Element container, IReadOnlyList<Element> children,
-        float contentAvailW, float contentAvailH, SizeRange ownCross)
+        float contentAvailW, float contentAvailH, SizeRange ownCross, out float heightFrom)
     {
         var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -598,10 +620,11 @@ public sealed partial class LayoutEngine
             || LayoutSpace.IsUnbounded(mainAvailable);
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount, anyBaseline) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        var (itemsArray, itemCount, anyBaseline, childrenFrom) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        List<FlexLine>? lines = null;
         try
         {
-            var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+            lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
             foreach (var line in lines)
                 ResolveFlexGrowShrink(line, mainDistribute, mainGap, isRow, crossAvailable);
@@ -609,7 +632,10 @@ public sealed partial class LayoutEngine
             // The measured height of a row is the height its parent will force on it, so
             // this pass needs the same post-flex cross sizes the layout pass takes.
             foreach (var line in lines)
-                RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
+                childrenFrom = HeightFromBoth(childrenFrom,
+                    RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable));
+
+            heightFrom = FlexHeightFrom(container, isRow, isWrap, anyBaseline, lines, mainGap, mainDistribute, childrenFrom);
 
             // As the layout pass does, or a row baseline alignment makes taller would be
             // measured shorter than it lays out.
@@ -635,6 +661,7 @@ public sealed partial class LayoutEngine
         finally
         {
             ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+            if (lines is not null) ReturnLines(lines);
         }
     }
 
@@ -657,7 +684,6 @@ public sealed partial class LayoutEngine
         // it its line's) each measured every label again.
         var box = element.BoxRead;
         bool anyHeight = element.MeasuresAtWidthOnly && !HasPercentHeight(box);
-        float keyH = anyHeight ? AnyHeight : constraintH;
 
         // For such a leaf a forced height changes nothing but the height: the width, and the
         // wrapping it decides, come from the width alone. So the stretched label of the layout
@@ -670,9 +696,10 @@ public sealed partial class LayoutEngine
                 ApplyMinMax(forcedH, box.MinHeight, box.MaxHeight, constraintH) + box.Margin.Vertical);
         }
 
-        if (element.MeasureCache.TryGet(constraintW, keyH, forcedWidth, forcedHeight,
-                out var cachedSize))
+        if (element.MeasureCache.TryGet(constraintW, constraintH, forcedWidth, forcedHeight,
+                out var cachedSize, out var cachedFrom))
         {
+            _measuredFromH = cachedFrom;
             return cachedSize;
         }
 
@@ -695,23 +722,103 @@ public sealed partial class LayoutEngine
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
-        element.MeasureCache.Store(constraintW, keyH, forcedWidth, forcedHeight, resultSize);
+        float heightFrom = anyHeight ? AnyHeight : ExactHeight;
+        element.MeasureCache.Store(constraintW, constraintH, forcedWidth, forcedHeight, resultSize, heightFrom);
+        _measuredFromH = heightFrom;
 
         return resultSize;
     }
 
-    /// <summary>The measure-cache key height of a leaf whose size the offered height cannot change.</summary>
-    private const float AnyHeight = -1f;
+    // ── The heights a measurement holds for (MeasureCache) ──
+    //
+    // Every measurement says, besides the size, the least height it could have been offered and
+    // still come out the same — so the measure pass, which offers most boxes an unbounded height,
+    // and the layout pass, which offers them their line's, share it. MeasureSize and
+    // MeasureLeafSize leave it in _measuredFromH for the caller that just asked; the flex
+    // measurement folds its children's into its own.
+
+    /// <summary>A measurement that holds whatever height is offered.</summary>
+    private const float AnyHeight = float.NegativeInfinity;
+
+    /// <summary>A measurement that holds at the height it was offered and no other (NaN: no
+    /// height is <c>&gt;=</c> it).</summary>
+    private const float ExactHeight = float.NaN;
+
+    /// <summary>What the last MeasureSize or MeasureLeafSize returned holds for.</summary>
+    private float _measuredFromH;
+
+    /// <summary>Both measurements hold from the higher floor; one that holds at its own height
+    /// only makes both so.</summary>
+    private static float HeightFromBoth(float a, float b) =>
+        float.IsNaN(a) || float.IsNaN(b) ? ExactHeight : float.MaxNative(a, b);
+
+    /// <summary>
+    /// The least content height at which a flex container's measurement holds. A row offers its
+    /// height to its children as their cross size and does nothing else with it, so it holds
+    /// where they all do. A column distributes it: the answer holds wherever nothing grows (no
+    /// grow factor) and nothing shrinks (the items fit) — at or above its items' total — and the
+    /// children, offered it as their main size, hold. A scrolling column distributes unbounded
+    /// space whatever it is offered. Wrapping columns, and rows aligning anything but text on its
+    /// baseline, are not worked out.
+    /// </summary>
+    /// <summary>Whether every item aligned by its baseline is a label: its baseline is its first
+    /// line's, at its width, whatever height it is offered (MeasureFirstBaseline). A container's
+    /// baseline comes from a layout of its own that is not worked out here.</summary>
+    private static bool BaselinesFromTextOnly(Element container, List<FlexLine> lines)
+    {
+        var align = container.FlexRead.AlignItems;
+        foreach (var line in lines)
+            foreach (var item in line.Items)
+            {
+                var e = item.Element;
+                if (ResolveAlignSelf(e.FlexRead.AlignSelf, align) != AlignItems.Baseline) continue;
+                if (e.Children.Count != 0 || !e.MeasuresAtWidthOnly || HasPercentHeight(e.BoxRead)) return false;
+            }
+        return true;
+    }
+
+    private static float FlexHeightFrom(Element container, bool isRow, bool isWrap, bool anyBaseline,
+        List<FlexLine> lines, float mainGap, float mainDistribute, float childrenFrom)
+    {
+        if (anyBaseline && !BaselinesFromTextOnly(container, lines)) return ExactHeight;
+        if (isRow) return childrenFrom;
+        if (container.BoxRead.OverflowY == Overflow.Scroll) return AnyHeight;
+        if (isWrap) return ExactHeight;
+
+        // The sum ResolveFlexGrowShrink compares with the space, in its order, so "it fits" is
+        // decided the same way here as there.
+        var items = lines[0].Items;
+        float total = 0, grow = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            total += items[i].BaseMain;
+            if (i > 0) total += mainGap;
+            grow += items[i].Element.FlexRead.FlexGrow;
+        }
+        if (grow > 0f || mainDistribute - total < 0f) return ExactHeight;
+        return HeightFromBoth(childrenFrom, total);
+    }
 
     private static bool HasPercentHeight(BoxStyle box) =>
         box.Height.Unit == DimensionUnit.Percent
         || box.MinHeight.Unit == DimensionUnit.Percent
         || box.MaxHeight.Unit == DimensionUnit.Percent;
 
-    private static List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
+    // The line lists, reused: every flex pass of every container made one, a dozen thousand a
+    // frame on a long list resizing. A list is held across the recursion into the children, so a
+    // pool (one per engine, which runs on one thread), not a single scratch list.
+    private readonly Stack<List<FlexLine>> _linePool = new();
+
+    private void ReturnLines(List<FlexLine> lines)
+    {
+        lines.Clear();
+        _linePool.Push(lines);
+    }
+
+    private List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
         float mainAvailable, float gap, bool isWrap)
     {
-        var lines = new List<FlexLine>();
+        var lines = _linePool.TryPop(out var pooled) ? pooled : new List<FlexLine>(1);
 
         if (!isWrap || itemCount == 0)
         {
@@ -983,8 +1090,11 @@ public sealed partial class LayoutEngine
     /// holds a measurement at the size it is going to be, and re-measuring the whole line
     /// would double Phase 1's cost for no change in the answer.</para>
     /// </summary>
-    private void RemeasureFlexedCrossSizes(FlexLine line, bool isRow, float mainAvailable, float crossAvailable)
+    /// <returns>The least height the re-measured items are offered at which their measurements
+    /// hold (see <see cref="MeasureFlexItems"/>).</returns>
+    private float RemeasureFlexedCrossSizes(FlexLine line, bool isRow, float mainAvailable, float crossAvailable)
     {
+        float heightFrom = AnyHeight;
         var items = line.Items;
         for (int i = 0; i < items.Count; i++)
         {
@@ -1009,9 +1119,11 @@ public sealed partial class LayoutEngine
             var measured = child.Children.Count == 0
                 ? MeasureLeafSize(child, constraintW, constraintH, fw, fh)
                 : MeasureSize(child, new LayoutConstraint(constraintW, constraintH), fw, fh);
+            heightFrom = HeightFromBoth(heightFrom, _measuredFromH);
 
             items[i] = item with { CrossSize = isRow ? measured.Height : measured.Width };
         }
+        return heightFrom;
     }
 
     /// <summary>Sizes each line across: its tallest item, a nowrap container's one line held in
