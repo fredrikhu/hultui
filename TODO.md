@@ -1,6 +1,47 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Rich text editor, stages 3–4: the element and its toolbar** — `RichTextEditorElement`
+  (`RichTextEditor.New(doc)`, `.OnDocumentChanged`, `.Features`, `.ReadOnly`, `.AutoHeight(min, max)`,
+  `.OnLinkActivated`, `.OnLinkRequested`; `CaretBounds(position)` for anchoring): blocks laid out once
+  per width as `TextParagraph`s and reused by block reference, only visible blocks drawn, own
+  scrolling (scrollbar, wheel, autoscroll), list markers (three bullet shapes by depth, numbers
+  right-aligned, task boxes that toggle on click), quote bars, code backgrounds, rules, alignment;
+  caret with wrap affinity, preferred x for Up/Down across blocks, Home/End per visual line, Page
+  keys, visual stepping on mixed-direction lines; click/double/triple/drag selection through
+  `CapturePointer`; IME preedit; clipboard as the editor's own JSON + HTML + text; links (plain
+  click read-only, Ctrl+click editable); context menu; controlled value (a document handed in
+  that is neither the last handed in nor the edited one replaces it). `RichTextTheme` on `Theme`;
+  the field look is `TextInputTheme`/`TextInputStyle`. The window hands clipboard and IME over
+  through the internal `ITextServicesClient`. `RichTextToolbar` + link popover;
+  `Element.AccessibleToggled`. Fluent sample "Rich text" page. Tests: 22 headless, 3 goldens.
+- **Rich text editor, stage 2: model and engine** (`src/HultUI.Core/RichText`) — `RichDocument`
+  (immutable blocks, never empty, global offsets = blocks joined by `\n`, `Slice` → `RichFragment`),
+  `RichBlock` (kind, text, normalized spans, heading level, indent, align, checked, info; value
+  equality), `RichMarks` (styles + colour, highlight, size, family, link), `RichTextFeatures`
+  (`Markdown` = no underline/colour/highlight/size/family/alignment; `Restrict` for paste).
+  `RichEditState`: one `Commit` primitive replacing a run of blocks; typing marks (links and code do
+  not grow past their end; pending marks until the caret moves), Enter/Shift+Enter/Backspace/Delete
+  rules per block kind, paste joining first/last blocks, toggle/set marks, links, block kinds
+  (paragraphs ⇄ one code block), indent limited to one past the block before, rules, alignment,
+  tasks; Markdown shortcuts (`# `…, `- `, `1. `, `[ ] `, `> `, `**b**`, `*i*`, `` `c` ``, `~~s~~`,
+  ```` ```lang ````/`---` + Enter), each its own undo step. `RichUndoHistory` groups like
+  `TextUndoHistory` with block-range steps checked by reference. 74 tests.
+- **Rich text editor, stage 1: paragraph handle** (docs/plans/16-rich-text-editor.md) — `TextSpan`
+  gains `FontFamily` (metric-affecting: inline code). `TextParagraph` (Core,
+  `IRenderContext.LayoutParagraph` / `DrawParagraph`) is one paragraph laid out with its spans,
+  line limit and overflow and kept: lines, alignment offset, baselines, caret x, offset at a
+  point, selection boxes (merged over a line's break), visual caret moves, wrap affinity
+  (`LineOf(offset, upstream)`), an empty line for empty text and after a final newline. The
+  pipeline backs it with the cached `TextLayout` (`PipelineTextParagraph`, glyph-exact, BiDi
+  aware); other contexts get `TextParagraph.FromLines` (lines + one-line caret methods); the
+  recorder logs `DrawParagraph` with every span field. `TextElement` hit-tests and paints
+  selection through it — plan 12's gap (a bold or larger run ahead of a link shifted every click
+  after it; centred lines hit-tested as if left-aligned) is closed, and clicks land on the
+  nearest caret position instead of rounding up. `LayoutProbe.DrawnLines` replaces reflection on
+  `TextElement._lines` (Junction's DiffWrapTests used it). Tests: 11 paragraph, 5 headless link
+  (all 5 fail on the old code); `GroupSelectionDragTests.ShiftDown…` clicks two characters in
+  rather than 1px, which only rounded up to inside row 3.
 - **Golden images** — `HeadlessOptions.Golden()` + `GoldenImage.Match(window, "name")`: a frame
   compared against `Golden/<name>.png` beside the test, the same PNG bytes on Windows and Linux.
   Two halves: **pinned fonts** (`SkiaFontCollection.Pinned` — every family resolves to DejaVu
@@ -758,6 +799,9 @@
 - **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.
 
 ## Up Next (in order)
+- **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4 and the Fluent page done.
+  Next: stage 6 (`HultUI.RichText.Markdown`, Markdig, `Raw` passthrough, round-trip corpus), then
+  Junction's Create MR description, then the accessible text source (stage 5).
 - Windows UIA bridge on-device verification — run a sample, open Accessibility Insights / `Inspect.exe`, confirm tree, name, role, bounding-rect, and pattern actions round-trip.
 - **AT-SPI `Action.DoAction`** — an AT can now activate controls. The neutral
   invoke/toggle/select logic was lifted out of the Windows-only `Sdl3UiaHostBridge`

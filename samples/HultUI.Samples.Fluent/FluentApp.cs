@@ -16,7 +16,7 @@ namespace HultUI.Samples.Fluent;
 // namespace body, it wins.
 using Text = HultUI.Core.Builders.Text;
 
-public enum Page { Home, Personalization, Gallery, About }
+public enum Page { Home, Personalization, Gallery, RichText, About }
 
 /// <summary>
 /// A Windows 11 Settings-shaped app: a custom title bar, a NavigationView down the left, and a
@@ -59,6 +59,15 @@ public sealed partial class FluentApp : Component
     [Reactive] public partial bool NotifyStore { get; set; }
     [Reactive] public partial bool InfoBarShown { get; set; }
     [Reactive] public partial int ClickCount { get; set; }
+
+    // Rich text
+    [Reactive] public partial HultUI.Core.RichText.RichDocument Notes { get; set; }
+    [Reactive] public partial bool NotesReadOnly { get; set; }
+    public readonly Ref<RichTextEditorElement> NotesEditor = new();
+    public readonly RichTextToolbar NotesToolbar;
+
+    /// <summary>Builds again: what the toolbar asks for when the caret moves.</summary>
+    public void Refresh() => MarkDirty();
 
     private readonly MenuBar _menus;
 
@@ -109,6 +118,7 @@ public sealed partial class FluentApp : Component
                 Text = d => d.Added.ToString("g"), Compare = (a, b) => a.Added.CompareTo(b.Added),
                 FirstSort = SortDirection.Descending },
         ], MarkDirty) { RowHeight = 36f };
+        NotesToolbar = new RichTextToolbar(NotesEditor, MarkDirty);
         EmptyBinFlyout = new Popover(() =>
         {
             var p = Palette;
@@ -134,6 +144,7 @@ public sealed partial class FluentApp : Component
                 ContextMenuItem.Separator(),
                 new ContextMenuItem { Label = "Personalization", IsChecked = Current == Page.Personalization, Action = () => Current = Page.Personalization },
                 new ContextMenuItem { Label = "Controls gallery", IsChecked = Current == Page.Gallery, Action = () => Current = Page.Gallery },
+                new ContextMenuItem { Label = "Rich text", IsChecked = Current == Page.RichText, Action = () => Current = Page.RichText },
             ]),
             new("&Help", [new ContextMenuItem { Label = "About", Action = () => Current = Page.About }]),
         ]);
@@ -146,6 +157,7 @@ public sealed partial class FluentApp : Component
         host.On<KeyUpEvent>(e => _menus.HandleKeyUp(e));
 
         Current = Page.Home;
+        Notes = Pages.NotesSample();
         Dark = true;
         AccentIndex = 0;
         Transparency = true;
@@ -304,6 +316,8 @@ public sealed partial class FluentApp : Component
                     () => Current = Page.Personalization),
                 F.NavItem(p, Icons.Gallery, "Controls gallery", Current == Page.Gallery,
                     () => Current = Page.Gallery),
+                F.NavItem(p, Icons.Editor, "Rich text", Current == Page.RichText,
+                    () => Current = Page.RichText),
                 Box.New().FlexGrow(1),
                 F.NavItem(p, Icons.About, "About", Current == Page.About, () => Current = Page.About));
     }
@@ -318,6 +332,7 @@ public sealed partial class FluentApp : Component
         {
             Page.Personalization => Pages.Personalization(this, p),
             Page.Gallery => Pages.Gallery(this, p),
+            Page.RichText => Pages.RichText(this, p),
             Page.About => Pages.About(this, p),
             _ => Pages.Home(this, p),
         };

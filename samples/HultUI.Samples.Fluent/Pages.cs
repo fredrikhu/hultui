@@ -330,6 +330,73 @@ public static class Pages
             F.ToggleSwitch(p, on, onChanged, label),
             F.Body(p, label));
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Rich text
+    // ──────────────────────────────────────────────────────────────────────
+
+    public static Element RichText(FluentApp app, FluentPalette p)
+    {
+        var doc = app.Notes;
+        int words = doc.ToPlainText().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+
+        var editor = RichTextEditor.New(doc)
+            .OnDocumentChanged(d => app.Notes = d)
+            .OnSelectionChanged(app.Refresh)
+            .OnLinkRequested(app.NotesToolbar.OpenLinkEditor)
+            .OnLinkActivated(url => app.ClickCount++)
+            .ReadOnly(app.NotesReadOnly)
+            .PlaceholderText("Write something. # for a heading, - for a list, **bold**.")
+            .AutoHeight(320, 640)
+            .AutomationId("notes-editor");
+        // The toolbar reads the editor on screen through the ref, so it is built before the ref
+        // moves to this freshly built one.
+        var toolbar = app.NotesToolbar.Build();
+        editor.WithRef(app.NotesEditor);
+
+        return Column(
+            F.Title(p, "Rich text").Margin(new Thickness(0, 0, 8, 0)),
+            F.Body(p, "A RichTextEditor and its toolbar, on the framework's text pipeline. Markdown "
+                    + "shortcuts work as you type, Ctrl+B/I/U format, Ctrl+K adds a link, and Tab "
+                    + "nests a list item.")
+                .TextColor(p.TextSecondary).Margin(new Thickness(0, 0, 16, 0)),
+            Section(p, "Editor",
+                Flex.Column(gap: 10f).Children(
+                    toolbar,
+                    editor,
+                    Flex.Row(gap: 24f).AlignItems(AlignItems.Center).Children(
+                        ToggleRow(p, "Read only", app.NotesReadOnly, v => app.NotesReadOnly = v),
+                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary)))));
+    }
+
+    /// <summary>What the rich text page opens with: one of everything.</summary>
+    public static Core.RichText.RichDocument NotesSample()
+    {
+        const string intro = "Text can be bold, italic, underlined, struck, code or a link to the docs.";
+        int At(string word) => intro.IndexOf(word, StringComparison.Ordinal);
+        Core.RichText.RichSpan S(string word, Core.RichText.RichMarks marks) => new(At(word), word.Length, marks);
+        return new Core.RichText.RichDocument(
+        [
+            Core.RichText.RichBlock.Heading(1, "Meeting notes"),
+            Core.RichText.RichBlock.Paragraph(intro,
+                S("bold", new(Core.RichText.InlineStyle.Bold)),
+                S("italic", new(Core.RichText.InlineStyle.Italic)),
+                S("underlined", new(Core.RichText.InlineStyle.Underline)),
+                S("struck", new(Core.RichText.InlineStyle.Strike)),
+                S("code", new(Core.RichText.InlineStyle.Code)),
+                S("a link to the docs", new(Link: "https://example.org/docs"))),
+            Core.RichText.RichBlock.Heading(2, "Decisions"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.BulletItem, "Ship the editor behind a flag"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.BulletItem, "Markdown in and out", indent: 1),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.NumberedItem, "Write the plan"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.NumberedItem, "Build it"),
+            Core.RichText.RichBlock.Heading(2, "To do"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.TaskItem, "Layout and caret") with { Checked = true },
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.TaskItem, "Markdown package"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.Quote, "Make it work, make it right, make it fast."),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.CodeBlock, "var editor = RichTextEditor.New(doc);") with { Info = "cs" },
+        ]);
+    }
+
     /// <summary>A gallery section: a bold label, then a card holding the specimens.</summary>
     private static Element Section(FluentPalette p, string title, Element content) =>
         Flex.Column(gap: 8f).FlexShrink(0).Margin(new Thickness(24, 0, 0, 0)).Children(

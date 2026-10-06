@@ -393,7 +393,7 @@ public static class AccessibilityTreeBuilder
     {
         CheckboxElement cb => cb.IsChecked,
         ToggleSwitchElement ts => ts.IsOn,
-        _ => null
+        _ => element.AccessibleToggled,
     };
 
     /// <summary>Selected, for one of a set: a radio button is when it is checked; anything

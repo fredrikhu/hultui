@@ -83,11 +83,15 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
                 source.ActivateItem(index);
             return;
         }
-        if (FindElement(id) is CheckboxElement cb)
+        var target = FindElement(id);
+        if (target is CheckboxElement cb)
         {
             cb.IsChecked = !cb.IsChecked;
             cb.OnChanged?.Invoke(cb.IsChecked);
         }
+        // A toggling button (Element.AccessibleToggled) is toggled by being pressed.
+        else if (target is { AccessibleToggled: not null })
+            EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, target);
     });
 
     public void SelectElement(ElementId id) => _pendingActions.Enqueue(() =>

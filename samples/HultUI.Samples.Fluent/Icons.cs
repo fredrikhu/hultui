@@ -31,6 +31,7 @@ public static class Icons
     public static readonly Icon Home = new("", "squares-four");
     public static readonly Icon Personalize = new("", "palette");
     public static readonly Icon Gallery = new("", "sliders-horizontal");
+    public static readonly Icon Editor = new("\uE70F", "note-pencil");
     public static readonly Icon About = new("", "sparkle");
 
     // Chrome

@@ -183,7 +183,7 @@ public sealed class FindBar
         if (alt && !ctrl && letter == 'r') { ToggleRegex(); return true; }
 
         // In a text field — the query, or a commit message beside the text — n and p are letters.
-        if (LetterKeys && !ctrl && !alt && e.Target is not (TextInputElement or TextAreaElement { ReadOnly: false }))
+        if (LetterKeys && !ctrl && !alt && e.Target is not (TextInputElement or TextAreaElement { ReadOnly: false } or RichTextEditorElement { ReadOnly: false }))
         {
             if (letter == 'n') { Next(); return true; }
             if (letter == 'p') { Previous(); return true; }
