@@ -158,6 +158,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-ca425da-mount-before.json` | Before a leaf of a set height held at any height: main at ca425da, median of 3 idle-gated runs … |
 | `2026-10-06-da3c9d2-forcedwidth-before.json` | Before a forced width was the unforced measurement at that width: main at da3c9d2, median of 3 idle-gated runs … |
 | `2026-10-06-8b2af12-forcedwidth-after.json` | … and after it: 8b2af12, interleaved with the line above. Compare these two: 0 slower, 1 faster (resize 2,000 rows −14 %; the rest of what moved is under the flag: see below). |
+| `2026-10-06-5855df8-textarea-before.json` | Before a TextArea found each line break from a guess at a line's length: main at 5855df8 with `text/open a long document in a TextArea` added, median of 3 idle-gated runs … |
+| `2026-10-06-ae037d5-textarea-after.json` | … and after it: ae037d5, interleaved with the line above. Compare these two: 0 slower, 1 faster (the long document −73 %). |
 | `2026-10-06-4aa5653-patch-before.json` | Before a patch that changes nothing about the layout left it standing: main at 4aa5653, median of 3 idle-gated runs … |
 | `2026-10-06-2688a99-patch-after.json` | … and after it, with a kept layout needing the same forced sizes exactly: 2688a99, interleaved with the line above. Compare these two: 0 slower, 3 faster. |
 | `2026-10-06-c451515-mount-after.json` | … and after it, with range ends checked for rounding, far boxes laid out and controls that ignore the height saying so: c451515, interleaved with the line above. Compare these two: 0 slower, 0 faster past the flag (icons −10 %, gallery −6 %: see below). |
@@ -409,6 +411,24 @@ Minimum, median of 3 runs:
 | `text/wrap 150 paragraphs resize` | 2.985 | 2.852 | −4 % | 1.980 → 1.846 ms |
 
 Nothing moved up past +2 %. In the window benchmark create 1,000 is −10 % and append −7 %.
+
+**A TextArea finds each line break from a guess at a line's length, before → after** (ae037d5).
+Junction's Files view drew its first frame of TODO.md (90 KB, lines up to 1,658 characters) in
+33 ms. To wrap a line the TextArea measured the whole rest of it, then bisected all of it, a new
+substring at every step — a document of 900 lines measured 930,000 characters to open. The search
+now starts where the line should end, from the width so far, and settles between a probe that fits
+and one that does not, counting whole grapheme clusters; a line that fits is measured once, as
+before. Minimum, median of 3 runs:
+
+| Scenario | 5855df8 | ae037d5 | | allocated |
+|---|---:|---:|---:|---|
+| `text/open a long document in a TextArea` | 31.645 | 8.477 | −73 % | 41.3 → 13.5 MB |
+| `input/type in 2,000-line TextArea` | 0.617 | 0.600 | −3 % | |
+| `input/undo-redo in TextArea` | 0.615 | 0.617 | 0 % | |
+
+Nothing else moved past ±5 %. In Junction (Native AOT, the Files walk of the frame log) TODO.md's
+frame is 33.6 → 20 ms; what is left is measuring its lines at all, most of which carry an em dash
+or an arrow and so take the BiDi path.
 
 **What the suite turned up on its first run**, for follow-up:
 

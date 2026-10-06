@@ -168,6 +168,7 @@ firing on those would be noise, and warning noise is the failure these rules exi
 | Three-level caching | MeasurementCache (full layout), GlyphCache (shaped runs), FontFallbackCache (codepoint→font). Text is the hot path |
 | ICU4N for segmentation | Full Unicode algorithm support. Needed for correct cursor movement, selection, line breaking |
 | HarfBuzz for shaping | Industry standard. Handles ligatures, kerning, complex scripts |
+| **A TextArea finds each line break from a guess at a line's length** (2026-10-06) | Wrapping a line measured the whole rest of it and then bisected all of it, measuring prefixes up to the line's length for every line it wrapped to — a 1,700-character paragraph was shaped some 150,000 characters' worth, and opening a 900-line document took 30 ms and 41 MB. The search now starts where the line should end, from the width of the text so far, and settles between a probe that fits and one that does not: about three measurements of a line's length per wrapped line (31.6 → 8.5 ms, 41 → 13.5 MB). It counts grapheme clusters, because a cut inside one measures nonsense — half of 👩‍💻 draws as a woman and a laptop, wider than the whole — so over clusters, and only there, more of a line never measures narrower; a line can no longer be broken inside a cluster either. A line that fits is measured once, whole, as before, and a line of plain characters skips the cluster walk. `TextAreaWrapTests` holds it to every whole-cluster prefix measured, with real fonts |
 
 ---
 
