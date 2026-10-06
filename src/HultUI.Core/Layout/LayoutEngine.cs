@@ -59,9 +59,14 @@ public sealed partial class LayoutEngine
         // ancestor's LayoutFlexChildren computed this element with forced=null
         // (auto) and Phase 6 now forces the natural size — that produces an
         // identical result, so the cache hit is safe.
+        // On an axis whose size is set — forced, or given in pixels, with no percentage min or max —
+        // the space offered goes nowhere: not into the box, its content room, or anything below.
+        // A resize offers every row's fixed-width cell a new width, and it was laid out again.
         if ((element.DirtyFlags & DirtyFlags.Layout) == 0
-            && element.CacheConstraintW == constraint.AvailableWidth
-            && element.CacheConstraintH == constraint.AvailableHeight
+            && (element.CacheConstraintW == constraint.AvailableWidth
+                || SizeIsSet(forcedWidth, element.BoxRead.Width, element.BoxRead.MinWidth, element.BoxRead.MaxWidth))
+            && (element.CacheConstraintH == constraint.AvailableHeight
+                || SizeIsSet(forcedHeight, element.BoxRead.Height, element.BoxRead.MinHeight, element.BoxRead.MaxHeight))
             && ForcedDimMatches(element.CacheForcedW, forcedWidth, element.Layout.Width)
             && ForcedDimMatches(element.CacheForcedH, forcedHeight, element.Layout.Height))
         {
@@ -198,6 +203,12 @@ public sealed partial class LayoutEngine
         if (current.HasValue && !cached.HasValue && current.Value == layoutDim) return true;
         return false;
     }
+
+    /// <summary>Whether a box's size on one axis is the same whatever space it is offered there:
+    /// forced, or given in pixels, and held by no percentage min or max (ResolveAxis).</summary>
+    private static bool SizeIsSet(float? forced, Dimension size, Dimension min, Dimension max) =>
+        (forced is not null || size.Unit == DimensionUnit.Pixels)
+        && min.Unit != DimensionUnit.Percent && max.Unit != DimensionUnit.Percent;
 
     /// <summary>Lays out a flex container's children. <paramref name="ownWidth"/> and
     /// <paramref name="ownHeight"/> are its own content-box size, each as the range it settles
@@ -1430,8 +1441,12 @@ public sealed partial class LayoutEngine
 
     private static void OffsetDescendants(Element element, float dx, float dy)
     {
-        foreach (var child in element.Children)
+        // Indexed: a foreach over the IReadOnlyList boxes its enumerator, once per element moved —
+        // and a subtree whose layout is kept is moved rather than laid out again.
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
         {
+            var child = children[i];
             child.Layout = child.Layout with
             {
                 AbsoluteX = child.Layout.AbsoluteX + dx,
