@@ -795,7 +795,12 @@ public sealed partial class LayoutEngine
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
-        float heightFrom = anyHeight ? AnyHeight : ExactHeight;
+        // Any height, as for a container (MeasureSize), when the box's own height is set — given,
+        // forced, or made from its width by a ratio — and no percentage reads the height offered:
+        // its content is then offered the same room whatever it is. A picture of a set size in a
+        // column held its column's measurement to the one height it was taken at, and the layout
+        // pass, offering another, laid the column out again.
+        float heightFrom = anyHeight || (resolvedH is not null && !HasPercentHeight(box)) ? AnyHeight : ExactHeight;
         var contentWidthFrom = float.IsNaN(sameFromW)
             ? WidthRange.At(contentAvailW)
             : new WidthRange(sameFromW, float.PositiveInfinity);
