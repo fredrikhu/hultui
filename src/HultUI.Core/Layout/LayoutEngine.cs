@@ -857,15 +857,41 @@ public sealed partial class LayoutEngine
 
         // The content is offered max(0, min(max(w, min), max) - spacing) of an offered w, which
         // never falls as w grows (ResolveAxis): the widths coming to a content width in the range
-        // are a range too. Each end one float step in, as (x + spacing) - spacing can round below
-        // x; the width measured at is put back in by the caller.
+        // are a range too. The width measured at is put back in by the caller.
         float min = box.MinWidth.ResolveOr(0f, -1f);
         float max = box.MaxWidth.ResolveOr(0f, float.MaxValue);
         float narrowest = float.MaxNative(0f, float.MinNative(min, max) - spacing);
         float widest = float.MaxNative(0f, max - spacing);
-        float lo = content.Lo <= narrowest ? float.NegativeInfinity : float.BitIncrement(content.Lo + spacing);
-        float hi = content.Hi >= widest ? float.PositiveInfinity : float.BitDecrement(content.Hi + spacing);
+        float lo = content.Lo <= narrowest ? float.NegativeInfinity : LeastOffered(content.Lo, spacing);
+        float hi = content.Hi >= widest ? float.PositiveInfinity : MostOffered(content.Hi, spacing);
         return new WidthRange(lo, hi).With(offered);
+    }
+
+    // The ends of WidthsOffered: x + spacing, stepped in only where rounding makes it come back to
+    // the wrong side of x — subtracting never runs backwards, so one end checked is every width
+    // past it checked. Stepping in always cost the commonest case: a row item laid out at the
+    // width it measured, with no padding, missed by one step. Rounding is half a step, so two
+    // steps settle it; past four, the end is given up (an empty range: the width measured alone).
+    private static float LeastOffered(float x, float spacing)
+    {
+        float w = x + spacing;
+        for (int i = 0; w - spacing < x; i++)
+        {
+            if (i == 4) return float.PositiveInfinity;
+            w = float.BitIncrement(w);
+        }
+        return w;
+    }
+
+    private static float MostOffered(float x, float spacing)
+    {
+        float w = x + spacing;
+        for (int i = 0; w - spacing > x; i++)
+        {
+            if (i == 4) return float.NegativeInfinity;
+            w = float.BitDecrement(w);
+        }
+        return w;
     }
 
     /// <summary>The content widths at which a flex container's measurement holds, its children
