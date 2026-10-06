@@ -68,7 +68,9 @@ public sealed partial class LayoutEngine
             && (element.CacheConstraintH == constraint.AvailableHeight
                 || SizeIsSet(forcedHeight, element.BoxRead.Height, element.BoxRead.MinHeight, element.BoxRead.MaxHeight))
             && ForcedDimMatches(element.CacheForcedW, forcedWidth, element.Layout.Width)
-            && ForcedDimMatches(element.CacheForcedH, forcedHeight, element.Layout.Height))
+            && ForcedDimMatches(element.CacheForcedH, forcedHeight, element.Layout.Height)
+            && WithinReach(element.Layout.AbsoluteX, element.Layout.AbsoluteY)
+            && WithinReach(absoluteX, absoluteY))
         {
             return element.CacheResultSize;
         }
@@ -203,6 +205,18 @@ public sealed partial class LayoutEngine
         if (current.HasValue && !cached.HasValue && current.Value == layoutDim) return true;
         return false;
     }
+
+    /// <summary>
+    /// Whether a box kept from an earlier pass can be moved to a new place by the difference
+    /// (OffsetDescendants), or has to be laid out where it now is. Past 2^24 a float has no
+    /// fraction of a pixel left, and a box pushed past an unbounded edge sits near 1.7E+38: moved
+    /// out there and back, its descendants came back where 1.7E+38 − 1.7E+38 put them, at 0, not
+    /// where they were. Only a layout gone past the edge of unbounded space puts anything there.
+    /// </summary>
+    private static bool WithinReach(float x, float y) =>
+        float.Abs(x) < FarthestKeptPosition && float.Abs(y) < FarthestKeptPosition;
+
+    private const float FarthestKeptPosition = 1 << 24;
 
     /// <summary>Whether a box's size on one axis is the same whatever space it is offered there:
     /// forced, or given in pixels, and held by no percentage min or max (ResolveAxis).</summary>
