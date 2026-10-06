@@ -1,3 +1,4 @@
+using System.Globalization;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -200,7 +201,7 @@ public sealed class TextPipeline
         // spans: direction runs, then style runs, then font runs (docs/plans/14-bidi.md). The
         // styled path below is left-to-right only — it used to get this text too, and one
         // bold word was enough to lay a Hebrew paragraph out left to right.
-        bool needsBidi = NeedsBidi(text, style);
+        bool needsBidi = NeedsBidi(text, style, PlainPathForLtr);
         int digest = MetricDigest(spans!);
 
         // Styled text skips the width-independent single-line fast path for now and
@@ -247,7 +248,7 @@ public sealed class TextPipeline
         // that cache, so a hit proves the string is RTL-free) — measured, it buys
         // 0.16 µs on a 4,700-character warm layout and costs every warm BiDi lookup
         // ~45%, for a more tangled Layout. Not worth it.
-        if (NeedsBidi(text, style))
+        if (NeedsBidi(text, style, PlainPathForLtr))
         {
             var bidiKey = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
                 style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
@@ -661,22 +662,59 @@ public sealed class TextPipeline
     /// <remarks>
     /// Every LTR layout runs this, on every call, before the cache is even
     /// consulted — it is the one place BiDi taxes text that has no RTL in it. So
-    /// it is the vectorized span search rather than a char-at-a-time loop: same
-    /// U+0590 threshold browsers use, one SIMD pass.
+    /// text with nothing at or above U+0590 is answered by one vectorized pass; only
+    /// past the first such char is each one asked whether it can need the BiDi path
+    /// (<see cref="MayNeedBidi"/>). Any char at or above U+0590 used to be enough:
+    /// the em dash in "Item 4 — 7 units" took that label to the BiDi path, at twice
+    /// the time and memory of "Item 4 - 7 units".
     /// </remarks>
-    private static bool NeedsBidi(string text, ResolvedInheritedStyle style)
+    private static bool NeedsBidi(string text, ResolvedInheritedStyle style, bool plainPathForLtr)
     {
-        // Auto needs no special case: with nothing at or above U+0590 in the text,
+        // Auto needs no special case: with nothing right-to-left in the text,
         // first-strong detection can only answer left-to-right, which is what the
         // plain path already does.
         if (style.TextDirection == TextDirection.Rtl) return true;
         // Cast to ushort rather than calling the char overload directly: both are
-        // the same vectorized range search, but ContainsAnyExceptInRange<char>
+        // the same vectorized range search, but IndexOfAnyExceptInRange<char>
         // boxes its two bounds on every call (96 B, measured — see
         // samples/HultUI.Samples.TextBench) and the ushort one allocates nothing.
-        return System.Runtime.InteropServices.MemoryMarshal
-            .Cast<char, ushort>(text.AsSpan())
-            .ContainsAnyExceptInRange((ushort)0, (ushort)0x058F);
+        var chars = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(text.AsSpan());
+        int first = chars.IndexOfAnyExceptInRange((ushort)0, (ushort)0x058F);
+        if (first < 0) return false;
+        if (!plainPathForLtr) return true;
+        for (int i = first; i < text.Length; i++)
+            if (MayNeedBidi(text[i])) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a char at or above U+0590 keeps its text on the BiDi path: one that can be
+    /// right-to-left or steers direction, or one that can join its neighbours into a
+    /// single user-perceived character — a surrogate, a mark, a joiner or variation
+    /// selector, a Hangul jamo. The plain path cuts lines and truncates between chars,
+    /// and has never been given such text; the BiDi path cuts between code points and
+    /// clusters. Everything else — dashes, quotes, arrows, symbols, box drawing, CJK,
+    /// kana, Hangul syllables, the private use area — is left-to-right, one char to a
+    /// character: the plain path breaks it into lines exactly as the BiDi path did, and
+    /// truncates it the way it truncates Latin text (PlainPathEquivalenceTests).
+    /// </summary>
+    internal static bool MayNeedBidi(char c)
+    {
+        if (c < '\u0590') return false;
+        if (c <= '\u08FF') return true;                                    // Hebrew to Arabic Extended-A
+        if (c >= '\uFB1D' && c <= '\uFDFF') return true;                 // Hebrew and Arabic presentation forms
+        if (c >= '\uFE70' && c <= '\uFEFF') return true;                 // Arabic presentation forms B, BOM
+        if (char.IsSurrogate(c)) return true;
+        if ((c >= '\u1100' && c <= '\u11FF') || (c >= '\uA960' && c <= '\uA97F') || (c >= '\uD7B0' && c <= '\uD7FF'))
+            return true;                                                     // Hangul jamo
+        if (c == '\u0D4E') return true;                                     // Malayalam dot reph: a prepend
+        return char.GetUnicodeCategory(c) switch
+        {
+            UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark
+                or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
+                or UnicodeCategory.OtherNotAssigned => true,
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -1419,6 +1457,15 @@ public sealed class TextPipeline
     /// again. The output is the same either way; tests hold the two paths to that.
     /// </summary>
     internal bool ReuseAcrossWidths { get; init; } = true;
+
+    /// <summary>
+    /// When false, any char at or above U+0590 sends its text down the BiDi path — the
+    /// reference: the em dash in "Item 4 — 7 units" took it, and with it twice the time
+    /// and memory to lay out. When true (the default) only text that can need the BiDi
+    /// path does (<see cref="MayNeedBidi"/>); left-to-right text of other symbols and
+    /// scripts lays out on the plain path. Tests hold the two to the same output.
+    /// </summary>
+    internal bool PlainPathForLtr { get; init; } = true;
 
     /// <summary>
     /// A string's font runs, and in each the space / non-space segments

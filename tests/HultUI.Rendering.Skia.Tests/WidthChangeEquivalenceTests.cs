@@ -45,6 +45,12 @@ public class WidthChangeEquivalenceTests
         "12345 67890 1029384756",
         "Ελληνικό κείμενο εδώ",
         "Привет, мир, как дела",
+        // Left-to-right text the plain path took over from the BiDi path (PlainPathEquivalenceTests).
+        "Item 4 — 7 units",
+        "word—word—word—word—word—word",
+        "Mixed English — 東京 → ∞ and 100 € £ ¥",
+        "中文文本测试，标点符号。还有更多的文字在这里。",
+        "┌─┬─┐ ★ ✓ → ≤ ≥ “quoted” … ‰",
         "W",
         "Wi",
         "first line\nsecond line is longer",
