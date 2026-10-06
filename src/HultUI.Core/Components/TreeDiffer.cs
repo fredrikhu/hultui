@@ -243,7 +243,24 @@ internal static class TreeDiffer
             }
         }
 
-        parent.ReplaceChildren(resultChildren.ToArray());
+        // Most rebuilds give a keyed list back as it was: every child matched, in the same
+        // order. Replacing the children then changes nothing, but tells everything up to the
+        // root that its children changed and its layout is stale — and a structural change
+        // rebuilds the accessibility tree that frame. Junction keys the children of its root,
+        // its sidebar rows and its overlays, so every rebuild did that: 0.7 ms of a 2 ms
+        // frame for a move of the History selection. A child that did change marks itself.
+        if (!SameChildren(parent.Children, resultChildren))
+            parent.ReplaceChildren(resultChildren.ToArray());
+    }
+
+    // Against the children the parent has now, not the snapshot the pass started from, so
+    // skipping the replace is a no-op by definition.
+    private static bool SameChildren(IReadOnlyList<Element> current, List<Element> result)
+    {
+        if (current.Count != result.Count) return false;
+        for (int i = 0; i < current.Count; i++)
+            if (!ReferenceEquals(current[i], result[i])) return false;
+        return true;
     }
 
     /// <summary>
