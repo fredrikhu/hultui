@@ -23,8 +23,8 @@ public class TextAreaWrapTests
 {
     private static readonly string[] Words =
     [
-        "the", "a", "wrap", "measure", "line", "of", "paragraph", "café", "café", "naïve",
-        "Ünïcödé", "東京", "漢字かな交じり文", "😀", "👩‍💻", "🇸🇪", "❤️", "각", "x",
+        "the", "a", "wrap", "measure", "line", "of", "paragraph", "café", "cafe\u0301", "naïve",
+        "Ünïcödé", "東京", "漢字かな交じり文", "😀", "👩‍💻", "🇸🇪", "❤️", "\u1100\u1161\u11A8", "x",
         "supercalifragilisticexpialidocious", "—", "…", "→", "WWWWWW", "iiiiii", "fi", "ffl", "AV", "To",
     ];
 
