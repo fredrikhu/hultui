@@ -87,7 +87,60 @@ public class FileSearchTests
         });
     }
 
+    /// <summary>
+    /// Moving the cursor rebuilds the view, and the tree is built again only when it is given
+    /// a different list of paths. The view gave it a fresh copy of every path in the
+    /// repository on each build — a whole tree built again for every arrow key, 1 ms a press
+    /// in a repository of 2,000 files.
+    /// </summary>
+    [Fact]
+    public void MovingTheCursorKeepsTheTreeItWasShowing()
+    {
+        Hosted((session, app) =>
+        {
+            var before = Roots(app);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+
+            Assert.NotEqual(Cursor(app), VisibleRows(app)[0]);   // the cursor did move
+            Assert.Same(before, Roots(app));
+        });
+    }
+
+    /// <summary>The same holds inside a search: walking its results keeps the tree, while the
+    /// query itself still builds a new one, and clearing it another.</summary>
+    [Fact]
+    public void ASearchBuildsItsTreeOnceAndClearingItBuildsTheWholeOneAgain()
+    {
+        Hosted((session, app) =>
+        {
+            var whole = Roots(app);
+            Search(session, "widget");
+            var found = Roots(app);
+            Assert.NotSame(whole, found);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            Assert.Same(found, Roots(app));
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(3);
+            Assert.NotSame(found, Roots(app));
+            Assert.Contains("README.md", VisibleRows(app));
+        });
+    }
+
     // ── Reaching the app's state ─────────────────────────────────────────
+
+    private static object Roots(JunctionApp app)
+    {
+        var tree = typeof(JunctionApp).GetField("_filesTree", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!;
+        return tree.GetType().GetProperty("Roots")!.GetValue(tree)!;
+    }
 
     private static void Search(HeadlessSession session, string query)
     {

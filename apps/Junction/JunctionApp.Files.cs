@@ -189,7 +189,7 @@ public partial class JunctionApp
         else pane.Width(300).FlexShrink(0);
 
         var query = _filesQuery.Trim();
-        var shown = FilterFilePaths(paths, query);
+        var shown = ShownFilePaths(paths, query);
         pane.AddChild(BuildFilesSearch(paths.Count, shown.Count, query));
 
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(6, 6, 6, 6))
@@ -247,9 +247,22 @@ public partial class JunctionApp
     /// the bare file name, so both *.cs and src/*.cs mean what they look like — the same
     /// rule the branch and tag searches follow.
     /// </summary>
-    private static List<string> FilterFilePaths(IReadOnlyList<string> paths, string query)
+    // The paths the tree was last given, kept while the paths and the query are what they
+    // were. The tree is built again only when Bind gets a different list, and a fresh copy
+    // on every build built it again from every path in the repository — 2,000 of them in
+    // this one, 1 ms each move of the cursor.
+    private (IReadOnlyList<string>? Paths, string Query, IReadOnlyList<string> Shown) _filesShown = (null, "", []);
+
+    private IReadOnlyList<string> ShownFilePaths(IReadOnlyList<string> paths, string query)
     {
-        if (query.Length == 0) return [.. paths];
+        if (!ReferenceEquals(_filesShown.Paths, paths) || _filesShown.Query != query)
+            _filesShown = (paths, query, FilterFilePaths(paths, query));
+        return _filesShown.Shown;
+    }
+
+    private static IReadOnlyList<string> FilterFilePaths(IReadOnlyList<string> paths, string query)
+    {
+        if (query.Length == 0) return paths;
         if (Glob.HasWildcard(query))
             return paths.Where(p => Glob.IsMatch(p, query) || Glob.IsMatch(FileNameOf(p), query)).ToList();
         return paths.Where(p => p.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
