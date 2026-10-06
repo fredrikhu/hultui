@@ -155,6 +155,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-cc29f80-flexplan-before.json` | Before the layout pass took the measure pass's flex resolution: main at cc29f80, median of 3 idle-gated runs … |
 | `2026-10-06-0bf5823-flexplan-after.json` | … and after it, with the min-content width kept until it changes: 0bf5823, interleaved with the line above. Compare these two: 0 slower, 3 faster (resize 2,000 rows is −10 % on both, a hair under the flag). |
 | `2026-10-06-4b4c733-widthrange-before.json` | Before a measurement held for a range of offered widths: main at 4b4c733, median of 3 idle-gated runs … |
+| `2026-10-06-ca425da-mount-before.json` | Before a leaf of a set height held at any height: main at ca425da, median of 3 idle-gated runs … |
+| `2026-10-06-c451515-mount-after.json` | … and after it, with range ends checked for rounding, far boxes laid out and controls that ignore the height saying so: c451515, interleaved with the line above. Compare these two: 0 slower, 0 faster past the flag (icons −10 %, gallery −6 %: see below). |
 | `2026-10-06-98e0581-widthrange-after.json` | … and after it, with the layout pass keeping a set-size box's layout and the cache entry back at 28 bytes: 98e0581, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
@@ -338,8 +340,31 @@ The resize's layout pass went from 2.25 to 1.38 ms, the chips' from 0.33 to 0.08
 entry (1b49032) every element was 16 bytes larger, a 1,000-row component rebuild allocated 94 KB
 more and ran 3–5 % slower; the height measured at went, and allocation is back to main's in every
 row. Left: `icons/mount 600` and `controls/gallery mount`, fresh tiles every step, are 3 % slower
-(layout +0.02 to +0.06 ms), and stay so with the ranges switched off — the shape of the measuring
-code, not the work it does.
+(layout +0.02 to +0.06 ms), and stay so with the ranges switched off — put down to the shape of
+the measuring code, wrongly: see below.
+
+**Mounting fresh tiles, before → after** (14477aa, with 021b665, a25d84a, ad09d1d and c451515).
+Timing the mount regression over 200 steps a build pinned it on the width ranges, and switching
+parts of them off moved it only a little; counting what layout did per pass found it. Both builds
+did the same work — and the work was twice what it should be: icons/mount 600 took no flex plan
+at all, before the width ranges or after, because a 20 px icon held its measurement for the one
+height it was measured at, and so did its tile's column, which the layout pass then offered
+another. A leaf whose height is set now holds at any height, as a container did; controls that
+never read the height say so (`Element.IgnoresAvailableHeight`); and a width range's ends step in
+only where rounding needs it, which every padless button laid out at its own width missed by one
+step. Content measurements per pass, icons: 1,031 → 516; gallery plans taken: 11 → 32 of 44.
+Minimum, median of 3 runs:
+
+| Scenario | ca425da | c451515 | | layout |
+|---|---:|---:|---:|---|
+| `icons/mount 600` | 1.934 | 1.737 | −10 % | 0.392 → 0.236 ms |
+| `controls/gallery mount` | 1.292 | 1.208 | −6 % | 0.226 → 0.158 ms |
+
+Nothing else moved past ±3 %. Against 4b4c733, before the width ranges, icons mount lays out in
+0.223 ms where it took 0.320 (200-step runs). Random trees of these controls
+(`LayoutPathIndependenceTests`) then turned up a box moved out past an unbounded edge, to near
+1.7E+38, and back by the difference, its descendants landing at 0: a box whose place is past
+2^24 is now laid out where it is (ad09d1d).
 
 **What the suite turned up on its first run**, for follow-up:
 

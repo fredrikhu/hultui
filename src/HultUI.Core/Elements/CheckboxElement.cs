@@ -50,6 +50,7 @@ public class CheckboxElement : Element
 
     public CheckboxElement()
     {
+        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         OnOwn<ClickEvent>(OnClick);
