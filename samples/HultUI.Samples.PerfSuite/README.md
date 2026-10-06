@@ -166,6 +166,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-2688a99-patch-after.json` | … and after it, with a kept layout needing the same forced sizes exactly: 2688a99, interleaved with the line above. Compare these two: 0 slower, 3 faster. |
 | `2026-10-06-c451515-mount-after.json` | … and after it, with range ends checked for rounding, far boxes laid out and controls that ignore the height saying so: c451515, interleaved with the line above. Compare these two: 0 slower, 0 faster past the flag (icons −10 %, gallery −6 %: see below). |
 | `2026-10-06-98e0581-widthrange-after.json` | … and after it, with the layout pass keeping a set-size box's layout and the cache entry back at 28 bytes: 98e0581, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
+| `2026-10-06-58f0abd-prefixes-before.json` | Before a TextArea read a line's widths off a table of its prefixes: main at 58f0abd with `input/type in a wrapped 900-line TextArea` added, median of 3 idle-gated runs … |
+| `2026-10-06-5568977-prefixes-after.json` | … and after it, with long lines' breaks remembered across edits: 5568977, interleaved with the line above. Compare these two: 0 slower, 3 faster (the long document −43 %, typing in it −21 %). |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -447,6 +449,25 @@ plain. Minimum, median of 3 runs:
 Nothing else moved past ±4 %. In Junction TODO.md's lines all leave the BiDi path (219 of 918 took
 it), and its first frame is 18.8–20.4 → 17.1–18.1 ms: what is left is measuring 89,000 characters
 nobody has measured before.
+
+**A TextArea reads a line's widths off one table of its prefixes, before → after** (5568977). The
+break search measured three or so prefixes of each wrapped line, each a new string laid out whole
+and cached. `IRenderContext.MeasureTextPrefixes` gives every prefix's width from one itemizing of
+the text and the word cache, to the bit what measuring each would give. Built anew where the old
+probes found the caches warm, the tables made typing in a document of long paragraphs 1.0 → 3.1 ms
+(a scenario added for it), so the TextArea also remembers where each long line broke, by its text,
+and an edit searches only the line it changed. Minimum, median of 3 runs:
+
+| Scenario | 58f0abd | 5568977 | | allocated |
+|---|---:|---:|---:|---|
+| `text/open a long document in a TextArea` | 8.152 | 4.646 | −43 % | 13.5 → 7.1 MB |
+| `input/type in a wrapped 900-line TextArea` | 1.022 | 0.812 | −21 % | 0.93 → 0.49 MB |
+| `input/undo-redo in TextArea` | 0.604 | 0.614 | +2 % | 469 → 484 KB |
+
+Nothing else moved past ±3 % but `icons/mount 600` (−3 %). Undo and redo swap one long line between
+two texts and the memo keeps only the current one, so each step builds that line's table again.
+Junction's TODO.md frame does not move (17.3–17.6 → 16.8–17.4 ms): 900 of its 917 lines fit, and
+each is measured once, whole, as before.
 
 **What the suite turned up on its first run**, for follow-up:
 
