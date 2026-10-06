@@ -224,10 +224,11 @@ public sealed partial class LayoutEngine
         // its own children to fit. Percentages against it resolve to auto (see
         // Dimension.Resolve), so no absurd sizes leak out.
         var (itemsArray, itemCount, anyBaseline, _) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        List<FlexLine>? lines = null;
         try
         {
             // ── Phase 2: Collect items into lines ──
-            var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+            lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
             // ── Phase 3: Resolve flex grow/shrink per line ──
             foreach (var line in lines)
@@ -385,6 +386,7 @@ public sealed partial class LayoutEngine
         finally
         {
             ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+            if (lines is not null) ReturnLines(lines);
         }
     }
 
@@ -619,9 +621,10 @@ public sealed partial class LayoutEngine
         float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
         var (itemsArray, itemCount, anyBaseline, childrenFrom) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        List<FlexLine>? lines = null;
         try
         {
-            var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+            lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
             foreach (var line in lines)
                 ResolveFlexGrowShrink(line, mainDistribute, mainGap, isRow, crossAvailable);
@@ -658,6 +661,7 @@ public sealed partial class LayoutEngine
         finally
         {
             ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+            if (lines is not null) ReturnLines(lines);
         }
     }
 
@@ -800,10 +804,21 @@ public sealed partial class LayoutEngine
         || box.MinHeight.Unit == DimensionUnit.Percent
         || box.MaxHeight.Unit == DimensionUnit.Percent;
 
-    private static List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
+    // The line lists, reused: every flex pass of every container made one, a dozen thousand a
+    // frame on a long list resizing. A list is held across the recursion into the children, so a
+    // pool (one per engine, which runs on one thread), not a single scratch list.
+    private readonly Stack<List<FlexLine>> _linePool = new();
+
+    private void ReturnLines(List<FlexLine> lines)
+    {
+        lines.Clear();
+        _linePool.Push(lines);
+    }
+
+    private List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
         float mainAvailable, float gap, bool isWrap)
     {
-        var lines = new List<FlexLine>();
+        var lines = _linePool.TryPop(out var pooled) ? pooled : new List<FlexLine>(1);
 
         if (!isWrap || itemCount == 0)
         {
