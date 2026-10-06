@@ -332,6 +332,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         if (string.IsNullOrEmpty(_text))
             return starts;
 
+        // A guess at a character's width, for where to start looking for each break; the
+        // measurements correct it as they go (see FindLineBreak).
+        float charWidth = style.FontSize * 0.55f;
+        var clusterEnds = new List<int>();
+
         int pos = 0;
         while (pos < _text.Length)
         {
@@ -339,20 +344,21 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             int hardEnd = _text.IndexOf('\n', pos);
             if (hardEnd < 0) hardEnd = _text.Length;
 
-            // Wrap the segment [pos..hardEnd) within wrapWidth
-            int segStart = pos;
-            while (segStart < hardEnd)
+            // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is measured
+            // once, whole, as it always was — every keystroke wraps all of them again — and
+            // only one that does not is cut into clusters and searched.
+            if (!FitsWhole(pos, hardEnd, wrapWidth, style, ref charWidth))
             {
-                // How many chars fit on this wrapped line?
-                int lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style);
-                if (lineEnd < hardEnd)
+                var ends = ClusterEnds(pos, hardEnd, clusterEnds);
+                int segStart = pos;
+                while (segStart < hardEnd)
                 {
+                    // How many chars fit on this wrapped line?
+                    int lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
+                    if (lineEnd >= hardEnd)
+                        break;
                     starts.Add(lineEnd);
                     segStart = lineEnd;
-                }
-                else
-                {
-                    break;
                 }
             }
 
@@ -367,32 +373,122 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         return starts;
     }
 
+    // Whether [start..end) fits whole. Measured only when it is no longer than a line of
+    // average characters; a longer one goes to the search, which finds it fitting if it does.
+    private bool FitsWhole(int start, int end, float wrapWidth, ResolvedInheritedStyle style, ref float charWidth)
+    {
+        int length = end - start;
+        if (length == 0) return true;
+        if (length > wrapWidth / Math.Max(charWidth, 0.01f)) return false;
+        float width = MeasureSubstring(start, length, style);
+        if (length >= 8) charWidth = width / length;
+        return width <= wrapWidth;
+    }
+
+    /// <summary>
+    /// Where each user-perceived character of [start..end) ends — the places a line may be
+    /// cut. Null when that is after every char: a char below U+0300, or among the dashes,
+    /// quotes, arrows and box drawing a plain-text document uses, never joins another into
+    /// one cluster (the joiners, marks, extenders and surrogates are all outside), so most
+    /// lines skip the walk.
+    /// </summary>
+    private List<int>? ClusterEnds(int start, int end, List<int> into)
+    {
+        // The common answer — nothing above U+02FF — comes from a vectorized scan, and the
+        // char-by-char test only runs from the first char past it.
+        // As ushort: the char overload boxes its two bounds on every call (see NeedsBidi in
+        // HultUI.Text), and this runs once per line that wraps.
+        int i = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(_text.AsSpan(start, end - start))
+            .IndexOfAnyExceptInRange((ushort)0, (ushort)0x02FF);
+        if (i < 0) return null;
+        i += start;
+        while (i < end && StandsAlone(_text[i])) i++;
+        if (i == end) return null;
+
+        into.Clear();
+        for (i = start; i < end;)
+        {
+            i += Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(_text.AsSpan(i, end - i)));
+            into.Add(i);
+        }
+        return into;
+
+        static bool StandsAlone(char c) =>
+            c < '\u0300'
+            || (c >= '\u2010' && c <= '\u2027') || (c >= '\u2030' && c <= '\u205E')
+            || (c >= '\u2190' && c <= '\u23FF') || (c >= '\u2500' && c <= '\u25FF');
+    }
+
     /// <summary>
     /// Given a segment [start..hardEnd), find where to break the first line
     /// to fit within wrapWidth. Returns the char index where the next line starts.
     /// If the whole segment fits, returns hardEnd.
+    ///
+    /// <para>The longest run of whole user-perceived characters that fits, at least one —
+    /// cut anywhere else, a prefix can measure wider than the whole: half an emoji
+    /// sequence draws as its parts. Found from a guess at about a line's length, then
+    /// outward from it, so every prefix measured is about as long as a line. Measuring the
+    /// whole rest of the segment first and bisecting all of it measured prefixes up to the
+    /// segment's length for every line it wrapped to: a 1,700-character paragraph was
+    /// shaped some 150,000 characters' worth, and a 900-line document took 30 ms and 41 MB
+    /// to open. More of a line never measures narrower, so a prefix that does not fit
+    /// settles that the rest does not either.</para>
     /// </summary>
-    private int FindLineBreak(int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style)
+    private int FindLineBreak(int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
+        List<int>? clusterEnds, ref float charWidth)
     {
         if (start >= hardEnd) return hardEnd;
 
-        float segWidth = MeasureSubstring(start, hardEnd - start, style);
-        if (segWidth <= wrapWidth)
-            return hardEnd;
-
-        // Binary search for how many chars fit
-        int lo = 1, hi = hardEnd - start;
-        while (lo < hi)
+        // The search counts clusters; k of them end at End(k). With no cluster list each
+        // char is one.
+        int first = 0, length = hardEnd - start;
+        if (clusterEnds is not null)
         {
-            int mid = (lo + hi + 1) / 2;
-            float w = MeasureSubstring(start, mid, style);
-            if (w <= wrapWidth)
-                lo = mid;
+            first = clusterEnds.BinarySearch(start);
+            first = first < 0 ? ~first : first + 1;
+            length = clusterEnds.Count - first;
+        }
+        int End(int k) => clusterEnds is null ? start + k : clusterEnds[first + k - 1];
+
+        // The answer is in [lo, hi]: a prefix of lo fits (or lo is the one-cluster floor),
+        // and once bounded, one of hi + 1 does not.
+        int lo = 1, hi = length;
+        bool bounded = false;
+        float loWidth = 0;
+        int probe = Math.Clamp((int)(wrapWidth / Math.Max(charWidth, 0.01f)), 1, length);
+        int step = 0;
+        for (int round = 0; ; round++)
+        {
+            float width = MeasureSubstring(start, End(probe) - start, style);
+            if (probe >= 8) charWidth = width / probe;
+            if (width <= wrapWidth)
+            {
+                if (probe == length) return hardEnd;
+                lo = probe;
+                loWidth = width;
+            }
             else
-                hi = mid - 1;
+            {
+                hi = probe - 1;
+                bounded = true;
+            }
+            if (lo >= hi) break;
+
+            // Where the line should end, from the width so far: the next probe is just past
+            // it while nothing has been seen not to fit — a step further each time that
+            // still fits, doubling — then on it, every other round halving instead, so a
+            // poor guess costs no more than a search would.
+            int predicted = lo + (int)((wrapWidth - loWidth) / Math.Max(charWidth, 0.01f));
+            if (!bounded)
+            {
+                probe = Math.Min(length, Math.Max(predicted + 1, lo + 1) + step);
+                step = step == 0 ? Math.Max(1, lo / 8) : step * 2;
+            }
+            else
+                probe = round % 2 == 0 ? Math.Clamp(predicted, lo + 1, hi) : (lo + hi + 1) / 2;
         }
 
-        int fitEnd = start + lo;
+        int fitEnd = End(lo);
 
         // Try to break at a word boundary (walk back to last space)
         int breakAt = fitEnd;
@@ -405,7 +501,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             return breakAt;
         }
 
-        // No word boundary found — break at character
+        // No word boundary found — break between characters
         return fitEnd;
     }
 
