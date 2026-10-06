@@ -194,6 +194,23 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         return pos;
     }
 
+    /// <summary>
+    /// Selects from <paramref name="anchor"/> to <paramref name="caret"/> (UTF-16 offsets,
+    /// clamped and kept off the middle of a surrogate pair); the caret is drawn at
+    /// <paramref name="caret"/> and scrolled into view. Equal offsets place a caret. Ends the
+    /// current undo step, as a click does. For a field that jumps the caret itself — to the
+    /// next placeholder, to a search hit.
+    /// </summary>
+    public void Select(int anchor, int caret)
+    {
+        _selectionStart = SnapToBoundary(Math.Clamp(anchor, 0, _text.Length));
+        _cursorPos = SnapToBoundary(Math.Clamp(caret, 0, _text.Length));
+        _history.Seal();
+        _preferredX = -1;
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
+    }
+
     public int SelectionStart => Math.Min(_selectionStart, _cursorPos);
     public int SelectionEnd => Math.Max(_selectionStart, _cursorPos);
     public bool HasSelection => _selectionStart != _cursorPos;
@@ -241,6 +258,31 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// begin — and kept by reference: to change the spans, hand a new list rather than
     /// changing this one in place.</para></summary>
     public IReadOnlyList<TextSpan>? Spans { get; set; }
+
+    /// <summary>
+    /// When true the area is as tall as its wrapped text — one row per wrapped line, at least
+    /// one — instead of taking only the height layout gives it and scrolling inside that. For
+    /// a field in a document that flows (a report section, a comment box, a form's notes):
+    /// the page around it scrolls, the area never does. Its width still comes from layout, and
+    /// the text wraps to that width; each edit that changes the text asks for layout again, so
+    /// a line typed or deleted moves what follows at once. An explicit height or a flex grow
+    /// still wins, as for any measured element. Off by default: an editor pane keeps its size.
+    /// </summary>
+    public bool GrowsWithContent
+    {
+        get => _growsWithContent;
+        set
+        {
+            if (_growsWithContent == value) return;
+            _growsWithContent = value;
+            MarkLayoutDirty();
+        }
+    }
+    private bool _growsWithContent;
+
+    // The context MeasureContent is wrapping with, before the first render has given the area
+    // one of its own; line breaks found with it are kept for the render at the same width.
+    private IMeasureContext? _measureCtx;
 
     public IClipboard? Clipboard { get; set; }
     public ITextInputHost? TextInputHost { get; set; }
@@ -389,11 +431,48 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
     // ──── Line Wrapping ────
 
-    private void InvalidateLines() => _linesValid = false;
+    private void InvalidateLines()
+    {
+        _linesValid = false;
+        // A growing area's height is its line count: a changed text may change it.
+        if (_growsWithContent) MarkLayoutDirty();
+    }
 
     /// <summary>How many times the line starts were worked out, for the tests that hold the
     /// area to working them out only when something that moves a break changed.</summary>
     internal int LineStartPasses => _linesVersion;
+
+    /// <summary>
+    /// A growing area's content: the width layout offers (the text wraps to it) by its wrapped
+    /// line count in rows. A non-growing area measures nothing of its own, as before — its size
+    /// is whatever layout gives it.
+    /// </summary>
+    internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
+    {
+        if (!_growsWithContent) return base.MeasureContent(availableWidth, availableHeight, ctx);
+        var style = ResolvedInherited;
+        float lh = _renderCtx is not null ? GetLineHeight(style) : ctx.MeasureText("X", style, float.PositiveInfinity, 1).Height;
+        if (lh <= 0) lh = style.FontSize * 1.4f;
+        // Unbounded or zero width: the min-content probe. Wrapping at every character there
+        // would report a column of single letters; one row is the honest floor.
+        if (!(availableWidth > 0) || float.IsInfinity(availableWidth)) return new Size(0, lh);
+
+        var previous = _measureCtx;
+        _measureCtx = ctx;
+        try
+        {
+            int rows = Math.Max(1, GetLineStarts(availableWidth, style).Count);
+            return new Size(availableWidth, rows * lh);
+        }
+        finally
+        {
+            _measureCtx = previous;
+        }
+    }
+
+    /// <summary>A growing area's text wraps to any width, so it pins no minimum width of its own.</summary>
+    internal override float MeasureMinContentWidth(IMeasureContext ctx) =>
+        _growsWithContent ? 0f : base.MeasureMinContentWidth(ctx);
 
     /// <summary>
     /// Computes line starts using word wrapping for the given width.
@@ -1084,6 +1163,8 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         var sub = _text.Substring(start, length);
         if (_renderCtx is not null)
             return _renderCtx.MeasureText(sub, style).Width;
+        if (_measureCtx is not null)
+            return _measureCtx.MeasureText(sub, style, float.PositiveInfinity, 1).Width;
         return sub.Length * style.FontSize * 0.6f; // fallback for tests
     }
 
@@ -2074,6 +2155,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             TextChanged = area.TextChanged;
             ReadOnly = area.ReadOnly;
             Spans = area.Spans;
+            GrowsWithContent = area.GrowsWithContent;
             MiddleClickAutoScroll = area.MiddleClickAutoScroll;
 
             // Preserve the caret / selection across a reconcile patch. The Text setter

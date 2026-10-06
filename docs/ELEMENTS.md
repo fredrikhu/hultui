@@ -1426,16 +1426,23 @@ TextArea.New("initial text")       // pre-filled; caret at the end
     .PlaceholderText("Notes…")
     .OnTextChanged(t => _notes = t)
     .ReadOnly()                    // selectable and scrollable, not editable
-    .Spans(highlightSpans);        // IReadOnlyList<TextSpan>, colour and decoration per range
+    .Spans(highlightSpans)         // IReadOnlyList<TextSpan>, colour and decoration per range
+    .GrowsWithContent();           // as tall as its wrapped text; the page scrolls, not the area
 ```
 
-Those four are the only fluent members; everything else is a property.
+Those five are the only fluent members; everything else is a property.
+
+**Growing with its text.** By default an area is the size layout gives it and scrolls its
+rows inside that — an editor pane. `GrowsWithContent` makes it measure as its wrapped rows
+(one at least) at the width it is offered, so a field in a flowing document — a report
+section, a notes box — pushes what follows down as lines are typed, and the scroll view
+around the page does the scrolling. An explicit height or a flex grow still wins.
 
 | Property | Type | Notes |
 |---|---|---|
 | `Text` | `string` | setting it collapses the selection to a caret, and a different value forgets the undo history |
 | `CursorPosition` | `int` | UTF-16 offset |
-| `SelectionStart`, `SelectionEnd`, `HasSelection`, `SelectedText` | read-only | document-order |
+| `SelectionStart`, `SelectionEnd`, `HasSelection`, `SelectedText` | read-only | document-order; `Select(anchor, caret)` sets a range from code |
 | `CanUndo`, `CanRedo` | read-only | false while `ReadOnly` |
 | `ReadOnly` | `bool` | |
 

@@ -191,6 +191,8 @@ public static class ElementExtensions
     public static TextAreaElement OnTextChanged(this TextAreaElement el, Action<string> handler) { el.TextChanged = handler; return el; }
     public static TextAreaElement ReadOnly(this TextAreaElement el, bool value = true) { el.ReadOnly = value; return el; }
     public static TextAreaElement Spans(this TextAreaElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
+    /// <summary>Makes the area as tall as its wrapped text; see <see cref="TextAreaElement.GrowsWithContent"/>.</summary>
+    public static TextAreaElement GrowsWithContent(this TextAreaElement el, bool value = true) { el.GrowsWithContent = value; return el; }
     public static TextInputElement Spans(this TextInputElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
 
     // ──── Checkbox properties ────
