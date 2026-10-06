@@ -1357,6 +1357,18 @@ public abstract class Element
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;
 
+    /// <summary><see cref="MeasureContent(float, float, IMeasureContext)"/>, and the least available
+    /// width from which it answers the same for every greater one: <paramref name="sameFromWidth"/>.
+    /// Layout keeps the answer for all of those widths (MeasureCache). The default says NaN — the
+    /// answer holds at <paramref name="availableWidth"/> only — which is always safe; text, whose
+    /// one line is the same at any width it fits in, overrides it.</summary>
+    internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx,
+        out float sameFromWidth)
+    {
+        sameFromWidth = float.NaN;
+        return MeasureContent(availableWidth, availableHeight, ctx);
+    }
+
     /// <summary>
     /// The narrowest content width below which this element's own content genuinely
     /// breaks, used by the automatic minimum size (docs/plans/13-min-content.md).

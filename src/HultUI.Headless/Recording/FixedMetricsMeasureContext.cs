@@ -51,4 +51,14 @@ public sealed class FixedMetricsMeasureContext(
 
         return new Size(Math.Min(totalWidth, maxWidth), lineCount * lineHeight);
     }
+
+    // As the real pipeline: one line that fits is the same at any width it fits in.
+    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+    {
+        var size = MeasureText(text, style, maxWidth, maxLines, overflow);
+        float totalWidth = string.IsNullOrEmpty(text) ? 0f : text.Length * style.FontSize * charWidthRatio;
+        sameFromWidth = totalWidth <= maxWidth ? totalWidth : float.NaN;
+        return size;
+    }
 }

@@ -19,6 +19,11 @@ namespace HultUI.Core.Layout;
 /// as it measures. The measure pass offers most elements an unbounded height and the layout
 /// pass their line's, and nearly every answer is the same for both — a resize of a
 /// 2,000-row list measured 14,000 containers twice over for nothing.</para>
+/// <para><b>And for a range of offered widths</b>, <see cref="Entry.LoW"/> to
+/// <see cref="Entry.HiW"/>: every width for a box whose own width is set, and for one sized from
+/// its content the widths its content comes out the same at — text on one line at any width it
+/// fits in. A resize offers every box a new width each step, and a row's item is laid out at
+/// the width it came out at, not the one it was measured at.</para>
 /// </summary>
 internal struct MeasureCache
 {
@@ -50,33 +55,39 @@ internal struct MeasureCache
     }
 
     /// <param name="validFromH">The matched entry's <see cref="Entry.ValidFromH"/>.</param>
+    /// <param name="validW">The matched entry's widths, <see cref="Entry.LoW"/> to <see cref="Entry.HiW"/>.</param>
     public bool TryGet(float constraintW, float constraintH, float? forcedW, float? forcedH,
-        out Size result, out float validFromH)
+        out Size result, out float validFromH, out WidthRange validW)
     {
         float fw = forcedW ?? NotForced, fh = forcedH ?? NotForced;
         for (int i = 0; i < _count; i++)
         {
             ref var e = ref _entries[i];
             // `>=` against NaN is false: an entry valid at its own height only matches it exactly.
-            if (e.ConstraintW == constraintW
+            if (constraintW >= e.LoW && constraintW <= e.HiW
                 && (e.ConstraintH == constraintH || constraintH >= e.ValidFromH)
                 && e.ForcedW == fw && e.ForcedH == fh)
             {
                 result = e.Result;
                 validFromH = e.ValidFromH;
+                validW = new WidthRange(e.LoW, e.HiW);
                 return true;
             }
         }
         result = default;
         validFromH = float.NaN;
+        validW = WidthRange.At(constraintW);
         return false;
     }
 
+    /// <param name="validW">The widths <paramref name="result"/> holds for, which take in
+    /// <paramref name="constraintW"/>.</param>
     public void Store(float constraintW, float constraintH, float? forcedW, float? forcedH,
-        Size result, float validFromH)
+        Size result, float validFromH, WidthRange validW)
     {
         ref var e = ref _entries[_next];
-        e.ConstraintW = constraintW;
+        e.LoW = validW.Lo;
+        e.HiW = validW.Hi;
         e.ConstraintH = constraintH;
         e.ForcedW = forcedW ?? NotForced;
         e.ForcedH = forcedH ?? NotForced;
@@ -102,12 +113,14 @@ internal struct MeasureCache
     /// <summary>A forced size of none. No forced size is −∞, and a plain float is half a
     /// <c>float?</c>: four entries sit inline in every element, so every byte here is paid per
     /// element — ValidFromH beside two <c>float?</c> fields grew each element by 16 bytes.
-    /// Packed, an entry is 28 bytes, 4 fewer than before ValidFromH.</summary>
+    /// Packed, an entry is 28 bytes, and 32 with a width range.</summary>
     private const float NotForced = float.NegativeInfinity;
 
     private struct Entry
     {
-        public float ConstraintW;
+        /// <summary>The offered widths <see cref="Result"/> holds for, both ends in: −∞ to +∞ for
+        /// any, the one it was measured at for that alone.</summary>
+        public float LoW, HiW;
         public float ConstraintH;
         public float ForcedW;   // NotForced for none
         public float ForcedH;   // NotForced for none
@@ -116,4 +129,25 @@ internal struct MeasureCache
         /// any, NaN for <see cref="ConstraintH"/> alone.</summary>
         public float ValidFromH;
     }
+}
+
+/// <summary>The offered widths a measurement holds for, both ends included (see
+/// <see cref="MeasureCache"/>).</summary>
+internal readonly record struct WidthRange(float Lo, float Hi)
+{
+    /// <summary>Whatever width is offered.</summary>
+    public static readonly WidthRange Any = new(float.NegativeInfinity, float.PositiveInfinity);
+
+    /// <summary>That width and no other.</summary>
+    public static WidthRange At(float width) => new(width, width);
+
+    /// <summary>The widths both hold for.</summary>
+    public static WidthRange Both(WidthRange a, WidthRange b) =>
+        new(float.MaxNative(a.Lo, b.Lo), float.MinNative(a.Hi, b.Hi));
+
+    public bool Contains(float width) => width >= Lo && width <= Hi;
+
+    /// <summary>This range, widened to take in <paramref name="width"/> — the width a measurement
+    /// was taken at, which it holds for whatever rounding did to the ends.</summary>
+    public WidthRange With(float width) => new(float.MinNative(Lo, width), float.MaxNative(Hi, width));
 }

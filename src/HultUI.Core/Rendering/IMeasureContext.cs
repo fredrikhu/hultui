@@ -30,6 +30,22 @@ public interface IMeasureContext
         => MeasureText(text, style, maxWidth, maxLines, overflow);
 
     /// <summary>
+    /// <see cref="MeasureText(string, ResolvedInheritedStyle, float, int?, TextOverflow, IReadOnlyList{TextSpan}?)"/>,
+    /// and the least <paramref name="maxWidth"/> from which it answers the same for every
+    /// greater one: <paramref name="sameFromWidth"/>. The layout engine keeps the answer for all
+    /// of those widths instead of measuring again at each (MeasureCache). NaN when the context
+    /// cannot say, which is always safe: the answer is then kept for <paramref name="maxWidth"/>
+    /// alone. A context answers for text on one line that fits, whose answer is its own width
+    /// at any width it fits in; wrapped or truncated text depends on the width.
+    /// </summary>
+    Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<TextSpan>? spans, out float sameFromWidth)
+    {
+        sameFromWidth = float.NaN;
+        return MeasureText(text, style, maxWidth, maxLines, overflow, spans);
+    }
+
+    /// <summary>
     /// The narrowest width at which <paramref name="text"/> does not overflow — the
     /// widest segment between line-break opportunities, i.e. usually the longest
     /// word. This is what CSS calls min-content width, and it is what an automatic
