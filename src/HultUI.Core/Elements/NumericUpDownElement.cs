@@ -42,6 +42,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
 
     public NumericUpDownElement()
     {
+        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Role = AccessibilityRole.SpinButton;
         Inherited.Cursor = CursorType.Pointer;

@@ -24,16 +24,24 @@ public class LayoutPathIndependenceTests
 
     [Theory]
     [MemberData(nameof(Seeds))]
-    public void ARandomTreeLaysOutAsIfLaidOutFresh(int seed)
+    public void ARandomTreeLaysOutAsIfLaidOutFresh(int seed) => LaysOutAsIfFresh(seed, controls: false);
+
+    /// <summary>The same with controls among the leaves: they say they measure the same at any
+    /// height (IgnoresAvailableHeight), and one that did not would show here.</summary>
+    [Theory]
+    [MemberData(nameof(Seeds))]
+    public void ARandomTreeOfControlsLaysOutAsIfLaidOutFresh(int seed) => LaysOutAsIfFresh(seed, controls: true);
+
+    private static void LaysOutAsIfFresh(int seed, bool controls)
     {
-        var tree = Build(seed);
+        var tree = Build(seed, controls);
         var engine = new LayoutEngine(new StubMeasureContext());
 
         foreach (var (w, h) in Sizes)
         {
             engine.PerformLayout(tree, w, h);
 
-            var fresh = Build(seed);
+            var fresh = Build(seed, controls);
             new LayoutEngine(new StubMeasureContext()).PerformLayout(fresh, w, h);
 
             var a = Flatten(tree).ToList();
@@ -55,25 +63,41 @@ public class LayoutPathIndependenceTests
         a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height
         && Near(a.AbsoluteX, b.AbsoluteX) && Near(a.AbsoluteY, b.AbsoluteY);
 
-    // Equal first: a box pushed past an unbounded edge sits at infinity, and ∞ − ∞ is NaN.
-    private static bool Near(float a, float b) => a == b || Math.Abs(a - b) < 0.01f;
+    // Equal first: a box pushed past an unbounded edge sits at infinity, and ∞ − ∞ is NaN; and one
+    // past it from both sides sits at NaN, laid out fresh or not.
+    private static bool Near(float a, float b) =>
+        a == b || (float.IsNaN(a) && float.IsNaN(b)) || Math.Abs(a - b) < 0.01f;
 
     private static string Describe(LayoutResult l) =>
         $"(x {l.X:R}, y {l.Y:R}, {l.Width:R}×{l.Height:R}, at {l.AbsoluteX:R},{l.AbsoluteY:R})";
 
     /// <summary>A random tree, the same for the same seed.</summary>
-    private static Element Build(int seed)
+    /// <summary>A control that measures its own parts, from among those that ignore the height.</summary>
+    private static Element Control(Random rng) => rng.Next(9) switch
+    {
+        0 => Checkbox.New(rng.Next(2) == 0, label: rng.Next(2) == 0 ? "a label that may wrap" : null),
+        1 => ToggleSwitch.New(rng.Next(2) == 0, label: rng.Next(2) == 0 ? "switch it" : null),
+        2 => Slider.New(rng.Next(100)),
+        3 => ProgressBar.New(rng.NextDouble()),
+        4 => Spinner.New(),
+        5 => TextInput.New(new string('x', rng.Next(30))),
+        6 => Dropdown.New(["one", "a longer option", "three"], rng.Next(3)),
+        7 => NumericUpDown.New(rng.Next(50)),
+        _ => RadioButton.New("g", rng.Next(2) == 0, label: rng.Next(2) == 0 ? "choose" : null),
+    };
+
+    private static Element Build(int seed, bool controls)
     {
         var rng = new Random(seed);
         int id = 0;
-        var root = Node(rng, depth: 0, ref id);
+        var root = Node(rng, depth: 0, ref id, controls);
         return root;
     }
 
-    private static Element Node(Random rng, int depth, ref int id)
+    private static Element Node(Random rng, int depth, ref int id, bool controls)
     {
         int kind = depth >= 4 ? rng.Next(2) : rng.Next(10);
-        Element e = kind switch
+        Element e = controls && kind <= 1 && rng.Next(3) == 0 ? Control(rng) : kind switch
         {
             0 => Text.New(new string('w', 1 + rng.Next(40)).Replace("www", "w w")),
             1 => Box.New(),
@@ -117,7 +141,7 @@ public class LayoutPathIndependenceTests
             var children = new Element[count];
             for (int i = 0; i < count; i++)
             {
-                children[i] = Node(rng, depth + 1, ref id);
+                children[i] = Node(rng, depth + 1, ref id, controls);
                 if (box.GridRead.HasTemplate)
                     children[i].GridCell(i / 2, i % 2);
             }

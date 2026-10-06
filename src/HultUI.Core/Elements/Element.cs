@@ -1354,6 +1354,15 @@ public abstract class Element
     /// this.</summary>
     internal bool MeasuresAtWidthOnly { get; private protected set; }
 
+    /// <summary>Whether <see cref="MeasureContent"/> ignores the available height, and no more: unlike
+    /// <see cref="MeasuresAtWidthOnly"/> it promises nothing about a forced height or where the
+    /// baseline sits. Set by controls that measure their own fixed parts — a checkbox, a slider,
+    /// a text field. Layout keeps their measurement for any height offered (MeasureCache); without
+    /// it a column of controls held its measurement to the one height it was taken at, and was
+    /// laid out again at the height its row gave it. An override that reads the height must not
+    /// set this.</summary>
+    internal bool IgnoresAvailableHeight { get; private protected set; }
+
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;
 
