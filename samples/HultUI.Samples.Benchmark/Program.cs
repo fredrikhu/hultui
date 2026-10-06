@@ -41,6 +41,14 @@ if ((auto || profile) && !args.Contains("--no-pin") && PerfSuite.CorePinning.Pin
 using var app = new Application("HultUI Benchmark", 1040, 760);
 app.Theme = Theme.Light;
 
+// Scripted runs time the work, not the display. With the loop paced to the display (the
+// default since 2026-09-20) a measured frame waited for its slot whenever the setup frame
+// before it had finished inside one interval — so the faster the build, the more its
+// sub-millisecond operations read as several milliseconds (medians of 3–5 ms against minimums
+// of 0.5 at 120 Hz). Unpaced, each frame renders as soon as the mutation is made.
+if (auto || profile)
+    app.FramePacing = FramePacing.Unlimited;
+
 var window = app.PrimaryWindow;
 var bench = new Benchmark(window, virtualMode);
 app.SetRoot(bench.Build());
@@ -199,10 +207,9 @@ sealed class Benchmark
         // Global pre-warm before ANY metric is measured. Without it the first
         // metric in the run absorbs JIT tier-up of the shared framework code
         // (style/layout/text/reconciliation) and reads ~2x its warm cost — an
-        // unfair penalty versus a browser, whose V8 is warmed the same way. This
-        // exercises the full pipeline on large and small tables, then idles a few
-        // frames so the background Tier-1 compiler finishes promoting.
-        PreWarm(_script);
+        // unfair penalty versus a browser, whose V8 is warmed the same way. See
+        // PreWarm: it runs for a length of time, not a number of passes.
+        PreWarm();
 
         Repeat("create 1,000", setup: _target.Clear, op: () => _target.Create(1_000));
         Repeat("update every 10th", setup: () => _target.Create(1_000), op: _target.UpdateEveryTenth);
@@ -230,33 +237,60 @@ sealed class Benchmark
         }
     }
 
-    // Runs the full pipeline (build/style/layout/text/render) on both large and
-    // small tables to drive the shared framework code past the Tier-0 → Tier-1
-    // call-count threshold, then idles a dozen frames so the background compiler
-    // has wall-clock time to finish promoting before the first measured metric.
-    // All steps are unmeasured. Under NativeAOT (no tiering) this is simply a
-    // cheap no-op warmup; under JIT it is what makes the first metric fair.
-    private void PreWarm(Queue<BenchStep> into)
+    // Runs every operation the suite measures, on large and small tables, in passes
+    // until at least three are done AND MinWarm has passed, then pauses for the
+    // background compiler to publish what it is still promoting. All unmeasured.
+    //
+    // By time, not by count (2026-10-06): tiered compilation with dynamic PGO reaches
+    // its steady state after seconds of work, not after N calls. Three fixed passes
+    // took less wall time once layout got faster, and the first metrics then ran on
+    // code still being promoted — create 1,000 read 22 ms of layout against 5 for the
+    // slower build it was compared with, and paint-only ops twice as slow, all of it
+    // gone with tiering off. The scenario suite learned the same (PerfSuite README).
+    // The old pass also skipped select, remove and append; they warmed only during
+    // their own two warm-up iterations. Under NativeAOT this is a cheap no-op.
+    private static readonly TimeSpan MinWarm = TimeSpan.FromSeconds(3);
+    private readonly Queue<BenchStep> _warm = new();
+    private readonly Stopwatch _warmClock = new();
+    private int _warmPasses;
+
+    private void PreWarm()
     {
-        void Q(Action op) => into.Enqueue(new BenchStep(null, op));
-        for (int pass = 0; pass < 3; pass++)
-        {
-            Q(() => _target.Create(10_000));
-            Q(_target.Clear);
-            Q(() => _target.Create(1_000));
-            Q(_target.UpdateEveryTenth);
-            Q(_target.Swap);
-            Q(_target.Clear);
-        }
-        for (int i = 0; i < 12; i++)
-            Q(static () => { });
+        _warm.Clear();
+        _warmPasses = 0;
+        _warmClock.Restart();
+        EnqueueWarmPass();
     }
+
+    private void EnqueueWarmPass()
+    {
+        void Q(Action op) => _warm.Enqueue(new BenchStep(null, op));
+        Q(() => _target.Create(10_000));
+        Q(_target.Clear);
+        Q(() => _target.Create(1_000));
+        Q(_target.UpdateEveryTenth);
+        Q(_target.SelectRandom);
+        Q(_target.Swap);
+        Q(_target.RemoveRandom);
+        Q(() => _target.Append(1_000));
+        Q(_target.Clear);
+        Q(() =>
+        {
+            if (++_warmPasses < 3 || _warmClock.Elapsed < MinWarm)
+                EnqueueWarmPass();
+            else
+                Thread.Sleep(500);   // let the background compiler publish the last tier-1 bodies
+        });
+    }
+
+    // The next step: the warm-up's while it lasts, then the script's.
+    private BenchStep? NextStep(Queue<BenchStep> script) =>
+        _warm.Count > 0 ? _warm.Dequeue() : script.Count > 0 ? script.Dequeue() : null;
 
     private void Pump()
     {
-        if (_script.Count == 0) { FinishSuite(); return; }
+        if (NextStep(_script) is not { } step) { FinishSuite(); return; }
 
-        var step = _script.Dequeue();
         // Rolling to a new metric — force a GC first so a collection mid-measure
         // doesn't skew the numbers (the web benchmark isolates runs the same way).
         if (step.MeasureAs is not null && step.MeasureAs != _currentMetric)
@@ -315,7 +349,7 @@ sealed class Benchmark
         _profSamples.Clear();
         _profMetric = null;
 
-        PreWarm(_profSteps);
+        PreWarm();
 
         QueueProfile("create 1,000", () => _target.Create(1_000));
         QueueProfile("create 10,000", () => _target.Create(10_000));
@@ -336,9 +370,8 @@ sealed class Benchmark
 
     private void Pump(Queue<BenchStep> steps, Action<string> measured, Action done)
     {
-        if (steps.Count == 0) { done(); return; }
+        if (NextStep(steps) is not { } step) { done(); return; }
 
-        var step = steps.Dequeue();
         if (step.MeasureAs is not null && step.MeasureAs != _profMetric)
         {
             FlushProfile();
