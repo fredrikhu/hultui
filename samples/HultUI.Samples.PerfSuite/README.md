@@ -156,6 +156,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-0bf5823-flexplan-after.json` | … and after it, with the min-content width kept until it changes: 0bf5823, interleaved with the line above. Compare these two: 0 slower, 3 faster (resize 2,000 rows is −10 % on both, a hair under the flag). |
 | `2026-10-06-4b4c733-widthrange-before.json` | Before a measurement held for a range of offered widths: main at 4b4c733, median of 3 idle-gated runs … |
 | `2026-10-06-ca425da-mount-before.json` | Before a leaf of a set height held at any height: main at ca425da, median of 3 idle-gated runs … |
+| `2026-10-06-da3c9d2-forcedwidth-before.json` | Before a forced width was the unforced measurement at that width: main at da3c9d2, median of 3 idle-gated runs … |
+| `2026-10-06-8b2af12-forcedwidth-after.json` | … and after it: 8b2af12, interleaved with the line above. Compare these two: 0 slower, 1 faster (resize 2,000 rows −14 %; the rest of what moved is under the flag: see below). |
 | `2026-10-06-4aa5653-patch-before.json` | Before a patch that changes nothing about the layout left it standing: main at 4aa5653, median of 3 idle-gated runs … |
 | `2026-10-06-2688a99-patch-after.json` | … and after it, with a kept layout needing the same forced sizes exactly: 2688a99, interleaved with the line above. Compare these two: 0 slower, 3 faster. |
 | `2026-10-06-c451515-mount-after.json` | … and after it, with range ends checked for rounding, far boxes laid out and controls that ignore the height saying so: c451515, interleaved with the line above. Compare these two: 0 slower, 0 faster past the flag (icons −10 %, gallery −6 %: see below). |
@@ -389,6 +391,24 @@ What is left of an edit is the rebuild (1.4 ms) and the style pass over every pa
 compares them with the changed trees built fresh; it found the layout cache keeping a box laid out
 unforced once forced to the size it came out at, which offers its content different room — a kept
 layout now needs the same forced sizes, exactly (50925d0).
+
+**A forced width is the unforced measurement at that width, before → after** (8b2af12). Counting text
+measurements per step: a 2,000-row resize measured every growing label again at each step, though
+each fits on one line and so holds its measurement for any width it fits in — the cache keyed the
+measurement on the exact forced width, a new one each step. For a leaf sized from its content a
+forced width changes nothing but the width, so the forced measurement is now the unforced one at
+that width, kept by its width range. Text measurements a step: resize 2,000 → 0, baseline rows
+500 → 0, ratio tiles and grid 600 → 0, wrapped paragraphs 300 → 150, overfull rows 5,867 → 3,467.
+Minimum, median of 3 runs:
+
+| Scenario | da3c9d2 | 8b2af12 | | layout |
+|---|---:|---:|---:|---|
+| `layout/resize 2,000-row list` | 2.035 | 1.758 | −14 % | 1.440 → 1.165 ms |
+| `layout/shrink 300 overfull rows resize` | 3.498 | 3.223 | −8 % | 2.276 → 2.031 ms |
+| `layout/aspect-ratio tiles resize` | 0.814 | 0.776 | −5 % | 0.189 → 0.140 ms |
+| `text/wrap 150 paragraphs resize` | 2.985 | 2.852 | −4 % | 1.980 → 1.846 ms |
+
+Nothing moved up past +2 %. In the window benchmark create 1,000 is −10 % and append −7 %.
 
 **What the suite turned up on its first run**, for follow-up:
 

@@ -73,18 +73,19 @@ public class LeafMeasureCacheTests
         context.Calls = 0;
         engine.PerformLayout(root, 780, 600);
 
-        // Per row: the growing label three times — at the row's width while its flex base size is
-        // found, then at the width it grew to, once offered and once forced. The id and the glyph
-        // are in boxes of a set width, which hold at any width the row offers.
-        Assert.Equal(3 * rows.Length, context.Calls);
+        // Per row: the growing label twice — at the row's width while its flex base size is found,
+        // then at the width it grew to; forced to that width is the same measurement (a forced
+        // width is the unforced one at that width). The id and the glyph are in boxes of a set
+        // width, which hold at any width the row offers.
+        Assert.Equal(2 * rows.Length, context.Calls);
     }
 
     [Fact]
-    public void AResizedListOfLabelsThatFitMeasuresOnlyTheOneForcedToANewWidth()
+    public void AResizedListOfLabelsThatFitMeasuresNothingAgain()
     {
         // A label on one line that fits is the same at any width it fits in, so the row's new
-        // width and the width the label grew to find its measurement already taken. Only the
-        // layout pass forcing it to the width it grew to, a new one, measures it.
+        // width and the width the label grew to find its measurement already taken — forced to
+        // that width too, which is the unforced measurement at it.
         var context = new CountingMeasureContext(saysWhereItHolds: true);
         var engine = new LayoutEngine(context);
         var rows = Enumerable.Range(0, 50).Select(Row).ToArray();
@@ -94,7 +95,7 @@ public class LeafMeasureCacheTests
         context.Calls = 0;
         engine.PerformLayout(root, 780, 600);
 
-        Assert.Equal(rows.Length, context.Calls);
+        Assert.Equal(0, context.Calls);
     }
 
     [Fact]

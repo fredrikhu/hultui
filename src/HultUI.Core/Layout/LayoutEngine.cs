@@ -775,6 +775,24 @@ public sealed partial class LayoutEngine
                 ApplyMinMax(forcedH, box.MinHeight, box.MaxHeight, constraintH) + box.Margin.Vertical);
         }
 
+        // And for any leaf sized from its content, a forced width changes nothing but the width:
+        // its content is offered what it would be offered at that width unforced (ResolveAxis),
+        // so the forced measurement is the unforced one at that width, given that width. The
+        // unforced one is kept for every width it holds at — a label on one line, any it fits in
+        // — where each forced width was a key of its own: a resize measured every growing label
+        // in a list again at each step. Not with a width or percentage min or max of its own
+        // (the unforced box would take those, not the forced width) or a ratio (its height
+        // follows the width it is given).
+        if (forcedWidth is { } forcedW && box.Width.IsAuto
+            && box.MinWidth.Unit != DimensionUnit.Percent && box.MaxWidth.Unit != DimensionUnit.Percent
+            && RatioOf(element) <= 0f)
+        {
+            var atThatWidth = MeasureLeafSize(element, forcedW, constraintH, null, forcedHeight);
+            _measuredW = WidthRange.Any;   // a set width: the width offered goes nowhere
+            return new Size(ApplyMinMax(forcedW, box.MinWidth, box.MaxWidth, constraintW) + box.Margin.Horizontal,
+                atThatWidth.Height);
+        }
+
         if (element.MeasureCache.TryGet(constraintW, constraintH, forcedWidth, forcedHeight,
                 out var cachedSize, out var cachedFrom, out var cachedW))
         {
