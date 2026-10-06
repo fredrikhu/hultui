@@ -255,10 +255,19 @@ text labels (**B**, *I*, U̲, H1…) by default and takes app artwork per comman
    over a line break, an ordered list's start number, loose vs tight lists.
 7. **Adoption.** Fluent gallery page; Junction Create MR description on the Markdown
    profile (the posted body is the written Markdown). **Fluent page done 2026-10-06** (nav
-   item "Rich text": toolbar, auto-height editor, read-only switch, word count). Junction
-   waits on stage 6; its own "is the user typing" checks (`JunctionApp.cs`, and Vesper,
-   Meridian, Aperture likewise) list `TextInputElement or TextAreaElement` and must learn the
-   editor, or app shortcuts fire while typing in it.
+   item "Rich text": toolbar, auto-height editor, read-only switch, word count, and the
+   document as Markdown, live). **Junction done 2026-10-07:**
+   - **The form.** It holds a `RichDocument`. The pre-fill from the commits (`- subject` per
+     commit, `Closes #N`) is written as Markdown and read in, and GitLab is sent
+     `RichMarkdown.Write`.
+   - **The editor.** It offers `RichMarkdown.Features` only, grows from 96 to 320 px, and
+     takes `Ui.Field`'s look. Its compact toolbar (B, I, S, code, link, H2, the three lists,
+     quote, code block) uses Phosphor artwork for link, code and tasks.
+   - **Keys.** The editor now leaves Ctrl+Enter and Alt+Enter to the form, which submits on
+     them. Junction's typing check names the editor. Vesper, Meridian and Aperture host none
+     and are unchanged.
+   - **Toolbar fix.** Toolbar buttons grow past `ButtonSize` to fit their label; at a fixed
+     width, "H2" wrapped in Junction's face.
 
 **Open after stages 1–4:** the accessible text source (UIA text pattern / AT-SPI Text over
 the plain text, so readers move by word and line — today a reader gets the value only); an

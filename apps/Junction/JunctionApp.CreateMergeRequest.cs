@@ -5,7 +5,10 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
+using HultUI.Core.RichText;
 using HultUI.Core.Styling;
+using HultUI.RichText.Markdown;
 using Junction.Git;
 using Junction.GitLab;
 using Junction.Theme;
@@ -26,7 +29,9 @@ public partial class JunctionApp
         public required string Source;
         public string Target = "";
         public string Title = "";
-        public string Description = "";
+        /// <summary>The description as the editor holds it; GitLab is sent its Markdown
+        /// (<see cref="RichMarkdown.Write"/>).</summary>
+        public RichDocument Description = RichDocument.Empty;
         public bool Draft;
         public bool RemoveSource = true;
         public bool Squash;
@@ -45,6 +50,32 @@ public partial class JunctionApp
     }
 
     private CreateMrForm? _createMr;
+
+    // The description's editor and its formatting bar: Markdown's formats only, since GitLab is
+    // sent Markdown.
+    private readonly Ref<RichTextEditorElement> _createMrDescRef = new();
+    private RichTextToolbar? _createMrToolbar;
+
+    private static readonly IReadOnlyList<RichTextCommand?> CreateMrToolbarCommands =
+    [
+        RichTextCommand.Bold, RichTextCommand.Italic, RichTextCommand.Strike, RichTextCommand.Code,
+        RichTextCommand.Link, null,
+        RichTextCommand.Heading2, RichTextCommand.BulletList, RichTextCommand.NumberedList,
+        RichTextCommand.TaskList, RichTextCommand.Quote, RichTextCommand.CodeBlock,
+    ];
+
+    private RichTextToolbar CreateMrToolbar() => _createMrToolbar ??= new RichTextToolbar(_createMrDescRef, MarkDirty)
+    {
+        Commands = CreateMrToolbarCommands,
+        ButtonSize = 26f,
+        Icon = command => command switch
+        {
+            RichTextCommand.Link => Ui.Icon(Icons.LinkSimple, 14f, Nocturne.On(0.8)),
+            RichTextCommand.Code => Ui.Icon(Icons.Code, 14f, Nocturne.On(0.8)),
+            RichTextCommand.TaskList => Ui.Icon(Icons.ListChecks, 14f, Nocturne.On(0.8)),
+            _ => null,
+        },
+    };
 
     private readonly KeyedAsyncLoader<string, Hosted<IReadOnlyList<GlMember>>> _memberLoaders =
         new(Hosted<IReadOnlyList<GlMember>>.Empty([]), capacity: 8, comparer: PathComparer);
@@ -131,7 +162,9 @@ public partial class JunctionApp
             if (lines.Count > 0) lines.Add("");
             lines.Add($"Closes #{issue}");
         }
-        form.Description = string.Join("\n", lines);
+        // Written as the Markdown GitLab would be sent, and read into the editor's document: a
+        // subject's own markup reads the way GitLab will render it.
+        form.Description = RichMarkdown.Parse(string.Join("\n", lines));
     }
 
     /// <summary><c>PC-1042-refund-splitting</c> → <c>PC-1042: refund splitting</c>;
@@ -306,15 +339,23 @@ public partial class JunctionApp
 
         // Title + description.
         col.AddChild(CreateMrField("Title", CreateMrInput(f.Title, "What this change does", v => { f.Title = v; f.TitleTouched = true; MarkDirty(); }, "create-mr-title")));
-        var descBox = Flex.Column(gap: 0).Padding(new Thickness(6, 10, 6, 10))
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
-        var desc = TextArea.New(f.Description)
+        var toolbar = CreateMrToolbar();
+        var desc = RichTextEditor.New(f.Description)
+            .Features(RichMarkdown.Features)
             .PlaceholderText("Pre-filled from the commits. Closes #… closes the issue on merge.")
-            .OnTextChanged(v => { f.Description = v; f.DescriptionTouched = true; MarkDirty(); })
-            .Height(Dimension.Px(88)).TextColor(Nocturne.Text);
+            .OnDocumentChanged(d => { f.Description = d; f.DescriptionTouched = true; MarkDirty(); })
+            .OnSelectionChanged(MarkDirty)
+            .OnLinkRequested(toolbar.OpenLinkEditor)
+            .OnLinkActivated(OpenUrl)
+            .AutoHeight(96, 320)
+            .Style(Ui.Field(verticalPadding: 8f))
+            .TextColor(Nocturne.Text);
         desc.AutomationId = "create-mr-description";
-        descBox.AddChild(desc);
-        col.AddChild(CreateMrField("Description", descBox));
+        // The bar reads the editor on screen through the ref: built before the ref moves to
+        // this freshly built one.
+        var bar = toolbar.Build();
+        desc.WithRef(_createMrDescRef);
+        col.AddChild(CreateMrField("Description", Flex.Column(gap: 4).Children(bar, desc)));
 
         // Reviewers and labels: pills, each picker a popover.
         col.AddChild(CreateMrField("Reviewers", BuildReviewerPills(f)));
@@ -541,7 +582,7 @@ public partial class JunctionApp
         MarkDirty();
         var request = new NewMergeRequest(
             f.Source, f.Target, f.Title.Trim(),
-            Description: f.Description.Trim().Length > 0 ? f.Description.Trim() : null,
+            Description: RichMarkdown.Write(f.Description).Trim() is { Length: > 0 } description ? description : null,
             Draft: f.Draft,
             ReviewerIds: f.ReviewerIds.Count > 0 ? [.. f.ReviewerIds] : null,
             Labels: f.Labels.Count > 0 ? [.. f.Labels] : null,

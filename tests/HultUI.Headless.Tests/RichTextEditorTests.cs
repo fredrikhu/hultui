@@ -102,6 +102,20 @@ public class RichTextEditorTests
     }
 
     [Fact]
+    public void CtrlEnter_IsLeftToTheForm()
+    {
+        int submitted = 0;
+        using var rig = Build(configure: e => e.OnKeyDown(k =>
+        {
+            if (k.Key == KeyCode.Enter && k.Modifiers.HasFlag(KeyModifiers.Ctrl)) submitted++;
+        }));
+        rig.Window.TypeText("text");
+        rig.Window.PressKey(KeyCode.Enter, KeyModifiers.Ctrl);
+        Assert.Equal(1, rig.Editor.Document.BlockCount);   // no new paragraph
+        Assert.Equal(1, submitted);                       // and the key went on to the form
+    }
+
+    [Fact]
     public void AReadOnlyEditor_TakesNoTyping()
     {
         using var rig = Build(new RichDocument([P("fixed")]), configure: e => e.ReadOnly = true);

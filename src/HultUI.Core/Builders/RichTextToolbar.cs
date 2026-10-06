@@ -110,7 +110,10 @@ public sealed class RichTextToolbar
         bool active = editor is not null && IsActive(editor, command);
         bool enabled = editor is not null && !editor.ReadOnly && IsEnabled(editor, command);
         var button = Button.New(active ? ButtonVariant.Secondary : ButtonVariant.Ghost)
-            .Width(Dimension.Px(ButtonSize)).Height(Dimension.Px(ButtonSize)).Padding(0)
+            // At least square, wider for a label that needs it (H2 in a wide face): a fixed
+            // width wrapped it onto two lines.
+            .MinWidth(Dimension.Px(ButtonSize)).Height(Dimension.Px(ButtonSize))
+            .Padding(new Thickness(0, 4, 0, 4))
             .Enabled(enabled)
             .Tooltip(TooltipOf(command))
             .AccessibleName(NameOf(command))
@@ -141,7 +144,7 @@ public sealed class RichTextToolbar
     // B in bold, I in italic, U underlined, S struck: the label shows what the button does.
     private static Element Label(RichTextCommand command)
     {
-        var text = Text.New(LabelOf(command)).FontSize(13);
+        var text = Text.New(LabelOf(command)).FontSize(13).MaxLines(1);
         return command switch
         {
             RichTextCommand.Bold => text.FontWeight(FontWeight.Bold),

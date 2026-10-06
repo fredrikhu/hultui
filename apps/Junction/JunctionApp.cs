@@ -1222,7 +1222,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
-        var typing = e.Target is TextInputElement or TextAreaElement;
+        var typing = e.Target is TextInputElement or TextAreaElement or RichTextEditorElement;
 
         // The repo/workspace popover and modal are lightweight; Esc dismisses them,
         // and (for the modal) typing flows to the focused field.

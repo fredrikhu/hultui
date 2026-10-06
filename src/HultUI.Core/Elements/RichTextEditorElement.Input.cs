@@ -105,8 +105,9 @@ public partial class RichTextEditorElement
                 MoveToLineEdge(start: false, document: ctrl, shift);
                 break;
 
+            // Ctrl+Enter and Alt+Enter are the form's — submit, most often — not a new paragraph.
             case KeyCode.Enter:
-                if (_readOnly) return;
+                if (_readOnly || ctrl || alt) return;
                 if (shift) _state.InsertLineBreak();
                 else _state.SplitBlock();
                 break;

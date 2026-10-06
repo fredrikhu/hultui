@@ -1,6 +1,12 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Junction: the merge request description is rich text** — the Create MR card's description is a
+  `RichTextEditor` on `RichMarkdown.Features` with a compact toolbar (B, I, S, code, link, H2, lists,
+  tasks, quote, code block); the commit pre-fill is read from Markdown and GitLab is sent
+  `RichMarkdown.Write`. The editor leaves Ctrl+Enter/Alt+Enter to the form (the card submits on
+  Ctrl+Enter); toolbar buttons grow to fit their labels. Tests: 2 Junction (typed with Markdown
+  shortcuts → the exact Markdown posted; only Markdown's formats offered), 1 headless.
 - **Rich text editor, stage 6: Markdown** (`src/HultUI.RichText.Markdown`, Markdig 1.3.2 as Junction) —
   `RichMarkdown.Parse` keeps what the document cannot hold (tables, HTML and comments, pictures,
   quotes holding lists, link definitions) as `Raw` blocks written back exactly; soft breaks read as
@@ -809,9 +815,9 @@
 - **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.
 
 ## Up Next (in order)
-- **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4, 6 and the Fluent page done.
-  Next: Junction's Create MR description (and every app's "is the user typing" check learning the
-  editor), then the accessible text source (stage 5), then measuring large documents (stage 8).
+- **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4, 6 and 7 (Fluent page, Junction
+  Create MR description) done. Next: the accessible text source (stage 5), then measuring large
+  documents (stage 8); candidates for more adoption: Junction's review notes and replies.
 - Windows UIA bridge on-device verification — run a sample, open Accessibility Insights / `Inspect.exe`, confirm tree, name, role, bounding-rect, and pattern actions round-trip.
 - **AT-SPI `Action.DoAction`** — an AT can now activate controls. The neutral
   invoke/toggle/select logic was lifted out of the Windows-only `Sdl3UiaHostBridge`
