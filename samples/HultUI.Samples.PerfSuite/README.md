@@ -160,6 +160,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-8b2af12-forcedwidth-after.json` | … and after it: 8b2af12, interleaved with the line above. Compare these two: 0 slower, 1 faster (resize 2,000 rows −14 %; the rest of what moved is under the flag: see below). |
 | `2026-10-06-5855df8-textarea-before.json` | Before a TextArea found each line break from a guess at a line's length: main at 5855df8 with `text/open a long document in a TextArea` added, median of 3 idle-gated runs … |
 | `2026-10-06-ae037d5-textarea-after.json` | … and after it: ae037d5, interleaved with the line above. Compare these two: 0 slower, 1 faster (the long document −73 %). |
+| `2026-10-06-b33f5f1-plainpath-before.json` | Before left-to-right text left the BiDi path: main at b33f5f1, median of 3 idle-gated runs … |
+| `2026-10-06-2261567-plainpath-after.json` | … and after it: 2261567, interleaved with the line above. Compare these two: 0 slower, 1 faster (labels with an em dash −44 %). |
 | `2026-10-06-4aa5653-patch-before.json` | Before a patch that changes nothing about the layout left it standing: main at 4aa5653, median of 3 idle-gated runs … |
 | `2026-10-06-2688a99-patch-after.json` | … and after it, with a kept layout needing the same forced sizes exactly: 2688a99, interleaved with the line above. Compare these two: 0 slower, 3 faster. |
 | `2026-10-06-c451515-mount-after.json` | … and after it, with range ends checked for rounding, far boxes laid out and controls that ignore the height saying so: c451515, interleaved with the line above. Compare these two: 0 slower, 0 faster past the flag (icons −10 %, gallery −6 %: see below). |
@@ -429,6 +431,22 @@ before. Minimum, median of 3 runs:
 Nothing else moved past ±5 %. In Junction (Native AOT, the Files walk of the frame log) TODO.md's
 frame is 33.6 → 20 ms; what is left is measuring its lines at all, most of which carry an em dash
 or an arrow and so take the BiDi path.
+
+**Left-to-right text takes the plain path unless it can need BiDi, before → after** (2261567). Any
+char at or above U+0590 sent its text down the BiDi path — the em dash in `text/create`'s
+"Item n — m units" included, and with it twice the time and memory of the same labels with a
+hyphen. Now only text that can need that path takes it: a char that can be right-to-left or steers
+direction, or one that joins its neighbours into one character (surrogates, marks, joiners,
+variation selectors, Hangul jamo). Dashes, quotes, arrows, symbols, CJK, kana and Hangul syllables go
+plain. Minimum, median of 3 runs:
+
+| Scenario | b33f5f1 | 2261567 | | allocated |
+|---|---:|---:|---:|---|
+| `text/create 2,000 unique labels` | 8.632 | 4.852 | −44 % | 14.9 → 7.6 MB |
+
+Nothing else moved past ±4 %. In Junction TODO.md's lines all leave the BiDi path (219 of 918 took
+it), and its first frame is 18.8–20.4 → 17.1–18.1 ms: what is left is measuring 89,000 characters
+nobody has measured before.
 
 **What the suite turned up on its first run**, for follow-up:
 
