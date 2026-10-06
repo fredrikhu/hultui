@@ -122,9 +122,19 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // and is O(total items) for a virtualized list. These changes are coalesced:
     // rebuild on the leading edge, then at most every A11yCoalesceMs, then once on
     // the trailing edge — the batching browsers apply to a11y location updates.
+    // Timed on the platform's clock, so a headless session's virtual time drives it.
     private bool _a11yLayoutRefreshPending;
     private long _lastA11yRebuildMs;
     private const long A11yCoalesceMs = 100;
+
+    private long A11yClockMs
+    {
+        get
+        {
+            var clock = Application.Platform.TimeProvider;
+            return clock.GetTimestamp() * 1000 / clock.TimestampFrequency;
+        }
+    }
     private readonly AccessibilityObserverAdapter _a11yObserver;
     private UiaHostBridge? _uiaHost;
     private AccessibilityActionRouter? _actionRouter;
@@ -720,7 +730,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
         || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
-            && Environment.TickCount64 - _lastA11yRebuildMs >= A11yCoalesceMs)
+            && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
         // AT thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame. Platform-neutral: the
@@ -818,7 +828,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             || _root.DirtyFlags.HasFlag(DirtyFlags.Children));
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
-        long nowMs = Environment.TickCount64;
+        long nowMs = A11yClockMs;
         bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
             && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
 
@@ -3098,7 +3108,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     {
         public void OnElementPropertyChanged(Element element, string propertyName)
         {
-            if (window._accessibilityBridge.IsActive)
+            if (!window._accessibilityBridge.IsActive) return;
+            // Bounds alone are a layout-only change: a scroll moves everything under the view
+            // and changes nothing else. They go on the coalesced schedule a resize gets — a
+            // property change rebuilt the whole tree on every frame of a wheel turn, 0.7 ms a
+            // frame of a 1.9 ms frame in a scrolling History list, and up to 9 ms.
+            if (propertyName == AccessibilityProperties.BoundingRect)
+                window._a11yLayoutRefreshPending = true;
+            else
                 window._a11yPropertyDirty = true;
         }
     }
