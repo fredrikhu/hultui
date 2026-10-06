@@ -218,6 +218,27 @@ public class FlexShrinkTests
     }
 
     [Fact]
+    public void ALabelOfASetWidthShrunkInARow_WrapsAtTheWidthItIsGiven()
+    {
+        // 19 characters, 133px on one line, asked to be 140 wide in a row of 100: shrunk to
+        // 100, where the stub breaks it after 14 characters — two lines. Measured as if it were
+        // the 140 it asked for, it would fit on one: a forced width is the unforced measurement
+        // at that width only for a label sized from its content.
+        var label = TextElement.New("aaaa bbbb cccc dddd");
+        label.Box.Width = 140;
+        var row = BoxElement.New();
+        row.Flex.Direction = FlexDirection.Row;
+        row.Flex.AlignItems = AlignItems.FlexStart;
+        row.Box.Width = 100;
+        row.AddChild(label);
+
+        _layout.PerformLayout(row, 300, 200);
+
+        Assert.Equal(100, label.Layout.Width);
+        Assert.Equal(28, label.Layout.Height);
+    }
+
+    [Fact]
     public void AShrinkingLabel_StopsAtItsWidestWord()
     {
         var (label, row) = SqueezedLabel("a wonderfully long word");
