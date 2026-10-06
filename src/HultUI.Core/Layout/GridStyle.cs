@@ -23,8 +23,20 @@ public sealed class GridStyle
 
     public bool HasTemplate => ColumnTemplate.Length > 0 || RowTemplate.Length > 0;
 
-    internal void CopyFrom(GridStyle source)
+    /// <returns>Whether anything changed: a patch that changes nothing in a layout style
+    /// leaves the element's layout standing (Element.PatchFrom).</returns>
+    internal bool CopyFrom(GridStyle source)
     {
+        if (ColumnTemplate.AsSpan().SequenceEqual(source.ColumnTemplate)
+            && RowTemplate.AsSpan().SequenceEqual(source.RowTemplate)
+            && ImplicitRow == source.ImplicitRow
+            && ImplicitColumn == source.ImplicitColumn
+            && RowGap == source.RowGap
+            && ColumnGap == source.ColumnGap
+            && JustifyItems == source.JustifyItems
+            && AlignItems == source.AlignItems)
+            return false;
+
         ColumnTemplate = source.ColumnTemplate;
         RowTemplate = source.RowTemplate;
         ImplicitRow = source.ImplicitRow;
@@ -33,6 +45,7 @@ public sealed class GridStyle
         ColumnGap = source.ColumnGap;
         JustifyItems = source.JustifyItems;
         AlignItems = source.AlignItems;
+        return true;
     }
 }
 

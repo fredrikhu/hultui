@@ -1191,17 +1191,18 @@ public abstract class Element
         // Copy styles without forcing allocation on either side: when the source
         // never touched a style and the target did, reset the target to defaults
         // (copying from the shared immutable default); when neither side has one,
-        // there is nothing to do.
-        if (source._flex is not null) Flex.CopyFrom(source._flex);
-        else _flex?.CopyFrom(FlexStyle.Default);
-        if (source._box is not null) Box.CopyFrom(source._box);
-        else _box?.CopyFrom(BoxStyle.Default);
-        if (source._position is not null) Position.CopyFrom(source._position);
-        else _position?.CopyFrom(PositionStyle.Default);
-        if (source._grid is not null) Grid.CopyFrom(source._grid);
-        else _grid?.CopyFrom(GridStyle.Default);
-        if (source._gridItem is not null) GridItem.CopyFrom(source._gridItem);
-        else _gridItem?.CopyFrom(GridItemStyle.Default);
+        // there is nothing to do. Each says whether it changed anything.
+        bool layoutChanged = false;
+        if (source._flex is not null) layoutChanged |= Flex.CopyFrom(source._flex);
+        else layoutChanged |= _flex?.CopyFrom(FlexStyle.Default) ?? false;
+        if (source._box is not null) layoutChanged |= Box.CopyFrom(source._box);
+        else layoutChanged |= _box?.CopyFrom(BoxStyle.Default) ?? false;
+        if (source._position is not null) layoutChanged |= Position.CopyFrom(source._position);
+        else layoutChanged |= _position?.CopyFrom(PositionStyle.Default) ?? false;
+        if (source._grid is not null) layoutChanged |= Grid.CopyFrom(source._grid);
+        else layoutChanged |= _grid?.CopyFrom(GridStyle.Default) ?? false;
+        if (source._gridItem is not null) layoutChanged |= GridItem.CopyFrom(source._gridItem);
+        else layoutChanged |= _gridItem?.CopyFrom(GridItemStyle.Default) ?? false;
         if (source._inherited is not null) Inherited.CopyFrom(source._inherited);
         else _inherited?.CopyFrom(InheritedStyle.Default);
         IsFocusable = source.IsFocusable;
@@ -1245,10 +1246,26 @@ public abstract class Element
                 r.SetTarget(this);
         }
 
-        MarkLayoutDirty();
+        // A rebuilt component patches every element it keeps, and marking each one's layout dirty
+        // threw every measurement in the subtree away: editing one row of a thousand laid all
+        // thousand out again. Its layout styles are compared above; what else a kind of element
+        // copies is its own to judge, so only a kind that marks its own layout when that changes
+        // (PatchMarksOwnLayout) is spared. Inherited style needs nothing here: the style pass
+        // marks layout when a metric it resolves changes.
+        if (layoutChanged || !PatchMarksOwnLayout)
+            MarkLayoutDirty();
         MarkPaintDirty();
         MarkStyleDirty();
     }
+
+    /// <summary>
+    /// Whether this kind of element's <see cref="PatchFrom"/> marks its layout dirty itself when
+    /// something it copies changes the layout — through setters that do, or by checking. Then
+    /// the base marks it only when a layout style changed, and a patch that changes nothing
+    /// leaves the layout standing. An override answers for its own type only
+    /// (<c>GetType() == typeof(...)</c>): a subclass copies more, and has to be checked on its own.
+    /// </summary>
+    private protected virtual bool PatchMarksOwnLayout => false;
 
     /// <summary>
     /// Drop this element's app handlers and adopt the incoming build's, preserving

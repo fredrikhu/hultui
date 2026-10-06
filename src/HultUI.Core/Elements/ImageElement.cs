@@ -144,6 +144,9 @@ public class ImageElement : Element
         else ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }
 
+    // Every setter below that can change the size marks the layout when it does.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(ImageElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

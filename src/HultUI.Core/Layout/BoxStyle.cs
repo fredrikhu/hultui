@@ -30,8 +30,24 @@ public sealed class BoxStyle
     /// </summary>
     public float AspectRatio { get; set; }
 
-    internal void CopyFrom(BoxStyle source)
+    /// <returns>Whether anything changed: a patch that changes nothing in a layout style
+    /// leaves the element's layout standing (Element.PatchFrom).</returns>
+    internal bool CopyFrom(BoxStyle source)
     {
+        if (Width == source.Width
+            && Height == source.Height
+            && MinWidth == source.MinWidth
+            && MinHeight == source.MinHeight
+            && MaxWidth == source.MaxWidth
+            && MaxHeight == source.MaxHeight
+            && Padding == source.Padding
+            && BorderWidth == source.BorderWidth
+            && Margin == source.Margin
+            && OverflowX == source.OverflowX
+            && OverflowY == source.OverflowY
+            && AspectRatio == source.AspectRatio)
+            return false;
+
         Width = source.Width;
         Height = source.Height;
         MinWidth = source.MinWidth;
@@ -44,5 +60,6 @@ public sealed class BoxStyle
         OverflowX = source.OverflowX;
         OverflowY = source.OverflowY;
         AspectRatio = source.AspectRatio;
+        return true;
     }
 }

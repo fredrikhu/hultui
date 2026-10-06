@@ -54,11 +54,7 @@ public sealed partial class LayoutEngine
             ? default
             : _tracer.Begin("Layout", element.GetType().Name, element.Key ?? element.Name);
 
-        // Skip clean subtrees when constraints haven't changed.
-        // The forced-dimension check also accepts the case where Phase 1 of an
-        // ancestor's LayoutFlexChildren computed this element with forced=null
-        // (auto) and Phase 6 now forces the natural size — that produces an
-        // identical result, so the cache hit is safe.
+        // Skip clean subtrees when constraints and forced sizes haven't changed.
         // On an axis whose size is set — forced, or given in pixels, with no percentage min or max —
         // the space offered goes nowhere: not into the box, its content room, or anything below.
         // A resize offers every row's fixed-width cell a new width, and it was laid out again.
@@ -67,8 +63,8 @@ public sealed partial class LayoutEngine
                 || SizeIsSet(forcedWidth, element.BoxRead.Width, element.BoxRead.MinWidth, element.BoxRead.MaxWidth))
             && (element.CacheConstraintH == constraint.AvailableHeight
                 || SizeIsSet(forcedHeight, element.BoxRead.Height, element.BoxRead.MinHeight, element.BoxRead.MaxHeight))
-            && ForcedDimMatches(element.CacheForcedW, forcedWidth, element.Layout.Width)
-            && ForcedDimMatches(element.CacheForcedH, forcedHeight, element.Layout.Height)
+            && ForcedDimMatches(element.CacheForcedW, forcedWidth)
+            && ForcedDimMatches(element.CacheForcedH, forcedHeight)
             && WithinReach(element.Layout.AbsoluteX, element.Layout.AbsoluteY)
             && WithinReach(absoluteX, absoluteY))
         {
@@ -194,17 +190,14 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Returns true when a forced-dimension cache lookup should hit. Accepts an
-    /// exact match, or the case where Phase 1 measured with no forced dimension
-    /// (cached=null) and Phase 6 now forces the element's natural size — that
-    /// produces an identical layout, so reusing the cached result is safe.
+    /// Whether a forced size matches the one the kept layout was made with: exactly. It used to
+    /// accept a box laid out unforced and now forced to the size it came out at, as the same
+    /// layout — it is not: unforced, the content is offered the room available; forced, the
+    /// forced size. A child with a percentage height in a row that started stretching its items
+    /// kept the share of the old room. (A patch used to mark every element it touched for layout,
+    /// which hid it from rebuilt components.)
     /// </summary>
-    private static bool ForcedDimMatches(float? cached, float? current, float layoutDim)
-    {
-        if (cached == current) return true;
-        if (current.HasValue && !cached.HasValue && current.Value == layoutDim) return true;
-        return false;
-    }
+    private static bool ForcedDimMatches(float? cached, float? current) => cached == current;
 
     /// <summary>
     /// Whether a box kept from an earlier pass can be moved to a new place by the difference

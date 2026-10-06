@@ -156,6 +156,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-0bf5823-flexplan-after.json` | … and after it, with the min-content width kept until it changes: 0bf5823, interleaved with the line above. Compare these two: 0 slower, 3 faster (resize 2,000 rows is −10 % on both, a hair under the flag). |
 | `2026-10-06-4b4c733-widthrange-before.json` | Before a measurement held for a range of offered widths: main at 4b4c733, median of 3 idle-gated runs … |
 | `2026-10-06-ca425da-mount-before.json` | Before a leaf of a set height held at any height: main at ca425da, median of 3 idle-gated runs … |
+| `2026-10-06-4aa5653-patch-before.json` | Before a patch that changes nothing about the layout left it standing: main at 4aa5653, median of 3 idle-gated runs … |
+| `2026-10-06-2688a99-patch-after.json` | … and after it, with a kept layout needing the same forced sizes exactly: 2688a99, interleaved with the line above. Compare these two: 0 slower, 3 faster. |
 | `2026-10-06-c451515-mount-after.json` | … and after it, with range ends checked for rounding, far boxes laid out and controls that ignore the height saying so: c451515, interleaved with the line above. Compare these two: 0 slower, 0 faster past the flag (icons −10 %, gallery −6 %: see below). |
 | `2026-10-06-98e0581-widthrange-after.json` | … and after it, with the layout pass keeping a set-size box's layout and the cache entry back at 28 bytes: 98e0581, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
 
@@ -366,6 +368,27 @@ Nothing else moved past ±3 %. Against 4b4c733, before the width ranges, icons m
 (`LayoutPathIndependenceTests`) then turned up a box moved out past an unbounded edge, to near
 1.7E+38, and back by the difference, its descendants landing at 0: a box whose place is past
 2^24 is now laid out where it is (ad09d1d).
+
+**A patch that changes nothing about the layout leaves it standing, before → after** (2688a99,
+with 50925d0). Counting per pass found the component edits laying the whole list out: editing one
+row of 1,000 measured 5,000 labels and made 6,003 ComputeLayout calls, none of them kept, because
+`Element.PatchFrom` marked every element the rebuilt component patched for layout. It now marks one
+only when a layout style changed, for the kinds of element that mark their own layout when the rest
+of what they copy changes (Box, Text, Image, ScrollView): an edit measures the row it changed — 2
+labels — and keeps the other 999. Minimum, median of 3 runs:
+
+| Scenario | 4aa5653 | 2688a99 | | layout |
+|---|---:|---:|---:|---|
+| `component/edit one of 1,000 keyed rows` | 2.998 | 1.885 | −37 % | 1.212 → 0.064 ms |
+| `component/edit one of 1,000 unkeyed rows` | 2.932 | 1.839 | −37 % | 1.197 → 0.061 ms |
+| `component/reverse 1,000 keyed rows` | 3.010 | 1.973 | −34 % | 1.192 → 0.109 ms |
+
+Nothing else moved past ±3 %, and the window benchmark, which builds no components, is unchanged.
+What is left of an edit is the rebuild (1.4 ms) and the style pass over every patched element
+(0.2 ms). `PatchRelayoutTests` patches random trees with random changes through the differ and
+compares them with the changed trees built fresh; it found the layout cache keeping a box laid out
+unforced once forced to the size it came out at, which offers its content different room — a kept
+layout now needs the same forced sizes, exactly (50925d0).
 
 **What the suite turned up on its first run**, for follow-up:
 

@@ -59,7 +59,7 @@ public class LayoutPathIndependenceTests
     /// of a pixel: after a cache hit it is moved by the difference instead of summed afresh from
     /// the root, and float addition rounds differently that way round (19.660004 against 19.66).
     /// </summary>
-    private static bool Same(LayoutResult a, LayoutResult b) =>
+    internal static bool Same(LayoutResult a, LayoutResult b) =>
         a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height
         && Near(a.AbsoluteX, b.AbsoluteX) && Near(a.AbsoluteY, b.AbsoluteY);
 
@@ -68,7 +68,7 @@ public class LayoutPathIndependenceTests
     private static bool Near(float a, float b) =>
         a == b || (float.IsNaN(a) && float.IsNaN(b)) || Math.Abs(a - b) < 0.01f;
 
-    private static string Describe(LayoutResult l) =>
+    internal static string Describe(LayoutResult l) =>
         $"(x {l.X:R}, y {l.Y:R}, {l.Width:R}×{l.Height:R}, at {l.AbsoluteX:R},{l.AbsoluteY:R})";
 
     /// <summary>A random tree, the same for the same seed.</summary>
@@ -86,7 +86,7 @@ public class LayoutPathIndependenceTests
         _ => RadioButton.New("g", rng.Next(2) == 0, label: rng.Next(2) == 0 ? "choose" : null),
     };
 
-    private static Element Build(int seed, bool controls)
+    internal static Element Build(int seed, bool controls)
     {
         var rng = new Random(seed);
         int id = 0;
@@ -150,7 +150,7 @@ public class LayoutPathIndependenceTests
         return e;
     }
 
-    private static IEnumerable<Element> Flatten(Element e)
+    internal static IEnumerable<Element> Flatten(Element e)
     {
         yield return e;
         foreach (var c in e.Children)

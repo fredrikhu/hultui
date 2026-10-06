@@ -15,13 +15,24 @@ public sealed class PositionStyle
     public Dimension Left { get; set; } = Dimension.None;
     public int ZIndex { get; set; }
 
-    internal void CopyFrom(PositionStyle source)
+    /// <returns>Whether anything changed: a patch that changes nothing in a layout style
+    /// leaves the element's layout standing (Element.PatchFrom).</returns>
+    internal bool CopyFrom(PositionStyle source)
     {
+        if (Type == source.Type
+            && Top == source.Top
+            && Right == source.Right
+            && Bottom == source.Bottom
+            && Left == source.Left
+            && ZIndex == source.ZIndex)
+            return false;
+
         Type = source.Type;
         Top = source.Top;
         Right = source.Right;
         Bottom = source.Bottom;
         Left = source.Left;
         ZIndex = source.ZIndex;
+        return true;
     }
 }

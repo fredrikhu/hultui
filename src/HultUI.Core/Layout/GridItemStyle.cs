@@ -15,12 +15,21 @@ public sealed class GridItemStyle
     /// <summary>Override container's <see cref="GridStyle.AlignItems"/>. Auto = inherit.</summary>
     public AlignSelf AlignSelf { get; set; } = AlignSelf.Auto;
 
-    internal void CopyFrom(GridItemStyle source)
+    /// <returns>Whether anything changed: a patch that changes nothing in a layout style
+    /// leaves the element's layout standing (Element.PatchFrom).</returns>
+    internal bool CopyFrom(GridItemStyle source)
     {
+        if (Row == source.Row
+            && Column == source.Column
+            && JustifySelf == source.JustifySelf
+            && AlignSelf == source.AlignSelf)
+            return false;
+
         Row = source.Row;
         Column = source.Column;
         JustifySelf = source.JustifySelf;
         AlignSelf = source.AlignSelf;
+        return true;
     }
 }
 
