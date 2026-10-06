@@ -239,6 +239,46 @@ public class FlexShrinkTests
         Assert.Equal(30, label.Layout.Width);
     }
 
+    // The floor is kept between layouts (it reads no constraint), so it has to go when the
+    // content does — both ways, and through a container whose floor is its child's.
+    [Fact]
+    public void AShrinkingLabel_FloorFollowsItsWordsWhenTheyChange()
+    {
+        var (label, row) = SqueezedLabel("a bb ccc dd e ff g hh i jj");
+        _layout.PerformLayout(row, 300, 200);
+        Assert.Equal(30, label.Layout.Width);
+
+        label.Content = "a wonderfully long word";
+        _layout.PerformLayout(row, 300, 200);
+        Assert.Equal(77, label.Layout.Width);
+
+        label.Content = "a bb ccc dd e ff g hh i jj";
+        _layout.PerformLayout(row, 300, 200);
+        Assert.Equal(30, label.Layout.Width);
+    }
+
+    [Fact]
+    public void AShrinkingBox_FloorFollowsItsLabelWhenItChanges()
+    {
+        var label = TextElement.New("a bb ccc dd e ff g hh i jj");
+        var inner = BoxElement.New();
+        inner.AddChild(label);
+        var rigid = TextElement.New("yyyyyyyyyy");
+        rigid.Flex.FlexShrink = 0;
+        var row = BoxElement.New();
+        row.Flex.Direction = FlexDirection.Row;
+        row.Box.Width = 100;
+        row.AddChild(inner);
+        row.AddChild(rigid);
+
+        _layout.PerformLayout(row, 300, 200);
+        Assert.Equal(30, inner.Layout.Width);
+
+        label.Content = "a wonderfully long word";
+        _layout.PerformLayout(row, 300, 200);
+        Assert.Equal(77, inner.Layout.Width);
+    }
+
     [Fact]
     public void AShrinkingLabelInsideAScrollContainer_HasNoFloorAtAll()
     {

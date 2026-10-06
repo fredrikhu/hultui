@@ -24,9 +24,21 @@ public sealed partial class LayoutEngine
         // Overlays should size to content instead.
         float? fw = forceRootFill && root.BoxRead.Width.IsAuto ? availableWidth : null;
         float? fh = forceRootFill && root.BoxRead.Height.IsAuto ? availableHeight : null;
-        ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
+        _passDepth++;
+        try
+        {
+            ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
+        }
+        finally
+        {
+            // Only the outermost pass drops the plans: one laid out from inside another (nothing
+            // does today) would otherwise clear items the outer one is still reading.
+            if (--_passDepth == 0) ClearPlans();
+        }
         ClearLayoutDirty(root);
     }
+
+    private int _passDepth;
 
     /// <param name="element">The subtree root to lay out.</param>
     /// <param name="constraint">The space available to it.</param>
@@ -223,23 +235,37 @@ public sealed partial class LayoutEngine
         // inside a ScrollView would resolve itself against the viewport and shrink
         // its own children to fit. Percentages against it resolve to auto (see
         // Dimension.Resolve), so no absurd sizes leak out.
-        var (itemsArray, itemCount, anyBaseline, _) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
+        //
+        // Phases 1 to 3.5 and the baselines are usually done already: the measure pass ran them
+        // for this container, at these inputs, and filed what they came to (TakePlan).
+        FlexItem[]? itemsArray = null;
         List<FlexLine>? lines = null;
         try
         {
-            // ── Phase 2: Collect items into lines ──
-            lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+            if (!isWrap && TakePlan(container, contentAvailW, contentAvailH) is { } planned)
+            {
+                lines = _linePool.TryPop(out var pooled) ? pooled : new List<FlexLine>(1);
+                lines.Add(new FlexLine(planned));
+            }
+            else
+            {
+                (itemsArray, int itemCount, bool anyBaseline, _) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable, flex.AlignItems);
 
-            // ── Phase 3: Resolve flex grow/shrink per line ──
-            foreach (var line in lines)
-                ResolveFlexGrowShrink(line, mainDistribute, mainGap, isRow, crossAvailable);
+                // ── Phase 2: Collect items into lines ──
+                lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
-            // ── Phase 3.5: Re-measure items whose main size flexing changed ──
-            foreach (var line in lines)
-                RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
+                // ── Phase 3: Resolve flex grow/shrink per line ──
+                foreach (var line in lines)
+                    ResolveFlexGrowShrink(line, mainDistribute, mainGap, isRow, crossAvailable);
+
+                // ── Phase 3.5: Re-measure items whose main size flexing changed ──
+                foreach (var line in lines)
+                    RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
+
+                if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
+            }
 
             // ── Phase 4: Compute per-line cross sizes ──
-            if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
             ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap);
 
             // ── Phase 5: Distribute lines along cross axis (AlignContent) ──
@@ -385,7 +411,7 @@ public sealed partial class LayoutEngine
         }
         finally
         {
-            ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+            if (itemsArray is not null) ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
             if (lines is not null) ReturnLines(lines);
         }
     }
@@ -640,6 +666,10 @@ public sealed partial class LayoutEngine
             // As the layout pass does, or a row baseline alignment makes taller would be
             // measured shorter than it lays out.
             if (anyBaseline) ResolveBaselines(container, lines, isRow, mainDistribute, crossAvailable);
+
+            // For the layout pass, which would otherwise work all of the above out again.
+            if (!isWrap) FilePlan(container, contentAvailW, contentAvailH, heightFrom, itemsArray, itemCount);
+
             ComputeLineCrossSizes(lines, ownCross, crossGap, flex.AlignContent, isWrap);
 
             float totalMain = 0;
@@ -813,6 +843,85 @@ public sealed partial class LayoutEngine
     {
         lines.Clear();
         _linePool.Push(lines);
+    }
+
+    // ── Flex plans: the measure pass's flex resolution, for the layout pass ──
+    //
+    // The layout pass lays a container's children out with the flex resolution the measure pass
+    // already worked out for it — the same children measured at the same sizes, grown and shrunk
+    // the same, re-measured and given baselines the same — and ran all of it again: on a 2,000-row
+    // resize, a sixth of the layout pass. So the measure pass files the items it resolved,
+    // with the inputs they hold for, and the layout pass takes them when its inputs match:
+    // the width exactly, the height by the measurement's own range (MeasureCache). The lines'
+    // cross sizes are left to the layout pass; they read the container's own size, which is
+    // definite there and not always in the measure pass.
+    //
+    // Filed per PerformLayout and dropped at its end, so nothing outlives the pass the inputs
+    // were current in. Wrapping containers are not filed: their lines are broken by sizes the
+    // items no longer hold once flexed.
+
+    private FlexPlan[] _plans = new FlexPlan[64];
+    private int _planCount;
+    private FlexItem[] _planItems = new FlexItem[256];
+    private int _planItemCount;
+
+    private struct FlexPlan
+    {
+        public Element Container;
+        public float ContentW, ContentH, ValidFromH;
+        public int Start, Count;
+    }
+
+    /// <summary>Files <paramref name="container"/>'s resolved items, worked out with
+    /// <paramref name="contentW"/> by <paramref name="contentH"/> of content room, which hold for
+    /// heights from <paramref name="validFromH"/> (see <see cref="MeasureCache"/>).</summary>
+    private void FilePlan(Element container, float contentW, float contentH, float validFromH,
+        FlexItem[] items, int count)
+    {
+        // Grown by replacing, never in place: a line taken from a plan may still be reading the
+        // array it was filed in.
+        if (_planItemCount + count > _planItems.Length)
+            Array.Resize(ref _planItems, Math.Max(_planItems.Length * 2, _planItemCount + count));
+        Array.Copy(items, 0, _planItems, _planItemCount, count);
+
+        if (_planCount == _plans.Length)
+            Array.Resize(ref _plans, _plans.Length * 2);
+        _plans[_planCount] = new FlexPlan
+        {
+            Container = container,
+            ContentW = contentW,
+            ContentH = contentH,
+            ValidFromH = validFromH,
+            Start = _planItemCount,
+            Count = count,
+        };
+        container.FlexPlan = _planCount++;
+        _planItemCount += count;
+    }
+
+    /// <summary>The items filed for <paramref name="container"/> in this pass, if they were
+    /// worked out at the same width and a height they hold for; null when none were.</summary>
+    private ArraySegment<FlexItem>? TakePlan(Element container, float contentW, float contentH)
+    {
+        // The index may be left over from an earlier pass, and point past the plans or at another
+        // container's: the container is the check.
+        int i = container.FlexPlan;
+        if (i >= _planCount) return null;
+        ref var plan = ref _plans[i];
+        // `>=` against NaN is false: a plan good at its own height only matches it exactly.
+        if (plan.Container != container || plan.ContentW != contentW
+            || !(plan.ContentH == contentH || contentH >= plan.ValidFromH))
+            return null;
+        return new ArraySegment<FlexItem>(_planItems, plan.Start, plan.Count);
+    }
+
+    /// <summary>Drops the pass's plans, and with them the elements they hold.</summary>
+    private void ClearPlans()
+    {
+        Array.Clear(_plans, 0, _planCount);
+        Array.Clear(_planItems, 0, _planItemCount);
+        _planCount = 0;
+        _planItemCount = 0;
     }
 
     private List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
@@ -1040,6 +1149,15 @@ public sealed partial class LayoutEngine
     /// <see cref="MinContentHeight"/>.
     /// </summary>
     private float MinContentWidth(Element e)
+    {
+        // Reads no constraint, so it is kept until the element or something in it changes.
+        if (e.MeasureCache.TryGetMinContentWidth(out var known)) return known;
+        float width = ComputeMinContentWidth(e);
+        e.MeasureCache.StoreMinContentWidth(width);
+        return width;
+    }
+
+    private float ComputeMinContentWidth(Element e)
     {
         var box = e.BoxRead;
         if (box.OverflowX != Overflow.Visible) return 0f;

@@ -303,6 +303,15 @@ inside the measured append, copying both tables' fresh rows. With a gen-0 budget
 large enough that no collection runs mid-operation (`DOTNET_GCgen0size=0x10000000`),
 append reads 6.30 → 5.14 ms (−18 %) and every other row's minimum is level or better.
 
+### The layout pass takes the measure pass's flex resolution (2026-10-06)
+
+6df8757 and 0bf5823 (see the scenario suite's README), the same harness, 8 interleaved runs each,
+a11y off, minimum: append 1,000 → 1,000 6.04 → 5.44 ms (−10 %), create 10,000 105.6 → 103.4 ms
+(−2 %), every other row within ±4 %. These operations make rows, so most of their layout pass
+is measuring new text for the first time, which this does not touch: their layout phase is about
+5 % shorter (create 10,000: 41.7 → 39.7 ms, 3 runs). The scenario suite's resize of the same rows,
+which only lays them out again, is −10 % overall.
+
 ## How the measurement works
 
 HultUI's whole pipeline — component rebuild → style → layout → render → present —

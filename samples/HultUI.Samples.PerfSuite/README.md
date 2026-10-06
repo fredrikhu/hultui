@@ -152,6 +152,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-4f8a3fc-leafcache-after.json` | … and after it, 4f8a3fc, interleaved with the line above. Compare these two: 0 slower, 11 faster. |
 | `2026-10-06-49a9b8b-heightrange-before.json` | Before a measurement held for a range of offered heights: main at 49a9b8b, median of 3 idle-gated runs … |
 | `2026-10-06-c80711c-heightrange-after.json` | … and after it, with the flex line pool and the packed cache entry: c80711c, interleaved with the line above. Compare these two: 0 slower, 10 faster. |
+| `2026-10-06-cc29f80-flexplan-before.json` | Before the layout pass took the measure pass's flex resolution: main at cc29f80, median of 3 idle-gated runs … |
+| `2026-10-06-0bf5823-flexplan-after.json` | … and after it, with the min-content width kept until it changes: 0bf5823, interleaved with the line above. Compare these two: 0 slower, 3 faster (resize 2,000 rows is −10 % on both, a hair under the flag). |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -285,6 +287,31 @@ against fresh layouts:
 Nothing moved up past +2 %, and a resize step of the 2,000-row list allocates 9 KB instead of
 4.2 MB. What is left, measured: the layout pass re-runs each container's flex phases 1–4 after
 the measure pass ran them at the same inputs, about a fifth of that resize's layout pass.
+
+**The layout pass takes the measure pass's flex resolution, before → after** (6df8757, with the
+min-content width kept 0bf5823). The layout pass ran each container's flex phases 1 to 3.5 again —
+every child's measurement looked up, grow and shrink, the re-measure, the baselines — at the inputs
+the measure pass had just used. The measure pass now files what it resolved per nowrap container,
+and the layout pass takes it when its width matches and its height is in the measurement's range:
+on the 2,000-row resize every container but the root takes one. Shrinking rows also asked each
+label for its widest word on every pass, shaped again each time; that width reads no constraint
+and is now kept until the label changes. Every element box unchanged; minimum, median of 3 runs:
+
+| Scenario | cc29f80 | 6df8757 | 0bf5823 | |
+|---|---:|---:|---:|---:|
+| `text/styled ellipsis 1,000 labels resize` | 12.52 | 9.90 | 6.47 | −48 % |
+| `text/styled bidi ellipsis 1,000 labels resize` | 36.60 | 31.23 | 28.60 | −22 % |
+| `layout/baseline rows resize` | 1.24 | 1.08 | 1.07 | −14 % |
+| `layout/resize 2,000-row list` | 3.16 | 2.82 | 2.83 | −10 % |
+| `a11y/create 1,000 rows, bridge on` | 3.59 | 3.20 | 3.26 | −9 % |
+| `layout/shrink 300 overfull rows resize` | 3.80 | 3.70 | 3.66 | −4 % |
+
+Styled ellipsis allocates 6.3 MB a step instead of 13.1 MB. The cost: a plan is filed for every
+container measured, and a row's item laid out at its natural width — narrower than the width it
+was measured at — never takes it: `layout/wrap 1,000 chips resize` spends 0.03 ms more in layout
+(+1 % of its frame), `layout/deep nesting leaf edit` +3 %. Making those hit takes a measurement
+that holds for a range of widths, as one now does for heights — which would also stop a resize
+measuring again every chip whose width never changes.
 
 **What the suite turned up on its first run**, for follow-up:
 

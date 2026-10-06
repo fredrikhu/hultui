@@ -27,8 +27,27 @@ internal struct MeasureCache
     private const int Capacity = 4;
 
     private Entries _entries;
-    private int _count;   // 0 = empty; reset is the whole invalidation
-    private int _next;    // ring write position
+    // Bytes, so the min-content width fits in the room the two ints took.
+    private byte _count;   // 0 = empty; reset is the whole invalidation
+    private byte _next;    // ring write position
+    private bool _hasMinContentWidth;
+    private float _minContentWidth;
+
+    /// <summary>The element's min-content width (LayoutEngine.MinContentWidth), if worked out
+    /// since the last invalidation. No constraint goes into it, so it holds until the content
+    /// does not: a shrinking row asked every label for it on every pass, and a styled label
+    /// shapes its words to answer — a quarter of a 1,000-label resize.</summary>
+    public readonly bool TryGetMinContentWidth(out float width)
+    {
+        width = _minContentWidth;
+        return _hasMinContentWidth;
+    }
+
+    public void StoreMinContentWidth(float width)
+    {
+        _minContentWidth = width;
+        _hasMinContentWidth = true;
+    }
 
     /// <param name="validFromH">The matched entry's <see cref="Entry.ValidFromH"/>.</param>
     public bool TryGet(float constraintW, float constraintH, float? forcedW, float? forcedH,
@@ -63,7 +82,7 @@ internal struct MeasureCache
         e.ForcedH = forcedH ?? NotForced;
         e.Result = result;
         e.ValidFromH = validFromH;
-        _next = (_next + 1) % Capacity;
+        _next = (byte)((_next + 1) % Capacity);
         if (_count < Capacity) _count++;
     }
 
@@ -71,6 +90,7 @@ internal struct MeasureCache
     {
         _count = 0;
         _next = 0;
+        _hasMinContentWidth = false;
     }
 
     [InlineArray(Capacity)]
