@@ -79,6 +79,16 @@ public interface IRenderContext
     Size MeasureText(string text, ResolvedInheritedStyle style);
 
     /// <summary>
+    /// The widths of <paramref name="text"/>'s prefixes, measured together:
+    /// <c>Width(n)</c> is <c>MeasureText(text[..n], style).Width</c>, exactly, for about the
+    /// cost of measuring <paramref name="text"/> once. Something that measures many prefixes
+    /// of one string — a search for where a line breaks — asks for this instead of measuring
+    /// each. Null when the context cannot answer exactly, which is the default; the caller
+    /// then measures each prefix.
+    /// </summary>
+    ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) => null;
+
+    /// <summary>
     /// Lays out <paramref name="text"/> into lines under the same wrapping rules
     /// <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?)"/> uses,
     /// and returns each line's source character range
@@ -230,6 +240,21 @@ public readonly record struct TextLineBox(int Start, int Length, float OffsetY, 
 /// shape a selection highlight or a span background is painted as.
 /// </summary>
 public readonly record struct TextRangeBox(float X0, float X1);
+
+/// <summary>
+/// The widths of one string's prefixes (<see cref="IRenderContext.MeasureTextPrefixes"/>).
+/// </summary>
+public interface ITextPrefixWidths
+{
+    /// <summary>The string's length: the longest prefix there is a width for.</summary>
+    int Length { get; }
+
+    /// <summary>
+    /// The width of the string's first <paramref name="length"/> chars, as
+    /// <see cref="IRenderContext.MeasureText(string, ResolvedInheritedStyle)"/> measures them.
+    /// </summary>
+    float Width(int length);
+}
 
 public interface IImageSource
 {

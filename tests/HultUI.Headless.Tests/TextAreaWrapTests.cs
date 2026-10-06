@@ -28,21 +28,31 @@ public class TextAreaWrapTests
         "supercalifragilisticexpialidocious", "—", "…", "→", "WWWWWW", "iiiiii", "fi", "ffl", "AV", "To",
     ];
 
-    private static string Document(Random rng, int lines)
+    // The words the plain path lays out: no emoji, joiner, variation selector or jamo, which
+    // keep their text on the BiDi path. Han before kana in one word: the prefixes that stop
+    // short of the kana are paragraphs without it.
+    private static readonly string[] PlainWords =
+    [
+        .. Words.Where(w => w.All(c => c < 0x1100 || c is >= (char)0x2010 and <= (char)0x2BFF or >= (char)0x3000 and <= (char)0x9FFF)),
+        "한국어", "東京に行きます", "1234", "office", "Wolf", "AVATAR",
+    ];
+
+    private static string Document(Random rng, int lines, string[]? vocabulary = null)
     {
+        var words = vocabulary ?? Words;
         var sb = new StringBuilder();
         for (int i = 0; i < lines; i++)
         {
             if (i > 0) sb.Append('\n');
-            int words = rng.Next(5) switch { 0 => 0, 1 => rng.Next(1, 6), 2 => rng.Next(6, 30), _ => rng.Next(30, 260) };
-            for (int w = 0; w < words; w++)
+            int count = rng.Next(5) switch { 0 => 0, 1 => rng.Next(1, 6), 2 => rng.Next(6, 30), _ => rng.Next(30, 260) };
+            for (int w = 0; w < count; w++)
             {
                 if (w > 0) sb.Append(rng.Next(12) == 0 ? "  " : " ");
-                sb.Append(Words[rng.Next(Words.Length)]);
+                sb.Append(words[rng.Next(words.Length)]);
             }
             // Now and then a run with no space in it, which only a break between characters splits.
             if (rng.Next(9) == 0) sb.Append(' ').Append(new string('m', rng.Next(40, 400)));
-            if (rng.Next(9) == 0) sb.Append(' ').Append(string.Concat(Enumerable.Repeat("👩‍💻", rng.Next(10, 60))));
+            if (vocabulary is null && rng.Next(9) == 0) sb.Append(' ').Append(string.Concat(Enumerable.Repeat("👩‍💻", rng.Next(10, 60))));
         }
         return sb.ToString();
     }
@@ -92,20 +102,38 @@ public class TextAreaWrapTests
 
     [Fact]
     public void TheLineStartsAreTheOnesMeasuringEveryClusterFinds()
+        => AssertTheReferenceLineStarts(vocabulary: null, letterSpacing: 0f, seed: 20261006);
+
+    /// <summary>
+    /// Text the plain path lays out has each line's widths read off one table of its prefixes
+    /// (<see cref="IRenderContext.MeasureTextPrefixes"/>) instead of measuring each — still the
+    /// reference's widths, to the bit, letter-spaced or not.
+    /// </summary>
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.6f)]
+    public void TheLineStartsAreTheSame_WhenTheWidthsComeFromATableOfPrefixes(float letterSpacing)
+        => AssertTheReferenceLineStarts(PlainWords, letterSpacing, seed: 20261007);
+
+    private static void AssertTheReferenceLineStarts(string[]? vocabulary, float letterSpacing, int seed)
     {
         using var session = HeadlessSession.Create(900, 700);
-        var area = TextArea.New("").FlexGrow(1);
+        var area = TextArea.New("").FlexGrow(1).LetterSpacing(letterSpacing);
         session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(area));
         session.PumpFrame();   // the area takes its render context from the first frame
 
         var ctx = (IRenderContext)typeof(TextAreaElement)
             .GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(area)!;
         var style = area.ResolvedInherited;
-        var rng = new Random(20261006);
+        Assert.Equal(letterSpacing, style.LetterSpacing);
+        var rng = new Random(seed);
         int compared = 0, wrapped = 0;
         for (int doc = 0; doc < 8; doc++)
         {
-            area.Text = Document(rng, 30);
+            area.Text = Document(rng, 30, vocabulary);
+            // The plain documents' lines do get a table: the comparison is of it.
+            if (vocabulary is not null)
+                Assert.NotNull(ctx.MeasureTextPrefixes(area.Text.Split('\n').MaxBy(l => l.Length)!, style));
             foreach (float width in new[] { 12f, 47.5f, 90f, 233.3f, 612f, 1300f })
             {
                 var expected = Reference(area.Text, width, s => ctx.MeasureText(s, style).Width);
@@ -117,6 +145,58 @@ public class TextAreaWrapTests
         }
         // The documents did wrap, and at every width: an all-fitting run would prove nothing.
         Assert.Equal(8 * 6, compared);
+        Assert.True(wrapped > 5_000, $"only {wrapped} wrapped lines");
+    }
+
+    /// <summary>
+    /// An edit changes a line or two, and a long line it leaves alone keeps where it broke the
+    /// last time, remembered by its text — at that width and in that style only. After every
+    /// edit, in whichever of two widths and two styles comes next, the breaks are still the
+    /// reference's.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AfterEveryEdit_TheLineStartsAreStillTheReferences(bool plain)
+    {
+        using var session = HeadlessSession.Create(900, 700);
+        var area = TextArea.New("").FlexGrow(1);
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(area));
+        session.PumpFrame();
+
+        var ctx = (IRenderContext)typeof(TextAreaElement)
+            .GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(area)!;
+        var styles = new[] { area.ResolvedInherited, area.ResolvedInherited with { FontSize = area.ResolvedInherited.FontSize + 3 } };
+        var widths = new[] { 233.3f, 612f };
+        var words = plain ? PlainWords : Words;
+        var rng = new Random(plain ? 20261009 : 20261008);
+        area.Text = Document(rng, 30, plain ? PlainWords : null);
+        int wrapped = 0;
+        for (int edit = 0; edit < 80; edit++)
+        {
+            // Mostly the same width and style, as when typing; now and then the other.
+            var style = styles[rng.Next(6) == 0 ? 1 : 0];
+            float width = widths[rng.Next(6) == 0 ? 1 : 0];
+            var expected = Reference(area.Text, width, s => ctx.MeasureText(s, style).Width);
+            var actual = area.GetLineStarts(width, style);
+            Assert.True(expected.SequenceEqual(actual), $"after {edit} edits: " + Describe(area.Text, width, expected, actual));
+            wrapped += expected.Count - (area.Text.Count(c => c == '\n') + 1);
+
+            // A word typed in, a run deleted, a line split or two joined. Never inside a
+            // surrogate pair: that is no edit a TextArea makes.
+            var text = area.Text;
+            int at = rng.Next(text.Length + 1);
+            while (at > 0 && at < text.Length && char.IsLowSurrogate(text[at])) at--;
+            int end = Math.Min(text.Length, at + rng.Next(1, 12));
+            while (end < text.Length && char.IsLowSurrogate(text[end])) end++;
+            area.Text = rng.Next(4) switch
+            {
+                0 => text.Insert(at, words[rng.Next(words.Length)] + " "),
+                1 when end > at => text.Remove(at, end - at),
+                2 => text.Insert(at, "\n"),
+                _ => text.IndexOf('\n', at) is var nl and >= 0 ? text.Remove(nl, 1) : text + " x",
+            };
+        }
         Assert.True(wrapped > 5_000, $"only {wrapped} wrapped lines");
     }
 

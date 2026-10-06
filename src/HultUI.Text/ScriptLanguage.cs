@@ -96,6 +96,14 @@ public static class ScriptLanguage
     /// </summary>
     public static string? CjkContextOf(ReadOnlySpan<char> text)
     {
+        var (kana, hangul) = CjkContextChars(text);
+        return kana == hangul ? null : kana ? "ja" : "ko";
+    }
+
+    /// <summary>Whether <paramref name="text"/> holds kana, and whether Hangul: all
+    /// <see cref="CjkContextOf"/> reads of it.</summary>
+    internal static (bool Kana, bool Hangul) CjkContextChars(ReadOnlySpan<char> text)
+    {
         bool kana = false, hangul = false;
         foreach (char c in text)
         {
@@ -111,7 +119,7 @@ public static class ScriptLanguage
                   or >= '\uFFA0' and <= '\uFFDC')     // halfwidth Hangul
                 hangul = true;
         }
-        return kana == hangul ? null : kana ? "ja" : "ko";
+        return (kana, hangul);
     }
 
     private static unsafe string? LikelyLanguage(int script)

@@ -1602,6 +1602,48 @@ public sealed class TextPipeline
     }
 
     /// <summary>
+    /// The widths of <paramref name="text"/>'s prefixes: <c>Width(n)</c> is the width
+    /// <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow)"/> gives
+    /// <c>text[..n]</c> on one unbounded line, to the bit — read off one itemizing of the text
+    /// and the word cache (<see cref="PrefixWidths"/>), where laying each prefix out shapes it
+    /// whole and caches it as a string of its own. Null where a prefix is not measured as the
+    /// sum of its words: text on the BiDi path or with a newline in it, and on the reference
+    /// path.
+    /// </summary>
+    public ITextPrefixWidths? MeasurePrefixes(string text, ResolvedInheritedStyle style)
+    {
+        if (!ReuseAcrossWidths || string.IsNullOrEmpty(text) || text.Contains('\n')
+            || NeedsBidi(text, style, PlainPathForLtr))
+            return null;
+        BeginParagraph(text);
+        return BuildPrefixWidths(text, style) is { Runs.Length: > 0 } table
+            ? new MeasuredPrefixes(this, table, style)
+            : null;
+    }
+
+    // A prefix is laid out as a paragraph of its own, and its Han characters take the face its
+    // kana or Hangul call for (ScriptLanguage.CjkContextOf) — so a prefix that stops short of
+    // the text's first kana can be drawn in another face than the table was itemized in. Such
+    // a prefix is laid out the long way. Text with neither, nearly all of it, never asks.
+    private sealed class MeasuredPrefixes(TextPipeline pipeline, PrefixWidths table, ResolvedInheritedStyle style)
+        : ITextPrefixWidths
+    {
+        private readonly bool _contextVaries = ScriptLanguage.CjkContextChars(table.Text) is (true, _) or (_, true);
+        private readonly string? _context = ScriptLanguage.CjkContextOf(table.Text);
+
+        public int Length => table.Text.Length;
+
+        public float Width(int length)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(length, table.Text.Length);
+            if (_contextVaries && ScriptLanguage.CjkContextOf(table.Text.AsSpan(0, length)) != _context)
+                return pipeline.Layout(table.Text[..length], style, float.PositiveInfinity, maxLines: 1).Size.Width;
+            return pipeline.PrefixWidth(table, length, style);
+        }
+    }
+
+    /// <summary>
     /// What one-line Ellipsis needs of a string at any width, worked out once.
     /// <see cref="Exact"/> says the shortcut gives the reference path's answer for it.
     /// </summary>

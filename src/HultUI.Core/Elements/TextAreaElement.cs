@@ -27,6 +27,17 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private float _lastWrapWidth;
     private float _lineHeight;
 
+    // Where each hard line too long to fit broke the last time line starts were worked out, by
+    // its text: an edit changes a line or two, and the rest come back from here instead of
+    // being searched again. Kept only for the same width, style, render context and UI culture
+    // (which picks Han faces), and only for the lines there were then.
+    private Dictionary<string, int[]>? _wrapMemo;
+    private float _wrapMemoWidth;
+    private ResolvedInheritedStyle _wrapMemoStyle;
+    private IRenderContext? _wrapMemoContext;
+    private System.Globalization.CultureInfo? _wrapMemoCulture;
+    private readonly List<int> _breaks = [];
+
     // Preferred column (in pixels) for up/down navigation
     private float _preferredX = -1;
 
@@ -337,6 +348,15 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         float charWidth = style.FontSize * 0.55f;
         var clusterEnds = new List<int>();
 
+        // The long lines' breaks from the last time, if they were found the same way.
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        var previous = _wrapMemo is not null && _wrapMemoWidth == wrapWidth && _wrapMemoStyle.Equals(style)
+            && ReferenceEquals(_wrapMemoContext, _renderCtx) && ReferenceEquals(_wrapMemoCulture, culture)
+                ? _wrapMemo
+                : null;
+        var remembered = previous?.GetAlternateLookup<ReadOnlySpan<char>>();
+        Dictionary<string, int[]>? memo = null;
+
         int pos = 0;
         while (pos < _text.Length)
         {
@@ -345,21 +365,19 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             if (hardEnd < 0) hardEnd = _text.Length;
 
             // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is measured
-            // once, whole, as it always was — every keystroke wraps all of them again — and
-            // only one that does not is cut into clusters and searched.
+            // once, whole, as it always was — every keystroke wraps all of them again, and
+            // the pipeline has each line's width cached — and only one that does not is
+            // cut into clusters and searched, unless its text was searched last time.
             if (!FitsWhole(pos, hardEnd, wrapWidth, style, ref charWidth))
             {
-                var ends = ClusterEnds(pos, hardEnd, clusterEnds);
-                int segStart = pos;
-                while (segStart < hardEnd)
-                {
-                    // How many chars fit on this wrapped line?
-                    int lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
-                    if (lineEnd >= hardEnd)
-                        break;
-                    starts.Add(lineEnd);
-                    segStart = lineEnd;
-                }
+                var line = _text.AsSpan(pos, hardEnd - pos);
+                memo ??= new Dictionary<string, int[]>(StringComparer.Ordinal);
+                if (remembered is { } lookup && lookup.TryGetValue(line, out var key, out var breaks))
+                    memo.TryAdd(key, breaks);
+                else
+                    memo.TryAdd(new string(line), breaks = WrapLine(pos, hardEnd, wrapWidth, style, clusterEnds, ref charWidth));
+                foreach (int b in breaks)
+                    starts.Add(pos + b);
             }
 
             // Move past the \n
@@ -368,9 +386,35 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
                 starts.Add(pos);
         }
 
+        _wrapMemo = memo;
+        _wrapMemoWidth = wrapWidth;
+        _wrapMemoStyle = style;
+        _wrapMemoContext = _renderCtx;
+        _wrapMemoCulture = culture;
+
         // If text ends with \n, we already added the final empty line above.
         // If text doesn't end with \n, the last line is already covered.
         return starts;
+    }
+
+    // Where [start..hardEnd), too long to fit whole, breaks into lines: each wrapped line's
+    // start after the first, relative to start.
+    private int[] WrapLine(int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
+        List<int> clusterEnds, ref float charWidth)
+    {
+        var ends = ClusterEnds(start, hardEnd, clusterEnds);
+        _breaks.Clear();
+        int segStart = start;
+        while (segStart < hardEnd)
+        {
+            // How many chars fit on this wrapped line?
+            int lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
+            if (lineEnd >= hardEnd)
+                break;
+            _breaks.Add(lineEnd - start);
+            segStart = lineEnd;
+        }
+        return _breaks.ToArray();
     }
 
     // Whether [start..end) fits whole. Measured only when it is no longer than a line of
@@ -450,6 +494,24 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         }
         int End(int k) => clusterEnds is null ? start + k : clusterEnds[first + k - 1];
 
+        // Every probe is a prefix of the same text, so they are read off one table of its
+        // prefix widths (IRenderContext.MeasureTextPrefixes) — measured one at a time, each
+        // was shaped whole and cached as a string of its own. The table covers half as much
+        // again as the probe that asks for it, so the probes around that one land inside;
+        // one past it gets a longer table.
+        ITextPrefixWidths? prefixes = null;
+        bool noPrefixes = _renderCtx is null;
+        float Measure(int chars)
+        {
+            if (!noPrefixes && (prefixes is null || chars > prefixes.Length))
+            {
+                int window = Math.Min(hardEnd - start, chars + chars / 2 + 16);
+                prefixes = _renderCtx!.MeasureTextPrefixes(_text.Substring(start, window), style);
+                noPrefixes = prefixes is null;
+            }
+            return prefixes is not null ? prefixes.Width(chars) : MeasureSubstring(start, chars, style);
+        }
+
         // The answer is in [lo, hi]: a prefix of lo fits (or lo is the one-cluster floor),
         // and once bounded, one of hi + 1 does not.
         int lo = 1, hi = length;
@@ -459,7 +521,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         int step = 0;
         for (int round = 0; ; round++)
         {
-            float width = MeasureSubstring(start, End(probe) - start, style);
+            float width = Measure(End(probe) - start);
             if (probe >= 8) charWidth = width / probe;
             if (width <= wrapWidth)
             {
