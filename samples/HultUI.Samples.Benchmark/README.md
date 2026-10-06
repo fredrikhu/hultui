@@ -267,6 +267,12 @@ lower after the batch. The evening table that stood here first agreed on the
 bulk rows but not on every small one; a game was open on the machine for part of
 that evening, so this quiet table replaces it.
 
+**Won back, 2026-10-06** (4f8a3fc, a leaf measured once per width instead of once
+per pass): against main at f586c39, 14 interleaved runs each, a11y off —
+create 10,000 141 → 131 ms (−7 %), append 7.6 → 6.5 ms (−15 %), remove row 1.77 →
+1.25 ms (−29 %), create 1,000 −7 %; the sub-millisecond rows unchanged on their
+minimums. Create 10,000 is back at its pre-batch e5a2206 level (130 ms).
+
 ## How the measurement works
 
 HultUI's whole pipeline — component rebuild → style → layout → render → present —
