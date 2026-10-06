@@ -1,7 +1,11 @@
+using System.Globalization;
+using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using HultUI.Core.RichText;
 using Markdig;
 using Markdig.Extensions.EmphasisExtras;
+using Markdig.Extensions.Tables;
 using Markdig.Extensions.TaskLists;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -14,7 +18,7 @@ namespace HultUI.RichText.Markdown;
 /// <see cref="BlockKind.Raw"/> block holding its source exactly, so writing the document back
 /// out loses none of it.
 /// </summary>
-internal static class RichMarkdownReader
+internal static partial class RichMarkdownReader
 {
     // CommonMark, with what GitLab adds that the document can hold (strikethrough, task lists)
     // and tables, which it cannot but must recognise as one block to keep them whole. No bare-URL
@@ -52,7 +56,7 @@ internal static class RichMarkdownReader
         return new RichDocument(reader.Blocks);
     }
 
-    private sealed class Reader(string source)
+    private sealed partial class Reader(string source)
     {
         public readonly List<RichBlock> Blocks = [];
 
@@ -68,6 +72,18 @@ internal static class RichMarkdownReader
 
                 case HeadingBlock h when listDepth < 0 && h.Inline is { } inline && ReadInline(inline) is { } heading:
                     Blocks.Add(RichBlock.Heading(h.Level, heading.Text.Replace('\n', ' '), [.. heading.Spans]));
+                    return;
+
+                case ParagraphBlock p when p.Inline is { } inline && Picture(inline) is { } picture:
+                    Blocks.Add(RichBlock.Picture(picture, indent));
+                    return;
+
+                case HtmlBlock html when PictureTag(html.Lines.ToString()) is { } tagged:
+                    Blocks.Add(RichBlock.Picture(tagged, indent));
+                    return;
+
+                case Table table when listDepth < 0 && ReadTable(table) is { } cells:
+                    Blocks.AddRange(cells);
                     return;
 
                 case ParagraphBlock p when p.Inline is { } inline && ReadInline(inline) is { } text:
@@ -216,6 +232,159 @@ internal static class RichMarkdownReader
             return at < 0 ? source.Length : at;
         }
 
+        // ── Pictures ──
+
+        /// <summary>A paragraph holding one picture and nothing else — or one link holding only
+        /// a picture — or one HTML <c>&lt;img&gt;</c>. Anything more is a picture inside a line
+        /// of text, which the document has no shape for.</summary>
+        private static RichImage? Picture(ContainerInline inline)
+        {
+            switch (Sole(inline))
+            {
+                case LinkInline { IsImage: true } image:
+                    return ImageOf(image, null);
+                case LinkInline link when Sole(link) is LinkInline { IsImage: true } inner:
+                    return ImageOf(inner, link.Url ?? "");
+                default:
+                    // <img …> written mid-paragraph is inline HTML, one tag at a time.
+                    var tags = new StringBuilder();
+                    for (var node = inline.FirstChild; node is not null; node = node.NextSibling)
+                    {
+                        if (node is HtmlInline html) tags.Append(html.Tag);
+                        else if (node is LiteralInline lit && lit.Content.IsEmptyOrWhitespace()) continue;
+                        else if (node is LineBreakInline { IsHard: false }) tags.Append('\n');
+                        else return null;
+                    }
+                    return tags.Length > 0 ? PictureTag(tags.ToString()) : null;
+            }
+        }
+
+        // The one child of `container` that is not blank text; null when there are more.
+        private static Inline? Sole(ContainerInline container)
+        {
+            Inline? found = null;
+            for (var node = container.FirstChild; node is not null; node = node.NextSibling)
+            {
+                if (node is LiteralInline lit && lit.Content.IsEmptyOrWhitespace()) continue;
+                if (found is not null) return null;
+                found = node;
+            }
+            return found;
+        }
+
+        // A picture's words are text: emphasis in them is not drawn, so it is not kept.
+        private static RichImage? ImageOf(LinkInline image, string? link)
+        {
+            var alt = new InlineWriter();
+            for (var node = image.FirstChild; node is not null; node = node.NextSibling)
+                if (!alt.Walk(node, RichMarks.None)) return null;
+            return new RichImage(image.Url ?? "", alt.Text.ToString(),
+                string.IsNullOrEmpty(image.Title) ? null : image.Title, null, link);
+        }
+
+        /// <summary>
+        /// <c>&lt;img src alt title width&gt;</c>, optionally inside <c>&lt;a href&gt;</c>, and
+        /// nothing else: how a picture with a width is written. Any other attribute — a height, a
+        /// style, a width in per cent — keeps the source raw.
+        /// </summary>
+        internal static RichImage? PictureTag(string html)
+        {
+            var m = PictureHtml().Match(html);
+            if (!m.Success) return null;
+            string? src = null, alt = null, title = null;
+            float? width = null;
+            string attributes = m.Groups["attrs"].Value;
+            foreach (Match a in HtmlAttribute().Matches(attributes))
+            {
+                string value = WebUtility.HtmlDecode(a.Groups["v"].Value);
+                switch (a.Groups["name"].Value.ToLowerInvariant())
+                {
+                    case "src": src = value; break;
+                    case "alt": alt = value; break;
+                    case "title": title = value; break;
+                    case "width" when float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var w) && w > 0:
+                        width = w;
+                        break;
+                    default: return null;
+                }
+            }
+            // Every attribute was one of those, quoted.
+            if (src is null || HtmlAttribute().Replace(attributes, "").Trim().Length > 0) return null;
+            string? link = m.Groups["href"].Success ? WebUtility.HtmlDecode(m.Groups["href"].Value) : null;
+            return new RichImage(src, alt ?? "", title, width, link);
+        }
+
+        [GeneratedRegex("""^\s*(?:<a\s+href="(?<href>[^"]*)"\s*>\s*)?<img\s(?<attrs>[^<>]*?)/?>\s*(?(href)</a>\s*)$""",
+            RegexOptions.IgnoreCase)]
+        private static partial Regex PictureHtml();
+
+        [GeneratedRegex("""(?<name>[A-Za-z-]+)\s*=\s*"(?<v>[^"]*)"\s*""")]
+        private static partial Regex HtmlAttribute();
+
+        // ── Tables ──
+
+        /// <summary>
+        /// A GFM table as a run of cells: its header row, its rows padded or cut to the header's
+        /// width as GitLab draws them, each column aligned as its delimiter says. Null — the table
+        /// stays raw — when a cell holds what a cell of the document cannot.
+        /// </summary>
+        private List<RichBlock>? ReadTable(Table table)
+        {
+            var rows = table.OfType<TableRow>().ToList();
+            if (rows.Count == 0 || !rows[0].IsHeader || rows.Skip(1).Any(r => r.IsHeader)) return null;
+            // GFM's width is the delimiter row's. Markdig widens a table to its widest row, with
+            // header cells that are in no source, where GitLab drops what overhangs: neither is
+            // what was written, so such a table is kept as it is.
+            int columns = rows[0].Count;
+            if (DelimiterCells(table.Line + 1) != columns) return null;
+            if (columns == 0) return null;
+            var cells = new List<RichBlock>(rows.Count * columns);
+            for (int r = 0; r < rows.Count; r++)
+                for (int c = 0; c < columns; c++)
+                {
+                    var align = c < table.ColumnDefinitions.Count
+                        ? table.ColumnDefinitions[c].Alignment switch
+                        {
+                            TableColumnAlign.Center => BlockAlign.Center,
+                            TableColumnAlign.Right => BlockAlign.End,
+                            _ => BlockAlign.Start,
+                        }
+                        : BlockAlign.Start;
+                    InlineText? text = new("", []);
+                    if (c < rows[r].Count)
+                    {
+                        if (rows[r][c] is not TableCell { ColumnSpan: 1, RowSpan: 1 } cell) return null;
+                        text = CellText(cell);
+                        if (text is null) return null;
+                    }
+                    cells.Add(RichBlock.Cell(r, c, text.Text, [.. text.Spans]) with { Align = align });
+                }
+            return cells;
+        }
+
+        // The cells on source line `line`, a delimiter row: dashes, colons and pipes, nothing
+        // escaped, so a split is exact.
+        private int DelimiterCells(int line)
+        {
+            int start = LineStart(line);
+            int end = source.IndexOf('\n', start);
+            string row = source[start..(end < 0 ? source.Length : end)].Trim();
+            if (row.StartsWith('|')) row = row[1..];
+            if (row.EndsWith('|')) row = row[..^1];
+            return row.Split('|').Length;
+        }
+
+        // A cell's one paragraph, where <br> is a line break.
+        private static InlineText? CellText(TableCell cell)
+        {
+            if (cell.Count == 0) return new InlineText("", []);
+            if (cell.Count != 1 || cell[0] is not ParagraphBlock { Inline: { } inline }) return null;
+            var w = new InlineWriter { InCell = true };
+            for (var node = inline.FirstChild; node is not null; node = node.NextSibling)
+                if (!w.Walk(node, RichMarks.None)) return null;
+            return new InlineText(w.Text.ToString(), w.Spans);
+        }
+
         // ── Inlines ──
 
         private sealed record InlineText(string Text, List<RichSpan> Spans);
@@ -259,6 +428,10 @@ internal static class RichMarkdownReader
             public readonly StringBuilder Text = new();
             public readonly List<RichSpan> Spans = [];
 
+            /// <summary>Whether this is a table cell: <c>&lt;br&gt;</c> is a line break there, a row
+            /// being one line of source, and <c>\|</c> is a pipe even in code.</summary>
+            public bool InCell { get; init; }
+
             // Styles opened by HTML tags — <strong>, <em>, <del> and their old spellings — which
             // the writer uses where a delimiter cannot open or close. A tag is a sibling of what it
             // wraps, not its parent, so these hold across the walk until the closing tag.
@@ -275,7 +448,9 @@ internal static class RichMarkdownReader
                         Append(entity.Transcoded.ToString(), marks);
                         return true;
                     case CodeInline code:
-                        Append(code.Content, marks.With(InlineStyle.Code, true));
+                        // GFM unescapes \| in a cell before reading it, code and all; Markdig leaves
+                        // it escaped in code, where GitLab's reader would not.
+                        Append(InCell ? code.Content.Replace("\\|", "|") : code.Content, marks.With(InlineStyle.Code, true));
                         return true;
                     case LineBreakInline br:
                         // A soft break reads as a space, as it renders; only a hard one breaks the line.
@@ -300,7 +475,7 @@ internal static class RichMarkdownReader
                         Append(task.Checked ? "[x]" : "[ ]", marks);
                         return true;
                     case HtmlInline html:
-                        return Tag(html.Tag);
+                        return Tag(html.Tag, marks);
                     case ContainerInline container when node.GetType() == typeof(ContainerInline):
                         return Children(container, marks);
                     default:
@@ -308,10 +483,11 @@ internal static class RichMarkdownReader
                 }
             }
 
-            private bool Tag(string tag)
+            private bool Tag(string tag, RichMarks marks)
             {
                 switch (tag.Trim().ToLowerInvariant())
                 {
+                    case "<br>" or "<br/>" or "<br />" when InCell: Append("\n", marks); return true;
                     case "<strong>" or "<b>": _bold++; return true;
                     case "</strong>" or "</b>": _bold = Math.Max(0, _bold - 1); return true;
                     case "<em>" or "<i>": _italic++; return true;

@@ -5,7 +5,9 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 
 namespace HultUI.Samples.Fluent;
 
@@ -343,6 +345,8 @@ public static class Pages
             .OnDocumentChanged(d => app.Notes = d)
             .OnSelectionChanged(app.Refresh)
             .OnLinkRequested(app.NotesToolbar.OpenLinkEditor)
+            .OnImageRequested(app.NotesToolbar.OpenPictureEditor)
+            .Images(app.Picture)
             .OnLinkActivated(url => app.ClickCount++)
             .ReadOnly(app.NotesReadOnly)
             .PlaceholderText("Write something. # for a heading, - for a list, **bold**.")
@@ -357,7 +361,8 @@ public static class Pages
             F.Title(p, "Rich text").Margin(new Thickness(0, 0, 8, 0)),
             F.Body(p, "A RichTextEditor and its toolbar, on the framework's text pipeline. Markdown "
                     + "shortcuts work as you type, Ctrl+B/I/U format, Ctrl+K adds a link, and Tab "
-                    + "nests a list item.")
+                    + "nests a list item. In a table, Tab moves cell to cell and the context menu "
+                    + "adds rows and columns; a picture's address is a file path here.")
                 .TextColor(p.TextSecondary).Margin(new Thickness(0, 0, 16, 0)),
             Section(p, "Editor",
                 Flex.Column(gap: 10f).Children(
@@ -399,7 +404,44 @@ public static class Pages
             Core.RichText.RichBlock.Of(Core.RichText.BlockKind.TaskItem, "Markdown package"),
             Core.RichText.RichBlock.Of(Core.RichText.BlockKind.Quote, "Make it work, make it right, make it fast."),
             Core.RichText.RichBlock.Of(Core.RichText.BlockKind.CodeBlock, "var editor = RichTextEditor.New(doc);") with { Info = "cs" },
+            Core.RichText.RichBlock.Heading(2, "Who does what"),
+            .. Cells(3,
+                "Owner", "Task", "Days",
+                "Ana", "Pictures as blocks", "2",
+                "Bo", "Tables, with Tab between the cells", "3"),
+            Core.RichText.RichBlock.Picture(new Core.RichText.RichImage("sample:aurora", "A green and violet aurora over hills")),
         ]);
+
+        // A table `columns` wide, row by row; its last column right-aligned, as numbers are.
+        static IEnumerable<Core.RichText.RichBlock> Cells(int columns, params string[] texts) =>
+            texts.Select((t, i) => Core.RichText.RichBlock.Cell(i / columns, i % columns, t) with
+            {
+                Align = i % columns == columns - 1 ? Core.RichText.BlockAlign.End : Core.RichText.BlockAlign.Start,
+            });
+    }
+
+    /// <summary>A picture drawn here rather than loaded: an aurora over hills, for the notes.</summary>
+    public static IImageSource Aurora(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                float u = (float)x / width, v = (float)y / height;
+                // Night sky, deepening upwards; a green band with violet at its top edge.
+                float band = MathF.Exp(-MathF.Pow((v - 0.35f - 0.12f * MathF.Sin(u * 7f)) / 0.12f, 2));
+                float r = 10 + 60 * band * v + 30 * (1 - v);
+                float g = 18 + 200 * band;
+                float b = 40 + 90 * band * (1 - v) + 60 * (1 - v);
+                // Hills along the bottom.
+                if (v > 0.78f + 0.08f * MathF.Sin(u * 5f + 1f)) (r, g, b) = (12, 22, 26);
+                int at = (y * width + x) * 4;
+                pixels[at] = (byte)Math.Clamp(r, 0, 255);
+                pixels[at + 1] = (byte)Math.Clamp(g, 0, 255);
+                pixels[at + 2] = (byte)Math.Clamp(b, 0, 255);
+                pixels[at + 3] = 255;
+            }
+        return SkiaImageSource.FromPixels(pixels, width, height, width * 4, PixelFormat.Rgba8888);
     }
 
     /// <summary>A gallery section: a bold label, then a card holding the specimens.</summary>

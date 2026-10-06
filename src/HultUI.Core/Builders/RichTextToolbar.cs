@@ -17,6 +17,11 @@ public enum RichTextCommand
     BulletList, NumberedList, TaskList, Quote, CodeBlock, Rule,
     AlignStart, AlignCenter, AlignEnd,
     Outdent, Indent,
+    /// <summary>The toolbar's picture editor (an address and a description); through
+    /// <see cref="RichTextToolbar.Execute"/>, <see cref="RichTextEditorElement.ImageRequested"/>.</summary>
+    Image,
+    /// <summary>A three-by-three table at the caret.</summary>
+    Table,
 }
 
 /// <summary>
@@ -43,6 +48,9 @@ public sealed class RichTextToolbar
     private readonly Ref<TextInputElement> _linkField = new();
     private readonly Popover _linkPopover;
     private string _linkDraft = "";
+    private readonly Ref<ButtonElement> _pictureButton = new();
+    private readonly Popover _picturePopover;
+    private string _pictureSource = "", _pictureAlt = "";
 
     public RichTextToolbar(Ref<RichTextEditorElement> editor, Action onChanged)
     {
@@ -52,6 +60,12 @@ public sealed class RichTextToolbar
         {
             AccessibleName = "Link",
             AutomationId = "richtext-link-editor",
+            Closed = () => { _editor.Current?.Focus(); _onChanged(); },
+        };
+        _picturePopover = new Popover(BuildPictureEditor)
+        {
+            AccessibleName = "Picture",
+            AutomationId = "richtext-picture-editor",
             Closed = () => { _editor.Current?.Focus(); _onChanged(); },
         };
     }
@@ -67,6 +81,7 @@ public sealed class RichTextToolbar
         RichTextCommand.Code, RichTextCommand.Link, null,
         RichTextCommand.BulletList, RichTextCommand.NumberedList, RichTextCommand.TaskList,
         RichTextCommand.Quote, RichTextCommand.CodeBlock, RichTextCommand.Rule, null,
+        RichTextCommand.Table, RichTextCommand.Image, null,
         RichTextCommand.AlignStart, RichTextCommand.AlignCenter, RichTextCommand.AlignEnd,
     ];
 
@@ -133,11 +148,17 @@ public sealed class RichTextToolbar
                 OpenLinkEditor();
                 return;
             }
+            if (command == RichTextCommand.Image)
+            {
+                OpenPictureEditor();
+                return;
+            }
             Execute(e, command);
             e.Focus();
             _onChanged();
         });
         if (command == RichTextCommand.Link) button.WithRef(_linkButton);
+        if (command == RichTextCommand.Image) button.WithRef(_pictureButton);
         return button;
     }
 
@@ -207,6 +228,66 @@ public sealed class RichTextToolbar
         _linkPopover.Close();
     }
 
+    // ── The picture editor ──
+
+    /// <summary>Whether the picture editor is open.</summary>
+    public bool IsPictureEditorOpen => _picturePopover.IsOpen;
+
+    /// <summary>Opens the picture editor against the Picture button: an address and the words
+    /// for what it shows, filled from the picture selected, if any. The address is whatever the
+    /// editor's <see cref="RichTextEditorElement.ImageResolver"/> reads. Wire the context menu's
+    /// Change picture to it with <see cref="RichTextEditorExtensions.OnImageRequested"/>; an app
+    /// with a picker of its own leaves <see cref="RichTextCommand.Image"/> out of
+    /// <see cref="Commands"/> and wires that instead.</summary>
+    public void OpenPictureEditor()
+    {
+        if (_editor.Current is not { } e || _pictureButton.Current is not { } anchor) return;
+        var current = e.State.CurrentImage?.Image;
+        _pictureSource = current?.Source ?? "";
+        _pictureAlt = current?.Alt ?? "";
+        _picturePopover.Open(anchor);
+        _onChanged();
+    }
+
+    private Element BuildPictureEditor()
+    {
+        bool changing = _editor.Current?.State.CurrentImage is not null;
+        var source = TextInput.New(_pictureSource)
+            .PlaceholderText("Address")
+            .OnTextChanged(t => _pictureSource = t)
+            .Width(Dimension.Px(260))
+            .AccessibleName("Address")
+            .AutomationId("richtext-picture-source");
+        var alt = TextInput.New(_pictureAlt)
+            .PlaceholderText("What it shows")
+            .OnTextChanged(t => _pictureAlt = t)
+            .Width(Dimension.Px(260))
+            .AccessibleName("Description")
+            .AutomationId("richtext-picture-alt");
+        foreach (var field in new[] { source, alt })
+            field.OnKeyDown(k =>
+            {
+                if (k.Key == KeyCode.Enter) { ApplyPicture(); k.StopPropagation = true; }
+            });
+        var apply = Button.New(changing ? "Apply" : "Insert").OnClick(_ => ApplyPicture()).AutomationId("richtext-picture-apply");
+        return Flex.Column(gap: 8).Padding(10).Children(source, alt, Flex.Row(gap: 8).Children(apply));
+    }
+
+    // On a picture, it changes; anywhere else a new one goes in at the caret.
+    private void ApplyPicture()
+    {
+        string source = _pictureSource.Trim();
+        if (_editor.Current is { } e && source.Length > 0)
+        {
+            var s = e.State;
+            if (s.CurrentImage is { } current)
+                s.SetImage(current.Block, current.Image with { Source = source, Alt = _pictureAlt.Trim() });
+            else
+                s.InsertImage(new RichImage(source, _pictureAlt.Trim()));
+        }
+        _picturePopover.Close();
+    }
+
     // ── Commands ──
 
     /// <summary>Whether the editor's features allow <paramref name="command"/>.</summary>
@@ -228,20 +309,29 @@ public sealed class RichTextToolbar
             RichTextCommand.CodeBlock => f.Allows(RichTextFeatures.CodeBlocks),
             RichTextCommand.Rule => f.Allows(RichTextFeatures.Rules),
             RichTextCommand.AlignStart or RichTextCommand.AlignCenter or RichTextCommand.AlignEnd => f.Allows(RichTextFeatures.Alignment),
+            RichTextCommand.Image => f.Allows(RichTextFeatures.Images),
+            RichTextCommand.Table => f.Allows(RichTextFeatures.Tables),
             _ => true,
         };
     }
 
+    // In a table, nothing that makes a block: a cell is a cell.
     private static bool IsEnabled(RichTextEditorElement editor, RichTextCommand command) => command switch
     {
         RichTextCommand.Undo => editor.State.CanUndo,
         RichTextCommand.Redo => editor.State.CanRedo,
+        RichTextCommand.Paragraph or RichTextCommand.Heading1 or RichTextCommand.Heading2 or RichTextCommand.Heading3
+            or RichTextCommand.BulletList or RichTextCommand.NumberedList or RichTextCommand.TaskList
+            or RichTextCommand.Quote or RichTextCommand.CodeBlock or RichTextCommand.Rule
+            or RichTextCommand.Image or RichTextCommand.Table
+            or RichTextCommand.Outdent or RichTextCommand.Indent => editor.State.CurrentTable is null,
         _ => true,
     };
 
     private static bool IsToggle(RichTextCommand command) =>
         command is not (RichTextCommand.Undo or RichTextCommand.Redo or RichTextCommand.Rule
-            or RichTextCommand.Outdent or RichTextCommand.Indent or RichTextCommand.ClearFormatting);
+            or RichTextCommand.Outdent or RichTextCommand.Indent or RichTextCommand.ClearFormatting
+            or RichTextCommand.Image or RichTextCommand.Table);
 
     /// <summary>Whether the selection already has what <paramref name="command"/> makes: a
     /// button drawn pressed.</summary>
@@ -306,8 +396,16 @@ public sealed class RichTextToolbar
             RichTextCommand.AlignEnd => s.SetAlign(BlockAlign.End),
             RichTextCommand.Outdent => s.Outdent(),
             RichTextCommand.Indent => s.Indent(),
+            RichTextCommand.Table => s.InsertTable(),
+            RichTextCommand.Image => editor.ImageRequested is { } request && Run(request),
             _ => false,
         };
+    }
+
+    private static bool Run(Action action)
+    {
+        action();
+        return true;
     }
 
     public static string LabelOf(RichTextCommand command) => command switch
@@ -336,6 +434,8 @@ public sealed class RichTextToolbar
         RichTextCommand.AlignEnd => "⇥",
         RichTextCommand.Outdent => "⇠",
         RichTextCommand.Indent => "⇢",
+        RichTextCommand.Image => "Pic",
+        RichTextCommand.Table => "Tbl",
         _ => command.ToString(),
     };
 
@@ -355,6 +455,7 @@ public sealed class RichTextToolbar
         RichTextCommand.AlignStart => "Align left",
         RichTextCommand.AlignCenter => "Centre",
         RichTextCommand.AlignEnd => "Align right",
+        RichTextCommand.Image => "Picture",
         _ => command.ToString(),
     };
 

@@ -47,14 +47,15 @@ public sealed partial class RichEditState
         a.Link == b.Link ? a.Link : null);
 
     /// <summary>Whether every block the selection touches is <paramref name="kind"/> (a heading
-    /// of <paramref name="headingLevel"/>, for headings): what a block button shows as pressed.</summary>
+    /// of <paramref name="headingLevel"/>, for headings): what a block button shows as pressed.
+    /// Rules, pictures and table cells are left out: no block format applies to them.</summary>
     public bool SelectionIs(BlockKind kind, int headingLevel = 0)
     {
         bool any = false;
         for (int i = Selection.Start.Block; i <= Selection.End.Block; i++)
         {
             var b = Document[i];
-            if (b.IsVoid) continue;
+            if (b.IsVoid || b.IsTableCell) continue;
             if (b.Kind != kind || (kind == BlockKind.Heading && headingLevel > 0 && b.HeadingLevel != headingLevel))
                 return false;
             any = true;
@@ -168,9 +169,9 @@ public sealed partial class RichEditState
         if (block.IsPreformatted || block.IsVoid) return InsertText(text);
 
         var marks = TypingMarks with { Link = target };
-        var (index, count, b, offset) = CutSelection();
-        Commit(index, count, [InsertInline(b, offset, text, [new RichSpan(0, text.Length, marks)])],
-            RichSelection.Caret(index, offset + text.Length), EditKind.Other);
+        var cut = CutSelection();
+        Commit(cut, [InsertInline(cut.Block, cut.Offset, text, [new RichSpan(0, text.Length, marks)])], 0,
+            cut.Offset + text.Length, EditKind.Other);
         return true;
     }
 
@@ -178,10 +179,12 @@ public sealed partial class RichEditState
 
     /// <summary>Makes every block the selection touches <paramref name="kind"/>. Paragraphs made
     /// into code become one code block, a line each; a code block made into anything else
-    /// becomes a block per line. <see cref="BlockKind.Rule"/> inserts a rule.</summary>
+    /// becomes a block per line. <see cref="BlockKind.Rule"/> inserts a rule. Pictures and table
+    /// cells keep what they are.</summary>
     public bool SetBlockKind(BlockKind kind, int headingLevel = 1)
     {
         if (kind == BlockKind.Rule) return InsertRule();
+        if (kind is BlockKind.Image or BlockKind.TableCell) return false;
         if (!Features.Allows(RichTextFeaturesExtensions.FeatureOf(kind))) return false;
 
         int first = Selection.Start.Block, last = Selection.End.Block, count = last - first + 1;
@@ -189,6 +192,9 @@ public sealed partial class RichEditState
 
         if (kind is BlockKind.CodeBlock or BlockKind.Raw)
         {
+            // Joining lines across a table would take its cells apart, and a picture has no line
+            // to give.
+            if (old.Any(b => b.IsTableCell || b.Kind == BlockKind.Image)) return false;
             // One preformatted block, lines joined; a position keeps its place in the joined text.
             var starts = new int[count];
             var lines = new List<string>();
@@ -217,7 +223,7 @@ public sealed partial class RichEditState
         {
             var b = old[i];
             pieces[i] = [];
-            if (b.IsVoid) { pieces[i].Add((0, result.Count)); result.Add(b); continue; }
+            if (b.IsVoid || b.IsTableCell) { pieces[i].Add((0, result.Count)); result.Add(b); continue; }
             if (b.IsPreformatted)
             {
                 int at = 0;
@@ -263,29 +269,110 @@ public sealed partial class RichEditState
             ? SetBlockKind(BlockKind.Paragraph)
             : SetBlockKind(kind, headingLevel);
 
-    /// <summary>A rule at the caret: the block splits around it, and the caret goes after it.</summary>
+    /// <summary>A rule at the caret: the block splits around it, and the caret goes after it. Not
+    /// in a table.</summary>
     public bool InsertRule()
     {
         if (!Features.Allows(RichTextFeatures.Rules)) return false;
-        var (index, count, block, offset) = CutSelection();
-        var rule = RichBlock.Of(BlockKind.Rule, indent: block.Indent);
-        if (block.IsVoid)
-        {
-            Commit(index, count, [block, rule], RichSelection.Caret(index + 1, 0), EditKind.Other);
-            return true;
-        }
-        var head = block.Slice(0, offset);
-        var tail = block.Slice(offset, block.Text.Length);
-        if (ReferenceEquals(head, tail)) tail = tail with { };
-        var blocks = head.Text.Length > 0 ? new List<RichBlock> { head, rule, tail } : [rule, tail];
-        Commit(index, count, blocks, RichSelection.Caret(index + blocks.Count - 1, 0), EditKind.Other);
+        var cut = CutSelection();
+        if (cut.Block.IsTableCell) return false;
+        return InsertApart(cut, [RichBlock.Of(BlockKind.Rule, indent: cut.Block.Indent)], caretInside: false);
+    }
+
+    /// <summary>A picture at the caret, on a line of its own: the block splits around it, and
+    /// the picture is selected. Not in a table.</summary>
+    public bool InsertImage(RichImage image)
+    {
+        if (!Features.Allows(RichTextFeatures.Images)) return false;
+        var cut = CutSelection();
+        if (cut.Block.IsTableCell) return false;
+        return InsertApart(cut, [RichBlock.Picture(image, cut.Block.Indent)], caretInside: true);
+    }
+
+    /// <summary>Changes the picture at <paramref name="block"/> — its source, its words, its
+    /// width.</summary>
+    public bool SetImage(int block, RichImage image)
+    {
+        if (block < 0 || block >= Document.BlockCount || Document[block].Kind != BlockKind.Image) return false;
+        var b = Document[block];
+        if (b.Image == image) return false;
+        Commit(block, 1, [b with { Image = image }], Selection, EditKind.Other);
         return true;
     }
 
+    /// <summary>The picture the caret is on, and its block; null elsewhere.</summary>
+    public (int Block, RichImage Image)? CurrentImage =>
+        Selection.IsCollapsed && CurrentBlock is { Kind: BlockKind.Image, Image: { } image }
+            ? (Selection.Focus.Block, image) : null;
+
+    // Blocks that stand apart — a rule, a picture, a table — put in at the caret: the block it is
+    // in splits around them and keeps a line after them. The caret goes into the first of them,
+    // or after them all.
+    private bool InsertApart(Cut cut, IReadOnlyList<RichBlock> blocks, bool caretInside)
+    {
+        var block = cut.Block;
+        if (block.IsVoid)
+        {
+            Commit(cut, [block, .. blocks, RichBlock.Paragraph() with { Indent = block.Indent }],
+                caretInside ? 1 : 1 + blocks.Count, 0, EditKind.Other);
+            return true;
+        }
+        var head = block.Slice(0, cut.Offset);
+        var tail = block.Slice(cut.Offset, block.Text.Length);
+        if (ReferenceEquals(head, tail)) tail = tail with { };
+        var result = new List<RichBlock>();
+        if (head.Text.Length > 0) result.Add(head);
+        int at = result.Count;
+        result.AddRange(blocks);
+        result.Add(tail);
+        Commit(cut, result, caretInside ? at : result.Count - 1, 0, EditKind.Other);
+        return true;
+    }
+
+    /// <summary>Aligns every block the selection touches. In a table it aligns the whole column
+    /// of each cell touched — Markdown's tables align columns, not cells — which needs
+    /// <see cref="RichTextFeatures.Tables"/> rather than <see cref="RichTextFeatures.Alignment"/>.</summary>
     public bool SetAlign(BlockAlign align)
     {
-        if (!Features.Allows(RichTextFeatures.Alignment)) return false;
-        return MapBlocks(b => b.IsVoid || b.Align == align ? b : b with { Align = align });
+        bool blocks = Features.Allows(RichTextFeatures.Alignment), cells = Features.Allows(RichTextFeatures.Tables);
+        int first = Selection.Start.Block, last = Selection.End.Block;
+        int from = first, to = last;
+        var columns = new HashSet<(int Table, int Column)>();
+        RichTableRange? table = null;
+        for (int i = first; cells && i <= last; i++)
+        {
+            if (!Document[i].IsTableCell) continue;
+            var t = TableOf(i, ref table);
+            columns.Add((t.Start, t.ColumnOf(i)));
+            from = Math.Min(from, t.Start);
+            to = Math.Max(to, t.End - 1);
+        }
+        if (columns.Count == 0 && !blocks) return false;
+
+        var result = new List<RichBlock>(to - from + 1);
+        bool changed = false;
+        for (int i = from; i <= to; i++)
+        {
+            var b = Document[i];
+            bool aligns;
+            if (b.IsTableCell)
+            {
+                var t = TableOf(i, ref table);
+                aligns = columns.Contains((t.Start, t.ColumnOf(i)));
+            }
+            else
+                aligns = blocks && i >= first && i <= last && !b.IsVoid;
+            if (aligns && b.Align != align)
+            {
+                result.Add(b with { Align = align });
+                changed = true;
+            }
+            else
+                result.Add(b);
+        }
+        if (!changed) return false;
+        Commit(from, result.Count, result, Selection, EditKind.Other);
+        return true;
     }
 
     /// <summary>One level deeper — never more than one past the block before it, so a list item
@@ -303,7 +390,7 @@ public sealed partial class RichEditState
         {
             var b = Document[i];
             int indent = b.Indent;
-            if (!b.IsVoid)
+            if (!b.IsVoid && !b.IsTableCell)
             {
                 if (delta < 0) indent = Math.Max(0, indent - 1);
                 else

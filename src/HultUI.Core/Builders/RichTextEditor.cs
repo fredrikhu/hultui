@@ -1,4 +1,5 @@
 using HultUI.Core.Elements;
+using HultUI.Core.Rendering;
 using HultUI.Core.RichText;
 using HultUI.Core.Styling;
 
@@ -28,6 +29,16 @@ public static class RichTextEditorExtensions
     /// <summary>Ctrl+K: show a link editor.</summary>
     public static RichTextEditorElement OnLinkRequested(this RichTextEditorElement el, Action handler)
     { el.LinkRequested = handler; return el; }
+
+    /// <summary>Where pictures' pixels come from: the app's loader, asked with each picture's
+    /// source on every build. Null, or a source not loaded yet, draws a line naming the picture.</summary>
+    public static RichTextEditorElement Images(this RichTextEditorElement el, Func<string, IImageSource?> resolve)
+    { el.ImageResolver = resolve; return el; }
+
+    /// <summary>The toolbar's Picture button and the context menu's Change picture: show a
+    /// picker, then <see cref="RichEditState.InsertImage"/> or <see cref="RichEditState.SetImage"/>.</summary>
+    public static RichTextEditorElement OnImageRequested(this RichTextEditorElement el, Action handler)
+    { el.ImageRequested = handler; return el; }
 
     public static RichTextEditorElement Features(this RichTextEditorElement el, RichTextFeatures features)
     { el.Features = features; return el; }

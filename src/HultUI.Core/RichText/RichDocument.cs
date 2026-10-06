@@ -33,6 +33,9 @@ public sealed class RichDocument : IEquatable<RichDocument>
     public int BlockCount => Blocks.Length;
     public RichBlock this[int block] => Blocks[block];
 
+    /// <summary>The table block <paramref name="block"/> is a cell of; null outside one.</summary>
+    public RichTableRange? TableAt(int block) => RichTable.At(Blocks, block);
+
     /// <summary>Each line of <paramref name="text"/> a paragraph of its own, unstyled.</summary>
     public static RichDocument FromPlainText(string text) =>
         new(text.ReplaceLineEndings("\n").Split('\n').Select(line => RichBlock.Paragraph(line)));
@@ -197,7 +200,20 @@ public sealed record RichFragment(ImmutableArray<RichBlock> Blocks)
 
     public bool IsInline => Blocks.Length == 1;
 
-    public string ToPlainText() => string.Join("\n", Blocks.Select(b => b.Text));
+    /// <summary>The text, a block to a line — except that the cells of a table row share one,
+    /// tab-separated, which is how a spreadsheet pastes them.</summary>
+    public string ToPlainText()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < Blocks.Length; i++)
+        {
+            var b = Blocks[i];
+            if (i > 0)
+                sb.Append(b.IsTableCell && Blocks[i - 1].IsTableCell && b.Column > 0 && b.Row == Blocks[i - 1].Row ? '\t' : '\n');
+            sb.Append(b.Text);
+        }
+        return sb.ToString();
+    }
 
     public bool Equals(RichFragment? other) =>
         other is not null && Blocks.SequenceEqual(other.Blocks);

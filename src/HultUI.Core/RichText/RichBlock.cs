@@ -19,10 +19,16 @@ public enum BlockKind : byte
     CodeBlock,
     /// <summary>A horizontal rule. It holds no text.</summary>
     Rule,
-    /// <summary>Source the editor cannot represent — a table, a picture, HTML — kept verbatim and
-    /// shown as plain text, so loading a document never loses what it cannot draw.
+    /// <summary>Source the editor cannot represent — HTML, a picture inside a line of text — kept
+    /// verbatim and shown as plain text, so loading a document never loses what it cannot draw.
     /// <see cref="RichBlock.Info"/> names the source format.</summary>
     Raw,
+    /// <summary>A picture on a line of its own (<see cref="RichBlock.Image"/>). It holds no text.</summary>
+    Image,
+    /// <summary>One cell of a table, at <see cref="RichBlock.Row"/> and <see cref="RichBlock.Column"/>.
+    /// A table is a run of cells in reading order, row by row; a cell at (0, 0) starts a new one,
+    /// and row 0 is its header (<see cref="RichTable"/>).</summary>
+    TableCell,
 }
 
 public enum BlockAlign : byte { Start, Center, End }
@@ -75,6 +81,17 @@ public readonly record struct RichMarks(
     }
 }
 
+/// <summary>
+/// A picture: where it comes from, what it shows in words, and how wide it asks to be drawn.
+/// </summary>
+/// <param name="Source">Whatever the app's image resolver understands — a URL, a path.</param>
+/// <param name="Alt">What it shows, in words: read aloud, and drawn while it loads.</param>
+/// <param name="Title">The tooltip a browser gives it.</param>
+/// <param name="Width">The width it asks for in layout units, as <c>width="600"</c> on an HTML
+/// image; null is its own. It is still scaled down to fit.</param>
+/// <param name="Link">Where a click on it goes, for a picture that is a link.</param>
+public sealed record RichImage(string Source, string Alt = "", string? Title = null, float? Width = null, string? Link = null);
+
 /// <summary>A run of <paramref name="Length"/> characters from <paramref name="Start"/> carrying
 /// <paramref name="Marks"/>.</summary>
 public readonly record struct RichSpan(int Start, int Length, RichMarks Marks)
@@ -109,6 +126,15 @@ public sealed record RichBlock
     /// <summary>A code block's language, or a raw block's source format.</summary>
     public string? Info { get; init; }
 
+    /// <summary>The picture an <see cref="BlockKind.Image"/> block shows.</summary>
+    public RichImage? Image { get; init; }
+
+    /// <summary>A <see cref="BlockKind.TableCell"/>'s row in its table, from 0 (the header).</summary>
+    public int Row { get; init; }
+
+    /// <summary>A <see cref="BlockKind.TableCell"/>'s column in its table, from 0.</summary>
+    public int Column { get; init; }
+
     /// <summary>The most a block may be indented.</summary>
     public const int MaxIndent = 8;
 
@@ -120,12 +146,21 @@ public sealed record RichBlock
 
     public static RichBlock Of(BlockKind kind, string text = "", int indent = 0) =>
         new RichBlock { Kind = kind, Indent = indent, HeadingLevel = kind == BlockKind.Heading ? 1 : 0 }
-            .WithContent(kind == BlockKind.Rule ? "" : text, []);
+            .WithContent(kind is BlockKind.Rule or BlockKind.Image ? "" : text, []);
+
+    public static RichBlock Picture(RichImage image, int indent = 0) =>
+        new() { Kind = BlockKind.Image, Image = image, Indent = indent };
+
+    public static RichBlock Cell(int row, int column, string text = "", params RichSpan[] spans) =>
+        new RichBlock { Kind = BlockKind.TableCell, Row = row, Column = column }.WithContent(text, spans);
 
     public bool IsListItem => Kind is BlockKind.BulletItem or BlockKind.NumberedItem or BlockKind.TaskItem;
 
-    /// <summary>A rule: there is nothing in it to type into.</summary>
-    public bool IsVoid => Kind == BlockKind.Rule;
+    /// <summary>A rule or a picture: there is nothing in it to type into, and it is selected,
+    /// stepped over and deleted whole.</summary>
+    public bool IsVoid => Kind is BlockKind.Rule or BlockKind.Image;
+
+    public bool IsTableCell => Kind == BlockKind.TableCell;
 
     /// <summary>Whether text in it is preformatted: no character styles, the code face.</summary>
     public bool IsPreformatted => Kind is BlockKind.CodeBlock or BlockKind.Raw;
@@ -162,7 +197,8 @@ public sealed record RichBlock
     /// <summary>Whether two blocks have the same format, whatever their text.</summary>
     public bool SameFormat(RichBlock other) =>
         Kind == other.Kind && HeadingLevel == other.HeadingLevel && Indent == other.Indent
-        && Align == other.Align && Checked == other.Checked && Info == other.Info;
+        && Align == other.Align && Checked == other.Checked && Info == other.Info
+        && Image == other.Image && Row == other.Row && Column == other.Column;
 
     /// <summary>This block's format with <paramref name="other"/>'s content.</summary>
     public RichBlock FormatOf(RichBlock other) => this with { Text = other.Text, Spans = other.Spans };
@@ -180,6 +216,8 @@ public sealed record RichBlock
         {
             BlockKind.Heading => $"h{HeadingLevel}",
             BlockKind.TaskItem => Checked ? "task[x]" : "task[ ]",
+            BlockKind.Image => $"image({Image?.Source})",
+            BlockKind.TableCell => $"cell[{Row},{Column}]",
             _ => Kind.ToString(),
         };
         if (Indent > 0) kind += $">{Indent}";

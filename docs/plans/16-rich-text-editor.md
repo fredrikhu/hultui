@@ -7,7 +7,8 @@ project". This is that project. Scope decided 2026-10-06:
 - **v1 formats:** inline styles (bold, italic, underline, strikethrough, inline code,
   color, highlight, size, font family), links, and block formats (paragraph, headings
   1–6, bullet / numbered / task lists with nesting, quote, code block, alignment).
-  Inline images and tables are out of v1.
+  Inline images and tables were out of v1; pictures as blocks and GFM tables came in as stage 9
+  (2026-10-07).
 - **Storage:** a neutral document model in `HultUI.Core`; Markdown import/export in a
   separate package, so Markdig stays out of Core.
 - **First consumers:** a Fluent gallery page (every feature) and Junction's Create MR
@@ -275,11 +276,101 @@ assistive tool setting the value; DevTools showing the document; Up/Down through
 that mixes directions has had no test.
 8. **Measure.** Typing latency and paint on a 5,000-block document under the perf
    suite's rules (docs: perf-suite); find integration (`TextSearch` over global offsets).
+9. **Pictures and tables.** Brought into scope 2026-10-07. Both take the shape GitLab's Markdown
+   gives them and Junction's Markdown viewer already draws. See [Pictures and tables](#pictures-and-tables).
+   **Done 2026-10-07:**
+   - **Engine.** `RichTable` / `RichTableRange`, `RichEditState.Tables.cs`, and one table-aware
+     `CutSelection` that every edit goes through. 36 engine tests, among them a random walk of
+     1,500 edits per seed that keeps every table rectangular.
+   - **Element.** A table is laid out as a unit; Up/Down move by row; a click picks the cell; a
+     right-click moves the caret before the context menu opens. 13 headless tests, 2 goldens
+     (`richtext-table`, `richtext-picture-selected`).
+   - **Toolbar.** Table and Picture buttons. The Picture button opens the toolbar's own picture
+     editor (address and description), the link editor's twin; `ImageRequested` drives the
+     context menu's "Change picture…".
+   - **Markdown.** Tables and pictures read and written; 9 new tests. The random round trip now
+     draws tables and pictures: 3 × 4,000 per run, and a one-off 3 × 40,000 passed.
+   - **Adoption.** The Fluent notes hold a table and a picture drawn in code; the resolver also
+     loads file paths. Junction's description editor loads pictures through its Markdown view's
+     loader (`MdPictureFor`).
+
+   Found on the way:
+   - **Markdig keeps `\|` inside a code span in a cell.** GFM, and so GitLab, unescapes it there.
+     The reader unescapes it, and the writer escapes every `|` in a cell, code included.
+   - **Markdig widens a table to its widest row.** GitLab drops the cells that overhang. Such a
+     table stays `Raw`; the width is taken from the delimiter row, as GFM takes it.
+   - **An address with `<` or `>`** was percent-encoded, which does not read back. It is now
+     backslash-escaped inside `<…>`, for links too.
+   - **`LinkRequested` was not copied in `PatchFrom`.** It is now, with `ImageRequested` and
+     `ImageResolver`.
+
+   **Not done:** a Table button in Junction (Phosphor's bundle has no table glyph), pasting
+   picture data (needs an upload hook), resizing a picture or a column by dragging.
+
+## Pictures and tables
+
+**A picture is a block.** `BlockKind.Image` is void like a rule and carries
+`RichImage(Source, Alt, Title, Width, Link)`. A picture alone on its line is what GitLab
+descriptions and Junction's viewer hold. A picture inside a line of text would need inline boxes
+in the text pipeline, so it stays out of scope. Markdown with one stays `Raw`.
+
+- **Loading is the app's.** The editor takes `ImageResolver: Func<string, IImageSource?>`. A
+  picture with no source, or one not loaded yet, draws as a placeholder line with its alt text.
+  A loaded one is scaled down to fit, never up (`ImageElement.ScaledSize`), with `Width` as its
+  natural width and `RichTextTheme.ImageMaxHeight` as its ceiling.
+- **Arrival.** The resolver is asked again on every rebuild (`PatchFrom`). A picture whose
+  answer changed re-lays out its own block and nothing else.
+- **Editing.** A caret on a picture means the picture is selected: it draws a ring, not a bar.
+  Typing or Enter there opens a paragraph after it. Backspace or Delete removes it. Backspace at
+  the start of the block after it selects it first, since a picture is content, not a separator.
+- **Commands.** `InsertImage(RichImage)` and `SetImage(block, RichImage)`. The toolbar's Picture
+  button opens its own picture editor: an address and a description. An app with a picker of its
+  own leaves the button out and raises its picker from `ImageRequested`, which the context menu's
+  "Change picture…" also raises. Pasting image data needs an upload hook from the app and is not
+  part of this stage.
+
+**A table is a run of cell blocks.** `BlockKind.TableCell` is one block per cell, row by row, with
+`Row` and `Column` from 0. A table is a maximal run of cells, and a cell at (0, 0) starts a new one.
+Row 0 is the header, as GFM requires. A column's alignment is the `Align` of its cells, kept
+equal. A cell holds inline text with marks and line breaks, which is what a GFM cell holds.
+
+- **Why flat.** Positions stay (block, offset). Typing, marks, links, undo, the clipboard and
+  the global-offset text work in a cell unchanged. A tree (ProseMirror's shape) would make every
+  position three levels deep and every command table-aware.
+- **Invariant: rectangular.** Table commands rewrite the whole run. `RichTable.Normalize` repairs
+  a run that arrives ragged (part of a table pasted, a document built by hand), and `Load` applies
+  it.
+- **Keys.** Enter moves to the cell below. From the last row it opens a paragraph after the table,
+  which is the way out of a table that ends the document. Shift+Enter is a line break in the cell.
+  Tab and Shift+Tab move to the next and previous cell, and Tab in the last cell adds a row.
+  Up and Down move by row in the same column. Left and Right go in reading order.
+- **Deleting.** Cells never join. Backspace at a cell's start and Delete at its end do nothing.
+  Backspace at the start of the block after a table moves into the last cell, and an empty block
+  goes. A selection across cells clears what it covers and never removes a cell. A table goes only
+  when a selection covers it and reaches past it on both sides, or through Delete table.
+- **Other commands.** Paste into a cell flattens to one cell's text: blocks become line breaks,
+  pictures and rules are dropped. Block formats (headings, lists, quotes, code) skip cells.
+  `InsertTable(rows, columns)`, `InsertRow(below)`, `InsertColumn(after)`, `DeleteRow`,
+  `DeleteColumn`, `DeleteTable`, and `SetAlign` on cells (the whole column) are on the state, the
+  context menu and the toolbar's Table button.
+- **Layout.** A table is laid out as a unit. Column widths follow Junction's viewer: each
+  column's weight is its widest cell on one line plus padding, held between 48 and 360, and the
+  columns share the width by weight. A row is as tall as its tallest cell. The header row is bold
+  on a tint, with a hairline grid. A selection paints the cells it covers in reading order: it is a
+  text selection, not a cell rectangle.
+- **Markdown.** GFM pipe tables. The writer escapes `|` as `\|` and writes a line break as `<br>`.
+  The reader takes `<br>` in a cell as a line break. A table with a cell the document cannot hold
+  stays `Raw`.
+
+**Features.** `Images` and `Tables` are new flags, both inside `Markdown`.
 
 ## Non-goals (v1)
 
-- Inline images and inline boxes of any kind; tables.
-- HTML or RTF paste; RTF anything.
+- Inline images and inline boxes of any kind (pictures are blocks, stage 9); merged or nested
+  table cells, tables without a header row, column widths that are kept.
+- HTML or RTF paste, and reading either. Writing both is wanted (2026-10-07, TODO.md): a
+  standalone HTML document grown from `RichHtml`, and an RTF writer, so a document can be saved
+  for Word or a browser and the clipboard can offer `text/rtf`.
 - Collaborative editing, comments, tracked changes.
 - Spell checking (no platform seam exists yet).
 - Lists inside quotes and other containment the flat model cannot hold.

@@ -57,10 +57,11 @@ public class RichMarkdownTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData("| a | b |\n|---|---|\n| 1 | 2 |")]                             // a table
+    [InlineData("| a | b |\n|---|---|\n| ![x](y.png) | 2 |")]                   // a picture in a cell
     [InlineData("<!-- a template's comment -->")]                               // HTML
     [InlineData("<details>\n<summary>More</summary>")]
-    [InlineData("![logo](/img/logo.png)")]                                       // a picture
+    [InlineData("see ![logo](/img/logo.png) here")]                            // a picture in a line
+    [InlineData("<img src=\"a.png\" height=\"40\">")]                          // a size the document has no field for
     [InlineData("text with <kbd>Ctrl</kbd> in it")]                              // inline HTML
     [InlineData("> - a list\n> - in a quote")]
     [InlineData("[ref]: https://x.org")]                                         // a link reference definition
@@ -210,11 +211,63 @@ public class RichMarkdownTests(ITestOutputHelper output)
             RichBlock.Heading(1, "Title #1"),
             RichBlock.Paragraph("Intro with a strike and a line\nbreak.",
                 new RichSpan(13, 6, new RichMarks(InlineStyle.Strike))),
-            RichBlock.Of(BlockKind.Raw, "| t | a |\n|---|---|"),
+            RichBlock.Of(BlockKind.Raw, "<details>\n<summary>More</summary>"),
+            RichBlock.Cell(0, 0, "t") , RichBlock.Cell(0, 1, "a") with { Align = BlockAlign.End },
+            RichBlock.Cell(1, 0, "x | y"), RichBlock.Cell(1, 1, "two\nlines", new RichSpan(0, 9, Bold)) with { Align = BlockAlign.End },
+            RichBlock.Picture(new RichImage("img/a b.png", "A [bracketed] picture", "Its title")),
+            RichBlock.Picture(new RichImage("w.png", "Wide \"one\"", Width: 320, Link: "https://x.org/?a=1&b=2")),
             RichBlock.Of(BlockKind.Rule),
             RichBlock.Heading(3, "End"),
         ]),
     };
+
+    // ── Pictures and tables ──
+
+    [Theory]
+    [InlineData("![A cat](cat.png)", "cat.png", "A cat", null, null, null)]
+    [InlineData("![](a.png \"Title\")", "a.png", "", "Title", null, null)]
+    [InlineData("[![logo](l.png)](https://x.org)", "l.png", "logo", null, null, "https://x.org")]
+    [InlineData("<img src=\"s.png\" alt=\"S &amp; T\" width=\"300\">", "s.png", "S & T", null, 300f, null)]
+    [InlineData("<a href=\"https://x.org\">\n<img src=\"s.png\" alt=\"S\" width=\"64\" />\n</a>", "s.png", "S", null, 64f, "https://x.org")]
+    public void APictureAloneOnItsLine_IsAPicture(string markdown, string source, string alt, string? title, float? width,
+        string? link)
+    {
+        var block = Assert.Single(RichMarkdown.Parse(markdown).Blocks);
+        Assert.Equal(new RichImage(source, alt, title, width, link), block.Image);
+    }
+
+    [Fact]
+    public void ATable_IsARunOfCells_AlignedByColumn()
+    {
+        var doc = RichMarkdown.Parse("| Name | Days |\n| :-- | --: |\n| **Ana** | 2 |\n| Bo<br>and Cy | 3 |\n| Di |");
+        Assert.Equal(
+            "cell[0,0] \"Name\" | cell[0,1]@End \"Days\" | cell[1,0] \"Ana\" {0+3:Bold} | cell[1,1]@End \"2\""
+            + " | cell[2,0] \"Bo\nand Cy\" | cell[2,1]@End \"3\" | cell[3,0] \"Di\" | cell[3,1]@End \"\"",
+            doc.ToString());
+        Assert.Equal(
+            "| Name | Days |\n| --- | ---: |\n| **Ana** | 2 |\n| Bo<br>and Cy | 3 |\n| Di |  |",
+            RichMarkdown.Write(doc));
+    }
+
+    [Fact]
+    public void ARowWiderThanItsHeader_KeepsTheTableRaw()
+    {
+        const string md = "| a | b |\n|---|---|\n| 1 | 2 | 3 |";
+        var raw = Assert.Single(RichMarkdown.Parse(md).Blocks);
+        Assert.Equal(BlockKind.Raw, raw.Kind);
+        Assert.Equal(md, raw.Text);
+    }
+
+    [Fact]
+    public void APipeInACell_IsEscaped_InCodeToo()
+    {
+        var doc = new RichDocument([
+            RichBlock.Cell(0, 0, "a|b"), RichBlock.Cell(0, 1, "c|d", new RichSpan(0, 3, new RichMarks(InlineStyle.Code))),
+        ]);
+        string md = RichMarkdown.Write(doc);
+        Assert.Equal("| a\\|b | `c\\|d` |\n| --- | --- |", md);
+        Assert.Equal(doc, RichMarkdown.Parse(md));
+    }
 
     [Theory]
     [MemberData(nameof(Documents))]
@@ -223,7 +276,10 @@ public class RichMarkdownTests(ITestOutputHelper output)
         var doc = Sample(name);
         string md = RichMarkdown.Write(doc);
         output.WriteLine(md);
-        Assert.Equal(doc.ToString(), RichMarkdown.Parse(md).ToString());
+        var back = RichMarkdown.Parse(md);
+        Assert.Equal(doc.ToString(), back.ToString());
+        // What ToString leaves out too: a picture's words, title, width and link.
+        Assert.Equal(doc, back);
     }
 
     /// <summary>
@@ -259,7 +315,7 @@ public class RichMarkdownTests(ITestOutputHelper output)
                 ok = RichMarkdown.Write(back) == RichMarkdown.Write(RichMarkdown.Parse(RichMarkdown.Write(back)));
             }
             else
-                ok = back.ToString() == doc.ToString();
+                ok = back.Equals(doc);
             if (ok) continue;
             if (++failures <= 5)
                 output.WriteLine($"--- #{n}\n{doc}\n--- markdown\n{md}\n--- read back\n{back}\n");
@@ -298,9 +354,12 @@ public class RichMarkdownTests(ITestOutputHelper output)
         int count = rng.Next(1, 5);
         for (int b = 0; b < count; b++)
         {
+            int kind = rng.Next(8);
+            if (kind == 6) { blocks.AddRange(RandomTable(rng)); continue; }
+            if (kind == 7) { blocks.Add(RandomPicture(rng)); continue; }
             string text = RandomText(rng);
             var spans = RandomSpans(rng, text);
-            var block = rng.Next(6) switch
+            var block = kind switch
             {
                 0 => RichBlock.Heading(rng.Next(1, 4), text.Replace('\n', ' '), spans),
                 1 => RichBlock.Paragraph(text, spans) with { Kind = BlockKind.BulletItem },
@@ -313,6 +372,29 @@ public class RichMarkdownTests(ITestOutputHelper output)
         }
         return new RichDocument(blocks.Count == 0 ? [RichBlock.Paragraph("x")] : blocks);
     }
+
+    // A table of random text — line breaks, pipes and backslashes among it — with each column
+    // aligned one way, as Markdown aligns them.
+    private static IEnumerable<RichBlock> RandomTable(Random rng)
+    {
+        int rows = rng.Next(1, 4), columns = rng.Next(1, 4);
+        var aligns = Enumerable.Range(0, columns).Select(_ => (BlockAlign)rng.Next(3)).ToArray();
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < columns; c++)
+            {
+                string text = rng.Next(5) == 0 ? "" : RandomText(rng);
+                yield return RichBlock.Cell(r, c, text, RandomSpans(rng, text)) with { Align = aligns[c] };
+            }
+    }
+
+    private static readonly string[] Sources = ["a.png", "img/b c.png", "x(1).png", "https://x.org/p?q=1&r=2", "<odd>.png"];
+
+    private static RichBlock RandomPicture(Random rng) => RichBlock.Picture(new RichImage(
+        Sources[rng.Next(Sources.Length)],
+        rng.Next(3) == 0 ? "" : RandomText(rng),
+        rng.Next(3) == 0 ? RandomText(rng).Replace('\n', ' ') : null,
+        rng.Next(3) == 0 ? 120 : null,
+        rng.Next(3) == 0 ? "https://x.org/l?" + rng.Next(3) : null));
 
     private static string RandomText(Random rng)
     {

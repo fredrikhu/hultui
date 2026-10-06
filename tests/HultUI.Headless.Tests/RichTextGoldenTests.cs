@@ -97,4 +97,64 @@ public sealed class RichTextGoldenTests
         session.PumpFrames(3);
         GoldenImage.Match(session.Window, "richtext-selection");
     }
+
+    // Stage 9: a table — header tint, grid, a column aligned to the end, a cell on two lines,
+    // a selection across cells — then a picture drawn from the resolver, one still loading and
+    // one with nothing to show, the first selected.
+    [Fact]
+    public void TablesAndPictures()
+    {
+        using var session = HeadlessSession.Create(480, 520, options: HeadlessOptions.Golden());
+        session.Application.Theme = Theme.Light;
+        var picture = Checkers(160, 80);
+        var loading = new Loading();
+        var doc = new RichDocument(
+        [
+            RichBlock.Cell(0, 0, "Owner"), RichBlock.Cell(0, 1, "Task"), RichBlock.Cell(0, 2, "Days") with { Align = BlockAlign.End },
+            RichBlock.Cell(1, 0, "Ana"), RichBlock.Cell(1, 1, "Pictures as blocks"), RichBlock.Cell(1, 2, "2") with { Align = BlockAlign.End },
+            RichBlock.Cell(2, 0, "Bo"), RichBlock.Cell(2, 1, "Tables,\nwith Tab between cells", S(0, 6, new(InlineStyle.Bold))),
+            RichBlock.Cell(2, 2, "13") with { Align = BlockAlign.End },
+            RichBlock.Picture(new RichImage("checkers")),
+            RichBlock.Picture(new RichImage("late.png", "A picture on its way")),
+            RichBlock.Picture(new RichImage("docs/missing.png")),
+        ]);
+        var editor = RichTextEditor.New(doc).Width(440).Height(480)
+            .Images(src => src switch { "checkers" => picture, "late.png" => loading, _ => null });
+        session.Window.SetRoot(Box.New().Width(480).Height(520).Padding(new Thickness(20)).Children(editor));
+        session.PumpFrame();
+        session.Window.Click(editor);
+        editor.State.Select(new RichPosition(1, 2), new RichPosition(4, 5));
+        session.PumpFrames(3);
+        GoldenImage.Match(session.Window, "richtext-table");
+
+        editor.State.Select(RichSelection.Caret(9, 0));
+        session.PumpFrames(3);
+        GoldenImage.Match(session.Window, "richtext-picture-selected");
+    }
+
+    // A checkerboard of two blues in 20-pixel squares: a picture whose scaling and placement
+    // show at a glance.
+    private static Rendering.Skia.SkiaImageSource Checkers(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                bool dark = ((x / 20) + (y / 20)) % 2 == 0;
+                int at = (y * width + x) * 4;
+                pixels[at] = dark ? (byte)30 : (byte)140;
+                pixels[at + 1] = dark ? (byte)64 : (byte)180;
+                pixels[at + 2] = dark ? (byte)175 : (byte)240;
+                pixels[at + 3] = 255;
+            }
+        return Rendering.Skia.SkiaImageSource.FromPixels(pixels, width, height, width * 4, Core.Rendering.PixelFormat.Rgba8888);
+    }
+
+    // A source the resolver has started on and not finished.
+    private sealed class Loading : Core.Rendering.IImageSource
+    {
+        public Size IntrinsicSize => default;
+        public bool IsLoaded => false;
+        public string? AlternateText => null;
+    }
 }

@@ -47,6 +47,21 @@ public static class RichClipboard
                 if (b.Align != BlockAlign.Start) w.WriteString("align", b.Align.ToString());
                 if (b.Checked) w.WriteBoolean("checked", true);
                 if (b.Info is { } info) w.WriteString("info", info);
+                if (b.IsTableCell)
+                {
+                    w.WriteNumber("row", b.Row);
+                    w.WriteNumber("column", b.Column);
+                }
+                if (b.Image is { } image)
+                {
+                    w.WriteStartObject("image");
+                    w.WriteString("source", image.Source);
+                    if (image.Alt.Length > 0) w.WriteString("alt", image.Alt);
+                    if (image.Title is { } title) w.WriteString("title", title);
+                    if (image.Width is { } width) w.WriteNumber("width", width);
+                    if (image.Link is { } href) w.WriteString("link", href);
+                    w.WriteEndObject();
+                }
                 if (b.Spans.Length > 0)
                 {
                     w.WriteStartArray("spans");
@@ -109,8 +124,13 @@ public static class RichClipboard
                     Align = b.TryGetProperty("align", out var al) && Enum.TryParse<BlockAlign>(al.GetString(), out var a) ? a : BlockAlign.Start,
                     Checked = b.TryGetProperty("checked", out var ch) && ch.GetBoolean(),
                     Info = b.TryGetProperty("info", out var inf) ? inf.GetString() : null,
+                    Row = b.TryGetProperty("row", out var row) ? Math.Max(0, row.GetInt32()) : 0,
+                    Column = b.TryGetProperty("column", out var col) ? Math.Max(0, col.GetInt32()) : 0,
+                    Image = b.TryGetProperty("image", out var img) ? ReadImage(img) : null,
                 };
-                result.Add(block.WithContent(kind == BlockKind.Rule ? "" : text, spans));
+                // A picture without one to show is nothing at all.
+                if (kind == BlockKind.Image && block.Image is null) continue;
+                result.Add(block.WithContent(block.IsVoid ? "" : text, spans));
             }
             return result.Count == 0 ? null : new RichFragment(result.ToImmutable());
         }
@@ -120,6 +140,15 @@ public static class RichClipboard
             return null;
         }
     }
+
+    private static RichImage? ReadImage(JsonElement e) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty("source", out var source) && source.GetString() is { } src
+            ? new RichImage(src,
+                e.TryGetProperty("alt", out var alt) ? alt.GetString() ?? "" : "",
+                e.TryGetProperty("title", out var title) ? title.GetString() : null,
+                e.TryGetProperty("width", out var width) ? width.GetSingle() : null,
+                e.TryGetProperty("link", out var link) ? link.GetString() : null)
+            : null;
 
     internal static string Hex(Color c) =>
         c.A == 255 ? $"#{c.R:X2}{c.G:X2}{c.B:X2}" : $"#{c.R:X2}{c.G:X2}{c.B:X2}{c.A:X2}";
@@ -136,9 +165,35 @@ public static class RichHtml
         var sb = new StringBuilder();
         // The lists open around the current block, innermost last: their kind and depth.
         var open = new Stack<(string Tag, int Depth)>();
+        bool inTable = false;
 
-        foreach (var b in blocks)
+        for (int i = 0; i < blocks.Count; i++)
         {
+            var b = blocks[i];
+            if (b.IsTableCell)
+            {
+                while (open.Count > 0) sb.Append("</").Append(open.Pop().Tag).Append('>');
+                bool starts = !inTable || RichTable.StartsTable(blocks, i);
+                if (starts)
+                {
+                    if (inTable) sb.Append("</tr></table>");
+                    sb.Append("<table><tr>");
+                    inTable = true;
+                }
+                else if (b.Column == 0 || b.Row != blocks[i - 1].Row)
+                    sb.Append("</tr><tr>");
+                string cell = b.Row == 0 ? "th" : "td";
+                sb.Append('<').Append(cell).Append(AlignAttribute(b.Align)).Append('>');
+                Inline(sb, b);
+                sb.Append("</").Append(cell).Append('>');
+                continue;
+            }
+            if (inTable)
+            {
+                sb.Append("</tr></table>");
+                inTable = false;
+            }
+
             if (b.IsListItem)
             {
                 string tag = b.Kind == BlockKind.NumberedItem ? "ol" : "ul";
@@ -161,14 +216,23 @@ public static class RichHtml
             }
 
             while (open.Count > 0) sb.Append("</").Append(open.Pop().Tag).Append('>');
-            string align = b.Align switch
-            {
-                BlockAlign.Center => " style=\"text-align:center\"",
-                BlockAlign.End => " style=\"text-align:right\"",
-                _ => "",
-            };
+            string align = AlignAttribute(b.Align);
             switch (b.Kind)
             {
+                case BlockKind.Image when b.Image is { } image:
+                {
+                    sb.Append("<p").Append(align).Append('>');
+                    if (image.Link is { } href) sb.Append("<a href=\"").Append(WebUtility.HtmlEncode(href)).Append("\">");
+                    sb.Append("<img src=\"").Append(WebUtility.HtmlEncode(image.Source))
+                        .Append("\" alt=\"").Append(WebUtility.HtmlEncode(image.Alt)).Append('"');
+                    if (image.Title is { } title) sb.Append(" title=\"").Append(WebUtility.HtmlEncode(title)).Append('"');
+                    if (image.Width is { } width)
+                        sb.Append(" width=\"").Append(width.ToString("0.##", CultureInfo.InvariantCulture)).Append('"');
+                    sb.Append('>');
+                    if (image.Link is not null) sb.Append("</a>");
+                    sb.Append("</p>");
+                    break;
+                }
                 case BlockKind.Heading:
                     sb.Append("<h").Append(b.HeadingLevel).Append(align).Append('>');
                     Inline(sb, b);
@@ -193,8 +257,16 @@ public static class RichHtml
             }
         }
         while (open.Count > 0) sb.Append("</").Append(open.Pop().Tag).Append('>');
+        if (inTable) sb.Append("</tr></table>");
         return sb.ToString();
     }
+
+    private static string AlignAttribute(BlockAlign align) => align switch
+    {
+        BlockAlign.Center => " style=\"text-align:center\"",
+        BlockAlign.End => " style=\"text-align:right\"",
+        _ => "",
+    };
 
     private static void Inline(StringBuilder sb, RichBlock block)
     {

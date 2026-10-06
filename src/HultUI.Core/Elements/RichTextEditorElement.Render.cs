@@ -55,13 +55,21 @@ public partial class RichTextEditorElement
 
         int first = BlockAt(_scrollY);
         if (first > 0 && _blocks[first].Top > _scrollY) first--;
+        // A row of a table is drawn from its first cell; BlockAt answers with its last.
+        if (_blocks[first].Table is { } firstTable) first = firstTable.Range.IndexOf(_blocks[first].CellRow, 0);
         float bottom = _scrollY + content.Height;
 
         var selection = _state.Selection;
+        TableLayout? drawnTable = null;
         for (int i = first; i < _blocks.Length; i++)
         {
             var bl = _blocks[i];
             if (bl.Top - bl.SpaceAbove > bottom) break;
+            if (bl.Table is { } table && !ReferenceEquals(table, drawnTable))
+            {
+                DrawTable(ctx, table, originX, originY);
+                drawnTable = table;
+            }
             DrawChrome(ctx, i, bl, originX, originY, content.Width);
             if (!selection.IsCollapsed) DrawSelection(ctx, i, bl, selection, originX, originY, content.Width);
             if (bl.Paragraph is { } para)
@@ -120,7 +128,53 @@ public partial class RichTextEditorElement
             case BlockKind.BulletItem or BlockKind.NumberedItem or BlockKind.TaskItem:
                 DrawMarker(ctx, bl, ox + indent, top);
                 break;
+
+            case BlockKind.Image:
+                DrawPicture(ctx, bl, ox, top);
+                break;
         }
+    }
+
+    // ── Pictures and tables ──
+
+    private void DrawPicture(IRenderContext ctx, BlockLayout bl, float ox, float top)
+    {
+        var r = new Rect(ox + bl.PictureRect.X, top + bl.PictureRect.Y, bl.PictureRect.Width, bl.PictureRect.Height);
+        if (bl.Picture is { IsLoaded: true } source && bl.PictureLoaded)
+        {
+            ctx.DrawImage(source, r, ImageFit.Fill);
+            return;
+        }
+
+        // Not (yet) a picture: a line naming it.
+        ctx.DrawRoundedRect(r, new CornerRadius(_rt.CodeBlockCornerRadius), _codeBackground, Color.Transparent, Thickness.Zero);
+        var image = bl.Block.Image;
+        string name = image is null ? "" : image.Alt.Length > 0 ? image.Alt : NameOf(image.Source);
+        string label = bl.Picture is null ? name : name + " — loading…";
+        var style = bl.Style with { TextColor = _rawText, TextAlign = TextAlign.Start, Decoration = TextDecoration.None };
+        float h = ctx.MeasureText(label.Length > 0 ? label : " ", style).Height;
+        float pad = _rt.CodeBlockPadding.Left;
+        ctx.DrawText(label, new Rect(r.X + pad, r.Y + (r.Height - h) / 2, Math.Max(0, r.Width - 2 * pad), h), style,
+            TextOverflow.Ellipsis, 1);
+    }
+
+    // The last part of a path or address: what a picture with no words is called.
+    private static string NameOf(string source)
+    {
+        int slash = source.TrimEnd('/', '\\').LastIndexOfAny(['/', '\\']);
+        return slash >= 0 ? source[(slash + 1)..].TrimEnd('/', '\\') : source;
+    }
+
+    // The header row's tint inside the grid, then the grid's lines over the whole table.
+    private void DrawTable(IRenderContext ctx, TableLayout t, float ox, float oy)
+    {
+        float top = oy + t.Top, b = t.Border;
+        float left = ox + t.ColumnX[0], width = t.ColumnX[^1] + b - t.ColumnX[0];
+        ctx.DrawRect(new Rect(left + b, top + b, Math.Max(0, width - 2 * b), Math.Max(0, t.RowY[1] - b)), _tableHeader);
+        foreach (float y in t.RowY)
+            ctx.DrawRect(new Rect(left, top + y, width, b), _tableBorder);
+        foreach (float x in t.ColumnX)
+            ctx.DrawRect(new Rect(ox + x, top, b, t.Height), _tableBorder);
     }
 
     // A list item's marker in the column before its text, centred on the first line.
@@ -206,9 +260,15 @@ public partial class RichTextEditorElement
 
         if (bl.Paragraph is not { } para)
         {
-            // A rule is selected whole, when the selection starts at or before it and goes on past.
+            // A rule or a picture is selected whole, when the selection starts at or before it and
+            // goes on past.
             if (s <= new RichPosition(index, 0) && e.Block > index)
-                ctx.DrawRect(new Rect(ox + bl.TextX, oy + bl.Top, Math.Max(0, width - bl.TextX), bl.Height), SelectionColor);
+            {
+                var r = bl.Block.Kind == BlockKind.Image
+                    ? new Rect(ox + bl.PictureRect.X, oy + bl.Top, bl.PictureRect.Width, bl.Height)
+                    : new Rect(ox + bl.TextX, oy + bl.Top, Math.Max(0, width - bl.TextX), bl.Height);
+                ctx.DrawRect(r, SelectionColor);
+            }
             return;
         }
 
@@ -228,6 +288,18 @@ public partial class RichTextEditorElement
     private void DrawCaret(IRenderContext ctx, float ox, float oy)
     {
         var focus = _state.Selection.Focus;
+        if (focus.Block < _blocks.Length && _blocks[focus.Block] is { Block.Kind: BlockKind.Image } picture)
+        {
+            // A caret on a picture is the picture selected: a ring round it, not a bar.
+            if (_state.Selection.IsCollapsed)
+            {
+                float ring = _rt.ImageRingWidth;
+                var p = picture.PictureRect;
+                ctx.DrawRoundedRect(new Rect(ox + p.X - ring, oy + picture.Top - ring, p.Width + 2 * ring, p.Height + 2 * ring),
+                    new CornerRadius(ring + 1), Color.Transparent, _ring, new Thickness(ring));
+            }
+            return;
+        }
         var rect = CaretRect(focus, _upstream);
         float x = ox + rect.X, y = oy + rect.Y, h = rect.Height;
 

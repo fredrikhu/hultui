@@ -28,10 +28,15 @@ public enum RichTextFeatures : uint
     Alignment = 1 << 16,
     /// <summary>Typing <c># </c>, <c>- </c>, <c>**bold**</c> and the like turns into formatting.</summary>
     MarkdownShortcuts = 1 << 17,
+    /// <summary>Pictures on lines of their own (<see cref="BlockKind.Image"/>).</summary>
+    Images = 1 << 18,
+    /// <summary>Tables (<see cref="BlockKind.TableCell"/>), with their columns' alignment.</summary>
+    Tables = 1 << 19,
 
-    All = (1u << 18) - 1,
+    All = (1u << 20) - 1,
 
-    /// <summary>What Markdown can say: no underline, colour, highlight, size, face or alignment.</summary>
+    /// <summary>What Markdown can say: no underline, colour, highlight, size, face or alignment
+    /// — except a table column's, which GFM has.</summary>
     Markdown = All & ~(Underline | Color | Highlight | Size | Family | Alignment),
 }
 
@@ -60,6 +65,8 @@ public static class RichTextFeaturesExtensions
         BlockKind.Quote => RichTextFeatures.Quotes,
         BlockKind.CodeBlock => RichTextFeatures.CodeBlocks,
         BlockKind.Rule => RichTextFeatures.Rules,
+        BlockKind.Image => RichTextFeatures.Images,
+        BlockKind.TableCell => RichTextFeatures.Tables,
         _ => RichTextFeatures.None,
     };
 
@@ -79,8 +86,8 @@ public static class RichTextFeaturesExtensions
     }
 
     /// <summary><paramref name="block"/> made allowable: a kind it does not allow becomes a
-    /// paragraph (a rule disappears into an empty one), and its marks lose what it does not
-    /// allow.</summary>
+    /// paragraph (a rule or a picture disappears into an empty one, a cell keeps its text), and
+    /// its marks lose what it does not allow.</summary>
     public static RichBlock Restrict(this RichTextFeatures features, RichBlock block)
     {
         var b = block;
@@ -89,9 +96,10 @@ public static class RichTextFeaturesExtensions
             {
                 Kind = b.Kind == BlockKind.TaskItem && features.Allows(RichTextFeatures.Lists)
                     ? BlockKind.BulletItem : BlockKind.Paragraph,
-                HeadingLevel = 0, Checked = false, Info = null,
+                HeadingLevel = 0, Checked = false, Info = null, Image = null, Row = 0, Column = 0,
             };
-        if (!features.Allows(RichTextFeatures.Alignment) && b.Align != BlockAlign.Start)
+        // A cell's alignment is its column's, which tables have whether or not blocks do.
+        if (!features.Allows(b.IsTableCell ? RichTextFeatures.Tables : RichTextFeatures.Alignment) && b.Align != BlockAlign.Start)
             b = b with { Align = BlockAlign.Start };
         if (b.Spans.Length > 0)
         {

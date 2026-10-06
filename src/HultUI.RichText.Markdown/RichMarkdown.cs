@@ -7,11 +7,14 @@ namespace HultUI.RichText.Markdown;
 /// CommonMark, plus the strikethrough and task lists GitLab and GitHub add.
 /// </summary>
 /// <remarks>
-/// <para><b>Reading</b> keeps what the document cannot show: a table, a picture, HTML, a quote
-/// holding a list, a link reference definition — each becomes a <see cref="BlockKind.Raw"/>
-/// block holding its source, written back exactly. A line break in a paragraph's source reads
-/// as a space, as it renders; a hard break (a backslash or two spaces at the end of a line) is a
-/// line break. A bare address stays text; <c>&lt;https://…&gt;</c> is a link.</para>
+/// <para><b>Reading</b> keeps what the document cannot show: HTML, a picture inside a line of
+/// text, a table cell holding one, a quote holding a list, a link reference definition — each
+/// becomes a <see cref="BlockKind.Raw"/> block holding its source, written back exactly. A line
+/// break in a paragraph's source reads as a space, as it renders; a hard break (a backslash or two
+/// spaces at the end of a line) is a line break. A bare address stays text;
+/// <c>&lt;https://…&gt;</c> is a link. A picture alone on its line is a picture block —
+/// <c>![words](address "title")</c>, inside a link or not, or a lone HTML <c>&lt;img&gt;</c> with a
+/// width — and a GFM table is a run of cells, <c>&lt;br&gt;</c> in a cell a line break.</para>
 /// <para><b>Writing</b> is canonical, so a document read and written comes back in one
 /// spelling: <c>-</c> bullets, numbered items counted from 1, fenced code, <c>**</c> and
 /// <c>*</c>, <c>\</c> for a line break. Reading that back gives the same document. What

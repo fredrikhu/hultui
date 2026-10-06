@@ -6,7 +6,9 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 
 namespace HultUI.Samples.Fluent;
 
@@ -68,6 +70,25 @@ public sealed partial class FluentApp : Component
 
     /// <summary>Builds again: what the toolbar asks for when the caret moves.</summary>
     public void Refresh() => MarkDirty();
+
+    private readonly Dictionary<string, IImageSource?> _pictures = new(StringComparer.Ordinal);
+
+    /// <summary>The notes' pictures: <c>sample:</c> ones drawn here, anything else a file on
+    /// disk. Kept once made, failures too, so a missing file is not looked for every build.</summary>
+    public IImageSource? Picture(string source)
+    {
+        if (_pictures.TryGetValue(source, out var known)) return known;
+        IImageSource? made = null;
+        try
+        {
+            if (source == "sample:aurora") made = Pages.Aurora(560, 180);
+            else if (File.Exists(source)) made = SkiaImageSource.FromFile(source);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+        return _pictures[source] = made;
+    }
 
     private readonly MenuBar _menus;
 

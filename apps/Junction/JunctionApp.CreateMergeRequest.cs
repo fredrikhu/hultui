@@ -340,6 +340,7 @@ public partial class JunctionApp
         // Title + description.
         col.AddChild(CreateMrField("Title", CreateMrInput(f.Title, "What this change does", v => { f.Title = v; f.TitleTouched = true; MarkDirty(); }, "create-mr-title")));
         var toolbar = CreateMrToolbar();
+        var mdContext = MdContextFor(f.Path);
         var desc = RichTextEditor.New(f.Description)
             .Features(RichMarkdown.Features)
             .PlaceholderText("Pre-filled from the commits. Closes #… closes the issue on merge.")
@@ -347,6 +348,9 @@ public partial class JunctionApp
             .OnSelectionChanged(MarkDirty)
             .OnLinkRequested(toolbar.OpenLinkEditor)
             .OnLinkActivated(OpenUrl)
+            // Pictures load as the Markdown view loads them: uploads through the account, the
+            // rest plainly, one cache for both. One arriving rebuilds, and the editor asks again.
+            .Images(url => MdPictureFor(ResolveMarkdownUrl(url, mdContext.Remote), mdContext).Source)
             .AutoHeight(96, 320)
             .Style(Ui.Field(verticalPadding: 8f))
             .TextColor(Nocturne.Text);

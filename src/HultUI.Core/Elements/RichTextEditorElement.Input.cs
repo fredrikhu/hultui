@@ -19,6 +19,12 @@ public partial class RichTextEditorElement
     /// calls <see cref="RichEditState.SetLink"/> or <see cref="RichEditState.InsertLink"/>.</summary>
     public Action? LinkRequested { get; set; }
 
+    /// <summary>Runs when a person asks to add a picture, or to change the one selected
+    /// (<see cref="RichEditState.CurrentImage"/>): the toolbar's Picture button, the context menu.
+    /// An app shows its own picker and calls <see cref="RichEditState.InsertImage"/> or
+    /// <see cref="RichEditState.SetImage"/>. Without it, nothing offers pictures.</summary>
+    public Action? ImageRequested { get; set; }
+
     /// <summary>Whether a pointer drag is selecting.</summary>
     public bool IsDragging => _dragging;
 
@@ -135,6 +141,7 @@ public partial class RichTextEditorElement
 
     private bool TabEdits(bool shift)
     {
+        if (_state.CurrentTable is not null) return _state.NextCell(backward: shift);
         var block = _state.CurrentBlock;
         if (block.IsListItem || (_state.Selection.Start.Block != _state.Selection.End.Block && block.Indent > 0))
         {
@@ -250,6 +257,20 @@ public partial class RichTextEditorElement
 
     private void OnPointerDown(PointerDownEvent evt)
     {
+        if (evt.Button == PointerEvent.RightButton && EnsureFreshLayout())
+        {
+            // The context menu that opens next is about what is under the pointer — a table's
+            // rows, a picture — so a press outside the selection moves the caret there first.
+            var (p, up) = PositionAt(ToDocument(evt.Position).X, ToDocument(evt.Position).Y);
+            var s = _state.Selection;
+            if (s.IsCollapsed || p < s.Start || p > s.End)
+            {
+                _upstream = up;
+                _preferredX = -1;
+                _state.MoveTo(p, extend: false);
+            }
+            return;
+        }
         if (evt.Button != 0 || !EnsureFreshLayout()) return;
         var at = ToDocument(evt.Position);
 
@@ -329,6 +350,12 @@ public partial class RichTextEditorElement
     private string? LinkUnder(Point at, RichPosition pos)
     {
         var block = _state.Document[pos.Block];
+        if (block.Image is { Link: { } pictureLink })
+        {
+            var bl = _blocks[pos.Block];
+            var r = bl.PictureRect;
+            return new Rect(r.X, bl.Top, r.Width, r.Height).Contains(at) ? pictureLink : null;
+        }
         if (block.Text.Length == 0) return null;
         int offset = at.X >= CaretRect(pos, false).X ? pos.Offset : pos.Offset - 1;
         if (offset < 0 || offset >= block.Text.Length) return null;
@@ -411,6 +438,37 @@ public partial class RichTextEditorElement
             items.Add(new ContextMenuItem { Label = "Open link", Action = () => LinkActivated?.Invoke(l.Target) });
             if (!_readOnly && _state.Features.Allows(RichTextFeatures.Links))
                 items.Add(new ContextMenuItem { Label = "Remove link", Action = () => _state.SetLink(null) });
+            items.Add(ContextMenuItem.Separator());
+        }
+
+        if (!_readOnly && _state.CurrentTable is not null)
+        {
+            bool shape = _state.Features.Allows(RichTextFeatures.Tables);
+            items.Add(new ContextMenuItem { Label = "Insert row above", IsDisabled = !shape, Action = () => _state.InsertRow(below: false) });
+            items.Add(new ContextMenuItem { Label = "Insert row below", IsDisabled = !shape, Action = () => _state.InsertRow() });
+            items.Add(new ContextMenuItem { Label = "Insert column left", IsDisabled = !shape, Action = () => _state.InsertColumn(after: false) });
+            items.Add(new ContextMenuItem { Label = "Insert column right", IsDisabled = !shape, Action = () => _state.InsertColumn() });
+            if (shape)
+                items.Add(new ContextMenuItem
+                {
+                    Label = "Align column",
+                    Children =
+                    [
+                        new ContextMenuItem { Label = "Left", IsChecked = _state.CurrentBlock.Align == BlockAlign.Start, Action = () => _state.SetAlign(BlockAlign.Start) },
+                        new ContextMenuItem { Label = "Centre", IsChecked = _state.CurrentBlock.Align == BlockAlign.Center, Action = () => _state.SetAlign(BlockAlign.Center) },
+                        new ContextMenuItem { Label = "Right", IsChecked = _state.CurrentBlock.Align == BlockAlign.End, Action = () => _state.SetAlign(BlockAlign.End) },
+                    ],
+                });
+            items.Add(ContextMenuItem.Separator());
+            items.Add(new ContextMenuItem { Label = "Delete row", Action = () => _state.DeleteRow() });
+            items.Add(new ContextMenuItem { Label = "Delete column", Action = () => _state.DeleteColumn() });
+            items.Add(new ContextMenuItem { Label = "Delete table", IsDanger = true, Action = () => _state.DeleteTable() });
+            items.Add(ContextMenuItem.Separator());
+        }
+
+        if (!_readOnly && _state.CurrentImage is not null && ImageRequested is not null)
+        {
+            items.Add(new ContextMenuItem { Label = "Change picture…", Action = () => ImageRequested?.Invoke() });
             items.Add(ContextMenuItem.Separator());
         }
 

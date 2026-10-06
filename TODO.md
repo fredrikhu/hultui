@@ -1,6 +1,18 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Rich text editor, stage 9: pictures and tables** (docs/plans/16-rich-text-editor.md) — a picture
+  is a void block (`BlockKind.Image`, `RichImage(Source, Alt, Title, Width, Link)`) whose pixels
+  come from the app (`.Images(resolve)`, asked again every rebuild); a table is a run of
+  `BlockKind.TableCell` blocks with `Row`/`Column` (`RichTable`, `RichTableRange`), so positions,
+  marks, undo and the clipboard work in cells unchanged. Cells never join; a selection across
+  them empties them; Enter goes down and out of the last row, Tab goes cell to cell and adds a
+  row; Up/Down move by row; context menu rows/columns/alignment/delete; right-click moves the
+  caret first. Toolbar Table and Picture buttons (built-in picture editor). Markdown: GFM tables
+  (`<br>` line breaks, `\|` everywhere incl. code), pictures as `![…](…)` or `<img width>`; Markdig
+  quirks handled (wide rows → raw; `\|` in cell code). Fluent notes hold a table and a drawn
+  picture; Junction's description loads pictures through its Markdown loader. Tests: 36 engine,
+  13 headless + 2 goldens, 9 Markdown (random round trip now with tables and pictures).
 - **Junction: the merge request description is rich text** — the Create MR card's description is a
   `RichTextEditor` on `RichMarkdown.Features` with a compact toolbar (B, I, S, code, link, H2, lists,
   tasks, quote, code block); the commit pre-fill is read from Markdown and GitLab is sent
@@ -816,8 +828,28 @@
 
 ## Up Next (in order)
 - **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4, 6 and 7 (Fluent page, Junction
-  Create MR description) done. Next: the accessible text source (stage 5), then measuring large
-  documents (stage 8); candidates for more adoption: Junction's review notes and replies.
+  Create MR description) and 9 (pictures and tables) done. Next: measuring large documents
+  (stage 8); candidates for more adoption: Junction's review notes and replies. Left from stage 9:
+  a Table button in Junction (needs Phosphor's `table` glyph in the bundle), pasting picture data
+  (an upload hook), dragging to resize pictures and columns.
+- **Rich text editor: accessible text source** (plan 16, stage 5) — a screen reader gets the
+  document as one value today, so it cannot move through it by word or line. Implement
+  `IAccessibleTextSource` (`AccessibleText`, as `TextAreaElement` does) over the document's
+  global-offset plain text: caret and selection as global offsets, line ranges from the laid-out
+  paragraphs, text-changed and caret-moved events. Then: an assistive tool setting the value
+  (UIA `ValuePattern.SetValue`, AT-SPI `EditableText`) loads it as plain paragraphs; formatting
+  toggles (Ctrl+B…) are announced; a picture reads as its alt text and a table cell by cell.
+  Formatting attributes on text ranges (UIA `FontWeight`, `IsItalic`) stay a follow-up.
+- **Rich text editor: export as HTML and RTF** (plan 16; export only, no import) — a whole
+  `RichDocument` written out as a file another program opens. HTML: grow `RichHtml.Write` (today
+  the clipboard's fragment writer) into a standalone document — `<!doctype>`, charset, the theme's
+  heading sizes and code face as a small stylesheet, nested lists, tables with `<thead>`,
+  `<img>` with width and alt, links. RTF: a new writer — font and colour tables from the marks,
+  `\b \i \ul \strike`, `\fs` for size, `\cf`/`\highlight` for colours, `\par` blocks with list
+  numbering (`\pn` or `\ls`), `\trowd` tables, pictures embedded as `\pict` PNG when the app's
+  resolver can give the bytes, else their alt text. Both sit in Core (no dependency needed) or a
+  `HultUI.RichText.Export` package; the clipboard can then offer `text/rtf` too, so Word and
+  WordPad paste formatting. Tests: golden output strings, and an HTML parse check.
 - Windows UIA bridge on-device verification — run a sample, open Accessibility Insights / `Inspect.exe`, confirm tree, name, role, bounding-rect, and pattern actions round-trip.
 - **AT-SPI `Action.DoAction`** — an AT can now activate controls. The neutral
   invoke/toggle/select logic was lifted out of the Windows-only `Sdl3UiaHostBridge`

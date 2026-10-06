@@ -61,9 +61,30 @@ public sealed class RichTextTheme : IThemeExtension<RichTextTheme>
     /// <summary>The height a rule takes, with its line through the middle.</summary>
     public float RuleHeight { get; init; } = 17f;
 
-    /// <summary>Source the editor keeps verbatim (a table, a picture). Null takes the palette's
-    /// secondary colour.</summary>
+    /// <summary>Source the editor keeps verbatim (HTML, a picture inside a line). Null takes the
+    /// palette's secondary colour.</summary>
     public Color? RawTextColor { get; init; }
+
+    /// <summary>The tallest a picture is drawn; a taller one is scaled down, narrowing with it.</summary>
+    public float ImageMaxHeight { get; init; } = 480f;
+    /// <summary>Around a selected picture.</summary>
+    public float ImageRingWidth { get; init; } = 2f;
+    /// <summary>Null takes the palette's primary colour: a field's own focus border can be a
+    /// grey that does not show against a picture.</summary>
+    public Color? ImageRingColor { get; init; }
+
+    /// <summary>Inside a table cell, around its text.</summary>
+    public Thickness TableCellPadding { get; init; } = new(5, 10, 5, 10);
+    /// <summary>The table's grid. Null takes a tint of the text colour.</summary>
+    public Color? TableBorderColor { get; init; }
+    public float TableBorderWidth { get; init; } = 1f;
+    /// <summary>Behind the header row. Null takes a faint tint of the text colour.</summary>
+    public Color? TableHeaderBackground { get; init; }
+    public FontWeight TableHeaderWeight { get; init; } = FontWeight.SemiBold;
+    /// <summary>The narrowest and widest a column's share of the width is weighted, from its
+    /// widest cell on one line: short columns stay legible, one long cell does not starve the rest.</summary>
+    public float TableColumnMinWeight { get; init; } = 48f;
+    public float TableColumnMaxWeight { get; init; } = 360f;
 
     public static RichTextTheme CreateDefault(Theme theme) => new();
 

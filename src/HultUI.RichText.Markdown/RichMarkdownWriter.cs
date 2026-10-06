@@ -23,15 +23,94 @@ internal static class RichMarkdownWriter
         var sb = new StringBuilder();
         var state = new ListState();
         RichBlock? previous = null;
-        foreach (var block in document.Blocks)
+        for (int i = 0; i < document.BlockCount; i++)
         {
+            var block = document[i];
             if (block.Kind == BlockKind.Paragraph && block.Text.Length == 0) continue;
             if (previous is not null) sb.Append(Separator(previous, block));
+            if (block.IsTableCell && document.TableAt(i) is { } table)
+            {
+                // A table ends any list.
+                Array.Clear(state.Counters);
+                state.Depth = -1;
+                WriteTable(sb, document, table);
+                previous = document[table.End - 1];
+                i = table.End - 1;
+                continue;
+            }
             WriteBlock(sb, block, state);
             previous = block;
         }
         return sb.ToString();
     }
+
+    // ── Tables ──
+
+    /// <summary>A GFM pipe table: the header row, the delimiter row with each column's
+    /// alignment, the rows. A row is one line of source, so a line break in a cell is
+    /// <c>&lt;br&gt;</c>, and every <c>|</c> in a cell is escaped — in code too, as GFM reads it.</summary>
+    private static void WriteTable(StringBuilder sb, RichDocument document, RichTableRange table)
+    {
+        for (int r = 0; r < table.Rows; r++)
+        {
+            if (r > 0) sb.Append('\n');
+            WriteRow(sb, c => Cell(document[table.IndexOf(r, c)]), table.Columns);
+            if (r == 0)
+            {
+                sb.Append('\n');
+                WriteRow(sb, c => document[table.IndexOf(0, c)].Align switch
+                {
+                    BlockAlign.Center => ":---:",
+                    BlockAlign.End => "---:",
+                    _ => "---",
+                }, table.Columns);
+            }
+        }
+    }
+
+    private static void WriteRow(StringBuilder sb, Func<int, string> cell, int columns)
+    {
+        sb.Append('|');
+        for (int c = 0; c < columns; c++)
+            sb.Append(' ').Append(cell(c)).Append(" |");
+    }
+
+    internal static string Cell(RichBlock cell)
+    {
+        string inline = Inline(cell.Text, cell.Spans, heading: false);
+        return inline.Replace("\\\n", "<br>").Replace("|", "\\|");
+    }
+
+    // ── Pictures ──
+
+    /// <summary>A picture as Markdown, <c>![words](address "title")</c>, inside a link if it is
+    /// one. A width has no Markdown, so a picture with one is an HTML <c>&lt;img&gt;</c>, which
+    /// GitLab and GitHub both draw at that width.</summary>
+    internal static string Picture(RichImage image)
+    {
+        if (image.Width is { } width)
+        {
+            var tag = new StringBuilder("<img src=\"").Append(Attribute(image.Source))
+                .Append("\" alt=\"").Append(Attribute(image.Alt)).Append('"');
+            if (image.Title is { } t) tag.Append(" title=\"").Append(Attribute(t)).Append('"');
+            tag.Append(" width=\"").Append(width.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).Append("\">");
+            // An <a> line of its own opens an HTML block; on one line with the picture, it would
+            // be inline HTML in a paragraph.
+            return image.Link is { } href ? $"<a href=\"{Attribute(href)}\">\n{tag}\n</a>" : tag.ToString();
+        }
+        var md = new StringBuilder("![").Append(PictureWords(image.Alt)).Append("](").Append(Destination(image.Source));
+        if (image.Title is { } title)
+            md.Append(" \"").Append(title.Replace("\\", "\\\\").Replace("\"", "\\\"")).Append('"');
+        md.Append(')');
+        return image.Link is { } link ? $"[{md}]({Destination(link)})" : md.ToString();
+    }
+
+    // A picture's words as plain text inside its brackets, escaped like any text.
+    private static string PictureWords(string alt) => Inline(alt, [], heading: false);
+
+    // An HTML block's first line must hold its whole opening tag: a line break in a value is a
+    // character reference.
+    private static string Attribute(string value) => System.Net.WebUtility.HtmlEncode(value).Replace("\n", "&#10;");
 
     // ── Blocks ──
 
@@ -122,6 +201,13 @@ internal static class RichMarkdownWriter
             case BlockKind.Rule:
                 sb.Append(Continuation(block, lists)).Append("---");
                 return;
+
+            case BlockKind.Image when block.Image is { } image:
+            {
+                string pad = Continuation(block, lists);
+                Lines(sb, Picture(image), pad, pad);
+                return;
+            }
 
             case BlockKind.Raw:
             {
@@ -584,7 +670,7 @@ internal static class RichMarkdownWriter
     {
         if (url.Length == 0) return "<>";
         if (url.Any(ch => ch is ' ' or '<' or '>'))
-            return "<" + url.Replace("<", "%3C").Replace(">", "%3E") + ">";
+            return "<" + url.Replace("\\", "\\\\").Replace("<", "\\<").Replace(">", "\\>") + ">";
         var sb = new StringBuilder(url.Length);
         foreach (char ch in url)
         {

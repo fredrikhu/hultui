@@ -10,9 +10,10 @@ using HultUI.Core.Styling;
 namespace HultUI.Core.Elements;
 
 /// <summary>
-/// A rich text editor: a <see cref="RichDocument"/> of paragraphs, headings, lists, quotes and
-/// code, edited in place (docs/plans/16-rich-text-editor.md). With <see cref="ReadOnly"/> it is the
-/// viewer — selectable, copyable, its links clickable.
+/// A rich text editor: a <see cref="RichDocument"/> of paragraphs, headings, lists, quotes, code,
+/// pictures and tables, edited in place (docs/plans/16-rich-text-editor.md). With
+/// <see cref="ReadOnly"/> it is the viewer — selectable, copyable, its links clickable. Pictures'
+/// pixels come from the app (<see cref="ImageResolver"/>).
 /// </summary>
 /// <remarks>
 /// <para>The editing rules live in <see cref="State"/>, which this element drives from the
@@ -245,6 +246,10 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         DocumentChanged = e.DocumentChanged;
         SelectionChanged = e.SelectionChanged;
         LinkActivated = e.LinkActivated;
+        LinkRequested = e.LinkRequested;
+        ImageRequested = e.ImageRequested;
+        // Set every build, changed or not: a picture that has arrived since is drawn now.
+        ImageResolver = e.ImageResolver;
         MiddleClickAutoScroll = e.MiddleClickAutoScroll;
         CursorWidth = e.CursorWidth;
         ScrollSpeed = e.ScrollSpeed;
