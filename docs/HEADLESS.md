@@ -208,6 +208,25 @@ using var image = window.CapturePixels();   // SKImage, layout size × scale
 
 Sessions support DPI testing: `HeadlessSession.Create(scale: 2f)` or `window.SetScale(1.5f)`.
 
+## Simulated Monitors
+
+A session has no desktop unless it is given one. `HeadlessOptions.Monitors` simulates monitors, so multi-monitor code — `Application.Monitors`, `Window.MoveToMonitor`, `Application.MonitorsChanged` — runs, and renders, on a machine with one screen:
+
+```csharp
+var desk = HeadlessMonitors.Row(taskBar: 48, (1920, 1080), (2560, 1440), (1440, 2560));
+using var session = HeadlessSession.Create(options: new HeadlessOptions { Monitors = desk });
+var images = session.CreateWindow("Images");
+images.Window.MoveToMonitor(session.Monitors[2], MonitorFit.Fullscreen);
+using var frame = images.CapturePixels();                    // 1440 × 2560: the portrait monitor
+
+session.SetMonitors(HeadlessMonitors.Row((1920, 1080)));      // unplug two
+session.PumpFrame();                                          // MonitorsChanged fires here
+```
+
+- **Placement is applied.** With monitors, a placement is fitted to the work areas and moves and resizes the surface; maximized fills the monitor's work area, full screen its bounds, and the window takes the monitor's `Scale`. Bounds are pixels, as on Windows. Without monitors, placement is only recorded, as before.
+- **Hot-plug like an OS.** `SetMonitors` moves windows off a monitor that went (onto the nearest remaining one), re-fills maximized and full-screen ones, and raises `MonitorsChanged` from the next `PumpFrame`'s event pump — not from inside `SetMonitors`.
+- `HeadlessMonitors.Row` stands monitors side by side, top edges aligned, the first primary (with the optional task bar); `HeadlessMonitors.Create` makes one anywhere, at any scale.
+
 **Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.
 
 ## Golden Images

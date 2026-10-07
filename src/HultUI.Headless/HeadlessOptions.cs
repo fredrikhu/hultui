@@ -32,6 +32,18 @@ public sealed class HeadlessOptions
     public bool PinnedText { get; set; }
 
     /// <summary>
+    /// Simulated monitors, for testing and screenshotting multi-monitor behaviour on a machine
+    /// with one screen (or none). With any, the session has a desktop:
+    /// <c>Application.Monitors</c> lists them, <c>Window.Placement</c> and
+    /// <c>Window.MoveToMonitor</c> move and resize the window's surface onto them, maximized
+    /// fills a monitor's work area and full screen its bounds, and
+    /// <see cref="HeadlessSession.SetMonitors"/> plugs and unplugs them. Bounds are in pixels,
+    /// as on Windows; <see cref="HeadlessMonitors"/> builds common desks. Without any (the
+    /// default), placement is only recorded, as before.
+    /// </summary>
+    public IReadOnlyList<Core.Platform.MonitorInfo>? Monitors { get; set; }
+
+    /// <summary>
     /// Recording enabled with cross-platform deterministic text measurement:
     /// the configuration for snapshot baselines committed to a repo that CI
     /// runs on a different OS.

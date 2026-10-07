@@ -69,6 +69,23 @@ public sealed class Application : IDisposable
     public IReadOnlyList<Window> Windows => _windows;
 
     /// <summary>
+    /// The desktop's monitors: bounds, work area, scale, orientation, which is primary. Empty
+    /// when the platform cannot say (a hosted control, a headless session given no monitors);
+    /// treat that as one screen. In no particular order — see
+    /// <see cref="MonitorInfo.InReadingOrder"/>. Place a window on one with
+    /// <see cref="Window.MoveToMonitor"/>.
+    /// </summary>
+    public IReadOnlyList<MonitorInfo> Monitors => (_platform as IMonitorSource)?.Monitors ?? [];
+
+    /// <summary>
+    /// Raised on the UI thread when a monitor is connected or disconnected, or one changes
+    /// position, resolution, orientation or scale. <see cref="Monitors"/> already holds the new
+    /// list. The OS has by then moved windows off a monitor that went; an app that put windows
+    /// on particular monitors re-arranges them here.
+    /// </summary>
+    public event Action? MonitorsChanged;
+
+    /// <summary>
     /// Schedules an action to run on the main (UI) thread during the next
     /// frame, and wakes the loop if it is parked between frames so that frame
     /// starts now. Use this to safely update component state from background
@@ -280,6 +297,7 @@ public sealed class Application : IDisposable
 
         _platform = platform ?? throw new ArgumentNullException(nameof(platform));
         _current = this;
+        if (_platform is IMonitorSource monitors) monitors.MonitorsChanged += () => MonitorsChanged?.Invoke();
         // Claim this thread before any window (and therefore any element) exists, so
         // the tree can never be built on one thread and driven from another.
         UIThread.Bind();

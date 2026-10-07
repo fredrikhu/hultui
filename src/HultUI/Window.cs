@@ -350,6 +350,45 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
     public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
 
+    /// <summary>
+    /// The monitor the window is on: the one its <see cref="Placement"/> overlaps most (for a
+    /// maximized or full-screen window, the one it fills). Null when the platform lists no
+    /// monitors (<see cref="Application.Monitors"/>) or cannot say where the window is.
+    /// </summary>
+    public MonitorInfo? Monitor
+    {
+        get
+        {
+            var monitors = Application.Monitors;
+            if (monitors.Count == 0 || Placement is not { IsUsable: true } p) return null;
+            return MonitorInfo.For(new Rect(p.X, p.Y, p.Width, p.Height), monitors);
+        }
+    }
+
+    /// <summary>
+    /// Puts the window on <paramref name="monitor"/>: maximized over its work area (the
+    /// default), full screen over all of it, or at its current size centred on it.
+    /// </summary>
+    /// <remarks>
+    /// <para>The window leaves full screen first, since a full-screen window belongs to the
+    /// monitor it covers, and its restored bounds land on the new monitor too, so
+    /// un-maximizing it later keeps it there. Called before <see cref="Application.Run"/>, the
+    /// window opens in place, like a <see cref="Placement"/> set then.</para>
+    /// <para>Built on <see cref="Placement"/>, so it inherits that property's platform rules:
+    /// Wayland takes the size and state but never a position, and a headless session moves the
+    /// window only when it was given monitors (<c>HeadlessOptions.Monitors</c>).</para>
+    /// </remarks>
+    public void MoveToMonitor(MonitorInfo monitor, MonitorFit fit = MonitorFit.Maximized)
+    {
+        ArgumentNullException.ThrowIfNull(monitor);
+        if (IsFullscreen) SetFullscreen(false);
+        var current = Placement;
+        int width = current is { IsUsable: true } c ? c.Width : (int)(LayoutWidth * DisplayScale);
+        int height = current is { IsUsable: true } d ? d.Height : (int)(LayoutHeight * DisplayScale);
+        Placement = monitor.Center(width, height, maximized: fit != MonitorFit.Centered);
+        if (fit == MonitorFit.Fullscreen) SetFullscreen(true);
+    }
+
     /// <summary>Current viewport width in density-independent (layout) units.</summary>
     public float LayoutWidth => PlatformWindow.LayoutWidth;
 

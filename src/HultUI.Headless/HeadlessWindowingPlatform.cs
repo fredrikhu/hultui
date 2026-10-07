@@ -7,12 +7,16 @@ namespace HultUI.Headless;
 /// <summary>
 /// The display-free windowing platform: creates <see cref="HeadlessPlatformWindow"/>s
 /// and supplies the session's virtual clock. There is no native event queue —
-/// input arrives only through explicit injection, so <see cref="PumpEvents"/> is
-/// a no-op that never requests quit.
+/// input arrives only through explicit injection, so <see cref="PumpEvents"/>
+/// never requests quit; the one thing it delivers is a change to the simulated
+/// monitors (<see cref="SetMonitors"/>), as a real platform delivers a hot-plug.
 /// </summary>
-internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
+internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource
 {
     private readonly HeadlessTimeProvider _time;
+    private readonly List<HeadlessPlatformWindow> _windows = [];
+    private IReadOnlyList<MonitorInfo> _monitors = [];
+    private bool _monitorsChangedPending;
 
     // One set of text services for every window, as on the real platforms: built with the
     // first window that needs it, given back when the session ends. Pinned windows measure in
@@ -29,23 +33,63 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
     public float NextWindowScale { get; set; } = 1f;
 
     /// <summary>Options applied to windows this platform creates.</summary>
-    public HeadlessOptions? Options { get; set; }
+    public HeadlessOptions? Options
+    {
+        get => _options;
+        set
+        {
+            _options = value;
+            _monitors = value?.Monitors is { Count: > 0 } m ? [.. m] : [];
+        }
+    }
+    private HeadlessOptions? _options;
 
     public TimeProvider TimeProvider => _time;
+
+    /// <inheritdoc/>
+    public IReadOnlyList<MonitorInfo> Monitors => _monitors;
+
+    /// <inheritdoc/>
+    public event Action? MonitorsChanged;
 
     public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
     {
         var text = Options?.PinnedText == true
             ? _pinnedText ??= PinnedFonts.CreateServices()
             : _text ??= new SkiaTextServices();
-        return new HeadlessPlatformWindow(title, width, height, NextWindowScale, style, text, Options);
+        var window = new HeadlessPlatformWindow(title, width, height, NextWindowScale, style, text, Options)
+        {
+            Desktop = () => _monitors,
+        };
+        _windows.RemoveAll(w => !w.IsOpen);
+        _windows.Add(window);
+        return window;
     }
 
-    /// <summary>Takes the queued wake, as a real platform's pump takes its wake event; never
-    /// requests quit.</summary>
+    /// <summary>
+    /// Replaces the simulated monitors: a hot-plug. Windows are first moved the way an OS moves
+    /// them — one whose monitor went is brought onto the nearest remaining one, a maximized or
+    /// full-screen one fills its (possibly resized) monitor again — and the change is announced
+    /// from the next <see cref="PumpEvents"/>, as a real display change is.
+    /// </summary>
+    public void SetMonitors(IReadOnlyList<MonitorInfo> monitors)
+    {
+        _monitors = [.. monitors];
+        foreach (var w in _windows)
+            if (w.IsOpen) w.OnDesktopChanged();
+        _monitorsChangedPending = true;
+    }
+
+    /// <summary>Takes the queued wake, as a real platform's pump takes its wake event, and
+    /// announces a pending change of the simulated monitors; never requests quit.</summary>
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
     {
         Volatile.Write(ref _wakePending, false);
+        if (_monitorsChangedPending)
+        {
+            _monitorsChangedPending = false;
+            MonitorsChanged?.Invoke();
+        }
         return true;
     }
 

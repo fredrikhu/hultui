@@ -109,6 +109,24 @@ public sealed class HeadlessSession : IDisposable
         return Wrap(window);
     }
 
+    /// <summary>The simulated monitors (<see cref="HeadlessOptions.Monitors"/>); empty when the
+    /// session has no desktop.</summary>
+    public IReadOnlyList<Core.Platform.MonitorInfo> Monitors => _platform.Monitors;
+
+    /// <summary>
+    /// Replaces the simulated monitors — plugs one in, unplugs one, rotates or re-sizes one.
+    /// Windows move as an OS moves them (off a monitor that went, onto the nearest remaining
+    /// one), and <c>Application.MonitorsChanged</c> is raised during the next
+    /// <see cref="PumpFrame()"/>, from the event pump, as a real display change is. An empty
+    /// list leaves the windows where they are and takes the desktop away.
+    /// </summary>
+    public void SetMonitors(IReadOnlyList<Core.Platform.MonitorInfo> monitors)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(monitors);
+        _platform.SetMonitors(monitors);
+    }
+
     private HeadlessWindow Wrap(Window window)
         => new(this, window, (HeadlessPlatformWindow)window.PlatformWindow);
 

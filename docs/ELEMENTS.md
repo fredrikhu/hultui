@@ -154,6 +154,13 @@ start, no context menu from that press), and hover catches up on the release.
 This is how `Slider` keeps following a drag that wanders off its track. The
 release still synthesizes a click when it lands on the captured element.
 
+**Positions inside a transformed subtree.** `e.Position` is in window coordinates;
+`e.LocalPosition` is relative to the current target's content box *in that element's own
+layout units*: the `Element.Transform` of every ancestor (and the element's own) is undone
+first, as hit testing does. So a view laid out at full size and drawn scaled down — a monitor
+preview, a live thumbnail — reads a drag at the size it was laid out. `HitTester.ToElementSpace(
+element, windowPoint)` does the same mapping for any point.
+
 Handlers are replaced by each rebuild's versions during reconciliation, so closures stay in sync with what the element displays. One rule: never capture the element variable itself — for hover/press/focus styling use the declarative `.OnHover`/`.OnPressed`/`.OnFocus` overrides (they survive rebuilds and restore the base look automatically), use `e.CurrentTarget` for other self-references (e.g. reading `.Layout`), and `Ref<T>` for cross-element reach. See "Event handlers follow the latest build" in REACTIVITY.md.
 
 ### Identity

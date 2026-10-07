@@ -11,7 +11,7 @@ namespace HultUI.Platform.SDL3;
 /// The real-display windowing platform: SDL3 windows with GL-backed Skia
 /// surfaces, driven by SDL's event queue.
 /// </summary>
-public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
+public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform, IMonitorSource
 {
     // The event type Wake pushes. SDL hands types out from a counter it never
     // rewinds, so this is registered once per process and shared by every
@@ -101,7 +101,16 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
             // (Action is contravariant), so no adapter is needed. A lambda wrapping it here was
             // a new closure and delegate on every pass of the loop, idle ones included: 88 B
             // (72 B on NativeAOT), 5.7 KB/s in an idle window and 3–4 MB/s while animating.
-            return SDL3Window.PollAllEvents(onWindowClose);
+            bool running = SDL3Window.PollAllEvents(onWindowClose);
+            if (SDL3Window.DisplaysChanged)
+            {
+                // A plug, unplug, rotation or scale change usually arrives as several events in one
+                // batch; one re-list and one notification covers them all.
+                SDL3Window.DisplaysChanged = false;
+                _monitors = null;
+                MonitorsChanged?.Invoke();
+            }
+            return running;
         }
         finally
         {
@@ -109,6 +118,18 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
             Interlocked.Exchange(ref _wakePending, 0);
         }
     }
+
+    private IReadOnlyList<MonitorInfo>? _monitors;
+
+    /// <inheritdoc/>
+    /// <remarks>Windows lists them through Win32 (<c>EnumDisplayMonitors</c>), in the physical
+    /// pixels <see cref="IPlatformWindow.Placement"/> uses there; elsewhere through SDL, in its
+    /// window coordinates. Cached until SDL reports a display change.</remarks>
+    public IReadOnlyList<MonitorInfo> Monitors =>
+        _monitors ??= OperatingSystem.IsWindows() ? WindowsPlacement.Monitors() : SDL3Window.SdlMonitors();
+
+    /// <inheritdoc/>
+    public event Action? MonitorsChanged;
 
     /// <summary>
     /// Idle-frame wait. A null event peeks without popping: whatever arrives stays

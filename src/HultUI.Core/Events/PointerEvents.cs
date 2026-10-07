@@ -8,13 +8,18 @@ public abstract class PointerEvent : ElementEvent
     /// <summary>Position in logical (CSS-like) coordinates relative to the window.</summary>
     public Point Position { get; init; }
 
-    /// <summary>Position relative to the current target element's content box.</summary>
+    /// <summary>
+    /// Position relative to the current target element's content box, in the element's own
+    /// layout units: inside a scaled or rotated subtree (<see cref="Element.Transform"/>) the
+    /// transforms are undone first (<see cref="HitTester.ToElementSpace"/>).
+    /// </summary>
     public Point LocalPosition
     {
         get
         {
             var box = CurrentTarget.Layout.AbsoluteContentBox;
-            return new(Position.X - box.X, Position.Y - box.Y);
+            var p = HitTester.ToElementSpace(CurrentTarget, Position);
+            return new(p.X - box.X, p.Y - box.Y);
         }
     }
 
@@ -85,13 +90,18 @@ public sealed class ScrollEvent : ElementEvent
 {
     public Point Position { get; init; }
 
-    /// <summary>Position relative to the current target element's content box.</summary>
+    /// <summary>
+    /// Position relative to the current target element's content box, in the element's own
+    /// layout units: inside a scaled or rotated subtree (<see cref="Element.Transform"/>) the
+    /// transforms are undone first (<see cref="HitTester.ToElementSpace"/>).
+    /// </summary>
     public Point LocalPosition
     {
         get
         {
             var box = CurrentTarget.Layout.AbsoluteContentBox;
-            return new(Position.X - box.X, Position.Y - box.Y);
+            var p = HitTester.ToElementSpace(CurrentTarget, Position);
+            return new(p.X - box.X, p.Y - box.Y);
         }
     }
 

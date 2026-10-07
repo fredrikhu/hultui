@@ -1,5 +1,6 @@
 using HultUI.Core.Events;
 using HultUI.Core.Platform;
+using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Headless.Recording;
@@ -157,32 +158,101 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
 
     public void Minimize() { }
 
-    public void Maximize() => IsMaximized = true;
+    public void Maximize()
+    {
+        IsMaximized = true;
+        ApplyDesktop();
+    }
 
-    public void Restore() => IsMaximized = false;
+    public void Restore()
+    {
+        IsMaximized = false;
+        ApplyDesktop();
+    }
 
-    public void SetFullscreen(bool fullscreen) => IsFullscreen = fullscreen;
+    public void SetFullscreen(bool fullscreen)
+    {
+        IsFullscreen = fullscreen;
+        ApplyDesktop();
+    }
 
     private WindowPlacement? _placement;
 
     /// <summary>
-    /// Recorded, not applied, for the reason <see cref="IsFullscreen"/> is: there is no desktop
-    /// to place the window on, and resizing the surface to saved bounds would make a test's
-    /// geometry depend on whatever the app last saved. What it gives a test is the app's wiring
-    /// — that a saved placement reaches the window and the window's comes back out to be saved.
-    /// The maximized flag is applied, as <see cref="Maximize"/> applies it. Before anything is
-    /// set it reports the client area at the origin.
+    /// Without simulated monitors: recorded, not applied, for the reason <see cref="IsFullscreen"/>
+    /// is — there is no desktop to place the window on, and resizing the surface to saved bounds
+    /// would make a test's geometry depend on whatever the app last saved. What it gives a test is
+    /// the app's wiring: that a saved placement reaches the window and the window's comes back out
+    /// to be saved. The maximized flag is applied, as <see cref="Maximize"/> applies it. Before
+    /// anything is set it reports the client area at the origin.
+    ///
+    /// <para>With simulated monitors (<see cref="HeadlessOptions.Monitors"/>) there is a desktop,
+    /// and the window lives on it the way a real one does: a placement is fitted to the work
+    /// areas and applied, maximized fills its monitor's work area, full screen its bounds, and
+    /// the window takes its monitor's scale. The surface is resized to match, so a frame
+    /// captured afterwards is the size it would be on that monitor.</para>
     /// </summary>
     public WindowPlacement? Placement
     {
-        get => (_placement ?? new WindowPlacement(0, 0, PixelWidth, PixelHeight, false))
-            with { Maximized = IsMaximized };
+        get => (_placement ?? DefaultPlacement()) with { Maximized = IsMaximized };
         set
         {
             if (value is not { IsUsable: true }) return;
-            _placement = value;
+            var monitors = Monitors;
+            _placement = monitors.Count > 0 ? value.FitTo(monitors.Select(m => m.WorkArea).ToList()) : value;
             IsMaximized = value.Maximized;
+            if (monitors.Count > 0) IsFullscreen = false;
+            ApplyDesktop();
         }
+    }
+
+    /// <summary>The simulated monitors this window lives on; null or empty for no desktop.</summary>
+    internal Func<IReadOnlyList<MonitorInfo>>? Desktop { get; init; }
+
+    private IReadOnlyList<MonitorInfo> Monitors => Desktop?.Invoke() ?? [];
+
+    /// <summary>Before any placement: the client area at the top left of the primary monitor's
+    /// work area, or at the origin with no desktop.</summary>
+    private WindowPlacement DefaultPlacement()
+    {
+        var monitors = Monitors;
+        var home = monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors.FirstOrDefault();
+        return home is null
+            ? new WindowPlacement(0, 0, PixelWidth, PixelHeight, false)
+            : new WindowPlacement((int)home.WorkArea.X, (int)home.WorkArea.Y, PixelWidth, PixelHeight, false);
+    }
+
+    /// <summary>The monitors changed: brought back within reach, as an OS moves a window whose
+    /// monitor went, and re-fitted to its monitor when maximized or full screen.</summary>
+    internal void OnDesktopChanged()
+    {
+        var monitors = Monitors;
+        if (monitors.Count == 0) return;
+        _placement = (_placement ?? DefaultPlacement()).FitTo(monitors.Select(m => m.WorkArea).ToList());
+        ApplyDesktop();
+    }
+
+    /// <summary>
+    /// With simulated monitors, sizes the surface to where the window now is: its monitor's
+    /// bounds when full screen, the work area when maximized, the restored bounds otherwise, at
+    /// the monitor's scale. Flags a resize so the next frame lays out at the new size. A no-op
+    /// without monitors, which keeps the record-only behaviour.
+    /// </summary>
+    private void ApplyDesktop()
+    {
+        var monitors = Monitors;
+        if (monitors.Count == 0) return;
+        var restored = _placement ?? DefaultPlacement();
+        var monitor = MonitorInfo.For(new Rect(restored.X, restored.Y, restored.Width, restored.Height), monitors)!;
+        var area = IsFullscreen ? monitor.Bounds
+            : IsMaximized ? monitor.WorkArea
+            : new Rect(restored.X, restored.Y, restored.Width, restored.Height);
+        _scale = monitor.Scale;
+        _layoutWidth = Math.Max(1f, area.Width / _scale);
+        _layoutHeight = Math.Max(1f, area.Height / _scale);
+        _surface.Resize(PixelWidth, PixelHeight, DisplayScale);
+        ResizePending = true;
+        LastResizeRenderTick = 0;   // relayout on the very next frame: no real-time throttle headless
     }
 
     public void Raise() { }
