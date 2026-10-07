@@ -708,6 +708,8 @@ Canvas.New()       // Without draw callback (set Draw property later)
 | `DrawRoundedRect(rect, radius, fill)` | Filled rounded rectangle |
 | `DrawRoundedRectStroke(rect, radius, color, strokeWidth)` | Rounded rectangle outline |
 | `DrawText(text, position, color, fontSize)` | Text at a given position |
+| `DrawText(text, position, color, fontSize, halo, haloWidth)` | Text over a halo — its glyph outlines stroked `haloWidth` wide in `halo` — legible on any background (labels over photographs and dark images) |
+| `MeasureText(text, fontSize)` | Advance width of `text` in the font `DrawText` uses, for placing and separating labels |
 | `DrawImage(source, dest, sourceRect, sampling)` | A rectangle of an image (in its own pixels) over `dest`, resampled per `ImageSampling` (`Nearest`, `Linear`, `Cubic`, or `Default`); frame sources are cut too |
 | `FillPolygon(points, fill)` / `DrawPolyline(points, color, width)` | Antialiased polygon fill and open polyline |
 | `PushClip(rect)` / `PushTransform(matrix)` / `Pop()` | Clip and transform until the matching `Pop`; the matrix is in canvas coordinates |

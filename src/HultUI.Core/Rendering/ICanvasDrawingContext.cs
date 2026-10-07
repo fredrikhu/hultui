@@ -33,6 +33,36 @@ public interface ICanvasDrawingContext
     /// </summary>
     void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling = ImageSampling.Default) { }
 
+    /// <summary>
+    /// Draws <paramref name="text"/> as <see cref="DrawText"/> does, over a halo: the glyphs'
+    /// outline stroked <paramref name="haloWidth"/> wide in <paramref name="halo"/> first, so the
+    /// text stays legible on any background — what labels drawn over a photograph or a dark
+    /// image need. The default draws the text in the halo colour at eight offsets around it,
+    /// then the text; the renderer strokes the real glyph outlines.
+    /// </summary>
+    void DrawText(string text, Point position, Color color, float fontSize, Color halo, float haloWidth)
+    {
+        if (halo.A > 0 && haloWidth > 0)
+        {
+            float d = haloWidth / 2f;
+            for (int i = 0; i < 8; i++)
+            {
+                double a = i * Math.PI / 4;
+                DrawText(text, new Point(position.X + (float)(Math.Cos(a) * d), position.Y + (float)(Math.Sin(a) * d)), halo, fontSize);
+            }
+        }
+        DrawText(text, position, color, fontSize);
+    }
+
+    /// <summary>
+    /// The advance width of <paramref name="text"/> as <see cref="DrawText"/> would draw it at
+    /// <paramref name="fontSize"/>, in the canvas's units: for placing labels beside things
+    /// drawn on the canvas (and keeping them apart). The default asks the window's measure
+    /// context (<see cref="TextMeasure"/>) for the default sans-serif face; the renderer measures
+    /// with the very font it draws with. 0 when nothing can measure.
+    /// </summary>
+    float MeasureText(string text, float fontSize) => TextMeasure.MeasureWidth(text, fontSize);
+
     /// <summary>Fills the closed polygon through <paramref name="points"/>, antialiased.</summary>
     void FillPolygon(ReadOnlySpan<Point> points, Color fill) { }
 

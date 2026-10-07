@@ -115,6 +115,34 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
         Canvas.DrawText(text, x, y, font, Fill(color));
     }
 
+    public void DrawText(string text, Point position, Color color, float fontSize, Color halo, float haloWidth)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        if (halo.A > 0 && haloWidth > 0)
+        {
+            var font = _owner.PooledCanvasFont;
+            font.Size = fontSize;
+            if (_owner.CanvasTypeface is { } pinned) font.Typeface = pinned;
+            float x = Bounds.X + position.X, y = Bounds.Y + position.Y + fontSize;
+            // The glyph outlines, stroked with round joins: an even rim however the text is placed.
+            using var path = font.GetTextPath(text, new SKPoint(x, y));
+            var paint = Stroke(halo, haloWidth);
+            paint.StrokeJoin = SKStrokeJoin.Round;
+            paint.StrokeCap = SKStrokeCap.Round;
+            Canvas.DrawPath(path, paint);
+        }
+        DrawText(text, position, color, fontSize);
+    }
+
+    public float MeasureText(string text, float fontSize)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        var font = _owner.PooledCanvasFont;
+        font.Size = fontSize;
+        if (_owner.CanvasTypeface is { } pinned) font.Typeface = pinned;
+        return font.MeasureText(text);
+    }
+
     public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling = ImageSampling.Default)
     {
         var abs = new Rect(Bounds.X + destRect.X, Bounds.Y + destRect.Y, destRect.Width, destRect.Height);

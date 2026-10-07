@@ -74,6 +74,15 @@ internal sealed class RecordingCanvasContext : ICanvasDrawingContext
         _inner.DrawText(text, position, color, fontSize);
     }
 
+    public void DrawText(string text, Point position, Color color, float fontSize, Color halo, float haloWidth)
+    {
+        Record("DrawText", $"{Quoted(text)} {Fmt(position)} size={F(fontSize)} {Fmt(color)} halo={Fmt(halo)} width={F(haloWidth)}");
+        _inner.DrawText(text, position, color, fontSize, halo, haloWidth);
+    }
+
+    // Not recorded: measuring draws nothing.
+    public float MeasureText(string text, float fontSize) => _inner.MeasureText(text, fontSize);
+
     public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling = ImageSampling.Default)
     {
         Record("DrawImage",
