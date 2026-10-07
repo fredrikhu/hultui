@@ -16,9 +16,10 @@ namespace HultUI.Platform.SDL3;
 ///
 /// <para>Windows has its own registry of format ids rather than MIME types, so the
 /// well-known ones are mapped: text becomes <c>CF_UNICODETEXT</c> (UTF-16, which is what
-/// every Windows app actually reads), and HTML becomes the registered "HTML Format" with
-/// the header Word and browsers require. Anything unmapped is registered under its MIME
-/// string and round-trips verbatim between HultUI apps.</para>
+/// every Windows app actually reads), HTML becomes the registered "HTML Format" with the
+/// header Word and browsers require, and RTF the registered "Rich Text Format". Anything
+/// unmapped is registered under its MIME string and round-trips verbatim between HultUI
+/// apps.</para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static partial class WindowsClipboard
@@ -151,12 +152,13 @@ internal static partial class WindowsClipboard
         {
             if (RegisteredFormats.TryGetValue(mime, out uint cached)) return cached;
 
-            // "HTML Format" and "PNG" are the names Windows apps look for; registering
-            // under the MIME string instead would make the data invisible to Word, the
-            // browsers, and every image editor.
+            // "HTML Format", "Rich Text Format" and "PNG" are the names Windows apps look
+            // for; registering under the MIME string instead would make the data invisible
+            // to Word, WordPad, the browsers, and every image editor.
             string name = mime switch
             {
                 ClipboardFormats.Html => "HTML Format",
+                ClipboardFormats.Rtf => "Rich Text Format",
                 ClipboardFormats.Png => "PNG",
                 _ => mime,
             };
@@ -181,6 +183,10 @@ internal static partial class WindowsClipboard
         if (mime == ClipboardFormats.Html)
             return WrapHtml(Encoding.UTF8.GetString(bytes));
 
+        // Rich Text Format is read as a C string by some apps: end it with a NUL.
+        if (mime == ClipboardFormats.Rtf && (bytes.Length == 0 || bytes[^1] != 0))
+            return [.. bytes, 0];
+
         return bytes;
     }
 
@@ -196,6 +202,9 @@ internal static partial class WindowsClipboard
 
         if (mime == ClipboardFormats.Html)
             return Encoding.UTF8.GetBytes(UnwrapHtml(Encoding.UTF8.GetString(raw)));
+
+        if (mime == ClipboardFormats.Rtf && Array.IndexOf(raw, (byte)0) is int end and >= 0)
+            return raw[..end];
 
         return raw;
     }

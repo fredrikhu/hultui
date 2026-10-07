@@ -459,7 +459,7 @@ public class RichTableTests
         ]);
         Assert.Equal(
             "<p><img src=\"p.png\" alt=\"A &amp; B\" width=\"64\"></p>"
-            + "<table><tr><th>h1</th><th>h2</th></tr><tr><td>a</td><td>b</td></tr></table><p>after</p>",
+            + "<table><thead><tr><th>h1</th><th>h2</th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table><p>after</p>",
             html);
     }
 

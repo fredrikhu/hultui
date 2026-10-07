@@ -434,13 +434,55 @@ equal. A cell holds inline text with marks and line breaks, which is what a GFM 
 
 **Features.** `Images` and `Tables` are new flags, both inside `Markdown`.
 
+## Export
+
+**Done 2026-10-07.** A document written out as a file another program opens, in Core with no
+new dependency: `RichHtml.WriteDocument(document, options)` and `RichRtf.Write(document, options)`.
+Both read only the document; nothing is read back.
+
+- **`RichExportOptions`.** A title, the body face and size (layout units, so 14 is 10.5 pt), the
+  `RichTextTheme` whose proportions to keep (heading scale and weight, code face and scale,
+  indent, spacing, cell padding), and `Pictures`, a picture's file for the writers to embed. The
+  theme's colours are not used. A document is read on paper whatever theme the editor was in,
+  so both writers draw in one light palette (`RichPaper`). Marks' own colours are kept.
+- **Lists are numbered once.** `RichLists.Next` is the editor's numbering, moved out of the
+  layout, and both writers use it, so an export numbers items as the editor drew them.
+- **HTML.** A UTF-8 HTML5 page with a small stylesheet. Lists nest inside their items, and a
+  paragraph indented under an item goes inside it, as Markdown reads it. A depth the document
+  skips is an item with no marker. Quotes group into one `<blockquote>` and nest by depth. Code
+  blocks carry `class="language-…"`. Tables put row 0 in `<thead>`. A picture is a `data:` URI
+  when `Pictures` gives its file (PNG, JPEG, GIF, WebP, BMP, SVG, recognised by their headers),
+  and its source otherwise. The clipboard's fragment is the same writer without the page or
+  stylesheet, so a paste takes on its target's look.
+- **RTF.** 7-bit, with everything past ASCII as `\u` escapes. Font and colour tables hold what
+  the body uses: generic families become real faces, and translucent colours are laid over
+  white. Headings carry `\outlinelevel` and `\keepn`, and their space above is net of the
+  paragraph space a word processor adds to it. Gaps follow the editor's: list items and their
+  continuing paragraphs are close, and so are quoted lines.
+- **RTF lists are written, not live.** Each item gets its marker as text, then a tab on a
+  hanging indent: the editor's bullet for its depth (• ◦ ▪), its number, or ☐/☑. Every reader
+  then shows the editor's numbering. A Word `\listtable` would make a live list, but one list per
+  run cannot hold HTML's rule that a nested list under a new parent restarts.
+- **More of the RTF.** A link is a `HYPERLINK` field. A quote is a ruled indent in the muted
+  colour, and a code block is the code face on a shaded ground. A table is `\trowd` rows with
+  bordered cells, the header shaded and repeated across pages (`\trhdr`), and columns sharing
+  the 6.5 in text column by their longest cell within the theme's bounds. A picture is a PNG or
+  JPEG `\pict` at its asked width (no wider than the page), and other formats are written as
+  `[alt]`.
+- **Clipboard.** Copy offers `text/rtf` too. On Windows it is registered as "Rich Text Format"
+  (with a terminating NUL), so Word and WordPad paste formatting.
+- **Sample.** The Fluent Rich text page has Save as HTML… and Save as RTF…. Its pictures go in:
+  the aurora is drawn, so it is encoded to PNG, and a file is read from disk.
+- **Checked by eye.** The page was viewed in a browser. The RTF was loaded into Windows'
+  RichEdit, which reported the right faces, sizes, marks, link colour, markers, pictures and
+  table, and was rendered to a bitmap. RichEdit draws no paragraph borders or shading (the
+  quote bar, the rule, the code ground); Word does.
+
 ## Non-goals (v1)
 
 - Inline images and inline boxes of any kind (pictures are blocks, stage 9); merged or nested
   table cells, tables without a header row, column widths that are kept.
-- HTML or RTF paste, and reading either. Writing both is wanted (2026-10-07, TODO.md): a
-  standalone HTML document grown from `RichHtml`, and an RTF writer, so a document can be saved
-  for Word or a browser and the clipboard can offer `text/rtf`.
+- HTML or RTF paste, and reading either. Writing both is done ([Export](#export)).
 - Collaborative editing, comments, tracked changes.
 - Spell checking (no platform seam exists yet).
 - Lists inside quotes and other containment the flat model cannot hold.

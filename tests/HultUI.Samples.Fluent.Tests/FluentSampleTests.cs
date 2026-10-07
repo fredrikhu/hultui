@@ -378,6 +378,50 @@ public class FluentSampleTests
     }
 
     /// <summary>
+    /// The notes save for other programs: the dialog is offered the right name and type, and
+    /// the file is a web page or RTF of the notes, the aurora — drawn, not loaded — embedded.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheNotesSaveAsAWebPageOrRtf_WithTheirPicture(bool rtf)
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+        GoTo(session, "Rich text");
+        var path = Path.Combine(Path.GetTempPath(), $"hultui-notes-{Guid.NewGuid():N}.{(rtf ? "rtf" : "html")}");
+        try
+        {
+            session.Window.FileDialogs.EnqueueResult(path);
+            // Under the editor, below the fold: reached from the keyboard.
+            session.Window.FindByRole(AccessibilityRole.Button, rtf ? "Save as RTF…" : "Save as HTML…")!.Focus();
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpUntil(() => app.NotesExported is not null, TimeSpan.FromSeconds(10));
+            Assert.Equal("Saved " + Path.GetFileName(path), app.NotesExported);
+            Assert.Equal(rtf ? "Notes.rtf" : "Notes.html", session.Window.FileDialogs.LastRequest!.SuggestedFileName);
+
+            var text = File.ReadAllText(path);
+            if (rtf)
+            {
+                Assert.StartsWith("{\\rtf1", text);
+                Assert.Contains("{\\info{\\title Meeting notes}}", text);
+                Assert.Contains("{\\pict\\pngblip\\picw560\\pich180", text);
+            }
+            else
+            {
+                Assert.StartsWith("<!doctype html>", text);
+                Assert.Contains("<title>Meeting notes</title>", text);
+                Assert.Contains("<img src=\"data:image/png;base64,", text);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
     /// The expander opens, and its header gives up its bottom corners when it does. That is
     /// what makes the header and the panel below it read as one object rather than as two
     /// stacked cards — a header that keeps all four corners open looks like a bug.

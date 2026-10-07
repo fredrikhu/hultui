@@ -372,7 +372,14 @@ public static class Pages
                     editor,
                     Flex.Row(gap: 24f).AlignItems(AlignItems.Center).Children(
                         ToggleRow(p, "Read only", app.NotesReadOnly, v => app.NotesReadOnly = v),
-                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary))])),
+                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary)),
+                    // Written out for other programs: a web page, or RTF for a word processor.
+                    Flex.Row(gap: 8f).AlignItems(AlignItems.Center).Children([
+                        F.Button(p, "Save as HTML…", () => app.ExportNotes(rtf: false)),
+                        F.Button(p, "Save as RTF…", () => app.ExportNotes(rtf: true)),
+                        .. app.NotesExported is { } exported
+                            ? [F.Body(p, exported).TextColor(p.TextSecondary).Margin(new Thickness(0, 0, 0, 8)).AutomationId("notes-exported")]
+                            : Array.Empty<Element>()])])),
             // The same document as HultUI.RichText.Markdown writes it, as you type.
             Section(p, "As Markdown",
                 TextArea.New(HultUI.RichText.Markdown.RichMarkdown.Write(doc)).ReadOnly()
@@ -423,7 +430,19 @@ public static class Pages
     }
 
     /// <summary>A picture drawn here rather than loaded: an aurora over hills, for the notes.</summary>
-    public static IImageSource Aurora(int width, int height)
+    public static IImageSource Aurora(int width, int height) =>
+        SkiaImageSource.FromPixels(AuroraPixels(width, height), width, height, width * 4, PixelFormat.Rgba8888);
+
+    /// <summary>The aurora as a PNG file, for an export to embed.</summary>
+    public static byte[] AuroraPng(int width, int height)
+    {
+        var info = new SkiaSharp.SKImageInfo(width, height, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Opaque);
+        using var image = SkiaSharp.SKImage.FromPixelCopy(info, AuroraPixels(width, height), width * 4);
+        using var png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return png.ToArray();
+    }
+
+    private static byte[] AuroraPixels(int width, int height)
     {
         var pixels = new byte[width * height * 4];
         for (int y = 0; y < height; y++)
@@ -443,7 +462,7 @@ public static class Pages
                 pixels[at + 2] = (byte)Math.Clamp(b, 0, 255);
                 pixels[at + 3] = 255;
             }
-        return SkiaImageSource.FromPixels(pixels, width, height, width * 4, PixelFormat.Rgba8888);
+        return pixels;
     }
 
     /// <summary>A gallery section: a bold label, then a card holding the specimens.</summary>

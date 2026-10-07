@@ -310,9 +310,9 @@ public partial class RichTextEditorElement
     private void Place(RichDocument doc, int from)
     {
         var blocks = _blocks;
-        Span<int> counters = stackalloc int[RichBlock.MaxIndent + 2];
+        Span<int> counters = stackalloc int[RichLists.Depths];
         for (int i = 0; i < blocks.Length; i++)
-            blocks[i].Number = NumberOf(doc[i], counters);
+            blocks[i].Number = RichLists.Next(doc[i], counters);
 
         float y = 0;
         if (from > 0)
@@ -555,24 +555,6 @@ public partial class RichTextEditorElement
         if (previous.Kind == BlockKind.Quote && block.Kind == BlockKind.Quote)
             return _rt.ListItemSpacing;
         return _rt.BlockSpacing;
-    }
-
-    // Numbering runs per depth: an item continues the count of the items before it at its depth
-    // until a block at a shallower depth (or a different list) ends it.
-    private static int NumberOf(RichBlock block, Span<int> counters)
-    {
-        int depth = Math.Clamp(block.Indent, 0, counters.Length - 1);
-        if (block.IsListItem)
-        {
-            counters[(depth + 1)..].Clear();
-            if (block.Kind == BlockKind.NumberedItem) return ++counters[depth];
-            counters[depth] = 0;
-            return 0;
-        }
-        // A paragraph continuing an item at depth - 1 keeps that item's count; anything else
-        // at depth 0 ends every list.
-        counters[(block.Kind == BlockKind.Paragraph ? depth : 0)..].Clear();
-        return 0;
     }
 
     /// <summary>

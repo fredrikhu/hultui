@@ -1,7 +1,5 @@
 using System.Buffers;
 using System.Collections.Immutable;
-using System.Globalization;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using HultUI.Core.Platform;
@@ -11,7 +9,8 @@ namespace HultUI.Core.RichText;
 
 /// <summary>
 /// What a rich editor puts on the clipboard: its own format, which another editor pastes without
-/// losing anything; HTML, which browsers, Word and mail read; and plain text for everything else.
+/// losing anything; HTML, which browsers, Word and mail read; RTF, which word processors read;
+/// and plain text for everything else.
 /// </summary>
 public static class RichClipboard
 {
@@ -24,6 +23,8 @@ public static class RichClipboard
     {
         [ClipboardFormats.PlainText] = Encoding.UTF8.GetBytes(fragment.ToPlainText()),
         [ClipboardFormats.Html] = Encoding.UTF8.GetBytes(RichHtml.Write(fragment.Blocks)),
+        // RTF is 7-bit: everything past ASCII is written as \u escapes.
+        [ClipboardFormats.Rtf] = Encoding.ASCII.GetBytes(RichRtf.Write(fragment.Blocks)),
         [MimeType] = Write(fragment),
     };
 
@@ -152,152 +153,4 @@ public static class RichClipboard
 
     internal static string Hex(Color c) =>
         c.A == 255 ? $"#{c.R:X2}{c.G:X2}{c.B:X2}" : $"#{c.R:X2}{c.G:X2}{c.B:X2}{c.A:X2}";
-}
-
-/// <summary>
-/// Blocks as HTML: what other applications read when a rich editor's selection is pasted into
-/// them. Runs of list items become nested lists; marks become the elements a browser would use.
-/// </summary>
-public static class RichHtml
-{
-    public static string Write(IReadOnlyList<RichBlock> blocks)
-    {
-        var sb = new StringBuilder();
-        // The lists open around the current block, innermost last: their kind and depth.
-        var open = new Stack<(string Tag, int Depth)>();
-        bool inTable = false;
-
-        for (int i = 0; i < blocks.Count; i++)
-        {
-            var b = blocks[i];
-            if (b.IsTableCell)
-            {
-                while (open.Count > 0) sb.Append("</").Append(open.Pop().Tag).Append('>');
-                bool starts = !inTable || RichTable.StartsTable(blocks, i);
-                if (starts)
-                {
-                    if (inTable) sb.Append("</tr></table>");
-                    sb.Append("<table><tr>");
-                    inTable = true;
-                }
-                else if (b.Column == 0 || b.Row != blocks[i - 1].Row)
-                    sb.Append("</tr><tr>");
-                string cell = b.Row == 0 ? "th" : "td";
-                sb.Append('<').Append(cell).Append(AlignAttribute(b.Align)).Append('>');
-                Inline(sb, b);
-                sb.Append("</").Append(cell).Append('>');
-                continue;
-            }
-            if (inTable)
-            {
-                sb.Append("</tr></table>");
-                inTable = false;
-            }
-
-            if (b.IsListItem)
-            {
-                string tag = b.Kind == BlockKind.NumberedItem ? "ol" : "ul";
-                while (open.Count > 0 && (open.Peek().Depth > b.Indent || (open.Peek().Depth == b.Indent && open.Peek().Tag != tag)))
-                    sb.Append("</").Append(open.Pop().Tag).Append('>');
-                while (open.Count == 0 || open.Peek().Depth < b.Indent)
-                {
-                    int depth = open.Count == 0 ? 0 : open.Peek().Depth + 1;
-                    if (depth > b.Indent) break;
-                    string t = depth == b.Indent ? tag : "ul";
-                    sb.Append('<').Append(t).Append('>');
-                    open.Push((t, depth));
-                }
-                sb.Append("<li>");
-                if (b.Kind == BlockKind.TaskItem)
-                    sb.Append(b.Checked ? "<input type=\"checkbox\" checked disabled> " : "<input type=\"checkbox\" disabled> ");
-                Inline(sb, b);
-                sb.Append("</li>");
-                continue;
-            }
-
-            while (open.Count > 0) sb.Append("</").Append(open.Pop().Tag).Append('>');
-            string align = AlignAttribute(b.Align);
-            switch (b.Kind)
-            {
-                case BlockKind.Image when b.Image is { } image:
-                {
-                    sb.Append("<p").Append(align).Append('>');
-                    if (image.Link is { } href) sb.Append("<a href=\"").Append(WebUtility.HtmlEncode(href)).Append("\">");
-                    sb.Append("<img src=\"").Append(WebUtility.HtmlEncode(image.Source))
-                        .Append("\" alt=\"").Append(WebUtility.HtmlEncode(image.Alt)).Append('"');
-                    if (image.Title is { } title) sb.Append(" title=\"").Append(WebUtility.HtmlEncode(title)).Append('"');
-                    if (image.Width is { } width)
-                        sb.Append(" width=\"").Append(width.ToString("0.##", CultureInfo.InvariantCulture)).Append('"');
-                    sb.Append('>');
-                    if (image.Link is not null) sb.Append("</a>");
-                    sb.Append("</p>");
-                    break;
-                }
-                case BlockKind.Heading:
-                    sb.Append("<h").Append(b.HeadingLevel).Append(align).Append('>');
-                    Inline(sb, b);
-                    sb.Append("</h").Append(b.HeadingLevel).Append('>');
-                    break;
-                case BlockKind.Quote:
-                    sb.Append("<blockquote>");
-                    Inline(sb, b);
-                    sb.Append("</blockquote>");
-                    break;
-                case BlockKind.CodeBlock or BlockKind.Raw:
-                    sb.Append("<pre><code>").Append(WebUtility.HtmlEncode(b.Text)).Append("</code></pre>");
-                    break;
-                case BlockKind.Rule:
-                    sb.Append("<hr>");
-                    break;
-                default:
-                    sb.Append("<p").Append(align).Append('>');
-                    Inline(sb, b);
-                    sb.Append("</p>");
-                    break;
-            }
-        }
-        while (open.Count > 0) sb.Append("</").Append(open.Pop().Tag).Append('>');
-        if (inTable) sb.Append("</tr></table>");
-        return sb.ToString();
-    }
-
-    private static string AlignAttribute(BlockAlign align) => align switch
-    {
-        BlockAlign.Center => " style=\"text-align:center\"",
-        BlockAlign.End => " style=\"text-align:right\"",
-        _ => "",
-    };
-
-    private static void Inline(StringBuilder sb, RichBlock block)
-    {
-        foreach (var run in RichSpans.Runs(block.Spans, block.Text.Length))
-        {
-            var m = run.Marks;
-            var close = new Stack<string>();
-            void Open(string tag, string? attributes = null)
-            {
-                sb.Append('<').Append(tag);
-                if (attributes is not null) sb.Append(' ').Append(attributes);
-                sb.Append('>');
-                close.Push(tag);
-            }
-
-            if (m.Link is { } link) Open("a", $"href=\"{WebUtility.HtmlEncode(link)}\"");
-            if (m.Has(InlineStyle.Bold)) Open("strong");
-            if (m.Has(InlineStyle.Italic)) Open("em");
-            if (m.Has(InlineStyle.Underline)) Open("u");
-            if (m.Has(InlineStyle.Strike)) Open("s");
-            if (m.Has(InlineStyle.Code)) Open("code");
-            var css = new List<string>();
-            if (m.Color is { } c) css.Add("color:" + RichClipboard.Hex(c));
-            if (m.Highlight is { } h) css.Add("background-color:" + RichClipboard.Hex(h));
-            if (m.Size is { } size) css.Add("font-size:" + size.ToString("0.##", CultureInfo.InvariantCulture) + "px");
-            if (m.Family is { } family) css.Add("font-family:" + WebUtility.HtmlEncode(family));
-            if (css.Count > 0) Open("span", $"style=\"{string.Join(";", css)}\"");
-
-            string text = block.Text.Substring(run.Start, run.Length);
-            sb.Append(WebUtility.HtmlEncode(text).Replace("\n", "<br>"));
-            while (close.Count > 0) sb.Append("</").Append(close.Pop()).Append('>');
-        }
-    }
 }

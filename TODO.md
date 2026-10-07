@@ -1,6 +1,17 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Rich text editor: export as HTML and RTF** (docs/plans/16-rich-text-editor.md, Export) — in Core.
+  `RichHtml.WriteDocument(doc, RichExportOptions)` is a UTF-8 HTML5 page with a small stylesheet of
+  the editor's proportions in dark text on white; lists nest inside their items, a continuing
+  paragraph stays in its item, quotes group and nest, tables have `<thead>`/`<tbody>`. `RichRtf.Write`
+  is 7-bit RTF: fonts and colours tabled as used, headings with outline levels, list markers written
+  as text with the editor's numbers, links as `HYPERLINK` fields, `\trowd` tables with a repeated
+  shaded header, PNG/JPEG `\pict`, alt text otherwise. Pictures come from
+  `RichExportOptions.Pictures` (HTML embeds any as `data:`). Copy now offers `text/rtf`, registered
+  on Windows as "Rich Text Format". Fluent sample: Save as HTML… / Save as RTF…. Checked: the page in
+  a browser, the RTF in Windows' RichEdit (fonts, sizes, marks, markers, pictures, table). Tests: 14
+  Core (golden strings, an HTML nesting check, RTF group balance), 2 Fluent (save flow).
 - **Rich text editor, stage 5: for a screen reader** (docs/plans/16-rich-text-editor.md) — the editor
   offers `IAccessibleTextSource`: blocks as paragraphs, drawn lines as lines (`AccessibleText` now
   takes `lineStarts`; UIA gained a paragraph unit, AT-SPI a paragraph granularity), a picture as its
@@ -853,16 +864,6 @@
   pasting picture data (an upload hook), dragging to resize pictures and columns. Left from stage 8: opening a long
   document lays every block out (5,000 blocks: 15.5 ms) — estimated heights off screen would make
   it cost a screenful.
-- **Rich text editor: export as HTML and RTF** (plan 16; export only, no import) — a whole
-  `RichDocument` written out as a file another program opens. HTML: grow `RichHtml.Write` (today
-  the clipboard's fragment writer) into a standalone document — `<!doctype>`, charset, the theme's
-  heading sizes and code face as a small stylesheet, nested lists, tables with `<thead>`,
-  `<img>` with width and alt, links. RTF: a new writer — font and colour tables from the marks,
-  `\b \i \ul \strike`, `\fs` for size, `\cf`/`\highlight` for colours, `\par` blocks with list
-  numbering (`\pn` or `\ls`), `\trowd` tables, pictures embedded as `\pict` PNG when the app's
-  resolver can give the bytes, else their alt text. Both sit in Core (no dependency needed) or a
-  `HultUI.RichText.Export` package; the clipboard can then offer `text/rtf` too, so Word and
-  WordPad paste formatting. Tests: golden output strings, and an HTML parse check.
 - Windows UIA bridge on-device verification — run a sample, open Accessibility Insights / `Inspect.exe`, confirm tree, name, role, bounding-rect, and pattern actions round-trip.
 - **AT-SPI `Action.DoAction`** — an AT can now activate controls. The neutral
   invoke/toggle/select logic was lifted out of the Windows-only `Sdl3UiaHostBridge`

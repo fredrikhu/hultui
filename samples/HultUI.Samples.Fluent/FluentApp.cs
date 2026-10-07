@@ -4,6 +4,7 @@ using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
@@ -93,6 +94,53 @@ public sealed partial class FluentApp : Component
         {
         }
         return _pictures[source] = made;
+    }
+
+    /// <summary>What the last export did, under the editor: where it went, or why it did not.</summary>
+    [Reactive] public partial string? NotesExported { get; set; }
+
+    /// <summary>The notes written out where the person picks: a web page, or RTF for a word
+    /// processor. Pictures go in with them.</summary>
+    public async void ExportNotes(bool rtf)
+    {
+        var dialogs = _window.FileDialogs;
+        if (!dialogs.IsAvailable) return;
+        var path = await dialogs.SaveFileAsync(rtf ? "Notes.rtf" : "Notes.html", null,
+            [rtf ? new FileDialogFilter("Rich Text Format", "rtf") : new FileDialogFilter("Web page", "html;htm")]);
+        if (path is null) return;
+        var doc = Notes;
+        var options = new HultUI.Core.RichText.RichExportOptions
+        {
+            Title = doc.Blocks.FirstOrDefault(b => b.Kind == HultUI.Core.RichText.BlockKind.Heading)?.Text ?? "Notes",
+            FontFamily = Fluent.BodyFont,
+            Pictures = PictureFile,
+        };
+        try
+        {
+            // RTF is ASCII by construction; the page says it is UTF-8 and is written so.
+            if (rtf) File.WriteAllText(path, HultUI.Core.RichText.RichRtf.Write(doc, options), System.Text.Encoding.ASCII);
+            else File.WriteAllText(path, HultUI.Core.RichText.RichHtml.WriteDocument(doc, options), new System.Text.UTF8Encoding(false));
+            NotesExported = "Saved " + Path.GetFileName(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            NotesExported = "Could not save: " + e.Message;
+        }
+    }
+
+    /// <summary>A picture's file, for an export to embed: the aurora encoded as a PNG, anything
+    /// else read from disk.</summary>
+    public byte[]? PictureFile(HultUI.Core.RichText.RichImage image)
+    {
+        try
+        {
+            if (image.Source == "sample:aurora") return Pages.AuroraPng(560, 180);
+            return File.Exists(image.Source) ? File.ReadAllBytes(image.Source) : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
     }
 
     private readonly MenuBar _menus;
