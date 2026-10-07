@@ -54,6 +54,11 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   previous image into a resized window.
 - **Resize:** rebuilt for every size by default. `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates and
   presents one-to-one through `swapchain_maintenance1` instead.
+- **Rebuild:** the old swapchain is handed to the new one as `oldSwapchain`, except the scRGB one
+  under MAILBOX on Windows, which is destroyed first. Handed over, it made the next present wait
+  about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
+  FIFO never waited, and destroying first made their resizes slower (5 and 12 ms against 29 and
+  33); the 8-bit swapchain never waited either and gained nothing. They keep the chained path.
 - **Synchronisation:** a semaphore per image orders the present after the frame. The acquire waits
   on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
 - **Per window:** each host has its own instance, device and command table. Device-level function
@@ -231,7 +236,9 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   801 to 466 ms/s (GL 264), which is 3.0x GL's down to 1.8x. It costs 4K video 91–95 ms/s against
   48–63.
 - **Resize CPU under MAILBOX is driver-side.** Halving the frames drawn during a resize left it
-  unchanged.
+  unchanged. Most of it, on the scRGB swapchain, was a 100 ms wait in the first present after
+  each rebuild; destroying the old swapchain first (2026-10-08) took a 40-resize probe from
+  453–480 to 198–206 ms/s, and a resize from 112 to 29 ms. The row above predates that.
 
 ## Not done
 
@@ -305,6 +312,15 @@ A check that reports the same thing whether the code works or not reads as evide
 - **A validation run with no layer installed reports nothing.** On Windows,
   `VK_LOADER_LAYERS_ENABLE` does nothing without the SDK, and the silence was once recorded as
   clean. Inject a fault and see the layer catch it.
+- **Task Manager's dedicated GPU memory is bookkeeping, not memory.** Each scRGB swapchain handed
+  over as `oldSwapchain` stayed in the process's figure for good: 20.5 GB on a 16 GB card after 650
+  resizes, while nvidia-smi's memory in use for the whole GPU and DXGI's `QueryVideoMemoryInfo` for
+  the process stayed flat and nothing failed. Ask nvidia-smi or DXGI before calling a GPU leak.
+- **A capture taken after `SetWindowPos` returns cannot see the resize.** The window procedure draws
+  the new size before it returns, so a stall inside that frame is over by the time anything looks.
+  On the chained scRGB MAILBOX swapchain the old harness read 0 of 80 resizes stretched, while a
+  thread sampling the screen during them found 72% of the composed frames scaled. Sample the
+  screen while the resize is happening.
 - **A fallback that was never exercised.** The GL fallback was "verified across the matrix", but
   only the environment override had run. The fallback itself first ran under fault injection
   (`VK_LOADER_VENDOR_ID_FILTER=0x1234` for a driver with no GPU, `VK_DRIVER_FILES` at a missing

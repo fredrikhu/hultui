@@ -1,0 +1,24 @@
+{
+  "label": "gl-vk-swapchain-rebuild-leak, after: the scRGB MAILBOX swapchain on Windows is destroyed before its replacement",
+  "kind": "real-window Vulkan probe, not a perf-suite capture (the suite never builds SdlVulkanHost)",
+  "date": "2026-10-07 23:58 +02:00",
+  "commit": "ae30892 + this change",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
+  "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, idle-gated, alternating with the before build",
+  "probes": "as in 2026-10-08-ae30892-swapchain-before.json",
+  "results": {
+    "mem": [
+      { "taskManagerDedicatedMB": { "start": 127.4, "r10": 172.8, "r20": 173.0, "r30": 173.2, "r40": 173.4, "idle5s": 173.4 }, "skiaCacheMB": 32.6, "nvidiaSmiUsedMiB": [4278, 4324, 4324, 4324, 4325, 4325], "resizeCpuMsPerS": 206.4, "rebuildIntervalMedianMs": 153.7 },
+      { "taskManagerDedicatedMB": { "start": 127.4, "r10": 172.8, "r20": 173.0, "r30": 173.2, "r40": 173.4, "idle5s": 173.4 }, "skiaCacheMB": 32.6, "nvidiaSmiUsedMiB": [4291, 4337, 4337, 4337, 4337, 4337], "resizeCpuMsPerS": 198.1, "rebuildIntervalMedianMs": 154.7 }
+    ],
+    "sample": [
+      { "samples": 539, "correct": 539, "stretched": 0, "squeezed": 0, "blank": 0, "scaledPercent": 0.0, "wallMs": 4518 },
+      { "samples": 543, "correct": 543, "stretched": 0, "squeezed": 0, "blank": 0, "scaledPercent": 0.0, "wallMs": 4553 }
+    ],
+    "vulkanProbeResizeMs": [ { "median": 28.7, "max": 150.5 }, { "median": 29.0, "max": 149.4 } ],
+    "vulkanProbeUnchangedPaths": { "immediateF16MedianMs": 5.1, "fifoF16MedianMs": 12.2, "mailbox8BitMedianMs": 3.6 },
+    "rebuildTiming": { "rebuilds": 30, "destroyFirstMs": 9.6, "createMs": 27.4, "createMsAfterTheFirst": 24, "firstCreateInAWindowMs": 137, "firstPresentMedianMs": 0.0 },
+    "oldHarness": { "mailboxStretched": "0 of 80", "immediateControlStretched": "7 of 80", "mailbox8BitStretched": "0 of 40" },
+    "validation": { "layers": "VK_LAYER_KHRONOS_validation 1.4.357, core + synchronisation", "messages": 0, "swapchainBuilds": 11, "positiveControl": "a barrier with a wrong srcAccessMask: VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819 x10" }
+  }
+}

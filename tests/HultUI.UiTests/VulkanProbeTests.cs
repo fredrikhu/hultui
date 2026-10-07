@@ -161,6 +161,40 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A resize on the half-float swapchain under MAILBOX, the default on an HDR display, is
+    /// drawn without the 100 ms wait. Handed over as <c>oldSwapchain</c>, the old swapchain made
+    /// the first present after every rebuild wait about 100 ms on NVIDIA (610.62), and a resize
+    /// took a median of 112 ms to draw; destroyed first, 29. A driver that never waited passes
+    /// either way.
+    /// </summary>
+    [VulkanUiFact]
+    public void AHalfFloatMailboxResize_IsNotHeldUpByTheSwapchainItReplaces()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through SetWindowPos
+        const int resizes = 20;
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = "1",
+            ["HULTUI_VULKAN_PRESENT"] = "mailbox",
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, $"--resizes={resizes}");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        // A half-float MAILBOX rebuild per size, or the time below says nothing.
+        Assert.Contains("vulkan present mode Mailbox", run.Output);
+        int builds = System.Text.RegularExpressions.Regex.Matches(run.Output,
+            @"vulkan swapchain \d+x\d+ x\d+ R16G16B16A16Sfloat").Count;
+        Assert.True(builds > resizes, $"{builds} half-float swapchain builds for {resizes} resizes:\n{run.Output}");
+
+        var time = System.Text.RegularExpressions.Regex.Match(run.Output, @"resizes, median ([\d.]+) ms");
+        Assert.True(time.Success, run.Output);
+        double median = double.Parse(time.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        // Halfway between the two: a destroy and a create cost about 34 ms, the wait 100 more.
+        Assert.True(median < 70, $"a resize took a median of {median:0.0} ms to draw:\n{run.Output}");
+    }
+
+    /// <summary>
     /// A driver that cannot give a device here, as in a remote session, a VM or a filtered loader.
     /// SDL creates the Vulkan window without complaint, and the renderer then fails to start.
     /// </summary>

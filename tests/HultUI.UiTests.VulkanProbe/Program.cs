@@ -26,6 +26,9 @@ using HultUI.WebView.WebView2;
 // (magenta, right): the web engine's interop and mpv's hidden GL context sharing one Vulkan
 // window. The clip is av://lavfi:color=c=magenta:s=320x240 unless --clip=<path or URL> says
 // otherwise (any file must be one the libmpv here decodes). Exits 4 when there is no libmpv.
+//
+// --resizes=N resizes the window N times between two sizes, without activating it, and prints
+// the median and longest time a resize took to be drawn (Windows).
 
 internal static class Program
 {
@@ -35,6 +38,8 @@ internal static class Program
     {
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--webviews")) return TwoPages(renderer);
+        if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
+            return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]));
         if (args.Contains("--page-and-video"))
             return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
                 ?? "av://lavfi:color=c=magenta:s=320x240");
@@ -144,6 +149,45 @@ internal static class Program
         Console.WriteLine("probe: done");
         return 0;
     }
+
+    /// <summary>
+    /// Every new size rebuilds the swapchain, so this is <paramref name="count"/> rebuilds. The
+    /// resize is SetWindowPos on this thread, never activating the window: as in a drag, the
+    /// window procedure draws the new size before SetWindowPos returns, so its time is a
+    /// rebuild plus its frames — and whatever the first present after it waits for.
+    /// </summary>
+    private static int Resizes(RendererKind renderer, int count)
+    {
+        using var app = new Application("vulkan-probe", 640, 400, renderer: renderer);
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
+            Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
+        for (int i = 0; i < 12; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        var times = new double[count];
+        for (int i = 0; i < count; i++)
+        {
+            int width = i % 2 == 0 ? 1100 : 1000, height = i % 2 == 0 ? 760 : 700;
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
+            times[i] = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            for (int f = 0; f < 2; f++)
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        }
+
+        Array.Sort(times);
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: {count} resizes, median {times[count / 2]:0.0} ms, max {times[^1]:0.0} ms"));
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private const uint NoMove = 0x0002, NoZOrder = 0x0004, NoActivate = 0x0010;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int width, int height, uint flags);
 
     private static string Page(string colour) =>
         $"<html><body style='margin:0;background:{colour}'><script>chrome.webview.postMessage('ready');</script></body></html>";
