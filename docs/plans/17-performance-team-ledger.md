@@ -34,7 +34,7 @@ survey to re-rank them.
 
 ### Round 1 build order
 
-1. **gl-vk-swapchain-rebuild-leak** (3) — F16 Vulkan swapchain leaks ~52 MB VRAM per
+1. ~~**gl-vk-swapchain-rebuild-leak**~~ LANDED 7a827e9 (3) — F16 Vulkan swapchain leaks ~52 MB VRAM per
    resize (MAILBOX/IMMEDIATE); destroy old before create. Re-run the resize-stretch check.
 2. **gl-no-depth-buffer** (3) — `SDL_GL_DEPTH_SIZE` 0; −15 % GPU memory per GL window.
 3. **paint-text-zero-alloc** (2; = runtime-text-draw-enumerators (4),
@@ -136,6 +136,7 @@ survey to re-rank them.
 
 | Round | Commit | Candidate | Before → after |
 |---|---|---|---|
+| 1 | 7a827e9 | gl-vk-swapchain-rebuild-leak | Not a real VRAM leak (Task Manager bookkeeping; nvidia-smi and DXGI flat). Real cost: ~100 ms first-present stall per chained scRGB MAILBOX rebuild. Destroy-first for scRGB MAILBOX on Windows: resize 112 → 29 ms median, resize CPU 453–480 → 198–206 ms/s, stretched frames during resize 72 % → 0, Task Manager 1,416 → 173 MB per 40 resizes. IMMEDIATE, FIFO, 8-bit keep chaining. |
 
 ## Examined, not worth it
 
@@ -194,7 +195,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 
 ## Open
 
-None yet.
+- **7a827e9 on Linux/KWin and on AMD/Intel Windows:** not measured. Linux keeps the chained
+  path. If AMD/Intel do not stall, destroy-first may cost them 21–24 ms per resize, as it
+  cost NVIDIA's IMMEDIATE and FIFO. A real Aperture resize run is also still to do.
 
 ## Log
 
