@@ -213,7 +213,8 @@ says so in the ledger's log.
 
 ### Phase `build` (one candidate at a time)
 
-Take up to six candidates, best first. For each, spawn **one** agent (the owning expert,
+Take up to twelve candidates, best first; the rest stay queued for the next survey to
+re-rank. For each, spawn **one** agent (the owning expert,
 no worktree isolation, in this worktree) and wait for it before the next. Never build
 or test here while it runs.
 
