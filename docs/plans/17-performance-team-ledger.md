@@ -44,6 +44,9 @@ survey to re-rank them.
    frame −40 % bytes.
 5. **paint-image-zero-copy** (2) — `SetImmutable` before `SKImage.FromBitmap`; −50 % decoded
    image memory (Aperture up to ~375 MB, Vesper ~50 MB).
+5a. **aperture-poster-decode-scale** (2; user said yes 2026-10-07) — request posters at
+   card width × display scale instead of × 2; −75 % poster memory at 100 % scale (up to
+   ~280 MB), −44 % at 150 %. Refetch at the new scale after a DPI change.
 6. **a11y-uia-wrapper-rebase** (7; = part of a11y-uia-apply-and-retention (4)) — rebase
    surviving wrappers, drop per-diff index; 34 MB leak after 200 toggles; fixes stale
    sibling navigation.
@@ -59,8 +62,18 @@ survey to re-rank them.
     ~−80…−220 MB GPU per Vulkan window after resizes.
 11. **a11y-build-diff-garbage** (7) — index loops, lazy child lists, positional diff,
     presized arrays, one slot lookup per list; a11y/edit 627 → ~425 KB/op.
+11a. **a11y-scroll-bounds-event** (7; user said yes 2026-10-07) — on a scroll rebuild,
+    raise one scroll change on the scroll view (as browsers report a scroll; check
+    Chromium's UIA and AT-SPI mapping) instead of a BoundingRectangle change per on-screen
+    node (133 per rebuild over 1,000 rows, 3 provider callbacks each).
+11b. **a11y-focus-state-on-tab** (7; user said yes 2026-10-07, correctness) — a focus move
+    updates HasKeyboardFocus/IsFocused at once (small patch per focus move) instead of
+    leaving them stale until the next rebuild.
 12. **apps-scenario-virtual-selection-walk-a11y** + **apps-scenario-textarea-highlighted-json**
     (8) — two perf-suite scenarios the big round 2 items need.
+
+**Between items 1 and 2:** render before/after images for Needs-the-user question 1
+(flex basis of truncating labels) in a separate worktree, for the user to decide.
 
 ### Waiting
 
@@ -155,19 +168,19 @@ From the round 1 surveys (details in `17-reports/`):
 1. **Flex basis of one-line truncating labels** (layout): use the CSS max-content basis?
    Halves ellipsis measurements (text/ellipsis 1,988 measurements, 7.7 MB per step) but
    changes how shrink is shared between several shrinkable items in a row (pixels move).
-2. **Bounds events on scroll** (a11y): keep one BoundingRectangle change per on-screen node
-   per scroll rebuild (133 per rebuild over 1,000 rows), or raise one scroll change on the
-   scroll view as browsers do? Changes the UIA event stream.
-3. **Stale focus state** (a11y, correctness): a Tab leaves HasKeyboardFocus/IsFocused stale
-   until the next rebuild. Fix it at the cost of a small patch per focus move?
-4. **Aperture poster decode size** (painting): request posters at card width × display
-   scale instead of × 2? −75 % poster memory at 100 % scale (up to ~280 MB), softer
-   posters briefly after moving to a higher-DPI monitor.
-5. **Should `MarkDirty()` join an open batch?** (reactivity): 3 MarkDirty calls in one
-   handler = 3 rebuilds today; joining caps it at 1, but a handler reading the tree right
-   after MarkDirty sees the old tree until `FlushNow()`. Changes documented semantics.
-6. **Aperture real-library measurement** (apps): provide an API key file, or allow using
-   the stored Jellyfin session?
+   **Open:** the user asked for before/after images (2026-10-07); rendering them is queued
+   between build items 1 and 2.
+6. **Aperture real-library measurement** (apps): **the user will provide an API key file**
+   (2026-10-07); its path goes here when it arrives. Never copy the key into the repo.
+
+Answered 2026-10-07:
+
+- 2. Bounds events on scroll → **yes**, one scroll change instead: candidate
+  a11y-scroll-bounds-event.
+- 3. Stale focus state → **yes**, fix it: candidate a11y-focus-state-on-tab.
+- 4. Aperture poster decode size → **yes**: candidate aperture-poster-decode-scale.
+- 5. `MarkDirty()` joining an open batch → **no**: it stays synchronous, as REACTIVITY.md
+  documents. The guidelines should tell app authors to call it once per handler.
 
 Decided by the orchestrator: idle wake-ups count as a bar (brief updated); a change aimed
 at per-frame allocation checks its bytes on AOT too (brief updated).
