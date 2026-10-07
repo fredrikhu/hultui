@@ -1,6 +1,6 @@
 # Plan 17: The performance team
 
-A team of four performance experts works through HultUI in rounds. Each round they
+A team of eight performance experts works through HultUI in rounds. Each round they
 look for time and memory wins in their area, the best ones are built and measured one at
 a time, and the round ends with a review. When a whole round finds nothing worth doing,
 the team writes `docs/PERFORMANCE.md`: guidelines for writing fast apps with the framework.
@@ -14,31 +14,30 @@ session running `/loop`) reads both on every tick, does the next step, and recor
 Every expert owns one area. A finding that crosses areas belongs to the expert whose code
 changes; the others may comment on it in their review.
 
-### 1. Layout and tree pipeline
+### 1. Layout
 
-- **Owns:** build and reconcile (`TreeDiffer`, components, signals), style resolution,
-  measure and arrange (flex, grid, text measure calls, measure caches), dirty propagation,
-  `VirtualList` / `TableView` realization, scrolling, sticky and z-order, hit-testing.
-- **Code:** `src/HultUI.Core/{Layout,Elements,Components,Reactivity,Styling,Events}`.
-- **Read first:** `docs/LAYOUT.md`, `docs/GRID.md`, `docs/REACTIVITY.md`,
-  `docs/DECISIONS.md`; memory `layout-leaf-measure-cache`, `layout-change-audit`,
-  `hultui-grid-vs-flex-perf`, `junction-frame-profile`, `perf-p4-p5-measured`.
+- **Owns:** style resolution, measure and arrange (flex, grid, text measure *calls*,
+  measure caches), dirty propagation, `VirtualList` / `TableView` realization, scrolling,
+  sticky and z-order, hit-testing.
+- **Code:** `src/HultUI.Core/{Layout,Elements,Styling,Events}`.
+- **Read first:** `docs/LAYOUT.md`, `docs/GRID.md`, `docs/DECISIONS.md`; memory
+  `layout-leaf-measure-cache`, `layout-change-audit`, `hultui-grid-vs-flex-perf`,
+  `junction-frame-profile`, `perf-p4-p5-measured`.
 - **Known leads:** hit-testing a 1,000-child column is linear (~5 µs per move) and
   enter/leave allocates ~1 KB per move; `VirtualList` realizes rows inside the render pass.
 
-### 2. SkiaSharp: painting and text
+### 2. SkiaSharp: painting
 
 - **Owns:** `SkiaRenderContext` and the paint path, `SaveLayer`/clip use, reuse of
-  `SKPaint`/`SKFont`/`SKPath`, picture and layer caching, image decode and caching, text
-  shaping and glyph caches (HarfBuzz, ICU), rich text paint, the cost of each effect
-  (shadow, blur, gradient, transform).
-- **Code:** `src/HultUI.Rendering.Skia`, `src/HultUI.Text`, `src/HultUI.Core/Rendering`,
-  `src/HultUI.Core/RichText`.
-- **Read first:** `docs/DECISIONS.md` (Text Rendering, Rendering, damage rects);
-  memory `opacity-layer-bounds`, `text-pipeline-perf`, `hultui-pixel-snapping`,
-  `golden-images`, `junction-frame-profile`.
+  `SKPaint`/`SKFont`/`SKPath`/`SKShader`, drawing text blobs, picture and layer caching,
+  image decode and caching, rich text paint, the cost of each effect (shadow, blur,
+  gradient, transform).
+- **Code:** `src/HultUI.Rendering.Skia` (not the text services), `src/HultUI.Core/Rendering`.
+- **Read first:** `docs/DECISIONS.md` (Rendering, damage rects); memory
+  `opacity-layer-bounds`, `hultui-pixel-snapping`, `golden-images`,
+  `junction-frame-profile`.
 - **Known leads:** Render is 40 % of a Junction frame and only about half of that is
-  painting; `TextArea` computes line starts in Render.
+  painting.
 - **Constraint:** golden images must stay byte-identical unless the change is meant to
   alter pixels; say so in the commit if it does.
 
@@ -65,16 +64,70 @@ changes; the others may comment on it in their review.
 - **Owns:** allocations per frame and per interaction, GC behaviour (gen-0 placement,
   LOH), boxing, closures, LINQ and iterators in hot paths, collection choice, struct
   layout and element size, NativeAOT and trimming, JIT tiering, P/Invoke and COM
-  marshalling, UI-thread dispatch and wake-ups, the managed cost of the accessibility
-  bridges (UIA, AT-SPI), leaks (handlers, subscriptions, unbounded caches).
-- **Code:** all of `src`; especially `src/HultUI.Core/{Threading,Accessibility}`,
-  `src/HultUI.Platform.Accessibility.*`, the interop files.
+  marshalling, UI-thread dispatch and wake-ups, leaks (handlers, subscriptions, unbounded
+  caches). Reviews every other expert's change for allocations.
+- **Code:** all of `src`; especially `src/HultUI.Core/Threading`, the interop files.
 - **Read first:** `docs/NATIVE-AOT.md`, `docs/THREADING.md`; memory
-  `perf-p4-p5-measured`, `uia-bridge`, `a11y-owner-slots`, `perf-suite` (allocation
-  traps), `hultui-twin-mount-leak`.
-- **Known leads:** a11y is 20 % of a Junction frame; the bridge's open levers are listed
-  in memory `uia-bridge` (reference-keyed dictionaries over fresh nodes, eager wrappers,
-  uncoalesced PropertyChanged).
+  `perf-p4-p5-measured`, `perf-suite` (allocation traps), `hultui-twin-mount-leak`.
+
+### 5. Text pipeline
+
+- **Owns:** itemization, shaping (HarfBuzz), BiDi, ICU line and grapheme breaking, word
+  and measure caches, font fallback, truncation and ellipsis, `TextArea` line layout,
+  rich text layout, `TextMeasure`.
+- **Code:** `src/HultUI.Text`; `SkiaTextShaper`, `SkiaTextServices`,
+  `SkiaMeasureContext`, `SkiaFontCollection` in `src/HultUI.Rendering.Skia`; the layout
+  side of `src/HultUI.Core/RichText` and `TextArea`.
+- **Read first:** `docs/plans/12-rich-text-spans.md`, `14-bidi.md`,
+  `16-rich-text-editor.md`, `samples/HultUI.Samples.TextBench/README.md`; memory
+  `text-pipeline-perf`, `hultui-textarea-scroll-wrap`, `cjk-fallback-test-chars`,
+  `rich-text-editor`, `junction-frame-profile`.
+- **Known leads:** opening Junction's `TODO.md` still costs ~20 ms, mostly cold
+  measuring of 89k characters; `TextArea` computes line starts in Render. The plain
+  (non-BiDi) path has never run surrogates, emoji, CJK or ZWJ in production: widening it
+  needs a BiDi-vs-plain equivalence corpus first.
+
+### 6. Reactivity and reconcile
+
+- **Owns:** components, `[Reactive]`, signals and effects, `Build`, `TreeDiffer`
+  (keyed and unkeyed), mount, unmount and patch, persistent child components, the code
+  the source generators emit.
+- **Code:** `src/HultUI.Core/{Components,Reactivity}`, `TreeDiffer`,
+  `src/HultUI.SourceGenerators`.
+- **Read first:** `docs/REACTIVITY.md`; memory `hultui-keyed-siblings-gotcha`,
+  `hultui-twin-mount-leak`, `hultui-dispatch-handler-pinning`, `junction-frame-profile`
+  (whole-app rebuild per selection), `perf-p4-p5-measured` (P5a).
+- **Known leads:** `MarkDirty` rebuilds synchronously, so several signal writes in one
+  handler may rebuild several times; Junction rebuilds the whole app per selection.
+
+### 7. Accessibility bridges
+
+- **Owns:** the per-frame `AccessibilityNode` tree build and diff, the UIA provider
+  (COM, events) and AT-SPI (D-Bus), coalescing, wrapper upkeep, property-change raising.
+- **Code:** `src/HultUI.Core/Accessibility`, `src/HultUI.Platform.Accessibility.*`.
+- **Read first:** `docs/ACCESSIBILITY-PLAN.md`; memory `uia-bridge`, `a11y-owner-slots`,
+  `uia-provider-repositioning`, `junction-frame-profile`; the perf suite's `a11y/` group.
+- **Known leads:** a11y is 20 % of a Junction frame. Open levers from memory `uia-bridge`:
+  reference-keyed dictionaries over fresh nodes (`RuntimeHelpers.GetHashCode` 9.6 % of
+  samples), wrappers built eagerly per diff, PropertyChanged raises not coalesced.
+- **Constraint:** a screen reader must see the same tree and events. A UIA client is
+  always listening on this machine; measure with the bridge on and with `HULTUI_A11Y=0`.
+
+### 8. App workloads
+
+- **Owns:** no code. Measures the real apps end to end on NativeAOT publishes —
+  Junction (`JUNCTION_BENCH`, `JUNCTION_FRAMELOG` on branch `claude/render-probe`),
+  Vesper Commander, Aperture, Meridian, Reel, the rich text editor — and splits each
+  app's frame time, start-up and working set by area.
+- **Job:** hands leads to the owning expert (a lead is a candidate with that expert as
+  owner); checks that landed commits helped real apps and not only suite rows; proposes
+  perf-suite scenarios for app patterns the suite does not cover.
+- **Read first:** memory `junction-frame-profile`, `junction-branch-perf`,
+  `startup-time-breakdown`, `benchmarking-workflow`; `scripts/aot-vs-jit-benchmark.ps1`;
+  the `run-hultui-app` skill.
+- **Reports shares, not times, in a survey:** the other surveys load the CPU, so it
+  gives each area's share of the frame and counts; absolute times come from the build
+  phase.
 
 Memory files live in
 `C:\Users\fredr\.claude\projects\C--Users-fredr-source-repos-fredrikhu-hului-revamped\memory\`.
@@ -112,9 +165,9 @@ guidelines should warn about. Fix the framework first.
 
 The ledger's **Phase** field says where the round is.
 
-### Phase `survey` (four experts in parallel)
+### Phase `survey` (all experts in parallel)
 
-Spawn the four experts at once, each with `isolation: "worktree"` so their builds never
+Spawn the eight experts at once, each with `isolation: "worktree"` so their builds never
 share `bin/` with each other or with this worktree. Each gets this brief, its own
 section, the ledger, and the list of commits since the last survey.
 
@@ -126,7 +179,7 @@ Each expert:
    allocations, read traces. Skips anything listed in the ledger as landed, declined or
    examined unless it has new evidence.
 3. May build and run anything in its own worktree, but **reports only allocation
-   numbers, call counts and complexity** from this phase. Four surveys run at once, so
+   numbers, call counts and complexity** from this phase. Eight surveys run at once, so
    their timings are noise; timings come from the build phase.
 4. Returns, in this shape:
 
@@ -147,9 +200,14 @@ Each expert:
 
    `SATISFIED: yes` means: no candidate in its area clears a bar.
 
-The orchestrator merges the four reports into the ledger, ranks the candidates by
-expected win over cost, and sets Phase `build`. If **all four** said `SATISFIED: yes`
-and none raised a review objection, it sets Phase `guidelines` instead.
+The orchestrator merges the reports into the ledger, folds duplicates into one
+candidate with one owner, ranks the candidates by expected win over cost, and sets Phase
+`build`. If **every expert** said `SATISFIED: yes` and none raised a review objection, it
+sets Phase `guidelines` instead.
+
+The team may change. When a survey shows an area nobody owns, or one expert's area is
+too big to cover in a round, the orchestrator adds or splits a role in this brief and
+says so in the ledger's log.
 
 ### Phase `build` (one candidate at a time)
 
@@ -188,7 +246,7 @@ commit reverted before the round closes. Then increment **Round**, set Phase `su
 
 ### Phase `guidelines`
 
-1. Spawn the four experts in parallel (read-only, no builds). Each returns its section
+1. Spawn every expert in parallel (read-only, no builds). Each returns its section
    of `docs/PERFORMANCE.md` as text.
 2. The orchestrator assembles the document. Shape:
    - **Measure first:** the perf suite, Benchmark, TextBench, `HULTUI_TRACE`,
@@ -199,8 +257,8 @@ commit reverted before the round closes. Then increment **Round**, set Phase `su
      real API.
    - **Traps:** things that look cheap and are not, from the ledger and memory.
    - **Costs at a glance:** a table of common operations and what they cost.
-3. Spawn the four again to review the whole document for errors, missing rules and
-   claims without a number. Apply their changes. Repeat until all four approve.
+3. Spawn every expert again to review the whole document for errors, missing rules and
+   claims without a number. Apply their changes. Repeat until all approve.
 4. Link it from `docs/toc.yml` (Guides) and `docs/index.md`. Commit.
 5. Set Phase `done`.
 
@@ -233,9 +291,8 @@ nothing is pushed or merged yet.
 - **Commit on this branch only.** No pushes, merges or tags; the user decides at the end.
 - **Plain language** in commits and docs, as in the rest of `docs/`.
 
-## Stopping early
+## When it ends
 
-- **Round 10** without the team satisfied: write the guidelines anyway, list the
-  remaining candidates under **Open** in the ledger, and stop.
-- **A blocker only the user can clear** (every remaining candidate is in Needs the user):
-  go to `guidelines`, then stop and ask.
+There is no round limit: the loop runs until every expert is satisfied in the same
+survey. The one other way out is **a blocker only the user can clear**: when every
+remaining candidate is in Needs the user, stop and ask; resume when the user answers.
