@@ -142,12 +142,12 @@ Open follow-ups:
   runs (code, Latin UI text) are exact.
 - **Styled single-line fast path**: styled text always takes the width-keyed
   cache; the width-independent shape cache is plain-text only for now.
-- **Hit-testing ignores metric spans** (found 2026-09-23, Junction's markdown — the
-  first consumer of stage 2). `TextElement.Render` caches its lines with
-  `LayoutTextLines(Content, style, …)`, which takes no spans, and `PositionFromPoint`
-  measures prefixes in the element style. On a paragraph with bold ahead of a link,
-  a click maps a few pixels off, and where bold moved a wrap, onto the wrong line.
-  Selection on styled text has the same skew.
+- ~~**Hit-testing ignores metric spans**~~ — done (2026-10-06, plan 16 stage 1).
+  `TextElement` keeps a `TextParagraph` (`IRenderContext.LayoutParagraph`, with its spans,
+  line limit and overflow — the layout DrawText draws) and maps clicks and paints selection
+  through it, so a bold or larger run ahead of a link no longer shifts the click, and
+  centred lines hit-test where they are drawn. Clicks now land on the nearest caret position
+  (they used to round up to after the character clicked). Spans also gained `FontFamily`.
 
 ## Non-goals
 

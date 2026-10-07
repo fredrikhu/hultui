@@ -925,8 +925,11 @@ typed were unrelated events. All four are new members, so no existing code chang
   patterns, offered by any node with text. Ranges never move onto the empty end; selecting from a
   reader is refused. Text changes raise `Text_TextChanged`, caret moves `Text_TextSelectionChanged`.
 - **Linux:** `org.a11y.atspi.Text` (its answers in plain functions, `AtSpiText`), and `TextChanged`
-  insert/delete, `TextCaretMoved` and `TextSelectionChanged`. A sentence and a paragraph are a line.
-- **Who uses it.** The terminal. Text inputs and TextArea are next.
+  insert/delete, `TextCaretMoved` and `TextSelectionChanged`. A sentence is a line; for the
+  terminal, whose text does not wrap, a paragraph is too.
+- **Who uses it.** The terminal, and since 2026-10-07 the rich text editor, whose text wraps: it
+  passes its drawn lines (`lineStarts`), and a paragraph is then a `'\n'`-separated run, on both
+  bridges. Text inputs and TextArea are next.
 
 **A2: announcements (`HultUI.Core`, both bridges). Built in step 7.**
 

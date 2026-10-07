@@ -269,7 +269,10 @@ public class GroupSelectionDragTests
         using var session = HeadlessSession.Create(width: 200, height: 200);
         var (scroll, rows, group) = Build(session);
 
-        float x = rows[0].Layout.AbsoluteContentBox.X + 1f;
+        // Two characters in, so the caret carried down two lines lands inside row 3, not at its
+        // start: a click is mapped to the nearest caret position, and 1px in is before the first.
+        float x = rows[0].Layout.AbsoluteContentBox.X
+            + Core.Rendering.TextMeasure.MeasureWidth("li", rows[0].ResolvedInherited);
         session.Window.Click(x, ScreenMidY(scroll, rows[1]));
 
         session.Window.KeyDown(KeyCode.Down, KeyModifiers.Shift);

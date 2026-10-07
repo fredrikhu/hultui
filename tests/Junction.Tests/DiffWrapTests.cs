@@ -452,10 +452,7 @@ public class DiffWrapTests
     /// <summary>Each line's laid-out width, from the label's own line boxes.</summary>
     private static IEnumerable<float> LineWidths(TextElement label)
     {
-        var lines = (HultUI.Core.Rendering.TextLineBox[])
-            typeof(TextElement).GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
-                .GetValue(label)!;
-        foreach (var line in lines) yield return line.Width;
+        foreach (var line in LayoutProbe.DrawnLines(label)) yield return line.Width;
     }
 
     private static void Press(HeadlessSession session, JunctionApp app, KeyCode key)
@@ -500,15 +497,7 @@ public class DiffWrapTests
         return tallest;
     }
 
-    private static float DrawnHeight(TextElement label)
-    {
-        var lines = (HultUI.Core.Rendering.TextLineBox[])
-            typeof(TextElement).GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
-                .GetValue(label)!;
-        float bottom = 0;
-        foreach (var line in lines) bottom = System.Math.Max(bottom, line.OffsetY + line.Height);
-        return bottom;
-    }
+    private static float DrawnHeight(TextElement label) => LayoutProbe.DrawnText(label).Height;
 
     private static List<TextElement> CodeLabels(HeadlessSession session)
     {

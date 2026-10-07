@@ -181,9 +181,44 @@ public interface IRenderContext
         return x1 > x0 ? [new TextRangeBox(x0, x1)] : [];
     }
 
+    // ── Paragraphs (docs/plans/16-rich-text-editor.md, stage 1) ──
+
+    /// <summary>
+    /// Lays <paramref name="text"/> out as one paragraph wrapped at <paramref name="maxWidth"/>,
+    /// shaped by whichever <paramref name="spans"/> change weight, slant, size or family, and
+    /// keeps the result to answer caret, hit-test and selection questions from
+    /// (<see cref="TextParagraph"/>). <paramref name="maxLines"/> and <paramref name="overflow"/>
+    /// mean what they mean to DrawText, so a label hit-tests the very lines it draws; an editor
+    /// passes neither. The default builds one from <see cref="LayoutTextLines"/>, which does not
+    /// see spans.
+    /// </summary>
+    TextParagraph LayoutParagraph(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<TextSpan>? spans = null, int? maxLines = null, TextOverflow overflow = TextOverflow.Clip)
+        => TextParagraph.FromLines(this, text, style, maxWidth, spans, maxLines, overflow);
+
+    /// <summary>
+    /// Draws <paramref name="paragraph"/> with its top-left corner at <paramref name="origin"/>:
+    /// the lines it holds, aligned within its width, with its spans' colors, backgrounds and
+    /// decorations. The default draws its text again through
+    /// <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?, IReadOnlyList{TextSpan}?)"/>.
+    /// </summary>
+    void DrawParagraph(TextParagraph paragraph, Point origin)
+    {
+        float width = float.IsInfinity(paragraph.MaxWidth) ? paragraph.Size.Width : paragraph.MaxWidth;
+        DrawText(paragraph.Text, new Rect(origin.X, origin.Y, width, paragraph.Size.Height),
+            paragraph.Style, paragraph.Overflow, paragraph.MaxLines, paragraph.Spans);
+    }
+
     void PushClip(Rect clipRect);
     void PushRoundedClip(Rect clipRect, CornerRadius radius);
     void PushTranslate(float x, float y);
+
+    /// <summary>
+    /// What the clips pushed so far leave visible, in the current coordinates: how far an element
+    /// taller than its viewport — a long document in an editor that grows with it, inside a scroll
+    /// view — need draw. Null when the context cannot say, and then everything is drawn.
+    /// </summary>
+    Rect? ClipBounds => null;
 
     /// <summary>
     /// Draws everything up to the matching <see cref="Pop"/> into a group, then blends the

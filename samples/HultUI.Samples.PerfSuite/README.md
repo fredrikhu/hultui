@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 64 scenarios over every feature area | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 83 scenarios over every feature area | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -37,12 +37,13 @@ below). `--list` prints every scenario, `--help` every option.
 | `virtual/`, `table/` | `VirtualListElement` with 100,000 items; `TableView` with 10,000 rows: sort, wheel, column resize |
 | `component/` | Keyed and unkeyed rebuilds of 1,000 rows, reverse, a small component in a big tree, 300 mounts, a signal read by 500 effects |
 | `input/` | Hover, checkbox click, typing in `TextInput` and a 2,000-line `TextArea`, undo/redo, Tab through a form, drag to reorder |
+| `richtext/` | The rich text editor on long documents: opening 5,000 blocks, a keystroke and Enter in them, the wheel, Ctrl+A, a resize of 1,000, a paragraph of 600 spans, a 200-cell table, and an editor that grows with its document inside a scroll view. The editor lays out inside its paint, so its layout shows under **render** |
 | `overlay/` | Opening a popover, dialog, menu bar menu, dropdown, tooltip; filtering a command palette of 2,000 commands |
 | `controls/`, `icons/` | Mounting a control screen, tabs, an animated expander, a slider drag, 600 icons |
 | `theme/` | Light ⇄ dark, and cycling the `HultUI.Themes` catalogue, on the control screen |
 | `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition |
 | `paint/` | The same 400 tiles plain, rounded, shadowed, gradient-filled, transformed: the price of each effect |
-| `a11y/` | Creates, edits and Tab with an accessibility client attached: the tree build and diff |
+| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff |
 
 ## Reading the output
 
@@ -168,6 +169,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-98e0581-widthrange-after.json` | … and after it, with the layout pass keeping a set-size box's layout and the cache entry back at 28 bytes: 98e0581, interleaved with the line above. Compare these two: 0 slower, 4 faster. |
 | `2026-10-06-58f0abd-prefixes-before.json` | Before a TextArea read a line's widths off a table of its prefixes: main at 58f0abd with `input/type in a wrapped 900-line TextArea` added, median of 3 idle-gated runs … |
 | `2026-10-06-5568977-prefixes-after.json` | … and after it, with long lines' breaks remembered across edits: 5568977, interleaved with the line above. Compare these two: 0 slower, 3 faster (the long document −43 %, typing in it −21 %). |
+| `2026-10-07-2128054-richtext-before.json` | Before the rich text editor's stage 8 (docs/plans/16-rich-text-editor.md): 2128054 with the `richtext/` scenarios added, all 82, median of 3 idle-gated runs … |
+| `2026-10-07-stage8-richtext-after.json` | … and after it, interleaved with the line above. Compare these two: 0 slower, 11 faster (see below). |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -486,6 +489,30 @@ each is measured once, whole, as before.
   0.9 ms rounded-with-border and 1.4 ms gradient (CPU raster; the order is the signal).
 - **Opening a dialog costs ~3 ms**, almost all of it overlay layout and paint ("other"),
   against ~0.5 ms for a popover, menu or dropdown.
+
+**The rich text editor, before → after stage 8.** The plan named a linear scan of a long
+paragraph's spans as the risk; profiled, it came third. Typing in a paragraph of 600 spans
+spent most of its layout asking Skia, a character at a time, whether a face had a glyph, and
+most of its paint in three passes over every span for every line. A face now remembers its
+answers for the Basic Multilingual Plane (two bits a character), the span lookups binary-search,
+and the editor lays out only the blocks an edit replaced, draws only what the clip leaves, and
+measures an auto-height editor from that same layout:
+
+| Scenario | before (min) | after | |
+|---|---:|---:|---:|
+| `richtext/type in a paragraph of 600 spans` | 19.24 ms | 2.69 ms | −86 % |
+| `richtext/type in an auto-height editor` | 3.35 ms | 0.81 ms | −76 %, alloc −98 % |
+| `richtext/type in 5,000 blocks` | 1.00 ms | 0.87 ms | −14 %, alloc −73 % |
+| `a11y/type in rich text, bridge on` | 1.57 ms | 1.14 ms | −27 %, alloc −52 % |
+| `text/open a long document in a TextArea` | 8.73 ms | 6.33 ms | −27 % |
+| `text/multi-font ellipsis 1,000 labels resize` | 10.23 ms | 8.19 ms | −20 % |
+| `text/wrap 150 paragraphs resize` | 2.85 ms | 2.38 ms | −17 % |
+
+The `text/` rows are the glyph answers: every label is itemized. Blobs are now kept by the
+glyphs they draw rather than by run, so a paragraph laid out again keeps the blobs of its
+unchanged lines; the hashing that costs every drawn run shows as `paint/dense text screen`
++1 %, within noise. The 600-span row reads 7.4 ms before in a filtered run and 19 ms in the full
+suite — the glyph calls cost more there — and 2.6 ms after in both.
 
 ## Adding a scenario
 

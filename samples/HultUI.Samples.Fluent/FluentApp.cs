@@ -6,7 +6,9 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 
 namespace HultUI.Samples.Fluent;
 
@@ -16,7 +18,7 @@ namespace HultUI.Samples.Fluent;
 // namespace body, it wins.
 using Text = HultUI.Core.Builders.Text;
 
-public enum Page { Home, Personalization, Gallery, About }
+public enum Page { Home, Personalization, Gallery, RichText, About }
 
 /// <summary>
 /// A Windows 11 Settings-shaped app: a custom title bar, a NavigationView down the left, and a
@@ -59,6 +61,39 @@ public sealed partial class FluentApp : Component
     [Reactive] public partial bool NotifyStore { get; set; }
     [Reactive] public partial bool InfoBarShown { get; set; }
     [Reactive] public partial int ClickCount { get; set; }
+
+    // Rich text
+    [Reactive] public partial HultUI.Core.RichText.RichDocument Notes { get; set; }
+    [Reactive] public partial bool NotesReadOnly { get; set; }
+    public readonly Ref<RichTextEditorElement> NotesEditor = new();
+    public readonly RichTextToolbar NotesToolbar;
+
+    /// <summary>Builds again: what the toolbar asks for when the caret moves.</summary>
+    public void Refresh() => MarkDirty();
+
+    /// <summary>Ctrl+F on the rich text page: the notes' matches tinted, Enter walking them.</summary>
+    public readonly FindBar NotesFind;
+
+    protected override void OnAfterBuild() => NotesFind.Service();
+
+    private readonly Dictionary<string, IImageSource?> _pictures = new(StringComparer.Ordinal);
+
+    /// <summary>The notes' pictures: <c>sample:</c> ones drawn here, anything else a file on
+    /// disk. Kept once made, failures too, so a missing file is not looked for every build.</summary>
+    public IImageSource? Picture(string source)
+    {
+        if (_pictures.TryGetValue(source, out var known)) return known;
+        IImageSource? made = null;
+        try
+        {
+            if (source == "sample:aurora") made = Pages.Aurora(560, 180);
+            else if (File.Exists(source)) made = SkiaImageSource.FromFile(source);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+        return _pictures[source] = made;
+    }
 
     private readonly MenuBar _menus;
 
@@ -109,6 +144,16 @@ public sealed partial class FluentApp : Component
                 Text = d => d.Added.ToString("g"), Compare = (a, b) => a.Added.CompareTo(b.Added),
                 FirstSort = SortDirection.Descending },
         ], MarkDirty) { RowHeight = 36f };
+        NotesToolbar = new RichTextToolbar(NotesEditor, MarkDirty);
+        NotesFind = new FindBar(MarkDirty)
+        {
+            Placeholder = "Find in the notes",
+            Body = () => NotesEditor.Current,
+            Selection = () => NotesEditor.Current?.FindSelection,
+            Reveal = () => NotesEditor.Current?.RevealSearchMatch(),
+            // Selecting the match scrolls the editor when it next draws: no layout to wait for.
+            RevealAfterLayout = false,
+        };
         EmptyBinFlyout = new Popover(() =>
         {
             var p = Palette;
@@ -134,6 +179,7 @@ public sealed partial class FluentApp : Component
                 ContextMenuItem.Separator(),
                 new ContextMenuItem { Label = "Personalization", IsChecked = Current == Page.Personalization, Action = () => Current = Page.Personalization },
                 new ContextMenuItem { Label = "Controls gallery", IsChecked = Current == Page.Gallery, Action = () => Current = Page.Gallery },
+                new ContextMenuItem { Label = "Rich text", IsChecked = Current == Page.RichText, Action = () => Current = Page.RichText },
             ]),
             new("&Help", [new ContextMenuItem { Label = "About", Action = () => Current = Page.About }]),
         ]);
@@ -142,10 +188,14 @@ public sealed partial class FluentApp : Component
         // On the host, where keys land when nothing has the focus — a handler on the column
         // inside it never sees a key aimed at the host.
         var host = Mount();
-        host.On<KeyDownEvent>(e => { if (_menus.HandleKey(e)) e.StopPropagation = true; });
+        host.On<KeyDownEvent>(e =>
+        {
+            if ((Current == Page.RichText && NotesFind.HandleKey(e)) || _menus.HandleKey(e)) e.StopPropagation = true;
+        });
         host.On<KeyUpEvent>(e => _menus.HandleKeyUp(e));
 
         Current = Page.Home;
+        Notes = Pages.NotesSample();
         Dark = true;
         AccentIndex = 0;
         Transparency = true;
@@ -304,6 +354,8 @@ public sealed partial class FluentApp : Component
                     () => Current = Page.Personalization),
                 F.NavItem(p, Icons.Gallery, "Controls gallery", Current == Page.Gallery,
                     () => Current = Page.Gallery),
+                F.NavItem(p, Icons.Editor, "Rich text", Current == Page.RichText,
+                    () => Current = Page.RichText),
                 Box.New().FlexGrow(1),
                 F.NavItem(p, Icons.About, "About", Current == Page.About, () => Current = Page.About));
     }
@@ -318,6 +370,7 @@ public sealed partial class FluentApp : Component
         {
             Page.Personalization => Pages.Personalization(this, p),
             Page.Gallery => Pages.Gallery(this, p),
+            Page.RichText => Pages.RichText(this, p),
             Page.About => Pages.About(this, p),
             _ => Pages.Home(this, p),
         };

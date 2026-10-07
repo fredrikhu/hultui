@@ -1,0 +1,416 @@
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
+using HultUI.Core.RichText;
+using HultUI.Core.Styling;
+
+namespace HultUI.Core.Elements;
+
+public partial class RichTextEditorElement
+{
+    private float _scrollY;
+    private bool _needsScrollToCaret;
+    private readonly Scrollbar _bar = new();
+    private readonly List<Rect> _boxes = [];
+
+    // Where the caret is drawn when a wrapped line's end and the next line's start are the same
+    // offset: true after End or a click past a line's end, so the caret stays where it was put.
+    private bool _upstream;
+
+    /// <summary>The box's — the document is clipped to it — while the scrollbar fits inside it.</summary>
+    public override Rect? PaintBounds(IRenderContext ctx) =>
+        _bar.PaintsInside(Layout.AbsoluteContentBox, vertical: true) ? base.PaintBounds(ctx) : null;
+
+    public override void Render(IRenderContext ctx)
+    {
+        var origBorder = BorderColor;
+        var origBackground = BackgroundColor;
+        if (_focused)
+        {
+            BorderColor = FocusBorderColor;
+            if (FocusBackground is { } fb) BackgroundColor = fb;
+        }
+        base.Render(ctx);
+        if (_focused)
+        {
+            BorderColor = origBorder;
+            BackgroundColor = origBackground;
+        }
+        TextFieldUnderline.Draw(ctx, Layout.AbsoluteBorderBox, CornerRadius,
+            (_focused ? FocusUnderlineColor ?? UnderlineColor : UnderlineColor) ?? Color.Transparent,
+            _focused ? FocusUnderlineThickness : UnderlineThickness);
+
+        var content = Layout.AbsoluteContentBox;
+        EnsureLayout(ctx, content.Width);
+
+        if (_needsScrollToCaret)
+        {
+            _needsScrollToCaret = false;
+            ScrollCaretIntoView(content.Height);
+        }
+        _scrollY = Math.Clamp(_scrollY, 0, MaxScrollY());
+        NoteViewFrame();
+
+        ctx.PushClip(content);
+        float originX = content.X, originY = content.Y - _scrollY;
+
+        // The document's visible stretch: the viewport, cut down to what the clips above leave —
+        // an editor that grows with its document, inside a scroll view, is mostly off screen.
+        float top = _scrollY, bottom = _scrollY + content.Height;
+        if (ctx.ClipBounds is { } clip)
+        {
+            top = Math.Max(top, clip.Y - originY);
+            bottom = Math.Min(bottom, clip.Bottom - originY);
+        }
+
+        int first = BlockAt(top);
+        if (first > 0 && _blocks[first].Top > top) first--;
+        // A row of a table is drawn from its first cell; BlockAt answers with its last.
+        if (_blocks[first].Table is { } firstTable) first = firstTable.Range.IndexOf(_blocks[first].CellRow, 0);
+
+        var selection = _state.Selection;
+        TableLayout? drawnTable = null;
+        for (int i = first; i < _blocks.Length; i++)
+        {
+            var bl = _blocks[i];
+            if (bl.Top - bl.SpaceAbove > bottom) break;
+            if (bl.Table is { } table && !ReferenceEquals(table, drawnTable))
+            {
+                DrawTable(ctx, table, originX, originY);
+                drawnTable = table;
+            }
+            DrawChrome(ctx, i, bl, originX, originY, content.Width);
+            if (_search is not null) DrawSearchHits(ctx, i, bl, originX, originY);
+            if (!selection.IsCollapsed) DrawSelection(ctx, i, bl, selection, originX, originY, content.Width);
+            if (bl.Paragraph is { } para)
+                ctx.DrawParagraph(para, new Point(originX + bl.TextX, originY + bl.Top + bl.TextY));
+        }
+
+        if (IsEmpty && Placeholder.Length > 0 && !_composition.IsActive && _blocks.Length > 0)
+        {
+            var bl = _blocks[0];
+            var style = bl.Style with { TextColor = PlaceholderColor };
+            ctx.DrawText(Placeholder, new Rect(originX + bl.TextX, originY + bl.Top + bl.TextY,
+                Math.Max(0, content.Width - bl.TextX), content.Height), style, TextOverflow.Clip, null);
+        }
+
+        if (_focused && !_readOnly)
+            DrawCaret(ctx, originX, originY);
+
+        ctx.Pop();
+        _bar.Paint(ctx, content, _documentHeight, _scrollY, vertical: true);
+    }
+
+    /// <summary>One empty paragraph: nothing typed yet.</summary>
+    private bool IsEmpty => _state.Document is { BlockCount: 1 } d && d[0] is { Kind: BlockKind.Paragraph, Text.Length: 0 };
+
+    // ── Block chrome: list markers, check boxes, quote bars, code backgrounds, rules ──
+
+    private void DrawChrome(IRenderContext ctx, int index, BlockLayout bl, float ox, float oy, float width)
+    {
+        var block = bl.Block;
+        float indent = block.Indent * _rt.IndentWidth;
+        float top = oy + bl.Top;
+
+        switch (block.Kind)
+        {
+            case BlockKind.CodeBlock or BlockKind.Raw:
+                ctx.DrawRoundedRect(new Rect(ox + indent, top, Math.Max(0, width - indent), bl.Height),
+                    new CornerRadius(_rt.CodeBlockCornerRadius), _codeBackground, Color.Transparent, Thickness.Zero);
+                break;
+
+            case BlockKind.Quote:
+            {
+                // A run of quotes is one bar, carried across the gaps between them.
+                bool joined = index > 0 && _blocks[index - 1].Block.Kind == BlockKind.Quote;
+                float from = joined ? top - bl.SpaceAbove : top;
+                ctx.DrawRect(new Rect(ox + indent, from, _rt.QuoteBarWidth, top + bl.Height - from), _quoteBar);
+                break;
+            }
+
+            case BlockKind.Rule:
+            {
+                float y = top + (bl.Height - _rt.RuleThickness) / 2;
+                ctx.DrawRect(new Rect(ox + indent, y, Math.Max(0, width - indent), _rt.RuleThickness), _rule);
+                break;
+            }
+
+            case BlockKind.BulletItem or BlockKind.NumberedItem or BlockKind.TaskItem:
+                DrawMarker(ctx, bl, ox + indent, top);
+                break;
+
+            case BlockKind.Image:
+                DrawPicture(ctx, bl, ox, top);
+                break;
+        }
+    }
+
+    // ── Pictures and tables ──
+
+    private void DrawPicture(IRenderContext ctx, BlockLayout bl, float ox, float top)
+    {
+        var r = new Rect(ox + bl.PictureRect.X, top + bl.PictureRect.Y, bl.PictureRect.Width, bl.PictureRect.Height);
+        if (bl.Picture is { IsLoaded: true } source && bl.PictureLoaded)
+        {
+            ctx.DrawImage(source, r, ImageFit.Fill);
+            return;
+        }
+
+        // Not (yet) a picture: a line naming it.
+        ctx.DrawRoundedRect(r, new CornerRadius(_rt.CodeBlockCornerRadius), _codeBackground, Color.Transparent, Thickness.Zero);
+        var image = bl.Block.Image;
+        string name = image is null ? "" : image.Alt.Length > 0 ? image.Alt : NameOf(image.Source);
+        string label = bl.Picture is null ? name : name + " — loading…";
+        var style = bl.Style with { TextColor = _rawText, TextAlign = TextAlign.Start, Decoration = TextDecoration.None };
+        float h = ctx.MeasureText(label.Length > 0 ? label : " ", style).Height;
+        float pad = _rt.CodeBlockPadding.Left;
+        ctx.DrawText(label, new Rect(r.X + pad, r.Y + (r.Height - h) / 2, Math.Max(0, r.Width - 2 * pad), h), style,
+            TextOverflow.Ellipsis, 1);
+    }
+
+    // The last part of a path or address: what a picture with no words is called.
+    private static string NameOf(string source)
+    {
+        int slash = source.TrimEnd('/', '\\').LastIndexOfAny(['/', '\\']);
+        return slash >= 0 ? source[(slash + 1)..].TrimEnd('/', '\\') : source;
+    }
+
+    // The header row's tint inside the grid, then the grid's lines over the whole table.
+    private void DrawTable(IRenderContext ctx, TableLayout t, float ox, float oy)
+    {
+        float top = oy + t.Top, b = t.Border;
+        float left = ox + t.ColumnX[0], width = t.ColumnX[^1] + b - t.ColumnX[0];
+        ctx.DrawRect(new Rect(left + b, top + b, Math.Max(0, width - 2 * b), Math.Max(0, t.RowY[1] - b)), _tableHeader);
+        foreach (float y in t.RowY)
+            ctx.DrawRect(new Rect(left, top + y, width, b), _tableBorder);
+        foreach (float x in t.ColumnX)
+            ctx.DrawRect(new Rect(ox + x, top, b, t.Height), _tableBorder);
+    }
+
+    // A list item's marker in the column before its text, centred on the first line.
+    private void DrawMarker(IRenderContext ctx, BlockLayout bl, float columnX, float top)
+    {
+        if (bl.Paragraph is not { } para) return;
+        var block = bl.Block;
+        var firstLine = para.Lines[0];
+        float lineTop = top + bl.TextY + firstLine.OffsetY;
+        float baseline = top + bl.TextY + para.Baseline(0);
+        float size = bl.Style.FontSize;
+        float column = _rt.IndentWidth;
+
+        switch (block.Kind)
+        {
+            case BlockKind.BulletItem:
+            {
+                float d = Math.Max(3f, size * _rt.BulletScale);
+                float cx = columnX + column * 0.5f;
+                // On the x-height's middle, roughly a third of the size above the baseline.
+                float cy = baseline - size * 0.32f;
+                var rect = new Rect(cx - d / 2, cy - d / 2, d, d);
+                var color = bl.Style.TextColor;
+                switch (block.Indent % 3)
+                {
+                    case 0:
+                        ctx.DrawRoundedRect(rect, new CornerRadius(d / 2), color, Color.Transparent, Thickness.Zero);
+                        break;
+                    case 1:
+                        ctx.DrawRoundedRect(rect, new CornerRadius(d / 2), Color.Transparent, color, new Thickness(1f));
+                        break;
+                    default:
+                        ctx.DrawRect(rect, color);
+                        break;
+                }
+                break;
+            }
+
+            case BlockKind.NumberedItem:
+            {
+                string label = bl.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".";
+                var style = bl.Style with { TextAlign = TextAlign.Start, Decoration = TextDecoration.None };
+                float w = ctx.MeasureText(label, style).Width;
+                // Right-aligned against the text, as a word processor sets them, so 9. and 10. line up.
+                float x = columnX + column - w - Math.Max(4f, size * 0.3f);
+                ctx.DrawText(label, new Rect(x, lineTop, w + 1, firstLine.Height), style, TextOverflow.Clip, 1);
+                break;
+            }
+
+            case BlockKind.TaskItem:
+            {
+                float s = Math.Max(8f, size * _rt.CheckboxScale);
+                var box = CheckboxRect(columnX, column, lineTop, firstLine.Height, s);
+                if (block.Checked)
+                {
+                    ctx.DrawRoundedRect(box, new CornerRadius(3f), _checked, Color.Transparent, Thickness.Zero);
+                    Span<Point> tick =
+                    [
+                        new(box.X + s * 0.22f, box.Y + s * 0.52f),
+                        new(box.X + s * 0.42f, box.Y + s * 0.72f),
+                        new(box.X + s * 0.78f, box.Y + s * 0.3f),
+                    ];
+                    ctx.DrawPolyline(tick, Color.White, Math.Max(1.5f, s * 0.12f));
+                }
+                else
+                    ctx.DrawRoundedRect(box, new CornerRadius(3f), Color.Transparent, _checkBorder, new Thickness(1f));
+                break;
+            }
+        }
+    }
+
+    private static Rect CheckboxRect(float columnX, float column, float lineTop, float lineHeight, float size) =>
+        new(columnX + (column - size) / 2 - 2f, lineTop + (lineHeight - size) / 2, size, size);
+
+    // ── Selection ──
+
+    private void DrawSelection(IRenderContext ctx, int index, BlockLayout bl, RichSelection selection,
+        float ox, float oy, float width)
+    {
+        var s = selection.Start;
+        var e = selection.End;
+        if (index < s.Block || index > e.Block) return;
+
+        if (bl.Paragraph is not { } para)
+        {
+            // A rule or a picture is selected whole, when the selection starts at or before it and
+            // goes on past.
+            if (s <= new RichPosition(index, 0) && e.Block > index)
+            {
+                var r = bl.Block.Kind == BlockKind.Image
+                    ? new Rect(ox + bl.PictureRect.X, oy + bl.Top, bl.PictureRect.Width, bl.Height)
+                    : new Rect(ox + bl.TextX, oy + bl.Top, Math.Max(0, width - bl.TextX), bl.Height);
+                ctx.DrawRect(r, SelectionColor);
+            }
+            return;
+        }
+
+        int from = index == s.Block ? s.Offset : 0;
+        // Carrying on into the next block selects this one's end too: one past its length.
+        int to = index == e.Block ? e.Offset : bl.Block.Text.Length + 1;
+
+        _boxes.Clear();
+        para.SelectionBoxes(from, to, _boxes, bl.Style.FontSize * 0.35f);
+        float x0 = ox + bl.TextX, y0 = oy + bl.Top + bl.TextY;
+        foreach (var r in _boxes)
+            ctx.DrawRect(new Rect(x0 + r.X, y0 + r.Y, r.Width, r.Height), SelectionColor);
+    }
+
+    // ── Caret and the input method's text ──
+
+    private void DrawCaret(IRenderContext ctx, float ox, float oy)
+    {
+        var focus = _state.Selection.Focus;
+        if (focus.Block < _blocks.Length && _blocks[focus.Block] is { Block.Kind: BlockKind.Image } picture)
+        {
+            // A caret on a picture is the picture selected: a ring round it, not a bar.
+            if (_state.Selection.IsCollapsed)
+            {
+                float ring = _rt.ImageRingWidth;
+                var p = picture.PictureRect;
+                ctx.DrawRoundedRect(new Rect(ox + p.X - ring, oy + picture.Top - ring, p.Width + 2 * ring, p.Height + 2 * ring),
+                    new CornerRadius(ring + 1), Color.Transparent, _ring, new Thickness(ring));
+            }
+            return;
+        }
+        var rect = CaretRect(focus, _upstream);
+        float x = ox + rect.X, y = oy + rect.Y, h = rect.Height;
+
+        if (_composition.IsActive && _blocks.Length > focus.Block)
+        {
+            var style = _blocks[focus.Block].Style;
+            string preedit = _composition.Text;
+            float w = ctx.MeasureText(preedit, style).Width;
+            ctx.DrawRect(new Rect(x, y, w, h), BackgroundColor);
+            ctx.DrawText(preedit, new Rect(x, y, w + 1, h), style, TextOverflow.Clip, 1);
+            ctx.DrawRect(new Rect(x, y + h - 1f, w, 1f), CursorColor);
+            if (_composition.SegmentLength > 0)
+            {
+                float segX = _composition.SegmentStart > 0 ? ctx.MeasureText(preedit[.._composition.SegmentStart], style).Width : 0;
+                float segEnd = ctx.MeasureText(preedit[..(_composition.SegmentStart + _composition.SegmentLength)], style).Width;
+                ctx.DrawRect(new Rect(x + segX, y + h - 2f, segEnd - segX, 2f), CursorColor);
+            }
+            int caretChars = _composition.SegmentStart == 0 && _composition.SegmentLength == 0
+                ? preedit.Length
+                : _composition.SegmentStart + _composition.SegmentLength;
+            x += caretChars > 0 ? ctx.MeasureText(preedit[..caretChars], style).Width : 0;
+        }
+
+        var caret = new Rect(x, y, CursorWidth, h);
+        ctx.DrawRect(caret, CursorColor);
+        TextInputHost?.SetInputArea(caret, 0);
+    }
+
+    // ── Scrolling ──
+
+    private float MaxScrollY() => Math.Max(0, _documentHeight - Layout.AbsoluteContentBox.Height);
+
+    /// <summary>Current vertical scroll offset in pixels, clamped to the scrollable range.</summary>
+    public float ScrollOffsetY
+    {
+        get => _scrollY;
+        set
+        {
+            float clamped = Math.Clamp(value, 0, MaxScrollY());
+            if (clamped == _scrollY) return;
+            _scrollY = clamped;
+            MarkPaintDirty();
+        }
+    }
+
+    private void ScrollCaretIntoView(float viewport)
+    {
+        var caret = CaretRect(_state.Selection.Focus, _upstream);
+        if (caret.Y < _scrollY) _scrollY = caret.Y;
+        else if (caret.Bottom > _scrollY + viewport) _scrollY = caret.Bottom - viewport;
+    }
+
+    /// <inheritdoc cref="ScrollViewElement.MiddleClickAutoScroll"/>
+    public bool MiddleClickAutoScroll { get; set; } = true;
+
+    public bool CanAutoScroll => _documentHeight > Layout.AbsoluteContentBox.Height + 0.5f;
+
+    public bool ScrollBy(float dx, float dy)
+    {
+        float before = _scrollY;
+        ScrollOffsetY = before + dy;
+        return _scrollY != before;
+    }
+
+    private bool _draggingScrollbar;
+    private float _scrollbarGrabOffset;
+
+    public bool IsDraggingScrollbar => _draggingScrollbar;
+
+    public bool TryStartScrollbarDrag(Point position)
+    {
+        var hit = _bar.HitTest(Layout.AbsoluteContentBox, _documentHeight, _scrollY, position,
+            vertical: true, out float grab, out float trackOffset);
+        switch (hit)
+        {
+            case ScrollbarHit.Thumb:
+                _draggingScrollbar = true;
+                _scrollbarGrabOffset = grab;
+                return true;
+            case ScrollbarHit.Track:
+                _scrollY = trackOffset;
+                MarkPaintDirty();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public bool IsPointOverScrollbar(Point position) =>
+        _bar.Contains(Layout.AbsoluteContentBox, _documentHeight, position, vertical: true);
+
+    public void SetScrollbarHover(Point? position) =>
+        _bar.SetHover(position is { } p && IsPointOverScrollbar(p), this);
+
+    public void UpdateScrollbarDrag(Point position)
+    {
+        if (!_draggingScrollbar) return;
+        _scrollY = _bar.OffsetFromDrag(Layout.AbsoluteContentBox, _documentHeight, position, _scrollbarGrabOffset,
+            vertical: true);
+        MarkPaintDirty();
+    }
+
+    public void EndScrollbarDrag() => _draggingScrollbar = false;
+}

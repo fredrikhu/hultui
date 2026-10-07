@@ -92,8 +92,7 @@ public class CreateMergeRequestTests
             session.PumpFrame();
             // PC-1042 names an open issue in the recording, so once the issues land the
             // description is pre-filled with the closing line; typing appends to it.
-            session.PumpUntil(() => ById(session, "create-mr-description") is TextAreaElement d && d.Text.Contains("Closes #1042"),
-                TimeSpan.FromSeconds(15));
+            session.PumpUntil(() => DescriptionHas(session, "Closes #1042"), TimeSpan.FromSeconds(15));
             session.Window.Click(ById(session, "create-mr-description")!);
             session.Window.TypeText(" (draft)");
             session.PumpFrame();
@@ -109,6 +108,66 @@ public class CreateMergeRequestTests
             Assert.EndsWith(" (draft)", form["description"]);
         }, handler);
     }
+
+    /// <summary>The description is edited as rich text — headings, bold, lists, typed with
+    /// Markdown's own shortcuts — and GitLab is sent the Markdown it reads.</summary>
+    [Fact]
+    public void TheDescriptionIsEditedAsRichTextAndSentAsMarkdown()
+    {
+        var handler = Routes();
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpUntil(() => DescriptionHas(session, "Closes #1042"), TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);   // found in the tree is a frame short of laid out
+
+            var editor = (RichTextEditorElement)ById(session, "create-mr-description")!;
+            session.Window.Click(editor);
+            session.Window.PressKey(KeyCode.A, KeyModifiers.Ctrl);
+            session.Window.PressKey(KeyCode.Delete);
+            session.Window.TypeText("## Why");
+            session.Window.PressKey(KeyCode.Enter);
+            session.Window.TypeText("Because **this** matters");
+            session.Window.PressKey(KeyCode.Enter);
+            session.Window.TypeText("- one");
+            session.Window.PressKey(KeyCode.Enter);
+            session.Window.TypeText("two");
+            session.PumpFrame();
+            Assert.Equal(HultUI.Core.RichText.BlockKind.Heading, BlockKindOf(editor, 0));
+            Assert.Equal(HultUI.Core.RichText.BlockKind.BulletItem, BlockKindOf(editor, 2));
+
+            session.Window.PressKey(KeyCode.Enter, KeyModifiers.Ctrl);
+            session.PumpUntil(() => !app.CreateMergeRequestOpen, TimeSpan.FromSeconds(10));
+
+            var form = HttpUtility.ParseQueryString(handler.Seen.Single(s => s.Request.Method == System.Net.Http.HttpMethod.Post).Body!);
+            Assert.Equal("## Why\n\nBecause **this** matters\n\n- one\n- two", form["description"]);
+        }, handler);
+    }
+
+    /// <summary>The description editor offers only what Markdown can say: no underline,
+    /// colour or alignment for GitLab to drop.</summary>
+    [Fact]
+    public void TheDescriptionOffersOnlyMarkdownsFormats()
+    {
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            var editor = (RichTextEditorElement)ById(session, "create-mr-description")!;
+            Assert.Equal(HultUI.RichText.Markdown.RichMarkdown.Features, editor.Features);
+            Assert.NotNull(ById(session, "richtext-bold"));
+            Assert.Null(ById(session, "richtext-underline"));
+            Assert.Null(ById(session, "richtext-aligncenter"));
+        });
+    }
+
+    private static bool DescriptionHas(HeadlessSession session, string text) =>
+        ById(session, "create-mr-description") is RichTextEditorElement d && d.Document.ToPlainText().Contains(text);
+
+    private static HultUI.Core.RichText.BlockKind BlockKindOf(RichTextEditorElement editor, int block) =>
+        editor.Document[block].Kind;
 
     [Fact]
     public void AnExistingMergeRequestOpensInsteadOfASecondCard()

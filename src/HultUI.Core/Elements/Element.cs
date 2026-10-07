@@ -656,6 +656,23 @@ public abstract class Element
     }
     private bool? _accessibleSelected;
 
+    /// <summary>
+    /// On/off state for a control that is not a check box or a switch but toggles all the same —
+    /// a toolbar's Bold button: <c>null</c> = not a toggle, <c>true</c> = pressed. Exposed as
+    /// UIA's Toggle pattern and AT-SPI's checkable and checked states.
+    /// </summary>
+    public bool? AccessibleToggled
+    {
+        get => _accessibleToggled;
+        set
+        {
+            if (_accessibleToggled == value) return;
+            _accessibleToggled = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsToggled);
+        }
+    }
+    private bool? _accessibleToggled;
+
     public string? AccessibleDescription { get; set; }
 
     /// <summary>
@@ -1231,6 +1248,7 @@ public abstract class Element
         AutomationId = source.AutomationId;
         AccessibleExpanded = source.AccessibleExpanded;
         AccessibleSelected = source.AccessibleSelected;
+        AccessibleToggled = source.AccessibleToggled;
         // App event handlers ARE copied: the incoming build is the source of truth,
         // so a retained element always runs the latest build's handlers (matching how
         // callback props like ButtonElement.Clicked already behave). Element-OWNED

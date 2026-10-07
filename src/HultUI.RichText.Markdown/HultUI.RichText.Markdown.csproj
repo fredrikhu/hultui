@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Markdown in and out of HultUI's rich text document (docs/plans/16-rich-text-editor.md,
+    stage 6). Kept out of HultUI.Core, whose zero-external-dependency guarantee Markdig would
+    break; apps that edit Markdown reference this, others pay nothing. Markdig is pinned to the
+    version Junction already uses so the two never disagree.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.RichText.Markdown</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Markdown (CommonMark plus GitLab's strikethrough and task lists) to and from HultUI's RichDocument.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
+  </ItemGroup>
+
+</Project>

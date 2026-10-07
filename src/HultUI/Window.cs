@@ -559,6 +559,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             case TextInputElement input: input.Clipboard = Clipboard; break;
             case TextAreaElement area: area.Clipboard = Clipboard; break;
+            case ITextServicesClient client: client.Clipboard = Clipboard; break;
             case TextElement { Selectable: true } label: label.Clipboard = Clipboard; break;
         }
         return true;
@@ -622,6 +623,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             textArea.Clipboard = Clipboard;
             textArea.TextInputHost = TextInputHost;
+            TextInputHost.StartTextInput();
+        }
+        else if (element is ITextServicesClient client)
+        {
+            client.Clipboard = Clipboard;
+            client.TextInputHost = TextInputHost;
             TextInputHost.StartTextInput();
         }
         else if (element is { WantsTextInput: true })
@@ -1369,6 +1376,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                             textInput.Clipboard = Clipboard;
                         else if (focusTarget is TextAreaElement textArea)
                             textArea.Clipboard = Clipboard;
+                        else if (focusTarget is ITextServicesClient client)
+                            client.Clipboard = Clipboard;
                         else if (focusTarget is TextElement selectableLabel && selectableLabel.Selectable)
                             selectableLabel.Clipboard = Clipboard;
                     }

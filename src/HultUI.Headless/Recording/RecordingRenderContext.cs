@@ -175,6 +175,30 @@ public sealed class RecordingRenderContext : IRenderContext
         _inner.DrawText(text, bounds, style, overflow, maxLines, spans);
     }
 
+    public void DrawParagraph(TextParagraph paragraph, Point origin)
+    {
+        var args = $"{Quoted(paragraph.Text)} at {F(origin.X)},{F(origin.Y)} width={F(paragraph.MaxWidth)} "
+            + Style(paragraph.Style) + OverflowSuffix(paragraph.Overflow, paragraph.MaxLines);
+        if (paragraph.Spans is { Count: > 0 } spans)
+            args += $" spans=[{string.Join(", ", spans.Select(SpanText))}]";
+        Record("DrawParagraph", args);
+        _inner.DrawParagraph(paragraph, origin);
+    }
+
+    // A paragraph's span as the log reads it: DrawText's colour and background, then whatever
+    // else the span changes, so a baseline shows a word turning bold or becoming a link.
+    private static string SpanText(TextSpan s)
+    {
+        var text = $"{s.Start}+{s.Length}:{Fmt(s.Color)}";
+        if (s.Background.A > 0) text += $"/bg:{Fmt(s.Background)}";
+        if (s.Decoration != TextDecoration.None) text += $"/{s.Decoration}";
+        if (s.Weight is { } w) text += $"/{w}";
+        if (s.Slant is { } sl) text += $"/{sl}";
+        if (s.FontSize is { } size) text += $"/{F(size)}px";
+        if (s.FontFamily is { } family) text += $"/'{family}'";
+        return text;
+    }
+
     private static string OverflowSuffix(TextOverflow overflow, int? maxLines)
     {
         var s = overflow == TextOverflow.Clip ? "" : $" overflow={overflow}";
@@ -194,6 +218,10 @@ public sealed class RecordingRenderContext : IRenderContext
         float maxWidth, int? maxLines)
         => _inner.LayoutTextLines(text, style, maxWidth, maxLines);
 
+    public TextParagraph LayoutParagraph(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<TextSpan>? spans = null, int? maxLines = null, TextOverflow overflow = TextOverflow.Clip)
+        => _inner.LayoutParagraph(text, style, maxWidth, spans, maxLines, overflow);
+
     public FontMetrics MeasureFont(ResolvedInheritedStyle style) => _inner.MeasureFont(style);
 
     public bool HasGlyph(ResolvedInheritedStyle style, int codePoint) => _inner.HasGlyph(style, codePoint);
@@ -212,6 +240,9 @@ public sealed class RecordingRenderContext : IRenderContext
         _depth++;
         _inner.PushClip(clipRect);
     }
+
+    // A question, not a drawing call: not recorded.
+    public Rect? ClipBounds => _inner.ClipBounds;
 
     public void PushRoundedClip(Rect clipRect, CornerRadius radius)
     {

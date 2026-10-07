@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.RichText.Markdown\HultUI.RichText.Markdown.csproj" />
     <ProjectReference Include="..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />

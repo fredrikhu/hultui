@@ -309,16 +309,25 @@ providers), a UIA `ItemContainer` on virtualized lists.
   the snapshot the tree was built with, and the source, which the bridges read on their
   own threads between rebuilds. The differ compares snapshots and tells `Text` (with the
   previous node, so a bridge can describe the change) and `TextSelection`.
+  - **Lines and paragraphs (2026-10-07).** A paragraph is a `'\n'`-separated run. A line
+    is a paragraph unless the element says where its text wraps (`lineStarts`), and then
+    it is a line as drawn, which is what a word processor's reader means by one.
   - **Windows:** the text pattern, `ITextProvider2` and `ITextRangeProvider`, as native
     vtables like the other patterns. Units: character (a surrogate pair whole), word (a
-    run with the blanks after it), line; format, paragraph and page take the next larger
+    run with the blanks after it), line, paragraph; format and page take the next larger
     one, as UIA asks. Ranges never move onto the empty end. Selecting from a reader is
     refused (`UIA_E_INVALIDOPERATION`). Text changes raise `Text_TextChanged`, caret and
     selection moves `Text_TextSelectionChanged`.
   - **Linux:** `org.a11y.atspi.Text`, its answers in `AtSpiText` (plain functions,
     tested without a bus), and `TextChanged` insert/delete, `TextCaretMoved` and
-    `TextSelectionChanged` signals. Not run against a real AT-SPI client yet.
-  - **Who offers it:** the terminal. Text inputs and TextArea are the next candidates.
+    `TextSelectionChanged` signals. A sentence is a line; a paragraph granularity is a
+    paragraph. Not run against a real AT-SPI client yet.
+  - **Who offers it:** the terminal, and the rich text editor (docs/plans/16, stage 5):
+    its blocks as paragraphs, its drawn lines as lines, a picture as its words, a table's
+    cells in reading order, made on the UI thread from its layout. Its boxes follow
+    scrolling without a new snapshot. Checked from outside with Windows' own UI Automation
+    client on the Fluent sample: lines, paragraphs, words, boxes, a point to a word, and
+    the caret. Text inputs and TextArea are the next candidates.
 - **Announcements (A2).** `Element.Announce(text, politeness)`: a UIA notification
   (`UiaRaiseNotificationEvent`, activity `HultUI.Announcement`; polite is
   `NotificationProcessing_All`, assertive `ImportantAll`), an AT-SPI 2.46

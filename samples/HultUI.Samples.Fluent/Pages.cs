@@ -5,7 +5,9 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 
 namespace HultUI.Samples.Fluent;
 
@@ -329,6 +331,120 @@ public static class Pages
         Flex.Row(gap: 12f).FlexShrink(0).AlignItems(AlignItems.Center).Children(
             F.ToggleSwitch(p, on, onChanged, label),
             F.Body(p, label));
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Rich text
+    // ──────────────────────────────────────────────────────────────────────
+
+    public static Element RichText(FluentApp app, FluentPalette p)
+    {
+        var doc = app.Notes;
+        int words = doc.ToPlainText().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+
+        var editor = RichTextEditor.New(doc)
+            .OnDocumentChanged(d => app.Notes = d)
+            .OnSelectionChanged(app.Refresh)
+            .OnLinkRequested(app.NotesToolbar.OpenLinkEditor)
+            .OnImageRequested(app.NotesToolbar.OpenPictureEditor)
+            .Images(app.Picture)
+            .HighlightSearch(app.NotesFind.IsOpen ? app.NotesFind.Search : null)
+            .OnLinkActivated(url => app.ClickCount++)
+            .ReadOnly(app.NotesReadOnly)
+            .PlaceholderText("Write something. # for a heading, - for a list, **bold**.")
+            .AutoHeight(320, 640)
+            .AutomationId("notes-editor");
+        // The toolbar reads the editor on screen through the ref, so it is built before the ref
+        // moves to this freshly built one.
+        var toolbar = app.NotesToolbar.Build();
+        editor.WithRef(app.NotesEditor);
+
+        return Column(
+            F.Title(p, "Rich text").Margin(new Thickness(0, 0, 8, 0)),
+            F.Body(p, "A RichTextEditor and its toolbar, on the framework's text pipeline. Markdown "
+                    + "shortcuts work as you type, Ctrl+B/I/U format, Ctrl+K adds a link, Ctrl+F "
+                    + "finds, and Tab nests a list item. In a table, Tab moves cell to cell and the "
+                    + "context menu adds rows and columns; a picture's address is a file path here.")
+                .TextColor(p.TextSecondary).Margin(new Thickness(0, 0, 16, 0)),
+            Section(p, "Editor",
+                Flex.Column(gap: 10f).Children([
+                    toolbar,
+                    .. app.NotesFind.IsOpen ? [app.NotesFind.Build()] : Array.Empty<Element>(),
+                    editor,
+                    Flex.Row(gap: 24f).AlignItems(AlignItems.Center).Children(
+                        ToggleRow(p, "Read only", app.NotesReadOnly, v => app.NotesReadOnly = v),
+                        F.Body(p, $"{words} words, {doc.BlockCount} blocks").TextColor(p.TextSecondary))])),
+            // The same document as HultUI.RichText.Markdown writes it, as you type.
+            Section(p, "As Markdown",
+                TextArea.New(HultUI.RichText.Markdown.RichMarkdown.Write(doc)).ReadOnly()
+                    .FontFamily("monospace").FontSize(13f).Height(260f)
+                    .AutomationId("notes-markdown")));
+    }
+
+    /// <summary>What the rich text page opens with: one of everything.</summary>
+    public static Core.RichText.RichDocument NotesSample()
+    {
+        const string intro = "Text can be bold, italic, underlined, struck, code or a link to the docs.";
+        int At(string word) => intro.IndexOf(word, StringComparison.Ordinal);
+        Core.RichText.RichSpan S(string word, Core.RichText.RichMarks marks) => new(At(word), word.Length, marks);
+        return new Core.RichText.RichDocument(
+        [
+            Core.RichText.RichBlock.Heading(1, "Meeting notes"),
+            Core.RichText.RichBlock.Paragraph(intro,
+                S("bold", new(Core.RichText.InlineStyle.Bold)),
+                S("italic", new(Core.RichText.InlineStyle.Italic)),
+                S("underlined", new(Core.RichText.InlineStyle.Underline)),
+                S("struck", new(Core.RichText.InlineStyle.Strike)),
+                S("code", new(Core.RichText.InlineStyle.Code)),
+                S("a link to the docs", new(Link: "https://example.org/docs"))),
+            Core.RichText.RichBlock.Heading(2, "Decisions"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.BulletItem, "Ship the editor behind a flag"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.BulletItem, "Markdown in and out", indent: 1),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.NumberedItem, "Write the plan"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.NumberedItem, "Build it"),
+            Core.RichText.RichBlock.Heading(2, "To do"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.TaskItem, "Layout and caret") with { Checked = true },
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.TaskItem, "Markdown package"),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.Quote, "Make it work, make it right, make it fast."),
+            Core.RichText.RichBlock.Of(Core.RichText.BlockKind.CodeBlock, "var editor = RichTextEditor.New(doc);") with { Info = "cs" },
+            Core.RichText.RichBlock.Heading(2, "Who does what"),
+            .. Cells(3,
+                "Owner", "Task", "Days",
+                "Ana", "Pictures as blocks", "2",
+                "Bo", "Tables, with Tab between the cells", "3"),
+            Core.RichText.RichBlock.Picture(new Core.RichText.RichImage("sample:aurora", "A green and violet aurora over hills")),
+        ]);
+
+        // A table `columns` wide, row by row; its last column right-aligned, as numbers are.
+        static IEnumerable<Core.RichText.RichBlock> Cells(int columns, params string[] texts) =>
+            texts.Select((t, i) => Core.RichText.RichBlock.Cell(i / columns, i % columns, t) with
+            {
+                Align = i % columns == columns - 1 ? Core.RichText.BlockAlign.End : Core.RichText.BlockAlign.Start,
+            });
+    }
+
+    /// <summary>A picture drawn here rather than loaded: an aurora over hills, for the notes.</summary>
+    public static IImageSource Aurora(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                float u = (float)x / width, v = (float)y / height;
+                // Night sky, deepening upwards; a green band with violet at its top edge.
+                float band = MathF.Exp(-MathF.Pow((v - 0.35f - 0.12f * MathF.Sin(u * 7f)) / 0.12f, 2));
+                float r = 10 + 60 * band * v + 30 * (1 - v);
+                float g = 18 + 200 * band;
+                float b = 40 + 90 * band * (1 - v) + 60 * (1 - v);
+                // Hills along the bottom.
+                if (v > 0.78f + 0.08f * MathF.Sin(u * 5f + 1f)) (r, g, b) = (12, 22, 26);
+                int at = (y * width + x) * 4;
+                pixels[at] = (byte)Math.Clamp(r, 0, 255);
+                pixels[at + 1] = (byte)Math.Clamp(g, 0, 255);
+                pixels[at + 2] = (byte)Math.Clamp(b, 0, 255);
+                pixels[at + 3] = 255;
+            }
+        return SkiaImageSource.FromPixels(pixels, width, height, width * 4, PixelFormat.Rgba8888);
+    }
 
     /// <summary>A gallery section: a bold label, then a card holding the specimens.</summary>
     private static Element Section(FluentPalette p, string title, Element content) =>

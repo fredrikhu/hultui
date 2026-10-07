@@ -45,6 +45,7 @@
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
     <Project Path="src/HultUI.Themes/HultUI.Themes.csproj" />
     <Project Path="src/HultUI.Syntax/HultUI.Syntax.csproj" />
+    <Project Path="src/HultUI.RichText.Markdown/HultUI.RichText.Markdown.csproj" />
     <Project Path="src/HultUI.Icons/HultUI.Icons.csproj" />
     <Project Path="src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj" />
     <Project Path="src/HultUI.WinForms/HultUI.WinForms.csproj" />
@@ -71,6 +72,7 @@
     <Project Path="tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj" />
     <Project Path="tests/HultUI.Themes.Tests/HultUI.Themes.Tests.csproj" />
     <Project Path="tests/HultUI.Syntax.Tests/HultUI.Syntax.Tests.csproj" />
+    <Project Path="tests/HultUI.RichText.Markdown.Tests/HultUI.RichText.Markdown.Tests.csproj" />
     <Project Path="tests/HultUI.Icons.Tests/HultUI.Icons.Tests.csproj" />
     <Project Path="tests/HultUI.Text.Tests/HultUI.Text.Tests.csproj" />
     <Project Path="tests/HultUI.Rendering.Skia.Tests/HultUI.Rendering.Skia.Tests.csproj" />
