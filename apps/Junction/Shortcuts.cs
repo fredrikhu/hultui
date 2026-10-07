@@ -107,7 +107,7 @@ public static class Shortcuts
         map.Add("review.next", review, "Next unresolved thread", K(KeyCode.N)).Legend("next unresolved");
         map.Add("review.previous", review, "Previous unresolved thread", K(KeyCode.P)).Legend("previous");
         map.Add("review.expand", review, "Expand or collapse every thread", K(KeyCode.E)).Legend("expand all");
-        map.Add("review.post", review, "Post the comment", K(KeyCode.Enter, ctrl));
+        map.Add("review.post", review, "Post the comment or reply", K(KeyCode.Enter, ctrl));
         map.Add("review.back", review, "Close the composer · clear the range · leave", K(KeyCode.Escape));
 
         const string rebase = "Rebase";

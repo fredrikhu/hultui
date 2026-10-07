@@ -8,7 +8,9 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
+using HultUI.Core.RichText;
 using HultUI.Core.Styling;
+using HultUI.RichText.Markdown;
 using Junction.Git;
 using Junction.GitLab;
 using Junction.Theme;
@@ -57,7 +59,9 @@ public partial class JunctionApp
         public string? FocusThread;
         public string? RevealThread;
         public ReviewComposer? Composer;
-        public readonly Dictionary<string, string> Replies = new(StringComparer.Ordinal);
+        /// <summary>The replies being written, by discussion id: a thread in here shows its
+        /// reply editor.</summary>
+        public readonly Dictionary<string, ReviewDraft> Replies = new(StringComparer.Ordinal);
         public string? Busy;
         /// <summary>Bumped whenever a card's height may have changed, so the row heights are
         /// measured again.</summary>
@@ -91,8 +95,19 @@ public partial class JunctionApp
         public int From { get; } = from;
         public int To { get; } = to;
         public bool Stopped { get; } = stopped;
-        public string Text = "";
+        public ReviewDraft Draft = new();
         public string? Failure;
+    }
+
+    /// <summary>A comment being written, the composer's or a reply's: the document, the
+    /// editor showing it, and that editor's formatting bar.</summary>
+    private sealed class ReviewDraft
+    {
+        public RichDocument Doc = RichDocument.Empty;
+        public readonly Ref<RichTextEditorElement> Editor = new();
+        public RichTextToolbar? Bar;
+        /// <summary>What GitLab is sent.</summary>
+        public string Markdown => RichMarkdown.Write(Doc).Trim();
     }
 
     internal sealed record ReviewLine(bool NewSide, int? OldLine, int? NewLine, string LineCode, string? Type)
@@ -117,7 +132,9 @@ public partial class JunctionApp
         bool New = false);
 
     private ReviewSession? _review;
-    private readonly Ref<TextAreaElement> _reviewComposerRef = new();
+    // The editor asked for focus — the composer's or a reply's — and how many frames are left
+    // to wait for its row.
+    private Ref<RichTextEditorElement>? _reviewFocusTarget;
     private int _pendingReviewFocus;
     private int _pendingReviewReveal = -1;
     private readonly Dictionary<(string Path, long Iid), int> _noteGen = new();
@@ -266,6 +283,7 @@ public partial class JunctionApp
         if (!ReferenceEquals(_review, rv)) return;
         _review = null;
         _pendingReviewFocus = 0;
+        _reviewFocusTarget = null;
         if (backToRequest) OpenMergeRequest(rv.Path, rv.Iid);
         else Rerender();
     }
@@ -491,6 +509,7 @@ public partial class JunctionApp
                 signature.Add(t.Outdated);
                 signature.Add(t.New);
                 signature.Add(ThreadExpanded(rv, t));
+                signature.Add(Replying(rv, t));
                 foreach (var n in t.Notes) signature.Add(n.Body.Length);
             }
             else if (r.Type == DiffRowType.Composer)
@@ -543,6 +562,10 @@ public partial class JunctionApp
     private const float CardPadY = 10f, CardPadX = 12f, CardBorder = 1f;
     private const float CardLineHeight = 22f, CardGap = 8f, NoteGap = 10f, NoteHeaderGap = 4f;
     private const float CardFooterHeight = 30f, ComposerAreaHeight = 72f, ComposerButtonsHeight = 30f, FailureLineHeight = 18f;
+    // A comment being written: the formatting bar, kept to one line, over an editor of fixed
+    // height that scrolls what it cannot show, so the card is the height measured for it.
+    private const float DraftBarHeight = 26f, DraftBarGap = 4f;
+    private const float DraftHeight = DraftBarHeight + DraftBarGap + ComposerAreaHeight;
     private const float SectionRowHeight = 34f;
     private const float NoteFontSize = 12.5f;
 
@@ -557,6 +580,11 @@ public partial class JunctionApp
     private bool ThreadExpanded(ReviewSession rv, ThreadView t) =>
         rv.ExpandAll || rv.Expanded.Contains(t.Id) || t.Id == rv.FocusThread;
 
+    /// <summary>Whether a reply to <paramref name="t"/> is being written: its card shows the
+    /// reply editor.</summary>
+    private static bool Replying(ReviewSession rv, ThreadView t) =>
+        t.DiscussionId is { } did && rv.Replies.ContainsKey(did);
+
     private float ThreadRowHeight(ReviewSession rv, ThreadView t, float textWidth)
     {
         float inner;
@@ -570,14 +598,15 @@ public partial class JunctionApp
                 if (i > 0) notes += NoteGap;
                 notes += CardLineHeight + NoteHeaderGap + NoteBodyHeight(t.Notes[i].Body, textWidth);
             }
-            inner = CardLineHeight + CardGap + notes + CardGap + CardFooterHeight;
+            inner = CardLineHeight + CardGap + notes + CardGap
+                + (Replying(rv, t) ? DraftHeight + CardGap : 0) + CardFooterHeight;
         }
         return CardMarginTop + 2 * CardBorder + 2 * CardPadY + inner + CardMarginBottom;
     }
 
     private float ComposerRowHeight(ReviewComposer c)
     {
-        float inner = CardLineHeight + CardGap + ComposerAreaHeight + CardGap + ComposerButtonsHeight
+        float inner = CardLineHeight + CardGap + DraftHeight + CardGap + ComposerButtonsHeight
             + (c.Failure is null ? 0 : CardGap + FailureLineHeight);
         return CardMarginTop + 2 * CardBorder + 2 * CardPadY + inner + CardMarginBottom;
     }
@@ -774,35 +803,47 @@ public partial class JunctionApp
             var footer = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(CardFooterHeight);
             if (t.DiscussionId is { } did)
             {
-                var text = rv.Replies.GetValueOrDefault(did, "");
-                var reply = TextInput.New(text).PlaceholderText("Reply…")
-                    .OnTextChanged(q =>
+                // A reply is written in an editor between the notes and the footer, opened from
+                // a field-shaped button: an editor in every open card would make each one a
+                // composer tall.
+                if (rv.Replies.TryGetValue(did, out var draft))
+                {
+                    var block = DraftBlock(rv, draft, "Write a reply…", "review-reply-text", "Reply to thread");
+                    // Esc and Ctrl+Enter ahead of the editor's own handling of them.
+                    block.On<KeyDownEvent>(EventPhase.Capture, e =>
                     {
-                        bool was = rv.Replies.GetValueOrDefault(did, "").Length > 0;
-                        rv.Replies[did] = q;
-                        if (was != q.Length > 0) MarkDirty();   // the Reply button comes and goes
-                    })
-                    .Height(Dimension.Px(CardFooterHeight)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
-                    .TextColor(Nocturne.Text);
-                reply.AutomationId = "review-reply";
-                reply.AccessibleName = "Reply to thread";
-                reply.On<KeyDownEvent>(e =>
-                {
-                    if (e.Key == KeyCode.Enter && rv.Replies.GetValueOrDefault(did, "").Trim().Length > 0) { e.StopPropagation = true; PostReply(rv, t); }
-                    else if (e.Key == KeyCode.Escape) { e.StopPropagation = true; rv.Replies.Remove(did); _diffBodyRef.Current?.Focus(); MarkDirty(); }
-                });
-                footer.AddChild(reply);
-                if (text.Trim().Length > 0)
-                {
-                    var send = Ui.PrimaryButton(rv.ReviewMode ? "Add to review" : "Reply", null, () => PostReply(rv, t), 11.5f);
+                        if (e.Key == KeyCode.Escape) { e.StopPropagation = true; CloseReply(rv, did); }
+                        else if (Shortcuts.Pressed("review.post", e)) { e.StopPropagation = true; PostReply(rv, t); }
+                    });
+                    card.AddChild(block);
+
+                    var send = Ui.PrimaryButton(rv.ReviewMode ? "Add to review" : "Reply", null, () => PostReply(rv, t), 11.5f)
+                        .Tooltip(Shortcuts.Keys("review.post"));
                     send.AccessibleName = "Reply";
                     footer.AddChild(send.FlexShrink(0));
+                }
+                else
+                {
+                    var reply = Button.New(ButtonVariant.Secondary).JustifyContent(JustifyContent.FlexStart)
+                        .Height(Dimension.Px(CardFooterHeight)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+                        .Children(Text.New("Reply…").FontSize(12.5f).TextColor(Nocturne.On(0.45)));
+                    reply.OnClick(_ => OpenReply(rv, did));
+                    reply.AutomationId = "review-reply";
+                    reply.AccessibleName = "Reply to thread";
+                    footer.AddChild(reply);
                 }
                 var resolve = Ui.SecondaryButton(t.Resolved ? "Unresolve" : "Resolve", null, () => ResolveThread(rv, t, !t.Resolved), 11.5f);
                 resolve.AccessibleName = t.Resolved ? "Unresolve" : "Resolve";
                 footer.AddChild(resolve.FlexShrink(0));
                 if (rv.Mr?.WebUrl is { } url && t.FirstNoteId is { } noteId)
                     footer.AddChild(Ui.IconButton(Icons.ArrowSquareOut, () => OpenUrl($"{url}#note_{noteId}"), "Open in the browser", 30f).FlexShrink(0));
+                if (rv.Replies.ContainsKey(did))
+                {
+                    footer.AddChild(Box.New().FlexGrow(1));
+                    var cancel = Ui.GhostButton("Cancel", null, () => CloseReply(rv, did), 11.5f).Tooltip("Esc");
+                    cancel.AccessibleName = "Cancel reply";
+                    footer.AddChild(cancel.FlexShrink(0));
+                }
             }
             else
             {
@@ -851,12 +892,7 @@ public partial class JunctionApp
         if (c.Stopped) head.AddChild(Text.New("· range stops at the side boundary").FontSize(11.5f).TextColor(Nocturne.On(0.5)));
         card.AddChild(head);
 
-        var area = TextArea.New(c.Text).PlaceholderText("Write a comment…")
-            .OnTextChanged(q => c.Text = q)
-            .Height(Dimension.Px(ComposerAreaHeight)).TextColor(Nocturne.Text)
-            .WithRef(_reviewComposerRef);
-        area.AutomationId = "review-composer-text";
-        card.AddChild(area);
+        card.AddChild(DraftBlock(rv, c.Draft, "Write a comment…", "review-composer-text", "Comment"));
 
         var buttons = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(ComposerButtonsHeight);
         if (rv.Busy is { } busy)
@@ -896,6 +932,25 @@ public partial class JunctionApp
         return outer;
     }
 
+    /// <summary>The formatting bar over the editor of <paramref name="draft"/>, the two
+    /// <see cref="DraftHeight"/> tall together. What of the bar does not fit the card's width
+    /// is cut off rather than wrapped onto a line nobody measured.</summary>
+    private Element DraftBlock(ReviewSession rv, ReviewDraft draft, string placeholder, string automationId, string name)
+    {
+        var bar = (draft.Bar ??= MarkdownBar(draft.Editor)).Build()
+            .FlexWrap(FlexWrap.NoWrap).Height(DraftBarHeight).Overflow(Overflow.Hidden);
+        var editor = MarkdownEditor(draft.Doc, draft.Bar, rv.Path, d => { draft.Doc = d; MarkDirty(); })
+            .PlaceholderText(placeholder)
+            .Height(Dimension.Px(ComposerAreaHeight))
+            .Style(Ui.Field(verticalPadding: 6f));
+        editor.AutomationId = automationId;
+        editor.AccessibleName = name;
+        // The bar reads the editor on screen through the ref: built before the ref moves to
+        // this freshly built one.
+        editor.WithRef(draft.Editor);
+        return Flex.Column(gap: DraftBarGap).Children(bar, editor);
+    }
+
     private Element OutdatedSectionRow() =>
         Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(SectionRowHeight)
             .Padding(new Thickness(0, 14, 0, 14))
@@ -910,11 +965,37 @@ public partial class JunctionApp
     {
         if (rv.File is null || rv.Caret < 0) return;
         var (from, to) = rv.Range is { } r ? (r.From, r.To) : (rv.Caret, rv.Caret);
-        if (rv.Composer is { } existing && existing.From == from && existing.To == to) { _pendingReviewFocus = 3; MarkDirty(); return; }
-        var text = rv.Composer?.Text ?? "";
-        rv.Composer = new ReviewComposer(rv.File, from, to, rv.RangeStopped) { Text = text };
-        rv.HeightVersion++;
+        if (rv.Composer is not { } existing || existing.From != from || existing.To != to)
+        {
+            // A new range keeps what was being written.
+            rv.Composer = new ReviewComposer(rv.File, from, to, rv.RangeStopped) { Draft = rv.Composer?.Draft ?? new() };
+            rv.HeightVersion++;
+        }
+        FocusDraft(rv.Composer.Draft);
+    }
+
+    /// <summary>Focuses <paramref name="draft"/>'s editor once its row exists: a row is
+    /// realized by the list during layout, so <see cref="ServiceReviewAfterBuild"/> waits for
+    /// the frame.</summary>
+    private void FocusDraft(ReviewDraft draft)
+    {
+        _reviewFocusTarget = draft.Editor;
         _pendingReviewFocus = 3;
+        MarkDirty();
+    }
+
+    private void OpenReply(ReviewSession rv, string discussionId)
+    {
+        if (!rv.Replies.TryGetValue(discussionId, out var draft))
+            rv.Replies[discussionId] = draft = new ReviewDraft();
+        FocusDraft(draft);
+    }
+
+    /// <summary>Drops the reply being written to the thread, and its editor with it.</summary>
+    private void CloseReply(ReviewSession rv, string discussionId)
+    {
+        rv.Replies.Remove(discussionId);
+        _diffBodyRef.Current?.Focus();
         MarkDirty();
     }
 
@@ -959,7 +1040,7 @@ public partial class JunctionApp
     private async void SubmitComposer(ReviewSession rv)
     {
         if (rv.Composer is not { } c || rv.Busy != null) return;
-        var body = c.Text.Trim();
+        var body = c.Draft.Markdown;
         if (body.Length == 0) { Flash("Write a comment first"); return; }
         if (ComposerPosition(rv, c) is not { } position) { Flash("This line has no position GitLab knows"); return; }
         if (GitLabRemoteFor(rv.Path) is not { } remote || _gitlab.ClientFor(remote.Host) is not { } client) return;
@@ -1005,15 +1086,15 @@ public partial class JunctionApp
     {
         rv.ReviewMode = true;
         rv.HeightVersion++;
-        if (rv.Composer is { } c && c.Text.Trim().Length > 0) SubmitComposer(rv);
+        if (rv.Composer is { } c && c.Draft.Markdown.Length > 0) SubmitComposer(rv);
         else MarkDirty();
     }
 
     private async void PostReply(ReviewSession rv, ThreadView t)
     {
-        if (t.DiscussionId is not { } did || rv.Busy != null) return;
-        var body = rv.Replies.GetValueOrDefault(did, "").Trim();
-        if (body.Length == 0) return;
+        if (t.DiscussionId is not { } did || rv.Busy != null || !rv.Replies.TryGetValue(did, out var draft)) return;
+        var body = draft.Markdown;
+        if (body.Length == 0) { Flash("Write a reply first"); return; }
         if (GitLabRemoteFor(rv.Path) is not { } remote || _gitlab.ClientFor(remote.Host) is not { } client) return;
         rv.Busy = "Replying…";
         MarkDirty();
@@ -1029,8 +1110,11 @@ public partial class JunctionApp
         if (!ReferenceEquals(_review, rv)) return;
         rv.Busy = null;
         if (failure != null) { Flash("Could not reply: " + failure.UserMessage(remote.Host, "Merge request")); MarkDirty(); return; }
+        // Posted: the editor goes, and the keys go back to the diff rather than to nothing.
+        bool hadFocus = draft.Editor.Current is { IsFocused: true };
         rv.Replies.Remove(did);
         rv.HeightVersion++;
+        if (hadFocus) _diffBodyRef.Current?.Focus();
         Flash(asDraft ? "Reply added to your review" : "Reply posted");
         RefreshNotes(rv.Path, rv.Iid);
     }
@@ -1409,9 +1493,9 @@ public partial class JunctionApp
         MarkDirty();
     }
 
-    /// <summary>After a build: the composer asked for focus gets it once its row exists (a
-    /// row is realized by the list during layout, so this waits for the frame), and a thread
-    /// asked for is scrolled to.</summary>
+    /// <summary>After a build: the editor asked for focus — the composer's or a reply's —
+    /// gets it once its row exists (a row is realized by the list during layout, so this waits
+    /// for the frame), and a thread asked for is scrolled to.</summary>
     private void ServiceReviewAfterBuild()
     {
         if (_pendingReviewReveal >= 0)
@@ -1425,14 +1509,17 @@ public partial class JunctionApp
             _window.RequestPostFrameCallback(() =>
             {
                 if (_pendingReviewFocus <= 0) return;
-                if (_reviewComposerRef.Current is { IsDetached: false } area && area.Parent != null)
+                if (_reviewFocusTarget?.Current is { IsDetached: false } editor && editor.Parent != null)
                 {
                     _pendingReviewFocus = 0;
-                    area.Focus();
+                    editor.Focus();
                 }
                 else if (--_pendingReviewFocus > 0)
                 {
-                    if (_review is { Composer: { } c } rv && c.To >= 0 && c.To < rv.RowOfLine.Length)
+                    // A reply's card is the one just clicked, so on screen; the composer's row
+                    // may be below the fold.
+                    if (_review is { Composer: { } c } rv && ReferenceEquals(_reviewFocusTarget, c.Draft.Editor)
+                        && c.To >= 0 && c.To < rv.RowOfLine.Length)
                         RevealDiffLine(rv.RowOfLine[c.To] + 1);
                     MarkDirty();
                 }

@@ -51,33 +51,11 @@ public partial class JunctionApp
 
     private CreateMrForm? _createMr;
 
-    // The description's editor and its formatting bar: Markdown's formats only, since GitLab is
-    // sent Markdown.
+    // The description's editor and its formatting bar (JunctionApp.MarkdownEditor).
     private readonly Ref<RichTextEditorElement> _createMrDescRef = new();
     private RichTextToolbar? _createMrToolbar;
 
-    private static readonly IReadOnlyList<RichTextCommand?> CreateMrToolbarCommands =
-    [
-        RichTextCommand.Bold, RichTextCommand.Italic, RichTextCommand.Strike, RichTextCommand.Code,
-        RichTextCommand.Link, null,
-        RichTextCommand.Heading2, RichTextCommand.BulletList, RichTextCommand.NumberedList,
-        RichTextCommand.TaskList, RichTextCommand.Quote, RichTextCommand.CodeBlock, null,
-        RichTextCommand.Table,
-    ];
-
-    private RichTextToolbar CreateMrToolbar() => _createMrToolbar ??= new RichTextToolbar(_createMrDescRef, MarkDirty)
-    {
-        Commands = CreateMrToolbarCommands,
-        ButtonSize = 26f,
-        Icon = command => command switch
-        {
-            RichTextCommand.Link => Ui.Icon(Icons.LinkSimple, 14f, Nocturne.On(0.8)),
-            RichTextCommand.Code => Ui.Icon(Icons.Code, 14f, Nocturne.On(0.8)),
-            RichTextCommand.TaskList => Ui.Icon(Icons.ListChecks, 14f, Nocturne.On(0.8)),
-            RichTextCommand.Table => Ui.Icon(Icons.Table, 14f, Nocturne.On(0.8)),
-            _ => null,
-        },
-    };
+    private RichTextToolbar CreateMrToolbar() => _createMrToolbar ??= MarkdownBar(_createMrDescRef);
 
     private readonly KeyedAsyncLoader<string, Hosted<IReadOnlyList<GlMember>>> _memberLoaders =
         new(Hosted<IReadOnlyList<GlMember>>.Empty([]), capacity: 8, comparer: PathComparer);
@@ -342,20 +320,11 @@ public partial class JunctionApp
         // Title + description.
         col.AddChild(CreateMrField("Title", CreateMrInput(f.Title, "What this change does", v => { f.Title = v; f.TitleTouched = true; MarkDirty(); }, "create-mr-title")));
         var toolbar = CreateMrToolbar();
-        var mdContext = MdContextFor(f.Path);
-        var desc = RichTextEditor.New(f.Description)
-            .Features(RichMarkdown.Features)
+        var desc = MarkdownEditor(f.Description, toolbar, f.Path,
+                d => { f.Description = d; f.DescriptionTouched = true; MarkDirty(); })
             .PlaceholderText("Pre-filled from the commits. Closes #… closes the issue on merge.")
-            .OnDocumentChanged(d => { f.Description = d; f.DescriptionTouched = true; MarkDirty(); })
-            .OnSelectionChanged(MarkDirty)
-            .OnLinkRequested(toolbar.OpenLinkEditor)
-            .OnLinkActivated(OpenUrl)
-            // Pictures load as the Markdown view loads them: uploads through the account, the
-            // rest plainly, one cache for both. One arriving rebuilds, and the editor asks again.
-            .Images(url => MdPictureFor(ResolveMarkdownUrl(url, mdContext.Remote), mdContext).Source)
             .AutoHeight(96, 320)
-            .Style(Ui.Field(verticalPadding: 8f))
-            .TextColor(Nocturne.Text);
+            .Style(Ui.Field(verticalPadding: 8f));
         desc.AutomationId = "create-mr-description";
         // The bar reads the editor on screen through the ref: built before the ref moves to
         // this freshly built one.

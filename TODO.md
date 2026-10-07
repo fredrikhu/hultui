@@ -846,8 +846,8 @@
 - **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.
 
 ## Up Next (in order)
-- **Rich text editor** — docs/plans/16-rich-text-editor.md; all nine stages done. Candidates for more
-  adoption: Junction's review notes and replies. Left from stage 5: a reader moving the caret or
+- **Rich text editor** — docs/plans/16-rich-text-editor.md; all nine stages done, and Junction's Create
+  MR description, review comments and replies use it. Left from stage 5: a reader moving the caret or
   selection (UIA `Select`, AT-SPI `SetCaretOffset`/`SetSelection` — both bridges refuse it for every
   element), AT-SPI `EditableText` (set-value on Linux), formatting as text attributes. Left from stage 9:
   pasting picture data (an upload hook), dragging to resize pictures and columns. Left from stage 8: opening a long

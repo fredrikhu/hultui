@@ -298,6 +298,14 @@ text labels (**B**, *I*, U̲, H1…) by default and takes app artwork per comman
    - **Toolbar fix.** Toolbar buttons grow past `ButtonSize` to fit their label; at a fixed
      width, "H2" wrapped in Junction's face.
 
+   **Since:** Junction's review comments and replies are the same editor
+   (`JunctionApp.MarkdownEditor` builds all three, one bar). Both sit in rows of the diff's
+   virtualized list, whose heights are computed before layout, so each is a fixed 72 px
+   editor that scrolls, under a one-line bar that cuts off rather than wraps. A reply opens
+   from a "Reply…" field into the card and closes on Esc, Cancel or posting; Ctrl+Enter
+   posts it, as it does a comment (Enter used to post the one-line reply). GitLab is sent
+   the Markdown. The keyed row keeps the editor, caret and undo through every rebuild.
+
 **Open after stages 1–4:** ~~the accessible text source~~ and ~~an assistive tool setting the
 value~~ (stage 5, done); DevTools showing the document; Up/Down through a line that mixes
 directions has had no test.

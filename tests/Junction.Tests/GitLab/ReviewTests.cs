@@ -15,8 +15,8 @@ namespace Junction.Tests.GitLab;
 /// head: the review opens as a base-to-head compare with the threads woven into the diff, a
 /// thread card is exactly as tall as the row the virtualised list gives it, the caret and the
 /// range are placed from the keyboard and posted with the position GitLab expects, the
-/// composer keeps its focus through a rebuild, and a review's drafts stay pending until they
-/// are submitted together.
+/// composer keeps its focus through a rebuild, comments and replies are written as rich text
+/// and sent as Markdown, and a review's drafts stay pending until they are submitted together.
 /// </summary>
 public class ReviewTests
 {
@@ -239,9 +239,14 @@ public class ReviewTests
         }, handler);
     }
 
-    private static void AssertCardFitsItsRow(HeadlessSession session)
+    private static void AssertCardFitsItsRow(HeadlessSession session) => AssertCardFitsItsRow(ById(session, "review-thread")!);
+
+    /// <summary>The same for the card row <paramref name="inside"/> is, or is in: a thread's
+    /// or the composer's.</summary>
+    private static void AssertCardFitsItsRow(Element inside)
     {
-        var outer = ById(session, "review-thread")!;
+        var outer = inside;
+        while (outer.AutomationId is not ("review-thread" or "review-composer")) outer = outer.Parent!;
         var card = outer.Children[0];
         float row = LayoutProbe.Painted(outer).Height;
         float inner = LayoutProbe.Painted(card).Height;
@@ -274,27 +279,29 @@ public class ReviewTests
 
             session.Window.PressKey(KeyCode.C);
             session.PumpUntil(() => ById(session, "review-composer") is not null, TimeSpan.FromSeconds(10));
-            session.PumpUntil(() => Focused(session) is TextAreaElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
+            session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
             Assert.True(TreeHas(session, "New comment on lines 19–21 (new)"));
+            var editor = (RichTextEditorElement)Focused(session)!;
+            AssertCardFitsItsRow(editor);
 
-            session.Window.TypeText("Looks wrong");
+            // Written as rich text: Markdown's own shortcut makes the word bold.
+            session.Window.TypeText("Looks **wrong**");
             session.PumpFrames(2);
-            var area = (TextAreaElement)Focused(session)!;
-            Assert.Equal("Looks wrong", area.Text);
+            Assert.Equal("Looks wrong", editor.Document.ToPlainText());
 
             // A rebuild of the whole tree — what every hosted refresh causes — leaves the
-            // same field focused with its text: the keyed row was kept, not replaced.
+            // same editor focused with its text: the keyed row was kept, not replaced.
             app.RefreshHosted(repo.Path);
             session.PumpFrames(4);
-            Assert.Same(area, Focused(session));
-            Assert.Equal("Looks wrong", area.Text);
+            Assert.Same(editor, Focused(session));
+            Assert.Equal("Looks wrong", editor.Document.ToPlainText());
 
             session.Window.PressKey(KeyCode.Enter, KeyModifiers.Ctrl);
             session.PumpUntil(() => handler.Seen.Any(s => s.Request.Method == System.Net.Http.HttpMethod.Post), TimeSpan.FromSeconds(10));
             var post = handler.Seen.Single(s => s.Request.Method == System.Net.Http.HttpMethod.Post);
             Assert.Equal($"{Api}/projects/7781/merge_requests/412/discussions", post.Request.RequestUri!.AbsolutePath);
             var form = HttpUtility.ParseQueryString(post.Body!);
-            Assert.Equal("Looks wrong", form["body"]);
+            Assert.Equal("Looks **wrong**", form["body"]);   // the Markdown GitLab reads
             Assert.Equal("text", form["position[position_type]"]);
             Assert.Equal(repo.Git("rev-parse", "HEAD").Stdout.Trim(), form["position[base_sha]"]);
             Assert.Equal(File, form["position[new_path]"]);
@@ -346,7 +353,7 @@ public class ReviewTests
             session.PumpFrames(2);
             session.Window.PressKey(KeyCode.Down);
             session.Window.PressKey(KeyCode.C);
-            session.PumpUntil(() => Focused(session) is TextAreaElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
+            session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
             session.Window.TypeText("Keep for later");
             session.PumpFrames(2);
 
@@ -383,17 +390,34 @@ public class ReviewTests
             app.StartReview(repo.Path, 412, focusThread: Thread1);
             session.PumpUntil(() => ById(session, "review-reply") is not null, TimeSpan.FromSeconds(20));
             session.PumpFrames(2);
-            var reply = (TextInputElement)ById(session, "review-reply")!;
-            reply.Focus();
-            session.PumpFrame();
-            session.Window.TypeText("Agreed");
+
+            // The field opens an editor in the card, focused, and the card grows to fit it.
+            // Esc drops it, and leaves the review where it was.
+            session.Window.Click(ById(session, "review-reply")!);
+            session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-reply-text" }, TimeSpan.FromSeconds(10));
             session.PumpFrames(2);
-            session.Window.PressKey(KeyCode.Enter);
+            AssertCardFitsItsRow(Focused(session)!);
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(2);
+            Assert.Null(ById(session, "review-reply-text"));
+            Assert.NotNull(ById(session, "review-reply"));
+            Assert.True(app.ReviewOpen);
+            AssertCardFitsItsRow(ById(session, "review-reply")!);
+
+            // Written as rich text, sent as Markdown: the backticks make code.
+            session.Window.Click(ById(session, "review-reply")!);
+            session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-reply-text" }, TimeSpan.FromSeconds(10));
+            session.Window.TypeText("Agreed, with `Refunds()`");
+            session.PumpFrames(2);
+            Assert.Equal("Agreed, with Refunds()", ((RichTextEditorElement)Focused(session)!).Document.ToPlainText());
+            session.Window.PressKey(KeyCode.Enter, KeyModifiers.Ctrl);
             session.PumpUntil(() => handler.Seen.Any(s => s.Request.RequestUri!.AbsolutePath.EndsWith($"/discussions/{Thread1}/notes")), TimeSpan.FromSeconds(10));
             var post = handler.Seen.Single(s => s.Request.RequestUri!.AbsolutePath.EndsWith($"/discussions/{Thread1}/notes"));
-            Assert.Equal("Agreed", HttpUtility.ParseQueryString(post.Body!)["body"]);
+            Assert.Equal("Agreed, with `Refunds()`", HttpUtility.ParseQueryString(post.Body!)["body"]);
 
+            // Posted: the editor closes back into the field.
             session.PumpUntil(() => ById(session, "review-reply") is not null, TimeSpan.FromSeconds(10));
+            Assert.Null(ById(session, "review-reply-text"));
             session.PumpFrames(2);
             session.Window.Click(Named(session, "Resolve"));
             session.PumpUntil(() => handler.Seen.Any(s => s.Request.Method == System.Net.Http.HttpMethod.Put), TimeSpan.FromSeconds(10));
