@@ -1315,6 +1315,16 @@ public partial class JunctionApp : Component, IDisposable
             return;
         }
 
+        // F5 reloads what GitLab says now instead of waiting for the timer. Above the panels'
+        // own handlers, which swallow what they do not take, so it works with the merge
+        // requests or the to-do list open too — and above the typing guard: F5 types nothing.
+        if (Shortcuts.Pressed("gitlab.refresh", e))
+        {
+            RefreshGitLabNow();
+            e.StopPropagation = true;
+            return;
+        }
+
         // ⌘D / Ctrl+D opens the selected file's diff in VS Code (Commit/Changes
         // views) — the primary way to inspect a diff when the pane is hidden on
         // narrow windows, but available at any size.

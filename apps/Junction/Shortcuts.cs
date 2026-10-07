@@ -59,6 +59,7 @@ public static class Shortcuts
         map.Add("zoom.out", global, "Zoom out", KeyChord.Of('-', ctrl));
         map.Add("zoom.reset", global, "Actual size", K(KeyCode.Digit0, ctrl));
         map.Add("close", global, "Close the topmost overlay", K(KeyCode.Escape));
+        map.Add("gitlab.refresh", global, "Refresh GitLab data now", K(KeyCode.F5));
 
         const string diff = "Diff";
         map.Add("diff.split", diff, "Unified or split", K(KeyCode.S));

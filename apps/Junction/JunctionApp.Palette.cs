@@ -97,9 +97,13 @@ public partial class JunctionApp
             _gitlab.All.Count == 0 ? "none" : string.Join(", ", _gitlab.All.Select(a => a.Host)),
             () => { OpenOptions(OptionsSection.GitLabAccounts); }));
         if (_gitlab.All.Count > 0)
+        {
+            items.Add(Keyed("action", "Action", Icons.ArrowsClockwise, "Refresh GitLab data", Shortcuts.Keys("gitlab.refresh"),
+                () => { RefreshGitLabNow(); }));
             items.Add(Row("action", "Action", Icons.Bell, "To do on GitLab…",
                 TodoCount is var todos && todos > 0 ? $"{todos} pending" : "nothing pending",
                 () => { OpenTodos(); }));
+        }
         items.Add(Row("action", "Action", Icons.Palette, "Appearance: colour scheme…",
             Nocturne.Theme.Name, () => { OpenOptions(OptionsSection.Appearance); }));
         if (GitLabRemoteFor(_activeRepoPath) is { } gitlabRemote)
