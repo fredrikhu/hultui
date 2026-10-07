@@ -87,6 +87,9 @@ public class OptionsAccountsTests
 
             session.Window.Click(Named(session, "Test"));
             session.PumpUntil(() => ById(session, "gitlab-host-verified") is not null, TimeSpan.FromSeconds(10));
+            // The Add account button comes with the verified row, and found in the tree is a frame
+            // short of laid out: clicked now, it has no bounds yet (CI, 255627a).
+            session.PumpFrame();
             Assert.True(TreeHas(session, "Dana Osei"));
             Assert.True(TreeHas(session, "scopes api, write_repository"));
 
@@ -230,7 +233,13 @@ public class OptionsAccountsTests
             // or more after mount (later when a file event restarts the load); until it does,
             // every GitLab command answers "not on GitLab". The mark by the repository's name is
             // how the app shows it knows, and a user cannot reach those commands before it.
-            if (gitlabOrigin) session.PumpUntil(() => ById(session, "gitlab-mark") is not null, TimeSpan.FromSeconds(15));
+            if (gitlabOrigin)
+            {
+                session.PumpUntil(() => ById(session, "gitlab-mark") is not null, TimeSpan.FromSeconds(15));
+                // The first-run strip and its Dismiss come in the same build, a frame short of
+                // laid out.
+                session.PumpFrame();
+            }
             body(repo, session, app, settings, store);
         }
         finally { app?.Dispose(); }
