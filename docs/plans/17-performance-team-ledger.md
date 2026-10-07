@@ -170,9 +170,14 @@ From the round 1 surveys (details in `17-reports/`):
    Halves ellipsis measurements (text/ellipsis 1,988 measurements, 7.7 MB per step) but
    changes how shrink is shared between several shrinkable items in a row (pixels move).
    **Open:** the user asked for before/after images (2026-10-07) and leans to a third
-   option: keep today's shrink split but take each truncating label's base as
-   min(natural width, available width) instead of truncating it. Render today, CSS
-   max-content and the third option side by side first, between build items 1 and 2.
+   option, **clamp**: keep today's shrink split but take each truncating label's base as
+   min(natural width, available width) instead of truncating it. Rendered and measured
+   2026-10-08 ([`17-reports/r1-truncation-basis.md`](17-reports/r1-truncation-basis.md)):
+   clamp halves ellipsis measurements (time −20…−43 %, alloc −21…−51 %) and moves ordinary
+   rows < 1 px; images shown to the user; awaiting the decision. A second question came out
+   of it: give one-line truncating labels an automatic minimum of 0 (as CSS does), which
+   fixes overlapping text in Junction Branches at ≤1200 px and Meridian's Send button
+   pushed off-screen by a long URL.
 
 Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
 (outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
