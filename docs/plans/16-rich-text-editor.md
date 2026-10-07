@@ -363,8 +363,11 @@ directions has had no test.
    - **`LinkRequested` was not copied in `PatchFrom`.** It is now, with `ImageRequested` and
      `ImageResolver`.
 
-   **Not done:** a Table button in Junction (Phosphor's bundle has no table glyph), pasting
-   picture data (needs an upload hook), resizing a picture or a column by dragging.
+   **Since:** Junction's Create MR description bar has a Table button, with Phosphor's `table`
+   glyph added to the bundle.
+
+   **Not done:** pasting picture data (needs an upload hook), resizing a picture or a column by
+   dragging.
 
 ## Pictures and tables
 

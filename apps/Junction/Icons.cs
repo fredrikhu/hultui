@@ -173,5 +173,6 @@ public static class Icons
     public const string ShieldCheck = "shield-check";
     public const string TerminalWindow = "terminal-window";
     public const string Code = "code";
+    public const string Table = "table";
     public const string HardDrives = "hard-drives";
 }

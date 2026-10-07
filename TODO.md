@@ -850,8 +850,7 @@
   adoption: Junction's review notes and replies. Left from stage 5: a reader moving the caret or
   selection (UIA `Select`, AT-SPI `SetCaretOffset`/`SetSelection` — both bridges refuse it for every
   element), AT-SPI `EditableText` (set-value on Linux), formatting as text attributes. Left from stage 9:
-  a Table button in Junction (needs Phosphor's `table` glyph in the bundle), pasting picture data
-  (an upload hook), dragging to resize pictures and columns. Left from stage 8: opening a long
+  pasting picture data (an upload hook), dragging to resize pictures and columns. Left from stage 8: opening a long
   document lays every block out (5,000 blocks: 15.5 ms) — estimated heights off screen would make
   it cost a screenful.
 - **Rich text editor: export as HTML and RTF** (plan 16; export only, no import) — a whole

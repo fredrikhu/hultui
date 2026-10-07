@@ -145,6 +145,46 @@ public class CreateMergeRequestTests
         }, handler);
     }
 
+    /// <summary>The bar's Table button puts a table at the caret, Tab walks its cells, and
+    /// GitLab is sent the pipe table it reads.</summary>
+    [Fact]
+    public void TheTableButtonInsertsATableSentAsAPipeTable()
+    {
+        var handler = Routes();
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpUntil(() => DescriptionHas(session, "Closes #1042"), TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);   // found in the tree is a frame short of laid out
+
+            var editor = (RichTextEditorElement)ById(session, "create-mr-description")!;
+            session.Window.Click(editor);
+            session.Window.PressKey(KeyCode.A, KeyModifiers.Ctrl);
+            session.Window.PressKey(KeyCode.Delete);
+            session.PumpFrame();
+            session.Window.Click(ById(session, "richtext-table")!);
+            session.PumpFrame();
+            Assert.NotNull(editor.State.CurrentTable);
+
+            string[] cells = ["Step", "Who", "When", "Build", "CI", "Now", "Ship", "Me", "Later"];
+            for (int i = 0; i < cells.Length; i++)
+            {
+                if (i > 0) session.Window.PressKey(KeyCode.Tab);
+                session.Window.TypeText(cells[i]);
+            }
+            session.PumpFrame();
+
+            session.Window.PressKey(KeyCode.Enter, KeyModifiers.Ctrl);
+            session.PumpUntil(() => !app.CreateMergeRequestOpen, TimeSpan.FromSeconds(10));
+
+            var form = HttpUtility.ParseQueryString(handler.Seen.Single(s => s.Request.Method == System.Net.Http.HttpMethod.Post).Body!);
+            Assert.Equal(
+                "| Step | Who | When |\n| --- | --- | --- |\n| Build | CI | Now |\n| Ship | Me | Later |",
+                form["description"]);
+        }, handler);
+    }
+
     /// <summary>The description editor offers only what Markdown can say: no underline,
     /// colour or alignment for GitLab to drop.</summary>
     [Fact]

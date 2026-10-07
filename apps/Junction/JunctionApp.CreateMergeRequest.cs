@@ -61,7 +61,8 @@ public partial class JunctionApp
         RichTextCommand.Bold, RichTextCommand.Italic, RichTextCommand.Strike, RichTextCommand.Code,
         RichTextCommand.Link, null,
         RichTextCommand.Heading2, RichTextCommand.BulletList, RichTextCommand.NumberedList,
-        RichTextCommand.TaskList, RichTextCommand.Quote, RichTextCommand.CodeBlock,
+        RichTextCommand.TaskList, RichTextCommand.Quote, RichTextCommand.CodeBlock, null,
+        RichTextCommand.Table,
     ];
 
     private RichTextToolbar CreateMrToolbar() => _createMrToolbar ??= new RichTextToolbar(_createMrDescRef, MarkDirty)
@@ -73,6 +74,7 @@ public partial class JunctionApp
             RichTextCommand.Link => Ui.Icon(Icons.LinkSimple, 14f, Nocturne.On(0.8)),
             RichTextCommand.Code => Ui.Icon(Icons.Code, 14f, Nocturne.On(0.8)),
             RichTextCommand.TaskList => Ui.Icon(Icons.ListChecks, 14f, Nocturne.On(0.8)),
+            RichTextCommand.Table => Ui.Icon(Icons.Table, 14f, Nocturne.On(0.8)),
             _ => null,
         },
     };
