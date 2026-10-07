@@ -211,6 +211,29 @@ public partial class JunctionApp
         return b;
     }
 
+    /// <summary>The refresh button beside an "as of" line. While the request lists of
+    /// <paramref name="paths"/> are loading it is a spinner instead, which is both the
+    /// progress and the reason a second press cannot stack a second load on the first.</summary>
+    private Element GitLabRefreshButton(IReadOnlyList<string> paths, float size = 28f)
+    {
+        if (paths.Any(p => _mrLoaders.For(p).IsLoading))
+        {
+            var busy = Box.New().Width(size).Height(size).FlexShrink(0)
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Children(Spinner(14f, Nocturne.On(0.45)));
+            busy.Key = "gitlab-refreshing";
+            busy.AutomationId = "gitlab-refreshing";
+            busy.AccessibleName = "Refreshing from GitLab";
+            return busy;
+        }
+        var b = Ui.IconButton(Icons.ArrowsClockwise, () => RefreshGitLabNow(paths),
+            $"Refresh from GitLab ({Shortcuts.Keys("gitlab.refresh")})", size).FlexShrink(0);
+        b.Key = "gitlab-refresh";
+        b.AutomationId = "gitlab-refresh";
+        b.AccessibleName = "Refresh from GitLab";
+        return b;
+    }
+
     // ── List page ────────────────────────────────────────────────────────────────────
 
     private void BuildMrListPage(BoxElement card)
@@ -238,6 +261,7 @@ public partial class JunctionApp
         if (hosted.Loaded)
             header.AddChild(Text.New(AsOfText(hosted.AsOf)).FontSize(11f)
                 .TextColor(hosted.Stale ? Nocturne.MarkAmber : Nocturne.On(0.42)).FlexShrink(0));
+        header.AddChild(GitLabRefreshButton([.. ScopeRepos()]));
         header.AddChild(MrCloseButton());
         card.AddChild(header);
 
@@ -386,7 +410,7 @@ public partial class JunctionApp
             .FontSize(11f).TextColor(Nocturne.On(0.55)));
         line.AddChild(text);
         if (failure.Kind != GitLabFailureKind.RateLimited)
-            line.AddChild(Ui.GhostButton("Retry", null, () => RefreshHosted(_activeRepoPath)));
+            line.AddChild(Ui.GhostButton("Retry", null, () => RefreshGitLabNow([_activeRepoPath])));
         line.AutomationId = "mr-failure";
         return Flex.Column(gap: 0).Padding(new Thickness(8, 18, 0, 18)).Children(line);
     }
@@ -553,6 +577,7 @@ public partial class JunctionApp
             if (hosted.Loaded)
                 meta.AddChild(Text.New(AsOfText(hosted.AsOf)).FontSize(10.5f)
                     .TextColor(hosted.Stale ? Nocturne.MarkAmber : Nocturne.On(0.4)));
+            meta.AddChild(GitLabRefreshButton([path], 24f));
             header.AddChild(meta);
         }
         card.AddChild(header);
@@ -1032,6 +1057,7 @@ public partial class JunctionApp
         strip.AddChild(Text.New(text).FontSize(13f).FlexShrink(1).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
         if (asOf is { } at)
             strip.AddChild(Text.New(AsOfText(at)).FontSize(11f).TextColor(Nocturne.On(0.42)).FlexShrink(0));
+        strip.AddChild(GitLabRefreshButton(hosted, 26f));
         strip.AddChild(Box.New().FlexGrow(1));
         var open = Ui.GhostButton(count == 0 ? "Open merge requests" : "Review them", Icons.ArrowRight,
             () => OpenWorkspaceReviews(hosted), 12.5f);

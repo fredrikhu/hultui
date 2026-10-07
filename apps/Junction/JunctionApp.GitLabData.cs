@@ -59,10 +59,15 @@ public partial class JunctionApp
     internal void RefreshHosted(string path)
     {
         if (string.IsNullOrEmpty(path)) return;
-        _hostedGen[path] = HostedGen(path) + 1;
-        _hostedLastRefresh[path] = DateTimeOffset.UtcNow;
+        BumpHosted(path);
         RefreshTodos();   // the bell rides along: an action on a request usually changes them
         Rerender();
+    }
+
+    private void BumpHosted(string path)
+    {
+        _hostedGen[path] = HostedGen(path) + 1;
+        _hostedLastRefresh[path] = DateTimeOffset.UtcNow;
     }
 
     /// <summary>A refresh only when the last one is old enough — what a repository switch
@@ -77,6 +82,82 @@ public partial class JunctionApp
         if (mrs.Value.Loaded && mrs.Value.Age <= after) return;
         if (!_hostedLastRefresh.TryGetValue(path, out var last) || DateTimeOffset.UtcNow - last > after)
             RefreshHosted(path);
+    }
+
+    // ── Refresh now ──────────────────────────────────────────────────────────────────
+
+    // The refresh the user asked for, until it is reported: the repositories whose request
+    // list has not landed yet, and the first failure among those that have. A list that
+    // never lands (its producer threw past its retries) must not surface minutes later as
+    // a toast for a refresh nobody remembers, hence the age limit.
+    private HashSet<string>? _refreshWaiting;
+    private (string Host, GitLabFailure Failure)? _refreshFailure;
+    private DateTimeOffset _refreshAskedAt;
+    private int _refreshAskedFor;
+    private static readonly TimeSpan RefreshReportWithin = TimeSpan.FromMinutes(1);
+
+    /// <summary>What F5 refreshes: the repositories the merge-request panel lists while it
+    /// is open, the workspace on Overview (every card has a hosted line), else the active
+    /// repository.</summary>
+    private IEnumerable<string> GitLabRefreshTargets() =>
+        _mrPanelOpen ? ScopeRepos()
+        : View == JunctionView.Overview ? ActiveWorkspaceRepos
+        : HasActiveRepo ? [_activeRepoPath] : [];
+
+    /// <summary>
+    /// F5, the palette and the refresh buttons: reloads the hosted data of
+    /// <paramref name="paths"/> — by default <see cref="GitLabRefreshTargets"/> — and the
+    /// to-do list now, rather than when the timer, a Fetch or a repository switch next comes
+    /// round. A toast says when the request lists have landed, since outside the panel
+    /// nothing else may visibly change.
+    /// </summary>
+    internal void RefreshGitLabNow(IEnumerable<string>? paths = null)
+    {
+        var targets = (paths ?? GitLabRefreshTargets()).Where(GitLabActive).Distinct(PathComparer).ToList();
+        if (targets.Count == 0)
+        {
+            // Nothing in view is on a signed-in GitLab; the to-do list still may be.
+            if (_gitlab.All.Count > 0) { RefreshTodos(); Rerender(); }
+            if (!_todosOpen)
+                Flash(GitLabRemoteFor(_activeRepoPath) is { } r ? $"Not signed in to {r.Host}" : "This repository is not on GitLab");
+            return;
+        }
+
+        _refreshWaiting = new HashSet<string>(targets, PathComparer);
+        _refreshFailure = null;
+        _refreshAskedAt = DateTimeOffset.UtcNow;
+        _refreshAskedFor = targets.Count;
+        foreach (var path in targets)
+        {
+            // A list already on its way is this refresh: bumping the generation under it
+            // would drop its result for a second call (see RefreshHostedIfStale).
+            if (_mrLoaders.For(path).IsLoading) continue;
+            BumpHosted(path);
+            // Start the list now rather than at the next build: a view that shows no request
+            // would never ask for it, and the toast would never come.
+            MergeRequestsFor(path);
+        }
+        RefreshTodos();
+        // Rerender, not MarkDirty: the bump re-keys every hosted loader of these repositories,
+        // and only a tracked rebuild subscribes to the new ones.
+        Rerender();
+    }
+
+    /// <summary>A request list landed: the end of a refresh the user asked for, once every
+    /// repository in it has answered.</summary>
+    private void NoteRefreshLanded(string path, string host, GitLabFailure? failure)
+    {
+        if (_refreshWaiting is not { } waiting || !waiting.Remove(path)) return;
+        if (DateTimeOffset.UtcNow - _refreshAskedAt > RefreshReportWithin) { _refreshWaiting = null; return; }
+        if (failure != null) _refreshFailure ??= (host, failure);
+        if (waiting.Count > 0) return;
+        _refreshWaiting = null;
+        if (_refreshFailure is { } failed)
+            Flash("Could not refresh: " + failed.Failure.UserMessage(failed.Host));
+        else
+            Flash(_refreshAskedFor is 1 && GitLabRemoteFor(path) is { } remote
+                ? $"Refreshed {remote.ProjectPath} from {remote.Host}"
+                : $"Refreshed {_refreshAskedFor} repositories from GitLab");
     }
 
     private static T Sync<T>(Task<T> task) => task.GetAwaiter().GetResult();
@@ -121,7 +202,11 @@ public partial class JunctionApp
             return mrs.Ok
                 ? new Hosted<IReadOnlyList<GlMergeRequest>>(mrs.Value, DateTimeOffset.UtcNow, null, true)
                 : Keep(prev, mrs.Failure!);
-        }, NoteAuthFailure<IReadOnlyList<GlMergeRequest>>(remote.Host));
+        }, result =>
+        {
+            if (result.Failure?.Kind == GitLabFailureKind.Unauthorized) MarkGitLabAuthFailed(remote.Host);
+            NoteRefreshLanded(path, remote.Host, result.Failure);
+        });
         return loader.Value;
     }
 

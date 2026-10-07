@@ -1342,6 +1342,7 @@ public partial class JunctionApp
         var hosted = DiscussionsFor(rv.Path, rv.Iid);
         if (hosted.Loaded)
             row2.AddChild(Text.New(AsOfText(hosted.AsOf)).FontSize(10.5f).TextColor(hosted.Stale ? Nocturne.MarkAmber : Nocturne.On(0.4)));
+        row2.AddChild(GitLabRefreshButton([rv.Path], 26f));
         box.AddChild(row2);
         return box;
     }

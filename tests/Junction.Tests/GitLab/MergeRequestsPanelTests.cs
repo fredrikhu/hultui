@@ -200,6 +200,101 @@ public class MergeRequestsPanelTests
         }, handler);
     }
 
+    /// <summary>F5 asks GitLab again now, from any view, and says when the answer is in —
+    /// outside the panel nothing else may visibly change.</summary>
+    [Fact]
+    public void F5ReloadsTheRequestsNowAndSaysWhenTheyLanded()
+    {
+        int listCalls = 0;
+        var handler = Routes(null).Map(MrList, _ =>
+        {
+            Interlocked.Increment(ref listCalls);
+            return FakeGitLabHandler.Json(FakeGitLabHandler.Recording("merge_requests_page1"));
+        });
+        Hosted((_, session, app) =>
+        {
+            // The toolbar asks for the active repository's requests on its own.
+            session.PumpUntil(() => Volatile.Read(ref listCalls) == 1, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+
+            session.Window.PressKey(KeyCode.F5);
+            session.PumpUntil(() => TreeHas(session, "Refreshed acme/core-api from gitlab.com"), TimeSpan.FromSeconds(15));
+            Assert.Equal(2, Volatile.Read(ref listCalls));
+        }, handler);
+    }
+
+    /// <summary>The button beside the panel's "as of" does the same. A second refresh while
+    /// the first is still on its way is the same refresh — it must not supersede it with a
+    /// second call (the AsyncLoader would drop the first answer).</summary>
+    [Fact]
+    public void ThePanelsRefreshButtonReloadsOnceHoweverOftenItIsAsked()
+    {
+        int listCalls = 0;
+        var handler = Routes(null).Map(MrList, _ =>
+        {
+            Interlocked.Increment(ref listCalls);
+            return FakeGitLabHandler.Json(FakeGitLabHandler.Recording("merge_requests_page1"));
+        });
+        Hosted((_, session, app) =>
+        {
+            app.OpenMergeRequests(JunctionApp.MrFilter.AllOpen);
+            session.PumpUntil(() => TreeHas(session, "!412") && ById(session, "gitlab-refresh") is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            int before = Volatile.Read(ref listCalls);
+
+            session.Window.Click(Named(session, "Refresh from GitLab"));
+            app.RefreshGitLabNow();   // again, before the first has landed
+            session.PumpUntil(() => TreeHas(session, "Refreshed acme/core-api from gitlab.com"), TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+
+            Assert.Equal(before + 1, Volatile.Read(ref listCalls));
+            Assert.True(TreeHas(session, "as of just now"));
+            Assert.True(TreeHas(session, "!412"));
+            Assert.NotNull(ById(session, "gitlab-refresh"));   // the spinner gave the button back
+        }, handler);
+    }
+
+    [Fact]
+    public void ARefreshThatFailsSaysSo()
+    {
+        int listCalls = 0;
+        var handler = Routes(null).Map(MrList, _ => Interlocked.Increment(ref listCalls) == 1
+            ? FakeGitLabHandler.Json(FakeGitLabHandler.Recording("merge_requests_page1"))
+            : FakeGitLabHandler.Json("{\"message\":\"401 Unauthorized\"}", 401));
+        Hosted((_, session, app) =>
+        {
+            session.PumpUntil(() => Volatile.Read(ref listCalls) == 1, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+
+            app.RefreshGitLabNow();
+            session.PumpUntil(() => TreeHas(session, "Could not refresh: Sign in again"), TimeSpan.FromSeconds(15));
+        }, handler);
+    }
+
+    [Fact]
+    public void F5InARepositoryNotOnGitLabSaysSo()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        var settings = new JunctionSettingsData
+        {
+            RepositoryPaths = [repo.Path],
+            ActiveRepoPath = repo.Path,
+            Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
+            ActiveWorkspaceId = "w1",
+        };
+        using var session = HeadlessSession.Create(1440, 900);
+        var app = new JunctionApp(session.Application, session.Window.Window, settings,
+            credentialStore: new InMemoryCredentialStore(), gitLabHandler: _ => new FakeGitLabHandler());
+        try
+        {
+            session.Application.SetRoot(app.Mount());
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.F5);
+            session.PumpUntil(() => TreeHas(session, "This repository is not on GitLab"), TimeSpan.FromSeconds(5));
+        }
+        finally { app.Dispose(); }
+    }
+
     // ── Hosting ──────────────────────────────────────────────────────────────────────
 
     private static FakeGitLabHandler Routes(string? headSha) =>
