@@ -168,10 +168,17 @@ From the round 1 surveys (details in `17-reports/`):
 1. **Flex basis of one-line truncating labels** (layout): use the CSS max-content basis?
    Halves ellipsis measurements (text/ellipsis 1,988 measurements, 7.7 MB per step) but
    changes how shrink is shared between several shrinkable items in a row (pixels move).
-   **Open:** the user asked for before/after images (2026-10-07); rendering them is queued
-   between build items 1 and 2.
-6. **Aperture real-library measurement** (apps): **the user will provide an API key file**
-   (2026-10-07); its path goes here when it arrives. Never copy the key into the repo.
+   **Open:** the user asked for before/after images (2026-10-07) and leans to a third
+   option: keep today's shrink split but take each truncating label's base as
+   min(natural width, available width) instead of truncating it. Render today, CSS
+   max-content and the third option side by side first, between build items 1 and 2.
+
+Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
+(outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
+`--app aperture --server http://jellyfin.home:8096 --api-key-file <that path>`. Real-library
+measurement (poster grid, artwork decode, a11y on a large library) belongs to the app
+workloads expert in the round 2 survey, and to aperture-poster-decode-scale's build. The
+user should revoke the key when the work is done.
 
 Answered 2026-10-07:
 
