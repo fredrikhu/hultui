@@ -282,7 +282,9 @@ nothing is pushed or merged yet.
   `layout-change-audit` (gen-0 GC placement, JIT object stack allocation moving allocKB,
   measure-cache hits from resizing between two widths, alternating two ops in one series).
 - **Apps on AOT.** Measure app frames on a NativeAOT publish; JIT first visits cost
-  5–10× more.
+  5–10× more. AOT also allocates differently (`Type.Name` builds a new string every call;
+  apps allocate ~2.2× more per frame than the JIT suite shows), so a change aimed at
+  per-frame allocation checks its bytes on an AOT build too.
 - **a11y state:** pin it with `HULTUI_A11Y=0` when comparing across OSes; measure it on
   when the change is in the a11y path.
 - **Never take focus** from the user's desktop: no `SendKeys`, no foreground windows,
