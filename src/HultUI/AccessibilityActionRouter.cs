@@ -126,6 +126,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         {
             case TextInputElement input: input.Text = value; input.TextChanged?.Invoke(value); break;
             case TextAreaElement area: area.Text = value; area.TextChanged?.Invoke(value); break;
+            case RichTextEditorElement editor: editor.SetValueFromAssistiveTool(value); break;
         }
     });
 

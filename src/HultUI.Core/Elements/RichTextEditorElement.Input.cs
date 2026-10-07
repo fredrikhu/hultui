@@ -76,6 +76,7 @@ public partial class RichTextEditorElement
         {
             if (level == 0) _state.SetBlockKind(BlockKind.Paragraph);
             else _state.ToggleBlockKind(BlockKind.Heading, level);
+            AnnounceBlock();
             evt.StopPropagation = true;
             return;
         }
@@ -160,24 +161,24 @@ public partial class RichTextEditorElement
         {
             case 'a': _state.SelectAll(); return true;
             case 'c': Copy(); return true;
-            case 'x' when shift: if (!_readOnly) _state.ToggleStyle(InlineStyle.Strike); return true;
+            case 'x' when shift: if (!_readOnly && _state.ToggleStyle(InlineStyle.Strike)) AnnounceStyle(InlineStyle.Strike, "Strikethrough"); return true;
             case 'x': if (!_readOnly) Cut(); return true;
             case 'v': if (!_readOnly) Paste(plainText: shift); return true;
             case 'z': if (!_readOnly) { if (shift) _state.Redo(); else _state.Undo(); } return true;
             case 'y': if (!_readOnly) _state.Redo(); return true;
-            case 'b': if (!_readOnly) _state.ToggleStyle(InlineStyle.Bold); return true;
-            case 'i': if (!_readOnly) _state.ToggleStyle(InlineStyle.Italic); return true;
-            case 'u': if (!_readOnly) _state.ToggleStyle(InlineStyle.Underline); return true;
-            case 'e': if (!_readOnly) _state.ToggleStyle(InlineStyle.Code); return true;
+            case 'b': if (!_readOnly && _state.ToggleStyle(InlineStyle.Bold)) AnnounceStyle(InlineStyle.Bold, "Bold"); return true;
+            case 'i': if (!_readOnly && _state.ToggleStyle(InlineStyle.Italic)) AnnounceStyle(InlineStyle.Italic, "Italic"); return true;
+            case 'u': if (!_readOnly && _state.ToggleStyle(InlineStyle.Underline)) AnnounceStyle(InlineStyle.Underline, "Underline"); return true;
+            case 'e': if (!_readOnly && _state.ToggleStyle(InlineStyle.Code)) AnnounceStyle(InlineStyle.Code, "Code"); return true;
             case 'k': if (!_readOnly) LinkRequested?.Invoke(); return true;
         }
         if (shift && !_readOnly && evt.Digit is int d)
         {
             switch (d)
             {
-                case 7: _state.ToggleBlockKind(BlockKind.NumberedItem); return true;
-                case 8: _state.ToggleBlockKind(BlockKind.BulletItem); return true;
-                case 9: _state.ToggleBlockKind(BlockKind.TaskItem); return true;
+                case 7: _state.ToggleBlockKind(BlockKind.NumberedItem); AnnounceBlock(); return true;
+                case 8: _state.ToggleBlockKind(BlockKind.BulletItem); AnnounceBlock(); return true;
+                case 9: _state.ToggleBlockKind(BlockKind.TaskItem); AnnounceBlock(); return true;
             }
         }
         return false;

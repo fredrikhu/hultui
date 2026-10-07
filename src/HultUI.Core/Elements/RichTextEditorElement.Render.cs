@@ -49,6 +49,7 @@ public partial class RichTextEditorElement
             ScrollCaretIntoView(content.Height);
         }
         _scrollY = Math.Clamp(_scrollY, 0, MaxScrollY());
+        NoteViewFrame();
 
         ctx.PushClip(content);
         float originX = content.X, originY = content.Y - _scrollY;

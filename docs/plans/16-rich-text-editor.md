@@ -159,8 +159,10 @@ Paste prefers the internal format, then plain text. HTML paste is not in v1: it 
 HTML parser, and Core takes no dependencies; the Markdown package can offer it later.
 
 **Accessibility.** Role `TextInput` (multi-line), value and `IAccessibleTextSource` over
-the global-offset plain text, so UIA's text pattern and AT-SPI text work as in TextArea.
-Formatting attributes on text ranges (UIA `FontWeight`, `IsItalic`) are a follow-up.
+the plain text, so UIA's text pattern and AT-SPI text work as for the terminal (TextArea
+offers only a value). Formatting attributes on text ranges (UIA `FontWeight`, `IsItalic`)
+are a follow-up. As built (stage 5), the drawn lines are the lines and a picture reads as
+its words.
 
 ## Element surface
 
@@ -224,7 +226,33 @@ text labels (**B**, *I*, U̲, H1…) by default and takes app artwork per comman
    the action router presses the button). Default code background, quote bar and rule are
    tints of the text colour: the palette's surface and border fills matched the Fluent field
    and drew nothing. Phosphor's text-formatting icons were not added.
-5. **Accessibility.** Text source, role, announcements for formatting toggles.
+5. **Accessibility.** Text source, role, announcements for formatting toggles. **Done 2026-10-07:**
+   - **The text.** The blocks a paragraph each, as the plain text reads them, except that a
+     picture reads as its words ("Picture" with none). A table's cells are paragraphs in reading
+     order. The caret and selection map onto it.
+   - **Lines are drawn lines.** `AccessibleText` takes the element's line starts. A line is then
+     what is drawn and a paragraph what a newline ends; UIA got a paragraph unit and AT-SPI a
+     paragraph granularity for it. Text that does not wrap (the terminal) is unchanged.
+   - **Made on the UI thread.** The snapshot is built from the layout when the tree is built, and
+     bridge threads get the last one built. The tree is built before the frame is drawn, so an
+     editor's first snapshot has no layout; its first paint, a new width or a new theme asks for
+     the tree again. Geometry is each line's box in document coordinates, plus exact character
+     positions for the lines on screen when the snapshot was made (others spread their characters
+     evenly). Boxes are placed through a record the paint replaces, so scrolling needs no new
+     snapshot.
+   - **Told.** A caret or selection move notifies the tree while a reader listens, so the bridges
+     raise caret-moved and selection-changed. Formatting shortcuts are spoken ("Bold on",
+     "Heading 2", "Bulleted list"). An assistive tool setting the value replaces the document as
+     plain paragraphs, one undoable edit (`RichEditState.ReplaceDocument`), refused when read-only.
+   - **Checked** with Windows' own UI Automation client on the Fluent sample: an Edit control with
+     Value and Text patterns; lines, paragraphs and words; boxes in screen pixels matching the
+     layout; a point inside line 1 finding its word; the caret. That check found the missing-layout
+     snapshot above. AT-SPI is unit-tested only, as for the terminal.
+   - **Cost.** With a bridge on, a keystroke in a 5,000-block document is 1.40 ms, 0.26 ms more
+     than without a text source: the snapshot walks every drawn line.
+   - **Not done.** A reader moving the caret or selection (UIA `Select`, AT-SPI `SetCaretOffset`)
+     is refused by both bridges, as for the terminal. AT-SPI `EditableText` (set-value on Linux).
+     Formatting as text attributes (UIA `FontWeight`, `IsItalic`; AT-SPI attribute runs).
 6. **Markdown package.** Parse, write, `Raw`, round-trip corpus. **Done 2026-10-07**
    (`src/HultUI.RichText.Markdown`: `RichMarkdown.Parse`/`Write`/`WriteInline`, `Features`;
    53 tests). Decisions made on the way:
@@ -270,10 +298,9 @@ text labels (**B**, *I*, U̲, H1…) by default and takes app artwork per comman
    - **Toolbar fix.** Toolbar buttons grow past `ButtonSize` to fit their label; at a fixed
      width, "H2" wrapped in Junction's face.
 
-**Open after stages 1–4:** the accessible text source (UIA text pattern / AT-SPI Text over
-the plain text, so readers move by word and line — today a reader gets the value only); an
-assistive tool setting the value; DevTools showing the document; Up/Down through a line
-that mixes directions has had no test.
+**Open after stages 1–4:** ~~the accessible text source~~ and ~~an assistive tool setting the
+value~~ (stage 5, done); DevTools showing the document; Up/Down through a line that mixes
+directions has had no test.
 8. **Measure.** Typing latency and paint on a 5,000-block document under the perf
    suite's rules (docs: perf-suite); find integration (`TextSearch` over global offsets).
    **Done 2026-10-07:**

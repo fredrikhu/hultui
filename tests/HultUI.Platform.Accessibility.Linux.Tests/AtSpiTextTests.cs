@@ -35,8 +35,12 @@ public class AtSpiTextTests
         Assert.Equal(("l", 2, 3), AtSpiText.GetStringAtOffset(Screen, 2, AtSpiConstants.GranularityChar));
         Assert.Equal(("ls ", 2, 5), AtSpiText.GetStringAtOffset(Screen, 3, AtSpiConstants.GranularityWord));
         Assert.Equal(("file.txt\n", 9, 18), AtSpiText.GetStringAtOffset(Screen, 12, AtSpiConstants.GranularityLine));
-        // A sentence and a paragraph are a line.
+        // A paragraph is a line in text that does not wrap.
         Assert.Equal(("file.txt\n", 9, 18), AtSpiText.GetStringAtOffset(Screen, 12, AtSpiConstants.GranularityParagraph));
+        // In text that does, a line is what is drawn and a paragraph what a newline ends.
+        var wrapped = new AccessibleText("one two\nthree", lineStarts: [0, 4]);
+        Assert.Equal(("one ", 0, 4), AtSpiText.GetStringAtOffset(wrapped, 1, AtSpiConstants.GranularityLine));
+        Assert.Equal(("one two\n", 0, 8), AtSpiText.GetStringAtOffset(wrapped, 1, AtSpiConstants.GranularityParagraph));
         Assert.Equal("ls -la", AtSpiText.GetText(Screen, 2, 8));
         Assert.Equal("$ ", AtSpiText.GetText(Screen, 18, -1));
     }

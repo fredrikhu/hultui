@@ -12,7 +12,8 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// Offsets are AT-SPI's character offsets, which here are the text's UTF-16 offsets, as on
 /// Windows. Coordinates are device pixels from the window's top left whatever coordinate type is
 /// asked for, as the Component interface answers (under Wayland a client has no screen origin).
-/// A sentence and a paragraph are a line: the text knows no smaller structure.
+/// A sentence is a line: the text knows no smaller structure. A paragraph is a paragraph, which
+/// is a line unless the text wraps.
 /// </remarks>
 [SupportedOSPlatform("linux")]
 internal static class AtSpiText
@@ -33,6 +34,7 @@ internal static class AtSpiText
         {
             AtSpiConstants.GranularityChar => Granularity.Char,
             AtSpiConstants.GranularityWord => Granularity.Word,
+            AtSpiConstants.GranularityParagraph => Granularity.Paragraph,
             _ => Granularity.Line,
         });
         return (t.Text[start..end], start, end);
@@ -56,7 +58,7 @@ internal static class AtSpiText
         return (t.Text[start..end], start, end);
     }
 
-    private enum Granularity { Char, Word, Line }
+    private enum Granularity { Char, Word, Line, Paragraph }
 
     private static (int Start, int End) Unit(AccessibleText t, int offset, Granularity g)
     {
@@ -65,6 +67,7 @@ internal static class AtSpiText
         {
             Granularity.Char => offset >= t.Length ? (t.Length, t.Length) : (offset, t.NextCharacter(offset)),
             Granularity.Word => offset >= t.Length && t.Length > 0 ? (t.PreviousWordStart(t.Length), t.Length) : t.WordRange(offset),
+            Granularity.Paragraph => t.ParagraphRange(offset),
             _ => t.LineRange(t.LineAt(offset)),
         };
     }

@@ -66,6 +66,15 @@ public sealed partial class RichEditState
         SelectionChanged?.Invoke();
     }
 
+    /// <summary>Replaces the whole document as an edit — one step, which Undo gives back — rather
+    /// than as a new value (<see cref="Load"/>): what an assistive tool setting the text does.
+    /// The caret goes to the end.</summary>
+    public void ReplaceDocument(RichDocument document)
+    {
+        var blocks = RichTable.Normalize(document).Blocks;
+        Commit(0, Document.BlockCount, blocks, RichSelection.Caret(new RichDocument(blocks).End), EditKind.Other);
+    }
+
     /// <summary>Moves the selection. Ends the current undo run and drops pending marks when the
     /// caret actually moves.</summary>
     public void Select(RichSelection selection)

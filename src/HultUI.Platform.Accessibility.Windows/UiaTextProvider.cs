@@ -311,7 +311,6 @@ internal sealed class UiaTextRange : INativeTextRange
     private static int Normalize(int unit) => unit switch
     {
         UiaInterop.TextUnit_Format => UiaInterop.TextUnit_Word,
-        UiaInterop.TextUnit_Paragraph => UiaInterop.TextUnit_Line,
         UiaInterop.TextUnit_Page => UiaInterop.TextUnit_Document,
         < UiaInterop.TextUnit_Character or > UiaInterop.TextUnit_Document => UiaInterop.TextUnit_Document,
         _ => unit,
@@ -322,6 +321,7 @@ internal sealed class UiaTextRange : INativeTextRange
         UiaInterop.TextUnit_Character => text.NextCharacter(p),
         UiaInterop.TextUnit_Word => text.NextWordStart(p),
         UiaInterop.TextUnit_Line => text.LineRange(text.LineAt(p)).End,
+        UiaInterop.TextUnit_Paragraph => text.ParagraphRange(p).End,
         _ => text.Length,
     };
 
@@ -334,6 +334,9 @@ internal sealed class UiaTextRange : INativeTextRange
             case UiaInterop.TextUnit_Line:
                 int line = text.LineAt(p);
                 return p == text.LineStart(line) && line > 0 ? text.LineStart(line - 1) : text.LineStart(line);
+            case UiaInterop.TextUnit_Paragraph:
+                int start = text.ParagraphRange(p).Start;
+                return p == start && start > 0 ? text.ParagraphRange(start - 1).Start : start;
             default: return 0;
         }
     }
@@ -344,6 +347,7 @@ internal sealed class UiaTextRange : INativeTextRange
         UiaInterop.TextUnit_Word when p >= text.Length => (text.PreviousWordStart(p), text.Length),
         UiaInterop.TextUnit_Word => text.WordRange(p),
         UiaInterop.TextUnit_Line => text.LineRange(text.LineAt(p)),
+        UiaInterop.TextUnit_Paragraph => text.ParagraphRange(p),
         _ => (0, text.Length),
     };
 }

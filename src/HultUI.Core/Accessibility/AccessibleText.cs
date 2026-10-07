@@ -10,8 +10,10 @@ namespace HultUI.Core.Accessibility;
 /// caret or selection change (<see cref="IAccessibleTextSource"/>).
 /// </summary>
 /// <remarks>
-/// <para>Lines are the text's <c>'\n'</c>-separated lines: what a reader moves through by line
-/// and what <see cref="LineAt"/> answers. Offsets count UTF-16 code units, as both platforms do;
+/// <para>Paragraphs are the text's <c>'\n'</c>-separated runs. Lines are what a reader moves
+/// through by line and what <see cref="LineAt"/> answers: the paragraphs, unless the element
+/// says where its text wraps (<c>lineStarts</c>), and then the lines it draws — as a word
+/// processor's reader means a line. Offsets count UTF-16 code units, as both platforms do;
 /// moving by character steps over a surrogate pair whole.</para>
 /// <para>Words are the framework's own (the same as a double-click selects): letters, digits
 /// and underscores, blanks, and everything else are three kinds, and a word runs to the start of
@@ -20,8 +22,9 @@ namespace HultUI.Core.Accessibility;
 public sealed class AccessibleText
 {
     private readonly int[] _lineStarts;
+    private readonly int[] _paragraphStarts;
 
-    /// <param name="text">The text, lines separated by <c>'\n'</c>.</param>
+    /// <param name="text">The text, paragraphs separated by <c>'\n'</c>.</param>
     /// <param name="caret">Where the caret is, or -1 when there is none.</param>
     /// <param name="selectionStart">Where the selection starts; equal to
     /// <paramref name="selectionEnd"/> (or -1) for none.</param>
@@ -31,8 +34,11 @@ public sealed class AccessibleText
     /// <param name="visibleStart">The first character on screen; 0 for all of it.</param>
     /// <param name="visibleEnd">Past the last character on screen; -1 for the end.</param>
     /// <param name="isReadOnly">Whether nothing the reader does may change the text.</param>
+    /// <param name="lineStarts">Where each drawn line starts, for text that wraps; null when the
+    /// lines are the paragraphs. Every paragraph's start is a line's start whether listed or not.</param>
     public AccessibleText(string text, int caret = -1, int selectionStart = -1, int selectionEnd = -1,
-        AccessibleTextGeometry? geometry = null, int visibleStart = 0, int visibleEnd = -1, bool isReadOnly = true)
+        AccessibleTextGeometry? geometry = null, int visibleStart = 0, int visibleEnd = -1, bool isReadOnly = true,
+        IReadOnlyList<int>? lineStarts = null)
     {
         ArgumentNullException.ThrowIfNull(text);
         Text = text;
@@ -47,11 +53,28 @@ public sealed class AccessibleText
         VisibleEnd = visibleEnd < 0 ? text.Length : Math.Clamp(visibleEnd, VisibleStart, text.Length);
         IsReadOnly = isReadOnly;
 
-        int lines = 1;
-        foreach (var c in text.AsSpan()) if (c == '\n') lines++;
-        _lineStarts = new int[lines];
-        for (int i = 0, line = 1; i < text.Length; i++)
-            if (text[i] == '\n') _lineStarts[line++] = i + 1;
+        // Vectorized searches: a long document's text is hundreds of thousands of characters,
+        // and an editor makes one of these a keystroke while a reader listens.
+        var span = text.AsSpan();
+        _paragraphStarts = new int[span.Count('\n') + 1];
+        for (int at = 0, p = 1, i; (i = span[at..].IndexOf('\n')) >= 0; at += i + 1)
+            _paragraphStarts[p++] = at + i + 1;
+        _lineStarts = lineStarts is { Count: > 0 } ? Merge(_paragraphStarts, lineStarts, text.Length) : _paragraphStarts;
+    }
+
+    // The paragraph starts and the given line starts, in order, each once, inside the text.
+    private static int[] Merge(int[] paragraphs, IReadOnlyList<int> lines, int length)
+    {
+        var all = new List<int>(paragraphs.Length + lines.Count);
+        int a = 0, b = 0, last = -1;
+        while (a < paragraphs.Length || b < lines.Count)
+        {
+            int next = b >= lines.Count || (a < paragraphs.Length && paragraphs[a] <= lines[b]) ? paragraphs[a++] : lines[b++];
+            if (next <= last || next > length) continue;
+            all.Add(next);
+            last = next;
+        }
+        return [.. all];
     }
 
     public string Text { get; }
@@ -88,11 +111,14 @@ public sealed class AccessibleText
 
     public int LineStart(int line) => _lineStarts[Math.Clamp(line, 0, LineCount - 1)];
 
-    /// <summary>Where a line's text ends: before its <c>'\n'</c>, or at the end of the text.</summary>
+    /// <summary>Where a line's text ends: before its <c>'\n'</c>, where the next line starts when
+    /// it wraps, or at the end of the text.</summary>
     public int LineEnd(int line)
     {
         line = Math.Clamp(line, 0, LineCount - 1);
-        return line + 1 < LineCount ? _lineStarts[line + 1] - 1 : Length;
+        if (line + 1 >= LineCount) return Length;
+        int next = _lineStarts[line + 1];
+        return Text[next - 1] == '\n' ? next - 1 : next;
     }
 
     /// <summary>A line with its <c>'\n'</c>: what a reader takes as the line unit, so moving
@@ -101,6 +127,21 @@ public sealed class AccessibleText
     {
         line = Math.Clamp(line, 0, LineCount - 1);
         return (_lineStarts[line], line + 1 < LineCount ? _lineStarts[line + 1] : Length);
+    }
+
+    // ──── Paragraphs ────
+
+    public int ParagraphCount => _paragraphStarts.Length;
+
+    /// <summary>The paragraph holding <paramref name="offset"/>, with its <c>'\n'</c>: the
+    /// paragraph unit, which covers the text with no gaps as lines do. The same as the line
+    /// unit for text that does not wrap.</summary>
+    public (int Start, int End) ParagraphRange(int offset)
+    {
+        offset = Math.Clamp(offset, 0, Length);
+        int i = Array.BinarySearch(_paragraphStarts, offset);
+        int p = i >= 0 ? i : ~i - 1;
+        return (_paragraphStarts[p], p + 1 < _paragraphStarts.Length ? _paragraphStarts[p + 1] : Length);
     }
 
     // ──── Words ────

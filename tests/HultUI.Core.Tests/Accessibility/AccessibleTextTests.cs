@@ -40,6 +40,25 @@ public class AccessibleTextTests
         Assert.Equal(6, t.LineEnd(1));
         Assert.Equal((7, 8), t.LineRange(2));
         Assert.Equal((8, 9), t.LineRange(3));
+        Assert.Equal((3, 7), t.ParagraphRange(4));
+    }
+
+    [Fact]
+    public void Lines_AreWhereTheTextWraps_WhenTheElementSays_AndParagraphsTheNewlineSeparatedOnes()
+    {
+        // "one two" wraps after "one "; the second paragraph's start is a line start unlisted.
+        var t = new AccessibleText("one two\nthree", lineStarts: [0, 4]);
+        Assert.Equal(3, t.LineCount);
+        Assert.Equal((0, 4), t.LineRange(0));
+        Assert.Equal(4, t.LineEnd(0));        // a wrapped line keeps its space
+        Assert.Equal((4, 8), t.LineRange(1));
+        Assert.Equal(7, t.LineEnd(1));        // a paragraph's last line ends before its newline
+        Assert.Equal((8, 13), t.LineRange(2));
+        Assert.Equal(1, t.LineAt(5));
+
+        Assert.Equal(2, t.ParagraphCount);
+        Assert.Equal((0, 8), t.ParagraphRange(5));
+        Assert.Equal((8, 13), t.ParagraphRange(13));
     }
 
     [Fact]

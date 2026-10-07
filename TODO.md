@@ -1,6 +1,15 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Rich text editor, stage 5: for a screen reader** (docs/plans/16-rich-text-editor.md) — the editor
+  offers `IAccessibleTextSource`: blocks as paragraphs, drawn lines as lines (`AccessibleText` now
+  takes `lineStarts`; UIA gained a paragraph unit, AT-SPI a paragraph granularity), a picture as its
+  words, cells in reading order; caret and selection; character boxes from the layout that follow
+  scrolling. Made on the UI thread when the tree is built; the first paint, a new width or theme asks
+  for a new one. Caret moves notify, formatting shortcuts are announced, an assistive tool's
+  set-value replaces the document as one undoable edit. Checked with Windows' UI Automation client
+  on the Fluent sample. Tests: 6 headless, `AccessibleText`, UIA and AT-SPI units. Bridge-on typing
+  at 5,000 blocks 1.40 ms (+0.26).
 - **Rich text editor, stage 8: measured, faster, and find** (docs/plans/16-rich-text-editor.md) —
   ten perf-suite scenarios (`richtext/`, `a11y/type in rich text`); idle-gated A/B 0 slower, 11
   faster (captures 2026-10-07 in the suite). A paragraph of 600 spans 19.2 → 2.7 ms per keystroke,
@@ -837,20 +846,14 @@
 - **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.
 
 ## Up Next (in order)
-- **Rich text editor** — docs/plans/16-rich-text-editor.md; stages 1–4 and 6–9 done; stage 5 is the
-  entry below. Candidates for more adoption: Junction's review notes and replies. Left from stage 9:
+- **Rich text editor** — docs/plans/16-rich-text-editor.md; all nine stages done. Candidates for more
+  adoption: Junction's review notes and replies. Left from stage 5: a reader moving the caret or
+  selection (UIA `Select`, AT-SPI `SetCaretOffset`/`SetSelection` — both bridges refuse it for every
+  element), AT-SPI `EditableText` (set-value on Linux), formatting as text attributes. Left from stage 9:
   a Table button in Junction (needs Phosphor's `table` glyph in the bundle), pasting picture data
   (an upload hook), dragging to resize pictures and columns. Left from stage 8: opening a long
   document lays every block out (5,000 blocks: 15.5 ms) — estimated heights off screen would make
   it cost a screenful.
-- **Rich text editor: accessible text source** (plan 16, stage 5) — a screen reader gets the
-  document as one value today, so it cannot move through it by word or line. Implement
-  `IAccessibleTextSource` (`AccessibleText`, as `TextAreaElement` does) over the document's
-  global-offset plain text: caret and selection as global offsets, line ranges from the laid-out
-  paragraphs, text-changed and caret-moved events. Then: an assistive tool setting the value
-  (UIA `ValuePattern.SetValue`, AT-SPI `EditableText`) loads it as plain paragraphs; formatting
-  toggles (Ctrl+B…) are announced; a picture reads as its alt text and a table cell by cell.
-  Formatting attributes on text ranges (UIA `FontWeight`, `IsItalic`) stay a follow-up.
 - **Rich text editor: export as HTML and RTF** (plan 16; export only, no import) — a whole
   `RichDocument` written out as a file another program opens. HTML: grow `RichHtml.Write` (today
   the clipboard's fragment writer) into a standalone document — `<!doctype>`, charset, the theme's

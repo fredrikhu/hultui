@@ -125,6 +125,26 @@ public class UiaTextPatternTests
     }
 
     [WindowsFact]
+    public void InTextThatWraps_ALineIsWhatIsDrawn_AndAParagraphWhatANewlineEnds()
+    {
+        using var rig = new Rig(new AccessibleText("one two\nthree", lineStarts: [0, 4], geometry: new Grid()));
+        Assert.Equal(0, rig.Provider().GetDocumentRange(out var native));
+        try
+        {
+            var r = Range(native);
+            Assert.Equal(0, r.ExpandToEnclosingUnit(Line));
+            Assert.Equal("one ", TextOf(r));
+            Assert.Equal(0, r.Move(Line, 1, out int moved));
+            Assert.Equal((1, "two\n"), (moved, TextOf(r)));
+            Assert.Equal(0, r.ExpandToEnclosingUnit(Paragraph));
+            Assert.Equal("one two\n", TextOf(r));
+            Assert.Equal(0, r.Move(Paragraph, 1, out moved));
+            Assert.Equal((1, "three"), (moved, TextOf(r)));
+        }
+        finally { Marshal.Release(native); }
+    }
+
+    [WindowsFact]
     public void ARange_MovesByCharacterWordAndLine()
     {
         using var rig = new Rig(Screen);
