@@ -147,6 +147,8 @@ A candidate is worth building when it is **measurable** and clears **one** bar:
 - **Scaling:** removes O(n) work per frame or per event from a hot path, even if today's
   scenarios are small.
 - **Start-up:** ≥10 ms off the time to the first presented frame.
+- **Idle:** an idle window (nothing dirty, no animation, no pending deadline) wakes the
+  CPU less often; target about 1 wake per second or fewer beyond the deadlines it owns.
 
 It is **not** reasonable when it:
 
