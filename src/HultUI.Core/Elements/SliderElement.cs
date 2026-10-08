@@ -198,11 +198,44 @@ public class SliderElement : Element, IRangeValueElement
         // (and, while pointed at, by however much is behind the pointer).
         float top = cy - TrackHeight / 2;
         var radius = new CornerRadius(TrackHeight / 2);
-        foreach (var (from, to) in Pieces())
+        if (range <= 0 || trackWidth <= 0 || _segments is not { Count: > 0 } segments)
+        {
+            DrawPiece(0f, 1f);
+        }
+        else
+        {
+            // The track as fractions of its width: one piece per segment with the gap taken out
+            // of each piece's right-hand end. Worked out here every frame, as it always was, but
+            // in a span: a LINQ chain and an iterator per frame were most of what a steady
+            // repaint allocated on a screen with sliders, and a video's scrubber repaints with
+            // every frame it plays.
+            Span<float> cuts = segments.Count <= 256 ? stackalloc float[segments.Count] : new float[segments.Count];
+            int count = 0;
+            for (int i = 0; i < segments.Count; i++)
+            {
+                double v = segments[i];
+                if (v > _min && v < _max) cuts[count++] = (float)((v - _min) / range);
+            }
+            cuts = cuts[..count];
+            cuts.Sort();
+
+            float gap = Math.Min(SegmentGap / trackWidth, 0.02f);
+            float start = 0f;
+            for (int i = 0; i < cuts.Length; i++)
+            {
+                float cut = cuts[i];
+                if (i > 0 && cut.Equals(cuts[i - 1])) continue;   // duplicates are one cut
+                if (cut - start > gap) DrawPiece(start, cut - gap);
+                start = cut;
+            }
+            if (start < 1f) DrawPiece(start, 1f);
+        }
+
+        void DrawPiece(float from, float to)
         {
             float x = trackLeft + trackWidth * from;
             float width = trackWidth * (to - from);
-            if (width <= 0) continue;
+            if (width <= 0) return;
 
             ctx.DrawRoundedRect(new Rect(x, top, width, TrackHeight), radius, _trackColor, Color.Transparent, default);
 
@@ -227,37 +260,6 @@ public class SliderElement : Element, IRangeValueElement
             var ring = new Rect(thumbX - ThumbRadius - o, cy - ThumbRadius - o, (ThumbRadius + o) * 2, (ThumbRadius + o) * 2);
             ctx.DrawRoundedRect(ring, new CornerRadius(ThumbRadius + o), Color.Transparent, _focusRingColor, new Thickness(2f));
         }
-    }
-
-    /// <summary>
-    /// The track as fractions of its width: one piece per segment with the gap taken out
-    /// of each piece's right-hand end, or a single piece when nothing divides it.
-    /// </summary>
-    private IEnumerable<(float From, float To)> Pieces()
-    {
-        double range = _max - _min;
-        float trackWidth = Layout.AbsoluteContentBox.Width - 2 * ThumbRadius;
-        if (range <= 0 || trackWidth <= 0 || _segments is not { Count: > 0 })
-        {
-            yield return (0f, 1f);
-            yield break;
-        }
-
-        float gap = trackWidth > 0 ? Math.Min(SegmentGap / trackWidth, 0.02f) : 0f;
-        var cuts = _segments
-            .Where(v => v > _min && v < _max)
-            .Select(v => (float)((v - _min) / range))
-            .Distinct()
-            .Order()
-            .ToList();
-
-        float start = 0f;
-        foreach (var cut in cuts)
-        {
-            if (cut - start > gap) yield return (start, cut - gap);
-            start = cut;
-        }
-        if (start < 1f) yield return (start, 1f);
     }
 
     // ── IRangeValueElement ──

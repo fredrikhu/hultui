@@ -108,6 +108,25 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"laying one box out again allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>Sliders, one cut into chapters as a video's scrubber is, and number fields,
+    /// repainted. A slider worked its pieces out through an iterator and, with chapter marks, a
+    /// LINQ chain; a number field formatted its value into two new strings: ~1.3 KB a frame on
+    /// the perf suite's control screen, and the scrubber repaints with every video frame.</summary>
+    [Fact]
+    public void ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing()
+    {
+        var chapters = Slider.New(30, 0, 100);
+        chapters.Segments = [80d, 10d, 35d, 35d];
+        var root = Flex.Column(gap: 8).Padding(8).Children(
+            Slider.New(40, 0, 100), chapters,
+            NumericUpDown.New(2.5, 0, 10, 0.5), NumericUpDown.New(7, 0, 100, 1));
+        using var session = Session(root);
+
+        double perFrame = PerFrame(session.Application, () => root.MarkPaintDirty());
+
+        Assert.True(perFrame < 1, $"a repaint allocated {perFrame:0.#} B per frame");
+    }
+
     /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key
     /// and focus events. It was ~28 KB per Tab (a tree walk with a boxed enumerator per
     /// container, a fresh list, and a sort of keys that were all equal); the bound is far above
