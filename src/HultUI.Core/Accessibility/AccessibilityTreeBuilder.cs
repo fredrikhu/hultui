@@ -18,6 +18,15 @@ public static class AccessibilityTreeBuilder
     internal const int MaxEagerVirtualItems = 2000;
 
     /// <summary>
+    /// The nodes built so far on this thread whose parent is still being built, deepest last.
+    /// How many children a node gets is known only once its element's subtree has been walked
+    /// (decorative containers pass theirs up), so they wait here and the node takes them in one
+    /// array of the exact size: a tree is rebuilt in full on every change a screen reader can
+    /// see, and a growing list per parent was garbage on each of them.
+    /// </summary>
+    [ThreadStatic] private static List<AccessibilityNode>? t_pending;
+
+    /// <summary>
     /// Builds an accessibility tree from the element tree rooted at the given element.
     /// Decorative containers (BoxElements with no role, name, or semantic children) are
     /// flattened — their children are promoted to the parent accessibility node.
@@ -43,7 +52,19 @@ public static class AccessibilityTreeBuilder
         // (and out of any scroll view along the way) are marked offscreen.
         var childClip = ClipForChildren(root, node.BoundingRect, ox, oy);
         if (!TryBuildContent(root, node, cx, cy, childClip) && !TryBuildVirtualItems(root, node, cx, cy, childClip))
-            BuildChildren(root, node, focusManager, cx, cy, childClip);
+        {
+            var pending = t_pending ??= [];
+            int start = pending.Count;
+            try
+            {
+                BuildElementChildren(root, node, pending, focusManager, cx, cy, childClip);
+            }
+            finally
+            {
+                // Something is left only when the walk threw: drop it rather than hold its nodes.
+                if (pending.Count > start) pending.RemoveRange(start, pending.Count - start);
+            }
+        }
         return node;
     }
 
@@ -95,6 +116,9 @@ public static class AccessibilityTreeBuilder
             isPassword: element is TextInputElement { Masked: true },
             isSelected: ResolveIsSelected(element));
         node.NativeContent = element.NativeAccessibleContent;
+        // What ChildScroll subtracts from everything under it.
+        if (element is ScrollViewElement sv)
+            node.ScrollOffset = new Point(sv.ScrollOffsetX, sv.ScrollOffsetY);
         if (element.AccessibleTextSource is { } text)
         {
             node.TextSource = text;
@@ -103,18 +127,35 @@ public static class AccessibilityTreeBuilder
         return node;
     }
 
-    private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager,
+    /// <summary>Builds <paramref name="node"/>'s children from <paramref name="element"/>'s, on top
+    /// of <paramref name="pending"/>, and gives them to the node.</summary>
+    private static void BuildElementChildren(Element element, AccessibilityNode node, List<AccessibilityNode> pending,
+        FocusManager? focusManager, float scrollX, float scrollY, Rect clip)
+    {
+        int start = pending.Count;
+        BuildChildren(element, pending, focusManager, scrollX, scrollY, clip);
+        int count = pending.Count - start;
+        if (count == 0) return;
+        var children = new AccessibilityNode[count];
+        pending.CopyTo(start, children, 0, count);
+        pending.RemoveRange(start, count);
+        node.SetChildren(children);
+    }
+
+    private static void BuildChildren(Element element, List<AccessibilityNode> pending, FocusManager? focusManager,
         float scrollX, float scrollY, Rect clip)
     {
-        foreach (var child in element.Children)
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
+            var child = children[i];
             // A sticky child is moved by its shift, subtree and all — to the builder, a negative scroll.
             var stick = child.PositionRead.Type == Layout.PositionType.Sticky ? child.StickyShift : default;
-            BuildChild(child, parent, focusManager, scrollX - stick.X, scrollY - stick.Y, clip);
+            BuildChild(child, pending, focusManager, scrollX - stick.X, scrollY - stick.Y, clip);
         }
     }
 
-    private static void BuildChild(Element child, AccessibilityNode parent, FocusManager? focusManager,
+    private static void BuildChild(Element child, List<AccessibilityNode> pending, FocusManager? focusManager,
         float scrollX, float scrollY, Rect clip)
     {
         // The child's own box sits in the parent's scroll space; its own
@@ -125,19 +166,19 @@ public static class AccessibilityTreeBuilder
         {
             var childNode = CreateNode(child, focusManager, scrollX, scrollY);
             childNode.IsOffscreen = !RectsIntersect(clip, childNode.BoundingRect);
-            parent.AddChild(childNode);
+            pending.Add(childNode);
             // A virtualized list only materializes on-screen rows as elements;
             // expose every item to assistive tech instead. Otherwise, unless a
             // text-only button folded its text into its own name (which would
             // double-announce), walk the real children.
             if (!TryBuildContent(child, childNode, cx, cy, childClip)
                 && !TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
-                BuildChildren(child, childNode, focusManager, cx, cy, childClip);
+                BuildElementChildren(child, childNode, pending, focusManager, cx, cy, childClip);
         }
         else
         {
-            // Flatten: promote this element's children directly into parent
-            BuildChildren(child, parent, focusManager, cx, cy, childClip);
+            // Flatten: promote this element's children directly into the parent's
+            BuildChildren(child, pending, focusManager, cx, cy, childClip);
         }
     }
 
@@ -151,36 +192,47 @@ public static class AccessibilityTreeBuilder
         if (element is not IAccessibleContentSource source) return false;
         var content = element.Layout.AbsoluteContentBox;
         float scale = source.AccessibleContentScale > 0 ? source.AccessibleContentScale : 1f;
-        foreach (var root in source.AccessibleContent)
-            AddContent(element, root, node, content.X - scrollX, content.Y - scrollY, scale, clip);
+        var roots = source.AccessibleContent;
+        if (roots.Count > 0)
+            node.SetChildren(BuildContent(AccessibleOwnerSlots.SlotOf(element.Id), roots,
+                content.X - scrollX, content.Y - scrollY, scale, clip));
         return true;
     }
 
-    private static void AddContent(Element owner, AccessibleContentNode data, AccessibilityNode parent,
+    /// <summary>One node per item of <paramref name="data"/>, each with its own under it. The
+    /// owner's slot comes in looked up: it is the same for every node.</summary>
+    private static AccessibilityNode[] BuildContent(uint ownerSlot, IReadOnlyList<AccessibleContentNode> data,
         float originX, float originY, float scale, Rect clip)
     {
-        var b = data.Bounds;
-        var rect = new Rect(originX + b.X / scale, originY + b.Y / scale, b.Width / scale, b.Height / scale);
-        var node = new AccessibilityNode(
-            ContentNodeId.For(owner.Id, data.Key),
-            data.Role,
-            data.Name,
-            data.Description,
-            rect,
-            isFocusable: data.IsFocusable,
-            isFocused: data.IsFocused,
-            isEnabled: data.IsEnabled,
-            isToggled: data.IsToggled,
-            value: data.Value,
-            expanded: data.Expanded,
-            // Described content says checked for a radio or a tab; for those, that is selected.
-            isSelected: data.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab ? data.IsToggled : null)
+        var nodes = new AccessibilityNode[data.Count];
+        for (int i = 0; i < nodes.Length; i++)
         {
-            IsOffscreen = !RectsIntersect(clip, rect),
-        };
-        parent.AddChild(node);
-        foreach (var child in data.Children)
-            AddContent(owner, child, node, originX, originY, scale, clip);
+            var item = data[i];
+            var b = item.Bounds;
+            var rect = new Rect(originX + b.X / scale, originY + b.Y / scale, b.Width / scale, b.Height / scale);
+            var node = new AccessibilityNode(
+                ContentNodeId.ForSlot(ownerSlot, item.Key),
+                item.Role,
+                item.Name,
+                item.Description,
+                rect,
+                isFocusable: item.IsFocusable,
+                isFocused: item.IsFocused,
+                isEnabled: item.IsEnabled,
+                isToggled: item.IsToggled,
+                value: item.Value,
+                expanded: item.Expanded,
+                // Described content says checked for a radio or a tab; for those, that is selected.
+                isSelected: item.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab ? item.IsToggled : null)
+            {
+                IsOffscreen = !RectsIntersect(clip, rect),
+            };
+            var children = item.Children;
+            if (children.Count > 0)
+                node.SetChildren(BuildContent(ownerSlot, children, originX, originY, scale, clip));
+            nodes[i] = node;
+        }
+        return nodes;
     }
 
     /// <summary>
@@ -221,6 +273,9 @@ public static class AccessibilityTreeBuilder
 
         float itemHeight = source.ItemHeight;
         var content = list.Layout.AbsoluteContentBox;
+        // Every item's id packs the list's slot: look it up once, not under a lock per item.
+        uint slot = AccessibleOwnerSlots.SlotOf(list.Id);
+        var items = new AccessibilityNode[count];
         for (int i = 0; i < count; i++)
         {
             // A container with uneven items (a menu with separators in it) places them
@@ -228,8 +283,8 @@ public static class AccessibilityTreeBuilder
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             float top = content.Y + localTop;
             var rect = new Rect(content.X - scrollX, top - scrollY, content.Width, height);
-            listNode.AddChild(new AccessibilityNode(
-                VirtualItemId.For(list.Id, i),
+            items[i] = new AccessibilityNode(
+                VirtualItemId.ForSlot(slot, i),
                 AccessibilityRole.ListItem,
                 source.GetItemLabel(i),
                 description: null,
@@ -241,8 +296,9 @@ public static class AccessibilityTreeBuilder
                 value: null)
             {
                 IsOffscreen = !RectsIntersect(clip, rect),
-            });
+            };
         }
+        listNode.SetChildren(items);
     }
 
 
@@ -343,21 +399,26 @@ public static class AccessibilityTreeBuilder
     /// </summary>
     internal static string? GetContentText(Element element)
     {
-        var sb = new StringBuilder();
-        AppendContentText(element, sb);
-        return sb.Length == 0 ? null : sb.ToString();
+        // Mostly one text names the control: then its string is the name, and the tree, rebuilt
+        // on every change a reader can see, builds no string per button to say so.
+        string? first = null;
+        StringBuilder? joined = null;
+        AppendContentText(element, ref first, ref joined);
+        return joined?.ToString() ?? first;
     }
 
-    private static void AppendContentText(Element element, StringBuilder sb)
+    private static void AppendContentText(Element element, ref string? first, ref StringBuilder? joined)
     {
-        foreach (var child in element.Children)
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
+            var child = children[i];
             if (child is TextElement text && !string.IsNullOrEmpty(text.Content))
             {
-                if (sb.Length > 0) sb.Append(' ');
-                sb.Append(text.Content);
+                if (first is null) first = text.Content;
+                else (joined ??= new StringBuilder(first)).Append(' ').Append(text.Content);
             }
-            AppendContentText(child, sb);
+            AppendContentText(child, ref first, ref joined);
         }
     }
 
@@ -379,8 +440,10 @@ public static class AccessibilityTreeBuilder
 
     private static bool HasOnlyTextDescendants(Element element)
     {
-        foreach (var child in element.Children)
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
+            var child = children[i];
             if (IsSemantic(child) && ResolveRole(child) != AccessibilityRole.Label)
                 return false;
             if (!HasOnlyTextDescendants(child))

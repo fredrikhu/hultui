@@ -513,9 +513,12 @@ public class TextElement : Element
 
     // The widest word, not the widest character: measuring text at zero available
     // width wraps it one character per line, which under-reports the width below
-    // which the text really breaks.
+    // which the text really breaks. A label of one line that truncates has no such
+    // width: it shows less of its text, down to none of it, so it may shrink to nothing,
+    // as CSS lets an item with `overflow: hidden` — and a box holding it past it too.
+    // Held at its widest word, it drew the rest over whatever was beside it.
     internal override float MeasureMinContentWidth(IMeasureContext ctx) =>
-        string.IsNullOrEmpty(Content)
+        MaxLines == 1 || string.IsNullOrEmpty(Content)
             ? 0f
             : ctx.MinContentTextWidth(Content, ResolvedInherited, _spans);
 
@@ -534,14 +537,14 @@ public class TextElement : Element
         // plain label would simply never fire.
         bool hitTestable = _selectable || _links is { Count: > 0 };
 
-        if (string.IsNullOrEmpty(Content))
+        var contentBox = Layout.AbsoluteContentBox;
+        var style = ResolvedInherited;
+
+        if (string.IsNullOrEmpty(Content) || TooNarrowForItsEllipsis(ctx, contentBox.Width, style))
         {
             _paragraph = null;
             return;
         }
-
-        var contentBox = Layout.AbsoluteContentBox;
-        var style = ResolvedInherited;
 
         if (hitTestable)
         {
@@ -568,10 +571,26 @@ public class TextElement : Element
     {
         var box = Layout.AbsoluteBorderBox;
         if (string.IsNullOrEmpty(Content)) return box;
+        if (TooNarrowForItsEllipsis(ctx, Layout.AbsoluteContentBox.Width, ResolvedInherited)) return box;
         if (_selectable && HasSelection) return null;
         return ctx.TextPaintBounds(Content, Layout.AbsoluteContentBox, ResolvedInherited, Overflow, MaxLines, _spans)
             is Rect ink ? box.Union(ink) : null;
     }
+
+    /// <summary>
+    /// Whether this is a label of one line ending in an ellipsis, truncated in a box narrower
+    /// than the ellipsis itself. It draws nothing then: the text shows as much of itself as
+    /// fits, and here not even the ellipsis does — drawn, it would lie over whatever is beside
+    /// the box. A row with no room left for a truncating label gives it none (its automatic
+    /// minimum is 0). Text that fits is drawn however narrow: a count of "7" is narrower than
+    /// an ellipsis. An ellipsis is narrower than twice the font size, so only boxes narrower
+    /// than that measure anything (one line each way, kept by the text pipeline).
+    /// </summary>
+    private bool TooNarrowForItsEllipsis(IRenderContext ctx, float width, ResolvedInheritedStyle style) =>
+        MaxLines == 1 && Overflow == TextOverflow.Ellipsis && width < 2f * style.FontSize
+        && width < ctx.MeasureText(Ellipsis, style).Width && width < ctx.MeasureText(Content, style).Width;
+
+    private const string Ellipsis = "…";
 
     // When the selection continues past a line (onto a wrapped or newline-separated
     // one), its box runs a little past the last glyph so the spanned break reads as

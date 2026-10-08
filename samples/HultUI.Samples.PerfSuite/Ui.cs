@@ -1,7 +1,11 @@
+using System.Buffers;
+using System.Text;
+using System.Text.Json;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
 namespace PerfSuite;
@@ -89,6 +93,102 @@ static class Ui
         for (int i = 0; i < words; i++)
             parts[i] = i % 3 == 2 ? IpaWords[rng.Next(IpaWords.Length)] : Nouns[rng.Next(Nouns.Length)];
         return string.Join(' ', parts);
+    }
+
+    private static readonly string[] States = ["open", "merged", "closed"];
+
+    /// <summary>
+    /// An API response as Meridian's response viewer shows it: a page of <c>items</c> objects
+    /// (ids, strings, a nested author, short arrays, booleans, nulls), pretty-printed by
+    /// <see cref="Utf8JsonWriter"/> as Meridian's Prettify does — two-space indent, '\n' line
+    /// ends, about 19 characters a line. About <paramref name="lines"/> lines long; at 24 lines
+    /// an item.
+    /// </summary>
+    public static string JsonResponse(Random rng, int lines)
+    {
+        int items = Math.Max(1, lines / 24);
+        var buffer = new ArrayBufferWriter<byte>(items * 600);
+        using (var w = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true, NewLine = "\n" }))
+        {
+            w.WriteStartObject();
+            w.WriteNumber("page", 1);
+            w.WriteNumber("per_page", items);
+            w.WriteNumber("total", items * 7 + rng.Next(1_000));
+            w.WriteStartArray("items");
+            for (int i = 0; i < items; i++)
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", 100_000 + i);
+                w.WriteString("sha", rng.Next(0x1000000, int.MaxValue).ToString("x7")[..7]);
+                w.WriteString("title", Label(rng));
+                w.WriteString("state", States[rng.Next(States.Length)]);
+                w.WriteBoolean("draft", rng.Next(4) == 0);
+                w.WriteNumber("score", Math.Round(rng.NextDouble() * 100, 2));
+                w.WriteStartObject("author");
+                w.WriteNumber("id", rng.Next(1, 500));
+                w.WriteString("login", Nouns[rng.Next(Nouns.Length)] + rng.Next(100));
+                if (rng.Next(3) == 0) w.WriteNull("avatar_url");
+                else w.WriteString("avatar_url", $"https://cdn.example/a/{rng.Next(10_000)}.png");
+                w.WriteEndObject();
+                w.WriteStartArray("labels");
+                for (int k = rng.Next(1, 4); k > 0; k--) w.WriteStringValue(Colours[rng.Next(Colours.Length)]);
+                w.WriteEndArray();
+                w.WriteStartArray("sizes");
+                for (int k = 0; k < 4; k++) w.WriteNumberValue(rng.Next(1, 5_000));
+                w.WriteEndArray();
+                w.WriteString("created_at", new DateTime(2026, 1, 1).AddMinutes(rng.Next(400_000)).ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    // VS Code Dark+, the theme HultUI.Syntax colours with by default.
+    public static readonly Color JsonKey = Color.FromHex("#4EC9B0");
+    public static readonly Color JsonString = Color.FromHex("#CE9178");
+    public static readonly Color JsonNumber = Color.FromHex("#B5CEA8");
+    public static readonly Color JsonLiteral = Color.FromHex("#569CD6");
+
+    /// <summary>
+    /// The colour spans HultUI.Syntax gives <see cref="JsonResponse"/>'s text, flattened to
+    /// whole-text offsets as Meridian flattens them: a key with its quotes, a string value with
+    /// its quotes, a number, a <c>true</c>/<c>false</c>/<c>null</c>. Punctuation keeps the
+    /// editor colour, which Dark+ gives no span. Checked against
+    /// <c>SyntaxHighlighter.TokenizeLines("response.json", …)</c> on a 19,013-line response:
+    /// the same 22,968 spans, start, length and colour. Written out here so the suite needs no
+    /// TextMate grammar, and so setup does not spend a third of a second tokenizing.
+    /// </summary>
+    public static TextSpan[] JsonSpans(string text)
+    {
+        var spans = new List<TextSpan>(text.Length / 12);
+        int i = 0;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            int end = i + 1;
+            if (c == '"')
+            {
+                while (text[end] != '"') end += text[end] == '\\' ? 2 : 1;
+                end++;
+                int after = end;
+                while (after < text.Length && text[after] == ' ') after++;
+                spans.Add(new TextSpan(i, end - i, after < text.Length && text[after] == ':' ? JsonKey : JsonString));
+            }
+            else if (c == '-' || char.IsAsciiDigit(c))
+            {
+                while (end < text.Length && (char.IsAsciiDigit(text[end]) || text[end] is '.' or 'e' or 'E' or '+' or '-')) end++;
+                spans.Add(new TextSpan(i, end - i, JsonNumber));
+            }
+            else if (char.IsAsciiLetter(c))
+            {
+                while (end < text.Length && char.IsAsciiLetter(text[end])) end++;
+                spans.Add(new TextSpan(i, end - i, JsonLiteral));
+            }
+            i = end;
+        }
+        return spans.ToArray();
     }
 
     public static readonly Color Muted = Color.FromHex("#94A3B8");

@@ -279,6 +279,37 @@ The diagnosis, when a label wraps that should not: dump the ancestor chain with 
 and `FlexShrink` per level — a wrapped label's box is about as wide as the wrapped text,
 not the intrinsic single line.
 
+**A one-line label that truncates starts from the room it is offered.** A label with
+`MaxLines(1)` (clipped, or with `TextOverflow.Ellipsis`), sized from its text and placed
+directly in a row, has a flex base size of its untruncated width capped at the row's
+width — CSS's max-content width, clamped — and then grows and shrinks like any other item.
+Its untruncated width is measured once and kept until its text or style changes, so a
+resize truncates it once a step, at the width it ends up with. Two consequences:
+
+- The base is the room itself, not the truncated text, which ends short of the room by
+  up to one character. A row of truncating labels shares its shrink by those bases.
+- In a row with no room at all, the label's base is 0 (plus its padding): it is not
+  measured as an ellipsis that is wider than the row.
+
+A label inside a wrapper box is measured truncated at the room the wrapper offers it, as
+any content is; only the label directly in the row starts from its own width.
+
+**And it can shrink to nothing.** A one-line label that truncates has no width below which
+its text breaks — it shows less of it — so its automatic minimum size is 0 (plus its
+padding), as CSS gives an item with `overflow: hidden`. When a row must shrink it, it
+truncates further instead of stopping at its widest word and drawing the rest over its
+neighbours, and a box holding it can shrink past it too: unlike CSS, a wrapper needs no
+`MinWidth(0)` for that. A label narrower than its ellipsis draws nothing. To keep a width:
+
+```csharp
+Text.New(name).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
+    .MinWidth(Dimension.Px(40));    // truncates, but no narrower than 40px
+Text.New("Send").MaxLines(1).FlexShrink(0);   // never truncated by the row
+```
+
+A label that wraps (no `MaxLines`, or more than one) keeps its widest word as its floor, and
+down a column a one-line label keeps its line's height.
+
 The related trap in the other direction is in `TODO.md`'s durable notes: **`FlexGrow(1)`
 alone does not mean "take the leftover space"**, because the default `auto` basis sizes
 the item to its own content first. `FlexBasis(0)` is what says "start from nothing".

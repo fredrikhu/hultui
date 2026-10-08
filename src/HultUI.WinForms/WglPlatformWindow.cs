@@ -32,7 +32,10 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
     private int _pixelHeight;
     private bool _disposed;
 
-    internal WglPlatformWindow(HultUIControl control, string title, WindowStyle style)
+    // textServices: the platform's text services, which every control shares and the platform
+    // disposes; asked for inside the surface's timing, since the first control's call builds them.
+    internal WglPlatformWindow(HultUIControl control, string title, WindowStyle style,
+        Func<SkiaTextServices> textServices)
     {
         _control = control;
         Title = title;
@@ -54,10 +57,10 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
         VSyncDisabled = Wgl.DisableVSync();
         MsContext = clock.Elapsed.TotalMilliseconds;
 
-        // Adopts the preloaded text pipeline when there is one; null builds a fresh one,
-        // which is what happens without a preload.
+        // The text pipeline every control shares: the preloaded one when there was a preload,
+        // built here by the first control otherwise.
         clock.Restart();
-        _surface = new SkiaGLRenderSurface(Wgl.GetProcAddress, GraphicsPreload.TakeText());
+        _surface = new SkiaGLRenderSurface(Wgl.GetProcAddress, textServices());
         MsSurface = clock.Elapsed.TotalMilliseconds;
         _surface.Resize(_pixelWidth, _pixelHeight, DisplayScale);
 
@@ -70,8 +73,8 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
     /// first control of a process that did not preload.</summary>
     internal double MsContext { get; }
 
-    /// <summary>Milliseconds spent building the Skia surface, including its text pipeline
-    /// when no preloaded one was available to adopt.</summary>
+    /// <summary>Milliseconds spent building the Skia surface, including the shared text
+    /// pipeline when this is the first control and no preloaded one was available.</summary>
     internal double MsSurface { get; }
 
     /// <summary>False when the driver had no <c>WGL_EXT_swap_control</c>; every swap

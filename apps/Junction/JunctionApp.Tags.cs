@@ -17,9 +17,21 @@ public partial class JunctionApp
     private const float ColTagCreated = 118f;
     private const float ColTagKind = 110f;
     private const float ColTagActions = 210f;
+    // The compact table's, on the branch table's breakpoints (see CompactTableContentWidth):
+    // the date alone, KIND as narrow as "lightweight", and Checkout an icon beside push and
+    // delete. 438px of fixed columns become 260; below the narrow breakpoint COMMIT goes too.
+    private const float ColTagKindCompact = 76f;
+    private const float ColTagActionsCompact = 3 * 30f + 2 * 5f;
     // Shared by the header and every leaf row; see BranchColumns.
-    private static readonly string TagColumns = FormattableString.Invariant(
+    private static readonly string TagColumnsFull = FormattableString.Invariant(
         $"34fr 40fr {ColTagCreated}px {ColTagKind}px {ColTagActions}px");
+    private static readonly string TagColumnsCompact = FormattableString.Invariant(
+        $"34fr 40fr {ColUpdatedCompact}px {ColTagKindCompact}px {ColTagActionsCompact}px");
+    private static readonly string TagColumnsNarrow = FormattableString.Invariant(
+        $"1fr 0px {ColUpdatedCompact}px {ColTagKindCompact}px {ColTagActionsCompact}px");
+
+    private string TagColumns =>
+        _narrowTables ? TagColumnsNarrow : _compactTables ? TagColumnsCompact : TagColumnsFull;
 
     private Element BuildTagsView()
     {
@@ -147,7 +159,8 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
         row.AddChild(HeaderCell("TAG", 0, JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("COMMIT", 1, JustifyContent.FlexStart));
+        if (!_narrowTables)
+            row.AddChild(HeaderCell("COMMIT", 1, JustifyContent.FlexStart));
         row.AddChild(HeaderCell("CREATED", 2, JustifyContent.FlexStart));
         row.AddChild(HeaderCell("KIND", 3, JustifyContent.Center));
         row.AddChild(HeaderCell("ACTIONS", 4, JustifyContent.FlexEnd));
@@ -223,7 +236,10 @@ public partial class JunctionApp
 
         // Tag cell: chip + name, with the annotation message underneath when there is one.
         // The tree's indent lives inside this cell so the columns beside it stay aligned.
-        var tagCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0);
+        // It ends 8px short of the next column, as COMMIT does before CREATED, so a truncated
+        // name's ellipsis does not run into the hash (or, without COMMIT, the date).
+        var tagCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0)
+            .Padding(new Thickness(0, 8, 0, 0));
         if (depth > 0)
             tagCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         tagCell.AddChild(Ui.Chip(Icons.Tag, "TAG",
@@ -242,17 +258,24 @@ public partial class JunctionApp
         tagCell.AddChild(titleCol);
         row.AddChild(tagCell);
 
-        // The commit it points at: short hash then subject.
-        var commitCell = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .GridColumn(1).Padding(new Thickness(0, 8, 0, 0));
-        commitCell.AddChild(Ui.Mono(ShortHash(t.Hash), 11.5f, Nocturne.On(0.45)).FlexShrink(0));
-        commitCell.AddChild(Text.New(t.Subject.Length > 0 ? t.Subject : "—").FontSize(12.5f)
-            .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        row.AddChild(commitCell);
+        if (_narrowTables)
+        {
+            // No COMMIT column: the commit is the tag cell's tooltip (and stays in the row's
+            // accessible label).
+            tagCell.Tooltip($"{ShortHash(t.Hash)} {(t.Subject.Length > 0 ? t.Subject : "—")}");
+        }
+        else
+        {
+            // The commit it points at: short hash then subject.
+            var commitCell = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
+                .GridColumn(1).Padding(new Thickness(0, 8, 0, 0));
+            commitCell.AddChild(Ui.Mono(ShortHash(t.Hash), 11.5f, Nocturne.On(0.45)).FlexShrink(0));
+            commitCell.AddChild(Text.New(t.Subject.Length > 0 ? t.Subject : "—").FontSize(12.5f)
+                .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+            row.AddChild(commitCell);
+        }
 
-        row.AddChild(Box.New().GridColumn(2)
-            .Children(Text.New(t.Date == default ? "" : t.Date.ToString("g"))
-                .FontSize(12f).TextColor(Nocturne.On(0.55))));
+        row.AddChild(DateCell(t.Date, 2));
 
         var kind = Flex.Row(gap: 0).GridColumn(3)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
@@ -272,7 +295,7 @@ public partial class JunctionApp
     {
         var box = Flex.Row(gap: 5).GridColumn(4)
             .JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
-        box.AddChild(Ui.SecondaryButton("Checkout", Icons.BendDownRight, () => CheckoutTag(t), 11.5f));
+        box.AddChild(CheckoutButton(() => CheckoutTag(t), "tags.checkout"));
         box.AddChild(SmallIconButton(Icons.ArrowUp, () => PushTag(t), "Push tag (p)"));
         box.AddChild(SmallIconButton(Icons.Trash, () => DeleteTagAction(t), "Delete"));
         return box;

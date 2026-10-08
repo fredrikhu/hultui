@@ -15,6 +15,7 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface
 {
     private readonly SkiaRenderContext _renderContext = new();
     private readonly SkiaTextServices _text;
+    private readonly bool _ownsText;
 
     private SKSurface? _surface;
     private int _width;
@@ -30,8 +31,12 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface
     /// <summary>Framebuffer height in physical pixels.</summary>
     public int PixelHeight => _height;
 
+    /// <param name="text">Text services to use instead of building its own: one several
+    /// surfaces share. The caller keeps it and disposes it; the surface does not. Null
+    /// builds a fresh one, which the surface disposes with itself.</param>
     public SkiaRasterRenderSurface(SkiaTextServices? text = null)
     {
+        _ownsText = text is null;
         _text = text ?? new SkiaTextServices();
         _renderContext.SetPipeline(_text.Pipeline);
     }
@@ -122,5 +127,6 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface
         _renderContext.Dispose();
         _surface?.Dispose();
         _surface = null;
+        if (_ownsText) _text.Dispose();
     }
 }

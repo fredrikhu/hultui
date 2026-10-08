@@ -95,6 +95,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     internal AccessibilityNode? RootNode => Volatile.Read(ref _rootNode);
 
+    /// <summary>For tests: told of each UIA event as the bridge raises it.</summary>
+    internal Action<UiaRaised>? Raised;
+
+    /// <summary>Every wrapper the bridge keeps, for tests of its upkeep.</summary>
+    internal IEnumerable<UiaFragment> Wrappers => _wrappers.Values;
+
     internal ElementId? FocusedNodeId
     {
         get
@@ -381,15 +387,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         // against it, and it must reflect deep changes even when the root node's
         // own properties didn't change.
         Volatile.Write(ref _rootNode, root);
-
-        // Index the new tree by id. Parent wrappers must be refreshed from *this*
-        // (authoritative, current) snapshot: RemovedNode.Parent references the
-        // previous tree, so refreshing a parent from it would leave the cached
-        // wrapper pointing at stale children — including just-removed ones whose
-        // wrappers we drop below. Navigate would then hand UIA a child ElementId
-        // with no wrapper (NativeFragment → Zero) and the whole subtree vanishes.
-        var currentById = new Dictionary<ElementId, AccessibilityNode>();
-        IndexTree(root, currentById);
+        int generation = ++_generation;
 
         // 1) Materialise/refresh wrappers for added nodes (no parent refresh yet).
         foreach (var added in diff.Added)
@@ -399,16 +397,23 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             if (_wrappers.TryGetValue(added.Node.ElementId, out var existing))
                 existing.UpdateFrom(added.Node);
             else
-                _wrappers[added.Node.ElementId] = new UiaFragment(this, added.Node);
+                _wrappers[added.Node.ElementId] = existing = new UiaFragment(this, added.Node);
+            existing.Generation = generation;
         }
 
-        // 2) Drop wrappers (and cached native objects) for removed nodes.
+        // 2) Drop wrappers (and cached native objects) for removed nodes — except an element
+        //    this same diff added again: it moved to another parent (a box that gained a name
+        //    takes its children), and step 1 already pointed its wrapper at its new place.
+        //    Dropping it left the element with no wrapper, so navigation to it found nothing.
         foreach (var removed in diff.Removed)
         {
-            _wrappers.TryRemove(removed.Node.ElementId, out _);
+            var id = removed.Node.ElementId;
+            if (_wrappers.TryGetValue(id, out var wrapper) && wrapper.Generation == generation)
+                continue;
+            _wrappers.TryRemove(id, out _);
             // Drop the bridge's reference to the element's cached native object;
             // it frees once any client references are also released.
-            if (_nativeByElement.TryRemove(removed.Node.ElementId, out var native))
+            if (_nativeByElement.TryRemove(id, out var native))
                 Marshal.Release(native);
         }
 
@@ -417,9 +422,19 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
                 wrapper.UpdateFrom(change.Node);
 
-        // 4) Now that every wrapper exists (adds) or is gone (removes), refresh
-        //    each affected parent from the new tree so its child list is current,
-        //    and raise the matching UIA events — once per topmost changed parent.
+        // 4) Point every other wrapper at its node in this tree too. The diff names
+        //    only what changed, but every rebuild is a new tree, and a node reaches
+        //    its whole tree through Parent and Children: a wrapper left on an old
+        //    node kept that tree alive (one tree per diff, ~170 KB at 1,001 nodes)
+        //    and navigated its siblings in it. One lookup per node and nothing
+        //    allocated; each swap is one reference write, so a UIA thread reading a
+        //    wrapper meanwhile walks its old tree or its new one, either consistent.
+        if (Rebase(root, generation) != _wrappers.Count)
+            DropStale(generation);
+
+        // 5) Now that every wrapper exists (adds) or is gone (removes) and points
+        //    into the new tree, refresh each affected parent's snapshot and raise
+        //    the matching UIA events — once per topmost changed parent.
         //    A parent that is itself part of the diff needs neither: its wrapper
         //    was already created from (or dropped with) the current snapshot,
         //    and UIA structure events are re-query hints on a parent, so the
@@ -429,51 +444,107 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         //    10k-row create, which profiled as half the operation.
         foreach (var parentId in diff.CoalescedAddedParents())
         {
-            RefreshParent(parentId, currentById);
+            RefreshParent(parentId);
             RaiseStructureChanged(parentId, UiaInterop.StructureChangeType_ChildrenBulkAdded);
         }
         foreach (var parentId in diff.CoalescedRemovedParents())
         {
-            RefreshParent(parentId, currentById);
+            RefreshParent(parentId);
             RaiseStructureChanged(parentId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
         }
         foreach (var reorderedParent in diff.Reordered)
         {
-            RefreshParent(reorderedParent.ElementId, currentById);
+            RefreshParent(reorderedParent.ElementId);
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
         }
         foreach (var change in diff.PropertyChanged)
-            if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
+        {
+            if (!_wrappers.TryGetValue(change.Node.ElementId, out var wrapper)) continue;
+            if (change.PropertyName == AccessibilityProperties.ScrollPosition)
+                RaiseScrolled(wrapper, change.Previous, change.Node);
+            else
                 RaisePropertyChanged(wrapper, change.PropertyName);
+        }
     }
 
-    private static void IndexTree(AccessibilityNode node, Dictionary<ElementId, AccessibilityNode> map)
+    // The apply pass, counted, so a wrapper the rebase did not reach, and one this pass added,
+    // can be told apart. UI thread only.
+    private int _generation;
+
+    /// <summary>
+    /// Points the wrapper of every node in <paramref name="node"/>'s subtree at that node and
+    /// returns how many it found. Index loops: a foreach over Children would box an enumerator
+    /// per node.
+    /// </summary>
+    private int Rebase(AccessibilityNode node, int generation)
     {
-        map[node.ElementId] = node;
-        foreach (var child in node.Children)
-            IndexTree(child, map);
+        int found = 0;
+        if (_wrappers.TryGetValue(node.ElementId, out var wrapper))
+        {
+            wrapper.Rebase(node, generation);
+            found = 1;
+        }
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            found += Rebase(children[i], generation);
+        return found;
     }
 
     /// <summary>
-    /// Point a parent's cached wrapper at its node in the current tree so its
-    /// child list is up to date. Looked up in <paramref name="currentById"/> (the
-    /// new tree) — never a diff-supplied parent, which may be a previous-tree
-    /// snapshot. Skips parents no longer in the tree (their wrapper is gone too).
+    /// Drops the wrappers (and cached native objects) of elements the new tree does not have
+    /// although no diff removed them. A diff from no tree — a client attached again, or the
+    /// window got a new root — adds everything and removes nothing, so the old tree's wrappers
+    /// would otherwise stay, each holding its tree, for the bridge's life.
     /// </summary>
-    private void RefreshParent(ElementId? parentId, Dictionary<ElementId, AccessibilityNode> currentById)
+    private void DropStale(int generation)
     {
-        if (parentId is null) return;
-        if (currentById.TryGetValue(parentId.Value, out var node)
-            && _wrappers.TryGetValue(parentId.Value, out var wrapper))
-            wrapper.UpdateFrom(node);
+        foreach (var (id, wrapper) in _wrappers)
+        {
+            if (wrapper.Generation == generation) continue;
+            _wrappers.TryRemove(id, out _);
+            if (_nativeByElement.TryRemove(id, out var native))
+                Marshal.Release(native);
+        }
     }
 
-    public void NotifyFocusChanged(AccessibilityNode? focused)
+    /// <summary>
+    /// Re-snapshots a parent whose children changed. Its wrapper already points at its node in
+    /// the current tree (step 4), never at a diff-supplied parent, which may be a previous-tree
+    /// node; a parent no longer in the tree has no wrapper.
+    /// </summary>
+    private void RefreshParent(ElementId? parentId)
     {
+        if (parentId is { } id && _wrappers.TryGetValue(id, out var wrapper))
+            wrapper.UpdateFrom(wrapper.Node);
+    }
+
+    /// <summary>Focus moved; the element that had it is the one this bridge was last told of.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused) => MoveFocus(focused, FocusedNodeId);
+
+    /// <summary>Focus moved, and the window marked it on its tree: <paramref name="previous"/>
+    /// had it.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
+        => MoveFocus(focused, previous?.ElementId);
+
+    private void MoveFocus(AccessibilityNode? focused, ElementId? previous)
+    {
+        // What the two wrappers answer for HasKeyboardFocus, as of now. A focus move rebuilds no
+        // tree, so they kept the state of the last rebuild, and the next rebuild's diff told the
+        // change late, as IsFocused property events, often frames after the focus event. Now the
+        // state changes here and the property events go with the focus event, before it, so a
+        // client that asks on the focus event reads the new state.
+        UiaFragment? lost = previous is { } p && p != focused?.ElementId
+            && _wrappers.TryGetValue(p, out var was) && was.SetFocused(false) ? was : null;
+        UiaFragment? gained = focused is not null
+            && _wrappers.TryGetValue(focused.ElementId, out var now) && now.SetFocused(true) ? now : null;
         Volatile.Write(ref _focusedIdRaw, focused is null ? 0L : unchecked((long)focused.ElementId.Value));
+        if (lost is not null) RaisePropertyChanged(lost, AccessibilityProperties.IsFocused);
+        if (gained is not null) RaisePropertyChanged(gained, AccessibilityProperties.IsFocused);
+
         if (!RaiseEvents || focused is null) return;
         IntPtr prov = NativeFragmentSimple(focused.ElementId);
         if (prov == IntPtr.Zero) return;
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_AutomationFocusChangedEventId, focused.ElementId));
         try { UiaInterop.UiaRaiseAutomationEvent(prov, UiaInterop.UIA_AutomationFocusChangedEventId); }
         finally { Marshal.Release(prov); }
     }
@@ -489,6 +560,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         IntPtr provider = source is not null ? NativeFragmentSimple(source.ElementId) : IntPtr.Zero;
         if (provider == IntPtr.Zero) provider = NativeRootSimple();
         if (provider == IntPtr.Zero) return;
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Notification, 0, source?.ElementId));
         try
         {
             UiaInterop.RaiseNotification(provider, UiaInterop.NotificationKind_Other,
@@ -509,6 +581,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (!RaiseEvents) return;
         IntPtr prov = parentId is null ? NativeRootSimple() : NativeFragmentSimple(parentId.Value);
         if (prov == IntPtr.Zero) return;
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Structure, changeType, parentId));
         try { UiaInterop.UiaRaiseStructureChangedEvent(prov, changeType, IntPtr.Zero, 0); }
         finally { Marshal.Release(prov); }
     }
@@ -521,6 +594,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             // Events, not property changes: a reader re-reads the text, or reads at the caret.
             IntPtr source = NativeFragmentSimple(wrapper.ElementId);
             if (source == IntPtr.Zero) return;
+            Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, propertyName == AccessibilityProperties.Text
+                ? UiaInterop.UIA_Text_TextChangedEventId : UiaInterop.UIA_Text_TextSelectionChangedEventId, wrapper.ElementId));
             try
             {
                 UiaInterop.UiaRaiseAutomationEvent(source, propertyName == AccessibilityProperties.Text
@@ -554,9 +629,38 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (propertyId == 0) return;
 
         wrapper.GetPropertyValue(propertyId, out var newValue);
+        RaiseProperty(wrapper, propertyId, newValue);
+    }
+
+    /// <summary>
+    /// A scroll view scrolled: what Chromium raises for a scroller (ui/accessibility/platform/
+    /// browser_accessibility_manager_win.cc, SCROLL_HORIZONTAL/VERTICAL_POSITION_CHANGED), a
+    /// HorizontalScrollPercent or VerticalScrollPercent property change on it, for the axis that
+    /// moved, with the percent now. Nothing under it is told it moved: its bounds within the
+    /// view did not change, and a client that asks gets them on screen.
+    /// </summary>
+    private void RaiseScrolled(UiaFragment wrapper, AccessibilityNode? previous, AccessibilityNode node)
+    {
+        if (!RaiseEvents) return;
+        var before = previous?.ScrollOffset ?? default;
+        var after = node.ScrollOffset;
+        bool known = _host.TryGetScrollInfo(wrapper.ElementId, out var info);
+        if (before.X != after.X)
+            RaiseProperty(wrapper, UiaInterop.UIA_ScrollHorizontalScrollPercentPropertyId,
+                known ? UiaVariant.FromDouble(info.HorizontalPercent) : UiaVariant.Empty);
+        if (before.Y != after.Y)
+            RaiseProperty(wrapper, UiaInterop.UIA_ScrollVerticalScrollPercentPropertyId,
+                known ? UiaVariant.FromDouble(info.VerticalPercent) : UiaVariant.Empty);
+    }
+
+    /// <summary>A property change with its new value, which this frees; the old one is left empty,
+    /// as UIA allows and Chromium does.</summary>
+    private void RaiseProperty(UiaFragment wrapper, int propertyId, UiaVariant newValue)
+    {
         var oldValue = UiaVariant.Empty;
         IntPtr prov = NativeFragmentSimple(wrapper.ElementId);
         if (prov == IntPtr.Zero) { newValue.Free(); return; }
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Property, propertyId, wrapper.ElementId));
         try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(prov, propertyId, oldValue, newValue); }
         finally { newValue.Free(); Marshal.Release(prov); }
     }
@@ -658,3 +762,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         }
     }
 }
+
+/// <summary>A UIA event the bridge raised, for tests (<see cref="WindowsAccessibilityBridge.Raised"/>):
+/// its kind, the event, property or structure-change id, and the element (null for the root).</summary>
+internal readonly record struct UiaRaised(UiaRaisedKind Kind, int Id, ElementId? Element);
+
+internal enum UiaRaisedKind { Event, Property, Structure, Notification }

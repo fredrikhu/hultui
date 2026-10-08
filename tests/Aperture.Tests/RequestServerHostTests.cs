@@ -43,7 +43,8 @@ public class RequestServerHostTests
     }
 
     private static void Host(FakeMediaLibrary library, IRequestServer? requests, Action<HeadlessSession, ApertureApp> body,
-        Func<HultUI.Media.IMediaBackend>? backends = null, Action<ApertureSettings>? setup = null)
+        Func<HultUI.Media.IMediaBackend>? backends = null, Action<ApertureSettings>? setup = null,
+        HttpMessageHandler? artwork = null)
     {
         using var session = HeadlessSession.Create(1440, 900);
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
@@ -53,7 +54,7 @@ public class RequestServerHostTests
             var settings = new ApertureSettings(new InMemoryCredentialStore(), settingsPath);
             setup?.Invoke(settings);
             app = new ApertureApp(session.Application, session.Window.Window, settings, library,
-                backends: backends, posterHttp: new HttpClient(new NoArtwork()), requests: requests);
+                backends: backends, posterHttp: new HttpClient(artwork ?? new NoArtwork()), requests: requests);
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
             body(session, app);
@@ -69,6 +70,28 @@ public class RequestServerHostTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+    }
+
+    /// <summary>No artwork either, but says what was asked for.</summary>
+    private sealed class RecordingArtwork : HttpMessageHandler
+    {
+        private readonly List<string> _asked = [];
+
+        public bool Asked(string text)
+        {
+            lock (_asked) return _asked.Any(a => a.Contains(text, StringComparison.Ordinal));
+        }
+
+        public string Log()
+        {
+            lock (_asked) return string.Join("\n", _asked);
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            lock (_asked) _asked.Add(request.RequestUri!.ToString());
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+        }
     }
 
     private static bool Shows(HeadlessSession session, string text) =>
@@ -218,6 +241,32 @@ public class RequestServerHostTests
             // Asked for already: the button is gone rather than offering a second request.
             Assert.Null(session.Window.FindByAutomationId("discover-request"));
         });
+    }
+
+    [Fact]
+    public void ATitlesHeroIsAskedForAtTheTmdbSizeItsDevicePixelsNeed()
+    {
+        var artwork = new RecordingArtwork();
+        Host(Library(), Requests(), (session, app) =>
+        {
+            // 700 wide, the hero is 636 x 396: narrower than 16:9, so its height decides the
+            // cover fit — 512 device pixels high, 911 wide — and TMDB's size for that is w1280,
+            // where the window's width alone asked for w780.
+            session.Window.SetClientSize(700, 900);
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            session.PumpUntil(() => artwork.Asked("/backdrop-603.jpg"), TimeSpan.FromSeconds(5));
+            Assert.True(artwork.Asked("/t/p/w1280/backdrop-603.jpg"), artwork.Log());
+
+            // 1,000 wide at 100 % the hero is 936 wide, 1,024 device pixels: w1280 still.
+            session.Window.SetClientSize(1000, 900);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            // At 150 % it covers 1,404: w1280 would be drawn at 0.9 source pixels per screen
+            // pixel, so it asks for w1920 — the most TMDB serves short of a 4K original.
+            session.Window.SetScale(1.5f);
+            session.PumpUntil(() => artwork.Asked("/t/p/w1920/backdrop-603.jpg"), TimeSpan.FromSeconds(5));
+            Assert.False(artwork.Asked("/t/p/w780/backdrop-603.jpg"), artwork.Log());
+            Assert.False(artwork.Asked("/t/p/original/"), artwork.Log());
+        }, artwork: artwork);
     }
 
     [Fact]

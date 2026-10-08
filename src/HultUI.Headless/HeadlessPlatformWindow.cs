@@ -22,8 +22,10 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     private float _scale;
     private bool _disposed;
 
+    // text: the services the surface draws and measures with — the platform's, which every
+    // window of the session shares and the platform disposes.
     public HeadlessPlatformWindow(string title, int width, int height, float scale, WindowStyle style,
-        HeadlessOptions? options = null)
+        SkiaTextServices text, HeadlessOptions? options = null)
     {
         if (scale <= 0f) throw new ArgumentOutOfRangeException(nameof(scale));
         Title = title;
@@ -32,7 +34,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         _layoutHeight = height;
         _scale = scale;
         PinnedText = options?.PinnedText == true;
-        _raster = PinnedText ? PinnedFonts.CreateSurface() : new SkiaRasterRenderSurface();
+        _raster = PinnedText ? PinnedFonts.CreateSurface(text) : new SkiaRasterRenderSurface(text);
 
         // Recording wraps the raster surface rather than replacing it, so the
         // frame still renders and pixel capture keeps working.

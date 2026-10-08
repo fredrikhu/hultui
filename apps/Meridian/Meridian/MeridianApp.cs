@@ -89,7 +89,37 @@ public partial class MeridianApp : Component, IDisposable
 
     // Response pane orientation: right 560dip by default, Ctrl+\ flips to
     // bottom 380dip, and below the breakpoint bottom is forced regardless.
-    private const float ForceBottomWindowWidth = 1100f;
+    //
+    // The breakpoint is the narrowest window that leaves the editor EditorMinWidth beside
+    // the pane: rail 48 + tree 264 + editor 448 + pane 560 = 1320 dip. 448 holds the six
+    // sub-tabs of a request with counts ("Params 4 · Headers 1 · Body · Auth · Assertions 1 ·
+    // Chain 3", 445 px with the strip's padding) without scrolling them, and leaves the URL
+    // box 227 px beside GET and 203 beside OPTIONS: the URL bar's floor is the method chip
+    // (46 px for GET, 70 for OPTIONS), Send with its Ctrl+Enter keycap (135) and 40 px of
+    // padding and gaps. It was 1100 until 2026-10-08, when the user approved the move: that
+    // left the editor 228 px, the URL bar's floor with almost no URL beside Send.
+    internal const float EditorMinWidth = 448f;
+    internal const float ForceBottomWindowWidth =
+        Azimuth.RailWidth + Azimuth.TreeWidth + EditorMinWidth + Azimuth.ResponseRight;
+
+    // At the bottom the pane is its designed 380 dip wherever the window leaves the editor
+    // above it EditorMinHeight; in a shorter window the pane gives way, down to its own floor,
+    // and the editor keeps its own. That is every window under 736 dip tall: since the
+    // breakpoint moved to 1320 those include a 1080p screen at 150 %, maximized (1280x672),
+    // where a fixed 380 left the editor 252 and its sub-editor 112, the Body box 92 px.
+    //
+    // The editor's floor is its chrome and five form rows: tabs 34 + URL bar 48 + sub-tabs
+    // 32 + footer 26, and the sub-editor's 8 px top padding + 5 rows of 32 with 2 px between
+    // them = 316 dip. The pane's: status line 32 + its tabs 30 + the body's padding 2 x 8 and
+    // six lines of the 12 px body (14 each) = 162 dip. Both add up to 478, which fits under
+    // the title bar of the smallest window Meridian allows (540 - 40 = 500): there both floors
+    // hold, with 22 dip to spare for the pane. (The two floors are flex minimums, so in a
+    // window shorter than that, which only a headless one can be, the pane would run past
+    // the bottom rather than take the editor's URL bar.)
+    internal const float EditorMinHeight = 34 + 48 + 32 + 26 + Azimuth.S2 + 5 * Azimuth.RowForm + 4 * 2;
+    internal const float BottomPaneMinHeight = 32 + 30 + 2 * Azimuth.S2 + 6 * 14;
+    internal const int MinWindowWidth = 760;
+    internal const int MinWindowHeight = 540;
     private bool _responseBottomChoice;
     private bool _forceResponseBottom;
     internal bool ResponseAtBottom => _responseBottomChoice || _forceResponseBottom;

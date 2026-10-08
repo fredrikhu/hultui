@@ -85,14 +85,12 @@ public sealed partial class ApertureApp
     /// </summary>
     private Element BuildHero(MediaItem item)
     {
-        float heroHeight = Math.Clamp(_window.LayoutHeight * 0.44f, 280f, 420f);
-
-        var hero = Box.New().Height(heroHeight).FlexShrink(0)
+        var hero = Box.New().Height(HeroHeight).FlexShrink(0)
             .AlignItems(AlignItems.Stretch)
             .Background(Halide.Raised);
 
-        var url = ImageUrlFor(item, ImageKind.Backdrop, (int)_window.LayoutWidth);
-        var (image, status) = _posters.Get(url);
+        var (image, status) = HeroArtwork(ImageUrlFor(item, ImageKind.Backdrop, null)?.ToString(),
+            ArtAspect(item, ImageKind.Backdrop), (width, height) => ImageUrlFor(item, ImageKind.Backdrop, width, height));
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);
@@ -408,8 +406,9 @@ public sealed partial class ApertureApp
         portrait.Box.OverflowY = Overflow.Hidden;
 
         var url = _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag,
-            maxWidth: (int)(PersonCardWidth * 2));
-        var (image, status) = _posters.Get(url);
+            maxWidth: ArtworkPixels(PersonCardWidth));
+        var (image, status) = _posters.Get(url, StandInPixels(PersonCardWidth) is { } old
+            ? _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag, maxWidth: old) : null);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);

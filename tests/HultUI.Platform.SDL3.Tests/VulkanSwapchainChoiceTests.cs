@@ -129,4 +129,25 @@ public class VulkanSwapchainChoiceTests
         Assert.False(CanKeepSwapchain(false, true, true, 0, 600, 2048, 1280));
         Assert.False(CanKeepSwapchain(false, true, true, 800, 0, 2048, 1280));
     }
+
+    [Fact]
+    public void AnScRgbMailboxSwapchainOnWindows_IsDestroyedBeforeItsReplacement()
+    {
+        // Handed over as oldSwapchain, the next present waited about 100 ms on every resize,
+        // and the compositor showed the old image scaled meanwhile.
+        Assert.True(DestroyBeforeReplacing(isWindows: true, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.Mailbox));
+    }
+
+    [Fact]
+    public void EveryOtherSwapchain_IsStillHandedOver()
+    {
+        // IMMEDIATE and FIFO never stalled, and destroying first made their resizes slower. The
+        // 8-bit swapchain never stalled either. Linux was never measured.
+        Assert.False(DestroyBeforeReplacing(isWindows: true, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.Immediate));
+        Assert.False(DestroyBeforeReplacing(isWindows: true, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.Fifo));
+        Assert.False(DestroyBeforeReplacing(isWindows: true, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.FifoRelaxed));
+        Assert.False(DestroyBeforeReplacing(isWindows: true, VkFormat.B8G8R8A8Unorm, VkPresentModeKHR.Mailbox));
+        Assert.False(DestroyBeforeReplacing(isWindows: true, VkFormat.R8G8B8A8Unorm, VkPresentModeKHR.Mailbox));
+        Assert.False(DestroyBeforeReplacing(isWindows: false, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.Mailbox));
+    }
 }

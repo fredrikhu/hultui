@@ -35,6 +35,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     private SDL_Window* _window;
 
+    // The preloaded text services, when this window was built without the platform's shared
+    // set and took them; disposed with the window. Null otherwise.
+    private SkiaTextServices? _ownedText;
+
     /// <summary>The native handle, for sibling platform services (file dialogs) that
     /// need to parent a dialog to this window.</summary>
     internal SDL_Window* NativeWindow => _window;
@@ -340,6 +344,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     }
 
     public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
+        : this(title, width, height, style, sharedText: null)
+    {
+    }
+
+    // sharedText: the platform's text services, which its windows share and it disposes. Null
+    // gives the window its own: the preloaded set if there is one, which the window then
+    // disposes with itself, or one its surface builds and disposes.
+    internal SDL3Window(string title, int width, int height, WindowStyle style, SkiaTextServices? sharedText)
     {
         Style = style;
         EventTranslator.OnInputEvent += evt => InputReceived?.Invoke(evt);
@@ -350,6 +362,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_DOUBLEBUFFER, 1);
+        // Skia wants a stencil (SkiaGLRenderSurface tells it 8 bits) and never a depth buffer.
+        // Left alone, SDL asks for 16 bits of depth, and NVIDIA hands back 24 packed with the
+        // stencil: about 3 bytes a pixel nobody reads, 22 MB for a window at 3818x2032. Depth
+        // is a minimum in WGL, GLX and EGL alike, so 0 only widens the formats a driver may
+        // pick and cannot fail where 16 succeeded; a driver without a stencil-only format gives
+        // depth 24 as before. The [HultUI] gfx: line reports what was granted.
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_DEPTH_SIZE, 0);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_STENCIL_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_RED_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, 8);
@@ -418,7 +437,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         // Taken once, so that a Vulkan attempt that fails does not lose it to the GL surface
         // built instead. Nothing in it touches the GPU.
-        var text = TakePreloadedText();
+        var text = sharedText;
+        if (text is null)
+            text = _ownedText = TakePreloadedText();
         try
         {
             SettleInitialSize(width, height);
@@ -460,6 +481,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _glContext = null;
             if (_window != null) SDL_DestroyWindow(_window);
             _window = null;
+            _ownedText?.Dispose();
+            _ownedText = null;
             throw;
         }
 
@@ -1356,9 +1379,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <summary>
     /// Describes the graphics configuration this window actually got (not what was
     /// requested). On GL: renderer/vendor/version strings, SDL video driver, achieved
-    /// swap interval, default-framebuffer MSAA samples, and the drawable geometry. On
-    /// Vulkan: the device, present mode, format and colour space, and the display's HDR
-    /// state. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
+    /// swap interval, default-framebuffer MSAA samples, depth and stencil bits, and the
+    /// drawable geometry. On Vulkan: the device, present mode, format and colour space, and
+    /// the display's HDR state. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
     /// </summary>
     public string? DescribeGraphics()
     {
@@ -1394,6 +1417,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (getIntegerv != null)
             getIntegerv(0x80A9, &samples); // GL_SAMPLES
 
+        // The default framebuffer's real depth and stencil. Depth is asked for at 0; a driver
+        // that has no stencil-only format still gives 24 here, and that costs memory per pixel.
+        int depthBits = 0, stencilBits = 0;
+        bool haveDepth = SDL_GL_GetAttribute(SDL_GLAttr.SDL_GL_DEPTH_SIZE, &depthBits);
+        bool haveStencil = SDL_GL_GetAttribute(SDL_GLAttr.SDL_GL_STENCIL_SIZE, &stencilBits);
+
         // The achieved interval, not the requested one — SDL_GL_SetSwapInterval(0)
         // can fail silently (Wayland/EGL), leaving the app vsync'd without knowing.
         int swapInterval = 0;
@@ -1409,6 +1438,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"video={driver} renderer=\"{renderer}\" vendor=\"{vendor}\" gl=\"{version}\""
             + $" swapInterval={(haveInterval ? swapInterval.ToString() : "?")} samples={samples}"
+            + $" depth={(haveDepth ? depthBits.ToString() : "?")} stencil={(haveStencil ? stencilBits.ToString() : "?")}"
             + $" drawable={PixelWidth}x{PixelHeight}px window={ww}x{wh}"
             + $" density={PixelDensity} scale={DisplayScale} refresh={RefreshRate}Hz"
             + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} sdrWhite={SdrWhiteLevelNits:0}nits");
@@ -1665,7 +1695,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     /// <summary>
     /// Starts loading the OpenGL driver on a worker thread and builds the (GL-free)
-    /// text pipeline the first window will adopt, so both overlap with whatever the
+    /// text pipeline the platform's windows will share, so both overlap with whatever the
     /// caller does next. No-op unless <c>HULTUI_GL_PRELOAD=1</c>; calling it twice is
     /// harmless. Must be called on the main thread — it initialises SDL's video
     /// subsystem first, which SDL requires there.
@@ -1701,17 +1731,17 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         });
 
         // Main-thread work that has no business waiting for a GPU: the font manager,
-        // the family lookup and the metrics path. The window will adopt this pipeline
-        // instead of building its own.
+        // the family lookup and the metrics path. The platform shares this pipeline between
+        // its windows instead of building one.
         var text = new SkiaTextServices();
         text.Warm();
         _preloadedText = text;
         StartupTrace.Mark("text pipeline warm");
     }
 
-    /// <summary>The preloaded text pipeline, handed to the first window that asks and
-    /// then dropped — later windows keep building their own, as they always have.</summary>
-    private static SkiaTextServices? TakePreloadedText()
+    /// <summary>The preloaded text pipeline, handed over once: to the platform, which shares
+    /// it between all its windows, or to a window built without the platform.</summary>
+    internal static SkiaTextServices? TakePreloadedText()
         => Interlocked.Exchange(ref _preloadedText, null);
 
     /// <summary>
@@ -1861,6 +1891,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         _vulkanSurface?.Dispose();
         _vulkanHost?.Dispose();
         _surface = null;
+        // After the surface that drew with it. Null when the platform's shared set was used.
+        _ownedText?.Dispose();
+        _ownedText = null;
         // Before the window goes: DisplayInformation hooks its message loop.
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)) _displayInformation?.Dispose();
         _displayInformation = null;

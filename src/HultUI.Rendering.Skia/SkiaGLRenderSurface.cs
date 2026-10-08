@@ -10,6 +10,7 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
     private readonly Func<string, IntPtr> _glGetProcAddress;
     private readonly SkiaRenderContext _renderContext = new();
     private readonly SkiaTextServices _text;
+    private readonly bool _ownsText;
 
     private GRBackendRenderTarget? _renderTarget;
     private SKSurface? _surface;
@@ -21,10 +22,11 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
     public IMeasureContext MeasureContext => _text.MeasureContext;
 
     /// <param name="glGetProcAddress">Resolver for GL entry points, from the windowing layer.</param>
-    /// <param name="text">Text pipeline to adopt instead of building one. Nothing in
+    /// <param name="text">Text pipeline to use instead of building one. Nothing in
     /// it needs GL, so a caller that started the driver loading on another thread can
-    /// have built (and measured with) it already — see <see cref="SkiaTextServices"/>.
-    /// Null builds a fresh one, which is what every caller did before.</param>
+    /// have built (and measured with) it already, and the windows of an application share
+    /// one — see <see cref="SkiaTextServices"/>. The caller keeps it and disposes it; the
+    /// surface does not. Null builds a fresh one, which the surface disposes with itself.</param>
     public SkiaGLRenderSurface(Func<string, IntPtr> glGetProcAddress, SkiaTextServices? text = null)
     {
         _glInterface = GRGlInterface.CreateOpenGl(name => glGetProcAddress(name))
@@ -33,6 +35,7 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GR context");
 
         _glGetProcAddress = glGetProcAddress;
+        _ownsText = text is null;
         _text = text ?? new SkiaTextServices();
         _renderContext.SetPipeline(_text.Pipeline);
         _renderContext.SetGLSurface(this);
@@ -118,5 +121,6 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
         _renderTarget?.Dispose();
         _grContext.Dispose();
         _glInterface.Dispose();
+        if (_ownsText) _text.Dispose();
     }
 }

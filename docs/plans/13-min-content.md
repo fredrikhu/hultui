@@ -97,6 +97,15 @@ but they do not lower min-content. So the widest word is the right floor: nothin
 *chooses* to shred a word across lines, while a scroll container or an
 over-constrained layout can still force it and get a sane rendering.
 
+**Refinement (2026-10-08, plan 17): a one-line label that truncates answers 0.**
+`MaxLines(1)` text, clipped or with an ellipsis, shows less of itself at any width, so
+nothing in it breaks: like a scroll container it contributes 0 (its padding still
+counts), to its own automatic minimum and to every box around it. Held at its widest
+word it overflowed instead of truncating — Junction's branch names drew over the next
+column, and a long URL in Meridian pushed the Send button out of its bar. CSS gets the
+item's half from `overflow: hidden`; its wrappers need `min-width: 0` there, here they
+do not. A label narrower than its ellipsis draws nothing.
+
 Flex wrap containers still use the row max rule per line-less approximation.
 
 ## Open decision

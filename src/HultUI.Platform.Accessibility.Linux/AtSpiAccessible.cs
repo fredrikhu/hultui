@@ -34,7 +34,15 @@ internal sealed class AtSpiAccessible
     public int Height { get; init; }
 
     public bool Focusable { get; init; }
-    public bool Focused { get; init; }
+
+    /// <summary>The one state that changes after the snapshot is built: a focus move rebuilds
+    /// none, so the bridge sets it on the UI thread while the bus thread may read it.</summary>
+    public bool Focused
+    {
+        get => Volatile.Read(ref _focused);
+        set => Volatile.Write(ref _focused, value);
+    }
+    private bool _focused;
     public bool Enabled { get; init; } = true;
     public bool Offscreen { get; init; }
     public bool Selectable { get; init; }

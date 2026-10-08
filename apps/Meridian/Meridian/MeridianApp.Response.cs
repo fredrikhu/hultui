@@ -78,14 +78,17 @@ public partial class MeridianApp
     // ── The response panel ───────────────────────────────────────────────
 
     /// <summary>The response region: status line, sub-tabs, and the active
-    /// tab's content. Sits right (560dip) or bottom (380dip) of the editor —
-    /// the caller decides which, this builds the same panel either way.</summary>
+    /// tab's content. Sits right (560dip) or bottom (380dip, less in a short
+    /// window) of the editor — the caller decides which, this builds the same
+    /// panel either way.</summary>
     private Element BuildResponsePanel(RequestTab tab, bool bottom)
     {
         var col = Flex.Column(gap: 0).FlexShrink(0);
         if (bottom)
         {
-            col.Height(Azimuth.ResponseBottom)
+            // 380 when the window has room for it above the editor's floor; shorter windows
+            // shrink the pane, never below its own floor (see EditorMinHeight).
+            col.Height(Azimuth.ResponseBottom).FlexShrink(1).MinHeight(BottomPaneMinHeight)
                .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(0, 2, 0, 0));
         }
         else

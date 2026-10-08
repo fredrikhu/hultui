@@ -104,11 +104,13 @@ Header: title, search (`/`, wildcards), **Tree / List** toggle, **New branch** (
 
 Grid: **BRANCH · LAST COMMIT · UPDATED · AHEAD / BEHIND · IN HISTORY · ACTIONS**. In tree mode `/`-segmented names group into collapsible folders with counts, remotes group under their name (`origin 5`), and rows keep one height so the list stays virtualised. Branch cell: prefix chip + mono leaf + `current` tag. Remote rows show `—` for ahead/behind and only *Checkout*. Actions: Checkout · push · pull · delete icon buttons.
 
+Narrow windows (added 2026-10-08, user-approved; plan 17 item 11h): the BRANCH column keeps at least 160 dip while the window allows. Below 934 dip of content the table is **compact**: UPDATED shows the date alone (date and time in the tooltip), the AHEAD / BEHIND and IN HISTORY headings become `↑ / ↓` and an eye, and *Checkout* becomes an icon button like the ones beside it (tooltip *Checkout (C)*, accessible name *Checkout*) — 584 dip of fixed columns become 374. Below 724 dip LAST COMMIT goes too and the name takes its room; the subject moves to the name cell's tooltip (and stays in the row's accessible label). At 1000 dip with the sidebar open the full table had left BRANCH 48 dip.
+
 Branch context menu: Checkout · Create branch from… · Rename… · Create worktree for this branch… — Merge into `<cur>` · Rebase `<cur>` onto — Push · Pull · Set upstream… — Include/Exclude from history · Copy name — **Delete branch**. Delete asks first and can discard unmerged work.
 
 ### 6 · Tags (`06-tags.png`) — new
 
-Same header shape as Branches (search, Tree / List, **New tag**). Grid: **TAG · COMMIT · CREATED · KIND · ACTIONS**. Tag cell: `TAG` chip + mono name + the annotation subject as subtitle. Kind is `annotated` or `lightweight`. Actions: Checkout · push · delete. Context menu adds *Push to <remote>*, *Delete on <remote>*, copy name/hash, create branch at tag.
+Same header shape as Branches (search, Tree / List, **New tag**). Grid: **TAG · COMMIT · CREATED · KIND · ACTIONS**. Tag cell: `TAG` chip + mono name + the annotation subject as subtitle. Kind is `annotated` or `lightweight`. Actions: Checkout · push · delete. In narrow windows it follows the Branches table's breakpoints: compact (date alone, KIND 76 dip, icon *Checkout*), then without COMMIT (hash and subject in the tag cell's tooltip). Context menu adds *Push to <remote>*, *Delete on <remote>*, copy name/hash, create branch at tag.
 
 ### 7 · Files (`07-files.png`) — new
 

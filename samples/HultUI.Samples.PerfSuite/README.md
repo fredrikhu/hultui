@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 83 scenarios over every feature area | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 94 scenarios over every feature area (88 off Windows) | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -23,7 +23,7 @@ dotnet run -c Release --project samples/HultUI.Samples.PerfSuite -- --compare ca
 dotnet run -c Release --project samples/HultUI.Samples.PerfSuite -- --verify
 ```
 
-The full suite takes about 25 s; a filtered run at least 5 s, which is the pre-warm (see
+The full suite takes about 28 s; a filtered run at least 5 s, which is the pre-warm (see
 below). `--list` prints every scenario, `--help` every option.
 
 ## Groups
@@ -32,18 +32,19 @@ below). `--list` prints every scenario, `--help` every option.
 |---|---|
 | `layout/` | Resize drags over long lists, deep nesting, flex wrap, baseline alignment, aspect-ratio tiles, overfull rows and columns (flex shrink); building 300 cards |
 | `grid/` | Creating, resizing and editing a 1,800-cell grid with `auto` and `fr` columns |
-| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out |
+| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out; long documents in a `TextArea`, among them Meridian's response viewer opening and wheeling a 19,000-line pretty-printed JSON response with its 23,000 colour spans (`… highlighted JSON …`; the spans are the ones HultUI.Syntax gives it, written out) |
 | `scroll/` | Wheel and jumps through a 5,000-row list, sticky section headers, nested scroll chaining |
-| `virtual/`, `table/` | `VirtualListElement` with 100,000 items; `TableView` with 10,000 rows: sort, wheel, column resize |
+| `virtual/`, `table/` | `VirtualListElement` with 100,000 items; a key walk down 1,000 two-line rows whose selection the owning component's Build reads, as Junction's History is walked (`virtual/selection walk …`: each Down rebuilds the owner and the list realizes its rows again in the render pass); `TableView` with 10,000 rows: sort, wheel, column resize |
 | `component/` | Keyed and unkeyed rebuilds of 1,000 rows, reverse, a small component in a big tree, 300 mounts, a signal read by 500 effects |
 | `input/` | Hover, checkbox click, typing in `TextInput` and a 2,000-line `TextArea`, undo/redo, Tab through a form, drag to reorder |
 | `richtext/` | The rich text editor on long documents: opening 5,000 blocks, a keystroke and Enter in them, the wheel, Ctrl+A, a resize of 1,000, a paragraph of 600 spans, a 200-cell table, and an editor that grows with its document inside a scroll view. The editor lays out inside its paint, so its layout shows under **render** |
 | `overlay/` | Opening a popover, dialog, menu bar menu, dropdown, tooltip; filtering a command palette of 2,000 commands |
+| `window/` | Opening a second window beside a busy one: its platform window, surface and tree under **build**, its first frame under style, layout and render (`Op.TimedWindow`) |
 | `controls/`, `icons/` | Mounting a control screen, tabs, an animated expander, a slider drag, 600 icons |
 | `theme/` | Light ⇄ dark, and cycling the `HultUI.Themes` catalogue, on the control screen |
 | `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition |
 | `paint/` | The same 400 tiles plain, rounded, shadowed, gradient-filled, transformed: the price of each effect |
-| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff |
+| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge; and the selection walk, whose list publishes a node for each of its 1,000 items on every rebuild. On Windows, six rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke, a label edit, a Tab, a wheel turn and the selection walk, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** (a Tab's focus event under **build**, where the key is handled). The wheel row and the selection walks space their frames 120 ms apart, past the 100 ms a scroll's accessibility refresh waits, so every step rebuilds |
 
 ## Reading the output
 
@@ -171,6 +172,27 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-5568977-prefixes-after.json` | … and after it, with long lines' breaks remembered across edits: 5568977, interleaved with the line above. Compare these two: 0 slower, 3 faster (the long document −43 %, typing in it −21 %). |
 | `2026-10-07-2128054-richtext-before.json` | Before the rich text editor's stage 8 (docs/plans/16-rich-text-editor.md): 2128054 with the `richtext/` scenarios added, all 82, median of 3 idle-gated runs … |
 | `2026-10-07-stage8-richtext-after.json` | … and after it, interleaved with the line above. Compare these two: 0 slower, 11 faster (see below). |
+| `2026-10-08-9ae8f9e-textdraw-before.json` | Before text drawing stopped allocating per frame (plan 17): 9ae8f9e, median of 3 idle-gated runs … |
+| `2026-10-08-9ae8f9e-textdraw-after.json` | … and after it, interleaved with the line above. Compare these two: 0 slower, 0 faster in time; allocation down ≥10 % on 43 rows (dense text 18.1 → 0.8 KB/op, typing in a `TextInput` 44.9 → 2.5). |
+| `2026-10-08-9ae8f9e-textdraw-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish, where the JIT cannot hide an allocation on the stack: allocation down ≥10 % on 44 rows (dense text 29.8 → 12.5 KB/op). |
+| `2026-10-08-28b23fb-tracename-before.json`, `…-after.json` | Before and after the layout and render passes stopped building each element's trace name when no trace records (plan 17): 28b23fb, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster; allocation −0.1 to −0.2 KB/op on the per-frame rows, because the JIT keeps `Type.Name`. |
+| `2026-10-08-28b23fb-tracename-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 2), where `Type.Name` builds a new string on every call: allocation down ≥10 % on 40 rows, none up (resize 2,000 rows 685.6 → 2.9 KB/op, typing in a `TextInput` 59.0 → 2.4, 400 tiles 7.7 → 0.7); 0 slower, 3 faster in time (resize 2,000 rows −16 %). |
+| `2026-10-08-7096431-uiarebase-before.json`, `…-after.json` | Before and after the UIA bridge pointed every wrapper at the current tree after each diff, with no per-diff index (plan 17): 7096431, which adds the three `…, UIA` rows, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster; allocation down on the three `…, UIA` rows and no other (a checkbox click 341 → 241 KB/op, a keystroke 211 → 164, a label edit in 1,000 rows 695 → 485). |
+| `2026-10-08-7096431-uiarebase-aot-before.json`, `…-aot-after.json` | The `a11y/` rows of the same pair as a NativeAOT publish (median of 2): the same allocation to the byte, and the label edit −6 % in time. |
+| `2026-10-08-2101bbf-framefloor-before.json`, `…-after.json` | Before and after the frame-floor series (plan 17): frame counters on rings, no delegate per loop pass, tree walks by index, Tab without a list or a sort, hover without a set, no closure per pointer move, sliders and number fields painted without allocating. 2101bbf, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster; allocation down ≥10 % on 32 rows, none up (Tab through 300 fields 28.4 → 0.3 KB/op, light ⇄ dark 22.7 → 8.7, hover 1.2 → 0.2, tiles and dense text 0.6–0.7 → 0.0); component rebuilds −5.6 % in allocation and −5 to −6 % in time. |
+| `2026-10-08-2101bbf-framefloor-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 2): the same 32 rows down, none up, the same bytes as JIT after (Tab 34.1 → 0.3 KB/op); 0 slower, 3 faster in time (grid resize and edit −12 % in both runs, icons mount −13 % from one slow run before). |
+| `2026-10-08-b277691-worddiet-before.json`, `…-after.json` | Before and after the text pipeline stopped making a string per word and a list per run (plan 17): word-cache lookups by a span of the text, glyphs into an array of the exact size, widths added up without glyphs, a kept list for a measurement's font runs, a full cache's evicted node reused. b277691, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 1 faster (a long document in a `TextArea` −10 %); allocation down ≥10 % on 17 rows, none up (`text/ellipsis` 7,261 → 3,418 KB/op, `text/wrap` 3,093 → 1,572, `richtext/open 5,000 blocks` 18,172 → 11,211, `richtext/type in a paragraph of 600 spans` 1,924 → 776, `layout/cards create 300` 7,609 → 4,455); in time also `richtext/open` −26 % on the minimum, `text/wrap`, `text/ellipsis` and `text/styled ellipsis` −7 %, cards −6 %. |
+| `2026-10-08-b277691-worddiet-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 3): the same 17 rows down, to within 0.3 % of the JIT bytes, none up; 0 slower (largest +3 %), 0 faster past the flag (`richtext/open` −26 % on the minimum, cards −7 %, a long document in a `TextArea` −6 %). |
+| `2026-10-08-e962738-textservices-before.json`, `…-after.json` | Before and after the windows of an application shared one set of text services, disposed with the application (plan 17): e962738, which adds `window/open a second window`, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 1 faster (opening a second window −47 % on the minimum, 262 → 132 KB/op); allocation unchanged on every other row. |
+| `2026-10-08-752ea95-a11ydiet-before.json`, `…-after.json` | Before and after the accessibility tree's build and diff stopped leaving garbage per node (plan 17): each node's children in one array of the exact length, leaves sharing the empty one; children walked by index; the differ pairing children by position while their ids agree; one owner-slot lookup per virtual list. 752ea95, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster at the flag; allocation down on the four rows that rebuild a tree on every step and on no other (edit every 10th of 1,000 568 → 368 KB/op, a checkbox click with UIA 240 → 142, a keystroke with UIA 163 → 87, a label edit in 1,000 rows with UIA 483 → 283); in time the edit every 10th −10 % and the label edit with UIA −12 % on the minimum, and −9 % and −10 % in a filtered rerun of 4 pairs. |
+| `2026-10-08-752ea95-a11ydiet-aot-before.json`, `…-aot-after.json` | The `a11y/` rows of the same pair as a NativeAOT publish (median of 3): the same bytes as JIT to 0.3 KB, the edit every 10th −10 % and the label edit with UIA −8 % on the minimum. |
+| `2026-10-08-93847ae-focusmove-before.json`, `…-after.json` | Before and after a focus move updated the focus state at once (plan 17): 93847ae, which adds `a11y/tab through 300 fields, UIA` and `a11y/wheel 1,000 rows, UIA`; the `a11y/` rows and `input/tab` only, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster, allocation unchanged on every row (Tab with UIA 0.8 KB/op, which now raises two HasKeyboardFocus events with its focus event: 0.351 → 0.350 ms). |
+| `2026-10-08-70d68c1-scrollevent-before.json`, `…-after.json` | Before and after a scroll became the scroll view's change, as browsers report it (plan 17): one ScrollPercent event on the view per rebuild in place of a BoundingRectangle event per node on screen. 70d68c1; the `a11y/` and `scroll/` rows only, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 1 faster (`a11y/wheel 1,000 rows, UIA` 1.344 → 0.541 ms, −60 %, 433.5 → 425.1 KB/op); every other row within ±4 %. Tab with UIA reads 0.3 → 0.4 KB/op in this pair and 0.3 on both builds in a run of the UIA rows alone: the JIT, not the change. |
+| `2026-10-08-43c0e05-clampbasis-before.json`, `…-after.json` | Before and after a one-line truncating label in a row took its untruncated width, capped at the room, as its flex base size, instead of being truncated at the room for it (plan 17): 43c0e05, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 5 faster, the five ellipsis rows, which truncate each label once a step instead of twice (`text/ellipsis` −30 %, 3,418 → 1,887 KB/op; `text/multi-font ellipsis` −42 %, 7,949 → 3,848; `text/styled bidi ellipsis` −30 %, 10,654 → 7,061); allocation unchanged on every other row. |
+| `2026-10-08-43c0e05-clampbasis-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 3): the same five rows faster (`text/ellipsis` −34 %, `text/multi-font ellipsis` −43 %) with the same bytes as JIT to 0.3 %, none slower (no row up by 4 % or more). |
+| `2026-10-08-6891682-minzero-before.json`, `…-after.json` | Before and after a one-line truncating label's min-content width became 0, so it may shrink to nothing rather than to its widest word (plan 17; a correctness change): 6891682, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster. `text/spans bold` reads +7 % on the minimum (+2 % median), untouched by the change: a filtered rerun of 4 alternated pairs reads 1.421 → 1.411 ms. Allocation: `text/ellipsis` 1,887 → 1,859 KB/op (its labels' widest words are no longer shaped), the rest within noise. |
+| `2026-10-08-6891682-minzero-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 3): 0 slower, 0 faster, no row up by 5 % or more; `text/ellipsis` 1,889 → 1,860 KB/op. |
+| `2026-10-09-1c8ee98-scenarios12.json`, `…-aot.json` | The five rows 1c8ee98 adds (plan 17 item 12: the selection walks and the highlighted JSON response), JIT and NativeAOT, 2 idle-gated runs each, min the lower and the rest their mean. Only those rows. The "before" for the round 2 items that change them; see below. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -471,6 +493,35 @@ Nothing else moved past ±3 % but `icons/mount 600` (−3 %). Undo and redo swap
 two texts and the memo keeps only the current one, so each step builds that line's table again.
 Junction's TODO.md frame does not move (17.3–17.6 → 16.8–17.4 ms): 900 of its 917 lines fit, and
 each is measured once, whole, as before.
+
+**Two app workloads** (1c8ee98). The app survey of plan 17 found two costs no row timed: a key
+walk down a list whose owner rebuilds on each press (Junction's History, Commit and Files views,
+Vesper's panes), and Meridian opening a large JSON response. Minimum, KB a step, JIT / AOT:
+
+| Scenario | min ms | render (median) | other (median) | KB/op |
+|---|---:|---:|---:|---:|
+| `virtual/selection walk 1,000 rows` | 0.466 / 0.482 | 0.48 / 0.49 | 0.00 | 108 |
+| `a11y/selection walk 1,000 rows, bridge on` | 0.534 / 0.582 | 0.48 / 0.49 | 0.07 / 0.10 | 412 / 411 |
+| `a11y/selection walk 1,000 rows, UIA` | 0.565 / 0.623 | 0.48 / 0.50 | 0.11 / 0.15 | 412 / 411 |
+| `text/open highlighted JSON in a TextArea` | 10.74 / 12.49 | 20.3 / 23.8 | 0.01 | 10,811 |
+| `text/wheel highlighted JSON in a TextArea` | 0.939 / 1.556 | 0.98 / 1.61 | 0.00 | 14 / 16 |
+
+- **The walk's rebuild is cheap; its rows are not kept.** The pane rebuilds in 0.01 ms, and the
+  list, patched, throws its 19 realized rows away and makes them again from the template while it
+  paints: 95 elements a step, most of the 108 KB. A temporary probe round the list's realization
+  put it at ~0.05 ms of the 0.48 ms render (~10 %; the rest is CPU raster). The app survey
+  measured 12–19 % in Junction and Vesper, whose rows are heavier than this one's five elements.
+- **An accessibility client adds ~300 KB and 0.07 ms a step** (UIA 0.11 ms): the tree rebuilt with
+  a node, and a label string, for each of the 1,000 items, on screen or not — about 300 B an item.
+  12 % of the step, 18 % with UIA; the survey measured 13–30 %.
+- **Opening the response measures each of its 19,013 lines once** (a substring and a layout each),
+  10.8 MB a step on both runtimes. The median is twice the minimum: the same three of the five
+  timed steps of every round take a garbage collection, 7–16 ms longer than the steps without
+  one (why a collection costs that much here is not profiled).
+- **The wheel is the span scan.** Each of the ~50 lines drawn walks the response's 22,968 spans
+  from the first, through an interface enumerator, to the ones on its line: ~11,500 a line in the
+  middle of the response. AOT reads 66 % slower than JIT here; dynamic PGO can devirtualize that
+  enumerator and AOT cannot (not profiled).
 
 **What the suite turned up on its first run**, for follow-up:
 

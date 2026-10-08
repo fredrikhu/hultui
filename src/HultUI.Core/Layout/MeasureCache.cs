@@ -24,6 +24,10 @@ namespace HultUI.Core.Layout;
 /// its content the widths its content comes out the same at — text on one line at any width it
 /// fits in. A resize offers every box a new width each step, and a row's item is laid out at
 /// the width it came out at, not the one it was measured at.</para>
+/// <para><b>One entry can be pinned</b>, and the ring then passes over it: a one-line label that
+/// truncates keeps its untruncated size there (LayoutEngine.TruncatingBase). Its other
+/// measurements are each at a width of their own, at every step of a resize, and in the ring
+/// alone they pushed it out every fourth step.</para>
 /// </summary>
 internal struct MeasureCache
 {
@@ -35,9 +39,15 @@ internal struct MeasureCache
     // Bytes, so the min-content width fits in the room the two ints took.
     private byte _count;   // 0 = empty; reset is the whole invalidation
     private byte _next;    // ring write position
-    private bool _hasMinContentWidth;
+    private byte _flags;   // HasMinContentWidth, and the pinned entry's index + 1 above it (0: none)
     private byte _exactH;  // bit i: entry i holds at its FromH only (see Entry.FromH)
     private float _minContentWidth;
+
+    private const byte HasMinContentWidth = 1;
+    private const int PinShift = 1;
+
+    /// <summary>The pinned entry's index, or −1 for none.</summary>
+    private readonly int Pinned => (_flags >> PinShift) - 1;
 
     /// <summary>The element's min-content width (LayoutEngine.MinContentWidth), if worked out
     /// since the last invalidation. No constraint goes into it, so it holds until the content
@@ -46,20 +56,21 @@ internal struct MeasureCache
     public readonly bool TryGetMinContentWidth(out float width)
     {
         width = _minContentWidth;
-        return _hasMinContentWidth;
+        return (_flags & HasMinContentWidth) != 0;
     }
 
     public void StoreMinContentWidth(float width)
     {
         _minContentWidth = width;
-        _hasMinContentWidth = true;
+        _flags |= HasMinContentWidth;
     }
 
     /// <param name="validFromH">The least height the matched entry holds from: −∞ for any, NaN for
     /// the one it was measured at alone.</param>
     /// <param name="validW">The matched entry's widths, <see cref="Entry.LoW"/> to <see cref="Entry.HiW"/>.</param>
+    /// <param name="pin">Pin the matched entry, so the ring keeps it (see <see cref="Store"/>).</param>
     public bool TryGet(float constraintW, float constraintH, float? forcedW, float? forcedH,
-        out Size result, out float validFromH, out WidthRange validW)
+        out Size result, out float validFromH, out WidthRange validW, bool pin = false)
     {
         float fw = forcedW ?? NotForced, fh = forcedH ?? NotForced;
         for (int i = 0; i < _count; i++)
@@ -73,6 +84,7 @@ internal struct MeasureCache
                 result = e.Result;
                 validFromH = exactH ? float.NaN : e.FromH;
                 validW = new WidthRange(e.LoW, e.HiW);
+                if (pin) PinAt(i);
                 return true;
             }
         }
@@ -86,16 +98,33 @@ internal struct MeasureCache
     /// any, NaN for <paramref name="constraintH"/> alone.</param>
     /// <param name="validW">The widths <paramref name="result"/> holds for, which take in
     /// <paramref name="constraintW"/>.</param>
+    /// <param name="pin">Keep this entry where the ring will not write: in place of the entry
+    /// pinned before, if there is one. One that is not pinned goes to the ring's next slot, past
+    /// the pinned one.</param>
     public void Store(float constraintW, float constraintH, float? forcedW, float? forcedH,
-        Size result, float validFromH, WidthRange validW)
+        Size result, float validFromH, WidthRange validW, bool pin = false)
     {
-        ref var e = ref _entries[_next];
+        int slot;
+        if (pin && Pinned >= 0)
+        {
+            slot = Pinned;   // replaces the pinned entry: the ring does not move
+        }
+        else
+        {
+            // While the ring is filling, _next is _count and the pinned entry is below it.
+            if (_next == Pinned) _next = (byte)((_next + 1) % Capacity);
+            slot = _next;
+            _next = (byte)((_next + 1) % Capacity);
+            if (_count < Capacity) _count++;
+            if (pin) PinAt(slot);
+        }
+        ref var e = ref _entries[slot];
         e.LoW = validW.Lo;
         e.HiW = validW.Hi;
         e.ForcedW = forcedW ?? NotForced;
         e.ForcedH = forcedH ?? NotForced;
         e.Result = result;
-        int bit = 1 << _next;
+        int bit = 1 << slot;
         if (float.IsNaN(validFromH))
         {
             e.FromH = constraintH;
@@ -107,15 +136,16 @@ internal struct MeasureCache
             e.FromH = float.MinNative(validFromH, constraintH);
             _exactH = (byte)(_exactH & ~bit);
         }
-        _next = (byte)((_next + 1) % Capacity);
-        if (_count < Capacity) _count++;
     }
+
+    private void PinAt(int slot) =>
+        _flags = (byte)((_flags & HasMinContentWidth) | ((slot + 1) << PinShift));
 
     public void Invalidate()
     {
         _count = 0;
         _next = 0;
-        _hasMinContentWidth = false;
+        _flags = 0;
     }
 
     [InlineArray(Capacity)]

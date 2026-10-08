@@ -87,6 +87,36 @@ public class SliderElementTests
     }
 
     [Fact]
+    public void MarksInAnyOrder_RepeatedOrOutOfRange_CutTheTrackOnceAtEachMarkInside()
+    {
+        var s = SliderElement.New(60, 0, 100);
+        s.ThumbRadius = 0;
+        s.Segments = [75d, 25d, 50d, 25d, -10d, 100d, 0d, 250d];
+        Layout(s, 200);
+
+        var ctx = new TrackRecordingContext();
+        s.Render(ctx);
+
+        // Cuts at a quarter, a half and three quarters; the gap (2 px of 200) comes off the
+        // right-hand end of every piece but the last.
+        const float gap = 2f / 200f;
+        (float From, float To)[] pieces = [(0f, 0.25f - gap), (0.25f, 0.5f - gap), (0.5f, 0.75f - gap), (0.75f, 1f)];
+        Assert.Equal(pieces.Length, ctx.Tracks.Count);
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            Assert.Equal(200f * pieces[i].From, ctx.Tracks[i].X, 3);
+            Assert.Equal(200f * (pieces[i].To - pieces[i].From), ctx.Tracks[i].Width, 3);
+        }
+
+        // Each piece is followed by what of it the value (60) has played: all of the first two,
+        // part of the third, none of the last.
+        Assert.Equal(4 + 3, ctx.Fills.Count);
+        Assert.Equal(ctx.Tracks[0].Width, ctx.Fills[1].Width, 3);
+        Assert.Equal(ctx.Tracks[1].Width, ctx.Fills[3].Width, 3);
+        Assert.Equal(ctx.Tracks[2].Width * (0.6f - 0.5f) / (0.75f - gap - 0.5f), ctx.Fills[5].Width, 3);
+    }
+
+    [Fact]
     public void NoMarksIsOneContinuousTrackAsItAlwaysWas()
     {
         var s = SliderElement.New(40, 0, 100);

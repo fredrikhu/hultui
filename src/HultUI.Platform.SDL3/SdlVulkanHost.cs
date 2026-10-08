@@ -618,6 +618,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
                 extent = new VkExtent2D(bucketW, bucketH);
         }
 
+        // What the swapchain being replaced was, which decides how it is let go of below.
+        var replacedFormat = _format;
+        var replacedPresentMode = _presentMode;
         _format = ChooseFormat(out var colorSpace);
         _colorSpace = colorSpace;
 
@@ -635,6 +638,19 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageCount = capabilities.maxImageCount;
 
         var old = _swapchain;
+
+        // Destroyed before its replacement exists, rather than handed over as oldSwapchain, where
+        // handing it over stalls the next present: see VulkanSwapchainChoice.DestroyBeforeReplacing.
+        // Safe here because every rebuild has already waited the device idle and dropped its
+        // acquired image.
+        if (!old.IsNull && VulkanSwapchainChoice.DestroyBeforeReplacing(
+                OperatingSystem.IsWindows(), replacedFormat, replacedPresentMode))
+        {
+            _vk.DestroySwapchain(_device, old, 0);
+            _swapchain = VkSwapchainKHR.Null;
+            _images = [];
+            old = VkSwapchainKHR.Null;
+        }
 
         // Only chained when the swapchain is actually allowed to differ from the window. Asking
         // for ONE_TO_ONE says "show the top-left of the image at its true size and leave the

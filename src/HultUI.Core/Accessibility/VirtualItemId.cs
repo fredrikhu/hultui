@@ -19,7 +19,12 @@ public static class VirtualItemId
     private const ulong Marker = 1UL << 63;
 
     public static ElementId For(ElementId listId, int index)
-        => new(Marker | ((ulong)AccessibleOwnerSlots.SlotOf(listId) << 32) | (uint)index);
+        => ForSlot(AccessibleOwnerSlots.SlotOf(listId), index);
+
+    /// <summary>The id of item <paramref name="index"/> of the list holding <paramref name="slot"/>:
+    /// for a caller making every item's id, which looks the slot up once.</summary>
+    internal static ElementId ForSlot(uint slot, int index)
+        => new(Marker | ((ulong)slot << 32) | (uint)index);
 
     /// <summary>True (with the decoded owner + index) if the id is a virtual item. The owner is
     /// <c>default</c> when its list has unmounted since: the item is gone.</summary>

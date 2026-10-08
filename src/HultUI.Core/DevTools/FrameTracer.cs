@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using HultUI.Core.Elements;
 
 namespace HultUI.Core.DevTools;
 
@@ -47,10 +48,43 @@ public sealed class FrameTracer
         _events.Clear();
     }
 
+    /// <summary>
+    /// Begins a timed scope. Nothing is recorded unless <see cref="IsRecording"/>, but the
+    /// arguments are built either way: pass strings that already exist, such as literals. A
+    /// name computed per call costs on every call, recording or not.
+    /// </summary>
     public Scope Begin(string category, string name, string? detail = null)
     {
         if (!IsRecording) return default;
         return new Scope(this, category, name, detail, Stopwatch.GetTimestamp());
+    }
+
+    /// <summary>
+    /// Begins a scope for one element in the layout or render pass: named after the
+    /// element's type, with its <see cref="Element.Key"/> or <see cref="Element.Name"/> as
+    /// the detail. The name is looked up only while recording. Those passes open a scope
+    /// for every element they visit, every frame, and on NativeAOT <c>Type.Name</c> builds a
+    /// new string on every call. Built up front, the names were 683 of the 686 KB a frame of
+    /// a 2,000-row resize allocated on NativeAOT.
+    /// </summary>
+    internal Scope BeginElement(string category, Element element)
+    {
+        if (!IsRecording) return default;
+        return new Scope(this, category, ElementTypeName(element), element.Key ?? element.Name,
+            Stopwatch.GetTimestamp());
+    }
+
+    /// <summary>
+    /// How many names <see cref="BeginElement"/> has looked up: one per element scope while
+    /// recording, none otherwise. Tests read it to see that no pass builds a name it will not
+    /// record.
+    /// </summary>
+    internal int ElementNameLookups { get; private set; }
+
+    private string ElementTypeName(Element element)
+    {
+        ElementNameLookups++;
+        return element.GetType().Name;
     }
 
     /// <summary>

@@ -135,14 +135,19 @@ a form first hides the lot. Joining rather than racing costs nothing either way:
 loader serialises the DLL load regardless, so a UI thread that got there first would
 block for the same time with none of the head start.
 
-**Sharing buys nothing; do not build it.** Sharing GL display lists
+**Sharing GL buys nothing; do not build it.** Sharing GL display lists
 (`wglShareLists`) and handing every surface one `SkiaTextServices` was measured
-and made no difference — per-surface cost stayed ~5 ms and the forced-render
-median got marginally *worse* (1.43 ms vs 1.21 ms for four surfaces). There is
-nothing left to share: after the first, a `SkiaTextServices` costs about a
-millisecond because the font collection is already warm. So `SkiaGLRenderSurface`
-does not need a "bring your own `GRContext`" overload, which was on the table
-before this was measured.
+and made no difference to time — per-surface cost stayed ~5 ms and the
+forced-render median got marginally *worse* (1.43 ms vs 1.21 ms for four
+surfaces). So `SkiaGLRenderSurface` does not need a "bring your own `GRContext`"
+overload, which was on the table before this was measured.
+
+The text services are shared all the same, for memory rather than time (plan 17,
+round 1): `WinFormsWindowingPlatform` hands every control's surface the one set.
+Each surface's own set held a HarfBuzz font per face that nothing ever freed, so
+every control whose handle was destroyed or recreated leaked them, and each kept
+its own copy of the text caches. All controls run on the one application's UI
+thread, so the set needs no lock.
 
 **One real trap: vsync.** Before calling `wglSwapIntervalEXT(0)`, the median
 forced render of a *single* surface was 8.3 ms — `SwapBuffers` blocking on the

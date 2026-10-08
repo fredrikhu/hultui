@@ -75,6 +75,28 @@ sheet is behind the session and this server answers `?api_key=` with **401**, so
 carries the session's `Authorization` header instead. Putting a token in a URL was the wrong
 instinct anyway — URLs end up in logs and caches.
 
+**Artwork is fetched at the size it is drawn.** A card asks for its box in device pixels —
+layout size × the window's display scale, rounded up to a 25 % step — by the side that decides
+a cover fit: `fillWidth` for a picture the card's shape or taller, `fillHeight` for one wider
+than the card (an episode's 16:9 still on a 2:3 poster card), using the aspect ratio the server
+reports. Never both: Jellyfin covers the box but rounds both sides up, and the spare pixel puts
+the picture half a pixel off, which is soft at one to one. Asking for twice the layout width
+whatever the scale held four times the pixels it drew at 100 %. When the window moves to a
+monitor with another scale, the cards ask again at the new size; until each new picture lands
+the old one stays up (soft, briefly), and once the downloads have all landed the old ones are
+dropped (`PosterCache.Retire`).
+
+The **heroes** across the top of an item page and a request title page follow the same rule.
+Their box is the view beside the rail and follows the window, so they round the device pixels
+up to a 128-pixel step: a window dragged wider asks again only when it passes a step, which is
+before the picture has fewer pixels than the screen, rather than at every width on the way (that
+fetched a picture per frame and kept them all). The picture on screen stays up until the new
+size lands, then goes (`PosterCache.Retire(Uri)`). A request title page asks TMDB for `w1920`
+above 1,280 device pixels: not a size TMDB's configuration lists, but one its image server serves,
+and never the 4K original. The app keeps the last four heroes, the page on screen and three
+behind it for Back: the cache bounds pictures by count, and a hero is 9 MB at 150 % in a
+1,400-wide window, so keeping one for every page visited added up.
+
 **The scrubber is cut into chapters** when the file has marks, and fills to the pointer as
 it crosses, so where you would land reads differently from where you are.
 

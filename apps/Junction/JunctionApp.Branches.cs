@@ -24,10 +24,45 @@ public partial class JunctionApp
     private const float ColAheadBehind = 120f;
     private const float ColInHistory = 96f;
     private const float ColActions = 250f;
+    // The compact table's, in a narrow window: the date without its time (the time is the
+    // tooltip), the counts under "↑ / ↓", the eye under an eye, and Checkout an icon like
+    // the buttons beside it — room for five of them (Checkout, merge request, push, pull,
+    // delete), 30px each with 5px between. 584px of fixed columns become 374.
+    private const float ColUpdatedCompact = 84f;
+    private const float ColAheadBehindCompact = 76f;
+    private const float ColInHistoryCompact = 44f;
+    private const float ColActionsCompact = 5 * 30f + 4 * 5f;
+
+    // When the table goes compact. The name column is the row's identity, so it is what the
+    // breakpoints protect: RefNameMinWidth is the least it should get while the window can
+    // give it that — the branch chip and about thirteen characters of a name in the list,
+    // seventeen in a folder. The flexible columns share what the fixed ones and the gutters
+    // (26px each side, 12px for the scroll bar) leave, 38 : 30, so the name column is 38/68
+    // of it: the full table gives it 160px down to 934px of content, the compact one down to
+    // 724px, and below that LAST COMMIT goes and the name takes all of it. At 1000px with
+    // the sidebar open (734px of content) the full table left name and commit 86px between
+    // them; the compact one gives the name 165 and the commit 131.
+    private const float RefNameMinWidth = 160f;
+    private const float RefTableGutters = 26f + 26f + 12f;
+    private const float RefNameShare = 38f / (38f + 30f);
+    private const float CompactTableContentWidth = RefTableGutters
+        + ColUpdated + ColAheadBehind + ColInHistory + ColActions + RefNameMinWidth / RefNameShare;
+    private const float NarrowTableContentWidth = RefTableGutters
+        + ColUpdatedCompact + ColAheadBehindCompact + ColInHistoryCompact + ColActionsCompact
+        + RefNameMinWidth / RefNameShare;
+
     // One template for the header and every leaf row, so the columns line up by
-    // construction rather than by each row repeating the same widths.
-    private static readonly string BranchColumns = FormattableString.Invariant(
+    // construction rather than by each row repeating the same widths. The narrow one keeps
+    // LAST COMMIT's track at 0px, so every other cell keeps its column number.
+    private static readonly string BranchColumnsFull = FormattableString.Invariant(
         $"38fr 30fr {ColUpdated}px {ColAheadBehind}px {ColInHistory}px {ColActions}px");
+    private static readonly string BranchColumnsCompact = FormattableString.Invariant(
+        $"38fr 30fr {ColUpdatedCompact}px {ColAheadBehindCompact}px {ColInHistoryCompact}px {ColActionsCompact}px");
+    private static readonly string BranchColumnsNarrow = FormattableString.Invariant(
+        $"1fr 0px {ColUpdatedCompact}px {ColAheadBehindCompact}px {ColInHistoryCompact}px {ColActionsCompact}px");
+
+    private string BranchColumns =>
+        _narrowTables ? BranchColumnsNarrow : _compactTables ? BranchColumnsCompact : BranchColumnsFull;
 
     private Element BuildBranchesView()
     {
@@ -182,22 +217,42 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
         row.AddChild(HeaderCell("BRANCH", 0, JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("LAST COMMIT", 1, JustifyContent.FlexStart));
+        if (!_narrowTables)
+            row.AddChild(HeaderCell("LAST COMMIT", 1, JustifyContent.FlexStart));
         row.AddChild(HeaderCell("UPDATED", 2, JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("AHEAD / BEHIND", 3, JustifyContent.Center));
-        row.AddChild(HeaderCell("IN HISTORY", 4, JustifyContent.Center));
+        if (_compactTables)
+        {
+            // The compact columns are too narrow for the words; the marks the cells show
+            // stand in for them, and the words are the tooltips.
+            row.AddChild(HeaderCell("↑ / ↓", 3, JustifyContent.Center).Tooltip("Ahead / behind"));
+            row.AddChild(HeaderIconCell(Icons.Eye, "In history", 4));
+        }
+        else
+        {
+            row.AddChild(HeaderCell("AHEAD / BEHIND", 3, JustifyContent.Center));
+            row.AddChild(HeaderCell("IN HISTORY", 4, JustifyContent.Center));
+        }
         row.AddChild(HeaderCell("ACTIONS", 5, JustifyContent.FlexEnd));
         return row;
     }
 
     /// <summary>A table header label in its grid column. The cell is stretched to the
-    /// track, so the label's alignment within it is a flex justification.</summary>
-    private static Element HeaderCell(string label, int column, JustifyContent align)
+    /// track, so the label's alignment within it is a flex justification. One line: in a
+    /// narrow window "LAST COMMIT" broke into three in its 38px column; it truncates now.</summary>
+    private static BoxElement HeaderCell(string label, int column, JustifyContent align)
     {
         var box = Flex.Row(gap: 0).JustifyContent(align).GridColumn(column);
-        box.AddChild(Text.New(label).FontSize(10.5f).LetterSpacing(0.6f).TextColor(Nocturne.On(0.55)));
+        box.AddChild(Text.New(label).FontSize(10.5f).LetterSpacing(0.6f).TextColor(Nocturne.On(0.55))
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         return box;
     }
+
+    /// <summary>A compact table's header mark in place of a word, centred in its column,
+    /// with the word as its tooltip.</summary>
+    private static BoxElement HeaderIconCell(string glyph, string label, int column) =>
+        Flex.Row(gap: 0).JustifyContent(JustifyContent.Center).GridColumn(column)
+            .Tooltip(label)
+            .Children(Ui.Icon(glyph, 12f, Nocturne.On(0.55)));
 
     private Element BuildBranchScroll(List<TreeNode<GitBranch>> rows)
     {
@@ -293,8 +348,14 @@ public partial class JunctionApp
 
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         // The tree's indent lives inside this cell so every column right of it stays
-        // aligned however deep the ref sits.
-        var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0);
+        // aligned however deep the ref sits. The cell clips: in a narrow window the column
+        // can be narrower than its indent, glyph and tag, and what does not fit is cut at
+        // the column's edge instead of being drawn over LAST COMMIT. It ends 12px short of
+        // the next column, as LAST COMMIT does before UPDATED: in a narrow window most names
+        // truncate there, and their ellipsis ran into the subject (or the date) beside it.
+        var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0)
+            .Padding(new Thickness(0, 12, 0, 0))
+            .OverflowX(Overflow.Hidden);
         if (depth > 0)
             branchCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         if (inFolder)
@@ -317,15 +378,23 @@ public partial class JunctionApp
 
         var titleCol = Flex.Column(gap: 1).FlexShrink(1).FlexBasis(Dimension.Px(0)).FlexGrow(1);
         var titleRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-        titleRow.AddChild(Ui.Mono(pb.Title, 12.5f, b.IsRemote ? Nocturne.On(0.72) : Nocturne.Text)
-            .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        var name = Ui.Mono(pb.Title, 12.5f, b.IsRemote ? Nocturne.On(0.72) : Nocturne.Text)
+            .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1);
+        var tags = new List<BoxElement>(2);
         if (compareRole != null)
-            titleRow.AddChild(Ui.TagOutline(compareRole, Nocturne.Accent, 9f).FlexShrink(0));
+            tags.Add(Ui.TagOutline(compareRole, Nocturne.Accent, 9f));
         if (b.IsCurrent)
-            titleRow.AddChild(Ui.TagOutline("current", Nocturne.Accent, 9f));
+            tags.Add(Ui.TagOutline("current", Nocturne.Accent, 9f));
         // The remote's name is the folder this row sits under, so only a flat row says it.
         if (b.IsRemote && !inFolder)
-            titleRow.AddChild(Ui.Chip(Icons.Cloud, remoteName, Nocturne.Neutral800, Nocturne.Neutral300));
+            tags.Add(Ui.Chip(Icons.Cloud, remoteName, Nocturne.Neutral800, Nocturne.Neutral300));
+        // The tags after the name: the name truncates first, then a tag that no longer fits
+        // whole is left out — it used to stick out over LAST COMMIT by its own width at 1000 px.
+        if (tags.Count == 0 || !Ui.NameThenWholeTags(titleRow, name, pb.Title, 12.5f, Fonts.Mono, tags))
+        {
+            titleRow.AddChild(name);
+            foreach (var tag in tags) titleRow.AddChild(tag);
+        }
         titleCol.AddChild(titleRow);
         if (pb.HasSub && !inFolder)
             titleCol.AddChild(Text.New(pb.Sub).FontSize(10.5f).TextColor(Nocturne.On(0.42))
@@ -333,34 +402,13 @@ public partial class JunctionApp
         branchCell.AddChild(titleCol);
         row.AddChild(branchCell);
 
-        // Last commit + updated. On a GitLab-backed repository the cell also carries what
-        // the host knows about the branch — lock · subject · pipeline glyph · !iid chip —
-        // in the cell rather than a column of its own, per the design's answer.
-        var lastCommit = Flex.Row(gap: 7).AlignItems(AlignItems.Center).GridColumn(1)
-            .Padding(new Thickness(0, 12, 0, 0));
-        bool hosted = GitLabActive(_activeRepoPath);
-        if (hosted && !b.IsRemote && ProtectionFor(_activeRepoPath, b.Name) is { } rule)
-            lastCommit.AddChild(Ui.Icon(Icons.Lock, 11f, Nocturne.On(0.5)).FlexShrink(0)
-                .Tooltip(ProtectionSummary(rule)));
-        // The subject takes the slack, so the glyph and the chip sit flush right in the cell
-        // — one column of marks down the list, as the design draws it — rather than trailing
-        // each subject at whatever width it happens to have.
-        lastCommit.AddChild(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
-            .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
-            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0)));
-        if (hosted)
-        {
-            if (PipelineForSha(_activeRepoPath, b.Hash) is { } pipe && Ui.PipelineGlyph(pipe.Status, 13f) is { } glyph)
-                lastCommit.AddChild(glyph.FlexShrink(0).Tooltip(PipelineSummary(pipe)));
-            // By leaf for a remote-tracking row: after a clone the branch an MR comes from
-            // usually exists only as origin/<name>, and that row is where the chip is wanted.
-            if (MergeRequestForBranch(_activeRepoPath, b.IsRemote ? leaf : b.Name) is { } mr)
-                lastCommit.AddChild(MergeRequestChip(mr).FlexShrink(0));
-        }
-        row.AddChild(lastCommit);
-        row.AddChild(Box.New().GridColumn(2)
-            .Children(Text.New(b.CommitDate == default ? "" : b.CommitDate.ToString("g"))
-                .FontSize(12f).TextColor(Nocturne.On(0.55))));
+        if (_narrowTables)
+            // No LAST COMMIT column: the subject is the name cell's tooltip (and stays in
+            // the row's accessible label).
+            branchCell.Tooltip(b.Subject.Length > 0 ? b.Subject : "—");
+        else
+            row.AddChild(LastCommitCell(b, leaf));
+        row.AddChild(DateCell(b.CommitDate, 2));
 
         // Ahead / behind (remote-tracking refs have no upstream of their own).
         var ab = Flex.Row(gap: 4).GridColumn(3)
@@ -391,6 +439,51 @@ public partial class JunctionApp
         return row;
     }
 
+    /// <summary>Last commit. On a GitLab-backed repository the cell also carries what the host
+    /// knows about the branch — lock · subject · pipeline glyph · !iid chip — in the cell
+    /// rather than a column of its own, per the design's answer.</summary>
+    private Element LastCommitCell(GitBranch b, string leaf)
+    {
+        var lastCommit = Flex.Row(gap: 7).AlignItems(AlignItems.Center).GridColumn(1)
+            .Padding(new Thickness(0, 12, 0, 0));
+        bool hosted = GitLabActive(_activeRepoPath);
+        if (hosted && !b.IsRemote && ProtectionFor(_activeRepoPath, b.Name) is { } rule)
+            lastCommit.AddChild(Ui.Icon(Icons.Lock, 11f, Nocturne.On(0.5)).FlexShrink(0)
+                .Tooltip(ProtectionSummary(rule)));
+        // The subject takes the slack, so the glyph and the chip sit flush right in the cell
+        // — one column of marks down the list, as the design draws it — rather than trailing
+        // each subject at whatever width it happens to have.
+        lastCommit.AddChild(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
+            .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0)));
+        if (hosted)
+        {
+            if (PipelineForSha(_activeRepoPath, b.Hash) is { } pipe && Ui.PipelineGlyph(pipe.Status, 13f) is { } glyph)
+                lastCommit.AddChild(glyph.FlexShrink(0).Tooltip(PipelineSummary(pipe)));
+            // By leaf for a remote-tracking row: after a clone the branch an MR comes from
+            // usually exists only as origin/<name>, and that row is where the chip is wanted.
+            if (MergeRequestForBranch(_activeRepoPath, b.IsRemote ? leaf : b.Name) is { } mr)
+                lastCommit.AddChild(MergeRequestChip(mr).FlexShrink(0));
+        }
+        return lastCommit;
+    }
+
+    /// <summary>A ref table's date (UPDATED, CREATED): date and time, or in the compact table
+    /// the date alone, one line, with date and time as its tooltip.</summary>
+    private Element DateCell(DateTimeOffset date, int column)
+    {
+        bool compact = _compactTables && date != default;
+        var label = Text.New(date == default ? "" : date.ToString(compact ? "d" : "g"))
+            .FontSize(12f).TextColor(Nocturne.On(0.55));
+        var cell = Box.New().GridColumn(column);
+        if (compact)
+        {
+            label.OverflowMode(TextOverflow.Ellipsis).MaxLines(1);
+            cell.Tooltip(date.ToString("g"));
+        }
+        return cell.Children(label);
+    }
+
     private Element IncludeToggle(string name)
     {
         var set = IncludeSet(_activeRepoPath);
@@ -418,8 +511,8 @@ public partial class JunctionApp
             .JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
 
         // The current branch's Checkout is inert and dimmed: already here.
-        box.AddChild(Ui.SecondaryButton("Checkout", Icons.BendDownRight,
-            () => CheckoutBranch(checkoutTarget), 11.5f).Enabled(!b.IsCurrent));
+        box.AddChild(CheckoutButton(() => CheckoutBranch(checkoutTarget), "branches.checkout")
+            .Enabled(!b.IsCurrent));
 
         // Push / Pull / Delete apply to local branches; a remote-tracking ref
         // is checked out (creating a local tracking branch) but not managed here.
@@ -436,6 +529,18 @@ public partial class JunctionApp
             box.AddChild(SmallIconButton(Icons.Trash, () => DeleteBranchAction(b), "Delete"));
         }
         return box;
+    }
+
+    /// <summary>A ref row's Checkout: labelled, or in the compact table an icon button the
+    /// size of the ones beside it, named "Checkout" for assistive tech, the word and its key
+    /// as the tooltip. Either way a click also selects the row, and the key (C) checks out
+    /// the selected row.</summary>
+    private ButtonElement CheckoutButton(Action onClick, string shortcut)
+    {
+        if (!_compactTables)
+            return Ui.SecondaryButton("Checkout", Icons.BendDownRight, onClick, 11.5f);
+        return Ui.IconButton(Icons.BendDownRight, onClick, $"Checkout ({Shortcuts.Keys(shortcut)})", 30f)
+            .AccessibleName("Checkout");
     }
 
     private static Element SmallIconButton(string glyph, Action onClick, string tooltip)

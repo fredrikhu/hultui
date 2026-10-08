@@ -14,8 +14,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <para>
 /// The exported tree is published as an immutable snapshot on every structural
 /// rebuild. The D-Bus method handlers run on the bus receive thread and read
-/// that snapshot lock-free; <see cref="ApplyChanges"/> and
-/// <see cref="NotifyFocusChanged"/> run on the UI thread and swap it. The
+/// that snapshot lock-free; <see cref="ApplyChanges"/> swaps it, and a focus move
+/// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
+/// focused state of its two objects in it, both on the UI thread. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
@@ -32,6 +33,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     }
 
     private readonly AtSpiBus? _bus;
+    // Where the signals go: the bus, or a test's recorder.
+    private readonly IAtSpiSignals? _signals;
     private readonly IAccessibilityActionHost? _actionHost;
     private readonly IAccessibilityGeometryHost? _geometryHost;
     private readonly bool _registered;
@@ -56,7 +59,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!connect) return;
         // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
         // "is anyone listening" contract the null bridge expresses everywhere.
-        _bus = AtSpiBus.Open();
+        _signals = _bus = AtSpiBus.Open();
         if (_bus is null) return;
 
         _bus.AddMethodHandler(new AtSpiObjectHandler(this));
@@ -74,6 +77,16 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // Whether anyone listens, for content costly to describe (seam W11).
         AccessibilityClients.Report(_bus.ReadStatus());
         _bus.WatchStatus(AccessibilityClients.Report);
+    }
+
+    /// <summary>For tests: a bridge registered with no bus, whose signals go to
+    /// <paramref name="signals"/>.</summary>
+    internal LinuxAccessibilityBridge(IAtSpiSignals signals, IAccessibilityActionHost? actionHost = null)
+    {
+        _actionHost = actionHost;
+        _geometryHost = actionHost as IAccessibilityGeometryHost;
+        _signals = signals;
+        _registered = true;
     }
 
     /// <summary>A childless application root, valid from Embed until the first build.</summary>
@@ -133,7 +146,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
     {
-        if (!_registered || _bus is null) return;
+        if (!_registered || _signals is null) return;
         DebugApplyChangesCalls++;
 
         _snapshot = Build(root, _geometryHost?.Scale ?? 1f);
@@ -151,13 +164,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         {
             string childPath = PathOf(added.Node);
             if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
-            _bus.EmitCacheAdd(this, acc);
+            _signals.EmitCacheAdd(this, acc);
             DebugSignalsEmitted++;
         }
 
+        // Gone objects only. One the new snapshot still has moved to another parent (a box
+        // that gained a name takes its children): the diff removes it from the old parent and
+        // adds it under the new, and its cache-add above already told the client where it is.
+        // Removing it after that made libatspi dispose the object it had just been given — the
+        // client lost it, and saw it go defunct. Its old parent learns of the move below.
         foreach (var removed in diff.Removed)
         {
-            _bus.EmitCacheRemove(PathOf(removed.Node));
+            string path = PathOf(removed.Node);
+            if (_snapshot.ByPath.ContainsKey(path)) continue;
+            _signals.EmitCacheRemove(path);
             DebugSignalsEmitted++;
         }
 
@@ -209,13 +229,16 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             string childPath = PathOf(added.Node);
             if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
             if (!seenParents.Add(acc.ParentPath)) continue;
-            _bus!.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
+            _signals!.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
             DebugSignalsEmitted++;
         }
     }
 
     // One children-changed:remove per surviving parent. Removed nodes are gone from
     // the new snapshot, so parent/index come from the previous tree the diff carries.
+    // Except an object that moved to another parent: it gets no cache-remove, which is what
+    // takes a gone object out of its parent's children in libatspi's cache, so its old parent
+    // says it lost that one, each time, or the client would list it under both parents.
     private void EmitRemovedChildNudges(List<RemovedNode> boundary)
     {
         var seenParents = new HashSet<string>();
@@ -223,25 +246,52 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         {
             if (removed.Parent is null) continue;
             string parentPath = PathOf(removed.Parent);
-            if (!seenParents.Add(parentPath)) continue;
+            bool moved = _snapshot.ByPath.ContainsKey(PathOf(removed.Node));
+            if (!moved && !seenParents.Add(parentPath)) continue;
             int index = IndexOf(removed.Parent, removed.Node);
-            _bus!.EmitChildrenChanged(parentPath, PathOf(removed.Node), index, isAdd: false);
+            _signals!.EmitChildrenChanged(parentPath, PathOf(removed.Node), index, isAdd: false);
             DebugSignalsEmitted++;
         }
     }
 
-    public void NotifyFocusChanged(AccessibilityNode? focused)
+    /// <summary>Focus moved; the object that had it is the one this bridge was last told of.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused) => MoveFocus(focused, previousPath: null);
+
+    /// <summary>Focus moved, and the window marked it on its tree: <paramref name="previous"/>
+    /// had it.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
+        => MoveFocus(focused, previous is null ? null : PathOf(previous));
+
+    private void MoveFocus(AccessibilityNode? focused, string? previousPath)
     {
-        if (!_registered || _bus is null) return;
+        if (!_registered || _signals is null) return;
 
         string? newPath = focused is null ? null : PathOf(focused);
-        if (newPath == _focusedPath) return;
 
-        if (_focusedPath is not null)
-            _bus.EmitStateChanged(_focusedPath, "focused", active: false);
-        if (newPath is not null)
-            _bus.EmitStateChanged(newPath, "focused", active: true);
+        // The focused state a client reads (GetState, the cache), as of now. A focus move
+        // rebuilds no snapshot, so both objects kept the state of the last rebuild, and the
+        // next rebuild's diff sent state-changed:focused for both again, late.
+        bool previousLost = previousPath is not null && previousPath != newPath && SetFocused(previousPath, false);
+        if (_focusedPath is not null && _focusedPath != newPath) SetFocused(_focusedPath, false);
+        if (newPath is not null) SetFocused(newPath, true);
+
+        if (_focusedPath is not null && _focusedPath != newPath)
+            _signals.EmitStateChanged(_focusedPath, "focused", active: false);
+        // The object the tree had focused, when this bridge was not told of it (a client
+        // attached after the focus last moved).
+        if (previousLost && previousPath != _focusedPath)
+            _signals.EmitStateChanged(previousPath!, "focused", active: false);
+        if (newPath is not null && newPath != _focusedPath)
+            _signals.EmitStateChanged(newPath, "focused", active: true);
         _focusedPath = newPath;
+    }
+
+    /// <summary>Sets an object's focused state in the published snapshot; true when it changed.</summary>
+    private bool SetFocused(string path, bool focused)
+    {
+        if (!_snapshot.ByPath.TryGetValue(path, out var acc) || acc.Focused == focused) return false;
+        acc.Focused = focused;
+        return true;
     }
 
     // ───────────────────────────────────────────────────────────── helpers
@@ -252,49 +302,49 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         switch (change.PropertyName)
         {
             case AccessibilityProperties.Name:
-                _bus!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleName, change.Node.Name ?? "");
+                _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleName, change.Node.Name ?? "");
                 return true;
             case AccessibilityProperties.Description:
-                _bus!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleDescription, change.Node.Description ?? "");
+                _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleDescription, change.Node.Description ?? "");
                 return true;
             case AccessibilityProperties.Value:
-                _bus!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleValue, change.Node.Value ?? "");
+                _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleValue, change.Node.Value ?? "");
                 return true;
             case AccessibilityProperties.IsPassword:
                 // A client caches the role from the cache-add, so a field masked or revealed
                 // after it was first seen has to say its role changed.
-                _bus!.EmitRoleChange(path, AtSpiAccessible.RoleOf(change.Node));
+                _signals!.EmitRoleChange(path, AtSpiAccessible.RoleOf(change.Node));
                 return true;
             case AccessibilityProperties.IsToggled:
-                _bus!.EmitStateChanged(path, "checked", change.Node.IsToggled == true);
+                _signals!.EmitStateChanged(path, "checked", change.Node.IsToggled == true);
                 return true;
             case AccessibilityProperties.IsFocused:
-                _bus!.EmitStateChanged(path, "focused", change.Node.IsFocused);
+                _signals!.EmitStateChanged(path, "focused", change.Node.IsFocused);
                 return true;
             case AccessibilityProperties.IsExpanded:
-                _bus!.EmitStateChanged(path, "expanded", change.Node.Expanded == true);
+                _signals!.EmitStateChanged(path, "expanded", change.Node.Expanded == true);
                 return true;
             case AccessibilityProperties.IsEnabled:
-                _bus!.EmitStateChanged(path, "enabled", change.Node.IsEnabled);
-                _bus!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);
+                _signals!.EmitStateChanged(path, "enabled", change.Node.IsEnabled);
+                _signals!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);
                 return true;
             case AccessibilityProperties.IsSelected:
-                _bus!.EmitStateChanged(path, "selected", change.Node.IsSelected == true);
+                _signals!.EmitStateChanged(path, "selected", change.Node.IsSelected == true);
                 return true;
             case AccessibilityProperties.Text:
             {
                 var (deleted, inserted) = AtSpiText.Difference(change.Previous?.Text?.Text ?? "", change.Node.Text?.Text ?? "");
-                if (deleted is { } d) _bus!.EmitTextChanged(path, insert: false, d.Offset, d.Text);
-                if (inserted is { } i) _bus!.EmitTextChanged(path, insert: true, i.Offset, i.Text);
+                if (deleted is { } d) _signals!.EmitTextChanged(path, insert: false, d.Offset, d.Text);
+                if (inserted is { } i) _signals!.EmitTextChanged(path, insert: true, i.Offset, i.Text);
                 return deleted is not null || inserted is not null;
             }
             case AccessibilityProperties.TextSelection:
             {
                 var (before, after) = (change.Previous?.Text, change.Node.Text);
                 if (after is not null && after.Caret >= 0 && before?.Caret != after.Caret)
-                    _bus!.EmitTextCaretMoved(path, after.Caret);
+                    _signals!.EmitTextCaretMoved(path, after.Caret);
                 if (before?.SelectionStart != after?.SelectionStart || before?.SelectionEnd != after?.SelectionEnd)
-                    _bus!.EmitTextSelectionChanged(path);
+                    _signals!.EmitTextSelectionChanged(path);
                 return true;
             }
             default:
@@ -305,8 +355,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// <summary>An AT-SPI announcement from the element's object, or the application's.</summary>
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
     {
-        if (!_registered || _bus is null) return;
-        _bus.EmitAnnouncement(source is null ? AtSpiConstants.RootPath : PathOf(source), text,
+        if (!_registered || _signals is null) return;
+        _signals.EmitAnnouncement(source is null ? AtSpiConstants.RootPath : PathOf(source), text,
             politeness == AnnouncementPoliteness.Assertive ? AtSpiConstants.LiveAssertive : AtSpiConstants.LivePolite);
         DebugSignalsEmitted++;
     }

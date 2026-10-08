@@ -206,15 +206,22 @@ public sealed class FakeMediaLibrary : IMediaLibrary
             : ApertureResult<MediaItem>.Fail(ApertureFailureKind.NotFound, "No such item"));
     }
 
+    // The size goes into the URL as the real server's does, so a test can see what size the
+    // app asked for, and the same picture at two sizes is two cache entries here too.
     public Uri? ImageUrl(string itemId, ImageKind kind, string? tag, int? maxWidth = null, int? maxHeight = null) =>
-        tag is null ? null : new Uri($"{Server.Address}/Items/{itemId}/Images/{kind}?tag={tag}");
+        tag is null ? null
+            : new Uri($"{Server.Address}/Items/{itemId}/Images/{kind}?tag={tag}{Size(maxWidth, maxHeight)}");
 
     public Uri? TrickplayTileUrl(string itemId, int width, int tileIndex) =>
         width <= 0 || tileIndex < 0 ? null
             : new Uri($"{Server.Address}/Videos/{itemId}/Trickplay/{width}/{tileIndex}.jpg");
 
     public Uri? ChapterImageUrl(string itemId, int chapterIndex, string? tag, int? maxWidth = null, int? maxHeight = null) =>
-        tag is null ? null : new Uri($"{Server.Address}/Items/{itemId}/Images/Chapter/{chapterIndex}?tag={tag}");
+        tag is null ? null
+            : new Uri($"{Server.Address}/Items/{itemId}/Images/Chapter/{chapterIndex}?tag={tag}{Size(maxWidth, maxHeight)}");
+
+    private static string Size(int? width, int? height) =>
+        (width is { } w ? $"&fillWidth={w}" : "") + (height is { } h ? $"&fillHeight={h}" : "");
 
     public Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
         int? maxBitrateBps = null, CancellationToken ct = default)

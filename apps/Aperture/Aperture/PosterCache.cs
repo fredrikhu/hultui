@@ -19,6 +19,14 @@ namespace Aperture;
 /// <para>Everything is keyed by the full image URL, which already carries the item, the
 /// image kind, the tag and the size — so new artwork on the server is a new key rather
 /// than a stale picture, and the same poster at two sizes is two entries on purpose.</para>
+///
+/// <para>Sizes follow the window's display scale, so a move to another monitor asks for
+/// everything again at new sizes. <see cref="Retire()"/> marks what is held as fetched for
+/// the old scale: a tile keeps drawing its old picture (soft, briefly) while the new one
+/// downloads, and once every download has landed whatever is left from the old scale is
+/// dropped, instead of sitting in the cache beside its replacement. A hero, whose size also
+/// follows the window's, retires its old size the same way one picture at a time
+/// (<see cref="Retire(Uri)"/>).</para>
 /// </summary>
 public sealed class PosterCache : IDisposable
 {
@@ -28,6 +36,9 @@ public sealed class PosterCache : IDisposable
     {
         public IImageSource? Image;
         public Status Status;
+        /// <summary>Fetched for a display scale the window has since left; see
+        /// <see cref="Retire()"/>.</summary>
+        public bool Retired;
     }
 
     /// <summary>Artwork past this is not decoded. Jellyfin's originals can be several
@@ -43,6 +54,18 @@ public sealed class PosterCache : IDisposable
     private readonly HttpClient _http;
     private readonly int _cap;
     private bool _disposed;
+
+    /// <summary>Bumped by <see cref="Retire()"/>. A download started before the bump lands
+    /// retired: it was asked for at the old scale.</summary>
+    private int _scaleGeneration;
+    private int _retiredCount;
+    /// <summary>Set when the last download lands while retired entries remain; the next
+    /// <see cref="Get"/> drops them. Not dropped on the download's own thread, because the
+    /// UI thread may be drawing one of them.</summary>
+    private bool _sweepRetired;
+    /// <summary>Downloads retired one by one (<see cref="Retire(Uri)"/>) before they landed:
+    /// they land retired.</summary>
+    private readonly HashSet<string> _retireOnLanding = new(StringComparer.Ordinal);
 
     /// <summary>Downloads allowed at once. Higher than a decode pool would be — these are
     /// mostly waiting on a LAN — but bounded, because every one of them holds a buffer and
@@ -93,25 +116,108 @@ public sealed class PosterCache : IDisposable
 
     /// <summary>The picture for a URL, or (null, Pending) while it is fetched. Null URL —
     /// an item the server has no artwork for — is <see cref="Status.Failed"/> at once, so
-    /// the tile draws its placeholder on the first frame rather than shimmering forever.</summary>
-    public (IImageSource? Image, Status Status) Get(Uri? url)
+    /// the tile draws its placeholder on the first frame rather than shimmering forever.
+    ///
+    /// <para><paramref name="standIn"/> is the same artwork at the size asked for before the
+    /// window last changed scale. While <paramref name="url"/> downloads, a retired picture
+    /// there is returned as <see cref="Status.Ready"/>, so the tile stays drawn; once
+    /// <paramref name="url"/> has landed, asking again drops the stand-in.</para>
+    ///
+    /// <para>Call it on the UI thread: it is where retired pictures are disposed, and that
+    /// thread is the one that may be drawing them.</para></summary>
+    public (IImageSource? Image, Status Status) Get(Uri? url, Uri? standIn = null)
     {
         if (url is null) return (null, Status.Failed);
         var key = url.ToString();
+        var standInKey = standIn?.ToString();
+        int generation;
+        Entry? stand = null;
         lock (_lock)
         {
             if (_disposed) return (null, Status.Failed);
-            if (_map.TryGetValue(key, out var e)) { Touch(key); return (e.Image, e.Status); }
-            if (!_inFlight.Add(key)) return (null, Status.Pending);
+            // The stand-in is spared: it may have been retired since the last download
+            // landed, and it is what this caller draws until its own picture is in.
+            if (_sweepRetired) SweepRetired(standInKey);
+            if (_map.TryGetValue(key, out var e))
+            {
+                Touch(key);
+                // Back at the scale it was fetched for: it is the right size again.
+                if (e.Retired) { e.Retired = false; _retiredCount--; }
+                if (standInKey is not null) DropRetired(standInKey);
+                return (e.Image, e.Status);
+            }
+            if (standInKey is not null && _map.TryGetValue(standInKey, out var s)
+                && s.Retired && s.Status == Status.Ready)
+            {
+                stand = s;
+                Touch(standInKey);   // drawn, so not the next thing the LRU drops
+            }
+            // Asked for again before it landed: it is wanted after all.
+            _retireOnLanding.Remove(key);
+            if (!_inFlight.Add(key)) return stand is null ? (null, Status.Pending) : (stand.Image, Status.Ready);
+            generation = _scaleGeneration;
         }
-        _ = FetchQueued(key, url);
-        return (null, Status.Pending);
+        _ = FetchQueued(key, url, generation);
+        return stand is null ? (null, Status.Pending) : (stand.Image, Status.Ready);
+    }
+
+    /// <summary>Whether anything fetched for an earlier display scale is still held — the
+    /// only time a stand-in is worth looking up.</summary>
+    public bool HasRetired { get { lock (_lock) return _retiredCount > 0; } }
+
+    /// <summary>
+    /// The window changed display scale, so every size asked for from now on is new: marks
+    /// everything held, and everything still downloading, as fetched for the old scale.
+    /// Retired pictures still serve as stand-ins (see <see cref="Get"/>) and are dropped
+    /// once the downloads that follow have all landed. One asked for again by its own URL
+    /// — the window went back — is simply current again.
+    /// </summary>
+    public void Retire()
+    {
+        lock (_lock)
+        {
+            _scaleGeneration++;
+            _sweepRetired = false;   // the stand-ins this makes are about to be needed
+            _retireOnLanding.Clear();   // every download now lands retired anyway
+            foreach (var e in _map.Values)
+                if (!e.Retired) { e.Retired = true; _retiredCount++; }
+        }
+    }
+
+    /// <summary>
+    /// One picture is no longer wanted at its size: a hero asked for the same artwork at
+    /// another size, because the window was resized past a step. Retired as by
+    /// <see cref="Retire()"/> — still a stand-in, dropped once the downloads that follow have
+    /// landed, current again if asked for by its own URL — and if it is still downloading,
+    /// it lands retired.
+    /// </summary>
+    public void Retire(Uri url)
+    {
+        var key = url.ToString();
+        lock (_lock)
+        {
+            if (_map.TryGetValue(key, out var e))
+            {
+                if (!e.Retired) { e.Retired = true; _retiredCount++; }
+            }
+            else if (_inFlight.Contains(key))
+            {
+                _retireOnLanding.Add(key);
+            }
+        }
+    }
+
+    /// <summary>Whether this URL's own picture has landed — not a stand-in for it, and not a
+    /// download that failed.</summary>
+    public bool IsReady(Uri url)
+    {
+        lock (_lock) return _map.TryGetValue(url.ToString(), out var e) && e.Status == Status.Ready;
     }
 
     /// <summary>Waits for a slot before taking a connection. Every visible tile calls
     /// <see cref="Get"/> on the same frame, so without this a screenful of posters is a
     /// screenful of simultaneous requests at the server.</summary>
-    private async Task FetchQueued(string key, Uri url)
+    private async Task FetchQueued(string key, Uri url, int generation)
     {
         await _slots.WaitAsync().ConfigureAwait(false);
         try
@@ -120,9 +226,15 @@ public sealed class PosterCache : IDisposable
             lock (_lock)
             {
                 if (_disposed) { (image as IDisposable)?.Dispose(); return; }
-                _map[key] = new Entry { Image = image, Status = status };
+                // Not ||: the key leaves the set either way.
+                bool retired = _retireOnLanding.Remove(key) | (generation != _scaleGeneration);
+                _map[key] = new Entry { Image = image, Status = status, Retired = retired };
+                if (retired) _retiredCount++;
                 _lru.AddLast(key);
                 _inFlight.Remove(key);
+                // The last download has landed: every tile that asked has its picture at the
+                // new size, so what is left from the old scale is drawn nowhere.
+                if (_inFlight.Count == 0 && _retiredCount > 0) _sweepRetired = true;
                 Trim();
             }
             _onLoaded();   // the caller marshals to the UI thread and coalesces the repaint
@@ -205,8 +317,35 @@ public sealed class PosterCache : IDisposable
         while (_map.Count > _cap && _lru.First is { } node)
         {
             _lru.RemoveFirst();
-            if (_map.Remove(node.Value, out var e)) (e.Image as IDisposable)?.Dispose();
+            if (_map.Remove(node.Value, out var e))
+            {
+                if (e.Retired) _retiredCount--;
+                (e.Image as IDisposable)?.Dispose();
+            }
         }
+    }
+
+    /// <summary>Drops one entry if it is retired. Under the lock.</summary>
+    private void DropRetired(string key)
+    {
+        if (!_map.TryGetValue(key, out var e) || !e.Retired) return;
+        _map.Remove(key);
+        _lru.Remove(key);
+        _retiredCount--;
+        (e.Image as IDisposable)?.Dispose();
+    }
+
+    /// <summary>Drops every retired entry but <paramref name="keep"/> (a stand-in about to be
+    /// drawn). Under the lock, on the UI thread; once per change of scale or hero size, so
+    /// the list it makes does not matter.</summary>
+    private void SweepRetired(string? keep)
+    {
+        _sweepRetired = false;
+        if (_retiredCount == 0) return;
+        var keys = new List<string>(_retiredCount);
+        foreach (var (key, e) in _map)
+            if (e.Retired && !string.Equals(key, keep, StringComparison.Ordinal)) keys.Add(key);
+        foreach (var key in keys) DropRetired(key);
     }
 
     public void Dispose()

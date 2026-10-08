@@ -76,7 +76,14 @@ public sealed class PerformanceCounters
     /// chose unlimited pacing), so the HUD can say the figure is throughput, not a rate.</summary>
     public bool Unpaced { get; set; }
 
-    private readonly Queue<long> _frameStarts = new();
+    // When recent frames began, oldest first: what Fps counts. A ring of fixed size, so a frame
+    // never allocates. A queue grew whenever the rate rose (to 128 at 120 Hz, by doubling), and
+    // these counters run every frame of every window, HUD shown or not. Above 512 frames a
+    // second, which only an unpaced loop reaches, the rate is taken over the last 512 frames
+    // rather than a whole second.
+    private readonly long[] _frameStarts = new long[512];
+    private int _frameStartsHead;
+    private int _frameStartsCount;
     public int ElementCount { get; set; }
 
     // ──── Slowest pass over the trailing PeakWindow ────
@@ -94,14 +101,25 @@ public sealed class PerformanceCounters
         _frameTimer.Restart();
 
         long now = Stopwatch.GetTimestamp();
-        _frameStarts.Enqueue(now);
+        var starts = _frameStarts;
+        int mask = starts.Length - 1;
+        if (_frameStartsCount == starts.Length)
+        {
+            _frameStartsHead = (_frameStartsHead + 1) & mask;
+            _frameStartsCount--;
+        }
+        starts[(_frameStartsHead + _frameStartsCount) & mask] = now;
+        _frameStartsCount++;
         long oldestKept = now - Stopwatch.Frequency;   // one second
-        while (_frameStarts.Count > 1 && _frameStarts.Peek() < oldestKept)
-            _frameStarts.Dequeue();
+        while (_frameStartsCount > 1 && starts[_frameStartsHead] < oldestKept)
+        {
+            _frameStartsHead = (_frameStartsHead + 1) & mask;
+            _frameStartsCount--;
+        }
         // Over the span the retained frames cover (up to a second), so the figure is
         // right from the second frame on rather than ramping up over the first second.
-        double span = (now - _frameStarts.Peek()) / (double)Stopwatch.Frequency;
-        Fps = span > 0 ? (float)((_frameStarts.Count - 1) / span) : 0f;
+        double span = (now - starts[_frameStartsHead]) / (double)Stopwatch.Frequency;
+        Fps = span > 0 ? (float)((_frameStartsCount - 1) / span) : 0f;
     }
 
     public void EndFrame()
@@ -156,8 +174,9 @@ public sealed class PerformanceCounters
     public static int CountElements(Core.Elements.Element root)
     {
         int count = 1;
-        foreach (var child in root.Children)
-            count += CountElements(child);
+        var children = root.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            count += CountElements(children[i]);
         return count;
     }
 }

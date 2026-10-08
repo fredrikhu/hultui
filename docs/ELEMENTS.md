@@ -749,6 +749,37 @@ var banner = Image.New(bannerSource)
     .ImageFit(ImageFit.Cover);
 ```
 
+**Still images.** `SkiaImageSource` is the Skia renderer's source for a picture that does not
+change: `FromFile`, `FromBytes`, `FromPixels`, or `new SkiaImageSource(bitmap)` for an
+`SKBitmap` you decoded or drew yourself. The source takes the bitmap over. It marks it
+immutable so the image it draws shares the bitmap's pixels instead of copying them (a copy
+would hold a 3840×2400 photo twice, 35 MB more), and it disposes the bitmap when it is
+disposed. Finish drawing into the bitmap before you hand it over, and do not change or
+dispose it afterwards: hand over a `Copy()` if you want to keep drawing.
+
+```csharp
+var bitmap = new SKBitmap(64, 64);
+using (var canvas = new SKCanvas(bitmap))
+    canvas.Clear(SKColors.Teal);                  // all drawing first
+var source = new SkiaImageSource(bitmap);          // then hand it over
+var picture = Image.New(source).Size(32f, 32f);   // dispose `source`, not `bitmap`, when done
+```
+
+**Decode at the size you draw.** A still image costs its decoded pixels, four bytes each,
+whatever size it is drawn at. Decode it, or ask a server for it, at the device pixels its box
+covers: the layout size times `Window.DisplayScale`. A fixed "twice the layout size" holds
+four times the pixels it draws at 100 % (a 168 × 252 poster: 677 KB instead of 169 KB), and
+drawing it smaller also makes Skia build a mipmap chain for it. For `ImageFit.Cover`, size it
+by the side that decides the fit (the height, for a picture wider than its box), so it still
+has a pixel for every pixel drawn. `DisplayScale` changes when
+the window moves to a monitor with another scale, which arrives as `Window.Resized`: ask
+again at the new size then, key any cache by the size asked for, and drop what was decoded
+for the old scale once the new pictures are in. Aperture's `PosterCache` does all three. A
+picture whose box follows the window (a backdrop across a page) passes through every width
+while the window is dragged: round its size up to a step (Aperture uses 128 device pixels),
+so it is asked for again only when the window passes one, keep drawing the old picture until
+the new one is in, and then drop the old one.
+
 **Changing pixels.** A source whose pixels change over time — a video frame, a
 camera, a software-rendered view — implements `IPixelImageSource`, and the renderer
 draws its current bytes without copying. `PixelFrameSink` is the ready-made one: a

@@ -2,6 +2,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using Xunit;
 
 namespace HultUI.Core.Tests.Layout;
@@ -32,17 +33,26 @@ public class LayoutPathIndependenceTests
     [MemberData(nameof(Seeds))]
     public void ARandomTreeOfControlsLaysOutAsIfLaidOutFresh(int seed) => LaysOutAsIfFresh(seed, controls: true);
 
-    private static void LaysOutAsIfFresh(int seed, bool controls)
+    /// <summary>The same with labels truncated as the text pipeline truncates them — whole
+    /// characters and an ellipsis, short of the room, and the ellipsis even with no room — where a
+    /// one-line label's base is its untruncated width capped at the room (TruncatingLabelTests).</summary>
+    [Theory]
+    [MemberData(nameof(Seeds))]
+    public void ARandomTreeOfTruncatedLabelsLaysOutAsIfLaidOutFresh(int seed) =>
+        LaysOutAsIfFresh(seed, controls: false, () => new TruncatingLabelTests.EllipsisMeasureContext());
+
+    private static void LaysOutAsIfFresh(int seed, bool controls, Func<IMeasureContext>? measure = null)
     {
+        measure ??= () => new StubMeasureContext();
         var tree = Build(seed, controls);
-        var engine = new LayoutEngine(new StubMeasureContext());
+        var engine = new LayoutEngine(measure());
 
         foreach (var (w, h) in Sizes)
         {
             engine.PerformLayout(tree, w, h);
 
             var fresh = Build(seed, controls);
-            new LayoutEngine(new StubMeasureContext()).PerformLayout(fresh, w, h);
+            new LayoutEngine(measure()).PerformLayout(fresh, w, h);
 
             var a = Flatten(tree).ToList();
             var b = Flatten(fresh).ToList();

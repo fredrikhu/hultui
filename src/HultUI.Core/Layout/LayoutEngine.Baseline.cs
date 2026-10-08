@@ -62,9 +62,10 @@ public sealed partial class LayoutEngine
         var margin = box.Margin;
 
         bool hasFlow = false;
-        foreach (var child in element.Children)
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
-            if (child.PositionRead.Type == PositionType.Absolute) continue;
+            if (children[i].PositionRead.Type == PositionType.Absolute) continue;
             hasFlow = true;
             break;
         }

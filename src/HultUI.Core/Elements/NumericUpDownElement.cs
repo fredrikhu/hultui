@@ -111,10 +111,24 @@ public class NumericUpDownElement : Element, IRangeValueElement
     private string FormatValue(double v)
     {
         if (Formatter is not null) return Formatter(v);
+
+        // The field measures and draws its text on every frame it paints, so the default
+        // format is kept for the value and step it was last asked for. Otherwise each paint
+        // formatted the value twice, each time into a new string with a new format string
+        // ("F0"): ~120 bytes a frame per field. An app's Formatter is called every time, as
+        // before, since it may read state of its own.
+        if (_formatted is not null && v.Equals(_formattedValue) && _step.Equals(_formattedStep))
+            return _formatted;
         int decimals = 0;
         for (double s = _step; s > 0 && decimals < 6 && Math.Abs(s - Math.Round(s)) > 1e-9; s *= 10) decimals++;
-        return v.ToString("F" + decimals, CultureInfo.InvariantCulture);
+        _formattedValue = v;
+        _formattedStep = _step;
+        return _formatted = v.ToString("F" + decimals, CultureInfo.InvariantCulture);
     }
+
+    private string? _formatted;
+    private double _formattedValue;
+    private double _formattedStep;
 
     private double Clamp(double v)
     {

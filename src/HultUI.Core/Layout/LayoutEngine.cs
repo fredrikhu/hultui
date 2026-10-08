@@ -50,9 +50,7 @@ public sealed partial class LayoutEngine
     private Size ComputeLayout(Element element, LayoutConstraint constraint, float absoluteX, float absoluteY,
         float? forcedWidth = null, float? forcedHeight = null)
     {
-        using var _trace = _tracer is null
-            ? default
-            : _tracer.Begin("Layout", element.GetType().Name, element.Key ?? element.Name);
+        using var _trace = _tracer is null ? default : _tracer.BeginElement("Layout", element);
 
         // Skip clean subtrees when constraints and forced sizes haven't changed.
         // On an axis whose size is set — forced, or given in pixels, with no percentage min or max —
@@ -507,7 +505,9 @@ public sealed partial class LayoutEngine
                 var constraintH = isRow ? crossAvailable : mainAvailable;
                 float? fw = hasBasisOrSize && isRow ? basisOrSize : stretchedWidth;
                 float? fh = hasBasisOrSize ? (isRow ? null : basisOrSize) : null;
-                measured = MeasureLeafSize(child, constraintW, constraintH, fw, fh);
+                measured = isRow && !hasBasisOrSize && !LayoutSpace.IsUnbounded(mainAvailable) && TruncatesToOneLine(child)
+                    ? TruncatingBase(child, mainAvailable, crossAvailable)
+                    : MeasureLeafSize(child, constraintW, constraintH, fw, fh);
             }
             else if (hasBasisOrSize)
             {
@@ -589,9 +589,7 @@ public sealed partial class LayoutEngine
             return cachedSize;
         }
 
-        using var _trace = _tracer is null
-            ? default
-            : _tracer.Begin("Measure", element.GetType().Name, element.Key ?? element.Name);
+        using var _trace = _tracer is null ? default : _tracer.BeginElement("Measure", element);
 
         var box = element.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;
@@ -749,8 +747,10 @@ public sealed partial class LayoutEngine
     /// element.Layout or updating the layout cache. Used by Phase 1 measurement
     /// so that Phase 6 can be the single authoritative ComputeLayout call.
     /// </summary>
+    /// <param name="pin">Keep the measurement where the cache's ring will not overwrite it
+    /// (<see cref="MeasureCache"/>): a truncating label's untruncated size (TruncatingBase).</param>
     private Size MeasureLeafSize(Element element, float constraintW, float constraintH,
-        float? forcedWidth = null, float? forcedHeight = null)
+        float? forcedWidth = null, float? forcedHeight = null, bool pin = false)
     {
         // Memoize like MeasureSize: a leaf is measured many times per layout — once
         // per ancestor's Phase 1 measure and again in Phase 6 arrange, across every
@@ -794,7 +794,7 @@ public sealed partial class LayoutEngine
         }
 
         if (element.MeasureCache.TryGet(constraintW, constraintH, forcedWidth, forcedHeight,
-                out var cachedSize, out var cachedFrom, out var cachedW))
+                out var cachedSize, out var cachedFrom, out var cachedW, pin))
         {
             _measuredFromH = cachedFrom;
             _measuredW = cachedW;
@@ -833,11 +833,73 @@ public sealed partial class LayoutEngine
             ? WidthRange.At(contentAvailW)
             : new WidthRange(sameFromW, float.PositiveInfinity);
         var widthFrom = WidthsOffered(box, forcedWidth, resolvedW, contentWidthFrom, outerSpacing.Horizontal, constraintW);
-        element.MeasureCache.Store(constraintW, constraintH, forcedWidth, forcedHeight, resultSize, heightFrom, widthFrom);
+        element.MeasureCache.Store(constraintW, constraintH, forcedWidth, forcedHeight, resultSize, heightFrom, widthFrom, pin);
         _measuredFromH = heightFrom;
         _measuredW = widthFrom;
 
         return resultSize;
+    }
+
+    // ── A one-line label that truncates, in a row ──
+    //
+    // Its flex base size is its untruncated width, capped at the room the row offers it — CSS's
+    // max-content width, clamped — rather than the label measured truncated at that room. The
+    // truncated measurement asked the text pipeline for the longest prefix that fits, with an
+    // ellipsis, once for the base and again at the width the label then shrank to: two
+    // truncations a label a step on a resize, where one does. The untruncated size is read no
+    // constraint, so it is measured once and kept (pinned in the label's MeasureCache) until
+    // the label changes. The base comes out up to the ellipsis's slack wider than before (the
+    // truncated text ends short of the room by less than a character), and with no room, at
+    // the label's padding: the ellipsis alone used to be measured wider than the room.
+
+    /// <summary>Whether <paramref name="child"/> is a label of one line that truncates whatever
+    /// width it is given (Clip or Ellipsis), sized from its text: no width or percentage min or
+    /// max of its own, no aspect ratio.</summary>
+    private static bool TruncatesToOneLine(Element child)
+    {
+        if (child is not TextElement { MaxLines: 1 }) return false;
+        var box = child.BoxRead;
+        return box.Width.IsAuto && box.AspectRatio <= 0f
+            && box.MinWidth.Unit != DimensionUnit.Percent && box.MaxWidth.Unit != DimensionUnit.Percent;
+    }
+
+    /// <summary>
+    /// The flex base size of a one-line truncating label in a row (<see cref="TruncatesToOneLine"/>),
+    /// offered <paramref name="constraintW"/>: its untruncated (margin-box) size, its width capped
+    /// at what its box comes to at the room offered. Capped, the cross size is NaN: the label's
+    /// height is the truncated line's, which is measured at the width flex resolution gives it
+    /// (RemeasureFlexedCrossSizes) — the measurement the layout pass then makes anyway.
+    /// </summary>
+    private Size TruncatingBase(Element label, float constraintW, float constraintH)
+    {
+        var natural = MeasureLeafSize(label, LayoutSpace.Unbounded, constraintH, pin: true);
+        float naturalFromH = _measuredFromH;
+        var naturalW = _measuredW;
+
+        // The width the box comes to, sized from content, at the room offered: its content gets
+        // the room within its min and max (ResolveAxis), and the box is that plus padding and
+        // border, within its min and max again. Its width at any content width is the same
+        // function of it, which never falls as the content widens: the smaller of the natural
+        // box and this one is the box at the smaller content width, to the bit.
+        var box = label.BoxRead;
+        float spacing = (box.Padding + box.BorderWidth).Horizontal;
+        float room = ApplyMinMax(constraintW, box.MinWidth, box.MaxWidth, constraintW) - spacing;
+        if (float.IsNegative(room)) room = 0;
+        float cap = ApplyMinMax(room + spacing, box.MinWidth, box.MaxWidth, constraintW) + box.Margin.Horizontal;
+
+        _measuredFromH = naturalFromH;
+        if (natural.Width <= cap)
+        {
+            // It fits: the base is the untruncated size, at every width the box gives it as much
+            // room — wherever the untruncated measurement says it holds, or at least from here up.
+            _measuredW = naturalW.Contains(constraintW) ? naturalW : new WidthRange(constraintW, float.PositiveInfinity);
+            return natural;
+        }
+
+        // Its height waits for the width it is laid out at (NaN, RemeasureFlexedCrossSizes),
+        // unless the box's height is set and no text decides it.
+        _measuredW = WidthRange.At(constraintW);
+        return new Size(cap, box.Height.IsAuto ? float.NaN : natural.Height);
     }
 
     // ── The heights a measurement holds for (MeasureCache) ──
@@ -1182,17 +1244,15 @@ public sealed partial class LayoutEngine
             // css-flexbox-1 §9.7's shape: distribute, clamp violators to their
             // floor and freeze them, then redistribute the shortfall among the
             // rest. An item with no floor (floor 0) behaves as before.
-            float[]? floors = null;
+            // On the stack, as frozen below: a scroll view in a column overflows it on every
+            // relayout, and a heap array here was the one allocation such a pass made.
+            Span<float> floors = items.Count <= 64 ? stackalloc float[items.Count] : new float[items.Count];
             for (int i = 0; i < items.Count; i++)
             {
                 var el = items[i].Element;
                 if (el.FlexRead.FlexShrink <= 0) continue;
                 float floor = AutomaticMinMain(el, isRow, mainAvailable, crossAvailable);
-                if (floor > 0)
-                {
-                    floors ??= new float[items.Count];
-                    floors[i] = floor;
-                }
+                if (floor > 0) floors[i] = floor;
             }
 
             Span<bool> frozen = items.Count <= 64 ? stackalloc bool[items.Count] : new bool[items.Count];
@@ -1215,7 +1275,7 @@ public sealed partial class LayoutEngine
                     if (shrinkFactor <= 0) continue;
 
                     float reduction = deficit * (shrinkFactor / totalShrink);
-                    float floor = floors?[i] ?? 0f;
+                    float floor = floors[i];
                     float shrunk = item.MainSize - reduction;
                     if (shrunk <= floor)
                     {
@@ -1320,7 +1380,8 @@ public sealed partial class LayoutEngine
     /// <summary>
     /// Min-content width (border-box): the width below which an element's content
     /// genuinely breaks. Leaves answer for themselves — text with its widest
-    /// unbreakable segment, everything else by measuring at zero available width.
+    /// unbreakable segment (a one-line label that truncates with none: it shows less
+    /// of itself instead), everything else by measuring at zero available width.
     /// Scroll/hidden overflow on the axis contributes zero, as in
     /// <see cref="MinContentHeight"/>.
     /// </summary>
@@ -1395,8 +1456,9 @@ public sealed partial class LayoutEngine
         for (int i = 0; i < items.Count; i++)
         {
             var item = items[i];
-            // Sub-pixel drift from distributing free space isn't a re-measure.
-            if (float.Abs(item.MainSize - item.BaseMain) < 0.01f) continue;
+            // Sub-pixel drift from distributing free space isn't a re-measure. A cross size not
+            // known yet (a truncating label's, TruncatingBase) is measured whatever happened.
+            if (float.Abs(item.MainSize - item.BaseMain) < 0.01f && !float.IsNaN(item.CrossSize)) continue;
 
             var child = item.Element;
             var childBox = child.BoxRead;
@@ -1768,8 +1830,10 @@ public sealed partial class LayoutEngine
         // final sweep is a safety net; ComputeLayout already clears visited nodes.
         if ((element.DirtyFlags & DirtyFlags.Layout) == 0) return;
         element.DirtyFlags &= ~DirtyFlags.Layout;
-        foreach (var child in element.Children)
-            ClearLayoutDirty(child);
+        // By index: foreach over the Children interface boxes an enumerator per container.
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            ClearLayoutDirty(children[i]);
     }
 }
 

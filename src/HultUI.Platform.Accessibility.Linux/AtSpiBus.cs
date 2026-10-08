@@ -4,6 +4,25 @@ using Tmds.DBus.Protocol;
 namespace HultUI.Platform.Accessibility.Linux;
 
 /// <summary>
+/// The signals the bridge sends to assistive technology: the a11y bus's, or, in tests, a
+/// recorder's, so the event stream can be checked without a bus.
+/// </summary>
+[SupportedOSPlatform("linux")]
+internal interface IAtSpiSignals
+{
+    void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd);
+    void EmitPropertyChange(string path, string atSpiProperty, string newValue);
+    void EmitRoleChange(string path, uint role);
+    void EmitStateChanged(string path, string state, bool active);
+    void EmitTextChanged(string path, bool insert, int offset, string text);
+    void EmitTextCaretMoved(string path, int offset);
+    void EmitTextSelectionChanged(string path);
+    void EmitAnnouncement(string path, string text, int politeness);
+    void EmitCacheAdd(IAtSpiTree tree, AtSpiAccessible node);
+    void EmitCacheRemove(string path);
+}
+
+/// <summary>
 /// Owns the two D-Bus connections the AT-SPI protocol needs — the session bus
 /// (used only to discover the a11y bus address) and the a11y bus itself — plus
 /// the outgoing traffic the bridge produces: the <c>Socket.Embed</c>
@@ -15,7 +34,7 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// deals with the calls and signals the application <em>originates</em>.
 /// </remarks>
 [SupportedOSPlatform("linux")]
-internal sealed class AtSpiBus : IDisposable
+internal sealed class AtSpiBus : IAtSpiSignals, IDisposable
 {
     private readonly DBusConnection _session;
     private readonly DBusConnection _a11y;

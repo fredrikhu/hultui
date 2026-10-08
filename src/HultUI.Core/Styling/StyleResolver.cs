@@ -64,8 +64,11 @@ public static class StyleResolver
             element.MarkLayoutDirty();
         element.ResolvedInherited = resolved;
 
-        foreach (var child in element.Children)
+        // By index: foreach over the Children interface boxes an enumerator per container.
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
         {
+            var child = children[i];
             // Propagate overlay host and focus manager down the tree
             child.OverlayHost = element.OverlayHost;
             child.FocusManager = element.FocusManager;

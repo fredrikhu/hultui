@@ -402,7 +402,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             {
                 if (Math.Abs(bx - ax) < 0.01f && Math.Abs(by - ay) < 0.01f) return;   // no radius here
 
-                using var tri = new SKPath();
+                // The pooled path: the clip copies it, and Stroke draws a round rect, not a path.
+                var tri = _pooledPath;
+                tri.Rewind();
                 tri.MoveTo(ax, ay);
                 tri.LineTo(bx, by);
                 tri.LineTo(cx, cy);
@@ -523,8 +525,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // TextDirection.Auto is only known now that it has been laid out.
         float alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
 
-        foreach (var line in layout.Lines)
+        // Indexed, here and in every text draw below: Lines and Runs are interfaces, and a
+        // foreach over one boxes its enumerator — 72 B per label per frame, on every frame.
+        var lines = layout.Lines;
+        for (int li = 0; li < lines.Count; li++)
         {
+            var line = lines[li];
             // Shift the line horizontally for center/right alignment. The layout
             // itself is width-independent (and shared from cache), so alignment is
             // applied here at draw time against the actual box width.
@@ -534,11 +540,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             float baseX = bounds.X + alignOffset;
             float lineY = bounds.Y + line.OffsetY + line.Ascent;
 
-            foreach (var run in line.Runs)
-                DrawRun(run, baseX + run.OffsetX, lineY);
+            DrawRuns(line, baseX, lineY);
 
             if (style.Decoration != TextDecoration.None)
                 DrawTextDecoration(style, baseX, lineY, line);
+        }
+    }
+
+    // Every run of one line at its baseline, in the pooled paint.
+    private void DrawRuns(TextLine line, float baseX, float baselineY)
+    {
+        var runs = line.Runs;
+        for (int ri = 0; ri < runs.Count; ri++)
+        {
+            var run = runs[ri];
+            DrawRun(run, baseX + run.OffsetX, baselineY);
         }
     }
 
@@ -562,8 +578,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // TextDirection.Auto is only known now that it has been laid out.
         float alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
 
-        foreach (var line in layout.Lines)
+        var lines = layout.Lines;
+        for (int li = 0; li < lines.Count; li++)
         {
+            var line = lines[li];
             float alignOffset = alignFactor > 0f && bounds.Width > line.Width
                 ? (bounds.Width - line.Width) * alignFactor
                 : 0f;
@@ -621,8 +639,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             else
             {
                 _pooledPaint.Color = ToSkColor(style.TextColor);
-                foreach (var run in line.Runs)
-                    DrawRun(run, baseX + run.OffsetX, lineY);
+                DrawRuns(line, baseX, lineY);
             }
 
             if (style.Decoration != TextDecoration.None)
@@ -699,8 +716,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // whitespace is trimmed at shaping; an ellipsized line ends in "…").
         // Drawn char i corresponds to source index line.Start + i.
         int drawnLength = 0;
-        foreach (var run in line.Runs)
-            drawnLength += run.Text.Length;
+        var runs = line.Runs;
+        for (int ri = 0; ri < runs.Count; ri++)
+            drawnLength += runs[ri].Text.Length;
         if (drawnLength == 0) return;
 
         var measurer = PrefixMeasurer(line, style);
@@ -800,6 +818,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         _pooledPaint.Color = ToSkColor(color);
         line.VisualRanges(startChar, endChar, _rangeBuffer, PrefixMeasurer(line, style));
+        var runs = line.Runs;
         foreach (var r in _rangeBuffer)
         {
             if (r.X1 <= r.X0) continue;
@@ -807,8 +826,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             // Hard-edged (non-AA) clip so adjacent segments tile without seams; a glyph
             // crossing the boundary is drawn by both segments, each contributing its half.
             Canvas.ClipRect(SKRect.Create(baseX + r.X0, lineTop, r.X1 - r.X0, line.Height));
-            foreach (var run in line.Runs)
+            for (int ri = 0; ri < runs.Count; ri++)
             {
+                var run = runs[ri];
                 if (run.OffsetX >= r.X1 || run.OffsetX + run.Width <= r.X0) continue;
                 DrawRun(run, baseX + run.OffsetX, baselineY);
             }
@@ -1158,11 +1178,16 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // stays null, so the common path allocates no closure.
     private Func<string, float>? PrefixMeasurer(TextLine line, ResolvedInheritedStyle style)
     {
-        foreach (var run in line.Runs)
-            if (run.Glyphs.Length != run.Text.Length)
-                return s => MeasureText(s, style).Width;
+        var runs = line.Runs;
+        for (int i = 0; i < runs.Count; i++)
+            if (runs[i].Glyphs.Length != runs[i].Text.Length)
+                return MeasurerFor(style);
         return null;
     }
+
+    // Its own method because a lambda capturing a parameter makes C# allocate the closure on
+    // entry to the method that declares it — on every call, the 1:1 ones included.
+    private Func<string, float> MeasurerFor(ResolvedInheritedStyle style) => s => MeasureText(s, style).Width;
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
     {

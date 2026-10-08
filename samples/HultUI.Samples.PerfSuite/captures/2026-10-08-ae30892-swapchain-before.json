@@ -1,0 +1,28 @@
+{
+  "label": "gl-vk-swapchain-rebuild-leak, before: every rebuild hands the old swapchain over as oldSwapchain",
+  "kind": "real-window Vulkan probe, not a perf-suite capture (the suite never builds SdlVulkanHost)",
+  "date": "2026-10-07 23:57 +02:00",
+  "commit": "ae30892",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
+  "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, idle-gated, alternating with the after build",
+  "probes": {
+    "mem": "40 resizes between 1637x1023 and 1600x1000 outer px (SetWindowPos NOACTIVATE on the UI thread, 120 ms apart); GPU Process Memory\\Dedicated Usage (what Task Manager shows), Skia cache, nvidia-smi memory.used every 10",
+    "sample": "60 resizes between 1200x840 and 900x700, 40 ms apart, while a second thread BitBlts one screen row through the window ~120 times a second and measures a bar drawn 300 px wide: 404 = stretched, 224 = squeezed",
+    "vulkanProbe": "tests/HultUI.UiTests.VulkanProbe --resizes=20: time for SetWindowPos to return, which includes the rebuild and the frames the window procedure draws",
+    "oldHarness": "the 2026-09-27 method: external SetWindowPos TOPMOST|NOACTIVATE, screen captured after it returns"
+  },
+  "results": {
+    "mem": [
+      { "taskManagerDedicatedMB": { "start": 127.4, "r10": 476.4, "r20": 789.6, "r30": 1102.7, "r40": 1415.8, "idle5s": 1415.8 }, "skiaCacheMB": 32.6, "nvidiaSmiUsedMiB": [4278, 4315, 4315, 4315, 4315, 4315], "resizeCpuMsPerS": 480.4, "rebuildIntervalMedianMs": 234.7 },
+      { "taskManagerDedicatedMB": { "start": 127.4, "r10": 476.4, "r20": 789.6, "r30": 1102.7, "r40": 1415.8, "idle5s": 1415.8 }, "skiaCacheMB": 32.6, "nvidiaSmiUsedMiB": [4291, 4327, 4327, 4327, 4327, 4327], "resizeCpuMsPerS": 452.6, "rebuildIntervalMedianMs": 235.2 }
+    ],
+    "mem650": { "resizes": 650, "taskManagerDedicatedMB": 20516.4, "nvidiaSmiUsedMiB": 4301, "dxgiLocalUsageMB": 149.0, "failures": 0, "note": "the Task Manager figure passes the card's 16 GB while the GPU's memory in use stays flat: bookkeeping, not memory" },
+    "sample": [
+      { "samples": 1176, "correct": 308, "stretched": 417, "squeezed": 451, "blank": 0, "scaledPercent": 73.8, "wallMs": 9795 },
+      { "samples": 1136, "correct": 316, "stretched": 413, "squeezed": 407, "blank": 0, "scaledPercent": 72.2, "wallMs": 9461 }
+    ],
+    "vulkanProbeResizeMs": [ { "median": 111.4, "max": 190.1 }, { "median": 112.4, "max": 121.0 }, { "median": 112.6, "max": 120.6 } ],
+    "rebuildTiming": { "rebuilds": 30, "createMs": 15.0, "destroyAfterMs": 0.03, "firstPresentMedianMs": 100.5, "firstPresentMaxMs": 105.3 },
+    "oldHarness": { "mailboxStretched": "0 of 80" }
+  }
+}

@@ -1,5 +1,6 @@
 using HultUI.Core.Platform;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 
 namespace HultUI.Headless;
 
@@ -12,6 +13,12 @@ namespace HultUI.Headless;
 internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
 {
     private readonly HeadlessTimeProvider _time;
+
+    // One set of text services for every window, as on the real platforms: built with the
+    // first window that needs it, given back when the session ends. Pinned windows measure in
+    // other fonts, so they share a set of their own.
+    private SkiaTextServices? _text;
+    private SkiaTextServices? _pinnedText;
 
     public HeadlessWindowingPlatform(HeadlessTimeProvider time)
     {
@@ -27,7 +34,12 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
     public TimeProvider TimeProvider => _time;
 
     public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
-        => new HeadlessPlatformWindow(title, width, height, NextWindowScale, style, Options);
+    {
+        var text = Options?.PinnedText == true
+            ? _pinnedText ??= PinnedFonts.CreateServices()
+            : _text ??= new SkiaTextServices();
+        return new HeadlessPlatformWindow(title, width, height, NextWindowScale, style, text, Options);
+    }
 
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose) => true;
 
@@ -41,5 +53,10 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
     /// <summary>No-op: the session pumps frames explicitly, so there is never a wait to cut short.</summary>
     public void Wake() { }
 
-    public void Dispose() { }
+    /// <summary>Gives back the text services the windows shared; the windows are gone by now.</summary>
+    public void Dispose()
+    {
+        _text?.Dispose();
+        _pinnedText?.Dispose();
+    }
 }

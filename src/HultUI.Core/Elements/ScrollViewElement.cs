@@ -180,9 +180,12 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         float maxRight = 0;
         float maxBottom = 0;
 
-        foreach (var child in Children)
+        // By index: this runs for every scroll view every frame, and foreach over the
+        // Children interface boxes an enumerator.
+        var children = Children;
+        for (int i = 0; i < children.Count; i++)
         {
-            var childBox = child.Layout;
+            var childBox = children[i].Layout;
             float childRight = childBox.X + childBox.Width + childBox.Margin.Right;
             float childBottom = childBox.Y + childBox.Height + childBox.Margin.Bottom;
             maxRight = Math.Max(maxRight, childRight);

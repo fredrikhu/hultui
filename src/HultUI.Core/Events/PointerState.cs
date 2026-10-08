@@ -67,19 +67,28 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
     {
         if (a is null || b is null) return null;
 
-        // Collect ancestors of a into a set
-        var ancestors = new HashSet<Element>(ReferenceEqualityComparer.Instance);
-        for (var el = a; el is not null; el = el.Parent)
-            ancestors.Add(el);
+        // Bring the deeper of the two up to the other's depth, then step both up together
+        // until they meet. Two elements in different trees (one of them since removed) reach
+        // null together and share nothing. A set of a's ancestors, which this used to build,
+        // was ~350 bytes on every hover change.
+        int depthA = Depth(a), depthB = Depth(b);
+        for (; depthA > depthB; depthA--) a = a!.Parent;
+        for (; depthB > depthA; depthB--) b = b!.Parent;
 
-        // Walk up from b to find the first shared ancestor
-        for (var el = b; el is not null; el = el.Parent)
+        while (a is not null && !ReferenceEquals(a, b))
         {
-            if (ancestors.Contains(el))
-                return el;
+            a = a.Parent;
+            b = b!.Parent;
         }
+        return a;
+    }
 
-        return null;
+    private static int Depth(Element element)
+    {
+        int depth = 0;
+        for (var el = element.Parent; el is not null; el = el.Parent)
+            depth++;
+        return depth;
     }
 
     /// <summary>

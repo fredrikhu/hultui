@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Junction.Theme;
 
@@ -109,6 +110,38 @@ public static class Ui
             .Children(TagLabel(label, fontSize, color));
         return box;
     }
+
+    /// <summary>
+    /// A name and the tags after it, in a column that can get too narrow for all of them: the
+    /// name truncates first, then each tag that no longer fits whole is left out — rather than
+    /// drawn past the column over the next one, truncated to an empty outline, or cut
+    /// mid-outline at the column's edge.
+    /// <para>The row wraps, one line high, and clips the rest. The name starts from nothing,
+    /// so the first line takes the tags while they fit; a tag that does not drops to the
+    /// hidden second line (a tag is measured at most as wide as the row, and the row's gap
+    /// before it then cannot fit, so it never sits on the first line truncated); and the
+    /// name grows into what is left — up to its own width, so the tags still sit right after
+    /// it. (A shrink order cannot do this: the flex algorithm shares a shortfall between
+    /// every item that may shrink, so a tag allowed to give way at all gives a little at
+    /// once, and a tag a hair narrower than its label wraps.)</para>
+    /// <para>Returns false, having added nothing, when text cannot be measured yet; the
+    /// caller then builds its plain row.</para>
+    /// </summary>
+    /// <param name="row">An empty <c>Flex.Row</c> with a gap between its items.</param>
+    public static bool NameThenWholeTags(BoxElement row, TextElement name, string nameText, float nameSize,
+        string nameFamily, IReadOnlyList<BoxElement> tags)
+    {
+        float nameWidth = TextMeasure.MeasureWidth(nameText, nameSize, nameFamily);
+        if (nameWidth <= 0f) return false;
+        row.FlexWrap(FlexWrap.Wrap).Height(TagRowHeight).Overflow(Overflow.Hidden);
+        row.AddChild(name.FlexBasis(Dimension.Px(0)).FlexGrow(1).FlexShrink(1)
+            .MaxWidth(Dimension.Px(nameWidth + 0.5f)));
+        foreach (var tag in tags) row.AddChild(tag.FlexShrink(0));
+        return true;
+    }
+
+    /// <summary>The height of a line holding a 9–9.5px tag or chip, as <see cref="NameThenWholeTags"/> lays one out.</summary>
+    private const float TagRowHeight = 18f;
 
     /// <summary>A label chip with an optional leading icon (feature / wip / remote /
     /// tag / HEAD). Pass a null/empty glyph for a text-only chip (local branches).</summary>

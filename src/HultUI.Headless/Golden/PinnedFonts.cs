@@ -19,10 +19,13 @@ internal static class PinnedFonts
     /// <summary>The regular proportional face — what canvas-element text draws in.</summary>
     public static SKTypeface Regular => s_faces.Value[0];
 
-    /// <summary>A raster surface whose text is pinned and drawn as outlines.</summary>
-    public static SkiaRasterRenderSurface CreateSurface()
+    /// <summary>Text services that know only the pinned faces.</summary>
+    public static SkiaTextServices CreateServices() => new(SkiaFontCollection.Pinned(s_faces.Value));
+
+    /// <summary>A raster surface over pinned <paramref name="text"/> (<see cref="CreateServices"/>),
+    /// drawing it as outlines. The caller keeps <paramref name="text"/>.</summary>
+    public static SkiaRasterRenderSurface CreateSurface(SkiaTextServices text)
     {
-        var text = new SkiaTextServices(SkiaFontCollection.Pinned(s_faces.Value));
         return new SkiaRasterRenderSurface(text)
         {
             TextAsOutlines = true,

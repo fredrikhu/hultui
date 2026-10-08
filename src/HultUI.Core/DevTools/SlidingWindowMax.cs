@@ -8,6 +8,12 @@ namespace HultUI.Core.DevTools;
 /// <see cref="Max"/> are O(1) amortized regardless of how many samples fall in
 /// the window. Used by the performance HUD to report the slowest recent pass
 /// for each stat.
+///
+/// <para>The deque is a ring over an array, not a linked list. Every window keeps
+/// eight of these and feeds each one sample per frame whether or not the HUD is
+/// shown, so a node per sample was eight allocations a frame (~0.4 KB) on a frame
+/// that otherwise allocates nothing. The array only grows, when the window holds
+/// more samples than it has room for (a long, steadily falling run of values).</para>
 /// </summary>
 internal sealed class SlidingWindowMax
 {
@@ -18,7 +24,9 @@ internal sealed class SlidingWindowMax
     }
 
     private readonly long _windowTicks;
-    private readonly LinkedList<Sample> _samples = new();
+    private Sample[] _ring = new Sample[16];   // power of two, so wrapping is a mask
+    private int _head;                         // index of the oldest sample (the max)
+    private int _count;
 
     public SlidingWindowMax(TimeSpan window)
     {
@@ -34,19 +42,40 @@ internal sealed class SlidingWindowMax
     /// </summary>
     public void Add(float value, long nowTicks)
     {
+        int mask = _ring.Length - 1;
+
         // Any tail sample that is no larger than this one can never be the max
         // again, so drop them — this keeps the deque monotonically decreasing.
-        while (_samples.Last is { } last && last.Value.Value <= value)
-            _samples.RemoveLast();
+        while (_count > 0 && _ring[(_head + _count - 1) & mask].Value <= value)
+            _count--;
 
-        _samples.AddLast(new Sample(nowTicks, value));
+        if (_count == _ring.Length)
+        {
+            Grow();
+            mask = _ring.Length - 1;
+        }
+        _ring[(_head + _count) & mask] = new Sample(nowTicks, value);
+        _count++;
 
         // Evict samples that have aged out of the window. The head is always
         // the current maximum because of the monotonic invariant above.
         long cutoff = nowTicks - _windowTicks;
-        while (_samples.First is { } first && first.Value.Timestamp < cutoff)
-            _samples.RemoveFirst();
+        while (_count > 0 && _ring[_head].Timestamp < cutoff)
+        {
+            _head = (_head + 1) & mask;
+            _count--;
+        }
 
-        Max = _samples.First is { } head ? head.Value.Value : 0f;
+        Max = _count > 0 ? _ring[_head].Value : 0f;
+    }
+
+    private void Grow()
+    {
+        var bigger = new Sample[_ring.Length * 2];
+        int mask = _ring.Length - 1;
+        for (int i = 0; i < _count; i++)
+            bigger[i] = _ring[(_head + i) & mask];
+        _ring = bigger;
+        _head = 0;
     }
 }

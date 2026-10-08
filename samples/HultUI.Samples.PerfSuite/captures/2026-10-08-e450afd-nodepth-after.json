@@ -1,0 +1,32 @@
+{
+  "label": "gl-no-depth-buffer, after: the GL window asks for depth 0 and keeps its 8-bit stencil",
+  "kind": "real-window GL probe, not a perf-suite capture (the suite never builds the GL surface)",
+  "date": "2026-10-08 01:36 +02:00",
+  "commit": "e450afd + this change",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
+  "configuration": "Release (JIT), HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_STARTUP=1, P-cores, idle-gated before every run, before and after alternating ABBA",
+  "probes": "as in 2026-10-08-e450afd-nodepth-before.json",
+  "results": {
+    "mem": [
+      { "run": 2, "A": { "drawable": "2100x1350", "depth": 0, "stencil": 8, "taskManagerMB": 46.8, "dxgiLocalMB": 44.3, "nvidiaSmiDeltaMiB": 46 }, "B": { "drawable": "3818x2032", "depth": 0, "stencil": 8, "taskManagerMB": 109.5, "dxgiLocalMB": 107.0, "nvidiaSmiDeltaMiB": 109 } },
+      { "run": 3, "A": { "drawable": "2100x1350", "depth": 0, "stencil": 8, "taskManagerMB": 46.8, "dxgiLocalMB": 44.3, "nvidiaSmiDeltaMiB": 46 }, "B": { "drawable": "3818x2032", "depth": 0, "stencil": 8, "taskManagerMB": 109.5, "dxgiLocalMB": 107.0, "nvidiaSmiDeltaMiB": 109 } },
+      { "run": 6, "A": { "drawable": "2100x1350", "depth": 0, "stencil": 8, "taskManagerMB": 46.8, "dxgiLocalMB": 44.3, "nvidiaSmiDeltaMiB": 46 }, "B": { "drawable": "3818x2032", "depth": 0, "stencil": 8, "taskManagerMB": 109.5, "dxgiLocalMB": 107.0, "nvidiaSmiDeltaMiB": 109 } },
+      { "run": 7, "A": { "drawable": "2100x1350", "depth": 0, "stencil": 8, "taskManagerMB": 46.8, "dxgiLocalMB": 44.3, "nvidiaSmiDeltaMiB": 46 }, "B": { "drawable": "3818x2032", "depth": 0, "stencil": 8, "taskManagerMB": 109.5, "dxgiLocalMB": 107.0, "nvidiaSmiDeltaMiB": 109 } }
+    ],
+    "memSaved": { "A": "8.5 MB = 3.1 B/px (-15.4 %)", "B": "22.4 MB = 3.0 B/px (-17.0 %)", "agreement": "Task Manager, DXGI and nvidia-smi agree to 1 MiB" },
+    "startupProbeMs": {
+      "SDL_CreateWindow": [207.6, 212.8, 205.3, 202.6],
+      "glContext": [3.4, 3.2, 3.2, 3.3],
+      "skiaSurface": [16.3, 16.5, 16.5, 16.0],
+      "firstFrameShownSinceProcessStart": [431.5, 425.4, 428.9, 419.1]
+    },
+    "startupJunctionMs": { "SDL_CreateWindow": [218.6, 213.3, 210.2, 205.1], "glContext": [3.7, 3.4, 3.6, 3.5], "firstFrameShownSinceProcessStart": [489.6, 478.9, 482.0, 470.7] },
+    "pixels": {
+      "junctionHistory": { "lastFrameSha256Prefix": "595E20EEA9273285", "size": "2160x1440", "stencilPerFrame": "stencilEnable 1, stencilFunc 3", "identicalToBefore": true },
+      "vesper": { "lastFrameSha256Prefix": "D26A02D10A6EF7F5", "size": "1860x1320", "stencilPerFrame": "stencilEnable 2, stencilClear 2, stencilFunc 4", "identicalToBefore": true },
+      "stencilScene": { "sha256Prefix": "58152ED73363B0C8", "size": "2100x1350", "stencilWork": "stencilEnable 1, stencilClear 2, stencilFunc 6, depthEnable 0", "identicalToBefore": true },
+      "negativeControl": "the same builds with stencil 0 as well: Junction and Vesper frames came out identical anyway (their stencil passes do not change those pixels), but the stencil scene differed in 111,883 px (sha 6FA2A09AF160A0CC): the non-antialiased star clip filled its whole rectangle and the translucent stroke blended twice where it crosses. So the scene sees a missing stencil, and depth 0 does not lose it."
+    },
+    "sdlAttributesWindows": "a hidden SDL window, nothing else: default depth gives depth 24 stencil 8, depth 0 gives depth 0 stencil 8 (WGL, NVIDIA)"
+  }
+}

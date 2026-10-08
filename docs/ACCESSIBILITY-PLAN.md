@@ -56,6 +56,12 @@ Files to add in `src/HultUI.Core/Accessibility/`:
 - **`AccessibilityTreeDiffer.cs`** — compares prev/next tree, produces a
   `TreeDiff` with `Added`, `Removed`, `Reordered`, `PropertyChanged(node, prop)`
   lists. Key nodes by `ElementId` so wrappers can be reused across rebuilds.
+  A rebuild is a whole new tree, so what it leaves besides the tree is garbage on
+  every change a reader can see. A node takes its children as one array of the
+  exact length (leaves share the empty one), and the differ pairs children by
+  position while their ids agree, indexing by id only from the first difference:
+  building costs the 136-byte node and 8 bytes in its parent's array, and diffing
+  an unchanged tree allocates only the `TreeDiff` (was 230 and 40 bytes a node).
 - **Evolve `IAccessibilityBridge`** from `Update(root)` to:
   - `bool IsActive { get; }` — cheap "is anyone listening" check, polled per frame
   - `void ApplyChanges(TreeDiff diff)`
@@ -157,6 +163,24 @@ Files:
 
 Wrapper caching is load-bearing: UIA clients compare provider identity across
 calls. Key wrappers off `AccessibilityNode.ElementId`, reuse across rebuilds.
+Every rebuild is a new tree, though, and a node reaches its whole tree through
+`Parent` and `Children`: after each diff the bridge points every surviving
+wrapper at its node in the new tree (one lookup per node, nothing allocated) and
+drops the wrappers of elements the new tree lacks. A wrapper left on an old node
+kept that tree alive and answered sibling navigation from it (500 checkbox rows
+held 201 trees, 34 MB, after 200 toggles). An element that moves to another
+parent (a box that gains a name takes its children) is in the same diff's
+additions and removals; the bridge keeps its wrapper, where it used to drop it
+after adding it, and on AT-SPI sends it no cache-remove, which libatspi takes
+for a dispose.
+
+A focus move rebuilds no tree. The window marks it on the applied tree in place
+(`IsFocused` on the node that had the focus and on the one that has it) and hands
+the bridge both nodes (`NotifyFocusChanged(focused, previous)`): the UIA wrappers
+take the new state and raise HasKeyboardFocus for both, then the focus event; the
+AT-SPI snapshot's objects take it and send state-changed:focused. The next
+rebuild's diff then has nothing to say about the move. Before, both kept the
+state of the last rebuild until the next one, which reported the move late.
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
@@ -217,7 +241,10 @@ Files:
 
 - **Unit tests for diffing** — `AccessibilityTreeDifferTests` in
   `tests/HultUI.Core.Tests/Accessibility/`. Add/remove/reorder/property-change
-  cases. Table-driven.
+  cases. Table-driven. `AccessibilityTreeDifferModelTests` diffs thousands of
+  random tree pairs and compares every entry with the differ as it was before
+  it paired children by position, kept in the test as the model; bridges raise
+  events in diff order, so the order is part of what must not change.
 - **Tree builder tests** already exist — extend for new node fields
   (`IsFocusable`, `IsToggled`, `Value`).
 - **Manual verification**:
@@ -294,7 +321,19 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 - **Scroll** — scroll views and virtualized lists; read scroll percent/view size
-  and programmatically scroll (`SetScrollPercent`, `Scroll` by line/page).
+  and programmatically scroll (`SetScrollPercent`, `Scroll` by line/page). A scroll
+  is the scroll view's own change (2026-10-08): the differ compares a node's bounds
+  within its scroll views (each scroll view node carries its `ScrollOffset`), so a
+  node that only scrolled is not reported, and the scroll view reports
+  `ScrollPosition`. UIA raises a `VerticalScrollPercent` or `HorizontalScrollPercent`
+  property change on it, as Chromium does for a scroller
+  (`ui/accessibility/platform/browser_accessibility_manager_win.cc`,
+  `SCROLL_VERTICAL_POSITION_CHANGED`), where it raised a `BoundingRectangle` change
+  for every node on screen (133 per rebuild over 1,000 rows). A node that moved or
+  resized within the view still raises its bounds change. AT-SPI sends nothing for a
+  scroll, before and after, as Chromium (`browser_accessibility_manager_auralinux.cc`
+  ignores both scroll events) and GTK do. Bounds and the offscreen state are read
+  from the current tree when a client asks.
 - **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
   read/set the value and its bounds.
 

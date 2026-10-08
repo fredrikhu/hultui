@@ -49,9 +49,7 @@ public static class ElementRenderer
             !element.Layout.AbsoluteBorderBox.Translate(offsetX, offsetY).IntersectsWith(clip))
             return; // fully outside the visible clip region — skip the subtree
 
-        using var _trace = tracer is null
-            ? default
-            : tracer.Begin("Render", element.GetType().Name, element.Key ?? element.Name);
+        using var _trace = tracer is null ? default : tracer.BeginElement("Render", element);
 
         // A transform rotates/scales the element and its subtree about its centre.
         // Once transformed, the screen-axis-aligned cull rect no longer bounds the

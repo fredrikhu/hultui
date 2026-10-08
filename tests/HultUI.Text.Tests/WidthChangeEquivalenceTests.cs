@@ -328,7 +328,7 @@ public class WidthChangeEquivalenceTests
     /// both fonts is as tall as one of the primary alone and only a line of the fallback alone
     /// is not.
     /// </summary>
-    private sealed class TwoFonts(bool negativeDescent, bool shortFallback = false) : IFontCollection
+    internal sealed class TwoFonts(bool negativeDescent, bool shortFallback = false) : IFontCollection
     {
         private static bool InFallback(int cp) => cp is >= 0x0370 and <= 0x03FF or >= 0x3000 and <= 0x9FFF or >= 0x1F000;
 
@@ -370,7 +370,7 @@ public class WidthChangeEquivalenceTests
     /// is NOT its share of the whole word's advances, and any shortcut that assumed so would
     /// show here.
     /// </summary>
-    private sealed class ContextShaper : ITextShaper
+    internal sealed class ContextShaper : ITextShaper
     {
         public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
         {

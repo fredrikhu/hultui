@@ -126,6 +126,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         }
 
         Ui.DisplayScale = _window.DisplayScale;
+        _artworkScale = ArtworkScaleFor(_window.DisplayScale);
         _window.Resized += OnWindowResize;
 
         // Global keys land on the host when nothing is focused.
@@ -143,11 +144,13 @@ public sealed partial class ApertureApp : Component, IDisposable
     private void Rerender() => _revision.Value++;
 
     // A monitor change arrives as a resize: retire the icon rasters cached for the old
-    // scale, or every icon disappears until the next build.
+    // scale, or every icon disappears until the next build. Artwork is fetched at the new
+    // scale as tiles are next built (SyncArtworkScale).
     private void OnWindowResize()
     {
         float scale = _window.DisplayScale;
-        if (MathF.Abs(Ui.DisplayScale - scale) >= 0.001f)
+        bool artwork = SyncArtworkScale();
+        if (artwork || MathF.Abs(Ui.DisplayScale - scale) >= 0.001f)
         {
             Ui.DisplayScale = scale;
             Rerender();

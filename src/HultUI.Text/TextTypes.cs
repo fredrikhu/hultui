@@ -161,10 +161,13 @@ public sealed class TextLine
         into.Clear();
         if (Runs.Count == 0 || to <= from) return;
 
+        // Indexed, as everywhere in this class: Runs is an interface, and a foreach over it
+        // would box an enumerator on every call — per span per line, on the paint path.
         var ranges = into;
         int start = 0;
-        foreach (var run in Runs)
+        for (int i = 0; i < Runs.Count; i++)
         {
+            var run = Runs[i];
             int len = run.Text.Length;
             int s = Math.Max(from, start), e = Math.Min(to, start + len);
             if (e > s)
@@ -209,8 +212,8 @@ public sealed class TextLine
     {
         result = offset;
         bool anyRtl = false;
-        foreach (var run in Runs)
-            if (run.IsRtl) { anyRtl = true; break; }
+        for (int i = 0; i < Runs.Count; i++)
+            if (Runs[i].IsRtl) { anyRtl = true; break; }
         if (!anyRtl) return false;
 
         // The nearest boundary strictly beyond the caret's current x, in the
@@ -222,8 +225,9 @@ public sealed class TextLine
         bool found = false;
 
         int start = 0;
-        foreach (var run in Runs)
+        for (int i = 0; i < Runs.Count; i++)
         {
+            var run = Runs[i];
             int len = run.Text.Length;
             for (int rel = 0; rel <= len; rel++)
             {

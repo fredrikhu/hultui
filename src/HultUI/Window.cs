@@ -108,6 +108,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
     private AccessibilityNode? _previousA11yTree;
+    // The element whose node _previousA11yTree marks focused: the focused one when the tree
+    // was built, then each focus move's (see MoveA11yFocus). Null for none.
+    private ElementId? _a11yFocusId;
     private bool _a11yWasActive;
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
@@ -603,9 +606,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private static Element? FindInTree(Element e, ElementId id)
     {
         if (e.Id == id) return e;
-        foreach (var child in e.Children)
+        var children = e.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
-            var found = FindInTree(child, id);
+            var found = FindInTree(children[i], id);
             if (found is not null) return found;
         }
         return null;
@@ -641,7 +645,48 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         }
 
         if (_accessibilityBridge.IsActive)
-            _accessibilityBridge.NotifyFocusChanged(FindA11yNode(element));
+        {
+            var (previous, focused) = MoveA11yFocus(element);
+            _accessibilityBridge.NotifyFocusChanged(focused, previous);
+        }
+    }
+
+    /// <summary>
+    /// A focus move rebuilds no accessibility tree, so the applied one still marks the element
+    /// that had the focus when it was built. Marks the move on it in place instead: the node
+    /// that had the focus and the one that has it now, found in one walk. A reader asking
+    /// either is then answered as of now, and the next rebuild's diff, which compares against
+    /// this tree, does not report the move again, late. Returns both nodes; null where the
+    /// element has none, or the tree marked no node.
+    /// </summary>
+    private (AccessibilityNode? Previous, AccessibilityNode? Focused) MoveA11yFocus(Element? element)
+    {
+        var tree = _previousA11yTree;
+        var previousId = _a11yFocusId;
+        _a11yFocusId = element?.Id;
+        if (tree is null) return (null, null);
+
+        AccessibilityNode? previous = null, focused = null;
+        FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
+        if (previous is not null && (ReferenceEquals(previous, focused) || !previous.IsFocused))
+            previous = null;
+        if (previous is not null) previous.IsFocused = false;
+        if (focused is not null) focused.IsFocused = true;
+        return (previous, focused);
+    }
+
+    /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
+    private static bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
+        ref AccessibilityNode? foundA, ref AccessibilityNode? foundB)
+    {
+        if (a is { } ia && node.ElementId == ia) foundA = node;
+        if (b is { } ib && node.ElementId == ib) foundB = node;
+        if ((a is null || foundA is not null) && (b is null || foundB is not null)) return true;
+        // By index: foreach over the interface boxes an enumerator per node.
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (FindNodes(children[i], a, b, ref foundA, ref foundB)) return true;
+        return false;
     }
 
     /// <summary>
@@ -659,9 +704,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private static AccessibilityNode? FindById(AccessibilityNode node, ElementId id)
     {
         if (node.ElementId == id) return node;
-        foreach (var child in node.Children)
+        // By index: this walks the whole accessibility tree on every focus move while a
+        // client listens, and foreach over the interface boxes an enumerator per node.
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
         {
-            var found = FindById(child, id);
+            var found = FindById(children[i], id);
             if (found is not null) return found;
         }
         return null;
@@ -788,14 +836,17 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // DirtyFlags.Layout per element, so by the accessibility phase it's gone.
         // A layout change (window/pane resize) moves elements without adding or
         // removing any, and their bounding rects must be re-snapshotted for UIA.
-        bool layoutWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Layout);
-        bool styleWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Style);
+        // The flag tests in this method are written out rather than HasFlag: optimized code
+        // treats HasFlag as an intrinsic, but unoptimized code (tier 0, which the first frames
+        // of a window run) boxes both operands, 192 bytes a frame here.
+        bool layoutWasDirty = (_root.DirtyFlags & DirtyFlags.Layout) != 0;
+        bool styleWasDirty = (_root.DirtyFlags & DirtyFlags.Style) != 0;
 
         // Style resolution (only if any element has style changes)
         _perf.BeginStyle();
         using (_tracer.Begin("Phase", "Style"))
         {
-            if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(_root, theme);
                 ClearFlags(_root, DirtyFlags.Style);
@@ -808,7 +859,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         _perf.BeginLayout();
         using (_tracer.Begin("Phase", "Layout"))
         {
-            if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
                 _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
         }
         _perf.EndLayout();
@@ -832,7 +883,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
         bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
-            || _root.DirtyFlags.HasFlag(DirtyFlags.Children));
+            || (_root.DirtyFlags & DirtyFlags.Children) != 0);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         long nowMs = A11yClockMs;
@@ -848,6 +899,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
+                _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
             }
             _a11yLayoutRefreshPending = false;
             _lastA11yRebuildMs = nowMs;
@@ -1799,7 +1851,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             if (el is null) return;
             if (el is TextElement te && te.Selectable && ReferenceEquals(te.SelectionGroup, token))
                 result.Add(te);
-            foreach (var child in el.Children) Collect(child);
+            var children = el.Children;   // by index: foreach over the interface boxes an enumerator
+            for (int i = 0; i < children.Count; i++) Collect(children[i]);
         }
     }
 
@@ -2266,8 +2319,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     {
         if ((element.DirtyFlags & flags) == 0) return;
         element.DirtyFlags &= ~flags;
-        foreach (var child in element.Children)
-            ClearFlags(child, flags);
+        // By index: Children is an interface, and foreach over it boxes an enumerator,
+        // 40 bytes per dirty container per frame (plan 17, runtime-frame-floor).
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            ClearFlags(children[i], flags);
     }
 
     /// <summary>
@@ -2332,8 +2388,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     {
         if (element.DirtyFlags == DirtyFlags.None) return;
         element.DirtyFlags = DirtyFlags.None;
-        foreach (var child in element.Children)
-            ClearAllFlags(child);
+        var children = element.Children;   // by index, as in ClearFlags
+        for (int i = 0; i < children.Count; i++)
+            ClearAllFlags(children[i]);
     }
 
     public void Close()
@@ -2579,13 +2636,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             var content = overlay.Content;
 
-            if (!overlay.StyleResolved || content.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(content, theme);
                 overlay.StyleResolved = true;
             }
 
-            if (!overlay.LayoutDone || content.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 _layoutEngine.PerformLayout(content,
                     PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
@@ -2676,6 +2733,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
         if (owner is null || text is null) return;
 
+        ScheduleTooltip(owner, text);
+    }
+
+    // A method of its own: the show callback captures owner and text, and C# allocates a
+    // captured local's closure where the local's scope begins. In UpdateTooltipHover that was
+    // its first line, which every pointer move runs, tooltip or not.
+    private void ScheduleTooltip(Element owner, string text)
+    {
         // Start show delay
         _tooltipOwner = owner;
         var theme = Application.Theme;
@@ -2983,8 +3048,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private static Element? FindMaximizeButton(Element e)
     {
         if (e.IsWindowMaximizeButton) return e;
-        foreach (var child in e.Children)
-            if (FindMaximizeButton(child) is { } found) return found;
+        var children = e.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            if (FindMaximizeButton(children[i]) is { } found) return found;
         return null;
     }
 

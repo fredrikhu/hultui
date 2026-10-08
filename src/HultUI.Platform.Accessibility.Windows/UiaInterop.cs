@@ -178,6 +178,8 @@ internal static partial class UiaInterop
     public const int UIA_BoundingRectanglePropertyId = 30001;
     public const int UIA_IsKeyboardFocusablePropertyId = 30009;
     public const int UIA_HasKeyboardFocusPropertyId = 30008;
+    public const int UIA_ScrollHorizontalScrollPercentPropertyId = 30053;
+    public const int UIA_ScrollVerticalScrollPercentPropertyId = 30055;
     public const int UIA_IsEnabledPropertyId = 30010;
     public const int UIA_IsControlElementPropertyId = 30016;
     public const int UIA_IsContentElementPropertyId = 30017;

@@ -411,9 +411,12 @@ public static class RequestImages
     {
         <= 300 => "w300",
         <= 780 => "w780",
-        // Never "original": a TMDB original backdrop is a 4K JPEG, 33 MB decoded, for a
-        // hero that is at most a window wide.
-        _ => "w1280",
+        <= 1280 => "w1280",
+        // Not in the sizes TMDB's configuration lists (w300, w780, w1280, original), but its
+        // image server serves it — it answers 400 for a size it does not, w1600 or w2560 —
+        // and a hero needs it: about 2,000 pixels across at 150 %. Never "original": a TMDB
+        // original backdrop is often a 4K JPEG, 33 MB decoded, for a hero at most a window wide.
+        _ => "w1920",
     }, imageBase);
 
     public static Uri? Profile(string? path, int width, string? imageBase = null) => Image(path, width switch

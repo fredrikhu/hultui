@@ -1,6 +1,7 @@
 using HultUI.Core.Platform;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 using SDL;
 using static SDL.SDL3;
 
@@ -22,6 +23,12 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
     // atomic exchange per call instead of one queued event each: SDL's queue is
     // finite, and every push also runs the event watchers on the pushing thread.
     private int _wakePending;
+
+    // The text services every window draws and measures with: fonts resolved once, caches
+    // shared, and nothing of them left behind when a window closes (a window that built its
+    // own leaked its HarfBuzz fonts). The preloaded set when HULTUI_GL_PRELOAD made one.
+    // Shared on one thread only: an application's windows all run on its UI thread.
+    private SkiaTextServices? _text;
 
     public SdlWindowingPlatform() : this(RendererKind.Default)
     {
@@ -63,7 +70,8 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
     public TimeProvider TimeProvider => TimeProvider.System;
 
     public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
-        => new SDL3Window(title, width, height, style);
+        => new SDL3Window(title, width, height, style,
+            _text ??= SDL3Window.TakePreloadedText() ?? new SkiaTextServices());
 
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
     {
@@ -112,5 +120,10 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
         SDL_PushEvent(&evt);
     }
 
-    public void Dispose() => SDL3Window.ShutdownSDL();
+    public void Dispose()
+    {
+        _text?.Dispose();
+        _text = null;
+        SDL3Window.ShutdownSDL();
+    }
 }
