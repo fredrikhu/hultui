@@ -31,6 +31,16 @@ public interface IAccessibilityBridge
     void NotifyFocusChanged(AccessibilityNode? focused);
 
     /// <summary>
+    /// Focus moved, with no rebuild: the window has marked the move on the most recently
+    /// applied tree in place — <paramref name="previous"/>'s <see cref="AccessibilityNode.IsFocused"/>
+    /// is now false and <paramref name="focused"/>'s true (either null when the element has no
+    /// node) — and the next diff will not report it. A bridge that holds a node's state brings
+    /// both up to date, tells assistive technology as a diff would have, and then the focus
+    /// change. By default, only the focus change.
+    /// </summary>
+    void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => NotifyFocusChanged(focused);
+
+    /// <summary>
     /// Has assistive technology speak <paramref name="text"/> (<see cref="Elements.Element.Announce"/>):
     /// a UIA notification on Windows, an AT-SPI announcement on Linux. <paramref name="source"/>
     /// is the announcing element's node in the most recently applied tree, or null when it has

@@ -174,6 +174,14 @@ additions and removals; the bridge keeps its wrapper, where it used to drop it
 after adding it, and on AT-SPI sends it no cache-remove, which libatspi takes
 for a dispose.
 
+A focus move rebuilds no tree. The window marks it on the applied tree in place
+(`IsFocused` on the node that had the focus and on the one that has it) and hands
+the bridge both nodes (`NotifyFocusChanged(focused, previous)`): the UIA wrappers
+take the new state and raise HasKeyboardFocus for both, then the focus event; the
+AT-SPI snapshot's objects take it and send state-changed:focused. The next
+rebuild's diff then has nothing to say about the move. Before, both kept the
+state of the last rebuild until the next one, which reported the move late.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element

@@ -84,6 +84,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         Generation = generation;
     }
 
+    /// <summary>Takes a focus move, which rebuilds no tree (UI thread). True when the state changed.</summary>
+    public bool SetFocused(bool focused)
+    {
+        if (_isFocused == focused) return false;
+        _isFocused = focused;
+        return true;
+    }
+
     private void Snapshot(AccessibilityNode node)
     {
         _name = node.Name;

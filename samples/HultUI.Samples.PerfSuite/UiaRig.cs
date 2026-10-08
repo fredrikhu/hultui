@@ -56,6 +56,12 @@ sealed class UiaRig : IAccessibilityBridge, IDisposable
         FocusMoves++;
     }
 
+    public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
+    {
+        _bridge.NotifyFocusChanged(focused, previous);
+        FocusMoves++;
+    }
+
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
         => _bridge.Announce(source, text, politeness);
 

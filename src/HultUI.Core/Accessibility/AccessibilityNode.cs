@@ -11,7 +11,13 @@ public sealed class AccessibilityNode
     public string? Description { get; }
     public Rect BoundingRect { get; }
     public bool IsFocusable { get; }
-    public bool IsFocused { get; }
+
+    /// <summary>
+    /// Whether the node's element has the keyboard focus. The one property that changes after
+    /// the tree is built: a focus move rebuilds no tree, so the window marks the move on the
+    /// applied tree's two nodes in place (UI thread), and the next diff does not report it again.
+    /// </summary>
+    public bool IsFocused { get; internal set; }
     public bool IsEnabled { get; }
 
     /// <summary>

@@ -253,18 +253,44 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         }
     }
 
-    public void NotifyFocusChanged(AccessibilityNode? focused)
+    /// <summary>Focus moved; the object that had it is the one this bridge was last told of.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused) => MoveFocus(focused, previousPath: null);
+
+    /// <summary>Focus moved, and the window marked it on its tree: <paramref name="previous"/>
+    /// had it.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
+        => MoveFocus(focused, previous is null ? null : PathOf(previous));
+
+    private void MoveFocus(AccessibilityNode? focused, string? previousPath)
     {
         if (!_registered || _signals is null) return;
 
         string? newPath = focused is null ? null : PathOf(focused);
-        if (newPath == _focusedPath) return;
 
-        if (_focusedPath is not null)
+        // The focused state a client reads (GetState, the cache), as of now. A focus move
+        // rebuilds no snapshot, so both objects kept the state of the last rebuild, and the
+        // next rebuild's diff sent state-changed:focused for both again, late.
+        bool previousLost = previousPath is not null && previousPath != newPath && SetFocused(previousPath, false);
+        if (_focusedPath is not null && _focusedPath != newPath) SetFocused(_focusedPath, false);
+        if (newPath is not null) SetFocused(newPath, true);
+
+        if (_focusedPath is not null && _focusedPath != newPath)
             _signals.EmitStateChanged(_focusedPath, "focused", active: false);
-        if (newPath is not null)
+        // The object the tree had focused, when this bridge was not told of it (a client
+        // attached after the focus last moved).
+        if (previousLost && previousPath != _focusedPath)
+            _signals.EmitStateChanged(previousPath!, "focused", active: false);
+        if (newPath is not null && newPath != _focusedPath)
             _signals.EmitStateChanged(newPath, "focused", active: true);
         _focusedPath = newPath;
+    }
+
+    /// <summary>Sets an object's focused state in the published snapshot; true when it changed.</summary>
+    private bool SetFocused(string path, bool focused)
+    {
+        if (!_snapshot.ByPath.TryGetValue(path, out var acc) || acc.Focused == focused) return false;
+        acc.Focused = focused;
+        return true;
     }
 
     // ───────────────────────────────────────────────────────────── helpers

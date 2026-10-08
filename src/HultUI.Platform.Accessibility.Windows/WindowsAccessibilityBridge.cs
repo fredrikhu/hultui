@@ -95,6 +95,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     internal AccessibilityNode? RootNode => Volatile.Read(ref _rootNode);
 
+    /// <summary>For tests: told of each UIA event as the bridge raises it.</summary>
+    internal Action<UiaRaised>? Raised;
+
     /// <summary>Every wrapper the bridge keeps, for tests of its upkeep.</summary>
     internal IEnumerable<UiaFragment> Wrappers => _wrappers.Values;
 
@@ -510,12 +513,33 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             wrapper.UpdateFrom(wrapper.Node);
     }
 
-    public void NotifyFocusChanged(AccessibilityNode? focused)
+    /// <summary>Focus moved; the element that had it is the one this bridge was last told of.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused) => MoveFocus(focused, FocusedNodeId);
+
+    /// <summary>Focus moved, and the window marked it on its tree: <paramref name="previous"/>
+    /// had it.</summary>
+    public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
+        => MoveFocus(focused, previous?.ElementId);
+
+    private void MoveFocus(AccessibilityNode? focused, ElementId? previous)
     {
+        // What the two wrappers answer for HasKeyboardFocus, as of now. A focus move rebuilds no
+        // tree, so they kept the state of the last rebuild, and the next rebuild's diff told the
+        // change late, as IsFocused property events, often frames after the focus event. Now the
+        // state changes here and the property events go with the focus event, before it, so a
+        // client that asks on the focus event reads the new state.
+        UiaFragment? lost = previous is { } p && p != focused?.ElementId
+            && _wrappers.TryGetValue(p, out var was) && was.SetFocused(false) ? was : null;
+        UiaFragment? gained = focused is not null
+            && _wrappers.TryGetValue(focused.ElementId, out var now) && now.SetFocused(true) ? now : null;
         Volatile.Write(ref _focusedIdRaw, focused is null ? 0L : unchecked((long)focused.ElementId.Value));
+        if (lost is not null) RaisePropertyChanged(lost, AccessibilityProperties.IsFocused);
+        if (gained is not null) RaisePropertyChanged(gained, AccessibilityProperties.IsFocused);
+
         if (!RaiseEvents || focused is null) return;
         IntPtr prov = NativeFragmentSimple(focused.ElementId);
         if (prov == IntPtr.Zero) return;
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_AutomationFocusChangedEventId, focused.ElementId));
         try { UiaInterop.UiaRaiseAutomationEvent(prov, UiaInterop.UIA_AutomationFocusChangedEventId); }
         finally { Marshal.Release(prov); }
     }
@@ -531,6 +555,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         IntPtr provider = source is not null ? NativeFragmentSimple(source.ElementId) : IntPtr.Zero;
         if (provider == IntPtr.Zero) provider = NativeRootSimple();
         if (provider == IntPtr.Zero) return;
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Notification, 0, source?.ElementId));
         try
         {
             UiaInterop.RaiseNotification(provider, UiaInterop.NotificationKind_Other,
@@ -551,6 +576,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (!RaiseEvents) return;
         IntPtr prov = parentId is null ? NativeRootSimple() : NativeFragmentSimple(parentId.Value);
         if (prov == IntPtr.Zero) return;
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Structure, changeType, parentId));
         try { UiaInterop.UiaRaiseStructureChangedEvent(prov, changeType, IntPtr.Zero, 0); }
         finally { Marshal.Release(prov); }
     }
@@ -563,6 +589,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             // Events, not property changes: a reader re-reads the text, or reads at the caret.
             IntPtr source = NativeFragmentSimple(wrapper.ElementId);
             if (source == IntPtr.Zero) return;
+            Raised?.Invoke(new UiaRaised(UiaRaisedKind.Event, propertyName == AccessibilityProperties.Text
+                ? UiaInterop.UIA_Text_TextChangedEventId : UiaInterop.UIA_Text_TextSelectionChangedEventId, wrapper.ElementId));
             try
             {
                 UiaInterop.UiaRaiseAutomationEvent(source, propertyName == AccessibilityProperties.Text
@@ -599,6 +627,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         var oldValue = UiaVariant.Empty;
         IntPtr prov = NativeFragmentSimple(wrapper.ElementId);
         if (prov == IntPtr.Zero) { newValue.Free(); return; }
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Property, propertyId, wrapper.ElementId));
         try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(prov, propertyId, oldValue, newValue); }
         finally { newValue.Free(); Marshal.Release(prov); }
     }
@@ -700,3 +729,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         }
     }
 }
+
+/// <summary>A UIA event the bridge raised, for tests (<see cref="WindowsAccessibilityBridge.Raised"/>):
+/// its kind, the event, property or structure-change id, and the element (null for the root).</summary>
+internal readonly record struct UiaRaised(UiaRaisedKind Kind, int Id, ElementId? Element);
+
+internal enum UiaRaisedKind { Event, Property, Structure, Notification }

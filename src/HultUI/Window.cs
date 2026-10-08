@@ -108,6 +108,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
     private AccessibilityNode? _previousA11yTree;
+    // The element whose node _previousA11yTree marks focused: the focused one when the tree
+    // was built, then each focus move's (see MoveA11yFocus). Null for none.
+    private ElementId? _a11yFocusId;
     private bool _a11yWasActive;
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
@@ -642,7 +645,48 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         }
 
         if (_accessibilityBridge.IsActive)
-            _accessibilityBridge.NotifyFocusChanged(FindA11yNode(element));
+        {
+            var (previous, focused) = MoveA11yFocus(element);
+            _accessibilityBridge.NotifyFocusChanged(focused, previous);
+        }
+    }
+
+    /// <summary>
+    /// A focus move rebuilds no accessibility tree, so the applied one still marks the element
+    /// that had the focus when it was built. Marks the move on it in place instead: the node
+    /// that had the focus and the one that has it now, found in one walk. A reader asking
+    /// either is then answered as of now, and the next rebuild's diff, which compares against
+    /// this tree, does not report the move again, late. Returns both nodes; null where the
+    /// element has none, or the tree marked no node.
+    /// </summary>
+    private (AccessibilityNode? Previous, AccessibilityNode? Focused) MoveA11yFocus(Element? element)
+    {
+        var tree = _previousA11yTree;
+        var previousId = _a11yFocusId;
+        _a11yFocusId = element?.Id;
+        if (tree is null) return (null, null);
+
+        AccessibilityNode? previous = null, focused = null;
+        FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
+        if (previous is not null && (ReferenceEquals(previous, focused) || !previous.IsFocused))
+            previous = null;
+        if (previous is not null) previous.IsFocused = false;
+        if (focused is not null) focused.IsFocused = true;
+        return (previous, focused);
+    }
+
+    /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
+    private static bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
+        ref AccessibilityNode? foundA, ref AccessibilityNode? foundB)
+    {
+        if (a is { } ia && node.ElementId == ia) foundA = node;
+        if (b is { } ib && node.ElementId == ib) foundB = node;
+        if ((a is null || foundA is not null) && (b is null || foundB is not null)) return true;
+        // By index: foreach over the interface boxes an enumerator per node.
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (FindNodes(children[i], a, b, ref foundA, ref foundB)) return true;
+        return false;
     }
 
     /// <summary>
@@ -855,6 +899,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
+                _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
             }
             _a11yLayoutRefreshPending = false;
             _lastA11yRebuildMs = nowMs;
