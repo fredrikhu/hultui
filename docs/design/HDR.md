@@ -89,6 +89,13 @@ Skia uses the piecewise curve, so shadows came out lighter than a GL window besi
 drawn encoded and decoded with 2.2 in the blit. Both shaders keep the sign of negative values, for
 wide gamut.
 
+**An offscreen that is let go is freed**, on a resize or when the route no longer needs one. Skia
+keeps a disposed surface's texture in its scratch pool for a later surface of exactly that size,
+and a resized window never asks for that size again: every size a drag passed through stayed in
+GPU memory, width × height × 8 bytes each, until the context's 256 MB budget pushed it out: DXGI
+read 458 MB after a 40-step drag, 243 now. So the pool's unused scratch is purged after the next
+frame is submitted (2026-10-08), which keeps what that frame drew with.
+
 ### Display colour: HDR state, SDR white, peak
 
 | | HDR state | SDR white | peak |
@@ -316,6 +323,10 @@ A check that reports the same thing whether the code works or not reads as evide
   over as `oldSwapchain` stayed in the process's figure for good: 20.5 GB on a 16 GB card after 650
   resizes, while nvidia-smi's memory in use for the whole GPU and DXGI's `QueryVideoMemoryInfo` for
   the process stayed flat and nothing failed. Ask nvidia-smi or DXGI before calling a GPU leak.
+- **`GRContext.GetResourceCacheUsage` counts only budgeted resources.** Created unbudgeted, the
+  scRGB offscreen dropped out of it (19.7 to 10.4 MB) while DXGI read the same 130.6 MB, and once
+  disposed Skia budgeted it and pooled it all the same. `DumpMemoryStatistics` lists every
+  resource, live or purgeable; read it, or DXGI, before calling a Skia change a saving.
 - **A capture taken after `SetWindowPos` returns cannot see the resize.** The window procedure draws
   the new size before it returns, so a stall inside that frame is over by the time anything looks.
   On the chained scRGB MAILBOX swapchain the old harness read 0 of 80 resizes stretched, while a

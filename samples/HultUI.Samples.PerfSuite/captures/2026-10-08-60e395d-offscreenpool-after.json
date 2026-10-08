@@ -1,0 +1,33 @@
+{
+  "label": "gl-vk-offscreen-scratch-pool, after: the scRGB offscreen let go is freed, by a scratch purge after the next frame is submitted",
+  "kind": "real-window Vulkan probes, not a perf-suite capture (the suite never builds SkiaVulkanRenderSurface)",
+  "date": "2026-10-08 13:00-14:10 +02:00",
+  "commit": "60e395d + this change",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
+  "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, P-cores, idle-gated before every run, before and after alternated (ABBA)",
+  "probes": "as in 2026-10-08-60e395d-offscreenpool-before.json",
+  "results": {
+    "memoryAfterResizes": {
+      "start (1350x900 client px)": { "skiaBudgetedMB": 19.7, "skiaPurgeableScratchMB": 0.2, "dxgiMB": 130.6, "nvidiaSmiDeltaMiB": 111, "taskManagerMB": 138.0 },
+      "sizes, 28 resizes over 4 sizes (two runs, identical)": { "skiaBudgetedMB": 21.7, "skiaPurgeableScratchMB": 0.1, "dxgiMB": 154.1, "nvidiaSmiDeltaMiB": [132, 132], "taskManagerMB": 158.6 },
+      "drag, 40 new sizes to 2058x1264 (two runs)": { "skiaBudgetedMB": [40.1, 40.2], "skiaPurgeableScratchMB": 0.1, "dxgiMB": 242.5, "nvidiaSmiDeltaMiB": [203, 203], "taskManagerMB": 223.5 },
+      "scene toggle, 40 resizes between two sizes (three runs, identical)": { "skiaBudgetedMB": 21.7, "skiaPurgeableScratchMB": 0.1, "dxgiMB": 154.3 }
+    },
+    "resizeMedianMs": {
+      "vulkanProbe two sizes": [30.1, 29.5],
+      "vulkanProbe new sizes": [30.8, 30.8],
+      "scratch sizes (4)": [31.19, 30.33],
+      "scratch drag": [31.10, 30.47],
+      "scratch scene toggle": [31.30, 29.88, 30.71]
+    },
+    "purgeAtTheResizeInstead": {
+      "note": "first version: purge inside ReleaseOffscreen, before the next frame; same memory, more resources made again, no faster",
+      "resizeMedianMs": { "vulkanProbe two sizes": [29.8, 29.4], "vulkanProbe new sizes": [30.8, 30.1], "scratch sizes (4)": [31.16, 30.76], "scratch drag": [31.65, 30.47] },
+      "skiaResourcesCreatedOver28SizeResizes": 1562
+    },
+    "skiaResourcesCreatedOver28SizeResizes": 1324,
+    "purgeCallMs": "0.16-0.73 per resize (HULTUI_STARTUP trace), larger when a texture over 10 MB is freed",
+    "validation": { "layers": "VK_LAYER_KHRONOS_validation 1.4.357, core + synchronisation (VK_LAYER_VALIDATE_SYNC=1), loader confirmed it forced enabled", "messages": 0, "runs": "VulkanProbe 12 new sizes at white scale 2, VulkanProbe 12 two-size resizes at the display's white, scratch probe 12 resizes over 4 sizes: 36 purges", "positiveControl": "present without its wait semaphore and a barrier with srcAccessMask SHADER_READ: 40 messages (VUID-vkCmdPipelineBarrier-pImageMemoryBarriers-02819 x20, VUID-vkQueueSubmit-pSignalSemaphores-00067 x20, SYNC-HAZARD-PRESENT-AFTER-WRITE x10, SYNC-HAZARD-WRITE-AFTER-WRITE x10)" },
+    "test": "VulkanProbeTests.AResize_FreesTheHalfFloatOffscreenItReplaces: under 0.1 MB held besides the offscreen in use at each of 10 new sizes; with the purge line removed it fails at 54.8 MB against a 5.0 MB bound"
+  }
+}

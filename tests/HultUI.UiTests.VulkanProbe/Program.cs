@@ -28,7 +28,8 @@ using HultUI.WebView.WebView2;
 // otherwise (any file must be one the libmpv here decodes). Exits 4 when there is no libmpv.
 //
 // --resizes=N resizes the window N times between two sizes, without activating it, and prints
-// the median and longest time a resize took to be drawn (Windows).
+// the median and longest time a resize took to be drawn (Windows). With --new-sizes every
+// resize is to a size the window has not had yet, as in a drag.
 
 internal static class Program
 {
@@ -39,7 +40,7 @@ internal static class Program
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--webviews")) return TwoPages(renderer);
         if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
-            return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]));
+            return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
         if (args.Contains("--page-and-video"))
             return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
                 ?? "av://lavfi:color=c=magenta:s=320x240");
@@ -156,7 +157,7 @@ internal static class Program
     /// window procedure draws the new size before SetWindowPos returns, so its time is a
     /// rebuild plus its frames — and whatever the first present after it waits for.
     /// </summary>
-    private static int Resizes(RendererKind renderer, int count)
+    private static int Resizes(RendererKind renderer, int count, bool newSizes)
     {
         using var app = new Application("vulkan-probe", 640, 400, renderer: renderer);
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
@@ -169,7 +170,8 @@ internal static class Program
         var times = new double[count];
         for (int i = 0; i < count; i++)
         {
-            int width = i % 2 == 0 ? 1100 : 1000, height = i % 2 == 0 ? 760 : 700;
+            int width = newSizes ? 1000 + 24 * (i + 1) : i % 2 == 0 ? 1100 : 1000;
+            int height = newSizes ? 700 + 16 * (i + 1) : i % 2 == 0 ? 760 : 700;
             long start = System.Diagnostics.Stopwatch.GetTimestamp();
             SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
             times[i] = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;

@@ -195,6 +195,44 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A resize frees the half-float offscreen it replaces. Left to Skia's scratch pool, which
+    /// keeps a texture for a later surface of exactly its size, every size the window passed
+    /// through held its offscreen (width × height × 8 bytes) until the context's 256 MB budget
+    /// pushed it out: 203 MB after a 40-step drag. The white scale is forced above 1 so the
+    /// frame is drawn through the offscreen on any display that offers scRGB.
+    /// </summary>
+    [VulkanUiFact]
+    public void AResize_FreesTheHalfFloatOffscreenItReplaces()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through SetWindowPos
+        const int resizes = 10;
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = "1",
+            ["HULTUI_VULKAN_WHITE_SCALE"] = "2",
+            ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, $"--resizes={resizes} --new-sizes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        // Skia's cache after the first frame at each new size, the offscreen in use included.
+        var purged = System.Text.RegularExpressions.Regex.Matches(run.Output,
+            @"vulkan scratch purged in [\d.]+ ms with a (\d+)x(\d+) offscreen: skia cache ([\d.]+) MB");
+        Assert.True(purged.Count >= resizes, $"{purged.Count} purges for {resizes} new sizes:\n{run.Output}");
+
+        static double Mb(int width, int height) => width * (double)height * 8 / 1048576;
+        // What Skia holds besides the offscreen in use.
+        var besides = purged.Select(m => double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture)
+            - Mb(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value))).ToArray();
+        double smallest = purged.Min(m => Mb(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value)));
+        // Kept, the old offscreens add up: 5 to 7 MB more with every size here.
+        Assert.True(besides.Max() - besides[0] < smallest,
+            $"Skia held {besides.Max() - besides[0]:0.0} MB more besides its offscreen after {resizes} new " +
+            $"sizes than after the first, against {smallest:0.0} MB for one offscreen:\n{run.Output}");
+    }
+
+    /// <summary>
     /// A driver that cannot give a device here, as in a remote session, a VM or a filtered loader.
     /// SDL creates the Vulkan window without complaint, and the renderer then fails to start.
     /// </summary>

@@ -1,0 +1,31 @@
+{
+  "label": "gl-vk-offscreen-scratch-pool, before: a disposed scRGB offscreen stays in Skia's scratch pool, keyed by its size",
+  "kind": "real-window Vulkan probes, not a perf-suite capture (the suite never builds SkiaVulkanRenderSurface)",
+  "date": "2026-10-08 13:00-14:10 +02:00",
+  "commit": "60e395d",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
+  "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, P-cores, idle-gated before every run, before and after alternated (ABBA)",
+  "probes": {
+    "scratch": "a scratch-pad probe window (title, five shadowed cards, twelve text rows in a full-width box at opacity 0.85), resized with SetWindowPos NOACTIVATE on the UI thread, two forced frames after each. sizes = 28 resizes cycling 1500x940, 1400x880, 1700x1060, 1600x1000 window px; drag = 40 resizes, each a new size, +12 x +8 px a step from 1600x1000; toggle = 40 resizes between two sizes. Memory read in-process: Skia GetResourceCacheUsage (budgeted only), Skia DumpMemoryStatistics (every resource, live or purgeable), DXGI IDXGIAdapter3::QueryVideoMemoryInfo for the process (local), nvidia-smi memory.used for the whole GPU minus a reading before the window, Task Manager's GPU Process Memory dedicated counter",
+    "vulkanProbe": "tests/HultUI.UiTests.VulkanProbe --resizes=40 (7a827e9's probe: two red/blue boxes, two sizes) and --resizes=40 --new-sizes (each resize a new size); median time SetWindowPos took, the window procedure drawing the new size inside it"
+  },
+  "results": {
+    "memoryAfterResizes": {
+      "start (1350x900 client px, all variants)": { "skiaBudgetedMB": 19.7, "skiaPurgeableScratchMB": 0.2, "dxgiMB": 130.6, "nvidiaSmiDeltaMiB": 112, "taskManagerMB": 138.0 },
+      "sizes, 28 resizes over 4 sizes (two runs, identical)": { "skiaBudgetedMB": 78.6, "skiaPurgeableScratchMB": 57.1, "purgeableResources": 17, "dxgiMB": 215.4, "nvidiaSmiDeltaMiB": [194, 194], "taskManagerMB": 219.9 },
+      "drag, 40 new sizes to 2058x1264 (two runs)": { "skiaBudgetedMB": 243.0, "skiaPurgeableScratchMB": 203.0, "purgeableResources": 18, "dxgiMB": 458.5, "nvidiaSmiDeltaMiB": [419, 423], "taskManagerMB": [455.7, 439.6] },
+      "scene toggle, 40 resizes between two sizes (three runs, identical)": { "skiaBudgetedMB": 41.0, "skiaPurgeableScratchMB": 19.5, "dxgiMB": 175.0 },
+      "what the pool held after the 4-size run": "the first offscreen (1350x900, 9.27 MB), three of the four sizes' offscreens (8.66, 9.97, 12.85 MB; the fourth is in use), a 2048x1024 F16 opacity-layer texture (16.00 MB) and small buffers"
+    },
+    "unbudgetedAlone": { "note": "the offscreen created with budgeted: false, nothing else changed (one run each)", "skiaPurgeableScratchMB": "57.1 -> 57.0", "dxgiMB": "215.1 -> 213.1", "skiaBudgetedAtStartMB": "19.7 -> 10.4 while DXGI read 130.6 both times: GetResourceCacheUsage leaves the live unbudgeted surface out" },
+    "resizeMedianMs": {
+      "vulkanProbe two sizes": [29.3, 29.4, 30.1, 29.1],
+      "vulkanProbe new sizes": [29.9, 30.4, 30.2, 30.7],
+      "scratch sizes (4)": [30.24, 29.90, 29.25, 29.61],
+      "scratch drag": [30.70, 30.50, 31.10, 31.02],
+      "scratch scene toggle": [29.99, 29.69, 30.90]
+    },
+    "skiaResourcesCreatedOver28SizeResizes": 322,
+    "gl": { "note": "the GL renderer has no exact-size offscreen; its pool holds approximately-sized layer textures only (RGBA8, Skia's size bins)", "skiaPurgeableScratchMB": { "start": 3.1, "after 28 resizes over 4 sizes": 11.1, "after a 40-step drag": 15.1 } }
+  }
+}

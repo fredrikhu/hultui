@@ -375,6 +375,37 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _grContext.Submit();
         _host.PresentAcquiredImage();
         _frameOpen = false;
+        if (_purgeScratch) PurgeScratch();
+    }
+
+    /// <summary>An offscreen was let go since the last purge; see <see cref="ReleaseOffscreen"/>.</summary>
+    private bool _purgeScratch;
+
+    /// <summary>
+    /// Frees the scratch resources nothing uses, the offscreen let go among them. Run after a
+    /// frame has been submitted rather than when the offscreen goes: what that frame drew with —
+    /// an opacity layer's texture, vertex and uniform buffers — is still in flight, so Skia
+    /// keeps it for the next frame. The rest of the pool goes and is made again as frames need
+    /// it: Skia made 1,324 resources over 28 resizes against 322 before (1,562 purged at the
+    /// resize itself). The resize is no slower on a drag or between two sizes; cycling through
+    /// four sizes, each of which used to find its old offscreen in the pool, it takes about
+    /// 1 ms longer.
+    /// </summary>
+    private void PurgeScratch()
+    {
+        _purgeScratch = false;
+        long start = StartupTrace.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        _grContext.PurgeUnlockedResources(scratchResourcesOnly: true);
+        if (StartupTrace.Enabled)
+        {
+            // What the scratch test reads: everything Skia still holds, the offscreen in use
+            // included, against what a kept offscreen per size would add.
+            double ms = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            _grContext.GetResourceCacheUsage(out int resources, out long bytes);
+            StartupTrace.Mark(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"vulkan scratch purged in {ms:0.00} ms with a {_offscreenWidth}x{_offscreenHeight} offscreen: " +
+                $"skia cache {bytes / 1048576.0:0.0} MB in {resources} resources"));
+        }
     }
 
     private SKSurface? SurfaceFor(in VulkanFrameTarget frame)
@@ -575,13 +606,37 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// returns at once when there is nothing to drop — and it leaves the video's colour filter
     /// alone: that one is keyed on its own inputs, and disposing it here recompiled its SkSL on
     /// every frame of every video drawn without an offscreen.
+    ///
+    /// <para><b>The offscreen's texture is freed, not kept.</b> A disposed Skia surface leaves
+    /// its texture in the context's scratch pool, for a later surface of exactly its size, and a
+    /// resized window never asks for that size again. Every size a resize passed through kept
+    /// width × height × 8 bytes of GPU memory until the context's 256 MB budget pushed it out:
+    /// 203 MB of them after a 40-step drag. So the next <see cref="Present"/> purges the pool's
+    /// unused scratch (<see cref="PurgeScratch"/>). Making the offscreen unbudgeted does not
+    /// help: Skia budgets an unbudgeted scratch texture when its last reference goes, if it
+    /// fits, and pools it all the same.</para>
+    ///
+    /// <para>A texture is purgeable only once no submitted work uses it, hence the wait for the
+    /// GPU unless the caller has just waited. The wait is on paths that run once per resize or
+    /// per change of display, never per frame.</para>
     /// </summary>
-    private void ReleaseOffscreen()
+    /// <param name="gpuIdle">The caller has just submitted synchronously, so nothing Skia has
+    /// in flight uses the offscreen.</param>
+    private void ReleaseOffscreen(bool gpuIdle = false)
     {
         if (_offscreen is null && _blit is null) return;
-        _offscreen?.Dispose();
+        if (_offscreen is { } offscreen)
+        {
+            if (!gpuIdle)
+            {
+                _grContext.Flush();
+                _grContext.Submit(synchronous: true);
+            }
+            offscreen.Dispose();
+            _offscreen = null;
+            _purgeScratch = true;
+        }
         _blit?.Dispose();
-        _offscreen = null;
         _blit = null;
         _blitScale = 0f;
         _offscreenWidth = _offscreenHeight = 0;
@@ -699,7 +754,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _grContext.Submit(synchronous: true);
 
         ReleaseFrameSurface();
-        ReleaseOffscreen();
+        ReleaseOffscreen(gpuIdle: true);
         _frameOpen = false;
     }
 
