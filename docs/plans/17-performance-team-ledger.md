@@ -94,7 +94,7 @@ survey to re-rank them.
     sub-tab labels need MaxLines(1) + ellipsis (they wrap and overlap the URL bar at ≤1100 px
     now that the editor gets its designed width). Junction: the FlexShrink(0) "current" tag
     overlaps LAST COMMIT by 23 px at 1000 px. Before/after images for the user.
-11f. **aperture-hero-scale** (2; user said yes 2026-10-08) — the item-page and request
+11f. ~~**aperture-hero-scale**~~ LANDED 6cf4fe6, 17e94b0 (2; user said yes 2026-10-08) — the item-page and request
     title-page heroes ask for the layout width at any scale (~0.7 source px per screen px at
     150 %, soft). Request layout width × display scale like f84893d; ~5.5 MB more per cached
     hero at a 1400-wide window. Show before/after crops at 150 %.
@@ -113,6 +113,13 @@ survey to re-rank them.
 
 ### Waiting
 
+- **aperture-tmdb-size-fallback** (2, app robustness) — w1920 is not in TMDB's configuration
+  list; TMDB serves it today but answers 400 for unlisted sizes. If it stops, the request
+  hero shows nothing: fall back to w1280. Small.
+- **aperture-poster-as-hero** (2, app memory) — a film with no backdrop shows its 2000×3000
+  poster as the hero: 22.9 MB decoded at 150 %. Ask for the size the hero shows. Small.
+- **aperture-hero-scrim-seam** (app visual, not perf) — the 70 %-wide horizontal scrim ends at
+  15 % alpha, leaving a visible seam (luma 115 → 134). Pre-existing.
 - **layout-scroll-strip-narrowing** (1, framework gap) — a tab strip cannot both narrow its
   tabs and scroll, because scroll content is laid out against an unbounded width; Meridian's
   open tab can be cut off at the strip's end.
@@ -225,6 +232,7 @@ survey to re-rank them.
 | 1 | 322df92 | layout-truncating-min-zero | A MaxLines(1) label's automatic minimum is 0 (nested boxes too); a label too narrow for its ellipsis draws nothing. Perf flat JIT and AOT. Fixes: Junction Branches name/tag overlap at 1200 px, Junction sidebar repo name/path running past the edge, Junction Tags subjects over the date column, Meridian's Send button off-window with a long URL. Exposed: Meridian's request tab titles and sub-tabs wrap at ≤1100 px and overlap the URL bar (follow-up 11e-fix); Junction's FlexShrink(0) "current" tag still overlaps at 1000 px. Goldens byte-identical. Images in scratchpad `truncation-minzero/`. |
 | 1 | be1fd9d | apps-truncation-followups (Meridian) | Request tab titles one line (ellipsis, ≤220 px, narrow to 72 px, strip clips); sub-tabs one line in a sideways-scrolling strip; URL box clips; Chain, Assertions, History, Environments labels fixed. At 1100 px the editor gets its designed 228 px and the response pane fits (before: titles 4–11 lines deep over the URL bar, pane 179 px off-window). Breakpoint left at 1100 (asked the user). |
 | 1 | 351e6cd | apps-truncation-followups (Junction) | Branch name cell clips; the name truncates first, then current/base/head/remote tags show whole or not at all; LAST COMMIT heading one line. No overlap at 1000/1200/1400 px. |
+| 1 | 6cf4fe6, 17e94b0 | aperture-hero-scale | Heroes requested at hero box × display scale (25 % steps), by the cover-fit side, rounded up to a 128-device-px step; stand-in on scale change or step; TMDB w1920 above w1280; only the last 4 heroes kept. 150 %: item hero 0.699 → 1.022 source px per device px, request hero 0.639 → 0.958; item page private 62.1 → 67.6 MB (hero 4.2 → 9.0 MB). Resizing 7 steps 96.9 → 66.0 MB (8 heroes → 1); 7 pages 137.6 → 96.8 MB (106.1 before 11f). Request page at 100 % +7.4 MB (w1920, strict rounding kept by the orchestrator). Measured against the real Jellyfin and Seerr. |
 
 ## Examined, not worth it
 
