@@ -151,7 +151,7 @@ public sealed partial class ApertureApp
             if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
         }
 
-        var (image, status) = _posters.Get(RequestImages.Backdrop(genre.BackdropPath, (int)(GenreCardWidth * 2), RequestImageBase));
+        var (image, status) = RequestArtwork(RequestImages.Backdrop, genre.BackdropPath, GenreCardWidth);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);
@@ -274,7 +274,7 @@ public sealed partial class ApertureApp
             if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
         }
 
-        var (image, status) = _posters.Get(RequestImages.Logo(company.LogoPath, (int)(CompanyCardWidth * 2), RequestImageBase));
+        var (image, status) = RequestArtwork(RequestImages.Logo, company.LogoPath, CompanyCardWidth);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var logo = Image.New(image);
@@ -403,7 +403,7 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         photo.Box.OverflowX = Overflow.Hidden;
         photo.Box.OverflowY = Overflow.Hidden;
-        var (image, status) = _posters.Get(RequestImages.Profile(person.ProfilePath, 300, RequestImageBase));
+        var (image, status) = RequestArtwork(RequestImages.Profile, person.ProfilePath, 150f);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);
@@ -538,7 +538,7 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         art.Box.OverflowX = Overflow.Hidden;
         art.Box.OverflowY = Overflow.Hidden;
-        var (image, status) = _posters.Get(RequestImages.Poster(item.PosterPath, (int)(width * 2), RequestImageBase));
+        var (image, status) = RequestArtwork(RequestImages.Poster, item.PosterPath, width);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);
@@ -768,7 +768,7 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         poster.Box.OverflowX = Overflow.Hidden;
         poster.Box.OverflowY = Overflow.Hidden;
-        var (posterImage, posterStatus) = _posters.Get(RequestImages.Poster(item.PosterPath, 300, RequestImageBase));
+        var (posterImage, posterStatus) = RequestArtwork(RequestImages.Poster, item.PosterPath, 150f);
         if (posterStatus == PosterCache.Status.Ready && posterImage is { IsLoaded: true })
         {
             var picture = Image.New(posterImage);
@@ -1152,7 +1152,7 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         art.Box.OverflowX = Overflow.Hidden;
         art.Box.OverflowY = Overflow.Hidden;
-        var (image, status) = _posters.Get(RequestImages.Profile(person.ProfilePath, (int)(width * 2), RequestImageBase));
+        var (image, status) = RequestArtwork(RequestImages.Profile, person.ProfilePath, width);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);

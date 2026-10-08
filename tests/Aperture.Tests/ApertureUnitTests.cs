@@ -433,6 +433,81 @@ public class ApertureUnitTests
         Assert.Empty(JellyfinLibrary.MapTrickplay(new Jellyfin.Sdk.Generated.Models.BaseItemDto_Trickplay()));
     }
 
+    // ── Artwork sizes ────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(1.0f, 1.0f)]
+    [InlineData(1.25f, 1.25f)]
+    [InlineData(1.5f, 1.5f)]
+    [InlineData(2.0f, 2.0f)]
+    [InlineData(1.001f, 1.0f)]   // float noise on a whole step stays on it
+    [InlineData(1.1f, 1.25f)]    // a zoom between steps asks for the step above
+    [InlineData(1.333f, 1.5f)]   // so does a fractional Wayland scale
+    [InlineData(0.5f, 0.5f)]     // zoomed out: fewer pixels, not a floor of 1
+    public void ArtworkIsFetchedForTheDisplayScaleRoundedUpToAQuarter(float display, float expected) =>
+        Assert.Equal(expected, ApertureApp.ArtworkScaleFor(display));
+
+    [Theory]
+    [InlineData(168f, 1.0f, 168)]
+    [InlineData(168f, 1.25f, 210)]
+    [InlineData(168f, 1.5f, 252)]
+    [InlineData(168f, 2.0f, 336)]
+    [InlineData(300f, 1.75f, 525)]
+    [InlineData(38f, 1.25f, 48)]   // 47.5: rounded up, never a pixel short
+    public void ArtworkIsAskedForAtTheDevicePixelsItCovers(float layoutWidth, float scale, int pixels) =>
+        Assert.Equal(pixels, ApertureApp.ArtworkPixels(layoutWidth, scale));
+
+    /// <summary>Every request answered with the same small PNG.</summary>
+    private sealed class SmallPngHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            using var bitmap = new SkiaSharp.SKBitmap(4, 6);
+            using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(data.ToArray()),
+            });
+        }
+    }
+
+    private static HultUI.Core.Rendering.IImageSource Loaded(PosterCache cache, Uri url)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (cache.Get(url) is ({ IsLoaded: true } image, PosterCache.Status.Ready)) return image;
+            Thread.Sleep(5);
+        }
+        throw new TimeoutException($"{url} never loaded");
+    }
+
+    [Fact]
+    public void AfterAScaleChangeThePosterCacheKeepsWhatIsAskedForAgainAndDropsTheRest()
+    {
+        using var cache = new PosterCache(() => { }, http: new HttpClient(new SmallPngHandler()));
+        var a = new Uri("http://jellyfin.test/Items/a/Images/Primary?fillWidth=168");
+        var b = new Uri("http://jellyfin.test/Items/b/Images/Primary?fillWidth=168");
+        var c = new Uri("http://jellyfin.test/Items/c/Images/Primary?fillWidth=252");
+        var pictureA = Loaded(cache, a);
+        var pictureB = Loaded(cache, b);
+
+        cache.Retire();
+        Assert.True(cache.HasRetired);
+
+        // The window went back: a is asked for at its own size again, so it is current.
+        Assert.Same(pictureA, Loaded(cache, a));
+        // b is not asked for again. Once the downloads that follow have landed, the next
+        // ask drops it.
+        Loaded(cache, c);
+        cache.Get(c);
+
+        Assert.False(cache.HasRetired);
+        Assert.False(pictureB.IsLoaded, "a picture fetched for the old scale is still held");
+        Assert.True(pictureA.IsLoaded, "a picture asked for again at its own size was dropped");
+    }
+
     private static void TryDeleteDirectory(string path)
     {
         try { Directory.Delete(path, recursive: true); } catch (IOException) { }

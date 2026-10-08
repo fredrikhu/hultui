@@ -408,8 +408,9 @@ public sealed partial class ApertureApp
         portrait.Box.OverflowY = Overflow.Hidden;
 
         var url = _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag,
-            maxWidth: (int)(PersonCardWidth * 2));
-        var (image, status) = _posters.Get(url);
+            maxWidth: ArtworkPixels(PersonCardWidth));
+        var (image, status) = _posters.Get(url, StandInPixels(PersonCardWidth) is { } old
+            ? _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag, maxWidth: old) : null);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);

@@ -1560,6 +1560,134 @@ public class ApertureAppHostTests
         }, () => backend);
     }
 
+    // ── Artwork sizes ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Answers each artwork request with a PNG as wide as it asked for (its fillWidth), so a
+    /// test can tell which size a card is drawing. Requests whose URL contains
+    /// <see cref="Hold"/> wait for <see cref="Release"/>, so a test can look at a card while
+    /// its new picture is still on the way.
+    /// </summary>
+    private sealed class SizedArtworkHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly List<string> _requested = [];
+
+        public string? Hold { get; set; }
+
+        public void Release() => _released.TrySetResult();
+
+        public bool Asked(string text)
+        {
+            lock (_requested) return _requested.Any(r => r.Contains(text, StringComparison.Ordinal));
+        }
+
+        public string Log()
+        {
+            lock (_requested) return string.Join("\n", _requested);
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var url = request.RequestUri!.PathAndQuery;
+            lock (_requested) _requested.Add(url);
+            if (Hold is { } hold && url.Contains(hold, StringComparison.Ordinal))
+                await _released.Task.WaitAsync(ct);
+
+            var asked = System.Text.RegularExpressions.Regex.Match(url, @"fillWidth=(\d+)");
+            int width = asked.Success ? int.Parse(asked.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 100;
+            using var bitmap = new SkiaSharp.SKBitmap(width, width * 3 / 2);
+            using var canvas = new SkiaSharp.SKCanvas(bitmap);
+            canvas.Clear(new SkiaSharp.SKColor(90, 60, 40));
+            using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(data.ToArray()),
+            };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            return response;
+        }
+    }
+
+    /// <summary>The picture a card is drawing, or null while it shows its placeholder. Artwork
+    /// is the image that covers its box; icons (the placeholder, the watched tick) fit theirs.</summary>
+    private static HultUI.Core.Rendering.IImageSource? CardPicture(HeadlessSession session, string automationId) =>
+        session.Window.FindByAutomationId(automationId) is { } card
+            ? Descendants(card.Element).OfType<HultUI.Core.Elements.ImageElement>()
+                .FirstOrDefault(i => i.Fit == HultUI.Core.Layout.ImageFit.Cover)?.Source
+            : null;
+
+    private static IEnumerable<HultUI.Core.Elements.Element> Descendants(HultUI.Core.Elements.Element element)
+    {
+        foreach (var child in element.Children)
+        {
+            yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
+    }
+
+    [Fact]
+    public void ArtworkIsAskedForAtTheWindowsScaleAndAgainWhenTheScaleChanges()
+    {
+        var artwork = new SizedArtworkHandler();
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.PumpUntil(() => CardPicture(session, "card-m1") is { IsLoaded: true }, TimeSpan.FromSeconds(5));
+
+            // At 100 % a poster card 168 wide asks for 168 pixels: one per screen pixel, not
+            // the four that a fixed "twice the width" held.
+            Assert.True(artwork.Asked("/Items/m1/Images/Primary?tag=tag-m1&fillWidth=168"), artwork.Log());
+            Assert.False(artwork.Asked("fillWidth=336"), artwork.Log());
+            var old = CardPicture(session, "card-m1")!;
+            Assert.Equal(168f, old.IntrinsicSize.Width);
+
+            // The window moves to a 150 % monitor: the card asks again at 252. Until that
+            // lands it keeps drawing the old picture rather than going blank.
+            artwork.Hold = "fillWidth=252";
+            session.Window.SetScale(1.5f);
+            session.PumpUntil(() => artwork.Asked("/Items/m1/Images/Primary?tag=tag-m1&fillWidth=252"),
+                TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Equal(1.5f, app.ArtworkScale);
+            Assert.Same(old, CardPicture(session, "card-m1"));
+
+            // Once it lands the card draws it, and the 100 % picture is gone from memory
+            // rather than kept beside its replacement.
+            artwork.Release();
+            session.PumpUntil(() => CardPicture(session, "card-m1") is { IntrinsicSize.Width: 252f },
+                TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.False(old.IsLoaded, "the 100 % picture was kept after its replacement landed");
+            Assert.False(app.Posters.HasRetired, "pictures fetched for 100 % are still held");
+        }, artwork: artwork);
+    }
+
+    [Fact]
+    public void APictureWiderThanItsCardIsAskedForByHeight()
+    {
+        var library = Library();
+        library.NextUpIds.Add("e5");
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Next up");
+            session.PumpUntil(() => app.Posters.PendingCount == 0 && artwork.Asked("/Items/e5/"),
+                TimeSpan.FromSeconds(5));
+
+            // An episode's picture is a 16:9 still. On a 2:3 poster card its height decides
+            // the cover fit, so the card asks for the card's height in pixels: by width it
+            // would arrive 168 x 95 and be drawn 2.7 times too large.
+            Assert.True(artwork.Asked("/Items/e5/Images/Primary?tag=tag-e5&fillHeight=252"), artwork.Log());
+            // A still card is the still's own shape: by width, as a poster card is.
+            Assert.True(artwork.Asked("/Items/e1/Images/Primary?tag=tag-e1&fillWidth=300"), artwork.Log());
+            Assert.False(artwork.Asked("&fillWidth=168&fillHeight"), artwork.Log());
+        }, artwork: artwork);
+    }
+
     // ── Streaming quality ────────────────────────────────────────────────
 
     [Fact]

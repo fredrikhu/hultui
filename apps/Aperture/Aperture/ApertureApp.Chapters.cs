@@ -114,10 +114,11 @@ public sealed partial class ApertureApp
     private Element? ChapterImage(int index, MediaChapter chapter)
     {
         if (_library is not { } lib || _playingItem is not { } item) return null;
-        if (lib.ChapterImageUrl(item.Id, index, chapter.ImageTag, (int)(ChapterThumbWidth * 2)) is not { } url)
+        if (lib.ChapterImageUrl(item.Id, index, chapter.ImageTag, ArtworkPixels(ChapterThumbWidth)) is not { } url)
             return null;
 
-        var (image, status) = _posters.Get(url);
+        var (image, status) = _posters.Get(url, StandInPixels(ChapterThumbWidth) is { } old
+            ? lib.ChapterImageUrl(item.Id, index, chapter.ImageTag, old) : null);
         if (status != PosterCache.Status.Ready || image is not { IsLoaded: true }) return null;
 
         var box = Box.New()

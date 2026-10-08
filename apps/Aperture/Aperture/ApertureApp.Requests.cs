@@ -114,7 +114,7 @@ public sealed partial class ApertureApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         thumb.Box.OverflowX = Overflow.Hidden;
         thumb.Box.OverflowY = Overflow.Hidden;
-        var (image, status) = _posters.Get(RequestImages.Poster(request.PosterPath, 92, RequestImageBase));
+        var (image, status) = RequestArtwork(RequestImages.Poster, request.PosterPath, 46f);
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);

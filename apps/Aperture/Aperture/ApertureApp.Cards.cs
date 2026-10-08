@@ -111,8 +111,16 @@ public sealed partial class ApertureApp
         box.Box.OverflowX = Overflow.Hidden;
         box.Box.OverflowY = Overflow.Hidden;
 
-        var url = ImageUrlFor(item, kind, (int)(width * 2));
-        var (image, status) = _posters.Get(url);
+        // The box in device pixels, by the side that decides a cover fit; the server scales
+        // the other side to keep the picture's shape. A picture wider than its box (an
+        // episode's 16:9 still on a 2:3 card) is asked for by height, so it still has a
+        // pixel for every pixel drawn. Never both sides: Jellyfin's fill covers the box but
+        // rounds both sides up, and the spare pixel on the side that already fits shifts
+        // the picture by half a pixel, which is soft at one to one.
+        bool byHeight = ArtAspect(item, kind) is { } aspect && aspect > width / height * 1.005;
+        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
+        var (image, status) = _posters.Get(url, _standInScale is { } old && _posters.HasRetired
+            ? ArtworkUrl(item, kind, width, height, byHeight, old) : null);
 
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
@@ -228,24 +236,100 @@ public sealed partial class ApertureApp
         return badge;
     }
 
+    // ── Artwork sizes ────────────────────────────────────────────────────
+
+    /// <summary>The display scale artwork is fetched for; see <see cref="ArtworkScaleFor"/>.</summary>
+    private float _artworkScale = 1f;
+
+    /// <summary>The scale before the last change, while the cache may still hold pictures
+    /// fetched for it — the stand-ins a tile draws until its new picture lands.</summary>
+    private float? _standInScale;
+
+    internal float ArtworkScale => _artworkScale;
+
+    /// <summary>
+    /// The display scale to fetch artwork for: the window's, rounded up to a quarter.
+    /// Windows offers scales in 25 % steps, so there it is the scale itself; a zoom or a
+    /// fractional scale in between asks for the step above rather than a new size for
+    /// every small change, which would fetch every picture again.
+    /// </summary>
+    internal static float ArtworkScaleFor(float displayScale) =>
+        MathF.Max(0.25f, MathF.Ceiling(displayScale * 4f - 0.01f) / 4f);
+
+    /// <summary>
+    /// How many pixels to ask for, across a side of artwork drawn <paramref name="layoutSize"/>
+    /// layout units long: the device pixels it covers, so a picture is drawn at about one
+    /// source pixel per screen pixel. A fixed "twice the layout width" held four times the
+    /// pixels it drew at 100 % and 1.8 times at 150 %, in a cache of up to 400 pictures.
+    /// </summary>
+    internal static int ArtworkPixels(float layoutSize, float scale) =>
+        (int)MathF.Ceiling(layoutSize * scale);
+
+    internal int ArtworkPixels(float layoutSize) => ArtworkPixels(layoutSize, _artworkScale);
+
+    /// <summary>The size the same artwork was asked for at before the window changed
+    /// scale, while the cache still holds such pictures; null otherwise. Passed to
+    /// <see cref="PosterCache.Get"/> as the stand-in.</summary>
+    private int? StandInPixels(float layoutSize) =>
+        _standInScale is { } old && _posters.HasRetired ? ArtworkPixels(layoutSize, old) : null;
+
+    /// <summary>
+    /// Follows the window to a new display scale: from now on artwork is asked for at the
+    /// new size, lazily, as tiles are built. What the cache holds is retired rather than
+    /// dropped, so each tile keeps its old picture (soft on a denser screen) until the new
+    /// one lands. True when the scale changed.
+    /// </summary>
+    private bool SyncArtworkScale()
+    {
+        float scale = ArtworkScaleFor(_window.DisplayScale);
+        if (scale == _artworkScale) return false;
+        _standInScale = _artworkScale;
+        _artworkScale = scale;
+        _posters.Retire();
+        return true;
+    }
+
+    /// <summary>A card's picture asked for by width, or by height (see
+    /// <see cref="Artwork"/>), at a display scale.</summary>
+    private Uri? ArtworkUrl(MediaItem item, ImageKind kind, float width, float height, bool byHeight, float scale) =>
+        byHeight
+            ? ImageUrlFor(item, kind, null, ArtworkPixels(height, scale))
+            : ImageUrlFor(item, kind, ArtworkPixels(width, scale));
+
+    /// <summary>The width-to-height ratio of the picture <see cref="ImageUrlFor"/> picks, when
+    /// it is known: a backdrop is 16:9, a primary image is what the server reported, and an
+    /// episode's primary image is a 16:9 still when the server did not say.</summary>
+    internal static double? ArtAspect(MediaItem item, ImageKind kind) =>
+        kind == ImageKind.Backdrop && (item.BackdropImageTag is { Length: > 0 } || item.BackdropItemId is { Length: > 0 })
+            ? 16.0 / 9.0
+            : item.PrimaryAspectRatio ?? (item.Kind == MediaKind.Episode ? 16.0 / 9.0 : null);
+
+    /// <summary>A TMDB picture (the request server's pages) at the size this scale needs,
+    /// with the stand-in from the scale before. TMDB serves fixed sizes, so the size picker
+    /// rounds the width up to one of them.</summary>
+    private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) RequestArtwork(
+        Func<string?, int, string?, Uri?> sized, string? path, float layoutWidth) =>
+        _posters.Get(sized(path, ArtworkPixels(layoutWidth), RequestImageBase),
+            StandInPixels(layoutWidth) is { } old ? sized(path, old, RequestImageBase) : null);
+
     /// <summary>
     /// Which image to ask the server for. An episode's own primary image is a still from
     /// the episode; for a backdrop it borrows the series', which is what
     /// <see cref="MediaItem.BackdropItemId"/> is for.
     /// </summary>
-    internal Uri? ImageUrlFor(MediaItem item, ImageKind kind, int maxWidth)
+    internal Uri? ImageUrlFor(MediaItem item, ImageKind kind, int? maxWidth, int? maxHeight = null)
     {
         if (_library is not { } lib) return null;
         if (kind == ImageKind.Backdrop)
         {
             if (item.BackdropImageTag is { Length: > 0 } own)
-                return lib.ImageUrl(item.Id, ImageKind.Backdrop, own, maxWidth);
+                return lib.ImageUrl(item.Id, ImageKind.Backdrop, own, maxWidth, maxHeight);
             if (item.BackdropItemId is { Length: > 0 } parent)
-                return lib.ImageUrl(parent, ImageKind.Backdrop, null, maxWidth);
+                return lib.ImageUrl(parent, ImageKind.Backdrop, null, maxWidth, maxHeight);
             // No backdrop anywhere: the primary image is better than a grey box.
-            return lib.ImageUrl(item.Id, ImageKind.Primary, item.PrimaryImageTag, maxWidth);
+            return lib.ImageUrl(item.Id, ImageKind.Primary, item.PrimaryImageTag, maxWidth, maxHeight);
         }
-        return lib.ImageUrl(item.Id, kind, item.PrimaryImageTag, maxWidth);
+        return lib.ImageUrl(item.Id, kind, item.PrimaryImageTag, maxWidth, maxHeight);
     }
 
     /// <summary>What a screen reader says for a card: the title, what it is, and the state

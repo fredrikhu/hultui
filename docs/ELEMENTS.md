@@ -765,6 +765,17 @@ var source = new SkiaImageSource(bitmap);          // then hand it over
 var picture = Image.New(source).Size(32f, 32f);   // dispose `source`, not `bitmap`, when done
 ```
 
+**Decode at the size you draw.** A still image costs its decoded pixels, four bytes each,
+whatever size it is drawn at. Decode it, or ask a server for it, at the device pixels its box
+covers: the layout size times `Window.DisplayScale`. A fixed "twice the layout size" holds
+four times the pixels it draws at 100 % (a 168 × 252 poster: 677 KB instead of 169 KB), and
+drawing it smaller also makes Skia build a mipmap chain for it. For `ImageFit.Cover`, size it
+by the side that decides the fit (the height, for a picture wider than its box), so it still
+has a pixel for every pixel drawn. `DisplayScale` changes when
+the window moves to a monitor with another scale, which arrives as `Window.Resized`: ask
+again at the new size then, key any cache by the size asked for, and drop what was decoded
+for the old scale once the new pictures are in. Aperture's `PosterCache` does all three.
+
 **Changing pixels.** A source whose pixels change over time — a video frame, a
 camera, a software-rendered view — implements `IPixelImageSource`, and the renderer
 draws its current bytes without copying. `PixelFrameSink` is the ready-made one: a

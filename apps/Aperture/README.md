@@ -75,6 +75,17 @@ sheet is behind the session and this server answers `?api_key=` with **401**, so
 carries the session's `Authorization` header instead. Putting a token in a URL was the wrong
 instinct anyway — URLs end up in logs and caches.
 
+**Artwork is fetched at the size it is drawn.** A card asks for its box in device pixels —
+layout size × the window's display scale, rounded up to a 25 % step — by the side that decides
+a cover fit: `fillWidth` for a picture the card's shape or taller, `fillHeight` for one wider
+than the card (an episode's 16:9 still on a 2:3 poster card), using the aspect ratio the server
+reports. Never both: Jellyfin covers the box but rounds both sides up, and the spare pixel puts
+the picture half a pixel off, which is soft at one to one. Asking for twice the layout width
+whatever the scale held four times the pixels it drew at 100 %. When the window moves to a
+monitor with another scale, the cards ask again at the new size; until each new picture lands
+the old one stays up (soft, briefly), and once the downloads have all landed the old ones are
+dropped (`PosterCache.Retire`).
+
 **The scrubber is cut into chapters** when the file has marks, and fills to the pointer as
 it crosses, so where you would land reads differently from where you are.
 
