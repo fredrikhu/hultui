@@ -6,7 +6,8 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 1
 - **Phase:** build — resumed 2026-10-08 22:49 after a pause. Next: item **11f**
-  (aperture-hero-scale), then item **12** (two perf-suite scenarios), then the end-of-round
+  (aperture-hero-scale), then **11g/11h** (Meridian breakpoint, Junction compact table),
+  then item **12** (two perf-suite scenarios), then the end-of-round
   full test suite (`dotnet test HultUI.slnx -c Release`), then round 2's survey. To resume
   after another pause, run in this worktree: `/loop Run the next step of the performance
   team: follow docs/plans/17-performance-team.md, with state in
@@ -97,6 +98,13 @@ survey to re-rank them.
     title-page heroes ask for the layout width at any scale (~0.7 source px per screen px at
     150 %, soft). Request layout width × display scale like f84893d; ~5.5 MB more per cached
     hero at a 1400-wide window. Show before/after crops at 150 %.
+11g. **meridian-pane-breakpoint** (8/1; user said yes 2026-10-08) — move Meridian's
+    side-pane breakpoint from 1100 to ~1320 px so the editor keeps ≥ 448 px; below it the
+    response pane goes to the bottom. Update the plan's design decision. Before/after images.
+11h. **junction-branches-compact** (8/1; user said yes 2026-10-08) — a compact Branches
+    table at ≤1000 px (e.g. icon-only Checkout, narrower fixed columns) so names are not
+    starved to "…" with the sidebar open. Check Tags/Remotes/Worktrees use the same table
+    and stay consistent. Before/after images.
 12. **apps-scenario-virtual-selection-walk-a11y** + **apps-scenario-textarea-highlighted-json**
     (8) — two perf-suite scenarios the big round 2 items need.
 
@@ -246,13 +254,7 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-- **Meridian response-pane breakpoint** (from be1fd9d): at 1100 px the editor gets
-  1100 − 48 − 264 − 560 = 228 px, so the URL is almost invisible beside Send. Move the
-  side-pane breakpoint from 1100 to ~1320 px (editor ≥ 448 px; below it the pane goes to the
-  bottom)? The plan's approved decision says "auto-bottom < 1100dip".
-- **Junction Branches compact table at ≤1000 px** (from 351e6cd): with the sidebar open the
-  fixed columns (118 + 120 + 96 + 250) leave 86 px for name + LAST COMMIT, so names show
-  as "…". Add a compact layout (e.g. icon-only Checkout, narrower columns)?
+None open.
 
 Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
 (outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
@@ -273,6 +275,10 @@ Answered:
 - 4. Aperture poster decode size → **yes**: candidate aperture-poster-decode-scale.
 - Aperture hero images at 150 % → **yes, make them sharp** (2026-10-08): candidate
   aperture-hero-scale.
+- Meridian response-pane breakpoint → **yes, move it to ~1320 px** (2026-10-08): candidate
+  meridian-pane-breakpoint.
+- Junction Branches compact table at ≤1000 px → **yes** (2026-10-08): candidate
+  junction-branches-compact.
 - 5. `MarkDirty()` joining an open batch → **no**: it stays synchronous, as REACTIVITY.md
   documents. The guidelines should tell app authors to call it once per handler.
 
