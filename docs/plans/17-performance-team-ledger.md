@@ -44,7 +44,7 @@ survey to re-rank them.
    frame −40 % bytes.
 5. ~~**paint-image-zero-copy**~~ LANDED 12d1480 (2) — `SetImmutable` before `SKImage.FromBitmap`; −50 % decoded
    image memory (Aperture up to ~375 MB, Vesper ~50 MB).
-5a. **aperture-poster-decode-scale** (2; user said yes 2026-10-07) — request posters at
+5a. ~~**aperture-poster-decode-scale**~~ LANDED f84893d (2; user said yes 2026-10-07) — request posters at
    card width × display scale instead of × 2; −75 % poster memory at 100 % scale (up to
    ~280 MB), −44 % at 150 %. Refetch at the new scale after a DPI change.
 6. **a11y-uia-wrapper-rebase** (7; = part of a11y-uia-apply-and-retention (4)) — rebase
@@ -77,6 +77,11 @@ survey to re-rank them.
 
 ### Waiting
 
+- **paint-cover-half-pixel-crop** (2) — at 1:1, Cover crops at half-pixel offsets when a
+  source is 1 px larger on the cropped axis (`ComputeImageFit` does not snap the source
+  rectangle): slightly soft pictures. Small.
+- **aperture-postercache-trim-thread** (2, app correctness) — `PosterCache.Trim` disposes
+  images on the download thread while the UI may draw them. Pre-existing.
 - **gl-image-retained-after-dispose** (2, lead for 3) — in a GL window, drawing 281 MB of
   photos adds ~380 MB of private bytes beyond the pixels, and ~375 MB stays after every
   source is disposed (437 vs 62 MB at start); before and after 12d1480 alike. Suspects:
@@ -145,6 +150,7 @@ survey to re-rank them.
 | 1 | 17e3de4 | paint-text-zero-alloc | Index loops on the text draw path, `PrefixMeasurer` closure moved out, pooled corner `SKPath`. allocKB −10…−96 % on 43 JIT / 44 AOT rows; dense text 18.1 → 0.8 KB/op (AOT 29.8 → 12.5); TextInput keystroke 44.9 → 2.5; render pass ~0.1 KB/frame on text screens; time flat; goldens byte-identical. |
 | 1 | 8ab877c | runtime-aot-trace-type-name | Element trace names looked up only while recording (internal `FrameTracer.BeginElement`). AOT allocKB −10…−99.6 % on 40 rows, none up: resize 2,000 rows 685.6 → 2.9 KB/op (time −16 %), TextInput typing 59.0 → 2.4 (−10 %), deep nesting 75.5 → 4.8 (−12 %), tiles 7.7 → 0.7; AOT per-frame bytes now equal JIT. JIT flat. HULTUI_TRACE output identical event for event. Junction AOT frame not re-measured. |
 | 1 | 12d1480 | paint-image-zero-copy | `SetImmutable` on hand-over: SkiaImageSource's image shares the bitmap's pixels. Private bytes: Vesper 216 thumbnails 83.6 → 66.3 MB (−21 %), Aperture real library (27 posters) 85.0 → 67.3 MB (−21 %), GL window with 8 × 3840×2400 photos 1001 → 723 MB (−278 MB). Extrapolated up to ~260 MB at Aperture's 400-poster cap. Time and allocKB flat on all 83 suite rows; goldens byte-identical; GL readback exact. Vulkan not checked. |
+| 1 | f84893d | aperture-poster-decode-scale | Aperture artwork requested at layout size × display scale (25 % steps), by the side that decides a cover fit; refetched on scale change with the old picture as stand-in. Real library, 27 pictures: decoded 17.6 → 4.4 MB at 100 % (−75 %), 9.9 MB at 150 % (−44 %), unchanged at 200 %; private 63.8 → 42.9 MB (−33 %) at 100 %, 63.2 → 54.1 (−14 %) at 150 %; Skia mip cache 5.9 → 0 MB. At the 400 cap 258 → 65 / 145 MB. As sharp or sharper (≥1 source px per device px). Same fix for cast, chapters and request-server pictures. |
 
 ## Examined, not worth it
 
@@ -186,6 +192,11 @@ From the round 1 surveys (details in `17-reports/`):
    of it: give one-line truncating labels an automatic minimum of 0 (as CSS does), which
    fixes overlapping text in Junction Branches at ≤1200 px and Meridian's Send button
    pushed off-screen by a long URL.
+
+- **Aperture hero images at 150 %** (painting, from f84893d): the item-page and request
+  title-page heroes ask for the layout width at any scale, so at 150 % they draw ~0.7 source
+  pixels per screen pixel (soft). Fixing it costs ~5.5 MB per cached hero at a 1400-wide
+  window. Fix it?
 
 Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
 (outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
