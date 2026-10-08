@@ -38,9 +38,12 @@ with a "replace from clipboard" action, so no phase hard-blocks.
 Azimuth register verbatim from mock 01 (`az-*` tokens, method + status registers, infra =
 warn never fail, glyphs always beside color). Junction idiom: 48dip rail, views on 1–5
 (Requests / Runner / Discovery / History / Environments). Response right 560dip default,
-Ctrl+\ flips to 380dip bottom, auto-bottom < 1100dip. Key map as mocked (Ctrl+Enter send,
-Esc cancel, Ctrl+E env, Ctrl+P palette, Ctrl+F find, Ctrl+S save, Ctrl+T/W tabs, Ctrl+R
-run). **Fonts:** follow the `Fonts.cs` precedent — platform sans + Consolas/Menlo; bundling
+Ctrl+\ flips to 380dip bottom, auto-bottom < 1320dip (was < 1100dip; the user approved the
+move on 2026-10-08: at 1100 the editor beside the pane was 228dip, the URL bar's method chip
+and Send with almost no URL between them; 1320 = rail 48 + tree 264 + editor 448 + pane 560,
+and 448 holds an ordinary request's six sub-tabs unscrolled and ~227dip of URL beside GET).
+Key map as mocked (Ctrl+Enter send, Esc cancel, Ctrl+E env, Ctrl+P palette, Ctrl+F find,
+Ctrl+S save, Ctrl+T/W tabs, Ctrl+R run). **Fonts:** follow the `Fonts.cs` precedent — platform sans + Consolas/Menlo; bundling
 Inter/JetBrains Mono is a separate later decision, not a blocker.
 
 ## The file format (engineering-owned, defined in P1)
@@ -88,8 +91,8 @@ editor footer (path · saved/● unsaved · Ctrl+S), external-change bar (reload
 diff — diff reuses the shared side-by-side view).
 **P3b response side:** status line (glyph + semantic color + duration + size), Body tab
 (HultUI.Syntax JSON/XML, shared TextSearch bar verbatim, pretty/raw), Headers/Cookies
-tables, Timeline mini-waterfall from P2 timings, pane flip (Ctrl+\ + <1100dip breakpoint —
-Junction's compact-breakpoint idiom), and all eight response states from mock 02 (never
+tables, Timeline mini-waterfall from P2 timings, pane flip (Ctrl+\ + <1320dip breakpoint,
+1100 until 2026-10-08 — Junction's compact-breakpoint idiom), and all eight response states from mock 02 (never
 sent, in-flight with greyed previous, huge body, binary hex stub, DNS, refused, TLS with
 scoped trust action, timeout).
 Headless tests: state renders via accessibility tree; RenderLog asserts the find-bar tint

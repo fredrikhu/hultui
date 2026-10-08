@@ -417,10 +417,12 @@ public partial class MeridianApp
     /// <summary>
     /// Params · Headers · Body · Auth · Assertions · Chain, each on one line and never
     /// truncated — the counts and the verdict ("Assertions 1/3✗") are what the labels are
-    /// for. When the editor is narrower than the six of them (~445px; beside the response
-    /// pane, a window of 1100–1320 px leaves it 228–448), the strip scrolls sideways under
-    /// the wheel rather than wrapping its labels or holding the editor wider than the pane
-    /// allows. The scroll bar stays hidden: drawn, it covers the open tab's pill.
+    /// for. Beside the response pane the editor is at least EditorMinWidth (448px), which
+    /// holds the six of an ordinary request (~445px); longer labels ("Body json",
+    /// "Auth inherited", "Assertions 1/3✗") can still outgrow it, and then the strip
+    /// scrolls sideways under the wheel rather than wrapping its labels or holding the
+    /// editor wider than the pane allows. The scroll bar stays hidden: drawn, it covers the
+    /// open tab's pill.
     /// </summary>
     private Element BuildSubTabs(RequestTab tab)
     {

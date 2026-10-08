@@ -89,7 +89,18 @@ public partial class MeridianApp : Component, IDisposable
 
     // Response pane orientation: right 560dip by default, Ctrl+\ flips to
     // bottom 380dip, and below the breakpoint bottom is forced regardless.
-    private const float ForceBottomWindowWidth = 1100f;
+    //
+    // The breakpoint is the narrowest window that leaves the editor EditorMinWidth beside
+    // the pane: rail 48 + tree 264 + editor 448 + pane 560 = 1320 dip. 448 holds the six
+    // sub-tabs of a request with counts ("Params 4 · Headers 1 · Body · Auth · Assertions 1 ·
+    // Chain 3", 445 px with the strip's padding) without scrolling them, and leaves the URL
+    // box 227 px beside GET and 203 beside OPTIONS: the URL bar's floor is the method chip
+    // (46 px for GET, 70 for OPTIONS), Send with its Ctrl+Enter keycap (135) and 40 px of
+    // padding and gaps. It was 1100 until 2026-10-08, when the user approved the move: that
+    // left the editor 228 px, the URL bar's floor with almost no URL beside Send.
+    internal const float EditorMinWidth = 448f;
+    internal const float ForceBottomWindowWidth =
+        Azimuth.RailWidth + Azimuth.TreeWidth + EditorMinWidth + Azimuth.ResponseRight;
     private bool _responseBottomChoice;
     private bool _forceResponseBottom;
     internal bool ResponseAtBottom => _responseBottomChoice || _forceResponseBottom;

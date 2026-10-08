@@ -7,12 +7,17 @@ namespace Meridian.Tests;
 
 /// <summary>
 /// The editor beside the response pane at the narrowest window that keeps the pane on the
-/// right (1100 px leaves the editor 228 of them). Its tab titles and sub-tab labels used to
-/// wrap — the open tabs' titles several lines deep, over the URL bar — and their words held
-/// the editor wide enough to push the response pane off the window.
+/// right (1320 px since 2026-10-08, leaving the editor 448 of them; 1100 and 228 before).
+/// Its tab titles and sub-tab labels used to wrap — the open tabs' titles several lines
+/// deep, over the URL bar — and their words held the editor wide enough to push the
+/// response pane off the window. Below the breakpoint the pane sits under the editor.
 /// </summary>
 public class NarrowEditorLayoutTests : IDisposable
 {
+    /// <summary>The narrowest window with the response pane beside the editor: rail 48 +
+    /// tree 264 + editor 448 + pane 560.</summary>
+    private const int SideBySide = 1320;
+
     private const string SignIn = "Sign in with client credentials and remember the access token";
     private const string Search = "Search succeeded charges over 10 SEK for the customer";
 
@@ -44,7 +49,10 @@ public class NarrowEditorLayoutTests : IDisposable
         File.WriteAllText(path, content);
     }
 
-    private void Hosted(int width, int height, Action<HeadlessSession> body)
+    private void Hosted(int width, int height, Action<HeadlessSession> body) =>
+        Hosted(width, height, (session, _) => body(session));
+
+    private void Hosted(int width, int height, Action<HeadlessSession, MeridianApp> body)
     {
         using var session = HeadlessSession.Create(width, height);
         MeridianApp? app = null;
@@ -54,7 +62,7 @@ public class NarrowEditorLayoutTests : IDisposable
             session.Application.SetRoot(app.Mount());
             app.OpenWorkspace(_root);
             session.PumpFrame();
-            body(session);
+            body(session, app);
         }
         finally
         {
@@ -111,10 +119,12 @@ public class NarrowEditorLayoutTests : IDisposable
             $"\"{label.Content}\" takes {lines:0.0} lines ({label.Layout.Width:0.#} x {label.Layout.Height:0.#})");
     }
 
+    private static readonly string[] SubTabs = ["params", "headers", "body", "auth", "assertions", "chain"];
+
     [Fact]
     public void Tab_titles_and_sub_tabs_stay_on_one_line_and_the_response_pane_stays_in_the_window()
     {
-        Hosted(1100, 760, session =>
+        Hosted(SideBySide, 760, session =>
         {
             Click(session, "req-login");
             Click(session, "req-search");
@@ -131,23 +141,25 @@ public class NarrowEditorLayoutTests : IDisposable
                     $"{id}'s title reaches y={box.Y + box.Height:0.#}, into the URL bar at y={url.Y:0.#}");
             }
 
-            foreach (var sub in new[] { "params", "headers", "body", "auth", "assertions", "chain" })
+            foreach (var sub in SubTabs)
                 AssertOneLine(Label(Get(session, "subtab-" + sub).Element));
+            // What the breakpoint is for: at its narrowest the editor still shows all six
+            // sub-tabs of an ordinary request (counts and all) without scrolling them.
+            AssertSubTabsAllInView(session);
 
-            AssertEditorLeavesThePaneAlone(session, 1100);
+            AssertEditorLeavesThePaneAlone(session, SideBySide);
         });
     }
 
     [Fact]
     public void Five_open_tabs_share_the_strip_and_stay_out_of_the_response_pane()
     {
-        Hosted(1100, 760, session =>
+        Hosted(SideBySide, 760, session =>
         {
+            // The last one open is the PATCH: "PATCH ▾" and Send are the widest common floor
+            // the URL bar has, and the editor holds them with room for the URL.
             foreach (var id in new[] { "req-login", "req-search", "req-get-charge", "req-list-refunds", "req-update-customer" })
                 Click(session, id);
-            // Back to a GET: the method chip and Send are the URL bar's floor, and "PATCH ▾"
-            // alone takes that 5px past the 228 the pane leaves the editor at 1100.
-            Click(session, "req-get-charge");
             session.PumpFrames(2);
 
             Rect url = Get(session, "url-display").Element.WindowBorderBox;
@@ -160,8 +172,151 @@ public class NarrowEditorLayoutTests : IDisposable
                         $"tab {i}'s \"{label.Content}\" reaches y={box.Y + box.Height:0.#}, into the URL bar at y={url.Y:0.#}");
                 }
 
-            AssertEditorLeavesThePaneAlone(session, 1100);
+            AssertEditorLeavesThePaneAlone(session, SideBySide);
+            Assert.True(url.Width >= 180f, $"the URL gets {url.Width:0.#}px beside \"PATCH ▾\" and Send");
         });
+    }
+
+    /// <summary>
+    /// The breakpoint, pinned: the pane sits beside the editor from 1320 px (the editor keeps
+    /// 448) and under it below that, re-evaluated as the window is resized across it. It was
+    /// 1100 until 2026-10-08, which left the editor 228 px — the method chip and Send with
+    /// almost no URL between them.
+    /// </summary>
+    [Fact]
+    public void The_pane_sits_beside_the_editor_from_1320_px_and_under_it_below()
+    {
+        Hosted(SideBySide, 760, (session, app) =>
+        {
+            Click(session, "req-search");
+
+            AssertSide(session, app, SideBySide);
+            Rect editor = Editor(session, "response-right").WindowBorderBox;
+            Assert.True(editor.Width >= 448f - 0.5f, $"the editor beside the pane is {editor.Width:0.#}px, short of 448");
+
+            Resize(session, SideBySide - 1, 760);
+            AssertBottom(session, app, SideBySide - 1);
+
+            Resize(session, SideBySide, 760);
+            AssertSide(session, app, SideBySide);
+        });
+    }
+
+    /// <summary>
+    /// Ctrl+\ is the user's choice and outlives the breakpoint: flipped to the bottom in a
+    /// wide window it stays there through a narrow spell and back; in a narrow window the
+    /// flip is refused (the pane cannot go right), so it does not quietly undo the choice.
+    /// </summary>
+    [Fact]
+    public void The_users_flip_outlives_a_pass_through_the_breakpoint()
+    {
+        Hosted(1400, 760, (session, app) =>
+        {
+            Click(session, "req-search");
+            AssertSide(session, app, 1400);
+
+            Flip(session);
+            AssertBottom(session, app, 1400);
+
+            Resize(session, 1200, 760);
+            AssertBottom(session, app, 1200);
+            Flip(session);   // refused: too narrow for the right
+            AssertBottom(session, app, 1200);
+
+            Resize(session, 1400, 760);
+            AssertBottom(session, app, 1400);
+            Flip(session);
+            AssertSide(session, app, 1400);
+
+            // And without a flip, the narrow spell is undone by widening again.
+            Resize(session, 1200, 760);
+            AssertBottom(session, app, 1200);
+            Resize(session, 1400, 760);
+            AssertSide(session, app, 1400);
+        });
+    }
+
+    /// <summary>
+    /// The windows the move sends to the bottom layout, 1100–1319 px at 760 tall: the pane
+    /// keeps its 380 px, and the editor keeps its whole chrome (tabs, URL bar, sub-tabs,
+    /// footer) with room for at least five form rows in the sub-editor between them. Being
+    /// full width, it shows all six sub-tabs and a long stretch of URL.
+    /// </summary>
+    [Theory]
+    [InlineData(1100)]
+    [InlineData(1200)]
+    [InlineData(SideBySide - 1)]
+    public void Under_the_breakpoint_the_editor_and_the_pane_share_the_height(int width)
+    {
+        Hosted(width, 760, (session, app) =>
+        {
+            Click(session, "req-search");
+            AssertBottom(session, app, width);
+
+            Rect pane = Get(session, "response-bottom").Element.WindowBorderBox;
+            Assert.True(Math.Abs(pane.Height - 380f) < 0.5f, $"the pane is {pane.Height:0.#}px tall, not 380");
+            Assert.True(pane.Y + pane.Height <= 760.5f, $"the pane ends at y={pane.Y + pane.Height:0.#}, past the window");
+
+            Rect subTabs = Get(session, "subtabs").Element.WindowBorderBox;
+            var footer = Labels(Editor(session, "response-bottom")).Single(l => l.Content == "charges/search.req");
+            Rect foot = footer.WindowBorderBox;
+            Assert.True(foot.Y + foot.Height <= pane.Y + 0.5f,
+                $"the editor's footer reaches y={foot.Y + foot.Height:0.#}, into the pane at y={pane.Y:0.#}");
+            float body = foot.Y - (subTabs.Y + subTabs.Height);
+            Assert.True(body >= 5 * 32f, $"the sub-editor gets {body:0.#}px between the sub-tabs and the footer");
+
+            AssertSubTabsAllInView(session);
+            Rect url = Get(session, "url-display").Element.WindowBorderBox;
+            Assert.True(url.Width >= 500f, $"the URL gets {url.Width:0.#}px in a {width}px window");
+        });
+    }
+
+    private static void Resize(HeadlessSession session, int width, int height)
+    {
+        session.Window.SetClientSize(width, height);
+        session.PumpFrames(3);
+    }
+
+    private static void Flip(HeadlessSession session)
+    {
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Backslash, HultUI.Core.Events.KeyModifiers.Ctrl);
+        session.PumpFrames(2);
+    }
+
+    private static void AssertSide(HeadlessSession session, MeridianApp app, int width)
+    {
+        Assert.False(app.ResponseAtBottom, $"the pane is at the bottom at {width}px");
+        Assert.NotNull(session.Window.FindByAutomationId("response-right"));
+        Assert.Null(session.Window.FindByAutomationId("response-bottom"));
+        AssertEditorLeavesThePaneAlone(session, width);
+    }
+
+    private static void AssertBottom(HeadlessSession session, MeridianApp app, int width)
+    {
+        Assert.True(app.ResponseAtBottom, $"the pane is beside the editor at {width}px");
+        Assert.NotNull(session.Window.FindByAutomationId("response-bottom"));
+        Assert.Null(session.Window.FindByAutomationId("response-right"));
+    }
+
+    /// <summary>The editor column: the URL bar's ancestor that sits beside the pane.</summary>
+    private static Element Editor(HeadlessSession session, string paneId)
+    {
+        var editor = Get(session, "url-display").Element;
+        while (editor.Parent is { } p && !p.Children.Any(c => c.AutomationId == paneId)) editor = p;
+        return editor;
+    }
+
+    /// <summary>All six sub-tabs show whole: none is cut by the strip, which scrolls sideways
+    /// when they do not fit.</summary>
+    private static void AssertSubTabsAllInView(HeadlessSession session)
+    {
+        foreach (var sub in SubTabs)
+        {
+            var tab = Get(session, "subtab-" + sub).Element;
+            Rect whole = tab.WindowBorderBox, shown = Visible(tab);
+            Assert.True(Math.Abs(shown.Width - whole.Width) < 0.5f,
+                $"the {sub} sub-tab shows {shown.Width:0.#} of its {whole.Width:0.#}px: the strip is too narrow for the six");
+        }
     }
 
     /// <summary>
