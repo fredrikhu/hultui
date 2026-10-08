@@ -84,10 +84,16 @@ public partial class JunctionApp : Component, IDisposable
     // HideDiffContentWidth: below it the Commit/Changes views drop the diff pane
     // and let the file list fill (the 3-pane split gets unusable when narrow).
     private const float HideDiffContentWidth = 620f;
+    // CompactTableContentWidth / NarrowTableContentWidth: below the first the Branches and
+    // Tags tables narrow their fixed columns (Checkout goes icon-only), below the second they
+    // drop LAST COMMIT / COMMIT too, so the name column keeps its room (derived beside the
+    // columns, in JunctionApp.Branches.cs).
     private const float SidebarExpandedWidth = 266f;
     private const float SidebarRailWidth = 58f;
     private bool _compactChrome;
     private bool _hideDiff;
+    private bool _compactTables;
+    private bool _narrowTables;
 
     private float ContentWidth =>
         _window.LayoutWidth - (_sidebarCollapsed ? SidebarRailWidth : SidebarExpandedWidth);
@@ -445,6 +451,8 @@ public partial class JunctionApp : Component, IDisposable
         _window.UserScale = _settings.Appearance.UiScale;
         _compactChrome = ContentWidth < CompactChromeContentWidth;
         _hideDiff = ContentWidth < HideDiffContentWidth;
+        _compactTables = ContentWidth < CompactTableContentWidth;
+        _narrowTables = ContentWidth < NarrowTableContentWidth;
         Ui.DisplayScale = _window.DisplayScale;
         _window.Resized += OnWindowResize;
 
@@ -489,16 +497,21 @@ public partial class JunctionApp : Component, IDisposable
         _diffWrap && (_diffFull || View is JunctionView.Commit or JunctionView.Changes);
 
     // Recompute the responsive flags from the current content width; returns true
-    // if either flipped. Called on resize and when the sidebar collapses/expands
+    // if any flipped. Called on resize and when the sidebar collapses/expands
     // (which changes the content width available to the toolbar and views).
     private bool RecomputeResponsive()
     {
         float content = ContentWidth;
         bool compact = content < CompactChromeContentWidth;
         bool hideDiff = content < HideDiffContentWidth;
-        if (compact == _compactChrome && hideDiff == _hideDiff) return false;
+        bool compactTables = content < CompactTableContentWidth;
+        bool narrowTables = content < NarrowTableContentWidth;
+        if (compact == _compactChrome && hideDiff == _hideDiff
+            && compactTables == _compactTables && narrowTables == _narrowTables) return false;
         _compactChrome = compact;
         _hideDiff = hideDiff;
+        _compactTables = compactTables;
+        _narrowTables = narrowTables;
         return true;
     }
 
