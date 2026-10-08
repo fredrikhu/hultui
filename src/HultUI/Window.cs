@@ -1502,15 +1502,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         }
         _perf.EndRender();
 
-        // Drag ghost overlay
-        if (_isDragging && !_isExternalDrag)
-            RenderDragGhost(ctx);
-
         if (_autoScrollTarget is not null)
             RenderAutoScrollAnchor(ctx);
 
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
+
+        // The drag ghost follows the pointer above everything, a dialog's own drag included.
+        if (_isDragging && !_isExternalDrag)
+            RenderDragGhost(ctx);
 
         // After the overlays: a focused control can live inside one, and the ring belongs on
         // top of everything either way — it is drawn outside the control's own bounds, so a
@@ -2057,7 +2057,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                     }
 
                     // Record potential drag source if the element (or ancestor) is draggable
-                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
+                    // In an overlay too (a dialog's own drag and drop: its rows, chips, tiles).
+                    if (button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null && _groupDragToken is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -2732,13 +2733,24 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// (Windows today). An app can hide the affordance where it reports false.</summary>
     public bool CanDragFilesOut => PlatformWindow is INativeDragSource { CanDragFiles: true };
 
+    /// <summary>
+    /// The element a drag is over at <paramref name="pos"/>: the topmost overlay's (a dialog
+    /// takes drops on its own elements, and a modal one shields the tree beneath it), else
+    /// the main tree's.
+    /// </summary>
+    private Element? DragTargetAt(Point pos)
+    {
+        var (overlayTarget, _) = HitTestOverlays(pos);
+        return overlayTarget ?? (_root is null ? null : HitTester.HitTest(_root, pos));
+    }
+
     private void UpdateDragHover(Point pos, KeyModifiers modifiers)
     {
         if (_root is null || _dragData is null) return;
         _lastDragPos = pos;
         _dragModifiers = modifiers;
 
-        var target = HitTester.HitTest(_root, pos);
+        var target = DragTargetAt(pos);
 
         // Fire DragLeave / DragEnter when the hovered element changes
         if (target != _dragHoveredElement)
@@ -2771,7 +2783,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // later against it (the DragLeave pairing this enter, above all) reaches the tree
         // rather than an orphan whose parent chain leads nowhere.
         if (_dragHoveredElement is { Parent: null } && !ReferenceEquals(_dragHoveredElement, _root))
-            _dragHoveredElement = HitTester.HitTest(_root, pos);
+            _dragHoveredElement = DragTargetAt(pos);
 
         PlatformWindow.SetCursor(_dragAccepted ? CursorType.Move : CursorType.NotAllowed);
     }
@@ -2781,7 +2793,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         if (_root is null || _dragData is null) { ResetDragState(); return; }
         _dragModifiers = modifiers;
 
-        var target = HitTester.HitTest(_root, pos);
+        var target = DragTargetAt(pos);
 
         // Fire final DragOver to confirm acceptance
         bool accepted = false;
@@ -2804,7 +2816,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             EventDispatcher.DispatchDirect(new DragEndEvent { Position = pos, DragData = _dragData, Modifiers = modifiers, WasAccepted = accepted }, _dragSource);
 
         // Restore cursor
-        var cursorTarget = HitTester.HitTest(_root, pos);
+        var cursorTarget = DragTargetAt(pos);
         PlatformWindow.SetCursor(cursorTarget?.ResolvedInherited.Cursor ?? CursorType.Default);
 
         ResetDragState();
@@ -2842,7 +2854,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
         if (_root is not null && _dragData is not null)
         {
-            var target = HitTester.HitTest(_root, _lastDragPos);
+            var target = DragTargetAt(_lastDragPos);
             if (target is not null)
             {
                 var overEvt = new DragOverEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers };
