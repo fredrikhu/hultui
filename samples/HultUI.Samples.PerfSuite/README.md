@@ -23,7 +23,7 @@ dotnet run -c Release --project samples/HultUI.Samples.PerfSuite -- --compare ca
 dotnet run -c Release --project samples/HultUI.Samples.PerfSuite -- --verify
 ```
 
-The full suite takes about 25 s; a filtered run at least 5 s, which is the pre-warm (see
+The full suite takes about 28 s; a filtered run at least 5 s, which is the pre-warm (see
 below). `--list` prints every scenario, `--help` every option.
 
 ## Groups
@@ -192,6 +192,7 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-08-43c0e05-clampbasis-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 3): the same five rows faster (`text/ellipsis` −34 %, `text/multi-font ellipsis` −43 %) with the same bytes as JIT to 0.3 %, none slower (no row up by 4 % or more). |
 | `2026-10-08-6891682-minzero-before.json`, `…-after.json` | Before and after a one-line truncating label's min-content width became 0, so it may shrink to nothing rather than to its widest word (plan 17; a correctness change): 6891682, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster. `text/spans bold` reads +7 % on the minimum (+2 % median), untouched by the change: a filtered rerun of 4 alternated pairs reads 1.421 → 1.411 ms. Allocation: `text/ellipsis` 1,887 → 1,859 KB/op (its labels' widest words are no longer shaped), the rest within noise. |
 | `2026-10-08-6891682-minzero-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 3): 0 slower, 0 faster, no row up by 5 % or more; `text/ellipsis` 1,889 → 1,860 KB/op. |
+| `2026-10-09-1c8ee98-scenarios12.json`, `…-aot.json` | The five rows 1c8ee98 adds (plan 17 item 12: the selection walks and the highlighted JSON response), JIT and NativeAOT, 2 idle-gated runs each, min the lower and the rest their mean. Only those rows. The "before" for the round 2 items that change them; see below. |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -492,6 +493,35 @@ Nothing else moved past ±3 % but `icons/mount 600` (−3 %). Undo and redo swap
 two texts and the memo keeps only the current one, so each step builds that line's table again.
 Junction's TODO.md frame does not move (17.3–17.6 → 16.8–17.4 ms): 900 of its 917 lines fit, and
 each is measured once, whole, as before.
+
+**Two app workloads** (1c8ee98). The app survey of plan 17 found two costs no row timed: a key
+walk down a list whose owner rebuilds on each press (Junction's History, Commit and Files views,
+Vesper's panes), and Meridian opening a large JSON response. Minimum, KB a step, JIT / AOT:
+
+| Scenario | min ms | render (median) | other (median) | KB/op |
+|---|---:|---:|---:|---:|
+| `virtual/selection walk 1,000 rows` | 0.466 / 0.482 | 0.48 / 0.49 | 0.00 | 108 |
+| `a11y/selection walk 1,000 rows, bridge on` | 0.534 / 0.582 | 0.48 / 0.49 | 0.07 / 0.10 | 412 / 411 |
+| `a11y/selection walk 1,000 rows, UIA` | 0.565 / 0.623 | 0.48 / 0.50 | 0.11 / 0.15 | 412 / 411 |
+| `text/open highlighted JSON in a TextArea` | 10.74 / 12.49 | 20.3 / 23.8 | 0.01 | 10,811 |
+| `text/wheel highlighted JSON in a TextArea` | 0.939 / 1.556 | 0.98 / 1.61 | 0.00 | 14 / 16 |
+
+- **The walk's rebuild is cheap; its rows are not kept.** The pane rebuilds in 0.01 ms, and the
+  list, patched, throws its 19 realized rows away and makes them again from the template while it
+  paints: 95 elements a step, most of the 108 KB. A temporary probe round the list's realization
+  put it at ~0.05 ms of the 0.48 ms render (~10 %; the rest is CPU raster). The app survey
+  measured 12–19 % in Junction and Vesper, whose rows are heavier than this one's five elements.
+- **An accessibility client adds ~300 KB and 0.07 ms a step** (UIA 0.11 ms): the tree rebuilt with
+  a node, and a label string, for each of the 1,000 items, on screen or not — about 300 B an item.
+  12 % of the step, 18 % with UIA; the survey measured 13–30 %.
+- **Opening the response measures each of its 19,013 lines once** (a substring and a layout each),
+  10.8 MB a step on both runtimes. The median is twice the minimum: the same three of the five
+  timed steps of every round take a garbage collection, 7–16 ms longer than the steps without
+  one (why a collection costs that much here is not profiled).
+- **The wheel is the span scan.** Each of the ~50 lines drawn walks the response's 22,968 spans
+  from the first, through an interface enumerator, to the ones on its line: ~11,500 a line in the
+  middle of the response. AOT reads 66 % slower than JIT here; dynamic PGO can devirtualize that
+  enumerator and AOT cannot (not profiled).
 
 **What the suite turned up on its first run**, for follow-up:
 
