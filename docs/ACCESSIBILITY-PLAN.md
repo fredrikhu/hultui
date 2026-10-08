@@ -321,7 +321,19 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 - **Scroll** — scroll views and virtualized lists; read scroll percent/view size
-  and programmatically scroll (`SetScrollPercent`, `Scroll` by line/page).
+  and programmatically scroll (`SetScrollPercent`, `Scroll` by line/page). A scroll
+  is the scroll view's own change (2026-10-08): the differ compares a node's bounds
+  within its scroll views (each scroll view node carries its `ScrollOffset`), so a
+  node that only scrolled is not reported, and the scroll view reports
+  `ScrollPosition`. UIA raises a `VerticalScrollPercent` or `HorizontalScrollPercent`
+  property change on it, as Chromium does for a scroller
+  (`ui/accessibility/platform/browser_accessibility_manager_win.cc`,
+  `SCROLL_VERTICAL_POSITION_CHANGED`), where it raised a `BoundingRectangle` change
+  for every node on screen (133 per rebuild over 1,000 rows). A node that moved or
+  resized within the view still raises its bounds change. AT-SPI sends nothing for a
+  scroll, before and after, as Chromium (`browser_accessibility_manager_auralinux.cc`
+  ignores both scroll events) and GTK do. Bounds and the offscreen state are read
+  from the current tree when a client asks.
 - **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
   read/set the value and its bounds.
 

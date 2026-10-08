@@ -9,16 +9,32 @@ public sealed class AccessibilityNode
     public AccessibilityRole Role { get; }
     public string? Name { get; }
     public string? Description { get; }
+
+    /// <summary>The node's box on screen, in layout units: every scroll container above it
+    /// subtracted (<see cref="ScrollOffset"/>).</summary>
     public Rect BoundingRect { get; }
-    public bool IsFocusable { get; }
+
+    /// <summary>
+    /// How far this node's content is scrolled, in layout units: a scroll view's (a virtual
+    /// list's) offset; zero for anything that does not scroll. Its descendants' bounds have it
+    /// subtracted, so a scroll moves them on screen and leaves them where they were within it.
+    /// </summary>
+    public Point ScrollOffset { get; internal set; }
+
+    public bool IsFocusable => (_flags & FocusableBit) != 0;
 
     /// <summary>
     /// Whether the node's element has the keyboard focus. The one property that changes after
     /// the tree is built: a focus move rebuilds no tree, so the window marks the move on the
     /// applied tree's two nodes in place (UI thread), and the next diff does not report it again.
     /// </summary>
-    public bool IsFocused { get; internal set; }
-    public bool IsEnabled { get; }
+    public bool IsFocused
+    {
+        get => (_flags & FocusedBit) != 0;
+        internal set => SetFlag(FocusedBit, value);
+    }
+
+    public bool IsEnabled => (_flags & EnabledBit) != 0;
 
     /// <summary>
     /// Toggle state for checkboxes and switch-like elements. <c>null</c> for
@@ -26,7 +42,7 @@ public sealed class AccessibilityNode
     /// <c>ToggleState.Indeterminate</c> or "pattern not supported" depending on
     /// role).
     /// </summary>
-    public bool? IsToggled { get; }
+    public bool? IsToggled => GetTriState(ToggledShift);
 
     /// <summary>
     /// String value for elements that expose UIA's ValueProvider — text inputs
@@ -36,20 +52,24 @@ public sealed class AccessibilityNode
 
     /// <summary>A password field: its <see cref="Value"/> is the bullets on screen, never the
     /// text, and a reader says what it is (UIA's IsPassword, AT-SPI's password-text role).</summary>
-    public bool IsPassword { get; }
+    public bool IsPassword => (_flags & PasswordBit) != 0;
 
     /// <summary>Stable automation identifier (UIA AutomationId), for test selectors.</summary>
     public string? AutomationId { get; }
 
     /// <summary>Expanded state for an expandable node, or null if not expandable.</summary>
-    public bool? Expanded { get; }
+    public bool? Expanded => GetTriState(ExpandedShift);
 
     /// <summary>Selected state for one of a set — a radio button, a tab — or null for a node
     /// that is not selectable that way. List items answer through their list instead.</summary>
-    public bool? IsSelected { get; }
+    public bool? IsSelected => GetTriState(SelectedShift);
 
     /// <summary>True when the node is scrolled/clipped out of the visible viewport.</summary>
-    public bool IsOffscreen { get; internal set; }
+    public bool IsOffscreen
+    {
+        get => (_flags & OffscreenBit) != 0;
+        internal set => SetFlag(OffscreenBit, value);
+    }
 
     public AccessibilityNode? Parent { get; private set; }
 
@@ -61,7 +81,11 @@ public sealed class AccessibilityNode
     /// demand rather than as child nodes (used for very large lists). The bridge
     /// synthesizes item providers by index instead of walking <see cref="Children"/>.
     /// </summary>
-    public bool IsVirtualItemContainer { get; internal set; }
+    public bool IsVirtualItemContainer
+    {
+        get => (_flags & VirtualItemsBit) != 0;
+        internal set => SetFlag(VirtualItemsBit, value);
+    }
 
     /// <summary>
     /// Content with an accessibility tree of its own, in windows of its own — a web page's.
@@ -88,6 +112,28 @@ public sealed class AccessibilityNode
     // technology can see, and most nodes are leaves, which share the one empty array.
     private AccessibilityNode[] _children = [];
 
+    // The node's states in one field, for the same reason: six bools and three nullable bools
+    // were 12 bytes of every node, and ScrollOffset took their place. A nullable state is two
+    // bits, whether it has a value and the value. Written on the UI thread only; IsFocused is
+    // the one written once the tree is out, and a reader on another thread sees every other
+    // bit unchanged either side of that write.
+    private ushort _flags;
+    private const int FocusableBit = 1 << 0, FocusedBit = 1 << 1, EnabledBit = 1 << 2, PasswordBit = 1 << 3,
+        OffscreenBit = 1 << 4, VirtualItemsBit = 1 << 5;
+    private const int ToggledShift = 6, ExpandedShift = 8, SelectedShift = 10;
+
+    /// <summary>Every state at once, for the differ: equal when none of them differs.</summary>
+    internal int States => _flags;
+
+    private void SetFlag(int bit, bool on) =>
+        _flags = (ushort)(on ? _flags | bit : _flags & ~bit);
+
+    private bool? GetTriState(int shift) =>
+        ((_flags >> shift) & 1) == 0 ? null : ((_flags >> shift) & 2) != 0;
+
+    private static int TriState(bool? value, int shift) =>
+        value is { } v ? (v ? 3 : 1) << shift : 0;
+
     internal AccessibilityNode(
         ElementId elementId,
         AccessibilityRole role,
@@ -109,15 +155,12 @@ public sealed class AccessibilityNode
         Name = name;
         Description = description;
         BoundingRect = boundingRect;
-        IsFocusable = isFocusable;
-        IsFocused = isFocused;
-        IsEnabled = isEnabled;
-        IsToggled = isToggled;
         Value = value;
         AutomationId = automationId;
-        Expanded = expanded;
-        IsPassword = isPassword;
-        IsSelected = isSelected;
+        _flags = (ushort)((isFocusable ? FocusableBit : 0) | (isFocused ? FocusedBit : 0)
+            | (isEnabled ? EnabledBit : 0) | (isPassword ? PasswordBit : 0)
+            | TriState(isToggled, ToggledShift) | TriState(expanded, ExpandedShift)
+            | TriState(isSelected, SelectedShift));
     }
 
     /// <summary>Makes <paramref name="children"/> this node's children, in place of any it had.

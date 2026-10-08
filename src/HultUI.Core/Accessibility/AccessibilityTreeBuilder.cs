@@ -116,6 +116,9 @@ public static class AccessibilityTreeBuilder
             isPassword: element is TextInputElement { Masked: true },
             isSelected: ResolveIsSelected(element));
         node.NativeContent = element.NativeAccessibleContent;
+        // What ChildScroll subtracts from everything under it.
+        if (element is ScrollViewElement sv)
+            node.ScrollOffset = new Point(sv.ScrollOffsetX, sv.ScrollOffsetY);
         if (element.AccessibleTextSource is { } text)
         {
             node.TextSource = text;

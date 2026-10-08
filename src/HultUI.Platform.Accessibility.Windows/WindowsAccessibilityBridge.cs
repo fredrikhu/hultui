@@ -458,8 +458,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
         }
         foreach (var change in diff.PropertyChanged)
-            if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
+        {
+            if (!_wrappers.TryGetValue(change.Node.ElementId, out var wrapper)) continue;
+            if (change.PropertyName == AccessibilityProperties.ScrollPosition)
+                RaiseScrolled(wrapper, change.Previous, change.Node);
+            else
                 RaisePropertyChanged(wrapper, change.PropertyName);
+        }
     }
 
     // The apply pass, counted, so a wrapper the rebase did not reach, and one this pass added,
@@ -624,6 +629,34 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (propertyId == 0) return;
 
         wrapper.GetPropertyValue(propertyId, out var newValue);
+        RaiseProperty(wrapper, propertyId, newValue);
+    }
+
+    /// <summary>
+    /// A scroll view scrolled: what Chromium raises for a scroller (ui/accessibility/platform/
+    /// browser_accessibility_manager_win.cc, SCROLL_HORIZONTAL/VERTICAL_POSITION_CHANGED), a
+    /// HorizontalScrollPercent or VerticalScrollPercent property change on it, for the axis that
+    /// moved, with the percent now. Nothing under it is told it moved: its bounds within the
+    /// view did not change, and a client that asks gets them on screen.
+    /// </summary>
+    private void RaiseScrolled(UiaFragment wrapper, AccessibilityNode? previous, AccessibilityNode node)
+    {
+        if (!RaiseEvents) return;
+        var before = previous?.ScrollOffset ?? default;
+        var after = node.ScrollOffset;
+        bool known = _host.TryGetScrollInfo(wrapper.ElementId, out var info);
+        if (before.X != after.X)
+            RaiseProperty(wrapper, UiaInterop.UIA_ScrollHorizontalScrollPercentPropertyId,
+                known ? UiaVariant.FromDouble(info.HorizontalPercent) : UiaVariant.Empty);
+        if (before.Y != after.Y)
+            RaiseProperty(wrapper, UiaInterop.UIA_ScrollVerticalScrollPercentPropertyId,
+                known ? UiaVariant.FromDouble(info.VerticalPercent) : UiaVariant.Empty);
+    }
+
+    /// <summary>A property change with its new value, which this frees; the old one is left empty,
+    /// as UIA allows and Chromium does.</summary>
+    private void RaiseProperty(UiaFragment wrapper, int propertyId, UiaVariant newValue)
+    {
         var oldValue = UiaVariant.Empty;
         IntPtr prov = NativeFragmentSimple(wrapper.ElementId);
         if (prov == IntPtr.Zero) { newValue.Free(); return; }

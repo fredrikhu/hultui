@@ -20,7 +20,13 @@ public static class AccessibilityProperties
     /// <summary><see cref="AccessibilityNode.IsPassword"/> changed: a field was masked or
     /// revealed. On AT-SPI that is a role change.</summary>
     public const string IsPassword = "IsPassword";
+    /// <summary><see cref="AccessibilityNode.BoundingRect"/> changed within the node's scroll
+    /// views: it moved in its content, or resized. Not reported for a node that only scrolled.</summary>
     public const string BoundingRect = "BoundingRect";
+
+    /// <summary><see cref="AccessibilityNode.ScrollOffset"/> changed: the node, a scroll view,
+    /// scrolled. The change carries the previous node, so a bridge can tell which way.</summary>
+    public const string ScrollPosition = "ScrollPosition";
 
     /// <summary>
     /// <see cref="AccessibilityNode.NativeContent"/> changed: a foreign tree arrived under the

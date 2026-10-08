@@ -40,13 +40,11 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private string? _value;
     private string? _automationId;
     private AccessibilityRole _role;
-    private Rect _bounds;
     private bool _isFocusable;
     private bool _isFocused;
     private bool _isEnabled;
     private bool? _isToggled;
     private bool? _expanded;
-    private bool _isOffscreen;
     private bool _isPassword;
     private bool? _isSelected;
     private bool _hasText;
@@ -99,13 +97,11 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _value = node.Value;
         _automationId = node.AutomationId;
         _role = node.Role;
-        _bounds = node.BoundingRect;
         _isFocusable = node.IsFocusable;
         _isFocused = node.IsFocused;
         _isEnabled = node.IsEnabled;
         _isToggled = node.IsToggled;
         _expanded = node.Expanded;
-        _isOffscreen = node.IsOffscreen;
         _isPassword = node.IsPassword;
         _isSelected = node.IsSelected;
         _hasText = node.TextSource is not null || node.Text is not null;
@@ -114,8 +110,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     /// <summary>The text now, for the text pattern: the node's source, read on this thread.</summary>
     public AccessibleText? Text => Node.CurrentText;
 
-    /// <summary>The node's box in layout units, scroll applied.</summary>
-    public Rect Bounds => _bounds;
+    /// <summary>The node's box in layout units, scroll applied. Read from the node, not kept: a
+    /// scroll moves every node under the view and names none of them in the diff, and the
+    /// bridge points every wrapper at its node in the current tree after each diff.</summary>
+    public Rect Bounds => Node.BoundingRect;
 
     // ── IRawElementProviderSimple ──
 
@@ -206,7 +204,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(_isFocusable),
             UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_isFocused),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
-            UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(_isOffscreen),
+            UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(Node.IsOffscreen),
             UiaInterop.UIA_IsPasswordPropertyId => UiaVariant.FromBool(_isPassword),
             UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected
                 => UiaVariant.FromBool(selected),
@@ -299,7 +297,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     public int GetBoundingRectangle(out UiaRect pRetVal)
     {
-        var screen = _bridge.ToScreen(_bounds);
+        var screen = _bridge.ToScreen(Bounds);
         pRetVal = new UiaRect { Left = screen.X, Top = screen.Y, Width = screen.Width, Height = screen.Height };
         return 0;
     }
