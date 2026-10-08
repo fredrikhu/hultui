@@ -42,7 +42,7 @@ survey to re-rank them.
    text draw, `PrefixMeasurer` closure, pooled corner `SKPath`; ~45 rows −10…−94 % allocKB.
 4. ~~**runtime-aot-trace-type-name**~~ LANDED 8ab877c (4) — trace args only while recording; Junction AOT
    frame −40 % bytes.
-5. **paint-image-zero-copy** (2) — `SetImmutable` before `SKImage.FromBitmap`; −50 % decoded
+5. ~~**paint-image-zero-copy**~~ LANDED 12d1480 (2) — `SetImmutable` before `SKImage.FromBitmap`; −50 % decoded
    image memory (Aperture up to ~375 MB, Vesper ~50 MB).
 5a. **aperture-poster-decode-scale** (2; user said yes 2026-10-07) — request posters at
    card width × display scale instead of × 2; −75 % poster memory at 100 % scale (up to
@@ -77,6 +77,10 @@ survey to re-rank them.
 
 ### Waiting
 
+- **gl-image-retained-after-dispose** (2, lead for 3) — in a GL window, drawing 281 MB of
+  photos adds ~380 MB of private bytes beyond the pixels, and ~375 MB stays after every
+  source is disposed (437 vs 62 MB at start); before and after 12d1480 alike. Suspects:
+  Skia's GPU resource cache, its CPU mip build, NVIDIA system-memory copies. Measure first.
 - **layout-virtuallist-realize-in-render** (8; + layout-virtuallist-keep-rows (1)) —
   realize is 12–19 % of key-walk frames, 84 % of a Vesper folder open (5.2 MB); patch rows
   whose item is unchanged. Medium–large. Needs scenario 12 first.
@@ -140,6 +144,7 @@ survey to re-rank them.
 | 1 | 0f5816a | gl-no-depth-buffer | `SDL_GL_DEPTH_SIZE` 0, stencil 8 kept: GPU per GL window 55.3 → 46.8 MB at 2100×1350 (−15 %), 131.9 → 109.5 MB at 3818×2032 (−17 %); Task Manager, DXGI and nvidia-smi agree (~3 B/px). Start-up unchanged (probe first frame 427.8 → 427.2 ms, Junction 480.7 → 480.5). Junction, Vesper and a stencil-dependent FBO 0 scene byte-identical; a stencil-0 control broke the scene. |
 | 1 | 17e3de4 | paint-text-zero-alloc | Index loops on the text draw path, `PrefixMeasurer` closure moved out, pooled corner `SKPath`. allocKB −10…−96 % on 43 JIT / 44 AOT rows; dense text 18.1 → 0.8 KB/op (AOT 29.8 → 12.5); TextInput keystroke 44.9 → 2.5; render pass ~0.1 KB/frame on text screens; time flat; goldens byte-identical. |
 | 1 | 8ab877c | runtime-aot-trace-type-name | Element trace names looked up only while recording (internal `FrameTracer.BeginElement`). AOT allocKB −10…−99.6 % on 40 rows, none up: resize 2,000 rows 685.6 → 2.9 KB/op (time −16 %), TextInput typing 59.0 → 2.4 (−10 %), deep nesting 75.5 → 4.8 (−12 %), tiles 7.7 → 0.7; AOT per-frame bytes now equal JIT. JIT flat. HULTUI_TRACE output identical event for event. Junction AOT frame not re-measured. |
+| 1 | 12d1480 | paint-image-zero-copy | `SetImmutable` on hand-over: SkiaImageSource's image shares the bitmap's pixels. Private bytes: Vesper 216 thumbnails 83.6 → 66.3 MB (−21 %), Aperture real library (27 posters) 85.0 → 67.3 MB (−21 %), GL window with 8 × 3840×2400 photos 1001 → 723 MB (−278 MB). Extrapolated up to ~260 MB at Aperture's 400-poster cap. Time and allocKB flat on all 83 suite rows; goldens byte-identical; GL readback exact. Vulkan not checked. |
 
 ## Examined, not worth it
 
