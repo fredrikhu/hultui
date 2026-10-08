@@ -103,8 +103,10 @@ public sealed class PipelineTextParagraph : TextParagraph
     /// </summary>
     internal Func<string, float>? PrefixMeasurer(TextLine line)
     {
-        foreach (var run in line.Runs)
-            if (run.Glyphs.Length != run.Text.Length)
+        // Indexed: Runs is an interface, and a foreach over it boxes an enumerator per call.
+        var runs = line.Runs;
+        for (int i = 0; i < runs.Count; i++)
+            if (runs[i].Glyphs.Length != runs[i].Text.Length)
                 return s => _pipeline.Layout(s, Style, float.PositiveInfinity, maxLines: 1).Size.Width;
         return null;
     }

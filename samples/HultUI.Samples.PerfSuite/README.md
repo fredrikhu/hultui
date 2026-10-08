@@ -171,6 +171,9 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-06-5568977-prefixes-after.json` | … and after it, with long lines' breaks remembered across edits: 5568977, interleaved with the line above. Compare these two: 0 slower, 3 faster (the long document −43 %, typing in it −21 %). |
 | `2026-10-07-2128054-richtext-before.json` | Before the rich text editor's stage 8 (docs/plans/16-rich-text-editor.md): 2128054 with the `richtext/` scenarios added, all 82, median of 3 idle-gated runs … |
 | `2026-10-07-stage8-richtext-after.json` | … and after it, interleaved with the line above. Compare these two: 0 slower, 11 faster (see below). |
+| `2026-10-08-9ae8f9e-textdraw-before.json` | Before text drawing stopped allocating per frame (plan 17): 9ae8f9e, median of 3 idle-gated runs … |
+| `2026-10-08-9ae8f9e-textdraw-after.json` | … and after it, interleaved with the line above. Compare these two: 0 slower, 0 faster in time; allocation down ≥10 % on 43 rows (dense text 18.1 → 0.8 KB/op, typing in a `TextInput` 44.9 → 2.5). |
+| `2026-10-08-9ae8f9e-textdraw-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish, where the JIT cannot hide an allocation on the stack: allocation down ≥10 % on 44 rows (dense text 29.8 → 12.5 KB/op). |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
