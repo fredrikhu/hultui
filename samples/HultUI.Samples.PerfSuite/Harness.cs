@@ -33,6 +33,13 @@ sealed class Op
     /// </summary>
     public Action<int>? Reset { get; init; }
 
+    /// <summary>
+    /// The window whose pass timers the step's style, layout and render columns read, asked
+    /// for after <see cref="Run"/>; default the session's first window. For a step whose
+    /// frame is another window's — one it just opened.
+    /// </summary>
+    public Func<HultUI.Window>? TimedWindow { get; init; }
+
     /// <summary>Frames pumped after <see cref="Run"/>, inside the timing. More than one for animations.</summary>
     public int Frames { get; init; } = 1;
 
@@ -197,12 +204,12 @@ static class Runner
             ctx.Session.PumpFrame();
         }
 
-        var perf = ctx.Window.Window.Performance;
         long alloc0 = GC.GetAllocatedBytesForCurrentThread();
         int gc0 = GC.CollectionCount(0);
         long t0 = Stopwatch.GetTimestamp();
         op.Run(step);
         long t1 = Stopwatch.GetTimestamp();
+        var perf = (op.TimedWindow?.Invoke() ?? ctx.Window.Window).Performance;
 
         double style = 0, layout = 0, render = 0;
         int rendered = 0;

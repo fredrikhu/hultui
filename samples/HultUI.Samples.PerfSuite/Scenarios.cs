@@ -15,6 +15,7 @@ static partial class Scenarios
             .Concat(Input())
             .Concat(RichTextScenarios())
             .Concat(Overlays())
+            .Concat(WindowScenarios())
             .Concat(Controls())
             .Concat(Paint())
             .Concat(Accessibility());
