@@ -1380,7 +1380,8 @@ public sealed partial class LayoutEngine
     /// <summary>
     /// Min-content width (border-box): the width below which an element's content
     /// genuinely breaks. Leaves answer for themselves — text with its widest
-    /// unbreakable segment, everything else by measuring at zero available width.
+    /// unbreakable segment (a one-line label that truncates with none: it shows less
+    /// of itself instead), everything else by measuring at zero available width.
     /// Scroll/hidden overflow on the axis contributes zero, as in
     /// <see cref="MinContentHeight"/>.
     /// </summary>

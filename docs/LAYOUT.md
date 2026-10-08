@@ -294,6 +294,22 @@ resize truncates it once a step, at the width it ends up with. Two consequences:
 A label inside a wrapper box is measured truncated at the room the wrapper offers it, as
 any content is; only the label directly in the row starts from its own width.
 
+**And it can shrink to nothing.** A one-line label that truncates has no width below which
+its text breaks — it shows less of it — so its automatic minimum size is 0 (plus its
+padding), as CSS gives an item with `overflow: hidden`. When a row must shrink it, it
+truncates further instead of stopping at its widest word and drawing the rest over its
+neighbours, and a box holding it can shrink past it too: unlike CSS, a wrapper needs no
+`MinWidth(0)` for that. A label narrower than its ellipsis draws nothing. To keep a width:
+
+```csharp
+Text.New(name).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
+    .MinWidth(Dimension.Px(40));    // truncates, but no narrower than 40px
+Text.New("Send").MaxLines(1).FlexShrink(0);   // never truncated by the row
+```
+
+A label that wraps (no `MaxLines`, or more than one) keeps its widest word as its floor, and
+down a column a one-line label keeps its line's height.
+
 The related trap in the other direction is in `TODO.md`'s durable notes: **`FlexGrow(1)`
 alone does not mean "take the leftover space"**, because the default `auto` basis sizes
 the item to its own content first. `FlexBasis(0)` is what says "start from nothing".
