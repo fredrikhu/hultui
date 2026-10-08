@@ -73,16 +73,20 @@ survey to re-rank them.
     both diff.Added and diff.Removed (an element moves to another a11y parent, e.g. a Box
     gains an AccessibleName), the bridge processes Added before Removed and drops the
     wrapper: UIA navigation to those children returns null. Process Removed first. Small.
-11d. **layout-truncation-clamp-basis** (1; user chose clamp 2026-10-08) — a one-line
+11d. ~~**layout-truncation-clamp-basis**~~ LANDED 6891682 (1; user chose clamp 2026-10-08) — a one-line
     truncating label's flex base = min(natural single-line width, available width) from the
     cached natural width, instead of truncating it to get that number. Prototype: ellipsis
     rows halve their measurements, time −20…−43 %, alloc −21…−51 %; ordinary rows move by
     the ellipsis slack (< 1 px, at most one character). See `17-reports/r1-truncation-basis.md`.
-11e. **layout-truncating-min-zero** (1; user said yes 2026-10-08, correctness) — a one-line
+11e. ~~**layout-truncating-min-zero**~~ LANDED 322df92 (1; user said yes 2026-10-08, correctness) — a one-line
     truncating label's automatic minimum is 0, as CSS gives `overflow: hidden` items, instead
     of its longest word. Fixes Junction Branches overlap at ≤1200 px and Meridian's Send
     button pushed off-screen by a long URL. Build after 11d, as its own commit, with
     before/after images of those screens for the user.
+11e-fix. **apps-truncation-followups** (1, from 322df92) — Meridian: request tab titles and
+    sub-tab labels need MaxLines(1) + ellipsis (they wrap and overlap the URL bar at ≤1100 px
+    now that the editor gets its designed width). Junction: the FlexShrink(0) "current" tag
+    overlaps LAST COMMIT by 23 px at 1000 px. Before/after images for the user.
 11f. **aperture-hero-scale** (2; user said yes 2026-10-08) — the item-page and request
     title-page heroes ask for the layout width at any scale (~0.7 source px per screen px at
     150 %, soft). Request layout width × display scale like f84893d; ~5.5 MB more per cached
@@ -95,6 +99,8 @@ survey to re-rank them.
 
 ### Waiting
 
+- **layout-maxlines-setter-dirty** (1, correctness) — the MaxLines property setter does not
+  mark layout dirty (a patch does). Small.
 - **a11y-atspi-cache-child-index** (7) — from source reading: libatspi's AddAccessible writes
   into the parent's cached child list by index (overwrites, not shifts); with one
   children-changed per parent, inserting several siblings at once may leave stale entries.
@@ -198,6 +204,8 @@ survey to re-rank them.
 | 1 | 93847ae | (measurement) | Windows-only perf rows `a11y/tab through 300 fields, UIA` and `a11y/wheel 1,000 rows, UIA`. |
 | 1 | 70d68c1, 0b2b003 | a11y-focus-state-on-tab | A focus move patches IsFocused on 2 nodes of the applied tree. UIA raises HasKeyboardFocus old/new before the focus event (was: at the next rebuild); AT-SPI answers current focus and drops its late duplicate signals. Allocation unchanged; Tab with UIA 0.351 → 0.350 ms. |
 | 1 | ab8917b | a11y-scroll-bounds-event | Scroll view nodes carry ScrollOffset; UIA raises Vertical/HorizontalScrollPercent on the view (Chromium's mapping, `browser_accessibility_manager_win.cc`) instead of a BoundingRectangle per on-screen node: 846 → 6 events, provider callbacks 11,844 → 84 per 30 notches; bounds and offscreen read live. a11y/wheel 1,000 rows, UIA −54 % min, −62 % median. Node still 136 B (packed states). AT-SPI unchanged (sent nothing before). |
+| 1 | 6891682 | layout-truncation-clamp-basis | A MaxLines(1) label in a row starts at min(untruncated width, room), from a pinned MeasureCache entry (no new element bytes). Ellipsis rows −19…−42 % time JIT, −20…−43 % AOT, allocation −21…−52 % (text/ellipsis 4.75 → 3.32 ms, 3,418 → 1,887 KB/op); measurements per step halved; 0 slower. Pixels: ellipsis slack ≤ 0.89 px; zero-room cells draw nothing instead of overlapping. Goldens byte-identical. |
+| 1 | 322df92 | layout-truncating-min-zero | A MaxLines(1) label's automatic minimum is 0 (nested boxes too); a label too narrow for its ellipsis draws nothing. Perf flat JIT and AOT. Fixes: Junction Branches name/tag overlap at 1200 px, Junction sidebar repo name/path running past the edge, Junction Tags subjects over the date column, Meridian's Send button off-window with a long URL. Exposed: Meridian's request tab titles and sub-tabs wrap at ≤1100 px and overlap the URL bar (follow-up 11e-fix); Junction's FlexShrink(0) "current" tag still overlaps at 1000 px. Goldens byte-identical. Images in scratchpad `truncation-minzero/`. |
 
 ## Examined, not worth it
 
