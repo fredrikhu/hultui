@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
@@ -89,9 +90,35 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("a11y/selection walk 1,000 rows, bridge on",
+            "virtual/selection walk with an accessibility client listening: every Down rebuilds and diffs the tree, an item node for each of the list's 1,000 rows",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return SelectionWalk(ctx, _ =>
+                    bridge.Diffs.Count == 0 ? "the bridge received no change"
+                    : !HoldsItems(bridge.CurrentTree, 1_000) ? "the tree does not hold the list's 1,000 items"
+                    : null,
+                    reset: bridge.ClearDiffs);
+            });
+
         if (OperatingSystem.IsWindows())
             foreach (var scenario in UiaAccessibility())
                 yield return scenario;
+    }
+
+    /// <summary>
+    /// Whether a node of <paramref name="node"/>'s tree publishes a list of
+    /// <paramref name="count"/> items: one node each, or (a longer list) on demand.
+    /// </summary>
+    private static bool HoldsItems(AccessibilityNode? node, int count)
+    {
+        if (node is null) return false;
+        if (node.IsVirtualItemContainer || node.Children.Count >= count) return true;
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (HoldsItems(children[i], count)) return true;
+        return false;
     }
 
     // The same kind of frames with the real UI Automation bridge behind them, on a hidden
@@ -209,6 +236,14 @@ static partial class Scenarios
                         return moved ? applied(step) : $"the view did not scroll (offset {offset})";
                     },
                 };
+            });
+
+        yield return new Scenario("a11y/selection walk 1,000 rows, UIA",
+            "virtual/selection walk with the UIA bridge: every Down a rebuild over the list's 1,000 item nodes, its wrapper upkeep and events",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return SelectionWalk(ctx, Applied(rig));
             });
     }
 

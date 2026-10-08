@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 89 scenarios over every feature area (84 off Windows) | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 94 scenarios over every feature area (88 off Windows) | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -32,9 +32,9 @@ below). `--list` prints every scenario, `--help` every option.
 |---|---|
 | `layout/` | Resize drags over long lists, deep nesting, flex wrap, baseline alignment, aspect-ratio tiles, overfull rows and columns (flex shrink); building 300 cards |
 | `grid/` | Creating, resizing and editing a 1,800-cell grid with `auto` and `fr` columns |
-| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out |
+| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out; long documents in a `TextArea`, among them Meridian's response viewer opening and wheeling a 19,000-line pretty-printed JSON response with its 23,000 colour spans (`… highlighted JSON …`; the spans are the ones HultUI.Syntax gives it, written out) |
 | `scroll/` | Wheel and jumps through a 5,000-row list, sticky section headers, nested scroll chaining |
-| `virtual/`, `table/` | `VirtualListElement` with 100,000 items; `TableView` with 10,000 rows: sort, wheel, column resize |
+| `virtual/`, `table/` | `VirtualListElement` with 100,000 items; a key walk down 1,000 two-line rows whose selection the owning component's Build reads, as Junction's History is walked (`virtual/selection walk …`: each Down rebuilds the owner and the list realizes its rows again in the render pass); `TableView` with 10,000 rows: sort, wheel, column resize |
 | `component/` | Keyed and unkeyed rebuilds of 1,000 rows, reverse, a small component in a big tree, 300 mounts, a signal read by 500 effects |
 | `input/` | Hover, checkbox click, typing in `TextInput` and a 2,000-line `TextArea`, undo/redo, Tab through a form, drag to reorder |
 | `richtext/` | The rich text editor on long documents: opening 5,000 blocks, a keystroke and Enter in them, the wheel, Ctrl+A, a resize of 1,000, a paragraph of 600 spans, a 200-cell table, and an editor that grows with its document inside a scroll view. The editor lays out inside its paint, so its layout shows under **render** |
@@ -44,7 +44,7 @@ below). `--list` prints every scenario, `--help` every option.
 | `theme/` | Light ⇄ dark, and cycling the `HultUI.Themes` catalogue, on the control screen |
 | `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition |
 | `paint/` | The same 400 tiles plain, rounded, shadowed, gradient-filled, transformed: the price of each effect |
-| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge. On Windows, five rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke, a label edit, a Tab and a wheel turn, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** (a Tab's focus event under **build**, where the key is handled). The wheel row spaces its frames 120 ms apart, past the 100 ms a scroll's accessibility refresh waits, so every step rebuilds |
+| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge; and the selection walk, whose list publishes a node for each of its 1,000 items on every rebuild. On Windows, six rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke, a label edit, a Tab, a wheel turn and the selection walk, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** (a Tab's focus event under **build**, where the key is handled). The wheel row and the selection walks space their frames 120 ms apart, past the 100 ms a scroll's accessibility refresh waits, so every step rebuilds |
 
 ## Reading the output
 

@@ -1,9 +1,13 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Icons;
 
 namespace PerfSuite;
 
@@ -43,6 +47,10 @@ static partial class Scenarios
                 ctx.Mount(list.FlexGrow(1));
                 return new Op { Run = step => list.Items = step % 2 == 0 ? b : a };
             });
+
+        yield return new Scenario("virtual/selection walk 1,000 rows",
+            "Press Down in a 1,000-row list of two-line rows whose selection the owning component's Build reads: the owner rebuilds, the rows are realized again in the render pass",
+            ctx => SelectionWalk(ctx, null));
 
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
@@ -89,6 +97,169 @@ static partial class Scenarios
         => VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow).Items(Models(rng, count));
 
     private static Element RenderVirtualRow(RowItem m) => Ui.Row(m.Id, m.Label);
+
+    /// <summary>
+    /// A key walk down a History-style pane (<see cref="WalkPane"/>), as Junction's History,
+    /// Commit and Files views and Vesper's panes are walked: Down at the window, the selection
+    /// a signal the pane's Build reads, so every press rebuilds the pane, patches its list and
+    /// has the list realize its rows again while it paints. The walk starts on the last row the
+    /// list shows whole, so every press also scrolls a row, as it does once a walk is under
+    /// way. Each frame comes 120 ms after the last — a key pressed and released, not held — so
+    /// with an accessibility client listening every step rebuilds its tree: a scroll's refresh
+    /// waits 100 ms. <paramref name="check"/> adds what the bridge must have seen.
+    /// </summary>
+    internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null)
+    {
+        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000));
+        var host = pane.Mount();
+        host.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Down) { pane.Move(1); e.StopPropagation = true; }
+            else if (e.Key == KeyCode.Up) { pane.Move(-1); e.StopPropagation = true; }
+        });
+        ctx.Mount(host);
+        pane.Select(pane.LastWholeRow());
+        ctx.Session.PumpFrame(WalkFrame);
+        int first = pane.Selected;
+        return new Op
+        {
+            Reset = reset is null ? null : _ => reset(),
+            Run = _ => ctx.Window.PressKey(KeyCode.Down),
+            FrameDelta = WalkFrame,
+            Check = step => pane.Verify(first + step + 1) ?? check?.Invoke(step),
+        };
+    }
+
+    private static readonly TimeSpan WalkFrame = TimeSpan.FromMilliseconds(120);
+
+    private static readonly string[] WalkIcons = ["git-commit", "git-commit", "git-commit", "git-merge", "git-commit", "tag"];
+    private static readonly string[] WalkAuthors = ["Fredrik Hult", "Ada Lovelace", "Grace Hopper", "Linus Torvalds", "Barbara Liskov"];
+
+    private static List<WalkItem> WalkItems(Random rng, int count)
+    {
+        var items = new List<WalkItem>(count);
+        var when = new DateTime(2026, 10, 5, 18, 0, 0);
+        for (int i = 0; i < count; i++)
+        {
+            string hash = rng.Next(0x1000000, int.MaxValue).ToString("x7")[..7];
+            string author = WalkAuthors[rng.Next(WalkAuthors.Length)];
+            when = when.AddMinutes(-rng.Next(5, 600));
+            items.Add(new WalkItem(i, WalkIcons[rng.Next(WalkIcons.Length)],
+                Ui.Paragraph(rng, 5 + rng.Next(6)), hash, author,
+                $"{hash} · {author} · {when:yyyy-MM-dd HH:mm} · +{rng.Next(1, 400)} −{rng.Next(0, 120)}"));
+        }
+        return items;
+    }
+}
+
+/// <summary>One commit of <see cref="WalkPane"/>: an icon, a subject, a line of detail.</summary>
+sealed record WalkItem(int Index, string Icon, string Subject, string Hash, string Author, string Meta);
+
+/// <summary>
+/// The shape of Junction's History view: a header, then a <see cref="VirtualListElement{T}"/>
+/// of two-line rows (an icon, the subject, a line of detail), no keys on the rows, the
+/// selection drawn by the template from the index the pane's Build read, the list told the
+/// selected index for assistive technology, and its rows named for it by a label made on
+/// each call. A selection move writes a signal; the rebuild scrolls the row into view after
+/// the build, as Junction's <c>OnAfterBuild</c> does.
+/// </summary>
+sealed class WalkPane(List<WalkItem> items) : Component
+{
+    public const float RowHeight = 46f;
+
+    private readonly Signal<int> _selected = new(0);
+    private readonly Ref<VirtualListElement<WalkItem>> _list = new();
+    private int _built;
+    private bool _reveal;
+
+    public int Selected => _selected.Value;
+
+    public void Select(int index)
+    {
+        _reveal = true;
+        _selected.Value = Math.Clamp(index, 0, items.Count - 1);
+    }
+
+    public void Move(int delta) => Select(_selected.Value + delta);
+
+    /// <summary>The last row the list shows whole, scrolled to the top.</summary>
+    public int LastWholeRow() =>
+        Math.Max(0, (int)((_list.Current?.Layout.AbsoluteContentBox.Height ?? 0) / RowHeight) - 1);
+
+    public override Element Build()
+    {
+        int selected = _built = _selected.Value;
+        return Flex.Column(gap: 0).FlexGrow(1).Children(
+            Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(9, 16))
+                .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))
+                .Children(
+                    Phosphor.Draw("git-branch", 14f, Ui.Muted),
+                    Text.New("History").FontSize(13f).FontWeight(FontWeight.SemiBold),
+                    Text.New($"{items.Count:N0} commits").FontSize(12f).TextColor(Ui.Muted)),
+            VirtualListElement<WalkItem>.New()
+                .ItemHeight(RowHeight)
+                .Items(items)
+                .RenderWith(item => Row(item, item.Index == selected))
+                .AccessibleItemLabel(item => $"{item.Subject}, {item.Author}, {item.Hash}")
+                .SelectedIndex(selected)
+                .FlexGrow(1)
+                .WithRef(_list));
+    }
+
+    protected override void OnAfterBuild()
+    {
+        if (!_reveal) return;
+        _reveal = false;
+        _list.Current?.ScrollRangeIntoView(_built * RowHeight, RowHeight);
+    }
+
+    private BoxElement Row(WalkItem item, bool selected)
+    {
+        var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(0, 16))
+            .Background(selected ? Ui.Selected : Color.Transparent)
+            .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))
+            .Cursor(CursorType.Pointer)
+            .Children(
+                Phosphor.Draw(item.Icon, 18f, selected ? Ui.Accent : Ui.Muted),
+                Flex.Column(gap: 3).FlexGrow(1).FlexShrink(1).Children(
+                    Text.New(item.Subject).FontSize(13f).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                    Text.New(item.Meta).FontSize(11f).TextColor(Ui.Muted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)));
+        row.OnClick(_ => Select(item.Index));
+        return row;
+    }
+
+    /// <summary>
+    /// Null when row <paramref name="expected"/> is selected, told to the list, on screen
+    /// whole and drawn selected, and the row above it no longer is. Reads the rows the list
+    /// shows by where they are, not by how it made them.
+    /// </summary>
+    public string? Verify(int expected)
+    {
+        if (_selected.Value != expected) return $"the selection is on row {_selected.Value}, not {expected}";
+        if (_list.Current is not { } list) return "the list is not mounted";
+        if (list.SelectedIndex != expected) return $"the list says row {list.SelectedIndex} is selected";
+        var view = list.WindowContentBox;
+        float top = view.Y + expected * RowHeight - list.ScrollOffsetY;
+        if (top < view.Y - 0.5f || top + RowHeight > view.Bottom + 0.5f)
+            return $"row {expected} is not on screen whole (top {top:0.#}, view {view.Y:0.#}–{view.Bottom:0.#})";
+        if (RowAt(list, top + RowHeight / 2) is not { } row) return $"no row is drawn where row {expected} is";
+        if (row.BackgroundColor != Ui.Selected) return $"row {expected} is not drawn selected";
+        if (RowAt(list, top - RowHeight / 2) is { } above && above.BackgroundColor == Ui.Selected)
+            return $"row {expected - 1} is still drawn selected";
+        return null;
+    }
+
+    private static BoxElement? RowAt(Element list, float y)
+    {
+        var children = list.Children;
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (children[i] is not BoxElement { Children.Count: > 0 } row) continue;   // not the spacer
+            var box = row.WindowBorderBox;
+            if (y >= box.Y && y < box.Bottom) return row;
+        }
+        return null;
+    }
 }
 
 sealed class TableBench : Component

@@ -199,6 +199,105 @@ static partial class Scenarios
                     Check = step => area.Text == documents[step % documents.Length] ? null : "the document did not reach the TextArea",
                 };
             });
+
+        yield return new Scenario("text/open highlighted JSON in a TextArea",
+            $"Meridian's response viewer handed a {JsonLines:N0}-line pretty-printed JSON response and its colour spans: a read-only monospace TextArea measures every line, then draws the first screen",
+            ctx =>
+            {
+                // Three responses in turn. A response's 19,000 lines go through a 2,048-line
+                // layout cache, so none of them is still there when it comes round again.
+                var responses = new (string Text, TextSpan[] Spans)[3];
+                for (int d = 0; d < responses.Length; d++)
+                {
+                    var text = Ui.JsonResponse(ctx.Rng, JsonLines);
+                    responses[d] = (text, Ui.JsonSpans(text));
+                }
+                var area = JsonViewer();
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                return new Op
+                {
+                    Run = step =>
+                    {
+                        var (text, spans) = responses[step % responses.Length];
+                        area.Text = text;
+                        area.Spans = spans;
+                    },
+                    Check = step => JsonShown(ctx, area, responses[step % responses.Length].Text),
+                };
+            });
+
+        yield return new Scenario("text/wheel highlighted JSON in a TextArea",
+            $"Wheel 3 notches in the middle of the {JsonLines:N0}-line JSON response: each line drawn takes its colour spans out of the whole response's",
+            ctx =>
+            {
+                var text = Ui.JsonResponse(ctx.Rng, JsonLines);
+                var area = JsonViewer();
+                area.Text = text;
+                area.Spans = Ui.JsonSpans(text);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                area.ScrollOffsetY = float.MaxValue;
+                area.ScrollOffsetY /= 2;
+                ctx.Pump();
+                var box = area.WindowBorderBox;
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, WheelDirection(step) * 3),
+                    Check = ScrolledTo(() => area.ScrollOffsetY),
+                };
+            });
+    }
+
+    /// <summary>
+    /// Meridian's response size, near the most it colours: HultUI.Syntax leaves a text of more
+    /// than 20,000 lines without spans. Meridian's survey response was 312 KB in ~22,500 lines;
+    /// this one is 368 KB in 19,013 (see <see cref="Ui.JsonResponse"/>).
+    /// </summary>
+    private const int JsonLines = 19_000;
+
+    /// <summary>Meridian's response body: read-only, monospace 12 px, Dark+ colours on a dark field.</summary>
+    private static TextAreaElement JsonViewer()
+    {
+        var area = TextArea.New("").FontFamily(FontFamilies.Monospace).FontSize(12f)
+            .TextColor(Color.FromHex("#D4D4D4")).FlexGrow(1);
+        area.ReadOnly = true;
+        area.Style = new TextInputStyle { Background = Color.FromHex("#1E1E1E") };
+        return area;
+    }
+
+    /// <summary>
+    /// Null when <paramref name="text"/> is the TextArea's, every line of it is laid out (the
+    /// scroll range is the whole response, probed and put back) and the first screen shows
+    /// keys and string values in their span colours.
+    /// </summary>
+    private static string? JsonShown(Ctx ctx, TextAreaElement area, string text)
+    {
+        if (!ReferenceEquals(area.Text, text)) return "the response did not reach the TextArea";
+
+        int lines = 1;
+        foreach (char c in text) if (c == '\n') lines++;
+        float viewport = area.Layout.AbsoluteContentBox.Height;
+        float was = area.ScrollOffsetY;
+        area.ScrollOffsetY = float.MaxValue;
+        float height = area.ScrollOffsetY + viewport;
+        area.ScrollOffsetY = was;
+        if (height / lines is < 10f or > 30f)
+            return $"the TextArea is {height:0} px tall for {lines:N0} lines";
+
+        // Anti-aliased glyphs on the dark field: a key's teal and a string's orange each show as
+        // pixels well off the grey of uncoloured text. Two dozen of each on the first screen.
+        using var image = ctx.Window.CapturePixels();
+        using var pixels = image.PeekPixels();
+        var box = area.WindowContentBox;
+        int keys = 0, strings = 0;
+        for (int y = (int)box.Y; y < (int)Math.Min(box.Bottom, box.Y + 240); y++)
+            for (int x = (int)box.X; x < (int)Math.Min(box.Right, pixels.Width); x++)
+            {
+                var p = pixels.GetPixelColor(x, y);
+                if (p.Green - p.Red > 60 && p.Blue - p.Red > 40) keys++;
+                else if (p.Red - p.Blue > 45 && p.Red > 100) strings++;
+            }
+        return keys >= 24 && strings >= 24 ? null
+            : $"the first screen shows {keys} key-coloured and {strings} string-coloured pixels";
     }
 
     // 1,000 one-line labels with metric spans in half a window: truncated at every width of the drag.
