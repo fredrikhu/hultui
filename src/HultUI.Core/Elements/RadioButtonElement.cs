@@ -118,8 +118,11 @@ public class RadioButtonElement : Element
             radio.OnChanged?.Invoke(false);
         }
 
-        foreach (var child in subtree.Children)
-            DeselectGroupMembers(child);
+        // By index: this walks the whole window on every selection, and foreach over the
+        // Children interface boxes an enumerator per container.
+        var children = subtree.Children;
+        for (int i = 0; i < children.Count; i++)
+            DeselectGroupMembers(children[i]);
     }
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)

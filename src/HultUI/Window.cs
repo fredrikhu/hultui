@@ -603,9 +603,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private static Element? FindInTree(Element e, ElementId id)
     {
         if (e.Id == id) return e;
-        foreach (var child in e.Children)
+        var children = e.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
-            var found = FindInTree(child, id);
+            var found = FindInTree(children[i], id);
             if (found is not null) return found;
         }
         return null;
@@ -659,9 +660,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private static AccessibilityNode? FindById(AccessibilityNode node, ElementId id)
     {
         if (node.ElementId == id) return node;
-        foreach (var child in node.Children)
+        // By index: this walks the whole accessibility tree on every focus move while a
+        // client listens, and foreach over the interface boxes an enumerator per node.
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
         {
-            var found = FindById(child, id);
+            var found = FindById(children[i], id);
             if (found is not null) return found;
         }
         return null;
@@ -788,14 +792,17 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // DirtyFlags.Layout per element, so by the accessibility phase it's gone.
         // A layout change (window/pane resize) moves elements without adding or
         // removing any, and their bounding rects must be re-snapshotted for UIA.
-        bool layoutWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Layout);
-        bool styleWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Style);
+        // The flag tests in this method are written out rather than HasFlag: optimized code
+        // treats HasFlag as an intrinsic, but unoptimized code (tier 0, which the first frames
+        // of a window run) boxes both operands, 192 bytes a frame here.
+        bool layoutWasDirty = (_root.DirtyFlags & DirtyFlags.Layout) != 0;
+        bool styleWasDirty = (_root.DirtyFlags & DirtyFlags.Style) != 0;
 
         // Style resolution (only if any element has style changes)
         _perf.BeginStyle();
         using (_tracer.Begin("Phase", "Style"))
         {
-            if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(_root, theme);
                 ClearFlags(_root, DirtyFlags.Style);
@@ -808,7 +815,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         _perf.BeginLayout();
         using (_tracer.Begin("Phase", "Layout"))
         {
-            if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            if ((_root.DirtyFlags & DirtyFlags.Layout) != 0)
                 _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
         }
         _perf.EndLayout();
@@ -832,7 +839,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
         bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
-            || _root.DirtyFlags.HasFlag(DirtyFlags.Children));
+            || (_root.DirtyFlags & DirtyFlags.Children) != 0);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         long nowMs = A11yClockMs;
@@ -1799,7 +1806,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             if (el is null) return;
             if (el is TextElement te && te.Selectable && ReferenceEquals(te.SelectionGroup, token))
                 result.Add(te);
-            foreach (var child in el.Children) Collect(child);
+            var children = el.Children;   // by index: foreach over the interface boxes an enumerator
+            for (int i = 0; i < children.Count; i++) Collect(children[i]);
         }
     }
 
@@ -2266,8 +2274,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     {
         if ((element.DirtyFlags & flags) == 0) return;
         element.DirtyFlags &= ~flags;
-        foreach (var child in element.Children)
-            ClearFlags(child, flags);
+        // By index: Children is an interface, and foreach over it boxes an enumerator,
+        // 40 bytes per dirty container per frame (plan 17, runtime-frame-floor).
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            ClearFlags(children[i], flags);
     }
 
     /// <summary>
@@ -2332,8 +2343,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     {
         if (element.DirtyFlags == DirtyFlags.None) return;
         element.DirtyFlags = DirtyFlags.None;
-        foreach (var child in element.Children)
-            ClearAllFlags(child);
+        var children = element.Children;   // by index, as in ClearFlags
+        for (int i = 0; i < children.Count; i++)
+            ClearAllFlags(children[i]);
     }
 
     public void Close()
@@ -2579,13 +2591,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             var content = overlay.Content;
 
-            if (!overlay.StyleResolved || content.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(content, theme);
                 overlay.StyleResolved = true;
             }
 
-            if (!overlay.LayoutDone || content.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
             {
                 _layoutEngine.PerformLayout(content,
                     PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
@@ -2983,8 +2995,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private static Element? FindMaximizeButton(Element e)
     {
         if (e.IsWindowMaximizeButton) return e;
-        foreach (var child in e.Children)
-            if (FindMaximizeButton(child) is { } found) return found;
+        var children = e.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            if (FindMaximizeButton(children[i]) is { } found) return found;
         return null;
     }
 

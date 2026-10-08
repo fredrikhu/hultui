@@ -33,6 +33,7 @@ public sealed class Application : IDisposable
     private bool _disposed;
     private bool _quitRequested;
     private bool _firstFrameTraced;
+    private Action<IPlatformWindow>? _onWindowClose;
 
     /// <summary>The windowing platform this application runs on.</summary>
     internal IWindowingPlatform Platform => _platform;
@@ -368,7 +369,9 @@ public sealed class Application : IDisposable
 
         // Poll and route all native events. A platform asking to quit ends the frame
         // here, before anything touches a tree the platform may already have torn down.
-        if (!_platform.PumpEvents(onWindowClose: OnWindowCloseRequested))
+        // The callback is created once: a method group passed as an argument is a new
+        // delegate on every call, 64 bytes on every pass of the loop, idle ones included.
+        if (!_platform.PumpEvents(onWindowClose: _onWindowClose ??= OnWindowCloseRequested))
         {
             _quitRequested = true;
             return false;

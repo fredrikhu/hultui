@@ -1178,17 +1178,15 @@ public sealed partial class LayoutEngine
             // css-flexbox-1 §9.7's shape: distribute, clamp violators to their
             // floor and freeze them, then redistribute the shortfall among the
             // rest. An item with no floor (floor 0) behaves as before.
-            float[]? floors = null;
+            // On the stack, as frozen below: a scroll view in a column overflows it on every
+            // relayout, and a heap array here was the one allocation such a pass made.
+            Span<float> floors = items.Count <= 64 ? stackalloc float[items.Count] : new float[items.Count];
             for (int i = 0; i < items.Count; i++)
             {
                 var el = items[i].Element;
                 if (el.FlexRead.FlexShrink <= 0) continue;
                 float floor = AutomaticMinMain(el, isRow, mainAvailable, crossAvailable);
-                if (floor > 0)
-                {
-                    floors ??= new float[items.Count];
-                    floors[i] = floor;
-                }
+                if (floor > 0) floors[i] = floor;
             }
 
             Span<bool> frozen = items.Count <= 64 ? stackalloc bool[items.Count] : new bool[items.Count];
@@ -1211,7 +1209,7 @@ public sealed partial class LayoutEngine
                     if (shrinkFactor <= 0) continue;
 
                     float reduction = deficit * (shrinkFactor / totalShrink);
-                    float floor = floors?[i] ?? 0f;
+                    float floor = floors[i];
                     float shrunk = item.MainSize - reduction;
                     if (shrunk <= floor)
                     {
@@ -1764,8 +1762,10 @@ public sealed partial class LayoutEngine
         // final sweep is a safety net; ComputeLayout already clears visited nodes.
         if ((element.DirtyFlags & DirtyFlags.Layout) == 0) return;
         element.DirtyFlags &= ~DirtyFlags.Layout;
-        foreach (var child in element.Children)
-            ClearLayoutDirty(child);
+        // By index: foreach over the Children interface boxes an enumerator per container.
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            ClearLayoutDirty(children[i]);
     }
 }
 

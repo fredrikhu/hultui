@@ -458,8 +458,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     private static void OffsetDescendants(Element element, float dx, float dy)
     {
-        foreach (var child in element.Children)
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
         {
+            var child = children[i];
             child.Layout = child.Layout with
             {
                 AbsoluteX = child.Layout.AbsoluteX + dx,
