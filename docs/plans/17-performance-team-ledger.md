@@ -5,16 +5,12 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 1
-- **Phase:** build — all round 1 items landed; running the end-of-round full test suite
-  (2026-10-09), then Phase `release`. (Resumed 2026-10-08 22:49 after a pause.) Was next: item **11f**
-  (aperture-hero-scale), then **11g/11h** (Meridian breakpoint, Junction compact table),
-  then item **12** (two perf-suite scenarios), then the end-of-round
-  full test suite (`dotnet test HultUI.slnx -c Release`), then Phase `release` (merge
-  into main, push, wait for CI), then round 2's survey. To resume
-  after another pause, run in this worktree: `/loop Run the next step of the performance
-  team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
-  for, record it in the ledger, and commit.`
+- **Phase:** release — round 1 merged into main as 64ba531 and pushed 2026-10-09
+  (full suite passed on the branch and again on the merge: 30 projects, 0 failures).
+  Waiting for CI on 64ba531; then Round 2, Phase survey. To resume after a pause, run in
+  this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
+  Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** fc0f4f7
@@ -338,3 +334,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-08: round 1 build items 1–11e and the truncation app follow-ups landed (see
   Landed). Paused before 11f at the user's request; nothing uncommitted. Two questions open
   for the user (Needs the user). Nothing pushed or merged.
+- 2026-10-09: round 1 full suite passed (30 projects, 0 failures); merged into main as
+  64ba531 on a detached origin/main (main had 3dca7b4/de5f0e6 from another session), suite
+  passed again on the merge, pushed de5f0e6..64ba531, primary fast-forwarded behind the guard.
