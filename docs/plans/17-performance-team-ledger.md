@@ -83,7 +83,7 @@ survey to re-rank them.
     of its longest word. Fixes Junction Branches overlap at ≤1200 px and Meridian's Send
     button pushed off-screen by a long URL. Build after 11d, as its own commit, with
     before/after images of those screens for the user.
-11e-fix. **apps-truncation-followups** (1, from 322df92) — Meridian: request tab titles and
+11e-fix. ~~**apps-truncation-followups**~~ LANDED be1fd9d, 351e6cd (1, from 322df92) — Meridian: request tab titles and
     sub-tab labels need MaxLines(1) + ellipsis (they wrap and overlap the URL bar at ≤1100 px
     now that the editor gets its designed width). Junction: the FlexShrink(0) "current" tag
     overlaps LAST COMMIT by 23 px at 1000 px. Before/after images for the user.
@@ -99,6 +99,9 @@ survey to re-rank them.
 
 ### Waiting
 
+- **layout-scroll-strip-narrowing** (1, framework gap) — a tab strip cannot both narrow its
+  tabs and scroll, because scroll content is laid out against an unbounded width; Meridian's
+  open tab can be cut off at the strip's end.
 - **layout-maxlines-setter-dirty** (1, correctness) — the MaxLines property setter does not
   mark layout dirty (a patch does). Small.
 - **a11y-atspi-cache-child-index** (7) — from source reading: libatspi's AddAccessible writes
@@ -206,6 +209,8 @@ survey to re-rank them.
 | 1 | ab8917b | a11y-scroll-bounds-event | Scroll view nodes carry ScrollOffset; UIA raises Vertical/HorizontalScrollPercent on the view (Chromium's mapping, `browser_accessibility_manager_win.cc`) instead of a BoundingRectangle per on-screen node: 846 → 6 events, provider callbacks 11,844 → 84 per 30 notches; bounds and offscreen read live. a11y/wheel 1,000 rows, UIA −54 % min, −62 % median. Node still 136 B (packed states). AT-SPI unchanged (sent nothing before). |
 | 1 | 6891682 | layout-truncation-clamp-basis | A MaxLines(1) label in a row starts at min(untruncated width, room), from a pinned MeasureCache entry (no new element bytes). Ellipsis rows −19…−42 % time JIT, −20…−43 % AOT, allocation −21…−52 % (text/ellipsis 4.75 → 3.32 ms, 3,418 → 1,887 KB/op); measurements per step halved; 0 slower. Pixels: ellipsis slack ≤ 0.89 px; zero-room cells draw nothing instead of overlapping. Goldens byte-identical. |
 | 1 | 322df92 | layout-truncating-min-zero | A MaxLines(1) label's automatic minimum is 0 (nested boxes too); a label too narrow for its ellipsis draws nothing. Perf flat JIT and AOT. Fixes: Junction Branches name/tag overlap at 1200 px, Junction sidebar repo name/path running past the edge, Junction Tags subjects over the date column, Meridian's Send button off-window with a long URL. Exposed: Meridian's request tab titles and sub-tabs wrap at ≤1100 px and overlap the URL bar (follow-up 11e-fix); Junction's FlexShrink(0) "current" tag still overlaps at 1000 px. Goldens byte-identical. Images in scratchpad `truncation-minzero/`. |
+| 1 | be1fd9d | apps-truncation-followups (Meridian) | Request tab titles one line (ellipsis, ≤220 px, narrow to 72 px, strip clips); sub-tabs one line in a sideways-scrolling strip; URL box clips; Chain, Assertions, History, Environments labels fixed. At 1100 px the editor gets its designed 228 px and the response pane fits (before: titles 4–11 lines deep over the URL bar, pane 179 px off-window). Breakpoint left at 1100 (asked the user). |
+| 1 | 351e6cd | apps-truncation-followups (Junction) | Branch name cell clips; the name truncates first, then current/base/head/remote tags show whole or not at all; LAST COMMIT heading one line. No overlap at 1000/1200/1400 px. |
 
 ## Examined, not worth it
 
@@ -235,7 +240,13 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-None open.
+- **Meridian response-pane breakpoint** (from be1fd9d): at 1100 px the editor gets
+  1100 − 48 − 264 − 560 = 228 px, so the URL is almost invisible beside Send. Move the
+  side-pane breakpoint from 1100 to ~1320 px (editor ≥ 448 px; below it the pane goes to the
+  bottom)? The plan's approved decision says "auto-bottom < 1100dip".
+- **Junction Branches compact table at ≤1000 px** (from 351e6cd): with the sidebar open the
+  fixed columns (118 + 120 + 96 + 250) leave 86 px for name + LAST COMMIT, so names show
+  as "…". Add a compact layout (e.g. icon-only Checkout, narrower columns)?
 
 Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
 (outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
