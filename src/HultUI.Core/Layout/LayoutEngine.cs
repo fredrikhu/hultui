@@ -50,9 +50,7 @@ public sealed partial class LayoutEngine
     private Size ComputeLayout(Element element, LayoutConstraint constraint, float absoluteX, float absoluteY,
         float? forcedWidth = null, float? forcedHeight = null)
     {
-        using var _trace = _tracer is null
-            ? default
-            : _tracer.Begin("Layout", element.GetType().Name, element.Key ?? element.Name);
+        using var _trace = _tracer is null ? default : _tracer.BeginElement("Layout", element);
 
         // Skip clean subtrees when constraints and forced sizes haven't changed.
         // On an axis whose size is set — forced, or given in pixels, with no percentage min or max —
@@ -589,9 +587,7 @@ public sealed partial class LayoutEngine
             return cachedSize;
         }
 
-        using var _trace = _tracer is null
-            ? default
-            : _tracer.Begin("Measure", element.GetType().Name, element.Key ?? element.Name);
+        using var _trace = _tracer is null ? default : _tracer.BeginElement("Measure", element);
 
         var box = element.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;

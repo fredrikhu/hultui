@@ -174,6 +174,8 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-08-9ae8f9e-textdraw-before.json` | Before text drawing stopped allocating per frame (plan 17): 9ae8f9e, median of 3 idle-gated runs … |
 | `2026-10-08-9ae8f9e-textdraw-after.json` | … and after it, interleaved with the line above. Compare these two: 0 slower, 0 faster in time; allocation down ≥10 % on 43 rows (dense text 18.1 → 0.8 KB/op, typing in a `TextInput` 44.9 → 2.5). |
 | `2026-10-08-9ae8f9e-textdraw-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish, where the JIT cannot hide an allocation on the stack: allocation down ≥10 % on 44 rows (dense text 29.8 → 12.5 KB/op). |
+| `2026-10-08-28b23fb-tracename-before.json`, `…-after.json` | Before and after the layout and render passes stopped building each element's trace name when no trace records (plan 17): 28b23fb, median of 3 idle-gated runs each, alternated. Compare these two: 0 slower, 0 faster; allocation −0.1 to −0.2 KB/op on the per-frame rows, because the JIT keeps `Type.Name`. |
+| `2026-10-08-28b23fb-tracename-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish (median of 2), where `Type.Name` builds a new string on every call: allocation down ≥10 % on 40 rows, none up (resize 2,000 rows 685.6 → 2.9 KB/op, typing in a `TextInput` 59.0 → 2.4, 400 tiles 7.7 → 0.7); 0 slower, 3 faster in time (resize 2,000 rows −16 %). |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
