@@ -95,6 +95,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     internal AccessibilityNode? RootNode => Volatile.Read(ref _rootNode);
 
+    /// <summary>Every wrapper the bridge keeps, for tests of its upkeep.</summary>
+    internal IEnumerable<UiaFragment> Wrappers => _wrappers.Values;
+
     internal ElementId? FocusedNodeId
     {
         get
@@ -382,15 +385,6 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         // own properties didn't change.
         Volatile.Write(ref _rootNode, root);
 
-        // Index the new tree by id. Parent wrappers must be refreshed from *this*
-        // (authoritative, current) snapshot: RemovedNode.Parent references the
-        // previous tree, so refreshing a parent from it would leave the cached
-        // wrapper pointing at stale children — including just-removed ones whose
-        // wrappers we drop below. Navigate would then hand UIA a child ElementId
-        // with no wrapper (NativeFragment → Zero) and the whole subtree vanishes.
-        var currentById = new Dictionary<ElementId, AccessibilityNode>();
-        IndexTree(root, currentById);
-
         // 1) Materialise/refresh wrappers for added nodes (no parent refresh yet).
         foreach (var added in diff.Added)
         {
@@ -417,9 +411,20 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
                 wrapper.UpdateFrom(change.Node);
 
-        // 4) Now that every wrapper exists (adds) or is gone (removes), refresh
-        //    each affected parent from the new tree so its child list is current,
-        //    and raise the matching UIA events — once per topmost changed parent.
+        // 4) Point every other wrapper at its node in this tree too. The diff names
+        //    only what changed, but every rebuild is a new tree, and a node reaches
+        //    its whole tree through Parent and Children: a wrapper left on an old
+        //    node kept that tree alive (one tree per diff, ~170 KB at 1,001 nodes)
+        //    and navigated its siblings in it. One lookup per node and nothing
+        //    allocated; each swap is one reference write, so a UIA thread reading a
+        //    wrapper meanwhile walks its old tree or its new one, either consistent.
+        int generation = ++_generation;
+        if (Rebase(root, generation) != _wrappers.Count)
+            DropStale(generation);
+
+        // 5) Now that every wrapper exists (adds) or is gone (removes) and points
+        //    into the new tree, refresh each affected parent's snapshot and raise
+        //    the matching UIA events — once per topmost changed parent.
         //    A parent that is itself part of the diff needs neither: its wrapper
         //    was already created from (or dropped with) the current snapshot,
         //    and UIA structure events are re-query hints on a parent, so the
@@ -429,17 +434,17 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         //    10k-row create, which profiled as half the operation.
         foreach (var parentId in diff.CoalescedAddedParents())
         {
-            RefreshParent(parentId, currentById);
+            RefreshParent(parentId);
             RaiseStructureChanged(parentId, UiaInterop.StructureChangeType_ChildrenBulkAdded);
         }
         foreach (var parentId in diff.CoalescedRemovedParents())
         {
-            RefreshParent(parentId, currentById);
+            RefreshParent(parentId);
             RaiseStructureChanged(parentId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
         }
         foreach (var reorderedParent in diff.Reordered)
         {
-            RefreshParent(reorderedParent.ElementId, currentById);
+            RefreshParent(reorderedParent.ElementId);
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
         }
         foreach (var change in diff.PropertyChanged)
@@ -447,25 +452,54 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
                 RaisePropertyChanged(wrapper, change.PropertyName);
     }
 
-    private static void IndexTree(AccessibilityNode node, Dictionary<ElementId, AccessibilityNode> map)
+    // The apply pass, counted, so a wrapper the rebase did not reach can be told apart. UI thread only.
+    private int _generation;
+
+    /// <summary>
+    /// Points the wrapper of every node in <paramref name="node"/>'s subtree at that node and
+    /// returns how many it found. Index loops: a foreach over Children would box an enumerator
+    /// per node.
+    /// </summary>
+    private int Rebase(AccessibilityNode node, int generation)
     {
-        map[node.ElementId] = node;
-        foreach (var child in node.Children)
-            IndexTree(child, map);
+        int found = 0;
+        if (_wrappers.TryGetValue(node.ElementId, out var wrapper))
+        {
+            wrapper.Rebase(node, generation);
+            found = 1;
+        }
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            found += Rebase(children[i], generation);
+        return found;
     }
 
     /// <summary>
-    /// Point a parent's cached wrapper at its node in the current tree so its
-    /// child list is up to date. Looked up in <paramref name="currentById"/> (the
-    /// new tree) — never a diff-supplied parent, which may be a previous-tree
-    /// snapshot. Skips parents no longer in the tree (their wrapper is gone too).
+    /// Drops the wrappers (and cached native objects) of elements the new tree does not have
+    /// although no diff removed them. A diff from no tree — a client attached again, or the
+    /// window got a new root — adds everything and removes nothing, so the old tree's wrappers
+    /// would otherwise stay, each holding its tree, for the bridge's life.
     /// </summary>
-    private void RefreshParent(ElementId? parentId, Dictionary<ElementId, AccessibilityNode> currentById)
+    private void DropStale(int generation)
     {
-        if (parentId is null) return;
-        if (currentById.TryGetValue(parentId.Value, out var node)
-            && _wrappers.TryGetValue(parentId.Value, out var wrapper))
-            wrapper.UpdateFrom(node);
+        foreach (var (id, wrapper) in _wrappers)
+        {
+            if (wrapper.Generation == generation) continue;
+            _wrappers.TryRemove(id, out _);
+            if (_nativeByElement.TryRemove(id, out var native))
+                Marshal.Release(native);
+        }
+    }
+
+    /// <summary>
+    /// Re-snapshots a parent whose children changed. Its wrapper already points at its node in
+    /// the current tree (step 4), never at a diff-supplied parent, which may be a previous-tree
+    /// node; a parent no longer in the tree has no wrapper.
+    /// </summary>
+    private void RefreshParent(ElementId? parentId)
+    {
+        if (parentId is { } id && _wrappers.TryGetValue(id, out var wrapper))
+            wrapper.UpdateFrom(wrapper.Node);
     }
 
     public void NotifyFocusChanged(AccessibilityNode? focused)

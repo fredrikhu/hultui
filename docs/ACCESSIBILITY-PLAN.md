@@ -157,6 +157,12 @@ Files:
 
 Wrapper caching is load-bearing: UIA clients compare provider identity across
 calls. Key wrappers off `AccessibilityNode.ElementId`, reuse across rebuilds.
+Every rebuild is a new tree, though, and a node reaches its whole tree through
+`Parent` and `Children`: after each diff the bridge points every surviving
+wrapper at its node in the new tree (one lookup per node, nothing allocated) and
+drops the wrappers of elements the new tree lacks. A wrapper left on an old node
+kept that tree alive and answered sibling navigation from it (500 checkbox rows
+held 201 trees, 34 MB, after 200 toggles).
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff

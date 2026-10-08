@@ -22,7 +22,17 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 {
     private readonly WindowsAccessibilityBridge _bridge;
     public ElementId ElementId { get; }
-    public AccessibilityNode Node { get; private set; }
+
+    /// <summary>
+    /// This element's node in the bridge's current tree. The UI thread swaps it with one
+    /// reference write after every diff (<see cref="UpdateFrom"/>, <see cref="Rebase"/>); a UIA
+    /// thread reads it once per call and walks that tree, which never changes once applied.
+    /// </summary>
+    public AccessibilityNode Node => Volatile.Read(ref _node);
+    private AccessibilityNode _node;
+
+    /// <summary>The bridge's last apply pass that found this element in its tree. UI thread only.</summary>
+    internal int Generation;
 
     private string? _name;
     private string? _description;
@@ -50,15 +60,27 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     public UiaFragment(WindowsAccessibilityBridge bridge, AccessibilityNode node)
     {
         _bridge = bridge;
-        Node = node;
+        _node = node;
         ElementId = node.ElementId;
         Snapshot(node);
     }
 
+    /// <summary>Takes the node's properties and points at it: for a node that is new or changed.</summary>
     public void UpdateFrom(AccessibilityNode node)
     {
-        Node = node;
+        Volatile.Write(ref _node, node);
         Snapshot(node);
+    }
+
+    /// <summary>
+    /// Points at the node's copy in a newer tree whose properties did not change. Every tree is
+    /// built afresh, and a node reaches its whole tree through Parent and Children, so a wrapper
+    /// left on an old node keeps that tree alive and navigates in it.
+    /// </summary>
+    public void Rebase(AccessibilityNode node, int generation)
+    {
+        Volatile.Write(ref _node, node);
+        Generation = generation;
     }
 
     private void Snapshot(AccessibilityNode node)
@@ -207,7 +229,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     public int Navigate(int direction, out IntPtr pRetVal)
     {
-        // Snapshot Node once: the UI thread may swap it via UpdateFrom while this
+        // Snapshot Node once: the UI thread may swap it after a diff while this
         // runs on a UIA worker thread. Each Node is an immutable per-frame tree.
         var node = Node;
 
