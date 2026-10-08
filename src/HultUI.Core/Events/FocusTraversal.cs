@@ -19,51 +19,89 @@ internal static class FocusTraversal
     /// </param>
     public static Element? FindNext(Element root, Element? current, bool wrap = true)
     {
-        var focusable = CollectFocusable(root);
-        if (focusable.Count == 0) return null;
+        var scratch = RentList();
+        try
+        {
+            var focusable = CollectFocusable(root, scratch);
+            if (focusable.Count == 0) return null;
 
-        if (current is null)
-            return focusable[0];
+            if (current is null)
+                return focusable[0];
 
-        int index = focusable.IndexOf(current);
-        if (index < 0)
-            return focusable[0];
+            int index = focusable.IndexOf(current);
+            if (index < 0)
+                return focusable[0];
 
-        int next = index + 1;
-        if (next >= focusable.Count)
-            return wrap ? focusable[0] : null;
-        return focusable[next];
+            int next = index + 1;
+            if (next >= focusable.Count)
+                return wrap ? focusable[0] : null;
+            return focusable[next];
+        }
+        finally { ReturnList(scratch); }
     }
 
     /// <inheritdoc cref="FindNext"/>
     public static Element? FindPrevious(Element root, Element? current, bool wrap = true)
     {
-        var focusable = CollectFocusable(root);
-        if (focusable.Count == 0) return null;
+        var scratch = RentList();
+        try
+        {
+            var focusable = CollectFocusable(root, scratch);
+            if (focusable.Count == 0) return null;
 
-        if (current is null)
-            return focusable[^1];
+            if (current is null)
+                return focusable[^1];
 
-        int index = focusable.IndexOf(current);
-        if (index < 0)
-            return focusable[^1];
+            int index = focusable.IndexOf(current);
+            if (index < 0)
+                return focusable[^1];
 
-        int previous = index - 1;
-        if (previous < 0)
-            return wrap ? focusable[^1] : null;
-        return focusable[previous];
+            int previous = index - 1;
+            if (previous < 0)
+                return wrap ? focusable[^1] : null;
+            return focusable[previous];
+        }
+        finally { ReturnList(scratch); }
     }
 
-    private static List<Element> CollectFocusable(Element root)
+    // Every Tab walks the whole tree into a list. Grown from empty each time, that list was
+    // most of what a Tab allocated (~8 KB of arrays for 300 fields), so one list is kept per
+    // thread and emptied after each use: it holds no element between Tabs, only its array,
+    // sized for the most focusable elements one tree has had. A nested call (there is none
+    // today) would find the slot empty and use a list of its own.
+    [ThreadStatic] private static List<Element>? _scratch;
+
+    private static List<Element> RentList()
     {
-        var inDocOrder = new List<Element>();
+        var list = _scratch ?? [];
+        _scratch = null;
+        return list;
+    }
+
+    private static void ReturnList(List<Element> list)
+    {
+        list.Clear();
+        _scratch = list;
+    }
+
+    private static List<Element> CollectFocusable(Element root, List<Element> inDocOrder)
+    {
         CollectRecursive(root, inDocOrder);
 
-        // OrderBy is a stable sort, so equal TabIndex values preserve document order.
-        // Mapping 0 → int.MaxValue places zero-indexed elements after all positive ones.
-        return inDocOrder
-            .OrderBy(e => e.TabIndex == 0 ? int.MaxValue : e.TabIndex)
-            .ToList();
+        // Positive values are rare. Without one, every element collected has TabIndex 0, the
+        // sort below keeps document order, and sorting it only cost a key array, a map and a
+        // second list on every Tab.
+        for (int i = 0; i < inDocOrder.Count; i++)
+        {
+            if (inDocOrder[i].TabIndex <= 0) continue;
+
+            // OrderBy is a stable sort, so equal TabIndex values preserve document order.
+            // Mapping 0 → int.MaxValue places zero-indexed elements after all positive ones.
+            return inDocOrder
+                .OrderBy(e => e.TabIndex == 0 ? int.MaxValue : e.TabIndex)
+                .ToList();
+        }
+        return inDocOrder;
     }
 
     private static void CollectRecursive(Element element, List<Element> result)
@@ -71,7 +109,10 @@ internal static class FocusTraversal
         if (element.IsFocusable && element.TabIndex >= 0)
             result.Add(element);
 
-        foreach (var child in element.Children)
-            CollectRecursive(child, result);
+        // By index: foreach over the Children interface boxes an enumerator per container,
+        // and this walks the whole tree on every Tab.
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++)
+            CollectRecursive(children[i], result);
     }
 }

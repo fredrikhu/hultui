@@ -221,6 +221,112 @@ public class FocusTraversalTests
         fm.MoveFocusNext(root); Assert.Equal("c", fm.FocusedElement?.Name);
     }
 
+    /// <summary>Positive values anywhere in the tree, nested at different depths, ties among
+    /// them, zeros before and after, and a negative: Tab visits the positives in ascending
+    /// order (ties in document order), then the zeros in document order, and Shift+Tab walks the
+    /// same sequence backwards. Twice round, because the list the traversal collects into is
+    /// kept between calls.</summary>
+    [Fact]
+    public void TabIndex_MixedValuesInNestedContainers_KeepTheHtmlOrder()
+    {
+        BoxElement F(string name, int tabIndex = 0) => new() { IsFocusable = true, Name = name, TabIndex = tabIndex };
+        var root = new BoxElement();
+        var outer = new BoxElement();
+        var inner = new BoxElement();
+        root.AddChild(F("z1"));
+        root.AddChild(outer);
+        outer.AddChild(F("p3a", 3));
+        outer.AddChild(inner);
+        inner.AddChild(F("z2"));
+        inner.AddChild(F("p1", 1));
+        inner.AddChild(F("neg", -1));
+        outer.AddChild(F("p3b", 3));
+        root.AddChild(F("p2", 2));
+        root.AddChild(F("z3"));
+
+        string[] expected = ["p1", "p2", "p3a", "p3b", "z1", "z2", "z3"];
+        var fm = new FocusManager();
+        var forward = new List<string?>();
+        for (int i = 0; i < expected.Length * 2; i++)
+        {
+            fm.MoveFocusNext(root);
+            forward.Add(fm.FocusedElement?.Name);
+        }
+        Assert.Equal([.. expected, .. expected], forward);
+
+        var backward = new List<string?>();
+        for (int i = 0; i < expected.Length * 2; i++)
+        {
+            fm.MoveFocusPrevious(root);
+            backward.Add(fm.FocusedElement?.Name);
+        }
+        string[] reversed = [.. Enumerable.Reverse(expected)];
+        // From z3, Shift+Tab steps back through the sequence and wraps from p1 to z3.
+        Assert.Equal([.. reversed.Skip(1), reversed[0], .. reversed.Skip(1), reversed[0]], backward);
+    }
+
+    /// <summary>A form of 300 fields in rows, none with a positive TabIndex: finding the next
+    /// and previous field allocates nothing. It walked the tree with a boxed enumerator per
+    /// container, grew a fresh list, and sorted it with OrderBy + ToList although every key was
+    /// equal: 27.7 KB per Tab on the perf suite's input/tab row (plan 17, runtime-frame-floor).</summary>
+    [Fact]
+    public void FindingTheNextField_AllocatesNothing_WhenNoTabIndexIsPositive()
+    {
+        var root = new BoxElement();
+        var fields = new BoxElement[300];
+        for (int i = 0; i < fields.Length; i++)
+        {
+            var row = new BoxElement();
+            row.AddChild(new TextElement());
+            row.AddChild(fields[i] = new BoxElement { IsFocusable = true });
+            root.AddChild(row);
+        }
+        FocusTraversal.FindNext(root, fields[5]);
+        FocusTraversal.FindPrevious(root, fields[5]);
+
+        var next = new Element?[20];
+        var previous = new Element?[20];
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 20; i++)
+        {
+            next[i] = FocusTraversal.FindNext(root, fields[i]);
+            previous[i] = FocusTraversal.FindPrevious(root, fields[i + 1]);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        for (int i = 0; i < 20; i++)
+        {
+            Assert.Same(fields[i + 1], next[i]);
+            Assert.Same(fields[i], previous[i]);
+        }
+        Assert.Equal(0, allocated);
+    }
+
+    /// <summary>The traversal keeps its list between calls; it must not keep the elements. A
+    /// tree that has been Tabbed through and then dropped is collectable.</summary>
+    [Fact]
+    public void FindingTheNextField_KeepsNoElementAlive()
+    {
+        var dropped = TabThroughATreeAndDropIt();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.False(dropped.TryGetTarget(out _), "a tree Tabbed through is still reachable");
+
+        // Not inlined, so no local of this frame keeps the tree alive.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference<BoxElement> TabThroughATreeAndDropIt()
+        {
+            var root = new BoxElement();
+            var a = new BoxElement { IsFocusable = true };
+            root.AddChild(a);
+            root.AddChild(new BoxElement { IsFocusable = true });
+            FocusTraversal.FindNext(root, a);
+            FocusTraversal.FindPrevious(root, a);
+            return new WeakReference<BoxElement>(a);
+        }
+    }
+
     [Fact]
     public void TabIndex_Negative_SkippedByTabButStillProgrammaticallyFocusable()
     {

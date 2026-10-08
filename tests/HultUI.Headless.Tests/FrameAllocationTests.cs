@@ -108,6 +108,35 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"laying one box out again allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key
+    /// and focus events. It was ~28 KB per Tab (a tree walk with a boxed enumerator per
+    /// container, a fresh list, and a sort of keys that were all equal); the bound is far above
+    /// the events and far below any of those.</summary>
+    [Fact]
+    public void ATab_AllocatesLittleMoreThanItsEvents()
+    {
+        var rows = new Element[300];
+        for (int i = 0; i < rows.Length; i++)
+            rows[i] = Flex.Row(gap: 8).FlexShrink(0).Children(
+                TextElement.New($"Field {i}").Width(Dimension.Px(80)),
+                TextInput.New("value").Width(Dimension.Px(200)));
+        using var session = Session(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+        var window = session.Window;
+        for (int i = 0; i < 10; i++) { window.PressKey(KeyCode.Tab); session.Application.RunFrame(Frame); }
+
+        var focusedBefore = window.Window.FocusedElement;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 20; i++)
+        {
+            window.PressKey(KeyCode.Tab);
+            session.Application.RunFrame(Frame);
+        }
+        double perTab = (GC.GetAllocatedBytesForCurrentThread() - before) / 20.0;
+
+        Assert.NotSame(focusedBefore, window.Window.FocusedElement);
+        Assert.True(perTab < 1024, $"a Tab allocated {perTab:0} B");
+    }
+
     /// <summary>Bytes this thread allocated per rendered frame, <paramref name="change"/>
     /// applied before each.</summary>
     private static double PerFrame(Application app, Action change)
