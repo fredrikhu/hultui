@@ -137,6 +137,38 @@ public class FrameAllocationTests
         Assert.True(perTab < 1024, $"a Tab allocated {perTab:0} B");
     }
 
+    private static object? _sink;
+
+    /// <summary>The pointer moving within one element allocates the platform's input and the
+    /// move event, nothing else. Looking for a tooltip to show allocated a closure for the
+    /// tooltip's delayed show on every move, whether there was a tooltip or not.</summary>
+    [Fact]
+    public void APointerMoveWithinOneElement_AllocatesOnlyItsEvents()
+    {
+        var (root, _) = Screen();
+        using var session = Session(root);
+        var window = session.Window;
+        for (int i = 0; i < 10; i++) { window.MoveMouse(480 + i % 2, 100); session.Application.RunFrame(Frame); }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            _sink = new InputEvent.MouseMoveInput(480, 100, 1, 0, KeyModifiers.None);
+            _sink = new PointerMoveEvent { Position = new Point(480, 100), Delta = new Point(1, 0) };
+        }
+        long events = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            window.MoveMouse(480 + i % 2, 100);
+            session.Application.RunFrame(Frame);
+        }
+        long moves = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
+    }
+
     /// <summary>Bytes this thread allocated per rendered frame, <paramref name="change"/>
     /// applied before each.</summary>
     private static double PerFrame(Application app, Action change)

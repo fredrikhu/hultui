@@ -2688,6 +2688,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
         if (owner is null || text is null) return;
 
+        ScheduleTooltip(owner, text);
+    }
+
+    // A method of its own: the show callback captures owner and text, and C# allocates a
+    // captured local's closure where the local's scope begins. In UpdateTooltipHover that was
+    // its first line, which every pointer move runs, tooltip or not.
+    private void ScheduleTooltip(Element owner, string text)
+    {
         // Start show delay
         _tooltipOwner = owner;
         var theme = Application.Theme;
