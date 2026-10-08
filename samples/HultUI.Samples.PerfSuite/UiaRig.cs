@@ -30,6 +30,9 @@ sealed class UiaRig : IAccessibilityBridge, IDisposable
     /// <summary>Diffs the bridge has applied, for a scenario's check.</summary>
     public int Applies { get; private set; }
 
+    /// <summary>Focus moves the bridge was told of, for a scenario's check.</summary>
+    public int FocusMoves { get; private set; }
+
     public static UiaRig Install(HeadlessWindow window)
     {
         // "STATIC" is a system class: no class to register, no window procedure to keep alive.
@@ -47,7 +50,11 @@ sealed class UiaRig : IAccessibilityBridge, IDisposable
         Applies++;
     }
 
-    public void NotifyFocusChanged(AccessibilityNode? focused) => _bridge.NotifyFocusChanged(focused);
+    public void NotifyFocusChanged(AccessibilityNode? focused)
+    {
+        _bridge.NotifyFocusChanged(focused);
+        FocusMoves++;
+    }
 
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
         => _bridge.Announce(source, text, politeness);

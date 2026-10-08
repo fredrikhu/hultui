@@ -158,6 +158,58 @@ static partial class Scenarios
                     Check = Applied(rig),
                 };
             });
+
+        yield return new Scenario("a11y/tab through 300 fields, UIA",
+            "Press Tab in a 300-field form with the UIA bridge: the focus moves, no rebuild",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var rows = new Element[300];
+                for (int i = 0; i < rows.Length; i++)
+                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(3, 12)).Children(
+                        Text.New($"Field {i}").FontSize(12f).Width(Dimension.Px(80)),
+                        TextInput.New(Ui.Label(ctx.Rng)).Width(Dimension.Px(260)));
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+                ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab);
+                ctx.Pump();
+                int moves = rig.FocusMoves;
+                return new Op
+                {
+                    // Forward 20, back 20, as input/tab does: the focus stays near the top.
+                    Run = step => ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab,
+                        (step / 20) % 2 == 0 ? HultUI.Core.Events.KeyModifiers.None : HultUI.Core.Events.KeyModifiers.Shift),
+                    Check = _ =>
+                    {
+                        bool moved = rig.FocusMoves > moves;
+                        moves = rig.FocusMoves;
+                        return moved ? null : "the UIA bridge was not told the focus moved";
+                    },
+                };
+            });
+
+        yield return new Scenario("a11y/wheel 1,000 rows, UIA",
+            "Wheel 3 notches through 1,000 rows with the UIA bridge, each frame 120 ms apart so each rebuilds: bounds over ~130 rows on screen",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var view = ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000));
+                ctx.Mount(view);
+                float offset = view.ScrollOffsetY;
+                var applied = Applied(rig);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, ((step / 20) % 2 == 0 ? -1 : 1) * 3),
+                    // Past the 100 ms a scroll's accessibility refresh waits for, so every step's
+                    // frame is a coalesced rebuild, as each one is in a slow wheel turn.
+                    FrameDelta = TimeSpan.FromMilliseconds(120),
+                    Check = step =>
+                    {
+                        bool moved = view.ScrollOffsetY != offset;
+                        offset = view.ScrollOffsetY;
+                        return moved ? applied(step) : $"the view did not scroll (offset {offset})";
+                    },
+                };
+            });
     }
 
     /// <summary>A check that the bridge applied a diff since the last time it was asked.</summary>
