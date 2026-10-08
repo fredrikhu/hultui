@@ -47,7 +47,7 @@ survey to re-rank them.
 5a. ~~**aperture-poster-decode-scale**~~ LANDED f84893d (2; user said yes 2026-10-07) — request posters at
    card width × display scale instead of × 2; −75 % poster memory at 100 % scale (up to
    ~280 MB), −44 % at 150 %. Refetch at the new scale after a DPI change.
-6. **a11y-uia-wrapper-rebase** (7; = part of a11y-uia-apply-and-retention (4)) — rebase
+6. ~~**a11y-uia-wrapper-rebase**~~ LANDED 4195da4 + 7096431 (7; = part of a11y-uia-apply-and-retention (4)) — rebase
    surviving wrappers, drop per-diff index; 34 MB leak after 200 toggles; fixes stale
    sibling navigation.
 7. **runtime-frame-floor** (4; + layout-tree-walk-allocs (1) walk/FocusTraversal half,
@@ -69,6 +69,10 @@ survey to re-rank them.
 11b. **a11y-focus-state-on-tab** (7; user said yes 2026-10-07, correctness) — a focus move
     updates HasKeyboardFocus/IsFocused at once (small patch per focus move) instead of
     leaving them stale until the next rebuild.
+11c. **a11y-uia-reparent-wrapper** (7, correctness, from 4195da4) — when an ElementId is in
+    both diff.Added and diff.Removed (an element moves to another a11y parent, e.g. a Box
+    gains an AccessibleName), the bridge processes Added before Removed and drops the
+    wrapper: UIA navigation to those children returns null. Process Removed first. Small.
 12. **apps-scenario-virtual-selection-walk-a11y** + **apps-scenario-textarea-highlighted-json**
     (8) — two perf-suite scenarios the big round 2 items need.
 
@@ -77,6 +81,9 @@ survey to re-rank them.
 
 ### Waiting
 
+- **a11y-snapshot-stale-fields** (7) — IsOffscreen, off-screen bounds, Role, AutomationId
+  update only when the diff names the node, so IsOffscreen can go stale after a viewport
+  resize. Seen in code only; test first.
 - **paint-cover-half-pixel-crop** (2) — at 1:1, Cover crops at half-pixel offsets when a
   source is 1 px larger on the cropped axis (`ComputeImageFit` does not snap the source
   rectangle): slightly soft pictures. Small.
@@ -151,6 +158,7 @@ survey to re-rank them.
 | 1 | 8ab877c | runtime-aot-trace-type-name | Element trace names looked up only while recording (internal `FrameTracer.BeginElement`). AOT allocKB −10…−99.6 % on 40 rows, none up: resize 2,000 rows 685.6 → 2.9 KB/op (time −16 %), TextInput typing 59.0 → 2.4 (−10 %), deep nesting 75.5 → 4.8 (−12 %), tiles 7.7 → 0.7; AOT per-frame bytes now equal JIT. JIT flat. HULTUI_TRACE output identical event for event. Junction AOT frame not re-measured. |
 | 1 | 12d1480 | paint-image-zero-copy | `SetImmutable` on hand-over: SkiaImageSource's image shares the bitmap's pixels. Private bytes: Vesper 216 thumbnails 83.6 → 66.3 MB (−21 %), Aperture real library (27 posters) 85.0 → 67.3 MB (−21 %), GL window with 8 × 3840×2400 photos 1001 → 723 MB (−278 MB). Extrapolated up to ~260 MB at Aperture's 400-poster cap. Time and allocKB flat on all 83 suite rows; goldens byte-identical; GL readback exact. Vulkan not checked. |
 | 1 | f84893d | aperture-poster-decode-scale | Aperture artwork requested at layout size × display scale (25 % steps), by the side that decides a cover fit; refetched on scale change with the old picture as stand-in. Real library, 27 pictures: decoded 17.6 → 4.4 MB at 100 % (−75 %), 9.9 MB at 150 % (−44 %), unchanged at 200 %; private 63.8 → 42.9 MB (−33 %) at 100 %, 63.2 → 54.1 (−14 %) at 150 %; Skia mip cache 5.9 → 0 MB. At the 400 cap 258 → 65 / 145 MB. As sharp or sharper (≥1 source px per device px). Same fix for cast, chapters and request-server pictures. |
+| 1 | 4195da4, 7096431 | a11y-uia-wrapper-rebase | Every surviving UIA wrapper points at the current tree after each diff; stale wrappers dropped; no per-diff full-tree index. Trees held after 200 toggles 221 → 1 (30–34 MB → 0 retained); ApplyChanges 47–211 → 0.3–1.4 KB per diff; new Windows-only perf rows with the real UIA bridge on a hidden HWND: allocKB −22 / −29 / −30 % (JIT and AOT), label edit min −5.4 %; 0 slower. UIA event stream identical (1,118 events); sibling navigation now current. |
 
 ## Examined, not worth it
 
