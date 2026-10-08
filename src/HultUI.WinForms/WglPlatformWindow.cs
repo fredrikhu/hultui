@@ -32,9 +32,8 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
     private int _pixelHeight;
     private bool _disposed;
 
-    /// <param name="textServices">The platform's text services, which every control shares and
-    /// the platform disposes; asked for inside the surface's timing, since the first control's
-    /// call builds them.</param>
+    // textServices: the platform's text services, which every control shares and the platform
+    // disposes; asked for inside the surface's timing, since the first control's call builds them.
     internal WglPlatformWindow(HultUIControl control, string title, WindowStyle style,
         Func<SkiaTextServices> textServices)
     {

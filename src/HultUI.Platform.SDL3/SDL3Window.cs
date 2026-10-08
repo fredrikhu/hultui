@@ -348,9 +348,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     {
     }
 
-    /// <param name="sharedText">The platform's text services, which its windows share and it
-    /// disposes. Null gives the window its own: the preloaded set if there is one, which the
-    /// window then disposes with itself, or one its surface builds and disposes.</param>
+    // sharedText: the platform's text services, which its windows share and it disposes. Null
+    // gives the window its own: the preloaded set if there is one, which the window then
+    // disposes with itself, or one its surface builds and disposes.
     internal SDL3Window(string title, int width, int height, WindowStyle style, SkiaTextServices? sharedText)
     {
         Style = style;

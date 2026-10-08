@@ -22,8 +22,8 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     private float _scale;
     private bool _disposed;
 
-    /// <param name="text">The text services the surface draws and measures with: the
-    /// platform's, which every window of the session shares. The platform disposes it.</param>
+    // text: the services the surface draws and measures with — the platform's, which every
+    // window of the session shares and the platform disposes.
     public HeadlessPlatformWindow(string title, int width, int height, float scale, WindowStyle style,
         SkiaTextServices text, HeadlessOptions? options = null)
     {
