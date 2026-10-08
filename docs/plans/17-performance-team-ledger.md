@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 1
-- **Phase:** build — resumed 2026-10-08 22:49 after a pause. Next: item **11f**
+- **Phase:** build — all round 1 items landed; running the end-of-round full test suite
+  (2026-10-09), then Phase `release`. (Resumed 2026-10-08 22:49 after a pause.) Was next: item **11f**
   (aperture-hero-scale), then **11g/11h** (Meridian breakpoint, Junction compact table),
   then item **12** (two perf-suite scenarios), then the end-of-round
   full test suite (`dotnet test HultUI.slnx -c Release`), then Phase `release` (merge
@@ -110,7 +111,7 @@ survey to re-rank them.
     380 px, so short windows starve the editor (1280×672: ~90 px of sub-editor; that window
     was side-by-side before). Share the height between editor and pane (proportional with
     minimums, or a splitter), so a 1080p-at-150 % maximized window stays usable. Images.
-12. **apps-scenario-virtual-selection-walk-a11y** + **apps-scenario-textarea-highlighted-json**
+12. ~~**apps-scenario-virtual-selection-walk-a11y**~~ LANDED 1c8ee98, 758fa03 + **apps-scenario-textarea-highlighted-json**
     (8) — two perf-suite scenarios the big round 2 items need.
 
 **Between items 1 and 2:** render before/after images for Needs-the-user question 1
@@ -118,6 +119,11 @@ survey to re-rank them.
 
 ### Waiting
 
+- **a11y-virtual-item-selected** (7, correctness, code reading) — `BuildVirtualItems` gives item
+  nodes no `IsSelected`, so a VirtualList selection move that does not scroll gives an empty
+  diff and no UIA SelectionItem event. Verify, then fix.
+- **syntax-maxlines-uncoloured** (app/text) — responses over 20,000 lines get no spans
+  (`SyntaxHighlighter.MaxLineCount`), so large Meridian responses are drawn uncoloured.
 - **meridian-pane-choice-not-persisted** (app bug) — the design lists the Ctrl+\ pane choice as
   persisted, but Meridian has no settings file, so it is not. Not perf.
 - **meridian-min-width-wraps** (app, not perf) — at the 760 dip minimum width the response tab
@@ -248,6 +254,7 @@ survey to re-rank them.
 | 1 | 5b2b676 | meridian-pane-breakpoint | Response pane goes to the bottom below 1320 dip (rail 48 + tree 264 + editor 448 + pane 560); 1100–1319 px windows put the pane at the bottom (at 760 tall: pane 380, editor full width). Ctrl+\ unchanged; plan and README updated. Exposed: the bottom pane is a fixed 380 px, so a 1280×672 window (1080p at 150 %, maximized) leaves ~90 px of sub-editor (follow-up 11g-fix). |
 | 1 | 2bca842 | junction-branches-compact | Branches/Tags compact below 934 px of content (date only, ↑/↓ and eye headings, icon Checkout named "Checkout"); below 724 px LAST COMMIT/COMMIT move to the tooltip. BRANCH at 1000 px with the sidebar 48 → 165 px, 1200 px 160 → 277, 900 px 0 → 196. Narrow mode also hides the GitLab lock, pipeline glyph and MR chip that live in LAST COMMIT. |
 | 1 | 53442e2 | meridian-bottom-pane-height | Bottom response pane keeps 380 dip in windows ≥ 736 tall and gives way below, with an editor floor of 316 (chrome + five form rows) and a pane floor of 162 (flex minimums, no rebuild on resize). 1280×672 editor 252 → 316 (header rows 3 → 5), 1100×600 180 → 316, 760×540 120 → 316; 1100×760, 1200×800, 1400×900 unchanged. No splitter (design token; Meridian has no settings file). |
+| 1 | 1c8ee98, 758fa03 | apps-scenario-virtual-selection-walk-a11y + apps-scenario-textarea-highlighted-json | 5 perf-suite rows (94 scenarios now): virtual/selection walk 1,000 rows (+ a11y bridge on, + UIA), text/open and text/wheel highlighted JSON (19,013 lines, 22,968 spans identical to HultUI.Syntax). JIT min 0.466 / 0.534 / 0.565 / 10.74 / 0.939 ms, 108 / 412 / 412 / 10,811 / 14 KB; realize ~10 % and a11y 12–18 % of the walk step (below the app survey's shares: 5 elements per row vs ~14 in Junction). JSON open median ≈ 2× min from GCs. |
 
 ## Examined, not worth it
 
