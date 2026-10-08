@@ -1,0 +1,34 @@
+{
+  "label": "gl-no-depth-buffer, before: the GL window takes SDL's default depth (16 asked, 24 granted) with its 8-bit stencil",
+  "kind": "real-window GL probe, not a perf-suite capture (the suite never builds the GL surface)",
+  "date": "2026-10-08 01:35 +02:00",
+  "commit": "e450afd",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
+  "configuration": "Release (JIT), HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_STARTUP=1, P-cores, idle-gated before every run, before and after alternating ABBA",
+  "probes": {
+    "mem": "a GL window (24 rows of text in rounded boxes) opened at 1400x900 layout units, pushed to the bottom of the z-order without activation, read after 2 s (A); then grown to its monitor's work area with SetWindowPos NOACTIVATE, the size a maximized window gets, and read after 2 s (B). GPU memory three ways: the 'GPU Process Memory' Dedicated Usage counter Task Manager shows, DXGI IDXGIAdapter3::QueryVideoMemoryInfo CurrentUsage for the process (local segment), and nvidia-smi memory.used for the whole GPU minus a reading taken before the GL driver loaded. Depth and stencil from SDL_GL_GetAttribute on the window's context.",
+    "startup": "the same runs' HULTUI_STARTUP marks",
+    "startupJunction": "Junction (JIT Release) on a 13-commit scratch repository, HULTUI_STARTUP=1, closed by JUNCTION_BENCH=close@3000",
+    "pixels": "a temporary probe (not committed) reading the back buffer before each swap: Junction History and Vesper on fixed scratch content, last frame compared byte for byte; and a scene drawn straight onto the window's own SKSurface over FBO 0 with the framework's GRContext (non-antialiased concave and even-odd fills, non-antialiased complex clips, a translucent self-crossing stroke, text through an oval clip, plus antialiased versions), read back with SKSurface.ReadPixels. Stencil work counted by wrapping glEnable, glClear, glStencilFunc and glStencilFuncSeparate."
+  },
+  "results": {
+    "mem": [
+      { "run": 1, "A": { "drawable": "2100x1350", "depth": 24, "stencil": 8, "taskManagerMB": 55.3, "dxgiLocalMB": 52.8, "nvidiaSmiDeltaMiB": 55 }, "B": { "drawable": "3818x2032", "depth": 24, "stencil": 8, "taskManagerMB": 131.9, "dxgiLocalMB": 129.4, "nvidiaSmiDeltaMiB": 132 } },
+      { "run": 4, "A": { "drawable": "2100x1350", "depth": 24, "stencil": 8, "taskManagerMB": 55.3, "dxgiLocalMB": 52.8, "nvidiaSmiDeltaMiB": 55 }, "B": { "drawable": "3818x2032", "depth": 24, "stencil": 8, "taskManagerMB": 131.9, "dxgiLocalMB": 129.4, "nvidiaSmiDeltaMiB": 131 } },
+      { "run": 5, "A": { "drawable": "2100x1350", "depth": 24, "stencil": 8, "taskManagerMB": 55.3, "dxgiLocalMB": 52.8, "nvidiaSmiDeltaMiB": 55 }, "B": { "drawable": "3818x2032", "depth": 24, "stencil": 8, "taskManagerMB": 131.9, "dxgiLocalMB": 129.4, "nvidiaSmiDeltaMiB": 131 } },
+      { "run": 8, "A": { "drawable": "2100x1350", "depth": 24, "stencil": 8, "taskManagerMB": 55.3, "dxgiLocalMB": 52.8, "nvidiaSmiDeltaMiB": 55 }, "B": { "drawable": "3818x2032", "depth": 24, "stencil": 8, "taskManagerMB": 131.9, "dxgiLocalMB": 129.4, "nvidiaSmiDeltaMiB": 131 } }
+    ],
+    "startupProbeMs": {
+      "SDL_CreateWindow": [201.3, 214.1, 202.4, 209.3],
+      "glContext": [3.5, 3.5, 3.5, 3.4],
+      "skiaSurface": [16.4, 16.9, 16.2, 16.4],
+      "firstFrameShownSinceProcessStart": [428.9, 439.9, 417.9, 426.7]
+    },
+    "startupJunctionMs": { "SDL_CreateWindow": [206.3, 218.5, 208.7, 210.0], "glContext": [3.7, 3.6, 3.8, 3.9], "firstFrameShownSinceProcessStart": [491.3, 483.6, 473.1, 477.7] },
+    "pixels": {
+      "junctionHistory": { "lastFrameSha256Prefix": "595E20EEA9273285", "size": "2160x1440", "stencilPerFrame": "stencilEnable 1, stencilFunc 3", "repeatRunIdentical": true },
+      "vesper": { "lastFrameSha256Prefix": "D26A02D10A6EF7F5", "size": "1860x1320", "stencilPerFrame": "stencilEnable 2, stencilClear 2, stencilFunc 4", "repeatRunIdentical": true },
+      "stencilScene": { "sha256Prefix": "58152ED73363B0C8", "size": "2100x1350", "stencilWork": "stencilEnable 1, stencilClear 2, stencilFunc 6, depthEnable 0", "repeatRunIdentical": true }
+    }
+  }
+}

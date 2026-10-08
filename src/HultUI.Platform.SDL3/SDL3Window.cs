@@ -350,6 +350,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_PROFILE_MASK, (int)SDL_GLProfile.SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_DOUBLEBUFFER, 1);
+        // Skia wants a stencil (SkiaGLRenderSurface tells it 8 bits) and never a depth buffer.
+        // Left alone, SDL asks for 16 bits of depth, and NVIDIA hands back 24 packed with the
+        // stencil: about 3 bytes a pixel nobody reads, 22 MB for a window at 3818x2032. Depth
+        // is a minimum in WGL, GLX and EGL alike, so 0 only widens the formats a driver may
+        // pick and cannot fail where 16 succeeded; a driver without a stencil-only format gives
+        // depth 24 as before. The [HultUI] gfx: line reports what was granted.
+        SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_DEPTH_SIZE, 0);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_STENCIL_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_RED_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_GREEN_SIZE, 8);
@@ -1356,9 +1363,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <summary>
     /// Describes the graphics configuration this window actually got (not what was
     /// requested). On GL: renderer/vendor/version strings, SDL video driver, achieved
-    /// swap interval, default-framebuffer MSAA samples, and the drawable geometry. On
-    /// Vulkan: the device, present mode, format and colour space, and the display's HDR
-    /// state. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
+    /// swap interval, default-framebuffer MSAA samples, depth and stencil bits, and the
+    /// drawable geometry. On Vulkan: the device, present mode, format and colour space, and
+    /// the display's HDR state. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
     /// </summary>
     public string? DescribeGraphics()
     {
@@ -1394,6 +1401,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (getIntegerv != null)
             getIntegerv(0x80A9, &samples); // GL_SAMPLES
 
+        // The default framebuffer's real depth and stencil. Depth is asked for at 0; a driver
+        // that has no stencil-only format still gives 24 here, and that costs memory per pixel.
+        int depthBits = 0, stencilBits = 0;
+        bool haveDepth = SDL_GL_GetAttribute(SDL_GLAttr.SDL_GL_DEPTH_SIZE, &depthBits);
+        bool haveStencil = SDL_GL_GetAttribute(SDL_GLAttr.SDL_GL_STENCIL_SIZE, &stencilBits);
+
         // The achieved interval, not the requested one — SDL_GL_SetSwapInterval(0)
         // can fail silently (Wayland/EGL), leaving the app vsync'd without knowing.
         int swapInterval = 0;
@@ -1409,6 +1422,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"video={driver} renderer=\"{renderer}\" vendor=\"{vendor}\" gl=\"{version}\""
             + $" swapInterval={(haveInterval ? swapInterval.ToString() : "?")} samples={samples}"
+            + $" depth={(haveDepth ? depthBits.ToString() : "?")} stencil={(haveStencil ? stencilBits.ToString() : "?")}"
             + $" drawable={PixelWidth}x{PixelHeight}px window={ww}x{wh}"
             + $" density={PixelDensity} scale={DisplayScale} refresh={RefreshRate}Hz"
             + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} sdrWhite={SdrWhiteLevelNits:0}nits");
