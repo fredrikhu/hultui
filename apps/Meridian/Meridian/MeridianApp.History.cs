@@ -180,8 +180,10 @@ public partial class MeridianApp
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
+        // The find box gives way to the filter chips, down to MinWidth: a chip truncated to
+        // "G…" no longer says which filter it is.
         var input = TextInput.New(_historyFind.Query).Style(Ui.Field)
-            .Height(Dimension.Px(26)).Width(260).FlexShrink(0);
+            .Height(Dimension.Px(26)).Width(260).MinWidth(Dimension.Px(140));
         input.PlaceholderText("find in history…");
         input.OnTextChanged(v => { _historyFind.SetQuery(v); MarkDirty(); });
         input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
@@ -206,6 +208,7 @@ public partial class MeridianApp
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.Mono($"{FilteredHistory().Count} of {_history.Count}", 10.5f, Azimuth.TextMuted)
+            .MaxLines(1).FlexShrink(0)
             .AutomationId("history-count"));
         return bar;
     }
@@ -215,6 +218,7 @@ public partial class MeridianApp
         var chip = Box.New()
             .Padding(new Thickness(3, Azimuth.S2, 3, Azimuth.S2))
             .CornerRadius(Azimuth.Radius1)
+            .FlexShrink(0)
             .BorderColor(on ? color : Azimuth.Border).BorderWidth(1f)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)

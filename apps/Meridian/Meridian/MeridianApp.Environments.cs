@@ -115,8 +115,11 @@ public partial class MeridianApp
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .Children(
-                Text.New("All keys × all environments").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.TextDim),
-                Ui.Mono("plain text on disk · secret values never leave the OS keyring", 10.5f, Azimuth.TextFaint)));
+                // One line each in a 40px bar: the title keeps its width, the note truncates.
+                Text.New("All keys × all environments").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.TextDim)
+                    .MaxLines(1).FlexShrink(0),
+                Ui.Mono("plain text on disk · secret values never leave the OS keyring", 10.5f, Azimuth.TextFaint)
+                    .MaxLines(1).TextOverflow(TextOverflow.Ellipsis)));
 
         // Header row.
         var header = Flex.Row(gap: Azimuth.S2).Height(28).FlexShrink(0)

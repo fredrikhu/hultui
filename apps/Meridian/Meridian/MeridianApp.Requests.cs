@@ -224,12 +224,25 @@ public partial class MeridianApp
         return col;
     }
 
+    // Open-request tabs share the strip. A tab is as wide as its title, up to
+    // TabTitleMaxWidth; when the strip is short every tab narrows, its title truncating
+    // with an ellipsis (the whole title is the tooltip), down to TabMinWidth: the method
+    // chip, and the close button on the open one. Tabs that still do not fit are cut off
+    // at the strip's end, as Vesper's are; the tree opens any of them. The strip clips
+    // rather than holding the editor open: a title used to wrap instead, up to eleven lines
+    // deep, over the URL bar — and its words kept the editor wide enough to push the
+    // response pane off the window.
+    private const float TabTitleMaxWidth = 220f;
+    private const float TabMinWidth = 72f;
+
     private Element BuildTabsBar()
     {
         var bar = Flex.Row(gap: 2).Height(34).FlexShrink(0)
             .AlignItems(AlignItems.Stretch)
             .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
-            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
+            .OverflowX(Overflow.Hidden)
+            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0))
+            .AutomationId("request-tabs");
 
         for (int i = 0; i < _tabs.Count; i++)
         {
@@ -240,19 +253,23 @@ public partial class MeridianApp
 
             var t = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
+                .MinWidth(Dimension.Px(TabMinWidth))
                 .CornerRadius(Azimuth.Radius1)
                 .BorderColor(active ? Azimuth.Accent : Color.Transparent)
                 .BorderWidth(new Thickness(0, 0, 0, 2))
                 .Cursor(CursorType.Pointer)
+                .Tooltip(name)
                 .AccessibleRole(AccessibilityRole.Button)
-                .AccessibleName($"{name} tab{(tab.Dirty ? ", unsaved" : "")}");
+                .AccessibleName($"{name} tab{(tab.Dirty ? ", unsaved" : "")}")
+                .AutomationId("request-tab-" + i);
             if (active) t.Background(Azimuth.Raised);
             t.AddChild(MethodChip(tab.Doc.Method, treeScale: true));
-            t.AddChild(Text.New(name).FontSize(12f).TextColor(active ? Azimuth.Text : Azimuth.TextMuted));
+            t.AddChild(Text.New(name).FontSize(12f).TextColor(active ? Azimuth.Text : Azimuth.TextMuted)
+                .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).MaxWidth(Dimension.Px(TabTitleMaxWidth)));
             if (tab.Dirty) t.AddChild(Dot(Azimuth.Accent));
             if (active)
             {
-                var close = Box.New().Padding(new Thickness(2)).Cursor(CursorType.Pointer)
+                var close = Box.New().Padding(new Thickness(2)).FlexShrink(0).Cursor(CursorType.Pointer)
                     .AccessibleRole(AccessibilityRole.Button).AccessibleName("Close tab")
                     .Children(Text.New("✕").FontSize(10f).TextColor(Azimuth.TextFaint));
                 close.On<ClickEvent>(e => { e.StopPropagation = true; CloseActiveTab(); });
@@ -298,10 +315,14 @@ public partial class MeridianApp
         });
         bar.AddChild(method);
 
-        // URL: a chip-rendered display normally; a plain text input while editing.
+        // URL: a chip-rendered display normally; a plain text input while editing. The box
+        // clips: its literal parts truncate, but the variable chips keep their width, and
+        // where even the chips do not fit they are cut at the box's edge instead of being
+        // drawn over Send.
         var urlBox = Flex.Row(gap: 0).FlexGrow(1).Height(32)
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
+            .OverflowX(Overflow.Hidden)
             .Background(Azimuth.Surface)
             .BorderColor(Azimuth.Border).BorderWidth(1f)
             .CornerRadius(Azimuth.Radius1);
@@ -393,12 +414,22 @@ public partial class MeridianApp
 
     // ── Sub-editors ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Params · Headers · Body · Auth · Assertions · Chain, each on one line and never
+    /// truncated — the counts and the verdict ("Assertions 1/3✗") are what the labels are
+    /// for. When the editor is narrower than the six of them (~445px; beside the response
+    /// pane, a window of 1100–1320 px leaves it 228–448), the strip scrolls sideways under
+    /// the wheel rather than wrapping its labels or holding the editor wider than the pane
+    /// allows. The scroll bar stays hidden: drawn, it covers the open tab's pill.
+    /// </summary>
     private Element BuildSubTabs(RequestTab tab)
     {
-        var bar = Flex.Row(gap: Azimuth.S1).Height(32).FlexShrink(0)
+        var bar = ScrollView.Horizontal().Gap(Azimuth.S1).Height(32).FlexShrink(0)
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
-            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
+            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0))
+            .AutomationId("subtabs");
+        bar.ShowScrollbarX = false;
 
         bar.AddChild(SubTabButton(tab, EditorTab.Params, $"Params {CountLabel(QueryParams(tab).Count)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Headers, $"Headers {CountLabel(tab.Doc.Headers.Count)}"));
@@ -435,10 +466,11 @@ public partial class MeridianApp
         var b = Box.New()
             .Padding(new Thickness(5, Azimuth.S3, 5, Azimuth.S3))
             .CornerRadius(Azimuth.Radius1)
+            .FlexShrink(0)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button).AccessibleName(label.TrimEnd())
             .AutomationId("subtab-" + which.ToString().ToLowerInvariant())
-            .Children(Text.New(label.TrimEnd()).FontSize(12f)
+            .Children(Text.New(label.TrimEnd()).FontSize(12f).MaxLines(1)
                 .FontWeight(active ? FontWeight.Medium : FontWeight.Regular)
                 .TextColor(active ? Azimuth.Text : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Raised);

@@ -117,15 +117,17 @@ public partial class MeridianApp
         string sourceText = spec.Qualifier.Length > 0 ? $"{spec.Source} {spec.Qualifier}" : spec.Source;
         row.AddChild(FormInput(sourceText, v => RewriteAssert(tab, index, source: v), 200, $"assert-source-{index}"));
 
-        // Operator: a popover chip cycling equals/contains/under.
+        // Operator: a popover chip cycling equals/contains/under. A chip, so one line and
+        // its own width: shrunk by the row, "equals ▾" broke after the word.
         var op = Box.New()
             .Padding(new Thickness(4, Azimuth.S2, 4, Azimuth.S2))
             .CornerRadius(Azimuth.Radius1)
             .BorderColor(Azimuth.Border).BorderWidth(1f)
+            .FlexShrink(0)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button).AccessibleName($"operator {spec.Op}")
             .AutomationId($"assert-op-{index}")
-            .Children(Ui.Mono(spec.Op + " ▾", 10.5f, Azimuth.TextDim));
+            .Children(Ui.ChipLabel(spec.Op + " ▾", 10.5f, Azimuth.TextDim));
         int opIndex = index;
         op.On<ClickEvent>(e =>
         {
@@ -146,15 +148,20 @@ public partial class MeridianApp
         return row;
     }
 
+    /// <summary>The verdict cell: 180px, giving way (one line, an ellipsis) when the editor
+    /// is narrower than the row — kept whole, it pushed the row's ✕ off the window at 800–900.</summary>
     private Element AssertPreview(Directives.AssertionSpec spec, HttpResponseData? response)
     {
         if (response == null)
-            return Ui.Mono("— send to preview", 10.5f, Azimuth.TextFaint).Width(180).FlexShrink(0);
+            return PreviewCell("— send to preview", Azimuth.TextFaint);
         var outcome = Directives.Evaluate(spec, response);
         return outcome.Passed
-            ? Ui.Mono($"✓ {Truncate(outcome.Actual, 22)}", 10.5f, Azimuth.StatusPass).Width(180).FlexShrink(0)
-            : Ui.Mono($"✗ got {Truncate(outcome.Actual, 18)}", 10.5f, Azimuth.StatusFail).Width(180).FlexShrink(0);
+            ? PreviewCell($"✓ {Truncate(outcome.Actual, 22)}", Azimuth.StatusPass)
+            : PreviewCell($"✗ got {Truncate(outcome.Actual, 18)}", Azimuth.StatusFail);
     }
+
+    private static Element PreviewCell(string text, Color color) =>
+        Ui.Mono(text, 10.5f, color).Width(180).MaxLines(1).TextOverflow(TextOverflow.Ellipsis);
 
     private void RewriteAssert(RequestTab tab, int index, string? source = null, string? op = null, string? expected = null)
     {
@@ -241,19 +248,22 @@ public partial class MeridianApp
             string? producer = nodes.FirstOrDefault(n => n.Produces.Contains(use)
                 && !n.Path.Equals(tab.Path, StringComparison.OrdinalIgnoreCase))?.Path;
             bool envDefined = envValues.Lookup(use) != null && !Extracted.ContainsKey(use);
+            // The rows are one list row high, so each part is one line: the producer's name
+            // gives way first (it truncates; the tooltip has it whole), and the verdict after
+            // it keeps its width. Wrapped, they ran three lines deep over the next row.
             if (envDefined)
-                row.AddChild(Ui.Mono("✓ env", 10.5f, Azimuth.StatusPass));
+                row.AddChild(ChainNote("✓ env", Azimuth.StatusPass).FlexShrink(0));
             else if (producer != null)
             {
-                row.AddChild(Ui.Mono($"← {RequestName(producer)}", 10.5f, Azimuth.TextDim));
-                row.AddChild(Extracted.ContainsKey(use)
-                    ? Ui.Mono("✓ fresh", 10.5f, Azimuth.StatusPass)
-                    : Ui.Mono("! not yet produced this session", 10.5f, Azimuth.StatusWarn));
+                row.AddChild(ChainNote($"← {RequestName(producer)}", Azimuth.TextDim).Tooltip(RequestName(producer)));
+                row.AddChild((Extracted.ContainsKey(use)
+                    ? ChainNote("✓ fresh", Azimuth.StatusPass)
+                    : ChainNote("! not yet produced this session", Azimuth.StatusWarn)).FlexShrink(0));
             }
             else if (Extracted.ContainsKey(use))
-                row.AddChild(Ui.Mono("✓ extracted", 10.5f, Azimuth.StatusPass));
+                row.AddChild(ChainNote("✓ extracted", Azimuth.StatusPass).FlexShrink(0));
             else
-                row.AddChild(Ui.Mono("! unresolved — nothing produces it", 10.5f, Azimuth.StatusWarn));
+                row.AddChild(ChainNote("! unresolved — nothing produces it", Azimuth.StatusWarn).FlexShrink(0));
             col.AddChild(row);
         }
 
@@ -265,8 +275,8 @@ public partial class MeridianApp
             var consumers = Chain.ConsumersOf(produced, nodes)
                 .Where(p => !p.Equals(tab.Path, StringComparison.OrdinalIgnoreCase))
                 .Select(RequestName).ToList();
-            row.AddChild(Ui.Mono(consumers.Count > 0 ? $"→ used by {string.Join(", ", consumers)}" : "→ unused",
-                10.5f, consumers.Count > 0 ? Azimuth.TextDim : Azimuth.TextFaint));
+            var usedBy = consumers.Count > 0 ? $"→ used by {string.Join(", ", consumers)}" : "→ unused";
+            row.AddChild(ChainNote(usedBy, consumers.Count > 0 ? Azimuth.TextDim : Azimuth.TextFaint).Tooltip(usedBy));
             col.AddChild(row);
         }
 
@@ -281,6 +291,10 @@ public partial class MeridianApp
         scroll.AddChild(col);
         return scroll;
     }
+
+    /// <summary>A chain row's note: mono, one line, an ellipsis when the row is short.</summary>
+    private static TextElement ChainNote(string text, Color color) =>
+        Ui.Mono(text, 10.5f, color).MaxLines(1).TextOverflow(TextOverflow.Ellipsis);
 
     private static Element VarChipLabel(string name) =>
         Box.New().Padding(new Thickness(1, 4, 1, 4)).CornerRadius(Azimuth.Radius1)
