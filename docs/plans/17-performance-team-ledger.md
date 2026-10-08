@@ -62,14 +62,14 @@ survey to re-rank them.
     ~−80…−220 MB GPU per Vulkan window after resizes.
 11. ~~**a11y-build-diff-garbage**~~ LANDED e3cff87 (7) — index loops, lazy child lists, positional diff,
     presized arrays, one slot lookup per list; a11y/edit 627 → ~425 KB/op.
-11a. **a11y-scroll-bounds-event** (7; user said yes 2026-10-07) — on a scroll rebuild,
+11a. ~~**a11y-scroll-bounds-event**~~ LANDED ab8917b (7; user said yes 2026-10-07) — on a scroll rebuild,
     raise one scroll change on the scroll view (as browsers report a scroll; check
     Chromium's UIA and AT-SPI mapping) instead of a BoundingRectangle change per on-screen
     node (133 per rebuild over 1,000 rows, 3 provider callbacks each).
-11b. **a11y-focus-state-on-tab** (7; user said yes 2026-10-07, correctness) — a focus move
+11b. ~~**a11y-focus-state-on-tab**~~ LANDED 70d68c1 (7; user said yes 2026-10-07, correctness) — a focus move
     updates HasKeyboardFocus/IsFocused at once (small patch per focus move) instead of
     leaving them stale until the next rebuild.
-11c. **a11y-uia-reparent-wrapper** (7, correctness, from 4195da4) — when an ElementId is in
+11c. ~~**a11y-uia-reparent-wrapper**~~ LANDED 4c3e3b1 (7, correctness, from 4195da4) — when an ElementId is in
     both diff.Added and diff.Removed (an element moves to another a11y parent, e.g. a Box
     gains an AccessibleName), the bridge processes Added before Removed and drops the
     wrapper: UIA navigation to those children returns null. Process Removed first. Small.
@@ -95,6 +95,14 @@ survey to re-rank them.
 
 ### Waiting
 
+- **a11y-atspi-cache-child-index** (7) — from source reading: libatspi's AddAccessible writes
+  into the parent's cached child list by index (overwrites, not shifts); with one
+  children-changed per parent, inserting several siblings at once may leave stale entries.
+  Verify with a live libatspi client first.
+- **a11y-focus-unbuilt-node** (7, correctness) — focus moved onto an element mounted in the
+  same handler (no node yet) raises no UIA focus event.
+- **a11y-scrollpercent-role** (7) — a ScrollViewElement given a role other than ScrollView or
+  List raises ScrollPercent without a Scroll pattern. Small.
 - **tooling-textbench-warmup** (5) — TextBench filtered to a few rows measures tier-0 code
   (3.6× slower, inflated differences) unless `DOTNET_TC_CallCountingDelayMs=0`; even full runs
   showed a false +11 %. Warm up by time as the perf suite does. Small.
@@ -186,6 +194,10 @@ survey to re-rank them.
 | 1 | e962738, f3a31d6, 5eebbf6 | runtime-text-services-per-window | One SkiaTextServices per application (SDL, WinForms, headless; pinned set separate), disposed with the platform; surfaces dispose only services they built. 600 open/close cycles: +4 font streams, +44 KB private, +1 KB managed per cycle → flat. WinForms handle recreation 808 → 3 streams after 200 cycles. New row window/open a second window 0.500 → 0.265 ms min, 262 → 132 KB/op; 0 slower on 86 rows. Windows share bounded caches now (one UI thread only). |
 | 1 | 1785d16 | gl-vk-offscreen-scratch-pool | Scratch purge after the frame that follows a let-go F16 offscreen. GPU memory: 4-size cycle DXGI 215.4 → 154.1 MB (Skia pool 57.1 → 0.1), 40-step drag 458.5 → 242.5 MB (pool 203.0 → 0.1); nvidia-smi agrees. Resize time unchanged on drags and two-size toggles; +0.5 ms on new sizes, +1 ms (3 %) cycling 4 sizes. Unbudgeted alone changes nothing. GL has no such offscreen. Validation 0 messages, positive control 40. Trap: `GetResourceCacheUsage` counts only budgeted resources. |
 | 1 | e3cff87 | a11y-build-diff-garbage | Exact-length child arrays (leaves share an empty one), index walks, positional pairing until the first difference, one owner-slot lookup per list. Build 230 → 144 B/node; unchanged diff 121.7 KB → 176 B (3,001 nodes). a11y/edit every 10th 568 → 368 KB/op (−35 %), time −9…−10 %; UIA rows −41…−47 % alloc, label edit −8…−12 % time; JIT and AOT; 0 slower. Diff identical vs the old differ over 3,300 random pairs; UIA event stream identical (1,118 events); Linux a11y tests pass. |
+| 1 | 4c3e3b1 | a11y-uia-reparent-wrapper | An element that moves to another a11y parent keeps its UIA wrapper; AT-SPI sends no cache-remove for a moved object and one children-changed:remove per moved child. Before, navigation to moved elements returned null and their events were dropped (6 of 16 in the reparent script). Other event streams identical (UIA 1,120, AT-SPI 6,886); allocation unchanged. |
+| 1 | 93847ae | (measurement) | Windows-only perf rows `a11y/tab through 300 fields, UIA` and `a11y/wheel 1,000 rows, UIA`. |
+| 1 | 70d68c1, 0b2b003 | a11y-focus-state-on-tab | A focus move patches IsFocused on 2 nodes of the applied tree. UIA raises HasKeyboardFocus old/new before the focus event (was: at the next rebuild); AT-SPI answers current focus and drops its late duplicate signals. Allocation unchanged; Tab with UIA 0.351 → 0.350 ms. |
+| 1 | ab8917b | a11y-scroll-bounds-event | Scroll view nodes carry ScrollOffset; UIA raises Vertical/HorizontalScrollPercent on the view (Chromium's mapping, `browser_accessibility_manager_win.cc`) instead of a BoundingRectangle per on-screen node: 846 → 6 events, provider callbacks 11,844 → 84 per 30 notches; bounds and offscreen read live. a11y/wheel 1,000 rows, UIA −54 % min, −62 % median. Node still 136 B (packed states). AT-SPI unchanged (sent nothing before). |
 
 ## Examined, not worth it
 
