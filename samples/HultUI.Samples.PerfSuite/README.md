@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 83 scenarios over every feature area | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 86 scenarios over every feature area (83 off Windows) | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -43,7 +43,7 @@ below). `--list` prints every scenario, `--help` every option.
 | `theme/` | Light ⇄ dark, and cycling the `HultUI.Themes` catalogue, on the control screen |
 | `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition |
 | `paint/` | The same 400 tiles plain, rounded, shadowed, gradient-filled, transformed: the price of each effect |
-| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff |
+| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge. On Windows, three rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke and a label edit, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** |
 
 ## Reading the output
 

@@ -1,5 +1,7 @@
+using System.Runtime.Versioning;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 using HultUI.Headless;
 
 namespace PerfSuite;
@@ -86,5 +88,88 @@ static partial class Scenarios
                     },
                 };
             });
+
+        if (OperatingSystem.IsWindows())
+            foreach (var scenario in UiaAccessibility())
+                yield return scenario;
+    }
+
+    // The same kind of frames with the real UI Automation bridge behind them, on a hidden
+    // window (Windows only): what a Windows screen reader adds on top of the build and diff,
+    // its wrapper upkeep and the events it raises. "other" holds the whole a11y phase.
+    [SupportedOSPlatform("windows")]
+    private static IEnumerable<Scenario> UiaAccessibility()
+    {
+        yield return new Scenario("a11y/click checkbox in 500 rows, UIA",
+            "Click a checkbox in a 500-row settings list with the UIA bridge: toggle and focus events over 1,001 nodes",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var boxes = new CheckboxElement[500];
+                var rows = new Element[boxes.Length];
+                for (int i = 0; i < boxes.Length; i++)
+                {
+                    boxes[i] = Checkbox.New(i % 3 == 0, Ui.Label(ctx.Rng));
+                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(4, 12)).Children(
+                        boxes[i], Text.New(Ui.Paragraph(ctx.Rng, 6)).FontSize(12f).TextColor(Ui.Muted));
+                }
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+                return new Op
+                {
+                    Run = step => ctx.Window.Click(boxes[step % 12]),
+                    Check = Applied(rig),
+                };
+            });
+
+        yield return new Scenario("a11y/type in TextInput, UIA",
+            "Type one character into a TextInput above 200 rows with the UIA bridge: value and text events over 603 nodes",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var input = TextInput.New("").Width(Dimension.Px(400));
+                ctx.Mount(Flex.Column(gap: 8).Padding(16).Children(
+                    Text.New("Name").FontSize(13f), input, Ui.Rows(ctx.Rng, 200)));
+                ctx.Window.Click(input);
+                ctx.Pump();
+                return new Op
+                {
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = Applied(rig),
+                };
+            });
+
+        yield return new Scenario("a11y/edit 1 label of 1,000 rows, UIA",
+            "Change one row's label in 1,000 rows with the UIA bridge: one name event over 2,001 nodes",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var labels = new List<TextElement>();
+                var rows = new Element[1_000];
+                for (int i = 0; i < rows.Length; i++)
+                {
+                    var label = Text.New(Ui.Label(ctx.Rng)).FontSize(13f);
+                    labels.Add(label);
+                    rows[i] = Flex.Row(gap: 12).FlexShrink(0).Padding(4).Children(Text.New($"{i}").FontSize(13f), label);
+                }
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+                return new Op
+                {
+                    Run = step => labels[step * 37 % labels.Count].Content += " !",
+                    Check = Applied(rig),
+                };
+            });
+    }
+
+    /// <summary>A check that the bridge applied a diff since the last time it was asked.</summary>
+    [SupportedOSPlatform("windows")]
+    private static Func<int, string?> Applied(UiaRig rig)
+    {
+        int seen = rig.Applies;
+        return _ =>
+        {
+            bool applied = rig.Applies > seen;
+            seen = rig.Applies;
+            return applied ? null : "the UIA bridge received no change";
+        };
     }
 }
