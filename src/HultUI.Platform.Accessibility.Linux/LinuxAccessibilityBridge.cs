@@ -14,8 +14,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <para>
 /// The exported tree is published as an immutable snapshot on every structural
 /// rebuild. The D-Bus method handlers run on the bus receive thread and read
-/// that snapshot lock-free; <see cref="ApplyChanges"/> and
-/// <see cref="NotifyFocusChanged"/> run on the UI thread and swap it. The
+/// that snapshot lock-free; <see cref="ApplyChanges"/> swaps it, and a focus move
+/// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
+/// focused state of its two objects in it, both on the UI thread. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
