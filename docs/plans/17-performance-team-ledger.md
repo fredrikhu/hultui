@@ -73,6 +73,20 @@ survey to re-rank them.
     both diff.Added and diff.Removed (an element moves to another a11y parent, e.g. a Box
     gains an AccessibleName), the bridge processes Added before Removed and drops the
     wrapper: UIA navigation to those children returns null. Process Removed first. Small.
+11d. **layout-truncation-clamp-basis** (1; user chose clamp 2026-10-08) — a one-line
+    truncating label's flex base = min(natural single-line width, available width) from the
+    cached natural width, instead of truncating it to get that number. Prototype: ellipsis
+    rows halve their measurements, time −20…−43 %, alloc −21…−51 %; ordinary rows move by
+    the ellipsis slack (< 1 px, at most one character). See `17-reports/r1-truncation-basis.md`.
+11e. **layout-truncating-min-zero** (1; user said yes 2026-10-08, correctness) — a one-line
+    truncating label's automatic minimum is 0, as CSS gives `overflow: hidden` items, instead
+    of its longest word. Fixes Junction Branches overlap at ≤1200 px and Meridian's Send
+    button pushed off-screen by a long URL. Build after 11d, as its own commit, with
+    before/after images of those screens for the user.
+11f. **aperture-hero-scale** (2; user said yes 2026-10-08) — the item-page and request
+    title-page heroes ask for the layout width at any scale (~0.7 source px per screen px at
+    150 %, soft). Request layout width × display scale like f84893d; ~5.5 MB more per cached
+    hero at a 1400-wide window. Show before/after crops at 150 %.
 12. **apps-scenario-virtual-selection-walk-a11y** + **apps-scenario-textarea-highlighted-json**
     (8) — two perf-suite scenarios the big round 2 items need.
 
@@ -194,23 +208,7 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-1. **Flex basis of one-line truncating labels** (layout): use the CSS max-content basis?
-   Halves ellipsis measurements (text/ellipsis 1,988 measurements, 7.7 MB per step) but
-   changes how shrink is shared between several shrinkable items in a row (pixels move).
-   **Open:** the user asked for before/after images (2026-10-07) and leans to a third
-   option, **clamp**: keep today's shrink split but take each truncating label's base as
-   min(natural width, available width) instead of truncating it. Rendered and measured
-   2026-10-08 ([`17-reports/r1-truncation-basis.md`](17-reports/r1-truncation-basis.md)):
-   clamp halves ellipsis measurements (time −20…−43 %, alloc −21…−51 %) and moves ordinary
-   rows < 1 px; images shown to the user; awaiting the decision. A second question came out
-   of it: give one-line truncating labels an automatic minimum of 0 (as CSS does), which
-   fixes overlapping text in Junction Branches at ≤1200 px and Meridian's Send button
-   pushed off-screen by a long URL.
-
-- **Aperture hero images at 150 %** (painting, from f84893d): the item-page and request
-  title-page heroes ask for the layout width at any scale, so at 150 % they draw ~0.7 source
-  pixels per screen pixel (soft). Fixing it costs ~5.5 MB per cached hero at a 1400-wide
-  window. Fix it?
+None open.
 
 Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
 (outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
@@ -219,12 +217,18 @@ measurement (poster grid, artwork decode, a11y on a large library) belongs to th
 workloads expert in the round 2 survey, and to aperture-poster-decode-scale's build. The
 user should revoke the key when the work is done.
 
-Answered 2026-10-07:
+Answered:
 
+- 1. Flex basis of truncating labels → **clamp** (2026-10-08, after the side-by-side renders):
+  candidate layout-truncation-clamp-basis.
+- Truncating labels shrinking below their longest word → **yes** (2026-10-08): candidate
+  layout-truncating-min-zero.
 - 2. Bounds events on scroll → **yes**, one scroll change instead: candidate
   a11y-scroll-bounds-event.
 - 3. Stale focus state → **yes**, fix it: candidate a11y-focus-state-on-tab.
 - 4. Aperture poster decode size → **yes**: candidate aperture-poster-decode-scale.
+- Aperture hero images at 150 % → **yes, make them sharp** (2026-10-08): candidate
+  aperture-hero-scale.
 - 5. `MarkDirty()` joining an open batch → **no**: it stays synchronous, as REACTIVITY.md
   documents. The guidelines should tell app authors to call it once per handler.
 
