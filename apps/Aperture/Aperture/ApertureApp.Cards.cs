@@ -312,6 +312,77 @@ public sealed partial class ApertureApp
         _posters.Get(sized(path, ArtworkPixels(layoutWidth), RequestImageBase),
             StandInPixels(layoutWidth) is { } old ? sized(path, old, RequestImageBase) : null);
 
+    // ── Heroes ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A hero's picture is asked for in device pixels rounded up to a multiple of this, along
+    /// the side that decides its cover fit. A hero's box follows the window, and a window
+    /// resized by dragging passes through every width on the way: asking at each one fetched
+    /// a new picture per frame and kept every one (seven steps of a resize held eight heroes,
+    /// 40 MB at 150 %). With the step it asks again only when the window has grown past one,
+    /// which is before the picture has fewer pixels than the screen, or shrunk past one; and
+    /// it holds at most 127 pixels more than the box needs.
+    /// </summary>
+    internal const int HeroStep = 128;
+
+    /// <summary>A hero's box, in layout units: the whole view beside the rail, and a height
+    /// that follows the window's.</summary>
+    internal float HeroWidth => MathF.Max(1f, _window.LayoutWidth - Halide.RailWidth);
+
+    internal float HeroHeight => Math.Clamp(_window.LayoutHeight * 0.44f, 280f, 420f);
+
+    /// <summary>The device pixels a hero asks for across a side <paramref name="layoutSize"/>
+    /// long: what the side covers at this scale, rounded up to a <see cref="HeroStep"/>.</summary>
+    internal static int HeroPixels(float layoutSize, float scale) =>
+        (ArtworkPixels(layoutSize, scale) + HeroStep - 1) / HeroStep * HeroStep;
+
+    /// <summary>The hero on screen: which artwork it is, the URL of the picture it draws, and
+    /// the URL it last asked for (the same one, once that has landed).</summary>
+    private string? _heroArt;
+    private Uri? _heroShown, _heroAsked;
+
+    /// <summary>
+    /// The picture for a hero (an item page's, a request title page's): asked for at the
+    /// device pixels its box covers, as a card's is, by the side that decides the cover fit,
+    /// rounded up to a <see cref="HeroStep"/>. Asking for the layout width at any scale drew
+    /// 0.7 source pixels per screen pixel at 150 %. <paramref name="art"/> says which artwork
+    /// it is whatever the size; <paramref name="sized"/> makes its URL for a width or a height
+    /// in device pixels.
+    ///
+    /// <para>When the same artwork is asked for at another size — the window was resized past
+    /// a step, or moved to a monitor with another scale — the picture on screen stays up until
+    /// the new one lands, and then goes rather than staying in the cache beside it. So does a
+    /// size the window passed over before it landed.</para>
+    /// </summary>
+    private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) HeroArtwork(
+        string? art, double? aspect, Func<int?, int?, Uri?> sized)
+    {
+        float width = HeroWidth, height = HeroHeight;
+        bool byHeight = aspect is { } a && a > width / height * 1.005;
+        int pixels = HeroPixels(byHeight ? height : width, _artworkScale);
+        var url = art is null ? null : byHeight ? sized(null, pixels) : sized(pixels, null);
+        if (url is null) return _posters.Get(null);
+
+        if (art != _heroArt)
+        {
+            // Another page: nothing on screen to replace. The last page's picture stays in
+            // the cache for Back.
+            _heroArt = art;
+            _heroShown = _heroAsked = null;
+        }
+        // Every other size of this artwork goes once the new picture is in: the one on screen
+        // stands in until then, and one the window passed over before it landed (a drag across
+        // several steps) is not wanted at all.
+        if (_heroAsked is { } previous && previous != url && previous != _heroShown) _posters.Retire(previous);
+        var standIn = _heroShown is { } shown && shown != url ? shown : null;
+        if (standIn is not null) _posters.Retire(standIn);
+        _heroAsked = url;
+
+        var result = _posters.Get(url, standIn);
+        if (_posters.IsReady(url)) _heroShown = url;
+        return result;
+    }
+
     /// <summary>
     /// Which image to ask the server for. An episode's own primary image is a still from
     /// the episode; for a backdrop it borrows the series', which is what

@@ -1563,23 +1563,38 @@ public class ApertureAppHostTests
     // ── Artwork sizes ────────────────────────────────────────────────────
 
     /// <summary>
-    /// Answers each artwork request with a PNG as wide as it asked for (its fillWidth), so a
-    /// test can tell which size a card is drawing. Requests whose URL contains
-    /// <see cref="Hold"/> wait for <see cref="Release"/>, so a test can look at a card while
-    /// its new picture is still on the way.
+    /// Answers each artwork request with a PNG of the size it asked for (its fillWidth or
+    /// fillHeight; a backdrop 16:9, anything else 2:3), so a test can tell which size a card
+    /// is drawing. Requests whose URL contains <see cref="Hold"/> wait for
+    /// <see cref="Release"/>, so a test can look at a card while its new picture is still on
+    /// the way; setting <see cref="Hold"/> again holds the next ones.
     /// </summary>
     private sealed class SizedArtworkHandler : HttpMessageHandler
     {
-        private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly List<string> _requested = [];
+        private string? _hold;
 
-        public string? Hold { get; set; }
+        public string? Hold
+        {
+            get => _hold;
+            set
+            {
+                _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _hold = value;
+            }
+        }
 
         public void Release() => _released.TrySetResult();
 
         public bool Asked(string text)
         {
             lock (_requested) return _requested.Any(r => r.Contains(text, StringComparison.Ordinal));
+        }
+
+        public int Count(string text)
+        {
+            lock (_requested) return _requested.Count(r => r.Contains(text, StringComparison.Ordinal));
         }
 
         public string Log()
@@ -1591,12 +1606,24 @@ public class ApertureAppHostTests
         {
             var url = request.RequestUri!.PathAndQuery;
             lock (_requested) _requested.Add(url);
+            var released = _released;
             if (Hold is { } hold && url.Contains(hold, StringComparison.Ordinal))
-                await _released.Task.WaitAsync(ct);
+                await released.Task.WaitAsync(ct);
 
-            var asked = System.Text.RegularExpressions.Regex.Match(url, @"fillWidth=(\d+)");
-            int width = asked.Success ? int.Parse(asked.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 100;
-            using var bitmap = new SkiaSharp.SKBitmap(width, width * 3 / 2);
+            static int? Asked(string url, string name) =>
+                System.Text.RegularExpressions.Regex.Match(url, name + @"=(\d+)") is { Success: true } m
+                    ? int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : null;
+            // Width over height, as a fraction: a backdrop 16:9, anything else a 2:3 poster.
+            var (across, down) = url.Contains("/Images/Backdrop", StringComparison.Ordinal) ? (16, 9) : (2, 3);
+            int width, height;
+            if (Asked(url, "fillHeight") is { } h && Asked(url, "fillWidth") is null)
+                (width, height) = ((h * across + down - 1) / down, h);
+            else
+            {
+                width = Asked(url, "fillWidth") ?? 100;
+                height = (width * down + across - 1) / across;
+            }
+            using var bitmap = new SkiaSharp.SKBitmap(width, height);
             using var canvas = new SkiaSharp.SKCanvas(bitmap);
             canvas.Clear(new SkiaSharp.SKColor(90, 60, 40));
             using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
@@ -1685,6 +1712,96 @@ public class ApertureAppHostTests
             // A still card is the still's own shape: by width, as a poster card is.
             Assert.True(artwork.Asked("/Items/e1/Images/Primary?tag=tag-e1&fillWidth=300"), artwork.Log());
             Assert.False(artwork.Asked("&fillWidth=168&fillHeight"), artwork.Log());
+        }, artwork: artwork);
+    }
+
+    /// <summary>The picture across the top of an item page — the widest cover-fit image on
+    /// it — and the box it is laid out in.</summary>
+    private static HultUI.Core.Elements.ImageElement? Hero(HeadlessSession session) =>
+        session.Window.FindByAutomationId("detail") is { } page
+            ? Descendants(page.Element).OfType<HultUI.Core.Elements.ImageElement>()
+                .Where(i => i.Fit == HultUI.Core.Layout.ImageFit.Cover)
+                .MaxBy(i => i.Layout.AbsoluteBorderBox.Width)
+            : null;
+
+    [Fact]
+    public void AHeroIsAskedForAtTheDevicePixelsItCoversAndAgainWhenTheyOutgrowIt()
+    {
+        var library = Library();
+        library.Update(library.Item("m1")! with { BackdropImageTag = "bd-m1" });
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            const string Backdrop = "/Items/m1/Images/Backdrop?tag=bd-m1&";
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: > 400f },
+                TimeSpan.FromSeconds(5));
+
+            // At 100 % the hero is the view beside the rail, 1,376 wide in a 1,440 window: it
+            // asks for its width in device pixels, rounded up to a 128-pixel step.
+            var box = LayoutProbe.Painted(Hero(session)!);
+            Assert.Equal(1376f, box.Width);
+            Assert.Equal(1408, ApertureApp.HeroPixels(box.Width, 1f));
+            Assert.True(artwork.Asked(Backdrop + "fillWidth=1408"), artwork.Log());
+            var old = Hero(session)!.Source!;
+            Assert.Equal(1408f, old.IntrinsicSize.Width);
+
+            // At 150 % it covers 2,064 device pixels: it asks again at 2,176 — not the layout
+            // width it used to ask for at any scale, 0.7 source pixels per screen pixel — and
+            // keeps drawing the old picture until the new one lands.
+            artwork.Hold = "fillWidth=2176";
+            session.Window.SetScale(1.5f);
+            session.PumpUntil(() => artwork.Asked(Backdrop + "fillWidth=2176"), TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Same(old, Hero(session)!.Source);
+            artwork.Release();
+            session.PumpUntil(() => Hero(session)!.Source is { IntrinsicSize.Width: 2176f }, TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.False(old.IsLoaded, "the 100 % hero was kept after its replacement landed");
+            Assert.True(Hero(session)!.Source!.IntrinsicSize.Width >= LayoutProbe.Painted(Hero(session)!).Width * 1.5f);
+
+            // A window widened by a few pixels still has a source pixel for every screen pixel:
+            // nothing is asked for.
+            int asked = artwork.Count("/Images/Backdrop");
+            session.Window.SetClientSize(1460, 900);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.Equal(1396f, LayoutProbe.Painted(Hero(session)!).Width);
+            Assert.Equal(asked, artwork.Count("/Images/Backdrop"));
+
+            // Widened past the step (1,576 wide: 2,364 device pixels), the 2,176 picture would
+            // be drawn larger than it is: it asks again, and the old picture stays up until the
+            // new one lands, then goes.
+            var narrower = Hero(session)!.Source!;
+            artwork.Hold = "fillWidth=2432";
+            session.Window.SetClientSize(1640, 900);
+            session.PumpUntil(() => artwork.Asked(Backdrop + "fillWidth=2432"), TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Same(narrower, Hero(session)!.Source);
+            artwork.Release();
+            session.PumpUntil(() => Hero(session)!.Source is { IntrinsicSize.Width: 2432f }, TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.False(narrower.IsLoaded, "the narrower hero was kept after its replacement landed");
+            Assert.False(app.Posters.HasRetired, "a hero size the window has left is still held");
+        }, artwork: artwork);
+    }
+
+    [Fact]
+    public void AHeroInANarrowWindowIsAskedForByHeight()
+    {
+        var library = Library();
+        library.Update(library.Item("m1")! with { BackdropImageTag = "bd-m1" });
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            // 636 x 396 is narrower than 16:9, so the backdrop's height decides the cover fit:
+            // by width it would arrive 640 x 360 and be drawn larger than it is.
+            session.Window.SetClientSize(700, 900);
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: > 400f },
+                TimeSpan.FromSeconds(5));
+            Assert.Equal(396f, LayoutProbe.Painted(Hero(session)!).Height);
+            Assert.True(artwork.Asked("/Items/m1/Images/Backdrop?tag=bd-m1&fillHeight=512"), artwork.Log());
+            Assert.False(artwork.Asked("/Items/m1/Images/Backdrop?tag=bd-m1&fillWidth"), artwork.Log());
         }, artwork: artwork);
     }
 

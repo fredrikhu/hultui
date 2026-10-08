@@ -731,12 +731,15 @@ public sealed partial class ApertureApp
     private Element DiscoverHero(DiscoverDetail detail)
     {
         var item = detail.Item;
-        float heroHeight = Math.Clamp(_window.LayoutHeight * 0.44f, 280f, 420f);
-        var hero = Box.New().Height(heroHeight).FlexShrink(0)
+        var hero = Box.New().Height(HeroHeight).FlexShrink(0)
             .AlignItems(AlignItems.Stretch)
             .Background(Halide.Raised);
 
-        var (image, status) = _posters.Get(RequestImages.Backdrop(item.BackdropPath, (int)_window.LayoutWidth, RequestImageBase));
+        // A TMDB backdrop is 16:9, and TMDB sizes are widths: by height is the width that
+        // height needs.
+        var (image, status) = HeroArtwork(item.BackdropPath is { Length: > 0 } path ? "tmdb:" + path : null, 16.0 / 9.0,
+            (width, height) => RequestImages.Backdrop(item.BackdropPath,
+                width ?? (int)MathF.Ceiling(height!.Value * 16f / 9f), RequestImageBase));
         if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
         {
             var picture = Image.New(image);

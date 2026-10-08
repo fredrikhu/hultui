@@ -86,6 +86,15 @@ monitor with another scale, the cards ask again at the new size; until each new 
 the old one stays up (soft, briefly), and once the downloads have all landed the old ones are
 dropped (`PosterCache.Retire`).
 
+The **heroes** across the top of an item page and a request title page follow the same rule.
+Their box is the view beside the rail and follows the window, so they round the device pixels
+up to a 128-pixel step: a window dragged wider asks again only when it passes a step, which is
+before the picture has fewer pixels than the screen, rather than at every width on the way (that
+fetched a picture per frame and kept them all). The picture on screen stays up until the new
+size lands, then goes (`PosterCache.Retire(Uri)`). A request title page asks TMDB for `w1920`
+above 1,280 device pixels: not a size TMDB's configuration lists, but one its image server serves,
+and never the 4K original.
+
 **The scrubber is cut into chapters** when the file has marks, and fills to the pointer as
 it crosses, so where you would land reads differently from where you are.
 

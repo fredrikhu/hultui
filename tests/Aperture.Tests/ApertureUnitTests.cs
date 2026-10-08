@@ -508,6 +508,123 @@ public class ApertureUnitTests
         Assert.True(pictureA.IsLoaded, "a picture asked for again at its own size was dropped");
     }
 
+    [Theory]
+    [InlineData(1336f, 1.0f, 1408)]   // a 1,400-wide window, beside the 64-wide rail
+    [InlineData(1336f, 1.5f, 2048)]   // 2,004 device pixels
+    [InlineData(1336f, 2.0f, 2688)]
+    [InlineData(1376f, 1.5f, 2176)]
+    [InlineData(1280f, 1.0f, 1280)]   // on a step: not a step more
+    [InlineData(396f, 1.5f, 640)]     // by height, in a narrow window
+    public void AHeroIsAskedForAtItsDevicePixelsRoundedUpToAStep(float layoutSize, float scale, int pixels)
+    {
+        Assert.Equal(pixels, ApertureApp.HeroPixels(layoutSize, scale));
+        Assert.True(pixels >= layoutSize * scale, "fewer pixels than the screen draws");
+        Assert.True(pixels < layoutSize * scale + ApertureApp.HeroStep);
+    }
+
+    [Theory]
+    [InlineData(780, "w780")]
+    [InlineData(1280, "w1280")]
+    [InlineData(1281, "w1920")]
+    [InlineData(2048, "w1920")]   // the most TMDB serves short of a 4K original
+    [InlineData(4000, "w1920")]
+    public void ATmdbBackdropIsTheSmallestServedSizeAtLeastAsWide(int width, string size) =>
+        Assert.Equal($"https://image.tmdb.org/t/p/{size}/b.jpg", Aperture.Core.Requests.RequestImages.Backdrop("/b.jpg", width)!.ToString());
+
+    [Fact]
+    public void AHeroSizeRetiredOnItsOwnStandsInUntilItsReplacementLandsAndThenGoes()
+    {
+        var held = new HeldPngHandler("fillWidth=2432");
+        using var cache = new PosterCache(() => { }, http: new HttpClient(held));
+        var narrow = new Uri("http://jellyfin.test/Items/a/Images/Backdrop?fillWidth=2048");
+        var wide = new Uri("http://jellyfin.test/Items/a/Images/Backdrop?fillWidth=2432");
+        var poster = new Uri("http://jellyfin.test/Items/b/Images/Primary?fillWidth=252");
+        var cast = new Uri("http://jellyfin.test/Items/c/Images/Primary?fillWidth=165");
+        var shown = Loaded(cache, narrow);
+        var other = Loaded(cache, poster);
+
+        // The window widened past a step: the hero retires the size on screen. Something
+        // else lands meanwhile, and the sweep that follows must spare the stand-in it is
+        // about to ask with.
+        cache.Retire(narrow);
+        Assert.True(cache.HasRetired);
+        cache.Get(cast);
+        var landed = DateTime.UtcNow.AddSeconds(5);
+        while (!cache.IsReady(cast) && DateTime.UtcNow < landed) Thread.Sleep(5);
+        var (first, status) = cache.Get(wide, narrow);
+        Assert.Equal(PosterCache.Status.Ready, status);
+        Assert.Same(shown, first);
+        Assert.Same(shown, cache.Get(wide, narrow).Image);
+
+        // Once the new size has landed, asking for it drops the old one; nothing else goes.
+        held.Release("fillWidth=2432");
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!cache.IsReady(wide) && DateTime.UtcNow < deadline) Thread.Sleep(5);
+        var (picture, _) = cache.Get(wide, narrow);
+        Assert.NotSame(shown, picture);
+        Assert.False(shown.IsLoaded, "the hero's old size is still held");
+        Assert.True(other.IsLoaded, "retiring one picture dropped another");
+        Assert.False(cache.HasRetired);
+    }
+
+    /// <summary>Every request answered with a small PNG; one whose URL contains one of the
+    /// texts it is made with once that text is released.</summary>
+    private sealed class HeldPngHandler(params string[] holds) : HttpMessageHandler
+    {
+        private readonly Dictionary<string, TaskCompletionSource> _released = holds.ToDictionary(
+            h => h, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+        public void Release(string hold) => _released[hold].TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            foreach (var (hold, released) in _released)
+                if (request.RequestUri!.ToString().Contains(hold, StringComparison.Ordinal))
+                    await released.Task.WaitAsync(ct);
+            using var bitmap = new SkiaSharp.SKBitmap(4, 6);
+            using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(data.ToArray()) };
+        }
+    }
+
+    [Fact]
+    public void AHeroSizePassedOverBeforeItLandedLandsRetiredAndGoes()
+    {
+        var held = new HeldPngHandler("fillWidth=2176", "fillWidth=2304", "fillWidth=2432");
+        using var cache = new PosterCache(() => { }, http: new HttpClient(held));
+        var passed = new Uri("http://jellyfin.test/Items/a/Images/Backdrop?fillWidth=2176");
+        var wanted = new Uri("http://jellyfin.test/Items/a/Images/Backdrop?fillWidth=2304");
+        var again = new Uri("http://jellyfin.test/Items/a/Images/Backdrop?fillWidth=2432");
+
+        // A drag across three steps: each size is passed over while it downloads, and the
+        // window settles back on the second.
+        Assert.Equal(PosterCache.Status.Pending, cache.Get(passed).Status);
+        Assert.Equal(PosterCache.Status.Pending, cache.Get(wanted).Status);
+        cache.Retire(passed);
+        cache.Retire(wanted);
+        Assert.Equal(PosterCache.Status.Pending, cache.Get(again).Status);
+        cache.Retire(again);
+        cache.Get(wanted);   // asked for again before it landed: wanted after all
+
+        // The two passed over land first, then the one wanted, last of all.
+        held.Release("fillWidth=2176");
+        held.Release("fillWidth=2432");
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (cache.PendingCount > 1 && DateTime.UtcNow < deadline) Thread.Sleep(5);
+        held.Release("fillWidth=2304");
+        while (!cache.IsReady(wanted) && DateTime.UtcNow < deadline) Thread.Sleep(5);
+
+        // The first ask after the last landing sweeps what the window passed over, and the
+        // size it settled on is there, not swept with them and fetched again.
+        var (picture, status) = cache.Get(wanted);
+        Assert.Equal(PosterCache.Status.Ready, status);
+        Assert.True(picture is { IsLoaded: true });
+        Assert.False(cache.IsReady(passed), "a size passed over before it landed is still held");
+        Assert.False(cache.IsReady(again), "a size passed over before it landed is still held");
+        Assert.False(cache.HasRetired);
+    }
+
     private static void TryDeleteDirectory(string path)
     {
         try { Directory.Delete(path, recursive: true); } catch (IOException) { }

@@ -774,7 +774,11 @@ by the side that decides the fit (the height, for a picture wider than its box),
 has a pixel for every pixel drawn. `DisplayScale` changes when
 the window moves to a monitor with another scale, which arrives as `Window.Resized`: ask
 again at the new size then, key any cache by the size asked for, and drop what was decoded
-for the old scale once the new pictures are in. Aperture's `PosterCache` does all three.
+for the old scale once the new pictures are in. Aperture's `PosterCache` does all three. A
+picture whose box follows the window (a backdrop across a page) passes through every width
+while the window is dragged: round its size up to a step (Aperture uses 128 device pixels),
+so it is asked for again only when the window passes one, keep drawing the old picture until
+the new one is in, and then drop the old one.
 
 **Changing pixels.** A source whose pixels change over time — a video frame, a
 camera, a software-rendered view — implements `IPixelImageSource`, and the renderer
