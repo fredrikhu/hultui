@@ -29,9 +29,11 @@ public sealed class TextPipeline
     // kerning across a segment boundary is lost — a font that kerns
     // letter↔space pairs would measure differently. UI fonts essentially
     // never do, and WordShapeCacheTests verifies equivalence on this system.
-    private readonly LruCache<WordShapeKey, ShapedRun> _wordShapeCache = new(capacity: 8192);
-
-    private readonly record struct WordShapeKey(string Segment, IResolvedFont Font, float FontSize);
+    // Looked up by a span of the text (WordSpanKey, through _wordsInPlace): a segment becomes a
+    // string of its own only on a miss, to be the entry's key.
+    private readonly LruCache<WordShapeKey, ShapedRun> _wordShapeCache =
+        new(capacity: 8192, WordShapeKeyComparer.Instance);
+    private readonly LruCache<WordShapeKey, ShapedRun>.InPlace<WordSpanKey> _wordsInPlace;
 
     // Digit fast path. All-digit segments (row ids, counters) are each unique,
     // so they miss every string-level cache forever and pay a full shaper call.
@@ -59,6 +61,7 @@ public sealed class TextPipeline
     {
         _fonts = fonts;
         _shaper = shaper;
+        _wordsInPlace = _wordShapeCache.LookedUpBy<WordSpanKey>();
     }
 
     /// <summary>
@@ -133,14 +136,19 @@ public sealed class TextPipeline
         }
     }
 
-    private List<FontRun> Itemize(string text, ResolvedInheritedStyle style)
+    private List<FontRun> Itemize(string text, ResolvedInheritedStyle style) =>
+        Itemize(text, style, new List<FontRun>());
+
+    // Into a list the caller owns, cleared first: MeasureString's, which needs the runs only
+    // while it adds them up.
+    private List<FontRun> Itemize(string text, ResolvedInheritedStyle style, List<FontRun> into)
     {
         if (!_hanContextKnown)
         {
             _hanContext = ScriptLanguage.CjkContextOf(_paragraph);
             _hanContextKnown = true;
         }
-        return FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, _hanContext);
+        return FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, _hanContext, into);
     }
 
     // ── Metric-affecting spans (stage 2 of docs/plans/12-rich-text-spans.md) ──
@@ -1063,8 +1071,8 @@ public sealed class TextPipeline
                 b = spans is null ? e : NextStyleBoundary(spans, i, e);
                 var eff = spans is null ? style : EffectiveStyleAt(style, spans, i);
                 foreach (var fr in Itemize(text[i..b], eff))
-                    width += ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing,
-                        rtl: (level & 1) == 1).Width;
+                    width += MeasureRun(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing,
+                        rtl: (level & 1) == 1);
             }
         }
         return width;
@@ -1545,15 +1553,16 @@ public sealed class TextPipeline
             runs[r] = new PrefixRun(runStart, runEnd, fr.Font, before, segments.Count);
             float x = 0;
             int glyphs = 0;
+            int fontHash = WordShapeKeyComparer.FontHash(fr.Font, style.FontSize);
             for (int i = runStart; i < runEnd;)
             {
                 bool isSpace = text[i] == ' ';
                 int start = i;
                 while (i < runEnd && (text[i] == ' ') == isSpace) i++;
-                var seg = GetOrShapeSegment(text[start..i], fr.Font, style.FontSize);
-                segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs.Length));
+                var seg = ShapeSegment(text, start, i - start, fr.Font, style.FontSize, fontHash);
+                segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs));
                 x += seg.Width;
-                glyphs += seg.Glyphs.Length;
+                glyphs += seg.Glyphs;
             }
             // The run's width as ShapeWithSpacing gives it, added as MeasureString adds it.
             before += style.LetterSpacing == 0f || glyphs == 0 ? x : x + style.LetterSpacing * glyphs;
@@ -1613,9 +1622,10 @@ public sealed class TextPipeline
         }
         else
         {
-            var part = GetOrShapeSegment(text[seg.Start..length], run.Font, p.FontSize);
+            var part = ShapeSegment(text, seg.Start, length - seg.Start, run.Font, p.FontSize,
+                WordShapeKeyComparer.FontHash(run.Font, p.FontSize));
             width = part.Width;
-            glyphs = part.Glyphs.Length;
+            glyphs = part.Glyphs;
         }
 
         // ShapeByWords' running sum, then ShapeWithSpacing's letter spacing, then
@@ -1768,17 +1778,58 @@ public sealed class TextPipeline
         return true;
     }
 
-    // Total advance width of a string, itemized and shaped the same way as a line.
-    private float MeasureString(string s, ResolvedInheritedStyle style)
+    // Total advance width of a string, itemized and shaped the same way as a line. Internal
+    // for the tests that hold it to the glyph runs it adds up.
+    internal float MeasureString(string s, ResolvedInheritedStyle style)
     {
         if (s.Length == 0)
             return 0;
 
-        var runs = Itemize(s, style);
+        var runs = Itemize(s, style, _measuredRuns);
         float width = 0;
         foreach (var run in runs)
-            width += ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing).Width;
+            width += MeasureRun(run.Text, run.Font, style.FontSize, style.LetterSpacing);
+        runs.Clear();
         return width;
+    }
+
+    // MeasureString's font runs, while it adds them up (nothing it calls measures a string).
+    private readonly List<FontRun> _measuredRuns = new();
+
+    // ShapeWithSpacing(…).Width without building the glyph array it would hand back: the same
+    // segment widths added in the same order, letter spacing applied the same way.
+    private float MeasureRun(string text, IResolvedFont font, float fontSize, float letterSpacing, bool rtl = false)
+    {
+        float width;
+        int glyphs;
+        if (rtl)
+        {
+            var run = _shaper.Shape(text, font, fontSize, rtl: true);
+            width = run.Width;
+            glyphs = run.Glyphs.Length;
+        }
+        else if (text.IndexOf(' ') < 0)
+        {
+            var word = ShapeSegment(text, 0, text.Length, font, fontSize, WordShapeKeyComparer.FontHash(font, fontSize));
+            width = word.Width;
+            glyphs = word.Glyphs;
+        }
+        else
+        {
+            width = 0;
+            glyphs = 0;
+            int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
+            for (int i = 0; i < text.Length;)
+            {
+                bool isSpace = text[i] == ' ';
+                int start = i;
+                while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+                var seg = ShapeSegment(text, start, i - start, font, fontSize, fontHash);
+                width += seg.Width;
+                glyphs += seg.Glyphs;
+            }
+        }
+        return letterSpacing == 0f || glyphs == 0 ? width : width + letterSpacing * glyphs;
     }
 
     // Shapes a run, then applies letter spacing by widening each glyph's advance
@@ -1813,51 +1864,100 @@ public sealed class TextPipeline
 
     // Shapes a font run by splitting it into maximal space / non-space
     // segments, shaping each through the word cache, and concatenating. Single
-    // segments (no space) go straight through the cache.
-    private ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize)
+    // segments (no space) go straight through the cache. Internal for the tests that
+    // hold it to the segments shaped apart, and to what it allocates.
+    internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize)
     {
+        int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
         if (text.IndexOf(' ') < 0)
         {
-            var run = GetOrShapeSegment(text, font, fontSize);
+            var word = ShapeSegment(text, 0, text.Length, font, fontSize, fontHash);
             // Fresh ShapedRun per call site: OffsetX is mutated by layout, so the
             // cached instance must never be handed out. The glyph array is
             // read-only in practice and safe to share.
-            return new ShapedRun(text, font, fontSize, run.Width, run.Glyphs);
+            var wordGlyphs = word.Run?.Glyphs;
+            if (wordGlyphs is null)
+                ComposeDigits(text, 0, text.Length, word.Digits!, 0f, wordGlyphs = new GlyphPosition[text.Length], 0);
+            return new ShapedRun(text, font, fontSize, word.Width, wordGlyphs);
         }
 
-        var glyphs = new List<GlyphPosition>(text.Length);
-        float x = 0;
-        int i = 0;
-        while (i < text.Length)
+        // The segments first, counting their glyphs, then one array of exactly that many:
+        // each segment's glyphs at the widths of the segments before it, added in order.
+        var words = _words;
+        words.Clear();
+        int count = 0;
+        for (int i = 0; i < text.Length;)
         {
             bool isSpace = text[i] == ' ';
             int start = i;
             while (i < text.Length && (text[i] == ' ') == isSpace) i++;
-            var seg = GetOrShapeSegment(text[start..i], font, fontSize);
-            foreach (var g in seg.Glyphs)
-                glyphs.Add(g with { X = g.X + x });
-            x += seg.Width;
+            var word = ShapeSegment(text, start, i - start, font, fontSize, fontHash);
+            words.Add(word);
+            count += word.Glyphs;
         }
-        return new ShapedRun(text, font, fontSize, x, glyphs.ToArray());
+
+        var glyphs = new GlyphPosition[count];
+        float x = 0;
+        int at = 0;
+        foreach (var word in words)
+        {
+            if (word.Run is { } run)
+            {
+                foreach (var g in run.Glyphs)
+                    glyphs[at++] = g with { X = g.X + x };
+            }
+            else
+            {
+                at = ComposeDigits(text, word.Start, word.Glyphs, word.Digits!, x, glyphs, at);
+            }
+            x += word.Width;
+        }
+        words.Clear();
+        return new ShapedRun(text, font, fontSize, x, glyphs);
     }
 
-    private ShapedRun GetOrShapeSegment(string segment, IResolvedFont font, float fontSize)
+    // ShapeByWords' segments, between its two passes (one list per pipeline, as a pipeline is
+    // used from one thread; nothing ShapeByWords calls comes back to it).
+    private readonly List<WordShape> _words = new();
+
+    /// <summary>
+    /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for an
+    /// all-digit segment in a font that passed the digit proof, the font's digit table — whose
+    /// glyphs are composed only where glyphs are wanted. <see cref="Width"/> and
+    /// <see cref="Glyphs"/> (the glyph count) are the segment's either way.
+    /// </summary>
+    private readonly record struct WordShape(ShapedRun? Run, DigitTable? Digits, int Start, float Width, int Glyphs);
+
+    // text[start..start + length], shaped: from the digit table, else from the word cache, looked
+    // up by the span; a miss shapes the segment as a string of its own (the text itself when the
+    // segment is all of it) and keeps it under that string. fontHash is
+    // WordShapeKeyComparer.FontHash(font, fontSize), which the caller works out once per run.
+    private WordShape ShapeSegment(string text, int start, int length, IResolvedFont font, float fontSize,
+        int fontHash)
     {
-        if (TryShapeDigits(segment, font, fontSize) is { } digits)
-            return digits;
+        var segment = text.AsSpan(start, length);
+        if (DigitTableFor(segment, font, fontSize) is { } digits)
+        {
+            float x = 0;
+            foreach (char c in segment)
+                x += digits.Advances[c - '0'];
+            return new WordShape(null, digits, start, x, length);
+        }
 
-        var key = new WordShapeKey(segment, font, fontSize);
-        if (_wordShapeCache.TryGet(key, out var cached))
-            return cached;
-
-        var run = _shaper.Shape(segment, font, fontSize);
-        _wordShapeCache.Put(key, run);
-        return run;
+        if (!_wordsInPlace.TryGet(new WordSpanKey(segment, font, fontSize, fontHash), out var run))
+        {
+            string word = text.Substring(start, length);
+            run = _shaper.Shape(word, font, fontSize);
+            // Put, not Add: next to the shaping a second lookup is nothing, and a key the
+            // lookup in place had missed would make Add throw.
+            _wordShapeCache.Put(new WordShapeKey(word, font, fontSize), run);
+        }
+        return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
     }
 
-    // Composes an all-digit segment from the proven advance table, or returns
-    // null when the segment isn't pure digits / the font+size failed the proof.
-    private ShapedRun? TryShapeDigits(string segment, IResolvedFont font, float fontSize)
+    // The proven digit table for an all-digit segment, or null when the segment isn't pure
+    // digits / the font+size failed the proof (which runs at the first digits it meets).
+    private DigitTable? DigitTableFor(ReadOnlySpan<char> segment, IResolvedFont font, float fontSize)
     {
         if (segment.Length == 0)
             return null;
@@ -1871,18 +1971,23 @@ public sealed class TextPipeline
             table = ProveDigitsContextFree(font, fontSize);
             _digitTables[key] = table;
         }
-        if (table is null)
-            return null;
+        return table;
+    }
 
-        var glyphs = new GlyphPosition[segment.Length];
-        float x = 0;
-        for (int i = 0; i < segment.Length; i++)
+    // Writes the glyphs of the all-digit text[start..start + length] into glyphs from index at,
+    // each at the advances before it in the segment plus x (the segment's place in its run), and
+    // returns the index after them.
+    private static int ComposeDigits(string text, int start, int length, DigitTable table, float x,
+        GlyphPosition[] glyphs, int at)
+    {
+        float advanced = 0;
+        for (int i = start; i < start + length; i++)
         {
-            int d = segment[i] - '0';
-            glyphs[i] = new GlyphPosition(table.GlyphIds[d], x, 0, table.Advances[d]);
-            x += table.Advances[d];
+            int d = text[i] - '0';
+            glyphs[at++] = new GlyphPosition(table.GlyphIds[d], advanced + x, 0, table.Advances[d]);
+            advanced += table.Advances[d];
         }
-        return new ShapedRun(segment, font, fontSize, x, glyphs);
+        return at;
     }
 
     // One-time proof per font+size (110 shaper calls): every digit must shape

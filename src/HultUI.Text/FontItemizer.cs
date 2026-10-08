@@ -8,10 +8,12 @@ namespace HultUI.Text;
 /// </summary>
 internal static class FontItemizer
 {
+    /// <summary>The font runs of <paramref name="text"/>, into <paramref name="runs"/>, which is
+    /// cleared first and returned.</summary>
     public static List<FontRun> Itemize(string text, IFontCollection fonts,
-        string familyName, FontWeight weight, FontSlant slant, string? hanContext = null)
+        string familyName, FontWeight weight, FontSlant slant, string? hanContext, List<FontRun> runs)
     {
-        var runs = new List<FontRun>();
+        runs.Clear();
         if (string.IsNullOrEmpty(text))
             return runs;
 
