@@ -17,7 +17,12 @@ public static class ContentNodeId
     private const ulong VirtualItemMarker = 1UL << 63;
 
     public static ElementId For(ElementId owner, int key)
-        => new(Marker | ((ulong)AccessibleOwnerSlots.SlotOf(owner) << 32) | (uint)key);
+        => ForSlot(AccessibleOwnerSlots.SlotOf(owner), key);
+
+    /// <summary>The id of node <paramref name="key"/> of the source holding <paramref name="slot"/>:
+    /// for a caller making every node's id, which looks the slot up once.</summary>
+    internal static ElementId ForSlot(uint slot, int key)
+        => new(Marker | ((ulong)slot << 32) | (uint)key);
 
     /// <summary>True (with the owner and the key) if the id is a content node's. The owner is
     /// <c>default</c> when it has unmounted since: the node is gone.</summary>

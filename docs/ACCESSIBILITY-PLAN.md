@@ -56,6 +56,12 @@ Files to add in `src/HultUI.Core/Accessibility/`:
 - **`AccessibilityTreeDiffer.cs`** — compares prev/next tree, produces a
   `TreeDiff` with `Added`, `Removed`, `Reordered`, `PropertyChanged(node, prop)`
   lists. Key nodes by `ElementId` so wrappers can be reused across rebuilds.
+  A rebuild is a whole new tree, so what it leaves besides the tree is garbage on
+  every change a reader can see. A node takes its children as one array of the
+  exact length (leaves share the empty one), and the differ pairs children by
+  position while their ids agree, indexing by id only from the first difference:
+  building costs the 136-byte node and 8 bytes in its parent's array, and diffing
+  an unchanged tree allocates only the `TreeDiff` (was 230 and 40 bytes a node).
 - **Evolve `IAccessibilityBridge`** from `Update(root)` to:
   - `bool IsActive { get; }` — cheap "is anyone listening" check, polled per frame
   - `void ApplyChanges(TreeDiff diff)`
@@ -223,7 +229,10 @@ Files:
 
 - **Unit tests for diffing** — `AccessibilityTreeDifferTests` in
   `tests/HultUI.Core.Tests/Accessibility/`. Add/remove/reorder/property-change
-  cases. Table-driven.
+  cases. Table-driven. `AccessibilityTreeDifferModelTests` diffs thousands of
+  random tree pairs and compares every entry with the differ as it was before
+  it paired children by position, kept in the test as the model; bridges raise
+  events in diff order, so the order is part of what must not change.
 - **Tree builder tests** already exist — extend for new node fields
   (`IsFocusable`, `IsToggled`, `Value`).
 - **Manual verification**:

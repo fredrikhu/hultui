@@ -45,31 +45,54 @@ public static class AccessibilityTreeDiffer
     {
         CompareProperties(diff, prev, curr);
 
-        if (prev.Children.Count == 0 && curr.Children.Count == 0)
-            return;
+        var prevChildren = prev.Children;
+        var currChildren = curr.Children;
+        int prevCount = prevChildren.Count, currCount = currChildren.Count;
 
-        // Index previous children by ElementId so we can match them in O(1).
-        Dictionary<ElementId, (AccessibilityNode Node, int Index)>? prevById = null;
-        if (prev.Children.Count > 0)
+        // Most rebuilds leave a node's children as they were. Pair them by position while
+        // their ids agree, which needs no index: the tree is rebuilt in full on every change a
+        // reader can see, and a dictionary per parent was most of what diffing it allocated.
+        int first = 0;
+        int common = Math.Min(prevCount, currCount);
+        while (first < common && prevChildren[first].ElementId == currChildren[first].ElementId)
         {
-            prevById = new Dictionary<ElementId, (AccessibilityNode, int)>(prev.Children.Count);
-            for (int i = 0; i < prev.Children.Count; i++)
-                prevById[prev.Children[i].ElementId] = (prev.Children[i], i);
+            DiffSubtree(diff, prevChildren[first], currChildren[first]);
+            first++;
         }
 
-        bool orderChanged = false;
-        int lastMatchedPrevIndex = -1;
-
-        for (int i = 0; i < curr.Children.Count; i++)
+        if (first == prevCount)
         {
-            var currChild = curr.Children[i];
-            if (prevById is not null && prevById.TryGetValue(currChild.ElementId, out var entry))
+            // Nothing of the old left: the rest is new.
+            for (int i = first; i < currCount; i++)
+                AddRecursive(diff, currChildren[i], curr);
+            return;
+        }
+        if (first == currCount)
+        {
+            // Nothing new left: the rest of the old is gone.
+            for (int i = first; i < prevCount; i++)
+                RemoveRecursive(diff, prevChildren[i], prev);
+            return;
+        }
+
+        // From the first difference on, match by ElementId in O(1). Ids are unique within a
+        // tree, so this pairs exactly what one index over all the children did.
+        var prevById = new Dictionary<ElementId, (AccessibilityNode Node, int Index)>(prevCount - first);
+        for (int i = first; i < prevCount; i++)
+            prevById[prevChildren[i].ElementId] = (prevChildren[i], i);
+
+        bool orderChanged = false;
+        int lastMatchedPrevIndex = first - 1;
+
+        for (int i = first; i < currCount; i++)
+        {
+            var currChild = currChildren[i];
+            if (prevById.Remove(currChild.ElementId, out var entry))
             {
                 DiffSubtree(diff, entry.Node, currChild);
                 if (entry.Index < lastMatchedPrevIndex)
                     orderChanged = true;
                 lastMatchedPrevIndex = entry.Index;
-                prevById.Remove(currChild.ElementId);
             }
             else
             {
@@ -77,11 +100,10 @@ public static class AccessibilityTreeDiffer
             }
         }
 
-        if (prevById is not null)
-        {
-            foreach (var (_, entry) in prevById)
-                RemoveRecursive(diff, entry.Node, prev);
-        }
+        // In their old order: a dictionary that only had entries taken out lists the rest in
+        // the order they went in.
+        foreach (var (_, entry) in prevById)
+            RemoveRecursive(diff, entry.Node, prev);
 
         if (orderChanged)
             diff.Reordered.Add(curr);
@@ -132,15 +154,17 @@ public static class AccessibilityTreeDiffer
     private static void AddRecursive(TreeDiff diff, AccessibilityNode node, AccessibilityNode? parent)
     {
         diff.Added.Add(new AddedNode(node, parent));
-        foreach (var child in node.Children)
-            AddRecursive(diff, child, node);
+        var children = node.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            AddRecursive(diff, children[i], node);
     }
 
     private static void RemoveRecursive(TreeDiff diff, AccessibilityNode node, AccessibilityNode? parent)
     {
         // Deepest-first so the bridge can tear down leaves before containers.
-        foreach (var child in node.Children)
-            RemoveRecursive(diff, child, node);
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            RemoveRecursive(diff, children[i], node);
         diff.Removed.Add(new RemovedNode(node, parent));
     }
 }

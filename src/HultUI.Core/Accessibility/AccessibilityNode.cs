@@ -46,6 +46,8 @@ public sealed class AccessibilityNode
     public bool IsOffscreen { get; internal set; }
 
     public AccessibilityNode? Parent { get; private set; }
+
+    /// <summary>The node's children, in order. Never changes once the tree is built.</summary>
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
     /// <summary>
@@ -76,7 +78,9 @@ public sealed class AccessibilityNode
     /// <summary>The text now: the source's, or the snapshot this tree was built with.</summary>
     public AccessibleText? CurrentText => TextSource?.AccessibleText ?? Text;
 
-    private readonly List<AccessibilityNode> _children = [];
+    // An array of the exact length: a tree is rebuilt in full on every change an assistive
+    // technology can see, and most nodes are leaves, which share the one empty array.
+    private AccessibilityNode[] _children = [];
 
     internal AccessibilityNode(
         ElementId elementId,
@@ -110,9 +114,23 @@ public sealed class AccessibilityNode
         IsSelected = isSelected;
     }
 
+    /// <summary>Makes <paramref name="children"/> this node's children, in place of any it had.
+    /// The node keeps the array: the caller must not change it afterwards.</summary>
+    internal void SetChildren(AccessibilityNode[] children)
+    {
+        foreach (var child in children)
+            child.Parent = this;
+        _children = children;
+    }
+
+    /// <summary>Adds one child after the others. Copies the children each time: for the odd
+    /// node added after a build (an overlay's tree under the window's root), not for building.</summary>
     internal void AddChild(AccessibilityNode child)
     {
+        var children = new AccessibilityNode[_children.Length + 1];
+        _children.CopyTo(children, 0);
+        children[^1] = child;
         child.Parent = this;
-        _children.Add(child);
+        _children = children;
     }
 }
