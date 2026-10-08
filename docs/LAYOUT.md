@@ -279,6 +279,21 @@ The diagnosis, when a label wraps that should not: dump the ancestor chain with 
 and `FlexShrink` per level — a wrapped label's box is about as wide as the wrapped text,
 not the intrinsic single line.
 
+**A one-line label that truncates starts from the room it is offered.** A label with
+`MaxLines(1)` (clipped, or with `TextOverflow.Ellipsis`), sized from its text and placed
+directly in a row, has a flex base size of its untruncated width capped at the row's
+width — CSS's max-content width, clamped — and then grows and shrinks like any other item.
+Its untruncated width is measured once and kept until its text or style changes, so a
+resize truncates it once a step, at the width it ends up with. Two consequences:
+
+- The base is the room itself, not the truncated text, which ends short of the room by
+  up to one character. A row of truncating labels shares its shrink by those bases.
+- In a row with no room at all, the label's base is 0 (plus its padding): it is not
+  measured as an ellipsis that is wider than the row.
+
+A label inside a wrapper box is measured truncated at the room the wrapper offers it, as
+any content is; only the label directly in the row starts from its own width.
+
 The related trap in the other direction is in `TODO.md`'s durable notes: **`FlexGrow(1)`
 alone does not mean "take the leftover space"**, because the default `auto` basis sizes
 the item to its own content first. `FlexBasis(0)` is what says "start from nothing".
