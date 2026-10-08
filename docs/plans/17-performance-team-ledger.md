@@ -99,13 +99,17 @@ survey to re-rank them.
     title-page heroes ask for the layout width at any scale (~0.7 source px per screen px at
     150 %, soft). Request layout width × display scale like f84893d; ~5.5 MB more per cached
     hero at a 1400-wide window. Show before/after crops at 150 %.
-11g. **meridian-pane-breakpoint** (8/1; user said yes 2026-10-08) — move Meridian's
+11g. ~~**meridian-pane-breakpoint**~~ LANDED 5b2b676 (8/1; user said yes 2026-10-08) — move Meridian's
     side-pane breakpoint from 1100 to ~1320 px so the editor keeps ≥ 448 px; below it the
     response pane goes to the bottom. Update the plan's design decision. Before/after images.
-11h. **junction-branches-compact** (8/1; user said yes 2026-10-08) — a compact Branches
+11h. ~~**junction-branches-compact**~~ LANDED 2bca842 (8/1; user said yes 2026-10-08) — a compact Branches
     table at ≤1000 px (e.g. icon-only Checkout, narrower fixed columns) so names are not
     starved to "…" with the sidebar open. Check Tags/Remotes/Worktrees use the same table
     and stay consistent. Before/after images.
+11g-fix. **meridian-bottom-pane-height** (from 5b2b676) — the bottom response pane is a fixed
+    380 px, so short windows starve the editor (1280×672: ~90 px of sub-editor; that window
+    was side-by-side before). Share the height between editor and pane (proportional with
+    minimums, or a splitter), so a 1080p-at-150 % maximized window stays usable. Images.
 12. **apps-scenario-virtual-selection-walk-a11y** + **apps-scenario-textarea-highlighted-json**
     (8) — two perf-suite scenarios the big round 2 items need.
 
@@ -114,6 +118,9 @@ survey to re-rank them.
 
 ### Waiting
 
+- **junction-narrow-gitlab-glyphs** (8, app) — below 724 px of content the Branches table
+  drops LAST COMMIT and with it the GitLab lock, pipeline glyph and MR chip. Move them next to
+  the name in narrow mode? Small.
 - **aperture-tmdb-size-fallback** (2, app robustness) — w1920 is not in TMDB's configuration
   list; TMDB serves it today but answers 400 for unlisted sizes. If it stops, the request
   hero shows nothing: fall back to w1280. Small.
@@ -234,6 +241,8 @@ survey to re-rank them.
 | 1 | be1fd9d | apps-truncation-followups (Meridian) | Request tab titles one line (ellipsis, ≤220 px, narrow to 72 px, strip clips); sub-tabs one line in a sideways-scrolling strip; URL box clips; Chain, Assertions, History, Environments labels fixed. At 1100 px the editor gets its designed 228 px and the response pane fits (before: titles 4–11 lines deep over the URL bar, pane 179 px off-window). Breakpoint left at 1100 (asked the user). |
 | 1 | 351e6cd | apps-truncation-followups (Junction) | Branch name cell clips; the name truncates first, then current/base/head/remote tags show whole or not at all; LAST COMMIT heading one line. No overlap at 1000/1200/1400 px. |
 | 1 | 6cf4fe6, 17e94b0 | aperture-hero-scale | Heroes requested at hero box × display scale (25 % steps), by the cover-fit side, rounded up to a 128-device-px step; stand-in on scale change or step; TMDB w1920 above w1280; only the last 4 heroes kept. 150 %: item hero 0.699 → 1.022 source px per device px, request hero 0.639 → 0.958; item page private 62.1 → 67.6 MB (hero 4.2 → 9.0 MB). Resizing 7 steps 96.9 → 66.0 MB (8 heroes → 1); 7 pages 137.6 → 96.8 MB (106.1 before 11f). Request page at 100 % +7.4 MB (w1920, strict rounding kept by the orchestrator). Measured against the real Jellyfin and Seerr. |
+| 1 | 5b2b676 | meridian-pane-breakpoint | Response pane goes to the bottom below 1320 dip (rail 48 + tree 264 + editor 448 + pane 560); 1100–1319 px windows put the pane at the bottom (at 760 tall: pane 380, editor full width). Ctrl+\ unchanged; plan and README updated. Exposed: the bottom pane is a fixed 380 px, so a 1280×672 window (1080p at 150 %, maximized) leaves ~90 px of sub-editor (follow-up 11g-fix). |
+| 1 | 2bca842 | junction-branches-compact | Branches/Tags compact below 934 px of content (date only, ↑/↓ and eye headings, icon Checkout named "Checkout"); below 724 px LAST COMMIT/COMMIT move to the tooltip. BRANCH at 1000 px with the sidebar 48 → 165 px, 1200 px 160 → 277, 900 px 0 → 196. Narrow mode also hides the GitLab lock, pipeline glyph and MR chip that live in LAST COMMIT. |
 
 ## Examined, not worth it
 
