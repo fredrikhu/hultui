@@ -45,6 +45,10 @@ public partial class MeridianApp
         response.Key = "response-" + (ResponseAtBottom ? "bottom" : "right");
         if (ResponseAtBottom)
         {
+            // The editor starts from its floor and takes whatever the pane's 380 leaves; when
+            // the column is too short for both, the pane shrinks instead (to its own floor),
+            // since the editor's floor holds it. See EditorMinHeight.
+            editor.FlexBasis(Dimension.Px(EditorMinHeight)).MinHeight(EditorMinHeight);
             var main = Flex.Column(gap: 0).FlexGrow(1).Children(editor, response);
             main.Key = "main-bottom";
             row.AddChild(main);

@@ -42,6 +42,12 @@ Ctrl+\ flips to 380dip bottom, auto-bottom < 1320dip (was < 1100dip; the user ap
 move on 2026-10-08: at 1100 the editor beside the pane was 228dip, the URL bar's method chip
 and Send with almost no URL between them; 1320 = rail 48 + tree 264 + editor 448 + pane 560,
 and 448 holds an ordinary request's six sub-tabs unscrolled and ~227dip of URL beside GET).
+The bottom pane is 380dip where the window has room; under 736dip tall it gives way so the
+editor keeps 316dip (chrome + five form rows), down to its own 162dip floor (status line,
+tabs, six lines of body); both floors fit the 760×540 minimum window (2026-10-09: with the
+breakpoint at 1320 a fixed 380 left a 1280×672 window — 1080p at 150 %, maximized — 112dip
+of sub-editor). No splitter: the size is the design's, and a dragged one is UI state the
+design says must persist, which Meridian has no settings file for yet.
 Key map as mocked (Ctrl+Enter send, Esc cancel, Ctrl+E env, Ctrl+P palette, Ctrl+F find,
 Ctrl+S save, Ctrl+T/W tabs, Ctrl+R run). **Fonts:** follow the `Fonts.cs` precedent — platform sans + Consolas/Menlo; bundling
 Inter/JetBrains Mono is a separate later decision, not a blocker.

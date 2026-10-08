@@ -15,7 +15,8 @@ app.DevToolsHotkeysEnabled = Environment.GetEnvironmentVariable("HULTUI_DEVTOOLS
 #endif
 
 var window = app.PrimaryWindow;
-window.SetMinimumSize(760, 540);
+// The bottom response pane's height floors are sized to fit this (MeridianApp.EditorMinHeight).
+window.SetMinimumSize(MeridianApp.MinWindowWidth, MeridianApp.MinWindowHeight);
 window.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "meridian.png"));
 
 var meridian = new MeridianApp(app, window);

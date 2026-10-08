@@ -1,6 +1,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Headless;
+using Meridian.Tests.Fixtures;
 using Xunit;
 
 namespace Meridian.Tests;
@@ -10,21 +11,39 @@ namespace Meridian.Tests;
 /// right (1320 px since 2026-10-08, leaving the editor 448 of them; 1100 and 228 before).
 /// Its tab titles and sub-tab labels used to wrap — the open tabs' titles several lines
 /// deep, over the URL bar — and their words held the editor wide enough to push the
-/// response pane off the window. Below the breakpoint the pane sits under the editor.
+/// response pane off the window. Below the breakpoint the pane sits under the editor, and
+/// in a short window the two share the height (2026-10-09; the pane was a fixed 380).
 /// </summary>
-public class NarrowEditorLayoutTests : IDisposable
+public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposable
 {
     /// <summary>The narrowest window with the response pane beside the editor: rail 48 +
     /// tree 264 + editor 448 + pane 560.</summary>
     private const int SideBySide = 1320;
+
+    /// <summary>Meridian's title bar, above the editor and the pane.</summary>
+    private const float TitleBar = 40f;
+
+    /// <summary>The editor's floor at the bottom layout: tabs 34 + URL bar 48 + sub-tabs 32 +
+    /// footer 26, and five form rows in the sub-editor (8 + 5 x 32 + 4 x 2 = 176).</summary>
+    private const float EditorFloor = 316f;
+
+    /// <summary>The bottom pane's floor: status line 32 + tabs 30 + the body's padding 16, and
+    /// six lines of its 12 px body at 14 each.</summary>
+    private const float PaneFloor = 162f;
 
     private const string SignIn = "Sign in with client credentials and remember the access token";
     private const string Search = "Search succeeded charges over 10 SEK for the customer";
 
     private readonly string _root = Directory.CreateTempSubdirectory("meridian-narrow-").FullName;
 
-    public NarrowEditorLayoutTests()
+    public NarrowEditorLayoutTests(TestHttpServer server)
     {
+        // Five headers (five form rows on the Headers tab) and an answer from the loopback
+        // server, so the pane shows a body.
+        Write("charges/list.req",
+            $"GET {server.Origin}/two\nname List the latest charges\nheader Accept: application/json\n"
+            + "header Accept-Language: sv-SE\nheader X-Request-Id: 7f3c2a9e-1b4d-4c8e-9a51-2d6f0e8b7c13\n"
+            + "header Idempotency-Key: list-charges-2026-10-09\nheader User-Agent: meridian/1.0\n");
         Write("auth/login.req",
             $"POST {{{{base_url}}}}/v1/oauth/token/client-credentials\nname {SignIn}\nheader Content-Type: application/json\n"
             + "extract body $.access_token -> token\n");
@@ -237,38 +256,146 @@ public class NarrowEditorLayoutTests : IDisposable
     }
 
     /// <summary>
-    /// The windows the move sends to the bottom layout, 1100–1319 px at 760 tall: the pane
-    /// keeps its 380 px, and the editor keeps its whole chrome (tabs, URL bar, sub-tabs,
-    /// footer) with room for at least five form rows in the sub-editor between them. Being
-    /// full width, it shows all six sub-tabs and a long stretch of URL.
+    /// The windows the move sends to the bottom layout, 1100–1319 px, where they are tall
+    /// enough (736 px and up): the pane keeps its designed 380 px and the editor takes the
+    /// rest — its whole chrome (tabs, URL bar, sub-tabs, footer) with room for at least five
+    /// form rows in the sub-editor between them. Being full width, it shows all six sub-tabs
+    /// and a long stretch of URL.
     /// </summary>
     [Theory]
-    [InlineData(1100)]
-    [InlineData(1200)]
-    [InlineData(SideBySide - 1)]
-    public void Under_the_breakpoint_the_editor_and_the_pane_share_the_height(int width)
+    [InlineData(1100, 760)]
+    [InlineData(1200, 760)]
+    [InlineData(SideBySide - 1, 760)]
+    [InlineData(1200, 800)]
+    public void Under_the_breakpoint_the_editor_and_the_pane_share_the_height(int width, int height)
     {
-        Hosted(width, 760, (session, app) =>
+        Hosted(width, height, (session, app) =>
         {
-            Click(session, "req-search");
+            SendAndWait(session, app, "list");
             AssertBottom(session, app, width);
 
             Rect pane = Get(session, "response-bottom").Element.WindowBorderBox;
             Assert.True(Math.Abs(pane.Height - 380f) < 0.5f, $"the pane is {pane.Height:0.#}px tall, not 380");
-            Assert.True(pane.Y + pane.Height <= 760.5f, $"the pane ends at y={pane.Y + pane.Height:0.#}, past the window");
+            Rect editor = Editor(session, "response-bottom").WindowBorderBox;
+            float rest = height - TitleBar - 380f;
+            Assert.True(Math.Abs(editor.Height - rest) < 0.5f, $"the editor is {editor.Height:0.#}px tall, not the {rest:0.#} left by the pane");
 
-            Rect subTabs = Get(session, "subtabs").Element.WindowBorderBox;
-            var footer = Labels(Editor(session, "response-bottom")).Single(l => l.Content == "charges/search.req");
-            Rect foot = footer.WindowBorderBox;
-            Assert.True(foot.Y + foot.Height <= pane.Y + 0.5f,
-                $"the editor's footer reaches y={foot.Y + foot.Height:0.#}, into the pane at y={pane.Y:0.#}");
-            float body = foot.Y - (subTabs.Y + subTabs.Height);
-            Assert.True(body >= 5 * 32f, $"the sub-editor gets {body:0.#}px between the sub-tabs and the footer");
-
-            AssertSubTabsAllInView(session);
-            Rect url = Get(session, "url-display").Element.WindowBorderBox;
-            Assert.True(url.Width >= 500f, $"the URL gets {url.Width:0.#}px in a {width}px window");
+            AssertEditorAndPaneHold(session, width, height, fullWidth: true);
         });
+    }
+
+    /// <summary>
+    /// Short windows under the breakpoint: the pane gives way and the editor keeps its floor
+    /// (316 px), so it still has its chrome and five whole form rows. 1280x672 is a 1080p
+    /// screen at 150 %, maximized, which a fixed 380 px pane left 112 px of sub-editor (and
+    /// was side by side before 2026-10-08); at 1100x600 it left 40.
+    /// </summary>
+    [Theory]
+    [InlineData(1280, 672)]
+    [InlineData(1100, 600)]
+    public void In_a_short_window_the_pane_gives_way_to_the_editors_floor(int width, int height)
+    {
+        Hosted(width, height, (session, app) =>
+        {
+            SendAndWait(session, app, "list");
+            AssertBottom(session, app, width);
+
+            Rect editor = Editor(session, "response-bottom").WindowBorderBox;
+            Assert.True(Math.Abs(editor.Height - EditorFloor) < 0.5f,
+                $"the editor is {editor.Height:0.#}px tall, not its {EditorFloor} floor");
+            Rect pane = Get(session, "response-bottom").Element.WindowBorderBox;
+            float rest = height - TitleBar - EditorFloor;
+            Assert.True(Math.Abs(pane.Height - rest) < 0.5f, $"the pane is {pane.Height:0.#}px tall, not the {rest:0.#} the editor leaves");
+
+            AssertEditorAndPaneHold(session, width, height, fullWidth: true);
+        });
+    }
+
+    /// <summary>
+    /// The two floors fit the smallest window Meridian allows (760x540, Program.cs): the editor
+    /// keeps 316 px and the pane gets 184, more than its own floor. Before, the pane kept 380
+    /// and the editor got 120: its footer over the URL bar's sub-tabs.
+    /// </summary>
+    [Fact]
+    public void Both_floors_hold_in_the_smallest_window()
+    {
+        int width = MeridianApp.MinWindowWidth, height = MeridianApp.MinWindowHeight;
+        Hosted(width, height, (session, app) =>
+        {
+            SendAndWait(session, app, "list");
+            AssertBottom(session, app, width);
+
+            Rect editor = Editor(session, "response-bottom").WindowBorderBox;
+            Assert.True(Math.Abs(editor.Height - EditorFloor) < 0.5f,
+                $"the editor is {editor.Height:0.#}px tall, not its {EditorFloor} floor");
+            AssertEditorAndPaneHold(session, width, height, fullWidth: false);
+        });
+    }
+
+    /// <summary>
+    /// Both floors are minimums, the pane's included: in a window shorter than the two together
+    /// (only a headless one can be, below the 540 px minimum) neither gives way, the pane keeps
+    /// its status line, tabs and six lines of body, and its bottom runs past the window.
+    /// </summary>
+    [Fact]
+    public void Below_the_smallest_window_neither_floor_gives_way()
+    {
+        Hosted(1100, 500, (session, app) =>
+        {
+            SendAndWait(session, app, "list");
+            AssertBottom(session, app, 1100);
+
+            Rect editor = Editor(session, "response-bottom").WindowBorderBox;
+            Assert.True(Math.Abs(editor.Height - EditorFloor) < 0.5f,
+                $"the editor is {editor.Height:0.#}px tall, not its {EditorFloor} floor");
+            Rect pane = Get(session, "response-bottom").Element.WindowBorderBox;
+            Assert.True(Math.Abs(pane.Height - PaneFloor) < 0.5f, $"the pane is {pane.Height:0.#}px tall, not its {PaneFloor} floor");
+        });
+    }
+
+    /// <summary>
+    /// What the floors are for, at any height: the pane is inside the window and at least its
+    /// floor, with its status line, tabs and room for six lines of body; the editor ends where
+    /// the pane starts, and between its sub-tabs and its footer shows the request's five
+    /// headers whole. At full width it also shows all six sub-tabs and 500 px or more of URL.
+    /// </summary>
+    private static void AssertEditorAndPaneHold(HeadlessSession session, int width, int height, bool fullWidth)
+    {
+        Rect pane = Get(session, "response-bottom").Element.WindowBorderBox;
+        Assert.True(pane.Y + pane.Height <= height + 0.5f, $"the pane ends at y={pane.Y + pane.Height:0.#}, past the window");
+        Assert.True(pane.Height >= PaneFloor - 0.5f, $"the pane is {pane.Height:0.#}px tall, short of {PaneFloor}");
+        Rect body = Get(session, "response-body").Element.WindowBorderBox;
+        Assert.True(body.Height >= 6 * 14f - 0.5f, $"the response body gets {body.Height:0.#}px, short of six lines");
+        Assert.True(body.Y + body.Height <= pane.Y + pane.Height + 0.5f, "the response body runs past the pane");
+
+        Rect editor = Editor(session, "response-bottom").WindowBorderBox;
+        Assert.True(editor.Y + editor.Height <= pane.Y + 0.5f,
+            $"the editor reaches y={editor.Y + editor.Height:0.#}, into the pane at y={pane.Y:0.#}");
+        var footer = Labels(Editor(session, "response-bottom")).Single(l => l.Content == "charges/list.req");
+        Rect foot = footer.Parent!.WindowBorderBox;
+        Assert.True(foot.Y + foot.Height <= pane.Y + 0.5f,
+            $"the editor's footer reaches y={foot.Y + foot.Height:0.#}, into the pane at y={pane.Y:0.#}");
+        Rect subTabs = Get(session, "subtabs").Element.WindowBorderBox;
+        for (int i = 0; i < 5; i++)
+        {
+            Rect row = Get(session, $"header-value-{i}").Element.WindowBorderBox;
+            Assert.True(row.Y >= subTabs.Y + subTabs.Height - 0.5f && row.Y + row.Height <= foot.Y + 0.5f,
+                $"header {i + 1} spans y={row.Y:0.#}–{row.Y + row.Height:0.#}, not between the sub-tabs (y={subTabs.Y + subTabs.Height:0.#}) and the footer (y={foot.Y:0.#})");
+        }
+
+        if (!fullWidth) return;
+        AssertSubTabsAllInView(session);
+        Rect url = Get(session, "url-display").Element.WindowBorderBox;
+        Assert.True(url.Width >= 500f, $"the URL gets {url.Width:0.#}px in a {width}px window");
+    }
+
+    private static void SendAndWait(HeadlessSession session, MeridianApp app, string req)
+    {
+        Click(session, "req-" + req);
+        Click(session, "send");
+        session.PumpUntil(() => app.ActiveTab!.Result != null && app.ActiveTab.Sending == null, TimeSpan.FromSeconds(10));
+        session.PumpFrames(2);
+        Assert.NotNull(app.ActiveTab!.Result?.Response);
     }
 
     private static void Resize(HeadlessSession session, int width, int height)
