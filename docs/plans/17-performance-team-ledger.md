@@ -37,7 +37,7 @@ survey to re-rank them.
 1. ~~**gl-vk-swapchain-rebuild-leak**~~ LANDED 7a827e9 (3) — F16 Vulkan swapchain leaks ~52 MB VRAM per
    resize (MAILBOX/IMMEDIATE); destroy old before create. Re-run the resize-stretch check.
 2. ~~**gl-no-depth-buffer**~~ LANDED 0f5816a (3) — `SDL_GL_DEPTH_SIZE` 0; −15 % GPU memory per GL window.
-3. **paint-text-zero-alloc** (2; = runtime-text-draw-enumerators (4),
+3. ~~**paint-text-zero-alloc**~~ LANDED 17e3de4 (2; = runtime-text-draw-enumerators (4),
    runtime-drawtext-boxed-enumerators (8), paint-text-draw-enumerators (1)) — index loops in
    text draw, `PrefixMeasurer` closure, pooled corner `SKPath`; ~45 rows −10…−94 % allocKB.
 4. **runtime-aot-trace-type-name** (4) — trace args only while recording; Junction AOT
@@ -138,6 +138,7 @@ survey to re-rank them.
 |---|---|---|---|
 | 1 | 7a827e9 | gl-vk-swapchain-rebuild-leak | Not a real VRAM leak (Task Manager bookkeeping; nvidia-smi and DXGI flat). Real cost: ~100 ms first-present stall per chained scRGB MAILBOX rebuild. Destroy-first for scRGB MAILBOX on Windows: resize 112 → 29 ms median, resize CPU 453–480 → 198–206 ms/s, stretched frames during resize 72 % → 0, Task Manager 1,416 → 173 MB per 40 resizes. IMMEDIATE, FIFO, 8-bit keep chaining. |
 | 1 | 0f5816a | gl-no-depth-buffer | `SDL_GL_DEPTH_SIZE` 0, stencil 8 kept: GPU per GL window 55.3 → 46.8 MB at 2100×1350 (−15 %), 131.9 → 109.5 MB at 3818×2032 (−17 %); Task Manager, DXGI and nvidia-smi agree (~3 B/px). Start-up unchanged (probe first frame 427.8 → 427.2 ms, Junction 480.7 → 480.5). Junction, Vesper and a stencil-dependent FBO 0 scene byte-identical; a stencil-0 control broke the scene. |
+| 1 | 17e3de4 | paint-text-zero-alloc | Index loops on the text draw path, `PrefixMeasurer` closure moved out, pooled corner `SKPath`. allocKB −10…−96 % on 43 JIT / 44 AOT rows; dense text 18.1 → 0.8 KB/op (AOT 29.8 → 12.5); TextInput keystroke 44.9 → 2.5; render pass ~0.1 KB/frame on text screens; time flat; goldens byte-identical. |
 
 ## Examined, not worth it
 
