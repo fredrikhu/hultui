@@ -5,13 +5,13 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 1
-- **Phase:** build — **paused 2026-10-08 by the user** (weekly usage limit). Resume at
-  item **11f** (aperture-hero-scale; its first attempt was stopped before any edit), then
-  item **12** (two perf-suite scenarios), then the end-of-round full test suite
-  (`dotnet test HultUI.slnx -c Release`), then round 2's survey. To resume, run in this
-  worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
-  Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
+- **Phase:** build — resumed 2026-10-08 22:49 after a pause. Next: item **11f**
+  (aperture-hero-scale), then item **12** (two perf-suite scenarios), then the end-of-round
+  full test suite (`dotnet test HultUI.slnx -c Release`), then round 2's survey. To resume
+  after another pause, run in this worktree: `/loop Run the next step of the performance
+  team: follow docs/plans/17-performance-team.md, with state in
+  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
+  for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** fc0f4f7
