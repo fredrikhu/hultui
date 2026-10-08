@@ -245,7 +245,29 @@ The agent:
 
 After the last candidate, run the whole test suite once (`dotnet test HultUI.slnx -c
 Release`; see the `testing` skill). A failure that appeared this round is fixed or its
-commit reverted before the round closes. Then increment **Round**, set Phase `survey`.
+commit reverted before the round closes. Then set Phase `release`.
+
+### Phase `release` (the user asked for this on 2026-10-08)
+
+Every round ends on main, with CI green, before the next round starts.
+
+1. **Merge into main and push**, only after the full suite passed. Follow memory
+   `merge-race-shared-checkout`: merge in this worktree, never by running git in the
+   primary checkout. If main is checked out elsewhere: `git fetch`, `git switch --detach
+   origin/main`, `git merge --no-ff -m "Merge branch '<branch>'" <branch>`. **Gate the
+   push:** if `origin/main` moved after the full suite ran (another session pushed), the
+   merged tree is not what was tested — build and run the suite on the merge first. Then
+   `git push origin HEAD:main`, fast-forward the primary checkout only behind the guard in
+   that memory, and `git switch` back to the branch. No tags.
+2. **Wait for CI** on the pushed commit (`gh run list --branch main --commit <sha>`; memory
+   `gh-cli-available`, `ci-red-findings`). Pace the checks to how long the workflows take;
+   do not poll in a tight loop. The next round's survey starts only when every run for that
+   commit has finished.
+3. **CI red:** tell a known flake (memory `ci-red-findings`) from a real failure by
+   re-running the failed job once. A real failure is fixed on the branch, re-tested, merged
+   and pushed the same way, and CI waited for again. Never start the next round on red.
+4. Record the merge commit and the CI result in the ledger, increment **Round**, set Phase
+   `survey`.
 
 ### Phase `guidelines`
 
@@ -268,8 +290,9 @@ commit reverted before the round closes. Then increment **Round**, set Phase `su
 ### Phase `done`
 
 Stop the loop (`ScheduleWakeup` with `stop: true`) and report to the user: the commits
-with their numbers, what was examined and declined, the **Needs the user** list, and that
-nothing is pushed or merged yet.
+with their numbers, what was examined and declined, the **Needs the user** list, and the
+last merge into main with its CI result. The guidelines commit is merged and pushed like a
+round, with CI waited for.
 
 ## Rules for everyone
 
@@ -293,7 +316,8 @@ nothing is pushed or merged yet.
   (branch `claude/render-probe`).
 - **One build at a time per worktree** (memory `concurrent-dotnet-test-trap`).
 - **Create files with the Write tool**, not shell heredocs (they hang).
-- **Commit on this branch only.** No pushes, merges or tags; the user decides at the end.
+- **Commit on this branch only.** Agents never push, merge or tag. The orchestrator merges
+  into main and pushes once per round, in Phase `release`; never tags.
 - **Plain language** in commits and docs, as in the rest of `docs/`.
 
 ## When it ends

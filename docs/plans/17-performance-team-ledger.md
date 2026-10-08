@@ -8,7 +8,8 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Phase:** build — resumed 2026-10-08 22:49 after a pause. Next: item **11f**
   (aperture-hero-scale), then **11g/11h** (Meridian breakpoint, Junction compact table),
   then item **12** (two perf-suite scenarios), then the end-of-round
-  full test suite (`dotnet test HultUI.slnx -c Release`), then round 2's survey. To resume
+  full test suite (`dotnet test HultUI.slnx -c Release`), then Phase `release` (merge
+  into main, push, wait for CI), then round 2's survey. To resume
   after another pause, run in this worktree: `/loop Run the next step of the performance
   team: follow docs/plans/17-performance-team.md, with state in
   docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
