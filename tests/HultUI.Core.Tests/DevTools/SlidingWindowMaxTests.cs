@@ -82,4 +82,46 @@ public class SlidingWindowMaxTests
         w.Add(1f, t0 + 6 * TicksPerSecond);
         Assert.Equal(8f, w.Max);
     }
+
+    /// <summary>The deque is a ring over an array that starts with room for 16 samples. A
+    /// falling run longer than that makes it grow while its head is part-way round, and samples
+    /// age out from the middle of the array: every Max must still be the brute-force answer.</summary>
+    [Fact]
+    public void Max_MatchesABruteForceWindow_WhileTheRingWrapsAndGrows()
+    {
+        var w = new SlidingWindowMax(TimeSpan.FromSeconds(1));
+        long step = TicksPerSecond / 60;
+        var rng = new Random(17);
+        var history = new List<(long T, float V)>();
+
+        for (int i = 0; i < 2_000; i++)
+        {
+            // Long falling runs (up to 90 samples, more than one window at 60 Hz) between
+            // random jumps, so the deque fills past its first array and drains again.
+            float v = i % 90 < 70 ? 1_000f - i % 90 : rng.Next(0, 1_200);
+            long t = i * step;
+            w.Add(v, t);
+            history.Add((t, v));
+
+            long cutoff = t - TicksPerSecond;
+            float expected = history.Where(h => h.T >= cutoff).Max(h => h.V);
+            Assert.Equal(expected, w.Max);
+        }
+    }
+
+    /// <summary>Every window feeds eight of these one sample a frame, HUD shown or not, so a
+    /// sample must not cost an allocation. A LinkedList node each was ~0.4 KB a frame on frames
+    /// that otherwise allocate nothing (plan 17, runtime-frame-floor).</summary>
+    [Fact]
+    public void Add_AllocatesNothing()
+    {
+        var w = new SlidingWindowMax(TimeSpan.FromSeconds(5));
+        long step = TicksPerSecond / 60;
+        long t = 0;
+        for (int i = 0; i < 600; i++) w.Add(i % 7, t += step);   // ten seconds: warm and full
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1_000; i++) w.Add(i % 7, t += step);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
 }
