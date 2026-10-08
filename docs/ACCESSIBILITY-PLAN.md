@@ -168,7 +168,11 @@ Every rebuild is a new tree, though, and a node reaches its whole tree through
 wrapper at its node in the new tree (one lookup per node, nothing allocated) and
 drops the wrappers of elements the new tree lacks. A wrapper left on an old node
 kept that tree alive and answered sibling navigation from it (500 checkbox rows
-held 201 trees, 34 MB, after 200 toggles).
+held 201 trees, 34 MB, after 200 toggles). An element that moves to another
+parent (a box that gains a name takes its children) is in the same diff's
+additions and removals; the bridge keeps its wrapper, where it used to drop it
+after adding it, and on AT-SPI sends it no cache-remove, which libatspi takes
+for a dispose.
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff

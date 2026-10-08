@@ -384,6 +384,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         // against it, and it must reflect deep changes even when the root node's
         // own properties didn't change.
         Volatile.Write(ref _rootNode, root);
+        int generation = ++_generation;
 
         // 1) Materialise/refresh wrappers for added nodes (no parent refresh yet).
         foreach (var added in diff.Added)
@@ -393,16 +394,23 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             if (_wrappers.TryGetValue(added.Node.ElementId, out var existing))
                 existing.UpdateFrom(added.Node);
             else
-                _wrappers[added.Node.ElementId] = new UiaFragment(this, added.Node);
+                _wrappers[added.Node.ElementId] = existing = new UiaFragment(this, added.Node);
+            existing.Generation = generation;
         }
 
-        // 2) Drop wrappers (and cached native objects) for removed nodes.
+        // 2) Drop wrappers (and cached native objects) for removed nodes — except an element
+        //    this same diff added again: it moved to another parent (a box that gained a name
+        //    takes its children), and step 1 already pointed its wrapper at its new place.
+        //    Dropping it left the element with no wrapper, so navigation to it found nothing.
         foreach (var removed in diff.Removed)
         {
-            _wrappers.TryRemove(removed.Node.ElementId, out _);
+            var id = removed.Node.ElementId;
+            if (_wrappers.TryGetValue(id, out var wrapper) && wrapper.Generation == generation)
+                continue;
+            _wrappers.TryRemove(id, out _);
             // Drop the bridge's reference to the element's cached native object;
             // it frees once any client references are also released.
-            if (_nativeByElement.TryRemove(removed.Node.ElementId, out var native))
+            if (_nativeByElement.TryRemove(id, out var native))
                 Marshal.Release(native);
         }
 
@@ -418,7 +426,6 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         //    and navigated its siblings in it. One lookup per node and nothing
         //    allocated; each swap is one reference write, so a UIA thread reading a
         //    wrapper meanwhile walks its old tree or its new one, either consistent.
-        int generation = ++_generation;
         if (Rebase(root, generation) != _wrappers.Count)
             DropStale(generation);
 
@@ -452,7 +459,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
                 RaisePropertyChanged(wrapper, change.PropertyName);
     }
 
-    // The apply pass, counted, so a wrapper the rebase did not reach can be told apart. UI thread only.
+    // The apply pass, counted, so a wrapper the rebase did not reach, and one this pass added,
+    // can be told apart. UI thread only.
     private int _generation;
 
     /// <summary>

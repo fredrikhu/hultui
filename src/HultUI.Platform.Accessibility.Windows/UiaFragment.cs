@@ -31,7 +31,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     public AccessibilityNode Node => Volatile.Read(ref _node);
     private AccessibilityNode _node;
 
-    /// <summary>The bridge's last apply pass that found this element in its tree. UI thread only.</summary>
+    /// <summary>The bridge's last apply pass that added this element or found it in its tree.
+    /// UI thread only.</summary>
     internal int Generation;
 
     private string? _name;

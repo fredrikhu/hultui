@@ -181,6 +181,48 @@ public class UiaWrapperTreeTests
     }
 
     [WindowsFact]
+    public void ABoxThatGainsAName_TakesItsChildren_WhichKeepTheirWrappers()
+    {
+        // A plain box has no node: its children hang under the nearest node above it. Named, it
+        // has one, and they move under it: the same diff adds them under the box and removes
+        // them from where they were. The bridge applied the adds first, then the removals, and
+        // so dropped the wrappers of the very elements it had just added.
+        using var rig = new Rig();
+        var title = TextB.New("Title");
+        var a = TextB.New("A");
+        var b = Checkbox.New(false, "B");
+        var group = Box.New().Children(a, b);
+        rig.Mount(Flex.Column().FlexShrink(0).Children(title, group));
+        var wrapperA = rig.Wrapper(a);
+        Assert.NotNull(wrapperA);
+        Assert.Null(rig.Wrapper(group));
+        Assert.Equal(a.Id, rig.Navigate(title, UiaInterop.NavigateDirection_NextSibling));
+
+        group.AccessibleName = "Group";
+        title.Content = "Title 2"; // a change a reader sees, so the tree is rebuilt
+        rig.Session.PumpFrame();
+
+        Assert.Equal(a.Id, rig.Navigate(group, UiaInterop.NavigateDirection_FirstChild));
+        Assert.Equal(b.Id, rig.Navigate(group, UiaInterop.NavigateDirection_LastChild));
+        Assert.Equal(group.Id, rig.Navigate(a, UiaInterop.NavigateDirection_Parent));
+        Assert.Equal(b.Id, rig.Navigate(a, UiaInterop.NavigateDirection_NextSibling));
+        Assert.Equal(group.Id, rig.Navigate(title, UiaInterop.NavigateDirection_NextSibling));
+        // The same wrapper, so a client holding the element's provider still holds a live one.
+        Assert.Same(wrapperA, rig.Wrapper(a));
+        Assert.Same(rig.Bridge.RootNode, RootOf(rig.Wrapper(b)!.Node));
+
+        // And back: unnamed, the box is gone and its children move up again.
+        group.AccessibleName = null;
+        title.Content = "Title 3";
+        rig.Session.PumpFrame();
+
+        Assert.Null(rig.Wrapper(group));
+        Assert.Equal(a.Id, rig.Navigate(title, UiaInterop.NavigateDirection_NextSibling));
+        Assert.Equal(b.Id, rig.Navigate(a, UiaInterop.NavigateDirection_NextSibling));
+        Assert.Same(wrapperA, rig.Wrapper(a));
+    }
+
+    [WindowsFact]
     public void ANewRoot_DropsTheWrappersOfTheOldOne()
     {
         // A new root diffs from no tree: everything is added and nothing removed, so the

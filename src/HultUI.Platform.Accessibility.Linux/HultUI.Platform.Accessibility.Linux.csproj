@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Platform.Accessibility.Linux.Tests" />
+    <!-- Drives the bridge from a headless window, with its signals recorded (IAtSpiSignals). -->
+    <InternalsVisibleTo Include="HultUI.Headless.Tests" />
   </ItemGroup>
 
   <ItemGroup>
