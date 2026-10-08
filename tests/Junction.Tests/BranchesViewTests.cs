@@ -2,6 +2,9 @@ using System.Reflection;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Headless;
 using Junction.Git;
 using Xunit;
@@ -149,6 +152,106 @@ public class BranchesViewTests
             Assert.False(Shows(session, "login"), "'*crash' matched a branch that does not end in it");
         });
     }
+
+    [Theory]
+    [InlineData(1440, true)]
+    [InlineData(1440, false)]
+    [InlineData(1200, true)]
+    [InlineData(1200, false)]
+    [InlineData(1100, true)]
+    [InlineData(1100, false)]
+    [InlineData(1000, true)]
+    [InlineData(1000, false)]
+    public void TheNameCellKeepsItsNameAndTagsInsideItsColumn(int width, bool tree)
+    {
+        // At 1000 px the BRANCH column is narrower than a tree row's indent, glyph and
+        // "current" tag. The tag never shrank (FlexShrink(0)), so it stuck out over LAST
+        // COMMIT by its own width; a deep ref's indent and glyph did the same. Now the cell
+        // clips, the name truncates first, and a tag that does not fit whole is left out:
+        // whole or not at all — never truncated to an empty outline or cut at the edge.
+        Hosted(tree, repo =>
+        {
+            repo.Git("checkout", "-b", "claude/happy-wiles-1e3e0e");
+            // Folders with two children at every level, so the tree cannot fold any of them
+            // into its parent: the sync leaves sit three indents deep, and at 1000 px their
+            // glyph alone starts past the column's edge.
+            repo.Git("branch", "team/platform/sync/q4-hardening-of-the-sync-path");
+            repo.Git("branch", "team/platform/sync/q4-retry-budget");
+            repo.Git("branch", "team/platform/retry/backoff");
+            repo.Git("branch", "team/web/login-copy");
+        }, (repo, session, app) =>
+        {
+            session.Window.SetClientSize(width, 760);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.Digit5);
+            PumpForList(session);
+            session.PumpFrames(2);
+
+            var subjects = LayoutProbe.Descendants<TextElement>(Root(session),
+                t => t.Content == "initial" && t.Layout.AbsoluteBorderBox.Height > 0);
+            Assert.True(subjects.Count >= 6, $"expected the six branch rows on screen, found {subjects.Count}");
+            foreach (var subject in subjects)
+            {
+                var lastCommit = subject.Parent!;
+                var row = lastCommit.Parent!;
+                float edge = lastCommit.WindowBorderBox.X;
+                foreach (var e in LayoutProbe.Descendants<Element>(row.Children[0]))
+                {
+                    var v = Visible(e);
+                    Assert.True(v.Width <= 0.5f || v.Height <= 0.5f || v.X + v.Width <= edge + 0.5f,
+                        $"{Describe(e)} draws to x={v.X + v.Width:0.#}, past the BRANCH column's edge at x={edge:0.#}");
+                }
+            }
+
+            var tagLabel = LayoutProbe.Descendants<TextElement>(Root(session),
+                t => t.Content == "current" && t.Inherited.FontSize is < 11f).Single();
+            var tag = tagLabel.Parent!;
+            var shown = Visible(tag);
+            bool hidden = shown.Width <= 0.5f || shown.Height <= 0.5f;
+            float natural = TextMeasure.MeasureWidth("current", 9f);
+            if (!hidden)
+            {
+                var whole = tag.WindowBorderBox;
+                Assert.True(Math.Abs(shown.Width - whole.Width) < 0.5f && Math.Abs(shown.Height - whole.Height) < 0.5f,
+                    $"the current tag is cut: {shown.Width:0.#}x{shown.Height:0.#} of {whole.Width:0.#}x{whole.Height:0.#} shows");
+                Assert.True(tagLabel.Layout.Width >= natural - 0.5f,
+                    $"the current tag's label is truncated: {tagLabel.Layout.Width:0.#} of {natural:0.#}px");
+            }
+            // And it goes only when it has to: where the name's row has room for the whole tag
+            // (its label, padding 8 + 8, border 1 + 1, the 6px gap), the name truncates instead.
+            float room = tag.Parent!.Layout.Width;
+            if (room >= natural + 18f + 6f + 1f)
+                Assert.False(hidden, $"the current tag is hidden in a {room:0.#}px row that has room for it");
+            if (width >= 1440)
+            {
+                Assert.False(hidden, "the current tag is hidden at 1440 px");
+                // Where the name fits whole, the tag sits right after its text, not at the
+                // column's end. (The text, not the label's box: a box grown to fill the row
+                // would put the tag at the end and still touch it.)
+                var name = LayoutProbe.Descendants<TextElement>(tag.Parent!, t => t.Content == "happy-wiles-1e3e0e").Single();
+                float text = TextMeasure.MeasureWidth(name.Content, 12.5f, Fonts.Mono);
+                float gap = tag.WindowBorderBox.X - (name.WindowBorderBox.X + text);
+                Assert.True(gap < 8f, $"the current tag sits {gap:0.#}px after the end of the name");
+            }
+        });
+    }
+
+    /// <summary>Where an element can draw: its window box, cut by every ancestor that clips.</summary>
+    private static Rect Visible(Element e)
+    {
+        Rect r = e.WindowBorderBox;
+        for (var a = e.Parent; a is not null; a = a.Parent)
+        {
+            Rect c = a.WindowBorderBox;
+            float x0 = r.X, x1 = r.X + r.Width, y0 = r.Y, y1 = r.Y + r.Height;
+            if (a.Box.OverflowX != Overflow.Visible) { x0 = Math.Max(x0, c.X); x1 = Math.Min(x1, c.X + c.Width); }
+            if (a.Box.OverflowY != Overflow.Visible) { y0 = Math.Max(y0, c.Y); y1 = Math.Min(y1, c.Y + c.Height); }
+            r = new Rect(x0, y0, Math.Max(0f, x1 - x0), Math.Max(0f, y1 - y0));
+        }
+        return r;
+    }
+
+    private static string Describe(Element e) => e is TextElement t ? $"\"{t.Content}\"" : e.GetType().Name;
 
     /// <summary>Waits for the virtualized table to realize its rows and hands back the list.</summary>
     private static Element PumpForList(HeadlessSession session)

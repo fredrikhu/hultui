@@ -191,11 +191,13 @@ public partial class JunctionApp
     }
 
     /// <summary>A table header label in its grid column. The cell is stretched to the
-    /// track, so the label's alignment within it is a flex justification.</summary>
+    /// track, so the label's alignment within it is a flex justification. One line: in a
+    /// narrow window "LAST COMMIT" broke into three in its 38px column; it truncates now.</summary>
     private static Element HeaderCell(string label, int column, JustifyContent align)
     {
         var box = Flex.Row(gap: 0).JustifyContent(align).GridColumn(column);
-        box.AddChild(Text.New(label).FontSize(10.5f).LetterSpacing(0.6f).TextColor(Nocturne.On(0.55)));
+        box.AddChild(Text.New(label).FontSize(10.5f).LetterSpacing(0.6f).TextColor(Nocturne.On(0.55))
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         return box;
     }
 
@@ -293,8 +295,11 @@ public partial class JunctionApp
 
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         // The tree's indent lives inside this cell so every column right of it stays
-        // aligned however deep the ref sits.
-        var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0);
+        // aligned however deep the ref sits. The cell clips: in a narrow window the column
+        // can be narrower than its indent, glyph and tag, and what does not fit is cut at
+        // the column's edge instead of being drawn over LAST COMMIT.
+        var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0)
+            .OverflowX(Overflow.Hidden);
         if (depth > 0)
             branchCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         if (inFolder)
@@ -317,15 +322,23 @@ public partial class JunctionApp
 
         var titleCol = Flex.Column(gap: 1).FlexShrink(1).FlexBasis(Dimension.Px(0)).FlexGrow(1);
         var titleRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-        titleRow.AddChild(Ui.Mono(pb.Title, 12.5f, b.IsRemote ? Nocturne.On(0.72) : Nocturne.Text)
-            .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        var name = Ui.Mono(pb.Title, 12.5f, b.IsRemote ? Nocturne.On(0.72) : Nocturne.Text)
+            .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1);
+        var tags = new List<BoxElement>(2);
         if (compareRole != null)
-            titleRow.AddChild(Ui.TagOutline(compareRole, Nocturne.Accent, 9f).FlexShrink(0));
+            tags.Add(Ui.TagOutline(compareRole, Nocturne.Accent, 9f));
         if (b.IsCurrent)
-            titleRow.AddChild(Ui.TagOutline("current", Nocturne.Accent, 9f));
+            tags.Add(Ui.TagOutline("current", Nocturne.Accent, 9f));
         // The remote's name is the folder this row sits under, so only a flat row says it.
         if (b.IsRemote && !inFolder)
-            titleRow.AddChild(Ui.Chip(Icons.Cloud, remoteName, Nocturne.Neutral800, Nocturne.Neutral300));
+            tags.Add(Ui.Chip(Icons.Cloud, remoteName, Nocturne.Neutral800, Nocturne.Neutral300));
+        // The tags after the name: the name truncates first, then a tag that no longer fits
+        // whole is left out — it used to stick out over LAST COMMIT by its own width at 1000 px.
+        if (tags.Count == 0 || !Ui.NameThenWholeTags(titleRow, name, pb.Title, 12.5f, Fonts.Mono, tags))
+        {
+            titleRow.AddChild(name);
+            foreach (var tag in tags) titleRow.AddChild(tag);
+        }
         titleCol.AddChild(titleRow);
         if (pb.HasSub && !inFolder)
             titleCol.AddChild(Text.New(pb.Sub).FontSize(10.5f).TextColor(Nocturne.On(0.42))
