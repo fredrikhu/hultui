@@ -336,10 +336,24 @@ public sealed partial class ApertureApp
     internal static int HeroPixels(float layoutSize, float scale) =>
         (ArtworkPixels(layoutSize, scale) + HeroStep - 1) / HeroStep * HeroStep;
 
-    /// <summary>The hero on screen: which artwork it is, the URL of the picture it draws, and
-    /// the URL it last asked for (the same one, once that has landed).</summary>
-    private string? _heroArt;
-    private Uri? _heroShown, _heroAsked;
+    /// <summary>
+    /// How many heroes' pictures the app keeps: the page on screen and the three behind it,
+    /// for Back. The cache bounds pictures by count, 400 of them, and a hero counted as one,
+    /// like a poster: every page visited kept its own, 9 MB at 150 % in a 1,400-wide window
+    /// (33 MB on a 4K monitor). A page further back than this fetches its hero again.
+    /// </summary>
+    internal const int HeroesKept = 4;
+
+    /// <summary>A hero kept: which artwork it is, the URL of the picture it draws, and the URL
+    /// it last asked for (the same one, once that has landed).</summary>
+    private sealed class HeroPicture(string art)
+    {
+        public string Art { get; } = art;
+        public Uri? Shown, Asked;
+    }
+
+    /// <summary>The heroes kept, the latest last.</summary>
+    private readonly List<HeroPicture> _heroes = [];
 
     /// <summary>
     /// The picture for a hero (an item page's, a request title page's): asked for at the
@@ -352,7 +366,8 @@ public sealed partial class ApertureApp
     /// <para>When the same artwork is asked for at another size — the window was resized past
     /// a step, or moved to a monitor with another scale — the picture on screen stays up until
     /// the new one lands, and then goes rather than staying in the cache beside it. So does a
-    /// size the window passed over before it landed.</para>
+    /// size the window passed over before it landed, and so does the picture of a page more
+    /// than <see cref="HeroesKept"/> heroes back.</para>
     /// </summary>
     private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) HeroArtwork(
         string? art, double? aspect, Func<int?, int?, Uri?> sized)
@@ -360,26 +375,39 @@ public sealed partial class ApertureApp
         float width = HeroWidth, height = HeroHeight;
         bool byHeight = aspect is { } a && a > width / height * 1.005;
         int pixels = HeroPixels(byHeight ? height : width, _artworkScale);
-        var url = art is null ? null : byHeight ? sized(null, pixels) : sized(pixels, null);
-        if (url is null) return _posters.Get(null);
+        if (art is null || (byHeight ? sized(null, pixels) : sized(pixels, null)) is not { } url)
+            return _posters.Get(null);
 
-        if (art != _heroArt)
+        var hero = _heroes.Find(h => h.Art == art);
+        if (hero is null)
         {
-            // Another page: nothing on screen to replace. The last page's picture stays in
-            // the cache for Back.
-            _heroArt = art;
-            _heroShown = _heroAsked = null;
+            hero = new HeroPicture(art);
+            if (_heroes.Count == HeroesKept)
+            {
+                // The page furthest back: its picture goes once the downloads that follow
+                // have landed.
+                var oldest = _heroes[0];
+                _heroes.RemoveAt(0);
+                if (oldest.Shown is { } kept) _posters.Retire(kept);
+                if (oldest.Asked is { } asked) _posters.Retire(asked);
+            }
         }
+        else
+        {
+            _heroes.Remove(hero);
+        }
+        _heroes.Add(hero);
+
         // Every other size of this artwork goes once the new picture is in: the one on screen
         // stands in until then, and one the window passed over before it landed (a drag across
         // several steps) is not wanted at all.
-        if (_heroAsked is { } previous && previous != url && previous != _heroShown) _posters.Retire(previous);
-        var standIn = _heroShown is { } shown && shown != url ? shown : null;
+        if (hero.Asked is { } previous && previous != url && previous != hero.Shown) _posters.Retire(previous);
+        var standIn = hero.Shown is { } shown && shown != url ? shown : null;
         if (standIn is not null) _posters.Retire(standIn);
-        _heroAsked = url;
+        hero.Asked = url;
 
         var result = _posters.Get(url, standIn);
-        if (_posters.IsReady(url)) _heroShown = url;
+        if (_posters.IsReady(url)) hero.Shown = url;
         return result;
     }
 

@@ -1786,6 +1786,45 @@ public class ApertureAppHostTests
     }
 
     [Fact]
+    public void OnlyTheLastFewHeroesAreKept()
+    {
+        var library = Library();
+        string[] pages = ["m1", "m2", "m3", "s1", "se1"];
+        foreach (var id in pages)
+            library.Update(library.Item(id)! with { BackdropImageTag = "bd-" + id });
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            var heroes = new List<HultUI.Core.Rendering.IImageSource>();
+            foreach (var id in pages)
+            {
+                app.Navigate(new Route(ApertureView.Detail, id, id));
+                session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: > 400f } s
+                    && !heroes.Contains(s), TimeSpan.FromSeconds(5));
+                heroes.Add(Hero(session)!.Source!);
+            }
+            Assert.Equal(5, ApertureApp.HeroesKept + 1);
+
+            // Five pages in, the first page's hero is no longer held; the four after it are.
+            session.PumpUntil(() => !heroes[0].IsLoaded, TimeSpan.FromSeconds(5));
+            Assert.False(heroes[0].IsLoaded, "the hero of a page five back is still held");
+            Assert.All(heroes.Skip(1), h => Assert.True(h.IsLoaded, "a hero of the last four pages was dropped"));
+
+            // Back on the second page, its hero is still there; on the first it is asked
+            // for again.
+            int asked = artwork.Count("/Images/Backdrop");
+            for (int i = 0; i < 3; i++) app.GoBack();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Same(heroes[1], Hero(session)!.Source);
+            Assert.Equal(asked, artwork.Count("/Images/Backdrop"));
+            app.GoBack();
+            session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: > 400f },
+                TimeSpan.FromSeconds(5));
+            Assert.Equal(asked + 1, artwork.Count("/Images/Backdrop"));
+        }, artwork: artwork);
+    }
+
+    [Fact]
     public void AHeroInANarrowWindowIsAskedForByHeight()
     {
         var library = Library();

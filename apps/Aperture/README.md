@@ -93,7 +93,9 @@ before the picture has fewer pixels than the screen, rather than at every width 
 fetched a picture per frame and kept them all). The picture on screen stays up until the new
 size lands, then goes (`PosterCache.Retire(Uri)`). A request title page asks TMDB for `w1920`
 above 1,280 device pixels: not a size TMDB's configuration lists, but one its image server serves,
-and never the 4K original.
+and never the 4K original. The app keeps the last four heroes, the page on screen and three
+behind it for Back: the cache bounds pictures by count, and a hero is 9 MB at 150 % in a
+1,400-wide window, so keeping one for every page visited added up.
 
 **The scrubber is cut into chapters** when the file has marks, and fills to the pointer as
 it crosses, so where you would land reads differently from where you are.
