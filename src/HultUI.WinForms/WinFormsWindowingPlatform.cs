@@ -1,5 +1,7 @@
 using HultUI.Core.Platform;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
+using HultUI.WinForms.Interop;
 
 namespace HultUI.WinForms;
 
@@ -30,6 +32,17 @@ internal sealed class WinFormsWindowingPlatform : IWindowingPlatform
     /// </summary>
     private WglPlatformWindow? _lastCreated;
 
+    /// <summary>
+    /// The text services every control's surface draws and measures with: fonts resolved
+    /// once, caches shared, and nothing of them left behind when a control's handle is
+    /// destroyed or recreated. The preloaded set when <see cref="GraphicsPreload"/> made one.
+    /// Shared on one thread only — every control belongs to the one application and its UI
+    /// thread.
+    /// </summary>
+    private SkiaTextServices? _text;
+
+    private SkiaTextServices TextServices() => _text ??= GraphicsPreload.TakeText() ?? new SkiaTextServices();
+
     internal WglPlatformWindow TakeLastCreated()
     {
         var created = _lastCreated
@@ -48,7 +61,7 @@ internal sealed class WinFormsWindowingPlatform : IWindowingPlatform
                 "belong to a HultUIControl; create them through the control rather than by " +
                 "calling Application.CreateWindow directly.");
         PendingControl = null;
-        _lastCreated = new WglPlatformWindow(control, title, style);
+        _lastCreated = new WglPlatformWindow(control, title, style, TextServices);
         return _lastCreated;
     }
 
@@ -68,5 +81,9 @@ internal sealed class WinFormsWindowingPlatform : IWindowingPlatform
     /// handler decides when the next <c>RunFrame</c> runs.</summary>
     public void Wake() { }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        _text?.Dispose();
+        _text = null;
+    }
 }

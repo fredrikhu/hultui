@@ -8,12 +8,19 @@ namespace HultUI.Rendering.Skia;
 /// The text half of a render surface — font collection, shaper, layout pipeline and
 /// measure context — with no GL context, window or display behind it.
 ///
-/// <para>Both render surfaces build one of these. It is a separate object because
-/// nothing in it needs a GPU: an app can construct it (and measure text with it)
-/// while the OpenGL driver is still loading on another thread, which is what
-/// <c>HULTUI_GL_PRELOAD</c> does. See <see cref="SkiaGLRenderSurface"/>.</para>
+/// <para>It is a separate object because nothing in it needs a GPU: an app can construct
+/// it (and measure text with it) while the OpenGL driver is still loading on another
+/// thread, which is what <c>HULTUI_GL_PRELOAD</c> does. See
+/// <see cref="SkiaGLRenderSurface"/>.</para>
+///
+/// <para>Several surfaces can share one, and the windowing platforms share one between
+/// all the windows of an application, so a window opens with the fonts resolved and the
+/// text caches warm, and closing one gives back nothing another needs. Sharing is for
+/// one thread: nothing in here takes a lock, and an application's windows all run on its
+/// UI thread. A surface given one leaves it to its owner to dispose; a surface that built
+/// its own disposes it with itself.</para>
 /// </summary>
-public sealed class SkiaTextServices
+public sealed class SkiaTextServices : IDisposable
 {
     public SkiaFontCollection Fonts { get; }
     public SkiaTextShaper Shaper { get; }
@@ -44,4 +51,12 @@ public sealed class SkiaTextServices
         var font = Fonts.Resolve(familyName, FontWeight.Regular, FontSlant.Normal);
         _ = font.LineHeight;
     }
+
+    /// <summary>
+    /// Gives back the shaper's HarfBuzz fonts, which nothing else frees (see
+    /// <see cref="SkiaTextShaper"/>). Measuring afterwards still works, more slowly; the
+    /// font collection's Skia objects are left to their finalizers, since text laid out
+    /// before still refers to them.
+    /// </summary>
+    public void Dispose() => Shaper.Dispose();
 }

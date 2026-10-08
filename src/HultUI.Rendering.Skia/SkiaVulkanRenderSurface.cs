@@ -30,6 +30,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private readonly GRContext _grContext;
     private readonly SkiaRenderContext _renderContext = new();
     private readonly SkiaTextServices _text;
+    private readonly bool _ownsText;
 
     /// <summary>
     /// This frame's wrapped image, thrown away at the end of it.
@@ -86,9 +87,11 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public IMeasureContext MeasureContext => _text.MeasureContext;
 
     /// <param name="host">The window's Vulkan device and swapchain.</param>
-    /// <param name="text">A text pipeline to adopt rather than build. Nothing in it touches
-    /// the GPU, so a caller that warmed one on another thread can hand it over — the same
-    /// arrangement <see cref="SkiaGLRenderSurface"/> has.</param>
+    /// <param name="text">A text pipeline to use rather than build. Nothing in it touches
+    /// the GPU, so a caller that warmed one on another thread can hand it over, and the
+    /// windows of an application share one — the same arrangement
+    /// <see cref="SkiaGLRenderSurface"/> has. The caller keeps it and disposes it; the
+    /// surface does not. Null builds a fresh one, which the surface disposes with itself.</param>
     public SkiaVulkanRenderSurface(IVulkanSurfaceHost host, SkiaTextServices? text = null)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -123,6 +126,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _grContext = GRContext.CreateVulkan(_backend)
             ?? throw new InvalidOperationException("Failed to create a Skia Vulkan context");
 
+        _ownsText = text is null;
         _text = text ?? new SkiaTextServices();
         _renderContext.SetPipeline(_text.Pipeline);
 
@@ -709,6 +713,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _grContext.Dispose();
         _backend.Dispose();
         _extensions.Dispose();
+        if (_ownsText) _text.Dispose();
     }
 
     // The handful of Vulkan enum values this file needs, as literals rather than as a

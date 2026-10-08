@@ -178,6 +178,8 @@ Each window has its own:
 | DevTools overlay | `window.DevTools` (F12 per window) |
 | Element tree | `window.SetRoot(element)` |
 
+Text is not per window. Every window of an application, the DevTools inspector's included, draws and measures with one set of text services: the fonts, the HarfBuzz shaper and the text caches. A new window opens with the fonts resolved and the caches warm, and closing one frees nothing another needs; the platform gives the set back when the application is disposed. A window that built its own used to keep about 150 KB of managed memory beside the others for the same text, and leaked its HarfBuzz fonts when it closed (+44 KB of native memory per window over 600 open/close cycles). The set is used on the UI thread only, like the rest of the tree.
+
 The DevTools inspector is application-wide rather than per-window: one panel, re-targeted with `app.OpenInspector(window)`. Its own window is flagged `IsDevToolsWindow`, so it is excluded from inspection and does not keep `Run()` alive after your windows close. See [DEVTOOLS.md](DEVTOOLS.md).
 
 ---
