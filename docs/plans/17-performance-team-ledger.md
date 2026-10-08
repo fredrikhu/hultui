@@ -54,7 +54,7 @@ survey to re-rank them.
    layout-hover-common-ancestor (1)) — SlidingWindowMax nodes, PumpEvents delegate, boxed
    Children enumerators in tree walks, FocusTraversal `OrderBy` skip, hover common-ancestor
    HashSet; steady frames to ~0 B, input/tab −80 %.
-8. **text-word-alloc-diet** (5) — exact-size glyph arrays, width-only MeasureString, span
+8. ~~**text-word-alloc-diet**~~ LANDED 0178784 (5) — exact-size glyph arrays, width-only MeasureString, span
    word-cache lookups; 14 rows −10…−50 %.
 9. **runtime-text-services-per-window** (4) — dispose or share SkiaTextServices; closes a
    ~29 KB-per-window leak, stops per-window cache duplication.
@@ -95,6 +95,9 @@ survey to re-rank them.
 
 ### Waiting
 
+- **tooling-textbench-warmup** (5) — TextBench filtered to a few rows measures tier-0 code
+  (3.6× slower, inflated differences) unless `DOTNET_TC_CallCountingDelayMs=0`; even full runs
+  showed a false +11 %. Warm up by time as the perf suite does. Small.
 - **layout-zorder-sorted-allocs** (1) — `ZOrderHelper.Sorted` allocates int[], a closure, a
   Comparison and an Element[] per call for containers with sticky or z-index children:
   ~1.4 KB/frame on scroll/sticky sections wheel. Small.
@@ -179,6 +182,7 @@ survey to re-rank them.
 | 1 | f84893d | aperture-poster-decode-scale | Aperture artwork requested at layout size × display scale (25 % steps), by the side that decides a cover fit; refetched on scale change with the old picture as stand-in. Real library, 27 pictures: decoded 17.6 → 4.4 MB at 100 % (−75 %), 9.9 MB at 150 % (−44 %), unchanged at 200 %; private 63.8 → 42.9 MB (−33 %) at 100 %, 63.2 → 54.1 (−14 %) at 150 %; Skia mip cache 5.9 → 0 MB. At the 400 cap 258 → 65 / 145 MB. As sharp or sharper (≥1 source px per device px). Same fix for cast, chapters and request-server pictures. |
 | 1 | 4195da4, 7096431 | a11y-uia-wrapper-rebase | Every surviving UIA wrapper points at the current tree after each diff; stale wrappers dropped; no per-diff full-tree index. Trees held after 200 toggles 221 → 1 (30–34 MB → 0 retained); ApplyChanges 47–211 → 0.3–1.4 KB per diff; new Windows-only perf rows with the real UIA bridge on a hidden HWND: allocKB −22 / −29 / −30 % (JIT and AOT), label edit min −5.4 %; 0 slower. UIA event stream identical (1,118 events); sibling navigation now current. |
 | 1 | 54631d4, 8aed816, 646139a, 9af7d75, 480b141, 65a01a3 | runtime-frame-floor (+ layout walk half, hover common ancestor, slider/number-field paint) | Steady and idle frames 0 B (tiles, dense text, tweens 0.6–0.7 → 0.0 KB/op; control screen repaint 1,296 → 0 B); Tab 28.4 → 0.3 KB (AOT 34.1 → 0.3); theme switch −62/−56 %; hover −83 %; component rebuilds −5.6 % alloc, −5 % time; 32 rows ≥10 % down, none up, JIT and AOT; 0 slower. Junction/Vesper AOT frames not re-measured. |
+| 1 | 0178784 | text-word-alloc-diet | Word cache looked up in place by a span (kept alternate lookup, per-run font hash), exact glyph arrays, widths without glyphs, LRU node reuse. allocKB −10…−60 % on 17 rows JIT and AOT, none up (text/ellipsis 7,261 → 3,418 KB/op, text/wrap 3,093 → 1,572, richtext/open 18,172 → 11,211, 600-span paragraph 1,924 → 776); 0 slower; text/open −10 %, richtext/open −26 % min; output bit-identical over 1.78 M layouts; goldens byte-identical. |
 
 ## Examined, not worth it
 
