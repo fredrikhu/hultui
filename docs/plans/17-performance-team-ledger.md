@@ -43,11 +43,15 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    — `SdlWindowingPlatform.cs:84` allocates 88/72 B per loop pass (idle 5.7 KB/s, animating
    3–4 MB/s); SDL truncates `WaitForEvents(1)` to 0, so the loop spins the last ~1 ms of
    every interval while dirty (41–46k passes/s for 200 frames). Real-window steady frames → 0 B.
-2. **vk-minimized-swapchain-lost** (3, correctness) — a Vulkan window that draws while
+2. ~~**vk-minimized-swapchain-lost**~~ LANDED 82e382b, 3766d78 (3, correctness) — a Vulkan window that draws while
    minimized never draws again (orphaned swapchain at SdlVulkanHost.cs:585, OUT_OF_DATE
    forever, later resizes fail with ErrorNativeWindowInUseKHR) and spins ~50k passes/s.
    Destroy on the zero-extent skip, retry at acquire, no spin while a dirty window cannot
    begin a frame.
+2b. **media-minimized-playback** (3/8, verification of 82e382b) — the UI thread no longer
+   renders mpv while minimized, so mpv may wait its 200 ms render timeout per frame. Check
+   Reel (and the VideoPlayer sample) playing a compressed clip while minimized: audio
+   continuity, frame drops, A/V sync and resume after restore, CPU; fix if needed.
 3. **text-textarea-patch-keeps-lines + text-textarea-span-scan** (5) — a patch with the same
    text re-wraps the whole TextArea (Meridian: 19,013 lines, 1.4 MB per keystroke in its
    editors; 25k unique lines 64 MB); SpansForLine scans from span 0 (JSON wheel 612k
@@ -158,6 +162,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 1 | 1c8ee98, 758fa03 | apps-scenario-virtual-selection-walk-a11y + apps-scenario-textarea-highlighted-json | 5 perf-suite rows (94 scenarios now): virtual/selection walk 1,000 rows (+ a11y bridge on, + UIA), text/open and text/wheel highlighted JSON (19,013 lines, 22,968 spans identical to HultUI.Syntax). JIT min 0.466 / 0.534 / 0.565 / 10.74 / 0.939 ms, 108 / 412 / 412 / 10,811 / 14 KB; realize ~10 % and a11y 12–18 % of the walk step (below the app survey's shares: 5 elements per row vs ~14 in Junction). JSON open median ≈ 2× min from GCs. |
 | 2 | 0ceecea | runtime-sdl-pump-closure | A real SDL loop pass allocates 0 B instead of 88 B (AOT 72). GL idle 5.5 KB/s → 0; GL spinner 3–4 MB/s → 0, no GCs; Vulkan idle 11.7 → 6.2 KB/s (display-colour poll left), spinner 4.45 → 0.41 MB/s (render target per frame left). Test on SDL's dummy driver runs in the normal suite. |
 | 2 | ff7a970, 2612de1 | runtime-paced-wait-spin | SDL on Windows rounded waits down (1 ms → 0); the wait now asks 1 ms more. Spinner 45–49k → 420–447 loop passes/s (224–245 → 2.1–2.2 per frame); UI-thread cycles −39…−57 %; frames/s 200 → 200 on GL and Vulkan, JIT and AOT; live resize still draws inside every step; headless suite flat. Linux/macOS not changed (SDL rounds correctly there per its source). |
+| 2 | 82e382b, 3766d78 | vk-minimized-swapchain-lost | A Vulkan window that drew while minimized draws again: 0 → 26–31 frames in the second after restore; resize ErrorNativeWindowInUseKHR → 29–31 frames (F16 MAILBOX, 8-bit, FIFO). Minimized and dirty 252–264 → 47–49 loop passes/s; idle after restore 401–403 → 61. **Minimized windows are no longer drawn** (GL and Vulkan): GL with a 30 Hz change 129 frames per 5 s, 47–56 ms/s → 0 frames, 9–13 ms/s. Validation 0 messages (before: a leaked VkSwapchainKHR); resize stretch 0; suite flat. Video while minimized unverified (step 2b). |
 
 ## Examined, not worth it
 
