@@ -39,7 +39,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Round 2 build order
 
-1. **runtime-sdl-pump-closure + runtime-paced-wait-spin** (4; = sdl-pump-closure-per-pass (3))
+1. ~~**runtime-sdl-pump-closure + runtime-paced-wait-spin**~~ LANDED 0ceecea, ff7a970, 2612de1 (4; = sdl-pump-closure-per-pass (3))
    — `SdlWindowingPlatform.cs:84` allocates 88/72 B per loop pass (idle 5.7 KB/s, animating
    3–4 MB/s); SDL truncates `WaitForEvents(1)` to 0, so the loop spins the last ~1 ms of
    every interval while dirty (41–46k passes/s for 200 frames). Real-window steady frames → 0 B.
@@ -89,6 +89,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **test-frame-pacing-event-precondition** (4, test) — UiTests `FramePacingTests.AnEventEveryMillisecond` fails its own precondition (its event thread's `Sleep(1)` takes ~2 ms, so ~510 events < the 606 it requires). Fix the test.
 - **runtime-idle-wakeups** (4/3) — 65 wakes/s idle in every app. Medium; after items 1–2
   (same loop code). WinForms host ticks every 8 ms.
 - **vk-swapchain-target-per-frame** (3) — Vulkan steady frame 2,658 → ~610 B; changes HDR.md's
@@ -155,6 +156,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 1 | 2bca842 | junction-branches-compact | Branches/Tags compact below 934 px of content (date only, ↑/↓ and eye headings, icon Checkout named "Checkout"); below 724 px LAST COMMIT/COMMIT move to the tooltip. BRANCH at 1000 px with the sidebar 48 → 165 px, 1200 px 160 → 277, 900 px 0 → 196. Narrow mode also hides the GitLab lock, pipeline glyph and MR chip that live in LAST COMMIT. |
 | 1 | 53442e2 | meridian-bottom-pane-height | Bottom response pane keeps 380 dip in windows ≥ 736 tall and gives way below, with an editor floor of 316 (chrome + five form rows) and a pane floor of 162 (flex minimums, no rebuild on resize). 1280×672 editor 252 → 316 (header rows 3 → 5), 1100×600 180 → 316, 760×540 120 → 316; 1100×760, 1200×800, 1400×900 unchanged. No splitter (design token; Meridian has no settings file). |
 | 1 | 1c8ee98, 758fa03 | apps-scenario-virtual-selection-walk-a11y + apps-scenario-textarea-highlighted-json | 5 perf-suite rows (94 scenarios now): virtual/selection walk 1,000 rows (+ a11y bridge on, + UIA), text/open and text/wheel highlighted JSON (19,013 lines, 22,968 spans identical to HultUI.Syntax). JIT min 0.466 / 0.534 / 0.565 / 10.74 / 0.939 ms, 108 / 412 / 412 / 10,811 / 14 KB; realize ~10 % and a11y 12–18 % of the walk step (below the app survey's shares: 5 elements per row vs ~14 in Junction). JSON open median ≈ 2× min from GCs. |
+| 2 | 0ceecea | runtime-sdl-pump-closure | A real SDL loop pass allocates 0 B instead of 88 B (AOT 72). GL idle 5.5 KB/s → 0; GL spinner 3–4 MB/s → 0, no GCs; Vulkan idle 11.7 → 6.2 KB/s (display-colour poll left), spinner 4.45 → 0.41 MB/s (render target per frame left). Test on SDL's dummy driver runs in the normal suite. |
+| 2 | ff7a970, 2612de1 | runtime-paced-wait-spin | SDL on Windows rounded waits down (1 ms → 0); the wait now asks 1 ms more. Spinner 45–49k → 420–447 loop passes/s (224–245 → 2.1–2.2 per frame); UI-thread cycles −39…−57 %; frames/s 200 → 200 on GL and Vulkan, JIT and AOT; live resize still draws inside every step; headless suite flat. Linux/macOS not changed (SDL rounds correctly there per its source). |
 
 ## Examined, not worth it
 
