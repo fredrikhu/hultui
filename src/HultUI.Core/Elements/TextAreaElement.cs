@@ -48,6 +48,16 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private System.Globalization.CultureInfo? _wrapMemoCulture;
     private readonly List<int> _breaks = [];
 
+    // Where each line's spans begin: _spanReach[k] is the furthest any of Spans[0..k] ends. The
+    // spans are sorted by start but may overlap, so their ends alone are not sorted (a long
+    // string's span ends after the search tint inside it, which comes next); this running
+    // maximum is, and the first span that can reach a line is the first whose entry passes the
+    // line's start. Worked out once per list (see SpansForLine).
+    private IReadOnlyList<TextSpan>? _spanReachOf;
+    private int _spanReachCount;
+    private int[] _spanReach = [];
+    private readonly List<TextSpan> _lineSpans = [];
+
     // Preferred column (in pixels) for up/down navigation
     private float _preferredX = -1;
 
@@ -182,7 +192,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     /// <summary>Optional per-range text colors (syntax highlighting and similar), in
     /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
-    /// measurement. Each visible line slices the spans it overlaps.</summary>
+    /// measurement. Each visible line slices the spans it overlaps.
+    /// <para>Sorted by start. They may overlap, as a search tint's background over a syntax
+    /// colour does. The list is indexed the first time it is drawn — where each line's spans
+    /// begin — and kept by reference: to change the spans, hand a new list rather than
+    /// changing this one in place.</para></summary>
     public IReadOnlyList<TextSpan>? Spans { get; set; }
 
     public IClipboard? Clipboard { get; set; }
@@ -1492,21 +1506,55 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// <summary>The subset of <see cref="Spans"/> overlapping the visible line
     /// [<paramref name="lineStart"/>, <paramref name="lineEnd"/>), clipped and rebased
     /// to line-local offsets so the per-line DrawText colours the right characters.
-    /// Returns null when the element has no spans or none touch this line.</summary>
-    private List<TextSpan>? SpansForLine(int lineStart, int lineEnd)
+    /// Returns null when the element has no spans or none touch this line.
+    ///
+    /// <para>Read from the first span that can reach the line, found by a binary search on
+    /// the running maximum of the spans' ends, not from the first span: each line drawn of a
+    /// 23,000-span JSON response walked ~11,500 spans to its own, 600,000 a frame. One list
+    /// serves every line; the renderer reads it during its DrawText call only.</para></summary>
+    internal List<TextSpan>? SpansForLine(int lineStart, int lineEnd)
     {
-        if (Spans is not { Count: > 0 } spans) return null;
-        List<TextSpan>? result = null;
-        foreach (var s in spans)
+        if (Spans is not { Count: > 0 } spans)
         {
-            if (s.End <= lineStart) continue;      // entirely before this line
+            if (_spanReachOf is not null) { _spanReachOf = null; _spanReach = []; }
+            return null;
+        }
+        int count = spans.Count;
+        if (!ReferenceEquals(_spanReachOf, spans) || _spanReachCount != count)
+        {
+            // A list much shorter than the last gets an array of its own size, so a large
+            // response once shown does not keep its index for good.
+            if (_spanReach.Length < count || _spanReach.Length > 4 * count)
+                _spanReach = new int[count];
+            int r = int.MinValue;
+            for (int k = 0; k < count; k++)
+                _spanReach[k] = r = Math.Max(r, spans[k].End);
+            _spanReachOf = spans;
+            _spanReachCount = count;
+        }
+
+        var reach = _spanReach;
+        int lo = 0, hi = count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (reach[mid] <= lineStart) lo = mid + 1;
+            else hi = mid;
+        }
+
+        var result = _lineSpans;
+        result.Clear();
+        for (int k = lo; k < count; k++)
+        {
+            var s = spans[k];
+            if (s.End <= lineStart) continue;      // before this line; a longer one before it reaches it
             if (s.Start >= lineEnd) break;         // sorted ⇒ nothing left overlaps
             int start = Math.Max(s.Start, lineStart);
             int end = Math.Min(s.End, lineEnd);
             if (end <= start) continue;
-            (result ??= []).Add(new TextSpan(start - lineStart, end - start, s.Color, s.Background));
+            result.Add(new TextSpan(start - lineStart, end - start, s.Color, s.Background));
         }
-        return result;
+        return result.Count == 0 ? null : result;
     }
 
     private void RenderSelection(IRenderContext ctx, Rect contentBox, ResolvedInheritedStyle style,

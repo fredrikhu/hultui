@@ -1244,7 +1244,7 @@ Undo and redo work as in `TextInputElement` — Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, `
 `Redo()`, the right-click menu — and a line break typed with Enter counts as typing, so a new
 line's first word starts a step of its own. A read-only area ignores both keys and has no Undo
 in its menu.
-| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives |
+| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives. Sorted by start, may overlap (a tint over a token). Indexed when first drawn and kept by reference: hand a new list to change them, and the same list each build when they have not changed |
 | `ScrollOffsetY`, `ScrollSpeed`, `Scrollbar*` | | vertical only |
 | `TextChanged` | `Action<string>?` | |
 
