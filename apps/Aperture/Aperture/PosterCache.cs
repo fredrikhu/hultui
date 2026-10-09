@@ -66,6 +66,11 @@ public sealed class PosterCache : IDisposable
     /// <summary>Downloads retired one by one (<see cref="Retire(Uri)"/>) before they landed:
     /// they land retired.</summary>
     private readonly HashSet<string> _retireOnLanding = new(StringComparer.Ordinal);
+    /// <summary>Pictures the count cap pushed out, waiting for the next <see cref="Get"/> to
+    /// dispose them. The cap is enforced where a download lands, on the thread pool, and the
+    /// UI thread may be drawing the very picture it pushes out: disposed there, the native
+    /// image could be freed under the draw.</summary>
+    private readonly List<IDisposable> _evicted = new();
 
     /// <summary>Downloads allowed at once. Higher than a decode pool would be — these are
     /// mostly waiting on a LAN — but bounded, because every one of them holds a buffer and
@@ -123,8 +128,8 @@ public sealed class PosterCache : IDisposable
     /// there is returned as <see cref="Status.Ready"/>, so the tile stays drawn; once
     /// <paramref name="url"/> has landed, asking again drops the stand-in.</para>
     ///
-    /// <para>Call it on the UI thread: it is where retired pictures are disposed, and that
-    /// thread is the one that may be drawing them.</para></summary>
+    /// <para>Call it on the UI thread: it is where retired pictures and those the count cap
+    /// pushed out are disposed, and that thread is the one that may be drawing them.</para></summary>
     public (IImageSource? Image, Status Status) Get(Uri? url, Uri? standIn = null)
     {
         if (url is null) return (null, Status.Failed);
@@ -135,6 +140,7 @@ public sealed class PosterCache : IDisposable
         lock (_lock)
         {
             if (_disposed) return (null, Status.Failed);
+            if (_evicted.Count > 0) DisposeEvicted();
             // The stand-in is spared: it may have been retired since the last download
             // landed, and it is what this caller draws until its own picture is in.
             if (_sweepRetired) SweepRetired(standInKey);
@@ -312,6 +318,9 @@ public sealed class PosterCache : IDisposable
         _lru.AddLast(key);
     }
 
+    /// <summary>Holds the cache to its count. Under the lock, on the download thread that just
+    /// landed, so what it pushes out is handed to the UI thread (<see cref="_evicted"/>) rather
+    /// than disposed here.</summary>
     private void Trim()
     {
         while (_map.Count > _cap && _lru.First is { } node)
@@ -320,9 +329,16 @@ public sealed class PosterCache : IDisposable
             if (_map.Remove(node.Value, out var e))
             {
                 if (e.Retired) _retiredCount--;
-                (e.Image as IDisposable)?.Dispose();
+                if (e.Image is IDisposable picture) _evicted.Add(picture);
             }
         }
+    }
+
+    /// <summary>Disposes what the count cap pushed out. Under the lock, on the UI thread.</summary>
+    private void DisposeEvicted()
+    {
+        foreach (var picture in _evicted) picture.Dispose();
+        _evicted.Clear();
     }
 
     /// <summary>Drops one entry if it is retired. Under the lock.</summary>
@@ -355,6 +371,7 @@ public sealed class PosterCache : IDisposable
             if (_disposed) return;
             _disposed = true;
             foreach (var e in _map.Values) (e.Image as IDisposable)?.Dispose();
+            DisposeEvicted();
             _map.Clear();
             _lru.Clear();
         }

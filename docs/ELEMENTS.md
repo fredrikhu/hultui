@@ -780,6 +780,13 @@ while the window is dragged: round its size up to a step (Aperture uses 128 devi
 so it is asked for again only when the window passes one, keep drawing the old picture until
 the new one is in, and then drop the old one.
 
+**Dispose a picture on the UI thread.** Decode wherever you like, but an element that holds
+a source can draw it on any frame, and only the UI thread draws. Disposed on another thread,
+its native image can be freed in the middle of a draw. A cache that lets pictures go where a
+download lands, on the thread pool, should hand them to the UI thread instead: Aperture's
+`PosterCache` keeps what its count cap pushes out until the UI thread next asks it for a
+picture, and disposes them then.
+
 **Changing pixels.** A source whose pixels change over time — a video frame, a
 camera, a software-rendered view — implements `IPixelImageSource`, and the renderer
 draws its current bytes without copying. `PixelFrameSink` is the ready-made one: a
