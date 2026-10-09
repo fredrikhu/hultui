@@ -12,8 +12,22 @@ namespace HultUI.Core.DevTools;
 /// <para>The deque is a ring over an array, not a linked list. Every window keeps
 /// eight of these and feeds each one sample per frame whether or not the HUD is
 /// shown, so a node per sample was eight allocations a frame (~0.4 KB) on a frame
-/// that otherwise allocates nothing. The array only grows, when the window holds
-/// more samples than it has room for (a long, steadily falling run of values).</para>
+/// that otherwise allocates nothing.</para>
+///
+/// <para>The ring never grows. The window is cut into <see cref="Buckets"/> slices of time. A
+/// sample smaller than the last one kept, in the same slice, is folded into it: the kept one
+/// keeps its value and takes the new time. So the deque holds at most one sample a slice and
+/// always fits <see cref="Capacity"/>, however fast samples come. It used to start at 16 samples
+/// and double when a falling run outlasted it, 536 B each time. Frame times fall run after run
+/// while an app's code is still being compiled, and an unpaced loop puts tens of thousands of
+/// samples in a window, so every window allocated on some frame early in its life. That made the
+/// "allocates nothing" frame tests fail now and then, most often on the first run after a build
+/// (plan 17, round 2).</para>
+///
+/// <para>Folding never makes <see cref="Max"/> smaller than the largest sample in the window. It
+/// can make it larger for less than one slice (the window / 62: 81 ms of 5 s), because the folded
+/// value counts until the later sample leaves the window. Samples in different slices are kept
+/// exactly.</para>
 /// </summary>
 internal sealed class SlidingWindowMax
 {
@@ -23,14 +37,22 @@ internal sealed class SlidingWindowMax
         public readonly float Value = value;
     }
 
+    /// <summary>Slices of the window: the deque holds samples from at most this many plus two
+    /// (the slices the window's two ends fall in), which is <see cref="Capacity"/>.</summary>
+    internal const int Buckets = Capacity - 2;
+    internal const int Capacity = 64;              // power of two, so wrapping is a mask
+
     private readonly long _windowTicks;
-    private Sample[] _ring = new Sample[16];   // power of two, so wrapping is a mask
-    private int _head;                         // index of the oldest sample (the max)
+    private readonly long _bucketTicks;
+    private readonly Sample[] _ring = new Sample[Capacity];
+    private int _head;                             // index of the oldest sample (the max)
     private int _count;
 
     public SlidingWindowMax(TimeSpan window)
     {
         _windowTicks = (long)(window.TotalSeconds * Stopwatch.Frequency);
+        // Rounded up, so a window spans no more than Buckets whole slices.
+        _bucketTicks = Math.Max(1, (_windowTicks + Buckets - 1) / Buckets);
     }
 
     /// <summary>The largest value added within the trailing window, or 0 if empty.</summary>
@@ -42,23 +64,10 @@ internal sealed class SlidingWindowMax
     /// </summary>
     public void Add(float value, long nowTicks)
     {
-        int mask = _ring.Length - 1;
+        const int mask = Capacity - 1;
 
-        // Any tail sample that is no larger than this one can never be the max
-        // again, so drop them — this keeps the deque monotonically decreasing.
-        while (_count > 0 && _ring[(_head + _count - 1) & mask].Value <= value)
-            _count--;
-
-        if (_count == _ring.Length)
-        {
-            Grow();
-            mask = _ring.Length - 1;
-        }
-        _ring[(_head + _count) & mask] = new Sample(nowTicks, value);
-        _count++;
-
-        // Evict samples that have aged out of the window. The head is always
-        // the current maximum because of the monotonic invariant above.
+        // Evict samples that have aged out of the window first, so they take no room. The head
+        // is always the current maximum because of the monotonic invariant below.
         long cutoff = nowTicks - _windowTicks;
         while (_count > 0 && _ring[_head].Timestamp < cutoff)
         {
@@ -66,16 +75,25 @@ internal sealed class SlidingWindowMax
             _count--;
         }
 
-        Max = _count > 0 ? _ring[_head].Value : 0f;
-    }
+        // Any tail sample that is no larger than this one can never be the max
+        // again, so drop them — this keeps the deque monotonically decreasing.
+        while (_count > 0 && _ring[(_head + _count - 1) & mask].Value <= value)
+            _count--;
 
-    private void Grow()
-    {
-        var bigger = new Sample[_ring.Length * 2];
-        int mask = _ring.Length - 1;
-        for (int i = 0; i < _count; i++)
-            bigger[i] = _ring[(_head + i) & mask];
-        _ring = bigger;
-        _head = 0;
+        int tail = (_head + _count - 1) & mask;
+        if (_count > 0 && (_count == Capacity
+            || _ring[tail].Timestamp / _bucketTicks == nowTicks / _bucketTicks))
+        {
+            // The tail is larger and in this sample's slice (or, for timestamps that do not
+            // move forward, the ring is full): it stands for both until this one ages out.
+            _ring[tail] = new Sample(Math.Max(nowTicks, _ring[tail].Timestamp), _ring[tail].Value);
+        }
+        else
+        {
+            _ring[(_head + _count) & mask] = new Sample(nowTicks, value);
+            _count++;
+        }
+
+        Max = _count > 0 ? _ring[_head].Value : 0f;
     }
 }

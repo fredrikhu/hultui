@@ -83,11 +83,11 @@ public class SlidingWindowMaxTests
         Assert.Equal(8f, w.Max);
     }
 
-    /// <summary>The deque is a ring over an array that starts with room for 16 samples. A
-    /// falling run longer than that makes it grow while its head is part-way round, and samples
-    /// age out from the middle of the array: every Max must still be the brute-force answer.</summary>
+    /// <summary>The deque is a ring over an array. Falling runs fill most of it while its head is
+    /// part-way round, and samples age out from the middle of the array: at 60 Hz every sample
+    /// has a slice of its own, and every Max must be the brute-force answer.</summary>
     [Fact]
-    public void Max_MatchesABruteForceWindow_WhileTheRingWrapsAndGrows()
+    public void Max_MatchesABruteForceWindow_WhileTheRingWraps()
     {
         var w = new SlidingWindowMax(TimeSpan.FromSeconds(1));
         long step = TicksPerSecond / 60;
@@ -106,6 +106,52 @@ public class SlidingWindowMaxTests
             long cutoff = t - TicksPerSecond;
             float expected = history.Where(h => h.T >= cutoff).Max(h => h.V);
             Assert.Equal(expected, w.Max);
+        }
+    }
+
+    /// <summary>
+    /// A falling run far longer than the ring, as frame times are while an app's code is still
+    /// being compiled, in an unpaced loop's tens of thousands of samples a window: nothing is
+    /// allocated, Max is never below the window's largest sample, and never above the largest of
+    /// the window and one slice before it. The ring used to grow instead, 536 B on some frame,
+    /// and the "allocates nothing" frame tests failed now and then (plan 17, round 2).
+    /// </summary>
+    [Fact]
+    public void AFallingRunLongerThanTheRing_AllocatesNothing_AndStaysWithinASliceOfExact()
+    {
+        var w = new SlidingWindowMax(TimeSpan.FromSeconds(1));
+        long step = TicksPerSecond / 20_000;
+        long slice = (TicksPerSecond + SlidingWindowMax.Buckets - 1) / SlidingWindowMax.Buckets;
+        var rng = new Random(5);
+        var t = new long[100_000];
+        var v = new float[t.Length];
+        var max = new float[t.Length];
+        for (int i = 0; i < t.Length; i++)
+        {
+            t[i] = i * step;
+            // Falling over 40,000 samples (two windows), with noise, then flat noise.
+            v[i] = (i < 40_000 ? 50_000f - i : 10_000f) + (float)rng.NextDouble() * 100f;
+        }
+
+        new SlidingWindowMax(TimeSpan.FromSeconds(1)).Add(1f, 0);   // compiled before it is counted
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < t.Length; i++)
+        {
+            w.Add(v[i], t[i]);
+            max[i] = w.Max;
+        }
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+
+        // Checked every 97 samples, against a window's brute force each.
+        for (int i = 0; i < t.Length; i += 97)
+        {
+            float exact = float.MinValue, loose = float.MinValue;
+            for (int j = i; j >= 0 && t[j] >= t[i] - TicksPerSecond - slice; j--)
+            {
+                loose = Math.Max(loose, v[j]);
+                if (t[j] >= t[i] - TicksPerSecond) exact = Math.Max(exact, v[j]);
+            }
+            Assert.InRange(max[i], exact, loose);
         }
     }
 
