@@ -57,7 +57,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    editors; 25k unique lines 64 MB); SpansForLine scans from span 0 (JSON wheel 612k
    iterations per step → 117). Watch Meridian's overlapping search spans. Add a suite row
    for a parent rebuild around a large TextArea.
-4. **text-shaper-direct** (5) — HarfBuzz called directly, one buffer/font per shaper:
+4. ~~**text-shaper-direct**~~ LANDED d049be7, d5176b7 (5) — HarfBuzz called directly, one buffer/font per shaper:
    −25…−50 % allocKB on 6 rows, bit-identical over 1.1 M shaper calls.
 5. **text-shape-cache-byte-bound** (5, from 4's review) — bound the shape and word caches by
    bytes/glyphs; closing a TextArea keeps 4–155 MB in the app-lifetime caches today.
@@ -168,6 +168,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 7e52ff5 | media-minimized-playback | 82e382b stopped serving mpv while minimized: 236–240 drops per 10 s, avsync up to 151 ms, Reel's next file silent until restore (23.9 s), seeks 235–426 ms. A minimized window now serves its video undrawn (`IGpuImageSource.ServiceUndrawn`: setup + SKIP_RENDERING): 0 drops, avsync ≤ 2 ms, next file 589–612 ms, seek 45–48 ms. Audio was never broken. Process CPU at 1080p24 minimized 63–70 → 105–112 Mcyc/s (still below drawing: GL 162–178); mpv's vo thread does its normal per-frame work. |
 | 2 | 27b8803, 95e93b5 | text-textarea-patch-keeps-lines | Same text handed back by a rebuild keeps the line starts (style/width/context/culture changes still re-wrap). New row text/rebuild around highlighted JSON 1.696 → 0.399 ms JIT, 2.051 → 0.424 AOT, 1,414 → 22 KB. Meridian URL keystroke with an 18,884-line response 3.00 → 1.70 ms, 1,612 → 182 KB. Fixed a real bug: row height kept the old font after a font-size patch. |
 | 2 | 3a057ea, e7717a0 | text-textarea-span-scan | Binary search on a running max of End (Meridian's spans overlap; End goes down 1,180 times), one reused list. JSON wheel 0.834 → 0.399 ms JIT, 1.584 → 0.412 AOT (AOT gap closed), 14–16 → 5 KB. Meridian wheel with find open 7.4–8.1 → 1.05–1.13 ms (−86 %). Contract: hand a new span list to change spans. Trap: AOT grid rows move 7–16 % with unrelated code layout (README note). |
+| 2 | d049be7, d5176b7 | text-shaper-direct | HarfBuzz driven directly, one buffer and font per shaper (in-use guard for shared scratch). text/create 4.24 → 3.26 ms (−23 % JIT, −19 % AOT), 5,792 → 4,317 KB; JSON open −22/−20 %, 10,802 → 6,595 KB; styled bidi ellipsis −16/−17 %, −50 % KB; 6 rows −25…−50 % alloc; TextBench cold/latin −20 %, hebrew −14 %; 0 slower. Bytes per call 936 → 176. Bit-identical vs SKShaper over 72.6 k calls on Windows and 51.3 k on WSL Fedora (Linux lacks Indic/Thai/emoji fonts: compared as notdef there). Handles flat over 10 M calls. |
 
 ## Examined, not worth it
 
@@ -229,8 +230,9 @@ Round 2 questions (asked 2026-10-09; reports `17-reports/r2-*`):
    Junction and Vesper lists one at a time?
 10. **layout-scroll-strip-narrowing** (not perf): pursue the CSS shrink-then-scroll
     behaviour outside plan 17, or drop it?
-11. **wsl-mesa**: install Mesa (EGL, DRI, Vulkan) in WSL Fedora to check 0f5816a/7a827e9 on
-    software GL/Vulkan?
+11. **wsl-mesa**: install Mesa (EGL, DRI, Vulkan) and Noto fonts (Indic, Thai, Khmer, Myanmar,
+    Tibetan, Ethiopic, colour emoji) in WSL Fedora, to check 0f5816a/7a827e9 on software
+    GL/Vulkan and to compare shaping on real faces on Linux (d049be7)?
 12. (later) **gl-noop-geterror**: only if timing shows the last glGetError round trip costs.
 
 Note: the round 2 app survey registered a Jellyfin device named "aperture-survey".
