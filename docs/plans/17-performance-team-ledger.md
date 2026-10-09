@@ -4,16 +4,15 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 1
-- **Phase:** release — round 1 merged into main as 64ba531 and pushed 2026-10-09
-  (full suite passed on the branch and again on the merge: 30 projects, 0 failures).
-  Waiting for CI on 64ba531; then Round 2, Phase survey. To resume after a pause, run in
-  this worktree: `/loop Run the next step of the performance team: follow
+- **Round:** 2
+- **Phase:** survey — round 2 started 2026-10-09 after round 1's release (merge 64ba531,
+  CI run 37861109308 green: test, test-linux, docs). To resume after a pause, run in this
+  worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
-- **Review commits since:** fc0f4f7
+- **Review commits since:** fc0f4f7 (round 2 reviews all of round 1: fc0f4f7..64ba531)
 - **Probe code kept for the build phase** (session scratchpad `probes/`, plus
   `painting-probes.patch`, `PaintProbe.cs`, `probedriver.cs`): a11y hidden-HWND rig,
   reactivity counters and Junction probe, painting probes.
@@ -337,3 +336,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-09: round 1 full suite passed (30 projects, 0 failures); merged into main as
   64ba531 on a detached origin/main (main had 3dca7b4/de5f0e6 from another session), suite
   passed again on the merge, pushed de5f0e6..64ba531, primary fast-forwarded behind the guard.
+- 2026-10-09: CI green on 64ba531 (run 37861109308). Round 2 survey started, eight experts.
