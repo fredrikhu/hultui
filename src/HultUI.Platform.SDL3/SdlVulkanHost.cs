@@ -579,11 +579,25 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
                 Math.Clamp((uint)heightPx, capabilities.minImageExtent.height, capabilities.maxImageExtent.height))
             : capabilities.currentExtent;
 
+        // A surface with no area — a minimized window on Windows — can have no swapchain. The
+        // one it had is out of date, and it goes now, not merely forgotten: a swapchain nobody
+        // destroys still owns the surface, so every later build failed with
+        // ErrorNativeWindowInUseKHR, and the window never drew again. Destroyed rather than kept
+        // to chain from, by every present mode: nothing is on screen to hand over. Every caller
+        // has waited the device idle and dropped its acquired image (Init has no swapchain yet).
+        // The size asked for is kept for the next build, which AcquireNextImage starts once the
+        // surface has area again.
         if (extent.width == 0 || extent.height == 0)
         {
             StartupTrace.Mark($"vulkan swapchain SKIPPED (asked {widthPx}x{heightPx})");
+            if (!_swapchain.IsNull) _vk.DestroySwapchain(_device, _swapchain, 0);
             _swapchain = VkSwapchainKHR.Null;
             _images = [];
+            if (widthPx > 0 && heightPx > 0)
+            {
+                _widthPx = widthPx;
+                _heightPx = heightPx;
+            }
             return;
         }
 
@@ -958,7 +972,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     public VulkanFrameTarget? AcquireNextImage()
     {
-        if (_disposed || _swapchain.IsNull || _images.Length == 0) return null;
+        if (_disposed) return null;
+        // A window minimized and restored at the size it had gets no resize, so nothing else
+        // asks for the swapchain its minimized surface went without (BuildSwapchain): without
+        // this, acquire returned null for ever and the window never drew again.
+        if (_swapchain.IsNull && !RebuildOnceSurfaceHasArea()) return null;
+        if (_images.Length == 0) return null;
         if (_haveAcquired) return Current();
 
         uint index = 0;
@@ -1157,6 +1176,25 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);
+    }
+
+    /// <summary>
+    /// Builds the swapchain a surface with no area went without, once it has area again, and
+    /// says whether there is one now. While the window stays minimized this costs one
+    /// capabilities query and no device wait, so a frame asked of it stays cheap.
+    /// </summary>
+    private bool RebuildOnceSurfaceHasArea()
+    {
+        var capabilities = new VkSurfaceCapabilitiesKHR();
+        if (_vk.GetSurfaceCapabilities(_physicalDevice, _surface, &capabilities) != VkResult.Success)
+            return false;
+        // 0xFFFFFFFF is "you choose" (Wayland): then the window's own size is the area.
+        bool hasArea = capabilities.currentExtent.width == uint.MaxValue
+            ? _widthPx > 0 && _heightPx > 0
+            : capabilities.currentExtent.width > 0 && capabilities.currentExtent.height > 0;
+        if (!hasArea) return false;
+        Rebuild(_widthPx, _heightPx, force: true);
+        return !_swapchain.IsNull;
     }
 
     public void Dispose()

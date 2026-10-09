@@ -751,7 +751,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// Registers an action to run exactly once, immediately after the next frame
     /// is presented (after present + buffer swap). Runs on the UI thread. This
     /// forces a frame to render even if nothing else is dirty, so the callback is
-    /// guaranteed to fire on the following loop iteration. Useful for measuring
+    /// guaranteed to fire on the following loop iteration — or, for a minimized window,
+    /// which is not drawn, on the first frame after it is restored. Useful for measuring
     /// how long a state change takes to reach the screen, or for reacting once
     /// content is actually painted.
     /// </summary>
@@ -807,9 +808,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         Resized?.Invoke();
     }
 
-    internal void RenderFrame()
+    /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
+    /// <returns>Whether a frame was drawn and presented.</returns>
+    internal bool RenderFrame(bool evenIfMinimized = false)
     {
-        if (_root is null) return;
+        if (_root is null) return false;
 
         // Drain queued UI-thread actions from the accessibility action router.
         // AT callbacks (UIA worker threads, the AT-SPI D-Bus receive thread) run
@@ -938,7 +941,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // A backend that has to acquire a target before it can be drawn on says so here.
         // Skipping is normal — a resize in flight, or a window with no area — and the next
         // frame will find one.
-        if (!PlatformWindow.Surface.BeginFrame()) return;
+        //
+        // A minimized window stops here too. Nothing would show its frame; on Windows a Vulkan
+        // surface has no area to draw into anyway; and GL drew every frame of an animation or
+        // a video nobody could see. Everything above has run — assistive technology's actions,
+        // style, layout, the accessibility tree — and the paint dirt is kept, so the first frame
+        // after the restore draws it.
+        if (!evenIfMinimized && PlatformWindow.IsMinimized) return false;
+        if (!PlatformWindow.Surface.BeginFrame()) return false;
 
         var ctx = PlatformWindow.Surface.RenderContext;
         _perf.BeginRender();
@@ -1012,6 +1022,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         }
 
         FrameRendered?.Invoke();
+        return true;
     }
 
     /// <summary>

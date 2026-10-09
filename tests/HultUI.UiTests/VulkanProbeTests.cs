@@ -25,6 +25,16 @@ public sealed class VulkanProbeTests
         }
     }
 
+    /// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="VulkanUiFactAttribute"/>.</summary>
+    private sealed class VulkanUiTheoryAttribute : TheoryAttribute
+    {
+        public VulkanUiTheoryAttribute()
+        {
+            if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
+            else if (!NativeLibrary.TryLoad("vulkan-1.dll", out _)) Skip = "No Vulkan loader (vulkan-1.dll).";
+        }
+    }
+
     /// <summary>What the loader sees when every driver is filtered out: a driver, but no GPU.</summary>
     private static readonly Dictionary<string, string?> NoUsableGpu = new() { ["VK_LOADER_VENDOR_ID_FILTER"] = "0x1234" };
 
@@ -230,6 +240,76 @@ public sealed class VulkanProbeTests
         Assert.True(besides.Max() - besides[0] < smallest,
             $"Skia held {besides.Max() - besides[0]:0.0} MB more besides its offscreen after {resizes} new " +
             $"sizes than after the first, against {smallest:0.0} MB for one offscreen:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// A window that draws while minimized, then is restored and resized. On Windows a minimized
+    /// Vulkan surface has no area, so the frame's swapchain went out of date and none could be
+    /// built; the old one was dropped without being destroyed. Restored at the same size, the
+    /// window drew 0 frames of 20 for ever, a resize failed with ErrorNativeWindowInUseKHR, and
+    /// the loop retried a frame every display interval meanwhile (400 passes a second at 200 Hz).
+    /// GL drew while minimized instead, every frame of an animation nobody could see. Now neither
+    /// draws a minimized window, and the loop waits as if idle until the restore.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("gl")]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    [InlineData("fifo")]
+    public void AWindowThatDrewWhileMinimized_WaitsQuietly_AndDrawsOnceRestored(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe minimizes and resizes through user32
+        var environment = new Dictionary<string, string?>
+        {
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_VULKAN_F16"] = null,
+            ["HULTUI_VULKAN_PRESENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        };
+        string arguments = "--minimize";
+        switch (variant)
+        {
+            case "gl": arguments += " --renderer=default"; break;
+            case "f16-mailbox": environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_PRESENT"] = "mailbox"; break;
+            case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
+            case "fifo": environment["HULTUI_VULKAN_PRESENT"] = "fifo"; break;
+        }
+
+        var run = RunProbe(environment, arguments);
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        Assert.DoesNotContain("Exception", run.Output);
+        if (variant == "gl") Assert.DoesNotContain(" vulkan device=", run.Output);
+        else
+        {
+            Assert.Contains(" vulkan device=", run.Output);
+            // The frames forced while minimized took the swapchain the window had.
+            Assert.Contains("vulkan swapchain SKIPPED", run.Output);
+        }
+        const string halfFloat = @"vulkan swapchain \d+x\d+ x\d+ R16G16B16A16Sfloat";
+        if (variant == "f16-mailbox") Assert.Matches(halfFloat, run.Output);
+        if (variant == "8-bit") Assert.DoesNotMatch(halfFloat, run.Output);
+        if (variant == "fifo") Assert.Contains("vulkan present mode Fifo", run.Output);
+
+        var (minimizedPasses, minimizedFrames) = Stage(run.Output, "minimized");
+        var (_, restoredFrames) = Stage(run.Output, "restored");
+        var (_, resizedFrames) = Stage(run.Output, "resized");
+        // The change made while minimized waits for the restore.
+        Assert.True(minimizedFrames == 0, $"{minimizedFrames} frames drawn while minimized:\n{run.Output}");
+        // An idle window's loop passes about 60 times a second. Retrying a frame every display
+        // interval is two passes an interval: 400 at 200 Hz, 120 at 60.
+        Assert.True(minimizedPasses < 100, $"{minimizedPasses} loop passes a second while minimized:\n{run.Output}");
+        // A change every 33 ms: about 30 frames in the second after the restore, 15 after the resize.
+        Assert.True(restoredFrames >= 10, $"{restoredFrames} frames in the second after the restore:\n{run.Output}");
+        Assert.True(resizedFrames >= 5, $"{resizedFrames} frames in the half second after a resize:\n{run.Output}");
+    }
+
+    private static (int PassesPerSecond, int Frames) Stage(string output, string stage)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(output, $@"probe: {stage} (\d+) passes/s, (\d+) frames");
+        Assert.True(match.Success, $"no '{stage}' line:\n{output}");
+        return (int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value));
     }
 
     /// <summary>

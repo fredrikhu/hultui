@@ -471,10 +471,12 @@ public sealed class Application : IDisposable
         return hz > 0f ? hz : 60f;
     }
 
+    /// <summary>Whether a window is waiting for its next frame. A minimized one is not: it is
+    /// drawn after its restore, whose event wakes the loop (see RenderDirtyWindows).</summary>
     private bool AnyWindowNeedsRender()
     {
         foreach (var w in _windows)
-            if (w.IsOpen && w.NeedsRender) return true;
+            if (w.IsOpen && w.NeedsRender && !w.PlatformWindow.IsMinimized) return true;
         return false;
     }
 
@@ -560,11 +562,20 @@ public sealed class Application : IDisposable
         foreach (var window in _windows)
         {
             if (!window.IsOpen || (!force && !window.NeedsRender)) continue;
+            // A minimized window's frame stops before drawing (see Window.RenderFrame). It is
+            // neither timed nor counted as rendered, so a dirty one leaves Run waiting as if
+            // idle instead of pacing frames nobody would see: on Vulkan they could not be drawn
+            // at all, and the loop retried one every display interval until the restore.
+            if (!force && window.PlatformWindow.IsMinimized)
+            {
+                window.RenderFrame();
+                continue;
+            }
             window.PlatformWindow.MakeCurrent();
             window.Performance.DisplayHz = window.PlatformWindow.RefreshRate;
             window.Performance.Unpaced = FramePacing == FramePacing.Unlimited || window.ContinuousRedraw;
             window.Performance.BeginFrame();
-            window.RenderFrame();
+            window.RenderFrame(evenIfMinimized: force);
             window.Performance.EndFrame();
             // The window is created hidden; reveal it only now that its first
             // frame has been presented, so the OS never composites the blank

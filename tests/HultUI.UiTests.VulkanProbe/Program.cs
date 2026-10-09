@@ -1,7 +1,9 @@
 using HultUI;
 using HultUI.Core.Builders;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Media;
 using HultUI.Media.Mpv;
 using HultUI.WebView;
@@ -30,6 +32,10 @@ using HultUI.WebView.WebView2;
 // --resizes=N resizes the window N times between two sizes, without activating it, and prints
 // the median and longest time a resize took to be drawn (Windows). With --new-sizes every
 // resize is to a size the window has not had yet, as in a drag.
+//
+// --minimize minimizes the window without activating it, forces frames while it is minimized,
+// then runs the real loop: minimized with one change waiting, restored, and resized, counting
+// loop passes and the frames drawn in each part (Windows).
 
 internal static class Program
 {
@@ -38,6 +44,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
+        if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--webviews")) return TwoPages(renderer);
         if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
             return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
@@ -186,7 +193,112 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// A window that draws while minimized, in the real loop. On Windows a minimized Vulkan
+    /// surface has no area: a frame drawn then found its swapchain out of date, the rebuild could
+    /// make none, and the old one was dropped without being destroyed. The window never drew
+    /// again, a resize failed with ErrorNativeWindowInUseKHR, and the loop retried a frame every
+    /// display interval until the restore. The forced frames below take that path; then the loop
+    /// runs 1.5 s minimized with one change waiting, 1 s restored and 0.5 s resized, the last two
+    /// with a change every 33 ms, as a video would make.
+    /// </summary>
+    private static int MinimizeAndRestore(RendererKind renderer)
+    {
+        var platform = new CountingPlatform(new HultUI.Platform.SDL3.SdlWindowingPlatform(renderer));
+        using var app = new Application(platform, "vulkan-probe", 640, 400);
+        int frames = 0;
+        var changing = Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"));
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
+            changing,
+            Canvas.New(_ => frames++).Width(1f).Height(1f)));
+        for (int i = 0; i < 12; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        ShowWindow(hwnd, ShowMinNoActive);
+        if (!IsIconic(hwnd)) { Console.WriteLine("probe: the window did not minimize"); return 2; }
+        for (int i = 0; i < 3; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        changing.MarkPaintDirty();
+
+        bool ticking = false;
+        new Thread(() =>
+        {
+            while (true)
+            {
+                Thread.Sleep(33);
+                if (Volatile.Read(ref ticking)) Application.InvokeOnMainThread(changing.MarkPaintDirty);
+            }
+        }) { IsBackground = true }.Start();
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int stage = 0, stageFrames = frames;
+        long stageStart = 0;
+        platform.Passes = 0;
+        platform.OnPass = () =>
+        {
+            long ms = clock.ElapsedMilliseconds;
+            int[] ends = [1500, 2500, 3000];
+            if (stage >= ends.Length || ms < ends[stage]) return;
+            double seconds = (ms - stageStart) / 1000.0;
+            string what = stage switch { 0 => "minimized", 1 => "restored", _ => "resized" };
+            Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"probe: {what} {platform.Passes / seconds:0} passes/s, {frames - stageFrames} frames in {seconds:0.0} s " +
+                $"on a {app.PrimaryWindow.RefreshRate:0} Hz display"));
+            if (stage == 0)
+            {
+                ShowWindow(hwnd, ShowNoActivate);
+                Volatile.Write(ref ticking, true);
+            }
+            else if (stage == 1)
+            {
+                SetWindowPos(hwnd, 0, 0, 0, 700, 460, NoMove | NoZOrder | NoActivate);
+            }
+            else
+            {
+                app.PrimaryWindow.Close();
+            }
+            stage++;
+            stageStart = ms;
+            stageFrames = frames;
+            platform.Passes = 0;
+        };
+        app.Run();
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>The SDL platform, counting the loop's passes.</summary>
+    private sealed class CountingPlatform(IWindowingPlatform inner) : IWindowingPlatform
+    {
+        public long Passes;
+        public Action? OnPass;
+
+        public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
+            => inner.CreateWindow(title, width, height, style);
+
+        public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
+        {
+            Passes++;
+            OnPass?.Invoke();
+            return inner.PumpEvents(onWindowClose);
+        }
+
+        public void WaitForEvents(int timeoutMs) => inner.WaitForEvents(timeoutMs);
+        public void Wake() => inner.Wake();
+        public TimeProvider TimeProvider => inner.TimeProvider;
+        public void Dispose() => inner.Dispose();
+    }
+
     private const uint NoMove = 0x0002, NoZOrder = 0x0004, NoActivate = 0x0010;
+    private const int ShowMinNoActive = 7, ShowNoActivate = 4;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint hwnd, int command);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsIconic(nint hwnd);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int width, int height, uint flags);

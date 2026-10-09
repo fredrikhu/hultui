@@ -66,6 +66,19 @@ twice) does the same on its own, so the throughput figure it exists to show is
 not capped. Neither touches the swap interval: this is the loop's pacing, not
 the driver's vsync.
 
+**A minimized window is not drawn.** Its frame runs up to the drawing — actions
+from assistive technology, style, layout and the accessibility tree stay current
+— and stops there with the paint dirt kept, so the first frame after the restore
+draws what changed; the restore's own event wakes the loop. Meanwhile the loop
+parks as an idle one does, about 60 passes a second. Before, GL drew every frame
+of an animation or a video nobody could see, and a Vulkan window, whose minimized
+surface on Windows has no area, retried a frame every display interval (220 to
+400 passes a second at 200 Hz). So a `Window.RequestPostFrameCallback` made
+while a window is minimized runs after the restore, not on the next pass, and
+nothing that must keep going while minimized should be driven by frames. A
+forced frame, `RunFrame(forceRender: true)`, still draws. The minimized state is
+SDL's, which the real-window test checks on Windows only.
+
 ```csharp
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());
 ```

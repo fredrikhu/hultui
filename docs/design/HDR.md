@@ -59,6 +59,11 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
   FIFO never waited, and destroying first made their resizes slower (5 and 12 ms against 29 and
   33); the 8-bit swapchain never waited either and gained nothing. They keep the chained path.
+- **Minimized (Windows):** the surface's extent is 0×0, so no swapchain can exist. The one the
+  window had is destroyed, by every present mode, and the first frame after the restore builds a
+  new one. The loop does not draw a minimized window, so only a forced frame, a display change or
+  a present caught by the minimize gets here. Built during the restore, the scRGB MAILBOX
+  swapchain takes 150–220 ms to create (9 ms at start-up, 23 on a resize; 8-bit 1, scRGB FIFO 24).
 - **Synchronisation:** a semaphore per image orders the present after the frame. The acquire waits
   on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
 - **Per window:** each host has its own instance, device and command table. Device-level function
@@ -354,6 +359,10 @@ Anything holding a handle to something Skia or a driver also tracks goes stale, 
   other.
 - **`GL_DEDICATED_MEMORY_OBJECT_EXT` is required** for a dedicated allocation. Without it NVIDIA on
   Linux read every 4K texture as black, with no GL error. Windows happened to work.
+- **A swapchain forgotten is not a swapchain destroyed.** Minimized, the rebuild found no area and
+  set the handle to null. The orphan still owned the surface: the restored window drew nothing,
+  for ever, and a resize failed with `ErrorNativeWindowInUseKHR`. The validation layer named it
+  only at device destruction, as a leaked `VkSwapchainKHR` (`VUID-vkDestroyDevice-device-05137`).
 
 ### 3. Defaults that are not neutral
 

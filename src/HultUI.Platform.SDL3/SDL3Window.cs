@@ -834,6 +834,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public bool IsMaximized =>
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
 
+    /// <summary>
+    /// SDL's flag, read live rather than kept from events: on Windows SDL sets and clears it
+    /// inside the window procedure, so a <c>ShowWindow</c> on this thread is seen before it
+    /// returns, and the restore queues an event that wakes an idle loop to draw what waited.
+    /// </summary>
+    public bool IsMinimized => _window != null
+        && ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MINIMIZED) != 0;
+
     public bool IsFullscreen =>
         _customFrame is { } frame ? frame.IsFullscreen
         : _plainFullscreen is { } plain ? plain.IsFullscreen

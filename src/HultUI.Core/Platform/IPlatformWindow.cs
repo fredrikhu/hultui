@@ -60,6 +60,13 @@ public interface IPlatformWindow : IDisposable
     bool IsMaximized { get; }
 
     /// <summary>
+    /// True while the window is minimized. The frame loop does not draw a minimized window
+    /// (a forced frame aside): nothing would show the frame, and on Windows a Vulkan surface
+    /// has no area to draw into. False where the platform cannot tell, which keeps drawing.
+    /// </summary>
+    bool IsMinimized => false;
+
+    /// <summary>
     /// The native window title — what the OS shows in the task bar, the Alt+Tab
     /// switcher and (for a decorated window) the caption. Settable after creation
     /// so an app can reflect its current document; a borderless window still has
