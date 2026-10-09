@@ -16,17 +16,35 @@ public partial class JunctionApp
     private const float DotRadius = 5.5f;
     private const float RowHeight = 54f;
 
-    // A property, not a static readonly field: the ramp it reads changes with the theme, and
-    // a field would hold whichever one was current when this type was first touched.
-    private static Color[] LanePalette =>
-    [
-        Nocturne.Accent400,
-        Nocturne.Neutral300,
-        Nocturne.Accent2_400,
-        Nocturne.Accent300,
-        Nocturne.Neutral400,
-        Nocturne.Accent500,
-    ];
+    // Not a static readonly field: the ramp it reads changes with the theme, and a field would
+    // hold whichever one was current when this type was first touched. Not a new array per
+    // read either: the graph reads it for every edge and dot of every row on screen, every
+    // frame (a new Color[6] per read was 1.97 KB a frame over a screen of History). Built once
+    // per theme instead, which is all Nocturne's ramps follow.
+    private static Color[] s_lanePalette = [];
+    private static HultUI.Themes.NamedTheme? s_lanePaletteTheme;
+
+    private static Color[] LanePalette
+    {
+        get
+        {
+            var theme = Nocturne.Theme;
+            if (!ReferenceEquals(theme, s_lanePaletteTheme))
+            {
+                s_lanePalette =
+                [
+                    Nocturne.Accent400,
+                    Nocturne.Neutral300,
+                    Nocturne.Accent2_400,
+                    Nocturne.Accent300,
+                    Nocturne.Neutral400,
+                    Nocturne.Accent500,
+                ];
+                s_lanePaletteTheme = theme;
+            }
+            return s_lanePalette;
+        }
+    }
 
     private Element BuildHistoryView()
     {
@@ -1255,17 +1273,27 @@ public partial class JunctionApp
 
     // ── Graph rendering ──────────────────────────────────────────────────
 
+    // Runs every frame for every row on screen, so it loops by index: a foreach over an
+    // IReadOnlyList boxes an enumerator each time.
     private static void DrawGraph(ICanvasDrawingContext ctx, GitGraphRow row)
     {
         var h = ctx.Bounds.Height;
         var centerY = h / 2f;
 
-        foreach (var e in row.EdgesFromPrev ?? [])
-            ctx.DrawBezier(new Point(LaneX(e.FromLane), 0), new Point(LaneX(e.ToLane), centerY),
-                LaneColor(e.ColorIndex), 2f);
-        foreach (var e in row.EdgesToNext ?? [])
-            ctx.DrawBezier(new Point(LaneX(e.FromLane), centerY), new Point(LaneX(e.ToLane), h),
-                LaneColor(e.ColorIndex), 2f);
+        if (row.EdgesFromPrev is { } fromPrev)
+            for (int i = 0; i < fromPrev.Count; i++)
+            {
+                var e = fromPrev[i];
+                ctx.DrawBezier(new Point(LaneX(e.FromLane), 0), new Point(LaneX(e.ToLane), centerY),
+                    LaneColor(e.ColorIndex), 2f);
+            }
+        if (row.EdgesToNext is { } toNext)
+            for (int i = 0; i < toNext.Count; i++)
+            {
+                var e = toNext[i];
+                ctx.DrawBezier(new Point(LaneX(e.FromLane), centerY), new Point(LaneX(e.ToLane), h),
+                    LaneColor(e.ColorIndex), 2f);
+            }
 
         var center = new Point(LaneX(row.Lane), centerY);
         var color = LaneColor(ColorIndexForLane(row));
@@ -1275,15 +1303,21 @@ public partial class JunctionApp
 
     private static int ColorIndexForLane(GitGraphRow row)
     {
-        foreach (var e in row.EdgesToNext ?? [])
-            if (e.FromLane == row.Lane) return e.ColorIndex;
-        foreach (var e in row.EdgesFromPrev ?? [])
-            if (e.ToLane == row.Lane) return e.ColorIndex;
+        if (row.EdgesToNext is { } toNext)
+            for (int i = 0; i < toNext.Count; i++)
+                if (toNext[i].FromLane == row.Lane) return toNext[i].ColorIndex;
+        if (row.EdgesFromPrev is { } fromPrev)
+            for (int i = 0; i < fromPrev.Count; i++)
+                if (fromPrev[i].ToLane == row.Lane) return fromPrev[i].ColorIndex;
         return row.Lane;
     }
 
     private static float LaneX(int lane) => lane * LaneWidth + 12f;
 
-    private static Color LaneColor(int i) =>
-        LanePalette[((i % LanePalette.Length) + LanePalette.Length) % LanePalette.Length];
+    private static Color LaneColor(int i)
+    {
+        var palette = LanePalette;
+        int n = palette.Length;
+        return palette[((i % n) + n) % n];
+    }
 }
