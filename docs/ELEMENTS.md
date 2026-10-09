@@ -1249,9 +1249,11 @@ in its menu.
 | `TextChanged` | `Action<string>?` | |
 
 **Wrapping is unconditional.** Every hard line wraps at the content-box width; there is
-no wrap switch, and the wrapped rows are cached against the width they wrapped at, so a
-resize re-wraps with nothing for you to do. The corollary is that there is never
-anything to the right to scroll to: `ScrollBy` ignores `dx`, and autoscroll is vertical.
+no wrap switch, and the wrapped rows are cached against the text, the width and the font
+they wrapped with, so a resize or another font size re-wraps with nothing for you to do,
+and a rebuild that hands the area the text it already shows wraps nothing. The corollary
+is that there is never anything to the right to scroll to: `ScrollBy` ignores `dx`, and
+autoscroll is vertical.
 
 **Revealing a position.** Two calls:
 

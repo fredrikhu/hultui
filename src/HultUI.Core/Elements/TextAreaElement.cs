@@ -23,9 +23,19 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     // Wrapped-line cache: each entry is the char index where that line starts.
     // Line i spans _lineStarts[i] .. _lineStarts[i+1]-1 (or end of text).
+    // Kept until the text changes or one of what the breaks were found with does: the width,
+    // the style's metrics, the render context and the UI culture (which picks Han faces). Every
+    // rebuild of a parent hands the area its text again, and wrapping a large document again
+    // for that was most of a keystroke elsewhere in the app.
     private List<int>? _lineStarts;
     private float _lastWrapWidth;
+    private ResolvedInheritedStyle _linesStyle;
+    private IRenderContext? _linesContext;
+    private System.Globalization.CultureInfo? _linesCulture;
+
+    // The height of a row, for the style metrics it was measured in.
     private float _lineHeight;
+    private ResolvedInheritedStyle _lineHeightStyle;
 
     // Where each hard line too long to fit broke the last time line starts were worked out, by
     // its text: an edit changes a line or two, and the rest come back from here instead of
@@ -59,10 +69,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             _text = newValue;
             _cursorPos = Math.Min(_cursorPos, _text.Length);
             _selectionStart = _cursorPos;
-            InvalidateLines();
             MarkPaintDirty();
             if (changed)
             {
+                // Only then: a patch hands the area its text on every rebuild of its parent.
+                InvalidateLines();
                 _history.Clear();
                 NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
             }
@@ -329,10 +340,16 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// </summary>
     internal List<int> GetLineStarts(float wrapWidth, ResolvedInheritedStyle style)
     {
-        if (_lineStarts is not null && Math.Abs(_lastWrapWidth - wrapWidth) < 0.5f)
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        if (_lineStarts is not null && Math.Abs(_lastWrapWidth - wrapWidth) < 0.5f
+            && ReferenceEquals(_linesContext, _renderCtx) && ReferenceEquals(_linesCulture, culture)
+            && StyleResolver.SameMetrics(_linesStyle, style))
             return _lineStarts;
 
         _lastWrapWidth = wrapWidth;
+        _linesStyle = style;
+        _linesContext = _renderCtx;
+        _linesCulture = culture;
         _lineStarts = ComputeLineStarts(wrapWidth, style);
         return _lineStarts;
     }
@@ -639,10 +656,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     private float GetLineHeight(ResolvedInheritedStyle style)
     {
-        if (_lineHeight > 0) return _lineHeight;
+        if (_lineHeight > 0 && StyleResolver.SameMetrics(_lineHeightStyle, style)) return _lineHeight;
         if (_renderCtx is not null)
         {
             _lineHeight = _renderCtx.MeasureText("X", style).Height;
+            _lineHeightStyle = style;
             return _lineHeight;
         }
         return style.FontSize; // fallback
@@ -1325,7 +1343,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         if (_renderCtx != ctx)
         {
             _renderCtx = ctx;
-            _lineHeight = 0; // re-measure only when context changes
+            _lineHeight = 0; // a row is measured again in the new context
         }
 
         var origBorder = BorderColor;

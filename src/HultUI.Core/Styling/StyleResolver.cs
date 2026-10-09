@@ -80,7 +80,7 @@ public static class StyleResolver
 
     /// <summary>Whether two styles measure text alike: everything shaping and line breaking
     /// read, nothing only painting reads (colour, decoration, alignment, cursor).</summary>
-    private static bool SameMetrics(in ResolvedInheritedStyle a, in ResolvedInheritedStyle b) =>
+    internal static bool SameMetrics(in ResolvedInheritedStyle a, in ResolvedInheritedStyle b) =>
         a.FontSize == b.FontSize
         && a.FontWeight == b.FontWeight
         && a.FontSlant == b.FontSlant
