@@ -29,8 +29,6 @@ public class ProgressBarElement : Element, IRangeValueElement
     private float _sweep;
     private TweenHandle _sweepTween;
 
-    public ProgressBarElement() => IgnoresAvailableHeight = true;
-
     public double Value
     {
         get => _value;

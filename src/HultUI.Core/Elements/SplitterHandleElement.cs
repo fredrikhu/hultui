@@ -50,7 +50,6 @@ public class SplitterHandleElement : Element
 
     public SplitterHandleElement(SplitterAxis axis = SplitterAxis.Horizontal)
     {
-        IgnoresAvailableHeight = true;
         Axis = axis;
         IsFocusable = true;
         Role = AccessibilityRole.Separator;

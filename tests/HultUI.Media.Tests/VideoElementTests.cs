@@ -82,6 +82,28 @@ public class VideoElementTests
         Assert.Equal(90, video.Layout.Height, 0.5);
     }
 
+    /// <summary>The one leaf whose measurement reads the height offered (Element.IgnoresAvailableHeight
+    /// is false for it): kept for any height, the video would stay as tall as the window was.</summary>
+    [Fact]
+    public void Measure_FollowsTheHeightOffered_WhenTheWindowGetsShorter()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var backend = new FakeMediaBackend { VideoWidth = 1920, VideoHeight = 1080 };
+        using var player = new MediaPlayer(backend);
+        var video = Video.New(player);
+        // In a row the height is the cross axis: offered, never forced.
+        session.Application.SetRoot(Flex.Row().AlignItems(AlignItems.FlexStart).Children(video));
+        player.Open(Clip);
+        session.PumpFrame();
+        Assert.Equal(225, video.Layout.Height, 0.5);
+
+        session.Window.SetClientSize(400, 150);
+        session.PumpFrame();
+
+        Assert.Equal(150, video.Layout.Height, 0.5);
+        Assert.Equal(1920f * 150 / 1080, video.Layout.Width, 0.5);
+    }
+
     [Fact]
     public void AChangeOfFrameSize_Relayouts()
     {

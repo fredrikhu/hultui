@@ -287,7 +287,6 @@ public class TextInputElement : BoxElement
 
     public TextInputElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Box.Padding = new Thickness(4, 8, 4, 8);
         // No font size of its own: ApplyTheme's `??=` fills it from the style or the theme,

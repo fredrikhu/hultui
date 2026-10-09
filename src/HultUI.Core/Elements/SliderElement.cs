@@ -87,7 +87,6 @@ public class SliderElement : Element, IRangeValueElement
 
     public SliderElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         // The press captures the pointer, so a drag that wanders above or below the

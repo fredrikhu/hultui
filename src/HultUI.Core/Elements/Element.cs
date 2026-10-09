@@ -1391,12 +1391,14 @@ public abstract class Element
 
     /// <summary>Whether <see cref="MeasureContent"/> ignores the available height, and no more: unlike
     /// <see cref="MeasuresAtWidthOnly"/> it promises nothing about a forced height or where the
-    /// baseline sits. Set by controls that measure their own fixed parts — a checkbox, a slider,
-    /// a text field. Layout keeps their measurement for any height offered (MeasureCache); without
-    /// it a column of controls held its measurement to the one height it was taken at, and was
-    /// laid out again at the height its row gave it. An override that reads the height must not
-    /// set this.</summary>
-    internal bool IgnoresAvailableHeight { get; private protected set; }
+    /// baseline sits. True unless an override reads the height, which must clear it — a video,
+    /// which scales down to the height offered, is the one that does. Everything else measures
+    /// at a width or not at all: an empty box (a spacer), a control's own fixed parts, a chevron.
+    /// Layout keeps such a leaf's measurement for any height offered (MeasureCache), and so the
+    /// row or column around it can keep its own: keyed on the exact height, one spacer or chevron
+    /// in a row had the row, and every container above it, measured again whenever the height on
+    /// offer moved — each frame of an expander's animation, a vertical resize, a splitter drag.</summary>
+    internal bool IgnoresAvailableHeight { get; private protected set; } = true;
 
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;

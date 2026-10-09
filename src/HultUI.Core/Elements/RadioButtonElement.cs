@@ -49,7 +49,6 @@ public class RadioButtonElement : Element
 
     public RadioButtonElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         OnOwn<ClickEvent>(OnClick);

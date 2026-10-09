@@ -85,7 +85,6 @@ public class ToggleSwitchElement : Element
 
     public ToggleSwitchElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         OnOwn<ClickEvent>(_ => Toggle());

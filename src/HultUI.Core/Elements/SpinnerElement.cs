@@ -42,7 +42,6 @@ public class SpinnerElement : Element, IRangeValueElement
 
     public SpinnerElement()
     {
-        IgnoresAvailableHeight = true;
         Role = AccessibilityRole.ProgressBar;
     }
 
