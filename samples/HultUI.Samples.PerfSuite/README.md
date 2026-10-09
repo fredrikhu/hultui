@@ -80,6 +80,12 @@ layout/resize 2,000-row list  12002    5.271    5.723    0.11    0.00    4.85   
   nothing a Tab does changed: with `DOTNET_JitObjectStackAllocation=0` f184580 reads 34,
   and filtered runs read 33 on f184580 and on the opacity merge after it alike. Before
   calling a few KB a regression, check it in a filtered run and with that switch off.
+- **A NativeAOT row can move with code it never runs.** The `grid/` rows read 7–10 % slower
+  on a build of 3a057ea whose only change was in `TextAreaElement`, in every run, while
+  JIT was flat; 95e93b5 with one cold method added to `TextAreaElement` read 13–16 %
+  slower, and 3a057ea with the same code in another shape read as 95e93b5. Where code lands
+  in the AOT binary moves those rows. Before calling an AOT-only move in untouched code a
+  regression, publish the base with a small unrelated change and see whether it moves too.
 - A row that ends in `! n/m steps rendered nothing` timed nothing: the scenario's change
   never dirtied anything. Fix the scenario.
 
@@ -195,6 +201,10 @@ All on one machine: i7-14700K (pinned to its 8 performance cores), RTX 4080, Win
 | `2026-10-09-1c8ee98-scenarios12.json`, `…-aot.json` | The five rows 1c8ee98 adds (plan 17 item 12: the selection walks and the highlighted JSON response), JIT and NativeAOT, 2 idle-gated runs each, min the lower and the rest their mean. Only those rows. The "before" for the round 2 items that change them; see below. |
 | `2026-10-09-ff7a970-sdlloop-before.json`, `…-after.json` | Before and after the SDL platform's event pump stopped making a closure on every pass of the loop and its short waits parked for their whole timeout on Windows (plan 17, round 2): 059316a and ff7a970, 2 idle-gated runs each, alternated, min the lower and the rest their mean. The suite runs headless, where neither change reaches: 0 slower, 0 faster, allocation unchanged on every row (the largest move −0.2 %). What they change, in a real window, is in commits 0ceecea and ff7a970: 88 B a loop pass → 0, and ~240 passes a frame → 2.1 while animating. |
 | `2026-10-09-82e382b-minimized-before.json`, `…-after.json` | Before and after a minimized window stopped being drawn and a Vulkan window that drew while minimized got its swapchain back on the restore (plan 17, round 2): 6a10483 and 82e382b, 2 idle-gated runs each, alternated, min the lower and the rest their mean. The suite runs headless, whose windows are never minimized: 0 slower, 0 faster, allocation unchanged past noise (the largest moves are rows of 1.4–1.7 KB/op). `text/spans bold` reads +10 % on the minimum (+4 % median), untouched by the change and 8 % apart between the two before runs: a filtered rerun of 4 alternated pairs reads 1.435 → 1.450 ms. What the change does, in a real window, is in commit 82e382b. |
+| `2026-10-09-95e93b5-tapatch-before.json`, `…-after.json` | Before and after a TextArea kept its line starts when a rebuild hands it the text it already shows (plan 17, round 2): 27b8803, which adds `text/rebuild around highlighted JSON in a TextArea`, and 95e93b5, 2 idle-gated runs each, alternated, min the lower and the rest their mean. Compare these two: 0 slower, 1 faster (the rebuild row 1.696 → 0.399 ms, 1,414 → 21.6 KB/op); allocation unchanged on every other row. `richtext/type in a paragraph of 600 spans` and `scroll/wheel 5,000-row list` read +5 % on the minimum, untouched by the change: a filtered rerun of 4 alternated pairs reads +1.6 % and +1.2 %. |
+| `2026-10-09-95e93b5-tapatch-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish: the rebuild row 2.051 → 0.424 ms, 1,415 → 22.9 KB/op; 0 slower, no other row up by 5 % or more. |
+| `2026-10-09-3a057ea-spanscan-before.json`, `…-after.json` | Before and after a TextArea found each line's spans by a binary search on the spans' running maximum end, into one reused list (plan 17, round 2): 95e93b5 and 3a057ea, 2 idle-gated runs each, alternated, min the lower and the rest their mean. Compare these two: 0 slower, 1 faster (`text/wheel highlighted JSON` 0.834 → 0.399 ms, 14.2 → 5.2 KB/op; the rebuild row 21.6 → 13.0 KB/op). `text/open highlighted JSON` reads +8 % on the minimum (+1 % median), `richtext/type in a paragraph of 600 spans` +6 %: a filtered rerun of 4 alternated pairs reads −1.4 % and +0.7 %. |
+| `2026-10-09-3a057ea-spanscan-aot-before.json`, `…-aot-after.json` | The same pair as a NativeAOT publish: the wheel 1.584 → 0.412 ms (−74 %, 16.1 → 5.4 KB/op), level with JIT where it read 1.9× JIT before; 0 slower, no other row up by 3 % or more. An earlier shape of the change read `grid/` 7–10 % slower here: code layout, see "Reading the output". |
 
 **The feature batch, before → after** (undo, scroll chaining, baseline alignment, find
 bar, menu bar, expander, popover, table, aspect ratio, align-content, sticky, the
@@ -523,7 +533,14 @@ Vesper's panes), and Meridian opening a large JSON response. Minimum, KB a step,
 - **The wheel is the span scan.** Each of the ~50 lines drawn walks the response's 22,968 spans
   from the first, through an interface enumerator, to the ones on its line: ~11,500 a line in the
   middle of the response. AOT reads 66 % slower than JIT here; dynamic PGO can devirtualize that
-  enumerator and AOT cannot (not profiled).
+  enumerator and AOT cannot (not profiled). Fixed in 3a057ea: a binary search finds each line's
+  first span, and the wheel reads 0.40 ms on JIT and 0.41 on AOT. In Meridian, whose span list is
+  a `List<TextSpan>` and whose find merges overlapping tints into it, a wheel step with a find open
+  took 7.4–8.1 ms before and 1.05–1.13 after (headless, JIT).
+- **A rebuild around the response wrapped it again** — every line measured, 1.4 MB — because the
+  patch handed the TextArea its text and the setter forgot the line starts. Fixed in 95e93b5:
+  `text/rebuild around highlighted JSON in a TextArea` 1.70 → 0.40 ms; a keystroke in Meridian's
+  URL field with such a response open 3.00 → 1.70 ms, 1,612 → 182 KB.
 
 **What the suite turned up on its first run**, for follow-up:
 
