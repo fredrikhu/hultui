@@ -2,6 +2,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Rendering.Skia.Tests;
@@ -14,9 +15,9 @@ namespace HultUI.Rendering.Skia.Tests;
 /// suite's dense text screen (plan 17, round 1). A rounded border with sides of their own built
 /// four <c>SKPath</c>s per frame for its corner clips.
 ///
-/// <para>The bound is under one byte per frame on average, not zero, so a one-off allocation
-/// somewhere in the runtime does not fail the test; anything drawn per frame costs tens of bytes
-/// a frame.</para>
+/// <para>The bound is under one byte per frame on average, over the least of a few rounds of
+/// frames (<see cref="Allocations"/>), so a one-off allocation does not fail the test; anything
+/// drawn per frame costs tens of bytes a frame, in every round.</para>
 /// </summary>
 public class TextDrawAllocationTests
 {
@@ -50,7 +51,7 @@ public class TextDrawAllocationTests
     }
 
     /// <summary>Bytes this thread allocated per frame of <paramref name="draw"/>, once the
-    /// caches are warm.</summary>
+    /// caches are warm: the least of a few rounds.</summary>
     private static double AllocatedPerFrame(SkiaRasterRenderSurface surface, Action<IRenderContext> draw)
     {
         var ctx = surface.RenderContext;
@@ -64,9 +65,7 @@ public class TextDrawAllocationTests
 
         Frame();
         Frame();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < Frames; i++) Frame();
-        return (GC.GetAllocatedBytesForCurrentThread() - before) / (double)Frames;
+        return Allocations.PerCall(Frames, Frame);
     }
 
     [Fact]

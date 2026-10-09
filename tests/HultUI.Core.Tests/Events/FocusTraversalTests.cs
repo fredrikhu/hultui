@@ -1,5 +1,6 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Events;
@@ -286,13 +287,14 @@ public class FocusTraversalTests
 
         var next = new Element?[20];
         var previous = new Element?[20];
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 20; i++)
+        long allocated = Allocations.Least(() =>
         {
-            next[i] = FocusTraversal.FindNext(root, fields[i]);
-            previous[i] = FocusTraversal.FindPrevious(root, fields[i + 1]);
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (int i = 0; i < 20; i++)
+            {
+                next[i] = FocusTraversal.FindNext(root, fields[i]);
+                previous[i] = FocusTraversal.FindPrevious(root, fields[i + 1]);
+            }
+        });
 
         for (int i = 0; i < 20; i++)
         {

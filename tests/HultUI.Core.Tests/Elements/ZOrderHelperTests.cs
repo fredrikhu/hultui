@@ -1,6 +1,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -35,13 +36,14 @@ public class ZOrderHelperTests
         ZOrderHelper.GetChildrenInZOrder(parent);
         ZOrderHelper.GetChildrenInZOrder(leaf);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++)
+        Assert.Equal(0, Allocations.Least(() =>
         {
-            ZOrderHelper.GetChildrenInZOrder(parent);
-            ZOrderHelper.GetChildrenInZOrder(leaf);
-        }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            for (int i = 0; i < 100; i++)
+            {
+                ZOrderHelper.GetChildrenInZOrder(parent);
+                ZOrderHelper.GetChildrenInZOrder(leaf);
+            }
+        }));
     }
 
     [Fact]

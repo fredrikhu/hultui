@@ -5,6 +5,7 @@ using HultUI.Core.Primitives;
 using HultUI.Headless;
 using HultUI.Headless.Recording;
 using HultUI.Rendering.Skia;
+using HultUI.Testing;
 using Junction.Git;
 using Junction.Theme;
 using Xunit;
@@ -41,9 +42,7 @@ public class HistoryGraphPaintTests
 
             Frame();
             Frame();
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < Frames; i++) Frame();
-            double perFrame = (GC.GetAllocatedBytesForCurrentThread() - before) / (double)Frames;
+            double perFrame = Allocations.PerCall(Frames, Frame);
 
             Assert.True(perFrame < 1, $"painting {graphs.Count} graph cells allocated {perFrame:0.#} B per frame");
         });

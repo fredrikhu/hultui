@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using HultUI.Core.DevTools;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.DevTools;
@@ -133,14 +134,21 @@ public class SlidingWindowMaxTests
             v[i] = (i < 40_000 ? 50_000f - i : 10_000f) + (float)rng.NextDouble() * 100f;
         }
 
-        new SlidingWindowMax(TimeSpan.FromSeconds(1)).Add(1f, 0);   // compiled before it is counted
-        long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < t.Length; i++)
         {
             w.Add(v[i], t[i]);
             max[i] = w.Max;
         }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+
+        // The same run into new windows, made beforehand: the first run of each allocates nothing.
+        var fresh = new SlidingWindowMax[Allocations.MaxRounds];
+        for (int k = 0; k < fresh.Length; k++) fresh[k] = new SlidingWindowMax(TimeSpan.FromSeconds(1));
+        int round = 0;
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            var next = fresh[round++];
+            for (int i = 0; i < t.Length; i++) next.Add(v[i], t[i]);
+        }));
 
         // Checked every 97 samples, against a window's brute force each.
         for (int i = 0; i < t.Length; i += 97)
@@ -166,8 +174,9 @@ public class SlidingWindowMaxTests
         long t = 0;
         for (int i = 0; i < 600; i++) w.Add(i % 7, t += step);   // ten seconds: warm and full
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1_000; i++) w.Add(i % 7, t += step);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            for (int i = 0; i < 1_000; i++) w.Add(i % 7, t += step);
+        }));
     }
 }

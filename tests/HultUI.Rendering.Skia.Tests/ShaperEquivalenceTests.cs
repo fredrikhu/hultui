@@ -1,5 +1,6 @@
 using HultUI.Core.Layout;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using HultUI.Text;
 using HultUI.Text.Tests;
 using SkiaSharp;
@@ -215,15 +216,17 @@ public class ShaperEquivalenceTests(ITestOutputHelper output)
             shaper.Shape(text, font, 14f, rtl: true);
         }
 
-        const int calls = 1_000;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < calls; i++)
-            shaper.Shape(text, font, i % 2 == 0 ? 14f : 15f, rtl: i % 3 == 0);
-        long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / calls;
-
         // ShapedRun: object header and method table, 3 references, 3 floats and a byte (56 B);
         // the glyph array: header, method table and length (24 B), 16 B a glyph.
         long expected = 56 + 24 + 16L * run.Glyphs.Length;
+
+        int call = 0;
+        long perCall = (long)Allocations.PerCall(1_000, () =>
+        {
+            shaper.Shape(text, font, call % 2 == 0 ? 14f : 15f, rtl: call % 3 == 0);
+            call++;
+        }, goal: expected);
+
         Assert.True(perCall <= expected, $"{perCall} B a call, expected {expected} B ({run.Glyphs.Length} glyphs)");
     }
 

@@ -2,6 +2,7 @@ using System.Collections;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -207,11 +208,13 @@ public class TextAreaSpanTests
         for (int line = 0; line < 600; line++)
             area.SpansForLine(line * 80, line * 80 + 79);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
         int found = 0;
-        for (int line = 0; line < 600; line++)
-            found += area.SpansForLine(line * 80, line * 80 + 79)?.Count ?? 0;
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = Allocations.Least(() =>
+        {
+            found = 0;
+            for (int line = 0; line < 600; line++)
+                found += area.SpansForLine(line * 80, line * 80 + 79)?.Count ?? 0;
+        });
 
         Assert.True(found > 600, $"only {found} spans on 600 lines");
         Assert.Equal(0, allocated);

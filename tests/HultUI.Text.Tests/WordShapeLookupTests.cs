@@ -1,5 +1,6 @@
 using HultUI.Core.Layout;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Text.Tests;
@@ -202,12 +203,13 @@ public class WordShapeLookupTests
         pipeline.MeasureString("pretty red tab", Base);
         pipeline.MeasureString("chair", spaced);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        pipeline.MeasureString(text, Base);
-        pipeline.MeasureString(text, spaced);
-        pipeline.MeasureString("pretty red tab", Base);
-        pipeline.MeasureString("chair", spaced);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            pipeline.MeasureString(text, Base);
+            pipeline.MeasureString(text, spaced);
+            pipeline.MeasureString("pretty red tab", Base);
+            pipeline.MeasureString("chair", spaced);
+        }));
     }
 
     [Fact]
@@ -217,14 +219,11 @@ public class WordShapeLookupTests
         var pipeline = new TextPipeline(fonts, new WidthChangeEquivalenceTests.ContextShaper());
         var font = fonts.Resolve(Base.FontFamily, Base.FontWeight, Base.FontSlant);
         const string text = "pretty red table 4711 chair house keyboard";
-        pipeline.ShapeByWords(text, font, 16f);
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
         var run = pipeline.ShapeByWords(text, font, 16f);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         // 16 bytes a glyph, and two objects' headers and fields: the run and the array.
         long glyphBytes = 16L * run.Glyphs.Length;
+        long allocated = Allocations.Least(() => run = pipeline.ShapeByWords(text, font, 16f), goal: glyphBytes + 160);
         Assert.InRange(allocated, glyphBytes, glyphBytes + 160);
     }
 
@@ -309,15 +308,18 @@ public class LruCacheTests
         var cache = new LruCache<int, int>(capacity: 4);
         for (int i = 0; i < 8; i++) cache.Add(i, i);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 8; i < 1_008; i++)
+        int next = 8;   // every round inserts keys the cache has not seen
+        Assert.Equal(0, Allocations.Least(() =>
         {
-            if (!cache.TryGet(i, out _)) cache.Add(i, i);
-            cache.Put(10_000 + i, i);
-        }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.True(cache.TryGet(1_006, out _) && cache.TryGet(11_007, out _));
-        Assert.False(cache.TryGet(1_005, out _));
+            for (int n = 0; n < 1_000; n++, next++)
+            {
+                if (!cache.TryGet(next, out _)) cache.Add(next, next);
+                cache.Put(10_000 + next, next);
+            }
+        }));
+        int last = next - 1;
+        Assert.True(cache.TryGet(last - 1, out _) && cache.TryGet(10_000 + last, out _));
+        Assert.False(cache.TryGet(last - 2, out _));
     }
 
     [Fact]
@@ -384,11 +386,13 @@ public class LruCacheTests
         int[] weights = [10, 30, 20, 10, 10, 45, 5, 5];
         for (int i = 0; i < 64; i++) cache.Add(i, i, weights[i % weights.Length]);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 64; i < 1_064; i++)
-            if (!cache.TryGet(i, out _)) cache.Add(i, i, weight: weights[i % weights.Length]);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        int next = 64;   // every round inserts keys the cache has not seen
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            for (int n = 0; n < 1_000; n++, next++)
+                if (!cache.TryGet(next, out _)) cache.Add(next, next, weight: weights[next % weights.Length]);
+        }));
         Assert.InRange(cache.Weight, 55, 100);
-        Assert.True(cache.TryGet(1_063, out _));
+        Assert.True(cache.TryGet(next - 1, out _));
     }
 }

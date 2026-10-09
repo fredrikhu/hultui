@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
@@ -16,7 +17,8 @@ namespace HultUI.Headless.Tests;
 /// (plan 17, runtime-frame-floor).
 ///
 /// <para>These drive <see cref="Application.RunFrame"/> directly, the call
-/// <see cref="Application.Run"/> makes each pass, and count what this thread allocated.</para>
+/// <see cref="Application.Run"/> makes each pass, and count what this thread allocated: the
+/// least of a few rounds (<see cref="Allocations"/>), so a one-off does not count.</para>
 /// </summary>
 public class FrameAllocationTests
 {
@@ -59,13 +61,14 @@ public class FrameAllocationTests
         for (int i = 0; i < 10; i++) { _ = app.IsRunning; app.RunFrame(Frame); }
 
         bool running = true, rendered = false;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 200; i++)
+        long allocated = Allocations.Least(() =>
         {
-            running &= app.IsRunning;
-            rendered |= app.RunFrame(Frame);
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (int i = 0; i < 200; i++)
+            {
+                running &= app.IsRunning;
+                rendered |= app.RunFrame(Frame);
+            }
+        });
 
         Assert.True(running);
         Assert.False(rendered, "the screen was meant to be idle");
@@ -131,8 +134,7 @@ public class FrameAllocationTests
     /// syntax spans, one selection group with a live selection, a bold word — and a linked label,
     /// a truncated one and a right-to-left one, repainted. Each label laid a new paragraph out
     /// every frame for its hit-testing, ~320 B a label: 10 KB a frame over a diff (plan 17,
-    /// round 2). The least of three rounds, so a one-off allocation while the frame's code is
-    /// still being compiled does not count.</summary>
+    /// round 2).</summary>
     [Fact]
     public void ASteadyRepaintOfSelectableLabels_AllocatesNothing()
     {
@@ -165,9 +167,7 @@ public class FrameAllocationTests
         for (int i = 0; i < 10; i++)
             Assert.NotNull(((TextElement)rows[i]).DrawnParagraph);
 
-        double perFrame = double.MaxValue;
-        for (int round = 0; round < 3; round++)
-            perFrame = Math.Min(perFrame, PerFrame(session.Application, () => root.MarkPaintDirty()));
+        double perFrame = PerFrame(session.Application, () => root.MarkPaintDirty());
 
         Assert.True(perFrame < 1, $"repainting 43 selectable and linked labels allocated {perFrame:0.#} B per frame");
     }
@@ -189,13 +189,11 @@ public class FrameAllocationTests
         for (int i = 0; i < 10; i++) { window.PressKey(KeyCode.Tab); session.Application.RunFrame(Frame); }
 
         var focusedBefore = window.Window.FocusedElement;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 20; i++)
+        double perTab = Allocations.PerCall(20, () =>
         {
             window.PressKey(KeyCode.Tab);
             session.Application.RunFrame(Frame);
-        }
-        double perTab = (GC.GetAllocatedBytesForCurrentThread() - before) / 20.0;
+        }, goal: 1023);
 
         Assert.NotSame(focusedBefore, window.Window.FocusedElement);
         Assert.True(perTab < 1024, $"a Tab allocated {perTab:0} B");
@@ -214,42 +212,42 @@ public class FrameAllocationTests
         var window = session.Window;
         for (int i = 0; i < 10; i++) { window.MoveMouse(480 + i % 2, 100); session.Application.RunFrame(Frame); }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++)
+        long events = Allocations.Least(() =>
         {
-            _sink = new InputEvent.MouseMoveInput(480, 100, 1, 0, KeyModifiers.None);
-            _sink = new PointerMoveEvent { Position = new Point(480, 100), Delta = new Point(1, 0) };
-        }
-        long events = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (int i = 0; i < 100; i++)
+            {
+                _sink = new InputEvent.MouseMoveInput(480, 100, 1, 0, KeyModifiers.None);
+                _sink = new PointerMoveEvent { Position = new Point(480, 100), Delta = new Point(1, 0) };
+            }
+        });
 
-        before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++)
+        long moves = Allocations.Least(() =>
         {
-            window.MoveMouse(480 + i % 2, 100);
-            session.Application.RunFrame(Frame);
-        }
-        long moves = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (int i = 0; i < 100; i++)
+            {
+                window.MoveMouse(480 + i % 2, 100);
+                session.Application.RunFrame(Frame);
+            }
+        }, goal: events);
 
         Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
     }
 
     /// <summary>Bytes this thread allocated per rendered frame, <paramref name="change"/>
-    /// applied before each.</summary>
+    /// applied before each: the least of a few rounds of 100 frames.</summary>
     private static double PerFrame(Application app, Action change)
     {
         for (int i = 0; i < 10; i++) { change(); app.RunFrame(Frame); }
 
-        const int frames = 100;
-        int rendered = 0;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < frames; i++)
+        int ran = 0, rendered = 0;
+        double perFrame = Allocations.PerCall(100, () =>
         {
             change();
+            ran++;
             if (app.RunFrame(Frame)) rendered++;
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        });
 
-        Assert.Equal(frames, rendered);
-        return allocated / (double)frames;
+        Assert.Equal(ran, rendered);
+        return perFrame;
     }
 }

@@ -1,4 +1,5 @@
 using HultUI.Core.Platform;
+using HultUI.Testing;
 using SDL;
 using Xunit;
 using static SDL.SDL3;
@@ -30,9 +31,10 @@ public sealed class SdlWindowingPlatformTests : IDisposable
         Action<IPlatformWindow> onClose = _ => { };
         for (int i = 0; i < 100; i++) Assert.True(platform.PumpEvents(onClose));
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1_000; i++) platform.PumpEvents(onClose);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 1_000; i++) platform.PumpEvents(onClose);
+        });
 
         Assert.Equal(0, allocated);
     }

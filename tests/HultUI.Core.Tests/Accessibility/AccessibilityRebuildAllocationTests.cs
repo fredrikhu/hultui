@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Accessibility;
@@ -70,12 +71,10 @@ public class AccessibilityRebuildAllocationTests
         return root;
     }
 
-    private static long Bytes(Action action)
-    {
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        action();
-        return GC.GetAllocatedBytesForCurrentThread() - before;
-    }
+    /// <summary>What <paramref name="action"/> allocates on this thread: the least of a few runs
+    /// (<see cref="Allocations"/>), stopping at one that allocates no more than
+    /// <paramref name="goal"/>.</summary>
+    private static long Bytes(Action action, long goal = 0) => Allocations.Least(action, goal);
 
     [Fact]
     public void DiffingAnUnchangedTree_AllocatesNothingButTheDiff()
@@ -86,7 +85,7 @@ public class AccessibilityRebuildAllocationTests
         Assert.True(AccessibilityTreeDiffer.Diff(a, b).IsEmpty);
 
         long emptyDiff = Bytes(() => s_kept = AccessibilityTreeDiffer.Diff(null, null));
-        long unchanged = Bytes(() => s_kept = AccessibilityTreeDiffer.Diff(a, b));
+        long unchanged = Bytes(() => s_kept = AccessibilityTreeDiffer.Diff(a, b), goal: emptyDiff);
 
         // The TreeDiff it returns, and not a byte per node: no index of the children, no
         // enumerator. Before, this tree's diff allocated about 10 KB.
@@ -97,11 +96,8 @@ public class AccessibilityRebuildAllocationTests
     public void BuildingATree_AllocatesItsNodesAndOneArrayOfTheExactLengthPerParent()
     {
         var root = Scene();
-        AccessibilityTreeBuilder.Build(root);   // the thread's first build sets up what it keeps
-
-        long built = 0;
-        AccessibilityNode tree = null!;
-        built = Bytes(() => tree = AccessibilityTreeBuilder.Build(root));
+        // The thread's first build sets up what it keeps; the tree is the one each build makes.
+        var tree = AccessibilityTreeBuilder.Build(root);
 
         long node = Bytes(() => s_kept = new AccessibilityNode(default, AccessibilityRole.None, null, null, default));
         long expected = 0;
@@ -119,6 +115,8 @@ public class AccessibilityRebuildAllocationTests
             }
             foreach (var child in n.Children) Count(child);
         }
+
+        long built = Bytes(() => s_kept = AccessibilityTreeBuilder.Build(root), goal: expected);
 
         Assert.True(nodes > 150 && parents >= 4, $"{nodes} nodes, {parents} parents");
         // Nothing else: no list per node, no enumerator per child list, no list grown in steps,

@@ -1,6 +1,7 @@
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Rendering.Skia.Tests;
@@ -36,7 +37,8 @@ public class PaintEffectCacheTests
     }
 
     /// <summary>Bytes this thread allocated per frame of <paramref name="draw"/> after two warm-up
-    /// frames. The frame's number goes to the draw, so it can hand over a new object each time.</summary>
+    /// frames, the least of a few rounds (<see cref="Allocations"/>). The frame's number goes to
+    /// the draw, so it can hand over a new object each time: up to <see cref="DrawnFrames"/>.</summary>
     private static double AllocatedPerFrame(SkiaRasterRenderSurface surface, Action<IRenderContext, int> draw)
     {
         int frame = 0;
@@ -44,10 +46,12 @@ public class PaintEffectCacheTests
         void One() => Frame(surface, drawFrame);
         One();
         One();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < Frames; i++) One();
-        return (GC.GetAllocatedBytesForCurrentThread() - before) / (double)Frames;
+        return Allocations.PerCall(Frames, One);
     }
+
+    /// <summary>The most frames <see cref="AllocatedPerFrame"/> draws: two to warm up, and every
+    /// round it may measure.</summary>
+    private const int DrawnFrames = 2 + Frames * Allocations.MaxRounds;
 
     private static byte[] Pixels(SkiaRasterRenderSurface surface)
     {
@@ -76,9 +80,9 @@ public class PaintEffectCacheTests
     [Fact]
     public void Gradients_AllocateNothingPerFrame_EvenWhenRebuiltEachFrame()
     {
-        var linear = new Gradient[Frames + 2];
-        var vertical = new Gradient[Frames + 2];
-        var radial = new Gradient[Frames + 2];
+        var linear = new Gradient[DrawnFrames];
+        var vertical = new Gradient[DrawnFrames];
+        var radial = new Gradient[DrawnFrames];
         for (int i = 0; i < linear.Length; i++)
         {
             linear[i] = Gradient.Linear(135f, Indigo, Violet);
