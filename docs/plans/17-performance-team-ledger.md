@@ -74,13 +74,12 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    MeasureSize −72 %, leaf measurements −93 %); two correctness fixes.
 9. **a11y-node-extras + a11y-snapshot-stale-fields + a11y-atspi-snapshot-diet** (7) — node
    136 → 80 B (9 of 11 a11y rows −13…−39 %); stale Role/AutomationId on rebased wrappers;
-   AT-SPI paths built once (−27…−34 % per Linux a11y frame). Plus, if approved,
-   **a11y-focus-unbuilt-node** and **a11y-virtual-item-selected** (user).
+   AT-SPI paths built once (−27…−34 % per Linux a11y frame); plus
+   **a11y-focus-unbuilt-node** and **a11y-virtual-item-selected** (approved 2026-10-09).
 10. **reconcile-blueprint-hashset** (6) — no HashSet for empty parents (component rows
-    −10.7…−11.8 %). Plus, if approved, **reactivity-tween-tick-per-frame** (user; Reel 13
-    rebuilds per presented frame, 172 MB per 11 s) with the
-    **apps-scenario-tween-signal-rebuild** suite row, and **reactivity-scope-threadstatic**
-    (user).
+    −10.7…−11.8 %); **reactivity-tween-tick-per-frame** (approved; Reel 13 rebuilds per
+    presented frame, 172 MB per 11 s) with the **apps-scenario-tween-signal-rebuild** suite
+    row; **reactivity-scope-threadstatic** (approved, low priority).
 11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) — sticky wheel 1.55 → ~0.3
     KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
 12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
@@ -90,6 +89,21 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     item 4); Meridian response frame 25.7 MB.
 14. **gl-vk-one-submit-per-frame + gl-vk-resize-duplicate-frames** (3) — Flush is the 2nd
     largest share in every app (14–36 %); 3 → 1 frames per resize step. Needs timing.
+
+15. **a11y-atspi-active-on-status + a11y-value-for-text + a11y-richtext-text-snapshot +
+    a11y-range-value-events** (7; approved 2026-10-09) — gate the Linux bridge on
+    org.a11y.Status (always-on override); drop whole-text Value changes for text-pattern
+    elements (rich text keystroke ~1.5 MB UIA / ~750 KB AT-SPI); lazy rich text tables;
+    announce Slider/ProgressBar values (UIA RangeValue, AT-SPI Value).
+16. **meridian-response-format-on-ui-thread + syntax-maxlines-uncoloured** (8/5; approved)
+    — prettify and tokenize on the request worker (15.3 ms on the UI thread today), then
+    colour responses over 20,000 lines.
+17. **layout-virtuallist-item-rows** (1; approved) — opt-in `RenderWith((item, selected) =>
+    …)` VirtualList API (walk template calls 19 → 3, −75 % bytes), adopted in Junction
+    History first, then other lists one at a time.
+18. **wsl-mesa-verify** (3/5; approved) — with Mesa and Noto fonts installed in WSL Fedora:
+    check 0f5816a (GL depth 0) and 7a827e9 on Mesa EGL/llvmpipe and lavapipe, and re-run
+    d049be7's shaper equivalence on real Indic/Thai/emoji faces on Linux.
 
 ### Waiting
 
@@ -119,19 +133,13 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 - **a11y-atspi-snapshot-per-diff** (7) — 496 B/node rebuilt per apply on Linux. Medium.
 - **a11y-atspi-virtual-items** (7, correctness) — lists over 2,000 items are empty to Orca.
   Medium; needs a live libatspi check.
-- **a11y-richtext-text-snapshot** (7) — −24 % as is, −90 %+ with the Value decision (user).
 - **a11y-atspi-cache-child-index** (7) — unverified; needs a live libatspi client.
 - **apps-tooling-generic-framelog** (8, built by 4) — env-gated HULTUI_BENCH/HULTUI_FRAMELOG.
-- **meridian-response-format-on-ui-thread** (8, app) — 15.3 ms on the UI thread per large
-  response; prerequisite for colouring > 20,000 lines (user).
 - **Suite scenarios** (8): apps-scenario-rich-row-walk, apps-scenario-document-switch,
   apps-scenario-image-grid, apps-scenario-loop-wakes (real loop), a first-code-icon test.
 - **aperture-tmdb-size-fallback**, **aperture-poster-as-hero**, **aperture-hero-scrim-seam**,
   **junction-narrow-gitlab-glyphs**, **meridian-pane-choice-not-persisted**,
   **meridian-min-width-wraps** (apps; mostly not perf).
-- **layout-virtuallist-item-rows** (1, user) — opt-in `RenderWith((item, selected) => …)` API:
-  walk template calls 19 → 3 per step, −75 % bytes. Replaces layout-virtuallist-realize-in-render
-  (keep-rows prototyped and declined: +6 % bytes, the template is 88 % of realize).
 
 ## Landed
 
@@ -206,34 +214,21 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-Round 2 questions (asked 2026-10-09; reports `17-reports/r2-*`):
+Round 2 questions, answered 2026-10-09 (the user took every recommendation; 11 yes):
 
-1. **a11y-atspi-active-on-status**: gate the Linux bridge on `org.a11y.Status`
-   IsEnabled/ScreenReaderEnabled (as Qt does, with an always-on override)? Today every
-   GNOME/KDE session pays it: a keystroke in a 603-node form 385 KB vs 3.2 KB.
-2. **a11y-eager-virtual-items**: provide list items on demand at any size? Per-item Name,
-   bounds and Added/Removed events become list-level invalidation.
-3. **a11y-value-for-text**: drop the Value change for elements with a text pattern? A rich
-   text keystroke sends the whole document (~1.5 MB UIA, ~750 KB AT-SPI).
-4. **a11y-range-value-events**: add UIA RangeValue.Value changes and an AT-SPI Value
-   interface for Slider/ProgressBar (today a keyboard user moving a slider hears nothing)?
-5. **a11y-focus-unbuilt-node + a11y-virtual-item-selected**: approve the added events (a
-   missing focus event; IsSelected changes on two items per selection move)?
-6. **reactivity-tween-tick-per-frame**: tweens step once per rendered frame (like
-   requestAnimationFrame); delay timers can end up to one display interval later while the
-   window redraws.
-7. **reactivity-scope-threadstatic**: a signal read on another thread or after an `await`
-   inside Build/an effect no longer subscribes (today a data race).
-8. **syntax-maxlines-uncoloured**: colour Meridian responses over 20,000 lines (after moving
-   tokenizing off the UI thread)?
-9. **layout-virtuallist-item-rows**: add the opt-in VirtualList API and adopt it in
-   Junction and Vesper lists one at a time?
-10. **layout-scroll-strip-narrowing** (not perf): pursue the CSS shrink-then-scroll
-    behaviour outside plan 17, or drop it?
-11. **wsl-mesa**: install Mesa (EGL, DRI, Vulkan) and Noto fonts (Indic, Thai, Khmer, Myanmar,
-    Tibetan, Ethiopic, colour emoji) in WSL Fedora, to check 0f5816a/7a827e9 on software
-    GL/Vulkan and to compare shaping on real faces on Linux (d049be7)?
-12. (later) **gl-noop-geterror**: only if timing shows the last glGetError round trip costs.
+1. Gate the Linux bridge on `org.a11y.Status` → **yes**, with an always-on override.
+2. List items on demand at any size → **not now** (declined for plan 17 round 2).
+3. Drop the Value change for elements with a text pattern → **yes**.
+4. Range value events for Slider/ProgressBar → **yes**.
+5. Added events for a11y-focus-unbuilt-node and a11y-virtual-item-selected → **yes**.
+6. Tweens step once per rendered frame → **yes**.
+7. `[ThreadStatic]` reactive scope → **yes**, low priority.
+8. Colour Meridian responses over 20,000 lines → **yes, after** tokenizing moves off the
+   UI thread.
+9. Opt-in VirtualList item-rows API, adopted one list at a time → **yes**.
+10. Tab strips that narrow then scroll → **outside plan 17** (not perf).
+11. Install Mesa and Noto fonts in WSL Fedora → **yes**.
+12. (later) no-op glGetError — only if timing shows the round trip costs.
 
 Note: the round 2 app survey registered a Jellyfin device named "aperture-survey".
 
@@ -295,3 +290,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-09: CI green on 64ba531 (run 37861109308). Round 2 survey started, eight experts.
 - 2026-10-09: round 2 surveys in (all eight not satisfied); reports in `17-reports/r2-*`;
   queue re-ranked into 14 build steps; 12 questions for the user; survey worktrees removed.
+- 2026-10-09: the user answered all 12 round 2 questions (recommendations taken; WSL install yes). Queued items 15–18.
