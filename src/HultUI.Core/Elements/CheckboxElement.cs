@@ -25,9 +25,29 @@ public class CheckboxElement : Element
         }
     }
 
-    public string? Label { get; set; }
-    public float LabelGap { get; set; } = 8f;
-    public float CheckboxSize { get; set; } = 18f;
+    private string? _label;
+    private float _labelGap = 8f;
+    private float _checkboxSize = 18f;
+
+    // What MeasureContent reads lays the checkbox out again when it changes: the size comes from
+    // the theme (ApplyTheme), so a theme with a bigger box left the old one's room around it.
+    public string? Label
+    {
+        get => _label;
+        set { if (_label == value) return; _label = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
+
+    public float LabelGap
+    {
+        get => _labelGap;
+        set { if (_labelGap == value) return; _labelGap = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
+
+    public float CheckboxSize
+    {
+        get => _checkboxSize;
+        set { if (_checkboxSize == value) return; _checkboxSize = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
     public float BorderWidth { get; set; } = 2f;
     public Color BoxColor { get; set; } = new(200, 200, 200, 255);
     public Color CheckedColor { get; set; } = new(66, 135, 245, 255);
