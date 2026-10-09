@@ -68,7 +68,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    posters on the download thread (correctness).
 7. ~~**paint-selectable-label-paragraph**~~ LANDED e7a7b03, bf5adcc, fbb5afc, 7755670 (2) — Junction diff and Vesper reader ~10 KB/frame of
    paragraphs → ~0.
-7b. **test-alloc-first-run-flake** (4, test reliability; moved up 2026-10-09) — "allocates
+7b. ~~**test-alloc-first-run-flake**~~ FIXED da2ccd8, f578b55 (4, test reliability; moved up 2026-10-09) — "allocates
    nothing" tests fail on the first run after a build (three seen: Headless
    `ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing`, `ASteadyRepaint_AllocatesNothing`
    5.4 B/frame; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame` 22.9 B/frame). Find
@@ -194,6 +194,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | c85396e | junction-lane-palette | History lane palette built once per theme, index loops: graph paint 16,224 → 0 B per frame (headless fixture). |
 | 2 | 93b8fef | aperture-postercache-trim-thread | Correctness: the poster cache's evictions are disposed on the UI thread at the next Get (the download thread disposed images the UI could be drawing). ELEMENTS.md: dispose image sources on the UI thread. |
 | 2 | e7a7b03, bf5adcc, fbb5afc, 7755670 | paint-selectable-label-paragraph | A selectable/linked label keeps its paragraph and draws from it. Render-pass bytes per hover frame: Junction diff 10.6 → 0.0 KB (AOT 12.2 → 0), Vesper reader 10.9 → 0.0 (AOT 12.6 → 0); wheel −10…−11 KB/frame (rest is VirtualList realization). New rows text/selectable viewer hover 13.8 → 0.4 KB/op, wheel 14.7 → 3.3. Time flat, 0 slower, pixels byte-identical (pixel test over alignments, RTL, ellipsis, spans, selection). |
+| 2 | da2ccd8, f578b55 | test-alloc-first-run-flake | Two causes. Headless: real code — the DevTools peak trackers' ring grew (536 B) while frame times fell; now a fixed 64-sample ring of time slices. Skia: no object at all — `GetAllocatedBytesForCurrentThread` counted the unused rest of the thread's allocation piece retired by a background-GC suspension (heap walk: one free object). All allocation tests now use `tests/Shared/Allocations.cs` (least of up to 8 rounds) with TieredPGO off in 6 test projects. Failed runs over 30 fresh runs per project: Headless 1 → 0, Skia 2 → 0; mutation checks still fail. |
 
 ## Examined, not worth it
 
