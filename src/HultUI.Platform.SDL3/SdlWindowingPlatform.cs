@@ -81,7 +81,12 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
         // the poll pushes an event the poll consumes at once, which is harmless —
         // the queued work is drained later in the same frame regardless.
         Interlocked.Exchange(ref _wakePending, 0);
-        return SDL3Window.PollAllEvents(onWindowClose is null ? null : w => onWindowClose(w));
+
+        // Passed straight through: an Action<IPlatformWindow> is an Action<SDL3Window>
+        // (Action is contravariant), so no adapter is needed. A lambda wrapping it here was
+        // a new closure and delegate on every pass of the loop, idle ones included: 88 B
+        // (72 B on NativeAOT), 5.7 KB/s in an idle window and 3–4 MB/s while animating.
+        return SDL3Window.PollAllEvents(onWindowClose);
     }
 
     /// <summary>

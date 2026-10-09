@@ -12,6 +12,7 @@ namespace HultUI.Platform.SDL3.Tests;
 /// with the events a platform backend would queue pushed onto SDL's own queue. The dummy driver
 /// has SDL's default US keymap.
 /// </summary>
+[Collection(SdlDummyDriver.Collection)]
 public sealed unsafe class EventTranslatorKeyTests : IDisposable
 {
     private readonly SDL_Window* _window;
