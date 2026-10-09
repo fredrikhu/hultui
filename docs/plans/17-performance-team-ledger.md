@@ -66,8 +66,14 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    draw (the last steady-frame bytes in real apps; suite rows → 0); blob builder per miss
    (scroll/jump −39 %); Junction graph palette (History −1.97 KB/frame); Aperture disposes
    posters on the download thread (correctness).
-7. **paint-selectable-label-paragraph** (2) — Junction diff and Vesper reader ~10 KB/frame of
+7. ~~**paint-selectable-label-paragraph**~~ LANDED e7a7b03, bf5adcc, fbb5afc, 7755670 (2) — Junction diff and Vesper reader ~10 KB/frame of
    paragraphs → ~0.
+7b. **test-alloc-first-run-flake** (4, test reliability; moved up 2026-10-09) — "allocates
+   nothing" tests fail on the first run after a build (three seen: Headless
+   `ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing`, `ASteadyRepaint_AllocatesNothing`
+   5.4 B/frame; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame` 22.9 B/frame). Find
+   the cause (tier-0/OSR, JIT stack allocation, a one-time lazy init) and fix it for all of
+   them before the round's full suite and CI.
 8. **layout-grid-linear-tracks + layout-leaves-ignore-offered-height +
    layout-maxlines-setter-dirty + checkbox-size-layout** (1) — grid O(rows² × cols) (~900
    loop iterations per cell); spacers/chevrons keyed on exact height (expander animation
@@ -82,7 +88,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     row; **reactivity-scope-threadstatic** (approved, low priority).
 11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) — sticky wheel 1.55 → ~0.3
     KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
-12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use + test-alloc-first-run-flake** (4) — palette filter
+12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
     −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
     thread (10 ms, 5 MB).
 13. **text-textarea-measure-lines** (5) — width-only FitsWhole (JSON open −36 %, −75 % with
@@ -187,6 +193,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 103f30e, d27ea6b | paint-blob-builder-reuse | One kept SKTextBlobBuilder: 216 → 136 B per new blob; scroll/jump 10.3 → 6.3 KB/op JIT (13.1 → 9.1 AOT); scroll wheels −17…−33 %; 0 slower. |
 | 2 | c85396e | junction-lane-palette | History lane palette built once per theme, index loops: graph paint 16,224 → 0 B per frame (headless fixture). |
 | 2 | 93b8fef | aperture-postercache-trim-thread | Correctness: the poster cache's evictions are disposed on the UI thread at the next Get (the download thread disposed images the UI could be drawing). ELEMENTS.md: dispose image sources on the UI thread. |
+| 2 | e7a7b03, bf5adcc, fbb5afc, 7755670 | paint-selectable-label-paragraph | A selectable/linked label keeps its paragraph and draws from it. Render-pass bytes per hover frame: Junction diff 10.6 → 0.0 KB (AOT 12.2 → 0), Vesper reader 10.9 → 0.0 (AOT 12.6 → 0); wheel −10…−11 KB/frame (rest is VirtualList realization). New rows text/selectable viewer hover 13.8 → 0.4 KB/op, wheel 14.7 → 3.3. Time flat, 0 slower, pixels byte-identical (pixel test over alignments, RTL, ellipsis, spans, selection). |
 
 ## Examined, not worth it
 
