@@ -198,6 +198,53 @@ public class GpuFrameSinkTests
         Assert.Equal(0, renderer.GLRenders);
     }
 
+    /// <summary>
+    /// A minimized window is not drawn, and mpv, whose render thread is the UI thread, waits up
+    /// to 200 ms for each frame to be taken. Undrawn, the sink takes a waiting frame without
+    /// drawing it or asking for a target, and a sink nothing has drawn yet sets up as its first
+    /// draw would: a decoder loads nothing until then.
+    /// </summary>
+    [Fact]
+    public void Undrawn_ANewSinkSetsUp_AndAWaitingFrameIsTakenWithoutDrawing()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+
+        sink.ServiceUndrawn(surface);
+        Assert.Equal(GpuSinkMode.Gpu, renderer.DecidedMode);
+        Assert.Equal(1, renderer.Prepares);
+        int entered = surface.GLEntries;
+
+        // Nothing waiting: GL is not entered.
+        sink.ServiceUndrawn(surface);
+        Assert.Equal(entered, surface.GLEntries);
+        Assert.Equal(0, renderer.Skips);
+
+        renderer.Waiting = true;
+        sink.ServiceUndrawn(surface);
+        Assert.Equal(1, renderer.Skips);
+        Assert.Equal(entered + 1, surface.GLEntries);
+        Assert.Equal(1, renderer.Prepares);
+        Assert.Equal(0, renderer.GLRenders);
+        Assert.Empty(surface.Owners);
+    }
+
+    /// <summary>Where foreign GL cannot run, a draw would take the pixel path, and so does an
+    /// undrawn sink: its renderer then delivers from a thread of its own.</summary>
+    [Fact]
+    public void Undrawn_WhereGLCannotRun_ANewSinkDecidesPixels()
+    {
+        var renderer = new CountingRenderer { Waiting = true };
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+
+        sink.ServiceUndrawn(null);
+
+        Assert.Equal(GpuSinkMode.Pixels, renderer.DecidedMode);
+        Assert.Equal(0, renderer.Prepares);
+        Assert.Equal(0, renderer.Skips);
+    }
+
     /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
     private sealed class LendingSurface : IExternalGLSurface
     {
@@ -257,7 +304,8 @@ public class GpuFrameSinkTests
         public int Skips { get; private set; }
 
         public void OnModeDecided(GpuSinkMode mode) => DecidedMode = mode;
-        public void PrepareGL(Func<string, nint> getProcAddress) { }
+        public int Prepares { get; private set; }
+        public void PrepareGL(Func<string, nint> getProcAddress) => Prepares++;
         public bool TryGetFrameSize(out int width, out int height)
         {
             width = HasSize ? 320 : 0;

@@ -19,7 +19,8 @@ public interface IExternalGLSurface : IRenderSurface
     /// Runs <paramref name="draw"/> now, with the renderer's pending work flushed
     /// first and its GL state cache invalidated afterwards, so neither side sees the
     /// other's bindings. Only valid on the render thread inside a frame — from
-    /// <see cref="IGpuImageSource.TryRenderFrame"/>, in practice. The callee may bind
+    /// <see cref="IGpuImageSource.TryRenderFrame"/>, in practice — or, for a window that is
+    /// not being drawn, from <see cref="IGpuImageSource.ServiceUndrawn"/>. The callee may bind
     /// its own framebuffer and textures and need not restore anything.
     /// </summary>
     void RunExternalGL(Action draw);
@@ -161,4 +162,14 @@ public readonly record struct GpuFrame(
 public interface IGpuImageSource : IImageSource
 {
     bool TryRenderFrame(IExternalGLSurface surface, out GpuFrame frame);
+
+    /// <summary>
+    /// Keeps the producer going while nothing draws it: its window is minimized, so
+    /// <see cref="TryRenderFrame"/> is not being asked. Called on the render thread on each
+    /// pass the window is dirty but not drawn, with its context current. A producer that
+    /// waits for its frames to be taken takes them here without drawing, and one still
+    /// undecided between GPU and pixels decides as a draw would. <paramref name="surface"/> is
+    /// null where foreign GL cannot run; a draw there would use the pixel path.
+    /// </summary>
+    void ServiceUndrawn(IExternalGLSurface? surface) { }
 }

@@ -808,6 +808,45 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         Resized?.Invoke();
     }
 
+    private readonly List<IGpuImageSource> _undrawnSources = [];
+
+    /// <summary>
+    /// Serves the GPU image sources of a window that is not being drawn (minimized), through
+    /// <see cref="IGpuImageSource.ServiceUndrawn"/>. Such a source can be a producer that
+    /// stops without its draws: mpv's render thread is this one, and its decoder waits up to
+    /// 200 ms for every frame to be taken. Measured in Reel minimized: every frame dropped after
+    /// that wait, and the next file in the folder never started (no render context until a
+    /// draw), so the sound stopped at the end of the file until the window was restored.
+    /// </summary>
+    private void ServiceUndrawnSources()
+    {
+        CollectGpuSources(_root!, _undrawnSources);
+        for (int i = 0; i < _overlays.Count; i++)
+            CollectGpuSources(_overlays[i].Content, _undrawnSources);
+        if (_undrawnSources.Count == 0) return;
+
+        // Where foreign GL cannot run, the source settles on its other path, as a draw would.
+        var surface = PlatformWindow.Surface as IExternalGLSurface;
+        if (surface is not null && !surface.SupportsExternalGL) surface = null;
+        if (surface is not null) PlatformWindow.MakeCurrent();
+        try
+        {
+            foreach (var source in _undrawnSources) source.ServiceUndrawn(surface);
+        }
+        finally
+        {
+            _undrawnSources.Clear();
+        }
+    }
+
+    private static void CollectGpuSources(Element element, List<IGpuImageSource> into)
+    {
+        if (element is ImageElement { Source: IGpuImageSource source } && !into.Contains(source))
+            into.Add(source);
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++) CollectGpuSources(children[i], into);
+    }
+
     /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
     /// <returns>Whether a frame was drawn and presented.</returns>
     internal bool RenderFrame(bool evenIfMinimized = false)
@@ -946,8 +985,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // surface has no area to draw into anyway; and GL drew every frame of an animation or
         // a video nobody could see. Everything above has run — assistive technology's actions,
         // style, layout, the accessibility tree — and the paint dirt is kept, so the first frame
-        // after the restore draws it.
-        if (!evenIfMinimized && PlatformWindow.IsMinimized) return false;
+        // after the restore draws it. A video still has to be served (ServiceUndrawnSources).
+        if (!evenIfMinimized && PlatformWindow.IsMinimized)
+        {
+            ServiceUndrawnSources();
+            return false;
+        }
         if (!PlatformWindow.Surface.BeginFrame()) return false;
 
         var ctx = PlatformWindow.Surface.RenderContext;

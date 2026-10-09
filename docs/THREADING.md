@@ -79,6 +79,14 @@ nothing that must keep going while minimized should be driven by frames. A
 forced frame, `RunFrame(forceRender: true)`, still draws. The minimized state is
 SDL's, which the real-window test checks on Windows only.
 
+A video in a minimized window keeps playing, because the window still serves its GPU
+image sources without drawing them (`IGpuImageSource.ServiceUndrawn`): on each pass
+it is dirty, it takes the frame mpv has waiting (`MPV_RENDER_PARAM_SKIP_RENDERING`)
+and lets a new player set up as a draw would. Without that, mpv, whose render thread
+is the UI thread, waited 200 ms for every frame and dropped it, and a player opened
+while minimized never loaded: in Reel the next file in a folder stayed silent until
+the window was restored.
+
 ```csharp
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());
 ```

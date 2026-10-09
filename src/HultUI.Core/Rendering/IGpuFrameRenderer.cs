@@ -64,8 +64,9 @@ public interface IGpuFrameRenderer
     float ReferenceWhiteNits => 0f;
 
     /// <summary>
-    /// True when a frame may be waiting although <see cref="TryGetFrameSize"/> is still false.
-    /// The sink then enters the GL context to <see cref="SkipFrame"/>, which it otherwise
+    /// True when a frame may be waiting to be taken. The sink asks when it cannot draw one:
+    /// while <see cref="TryGetFrameSize"/> is still false, and while the window is not being
+    /// drawn (minimized). It then enters the GL context to <see cref="SkipFrame"/>, which it otherwise
     /// avoids for a frame it cannot draw, because on a GL surface entering costs a flush.
     /// </summary>
     bool FrameMayBeWaiting => false;
@@ -75,7 +76,9 @@ public interface IGpuFrameRenderer
     /// is false. This is for a producer that holds everything until its frame is taken, and
     /// learns its size only after that. mpv holds its core for up to 200 ms after every load,
     /// and the video's size can only be read from the core. The next <see cref="Render"/> that
-    /// has a target draws the frame taken here.
+    /// has a target draws the frame taken here. Also every frame of a window that is not being
+    /// drawn (<see cref="IGpuImageSource.ServiceUndrawn"/>), where mpv would otherwise wait out
+    /// those 200 ms for each frame and drop it.
     /// </summary>
     void SkipFrame(Func<string, nint> getProcAddress) { }
 

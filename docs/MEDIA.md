@@ -108,6 +108,13 @@ video's size is known without drawing it (`IGpuFrameRenderer.SkipFrame`). A sync
 used to freeze the window for 200 ms on nearly every step of a scrub. A backend of your own
 with the same kind of wait needs both.
 
+**A minimized window is not drawn, and its video still plays.** The window serves each GPU
+source it shows through `IGpuImageSource.ServiceUndrawn`, and `GpuFrameSink` takes the waiting
+frame without drawing it (`SkipFrame` again) and sets up a new player's render context. Without
+that, mpv waited 200 ms for each frame and dropped it, and a file opened while minimized never
+loaded. A backend of your own that waits for its frames to be taken should say so through
+`FrameMayBeWaiting`.
+
 **A `VideoElement` listens only while a window shows it.** It subscribes to
 `FrameArrived` at its first paint (or on mounting into a shown tree), never from a
 rebuild's throwaway twin, and unsubscribes on unmount or on the first frame that finds

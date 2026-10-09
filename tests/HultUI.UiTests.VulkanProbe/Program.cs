@@ -36,6 +36,12 @@ using HultUI.WebView.WebView2;
 // --minimize minimizes the window without activating it, forces frames while it is minimized,
 // then runs the real loop: minimized with one change waiting, restored, and resized, counting
 // loop passes and the frames drawn in each part (Windows).
+//
+// --minimized-video --clip=<file> plays the clip through MpvBackend, minimizes the window without
+// activating it, and runs the real loop: 1.5 s minimized, then a second player opened as Reel
+// opens the next file in a folder, 1.5 s more, then restored. It prints the frames mpv dropped
+// while minimized, how far the second player got, and the frames drawn in the second after the
+// restore (Windows). Exits 4 when there is no libmpv.
 
 internal static class Program
 {
@@ -45,6 +51,8 @@ internal static class Program
     {
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
+        if (args.Contains("--minimized-video"))
+            return MinimizedVideo(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
         if (args.Contains("--webviews")) return TwoPages(renderer);
         if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
             return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
@@ -265,6 +273,73 @@ internal static class Program
             platform.Passes = 0;
         };
         app.Run();
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>
+    /// A video in a minimized window, in the real loop. Nothing draws a minimized window, and
+    /// the UI thread is mpv's render thread, so mpv waited 200 ms for every frame to be taken
+    /// and then dropped it; and a player opened meanwhile never loaded its file, because its
+    /// render context is made by a draw. In Reel the sound stopped at the end of a file until
+    /// the window was restored. The window serves its video without drawing it instead.
+    /// </summary>
+    private static int MinimizedVideo(RendererKind renderer, string clip)
+    {
+        if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
+        using var app = new Application("vulkan-probe", 480, 270, renderer: renderer);
+        int frames = 0;
+        HultUI.Core.Elements.Element Show(MediaPlayer player) => Flex.Row().FlexGrow(1).Children(
+            VideoElement.New(player).FlexGrow(1),
+            Canvas.New(_ => Interlocked.Increment(ref frames)).Width(1f).Height(1f));
+
+        var firstBackend = new MpvBackend();
+        var first = new MediaPlayer(firstBackend);
+        app.SetRoot(Show(first));
+        first.Open(MediaSource.FromFile(clip), autoPlay: true);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!(first.IsPlaying && firstBackend.Peek("time-pos") >= 0.3))
+        {
+            if (clock.Elapsed.TotalSeconds > 20) { Console.WriteLine($"probe: the video never played ({first.State}, {first.Error})"); return 2; }
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+        }
+
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        ShowWindow(hwnd, ShowMinNoActive);
+        if (!IsIconic(hwnd)) { Console.WriteLine("probe: the window did not minimize"); return 2; }
+
+        MediaPlayer? second = null;
+        MpvBackend? secondBackend = null;
+        new Thread(() =>
+        {
+            double drops = firstBackend.Peek("frame-drop-count"), position = firstBackend.Peek("time-pos");
+            Thread.Sleep(1500);
+            Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"probe: minimized 1.5 s, {firstBackend.Peek("frame-drop-count") - drops:0} frames dropped, " +
+                $"played {firstBackend.Peek("time-pos") - position:0.00} s"));
+
+            // As Reel opens the next file in the folder when one ends: a new player and element.
+            Application.InvokeOnMainThread(() =>
+            {
+                first.Dispose();
+                secondBackend = new MpvBackend();
+                second = new MediaPlayer(secondBackend);
+                app.SetRoot(Show(second));
+                second.Open(MediaSource.FromFile(clip), autoPlay: true);
+            });
+            Thread.Sleep(1500);
+            double reached = Volatile.Read(ref secondBackend) is { } opened ? opened.Peek("time-pos") : double.NaN;
+            Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"probe: opened while minimized, at {(double.IsNaN(reached) ? -1 : reached):0.00} s, still minimized {IsIconic(hwnd)}"));
+
+            int before = Volatile.Read(ref frames);
+            Application.InvokeOnMainThread(() => ShowWindow(hwnd, ShowNoActivate));
+            Thread.Sleep(1000);
+            Console.WriteLine($"probe: restored, {Volatile.Read(ref frames) - before} frames in 1 s");
+            Application.InvokeOnMainThread(() => app.PrimaryWindow.Close());
+        }) { IsBackground = true }.Start();
+        app.Run();
+        second?.Dispose();
         Console.WriteLine("probe: done");
         return 0;
     }
