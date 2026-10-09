@@ -262,6 +262,151 @@ static partial class Scenarios
                     Check = step => pane.Verify(area, step + 1) ?? JsonShown(ctx, area, text),
                 };
             });
+
+        yield return new Scenario("text/selectable viewer hover",
+            $"Move the pointer to another line of a file viewer of {ViewerLines} selectable, syntax-coloured lines in one selection group, as Junction's diff and Vesper's reader are: every line on screen drawn again",
+            ctx =>
+            {
+                var viewer = new SelectableViewer(ctx);
+                // ~18 px lines: a 63 px step lands on another line each time.
+                static float PointerY(int step) => 30 + step * 63 % 660;
+                return new Op
+                {
+                    Run = step => ctx.Window.MoveMouse(500, PointerY(step)),
+                    Check = step => viewer.Hovered(PointerY(step)) ?? viewer.Drawn(),
+                };
+            });
+
+        yield return new Scenario("text/selectable viewer wheel",
+            $"Wheel 3 notches through the file viewer of {ViewerLines} selectable lines: every line on screen drawn at a new place",
+            ctx =>
+            {
+                var viewer = new SelectableViewer(ctx);
+                var scrolled = ScrolledTo(() => viewer.View.ScrollOffsetY);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
+                    Check = step => scrolled(step) ?? viewer.Drawn(),
+                };
+            });
+    }
+
+    private const int ViewerLines = 400;
+
+    /// <summary>
+    /// A file viewer as Junction's diff and Vesper's reader build one: a line number, then the
+    /// line itself, monospace 12 px in its syntax colours, selectable, every line in one
+    /// <see cref="TextSelectionGroup"/>, and a hover tint on the row. Not virtualized: the same
+    /// labels stay on screen from frame to frame, and only where they are drawn changes.
+    /// </summary>
+    private sealed class SelectableViewer
+    {
+        private static readonly Color Field = Color.FromHex("#1E1E1E");
+        private static readonly Color Plain = Color.FromHex("#D4D4D4");
+        private static readonly Color HoverLine = Color.FromHex("#2A2D2E");
+
+        private readonly Element[] _rows = new Element[ViewerLines];
+        private readonly TextElement[] _code = new TextElement[ViewerLines];
+
+        public ScrollViewElement View { get; }
+
+        public SelectableViewer(Ctx ctx)
+        {
+            var lines = new string[ViewerLines];
+            var group = new TextSelectionGroup();
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var (text, spans) = CodeLine(ctx.Rng, i);
+                lines[i] = text;
+                _code[i] = Text.New(text).FontFamily(FontFamilies.Monospace).FontSize(12f).TextColor(Plain)
+                    .Selectable().SelectionGroup(group, i).Spans(spans).Padding(new Thickness(2, 8)).FlexGrow(1);
+                _rows[i] = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Stretch)
+                    .OnHover(r => r.Background(HoverLine))
+                    .Children(
+                        Text.New($"{i + 1}").FontFamily(FontFamilies.Monospace).FontSize(12f).TextColor(Ui.Muted)
+                            .Width(Dimension.Px(48)).Padding(new Thickness(2, 8)),
+                        _code[i]);
+            }
+            group.Bind(lines, lines.Length, i => lines[i]);
+            View = ScrollView.New().FlexGrow(1).Background(Field).Children(Flex.Column().FlexShrink(0).Children(_rows));
+            ctx.Mount(View);
+        }
+
+        /// <summary>Null when the row under the pointer, and only it, is hovered.</summary>
+        public string? Hovered(float pointerY)
+        {
+            int hovered = -1;
+            for (int i = 0; i < _rows.Length; i++)
+            {
+                if (!_rows[i].IsHovered) continue;
+                if (hovered >= 0) return $"lines {hovered + 1} and {i + 1} are both hovered";
+                hovered = i;
+            }
+            if (hovered < 0) return "no line is hovered";
+            var box = _rows[hovered].WindowBorderBox;
+            return pointerY >= box.Y && pointerY < box.Bottom ? null
+                : $"line {hovered + 1} is hovered, but the pointer is at y = {pointerY}, not over it";
+        }
+
+        /// <summary>Null when every line on screen drew its text through the paragraph a click
+        /// hit-tests, and a screenful of them did.</summary>
+        public string? Drawn()
+        {
+            var viewport = View.WindowBorderBox;
+            int drawn = 0;
+            for (int i = 0; i < _code.Length; i++)
+            {
+                var box = _code[i].WindowBorderBox;
+                if (box.Bottom <= viewport.Y || box.Y >= viewport.Bottom) continue;
+                if (HultUI.Headless.LayoutProbe.DrawnLines(_code[i]).Count != 1)
+                    return $"line {i + 1} is on screen but did not draw one line of selectable text";
+                drawn++;
+            }
+            return drawn >= 30 ? null : $"only {drawn} lines are on screen";
+        }
+
+        // A line of code in a viewer's colours: indentation, then a keyword, names, a call with a
+        // number and a string, and on some lines a comment, each a span of its own colour.
+        private static (string Text, TextSpan[] Spans) CodeLine(Random rng, int line)
+        {
+            var keyword = Color.FromHex("#569CD6");
+            var name = Color.FromHex("#9CDCFE");
+            var number = Color.FromHex("#B5CEA8");
+            var str = Color.FromHex("#CE9178");
+            var comment = Color.FromHex("#6A9955");
+
+            var text = new System.Text.StringBuilder();
+            var spans = new List<TextSpan>();
+            void Add(string s, Color? colour = null)
+            {
+                if (colour is { } c) spans.Add(new TextSpan(text.Length, s.Length, c));
+                text.Append(s);
+            }
+
+            Add(new string(' ', 4 * (1 + line % 3)));
+            if (line % 7 == 0)
+            {
+                Add("// " + Ui.Paragraph(rng, 9), comment);
+                return (text.ToString(), spans.ToArray());
+            }
+            var words = Ui.Label(rng).Split(' ');
+            if (line % 5 == 0)
+                Add("return ", keyword);
+            else
+            {
+                Add("var ", keyword);
+                Add(words[0] + char.ToUpperInvariant(words[1][0]) + words[1][1..], name);
+                Add(" = ");
+            }
+            Add(words[2]);
+            Add(".Make(");
+            Add($"{rng.Next(10_000)}", number);
+            Add(", ");
+            Add($"\"{Ui.Label(rng)}\"", str);
+            Add(");");
+            if (line % 3 == 0) Add(" // " + Ui.Paragraph(rng, 4), comment);
+            return (text.ToString(), spans.ToArray());
+        }
     }
 
     /// <summary>
