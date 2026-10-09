@@ -1,7 +1,9 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
@@ -245,6 +247,60 @@ static partial class Scenarios
                     Check = ScrolledTo(() => area.ScrollOffsetY),
                 };
             });
+
+        yield return new Scenario("text/rebuild around highlighted JSON in a TextArea",
+            $"A keystroke elsewhere rebuilds the pane holding the {JsonLines:N0}-line JSON response, as Meridian's URL and body editors rebuild the app: the TextArea is patched with the same text and spans",
+            ctx =>
+            {
+                var text = Ui.JsonResponse(ctx.Rng, JsonLines);
+                var pane = new ResponsePane(text, Ui.JsonSpans(text));
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(pane.Mount()));
+                var area = pane.Area!;
+                return new Op
+                {
+                    Run = _ => pane.Edit(),
+                    Check = step => pane.Verify(area, step + 1) ?? JsonShown(ctx, area, text),
+                };
+            });
+    }
+
+    /// <summary>
+    /// Meridian's response pane as its editors rebuild it: a header whose label reads a signal
+    /// the request editor writes on every keystroke, over the read-only TextArea of the
+    /// response, handed the same text and spans on every build (Meridian keeps them per
+    /// response, so a rebuild formats and tokenizes nothing).
+    /// </summary>
+    private sealed class ResponsePane(string body, TextSpan[] spans) : Component
+    {
+        private readonly Signal<int> _edits = new(0);
+        private readonly Ref<TextAreaElement> _area = new();
+        private readonly Ref<TextElement> _label = new();
+
+        public TextAreaElement? Area => _area.Current;
+
+        public void Edit() => _edits.Value++;
+
+        public override Element Build()
+        {
+            var area = JsonViewer();
+            area.Text = body;
+            area.Spans = spans;
+            return Flex.Column(gap: 0).FlexGrow(1).Children(
+                Flex.Row(gap: 12).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(6, 12)).Children(
+                    Text.New("200 OK").FontSize(12f).TextColor(Ui.Accent),
+                    Text.New($"request edited {_edits.Value} times").FontSize(12f).TextColor(Ui.Muted).WithRef(_label)),
+                area.WithRef(_area));
+        }
+
+        /// <summary>Null when <paramref name="edits"/> rebuilds reached the header and the
+        /// TextArea that shows the response is still <paramref name="area"/>, patched rather
+        /// than mounted anew.</summary>
+        public string? Verify(TextAreaElement area, int edits)
+        {
+            if (_label.Current?.Content != $"request edited {edits} times")
+                return $"the header reads \"{_label.Current?.Content}\" after {edits} edits: the pane did not rebuild";
+            return ReferenceEquals(_area.Current, area) ? null : "the rebuild replaced the TextArea instead of patching it";
+        }
     }
 
     /// <summary>
@@ -260,9 +316,12 @@ static partial class Scenarios
         var area = TextArea.New("").FontFamily(FontFamilies.Monospace).FontSize(12f)
             .TextColor(Color.FromHex("#D4D4D4")).FlexGrow(1);
         area.ReadOnly = true;
-        area.Style = new TextInputStyle { Background = Color.FromHex("#1E1E1E") };
+        area.Style = JsonField;
         return area;
     }
+
+    // One instance for every build: a TextArea compares its style by reference.
+    private static readonly TextInputStyle JsonField = new() { Background = Color.FromHex("#1E1E1E") };
 
     /// <summary>
     /// Null when <paramref name="text"/> is the TextArea's, every line of it is laid out (the
