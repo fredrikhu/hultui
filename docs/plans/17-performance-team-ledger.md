@@ -102,7 +102,9 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 17. **layout-virtuallist-item-rows** (1; approved) — opt-in `RenderWith((item, selected) =>
     …)` VirtualList API (walk template calls 19 → 3, −75 % bytes), adopted in Junction
     History first, then other lists one at a time.
-18. **wsl-mesa-verify** (3/5; approved) — with Mesa and Noto fonts installed in WSL Fedora:
+18. **wsl-mesa-verify** (3/5; approved) — Mesa 26.2.3 (EGL, DRI, Vulkan: Dozen on the RTX 4080
+    via D3D12, and llvmpipe) and 48 Noto font packages (Indic, Thai, Lao, Khmer, Myanmar,
+    Tibetan, Ethiopic, CJK, colour emoji; 83 → 611 faces) installed in WSL Fedora 2026-10-09:
     check 0f5816a (GL depth 0) and 7a827e9 on Mesa EGL/llvmpipe and lavapipe, and re-run
     d049be7's shaper equivalence on real Indic/Thai/emoji faces on Linux.
 
@@ -294,3 +296,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-09: round 2 surveys in (all eight not satisfied); reports in `17-reports/r2-*`;
   queue re-ranked into 14 build steps; 12 questions for the user; survey worktrees removed.
 - 2026-10-09: the user answered all 12 round 2 questions (recommendations taken; WSL install yes). Queued items 15–18.
+- 2026-10-09: installed Mesa + Noto fonts in WSL Fedora (user approved); round 2 step 6 next.
