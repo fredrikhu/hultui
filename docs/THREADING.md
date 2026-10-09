@@ -50,7 +50,11 @@ anything — the loop is running that code, not parked.
 Rendering is paced to the display (`Window.RefreshRate`, from the platform; 60 Hz
 when unknown). The swap interval is 0, because a vsync'd swap blocks the modal
 resize loop, so the loop itself holds a dirty window back until one interval has
-passed since the last render. Events are pumped and handled on every iteration
+passed since the last render. Meanwhile it parks in the platform's wait for what is
+left of the interval: an animating window costs two or three passes of the loop a
+frame. (On Windows SDL used to cut every such wait a millisecond short and a 1 ms
+wait to nothing, so the loop spun through the end of every interval: ~240 passes a
+frame at 200 Hz.) Events are pumped and handled on every iteration
 regardless, so a 1000 Hz mouse updates hover a thousand times a second and is
 drawn at the display's rate; a posted video frame is drawn on the next interval.
 The DevTools HUD shows the measured rate next to the display's, and

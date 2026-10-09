@@ -102,9 +102,23 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
     /// unlike either of the old paths, it is interrupted on every platform by
     /// <see cref="Wake"/> from another thread. The real-window suite in
     /// HultUI.UiTests is the proof for both halves.
+    ///
+    /// <para><b>A millisecond more on Windows.</b> SDL starts its clock, pumps, and hands
+    /// <c>MsgWaitForMultipleObjects</c> what is left of the timeout in whole milliseconds,
+    /// rounded down — so a wait of <i>n</i> ms parked for <i>n</i> − 1, and a wait of 1 ms
+    /// returned at once. <c>Application.Run</c> waits out the last of a display
+    /// interval with exactly such a wait while a window is dirty, so it spun instead: on a
+    /// 200 Hz display ~45,000 loop passes a second for 200 frames, each pass pumping,
+    /// draining posts and ticking animations. One more millisecond in, the microseconds
+    /// SDL spends before it waits come off that instead, and Windows gets the <i>n</i> asked
+    /// for. Only Windows: SDL's X11 and Wayland waits take the remainder in nanoseconds
+    /// (or round it up), and Cocoa's in seconds, so there it already waits what it is
+    /// asked to.</para>
     /// </remarks>
     public void WaitForEvents(int timeoutMs)
     {
+        if (OperatingSystem.IsWindows() && timeoutMs is > 0 and < int.MaxValue)
+            timeoutMs++;
         SDL_WaitEventTimeout(null, timeoutMs);
     }
 
