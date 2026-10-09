@@ -52,7 +52,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    renders mpv while minimized, so mpv may wait its 200 ms render timeout per frame. Check
    Reel (and the VideoPlayer sample) playing a compressed clip while minimized: audio
    continuity, frame drops, A/V sync and resume after restore, CPU; fix if needed.
-3. **text-textarea-patch-keeps-lines + text-textarea-span-scan** (5) — a patch with the same
+3. ~~**text-textarea-patch-keeps-lines + text-textarea-span-scan**~~ LANDED 27b8803, 95e93b5, 3a057ea, e7717a0 (5) — a patch with the same
    text re-wraps the whole TextArea (Meridian: 19,013 lines, 1.4 MB per keystroke in its
    editors; 25k unique lines 64 MB); SpansForLine scans from span 0 (JSON wheel 612k
    iterations per step → 117). Watch Meridian's overlapping search spans. Add a suite row
@@ -93,6 +93,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **paint-drawspannedline-overlap** (2, correctness, latent) — `DrawSpannedLine` (`FirstSpanEndingAfter`) binary-searches on End and assumes spans do not overlap; a multi-line DrawText/paragraph given overlapping spans would skip spans (TextArea is safe: its per-line spans are clipped). Small.
 - **mpv-vo-thread-minimized** (3, lead) — mpv's vo thread costs ~125 Mcyc/s at 60 fps whether drawing or skipping; while minimized a lower-cost mode (e.g. pausing video output, `vid=no`-like) might save it. Investigate.
 - **test-frame-pacing-event-precondition** (4, test) — UiTests `FramePacingTests.AnEventEveryMillisecond` fails its own precondition (its event thread's `Sleep(1)` takes ~2 ms, so ~510 events < the 606 it requires). Fix the test.
 - **runtime-idle-wakeups** (4/3) — 65 wakes/s idle in every app. Medium; after items 1–2
@@ -165,6 +166,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | ff7a970, 2612de1 | runtime-paced-wait-spin | SDL on Windows rounded waits down (1 ms → 0); the wait now asks 1 ms more. Spinner 45–49k → 420–447 loop passes/s (224–245 → 2.1–2.2 per frame); UI-thread cycles −39…−57 %; frames/s 200 → 200 on GL and Vulkan, JIT and AOT; live resize still draws inside every step; headless suite flat. Linux/macOS not changed (SDL rounds correctly there per its source). |
 | 2 | 82e382b, 3766d78 | vk-minimized-swapchain-lost | A Vulkan window that drew while minimized draws again: 0 → 26–31 frames in the second after restore; resize ErrorNativeWindowInUseKHR → 29–31 frames (F16 MAILBOX, 8-bit, FIFO). Minimized and dirty 252–264 → 47–49 loop passes/s; idle after restore 401–403 → 61. **Minimized windows are no longer drawn** (GL and Vulkan): GL with a 30 Hz change 129 frames per 5 s, 47–56 ms/s → 0 frames, 9–13 ms/s. Validation 0 messages (before: a leaked VkSwapchainKHR); resize stretch 0; suite flat. Video while minimized unverified (step 2b). |
 | 2 | 7e52ff5 | media-minimized-playback | 82e382b stopped serving mpv while minimized: 236–240 drops per 10 s, avsync up to 151 ms, Reel's next file silent until restore (23.9 s), seeks 235–426 ms. A minimized window now serves its video undrawn (`IGpuImageSource.ServiceUndrawn`: setup + SKIP_RENDERING): 0 drops, avsync ≤ 2 ms, next file 589–612 ms, seek 45–48 ms. Audio was never broken. Process CPU at 1080p24 minimized 63–70 → 105–112 Mcyc/s (still below drawing: GL 162–178); mpv's vo thread does its normal per-frame work. |
+| 2 | 27b8803, 95e93b5 | text-textarea-patch-keeps-lines | Same text handed back by a rebuild keeps the line starts (style/width/context/culture changes still re-wrap). New row text/rebuild around highlighted JSON 1.696 → 0.399 ms JIT, 2.051 → 0.424 AOT, 1,414 → 22 KB. Meridian URL keystroke with an 18,884-line response 3.00 → 1.70 ms, 1,612 → 182 KB. Fixed a real bug: row height kept the old font after a font-size patch. |
+| 2 | 3a057ea, e7717a0 | text-textarea-span-scan | Binary search on a running max of End (Meridian's spans overlap; End goes down 1,180 times), one reused list. JSON wheel 0.834 → 0.399 ms JIT, 1.584 → 0.412 AOT (AOT gap closed), 14–16 → 5 KB. Meridian wheel with find open 7.4–8.1 → 1.05–1.13 ms (−86 %). Contract: hand a new span list to change spans. Trap: AOT grid rows move 7–16 % with unrelated code layout (README note). |
 
 ## Examined, not worth it
 
