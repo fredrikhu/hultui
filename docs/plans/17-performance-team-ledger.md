@@ -61,8 +61,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    −25…−50 % allocKB on 6 rows, bit-identical over 1.1 M shaper calls.
 5. ~~**text-shape-cache-byte-bound**~~ LANDED 48823d5, 8a91d93 (5, from 4's review) — bound the shape and word caches by
    bytes/glyphs; closing a TextArea keeps 4–155 MB in the app-lifetime caches today.
-6. **paint-effect-object-cache + paint-blob-builder-reuse + junction-lane-palette +
-   aperture-postercache-trim-thread** (2) — shadows/gradients create native objects per
+6. ~~**paint-effect-object-cache + paint-blob-builder-reuse + junction-lane-palette +
+   aperture-postercache-trim-thread**~~ LANDED 8d30d31, 103f30e, c85396e, 93b8fef, d27ea6b (2) — shadows/gradients create native objects per
    draw (the last steady-frame bytes in real apps; suite rows → 0); blob builder per miss
    (scroll/jump −39 %); Junction graph palette (History −1.97 KB/frame); Aperture disposes
    posters on the download thread (correctness).
@@ -82,7 +82,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     row; **reactivity-scope-threadstatic** (approved, low priority).
 11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) — sticky wheel 1.55 → ~0.3
     KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
-12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
+12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use + test-alloc-first-run-flake** (4) — palette filter
     −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
     thread (10 ms, 5 MB).
 13. **text-textarea-measure-lines** (5) — width-only FitsWhole (JSON open −36 %, −75 % with
@@ -110,6 +110,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **test-alloc-first-run-flake** (4, test reliability; in step 12) — two "allocates nothing" tests failed once each on the first run right after a build (Headless `ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing`; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame`, 22.9 B/frame); reruns pass. Likely tier-0/JIT warm-up; would flake CI. Harden the warm-up.
 - **text-memo-cache-byte-bound** (5) — BiDi/styled memo caches are not byte-bounded: 15.2 MB after a 5,000-block rich text document is opened twice and resized; `MemoRange` keys keep evicted `TextMemo`s alive. richtext/open reuses ~11 MB of them, so a bound costs re-open speed.
 - **paint-drawspannedline-overlap** (2, correctness, latent) — `DrawSpannedLine` (`FirstSpanEndingAfter`) binary-searches on End and assumes spans do not overlap; a multi-line DrawText/paragraph given overlapping spans would skip spans (TextArea is safe: its per-line spans are clipped). Small.
 - **mpv-vo-thread-minimized** (3, lead) — mpv's vo thread costs ~125 Mcyc/s at 60 fps whether drawing or skipping; while minimized a lower-cost mode (e.g. pausing video output, `vid=no`-like) might save it. Investigate.
@@ -182,6 +183,10 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 3a057ea, e7717a0 | text-textarea-span-scan | Binary search on a running max of End (Meridian's spans overlap; End goes down 1,180 times), one reused list. JSON wheel 0.834 → 0.399 ms JIT, 1.584 → 0.412 AOT (AOT gap closed), 14–16 → 5 KB. Meridian wheel with find open 7.4–8.1 → 1.05–1.13 ms (−86 %). Contract: hand a new span list to change spans. Trap: AOT grid rows move 7–16 % with unrelated code layout (README note). |
 | 2 | d049be7, d5176b7 | text-shaper-direct | HarfBuzz driven directly, one buffer and font per shaper (in-use guard for shared scratch). text/create 4.24 → 3.26 ms (−23 % JIT, −19 % AOT), 5,792 → 4,317 KB; JSON open −22/−20 %, 10,802 → 6,595 KB; styled bidi ellipsis −16/−17 %, −50 % KB; 6 rows −25…−50 % alloc; TextBench cold/latin −20 %, hebrew −14 %; 0 slower. Bytes per call 936 → 176. Bit-identical vs SKShaper over 72.6 k calls on Windows and 51.3 k on WSL Fedora (Linux lacks Indic/Thai/emoji fonts: compared as notdef there). Handles flat over 10 M calls. |
 | 2 | 48823d5, 8a91d93 | text-shape-cache-byte-bound | Shape/word/layout caches bounded by estimated bytes (24 / 4 / 4 MB; estimates within 6 % of measured), LRU by weight, one entry ≤ half the bound. Retained after close: CSV 23.2 → 4.2 MB, 5,000-block rich text 8.8 → 4.5 MB; 19k-line JSON kept on purpose (~22 MB: the TextArea's keystroke store until measure-lines lands). Hit rates identical on all 95 rows; 0 slower JIT; AOT grid moves are code placement (control build). Correction: the survey's 52/155 MB were probe-held documents; real totals 4–26 MB. |
+| 2 | 8d30d31, d27ea6b | paint-effect-object-cache | Blur filters (≤ 32) and gradient shaders (≤ 256, keyed by content + rect) kept between frames. paint/tiles shadow 7.3 → 0, gradient 11.8 → 0 KB/op, JIT and AOT; 0 slower; goldens byte-identical. |
+| 2 | 103f30e, d27ea6b | paint-blob-builder-reuse | One kept SKTextBlobBuilder: 216 → 136 B per new blob; scroll/jump 10.3 → 6.3 KB/op JIT (13.1 → 9.1 AOT); scroll wheels −17…−33 %; 0 slower. |
+| 2 | c85396e | junction-lane-palette | History lane palette built once per theme, index loops: graph paint 16,224 → 0 B per frame (headless fixture). |
+| 2 | 93b8fef | aperture-postercache-trim-thread | Correctness: the poster cache's evictions are disposed on the UI thread at the next Get (the download thread disposed images the UI could be drawing). ELEMENTS.md: dispose image sources on the UI thread. |
 
 ## Examined, not worth it
 
