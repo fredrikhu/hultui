@@ -141,6 +141,75 @@ public class TextDrawAllocationTests
         Assert.True(perFrame < 1, $"drawing two rounded per-side borders allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>
+    /// A run drawn for the first time becomes a text blob, built in one builder the context
+    /// keeps: <c>Build</c> hands the blob over and leaves the builder empty for the next. A new
+    /// <c>SKTextBlobBuilder</c> per blob was 80 B more per new blob (216 → 136 B; plan 17, round
+    /// 2), ~4 KB a step when a scrolled list draws ~50 new rows.
+    /// </summary>
+    [Fact]
+    public void ANewBlob_IsBuiltInTheKeptBuilder()
+    {
+        using var surface = Surface();
+        var ctx = (SkiaRenderContext)surface.RenderContext;
+        var style = Style();
+        var paragraphs = new TextParagraph[SkiaRenderContext.RunBlobCacheMaxSize + 1_000];
+        for (int i = 0; i < paragraphs.Length; i++)
+            paragraphs[i] = ctx.LayoutParagraph($"Row {i:D5} of the list", style, 400);
+
+        ctx.BeginFrame(600, 400, 1f, Color.White);
+        // Draw until the blob cache reaches its bound and empties: an emptied dictionary keeps
+        // its capacity, so the misses measured after it grow nothing and cost only the blob.
+        int next = 0, lastCount = 0;
+        while (next < paragraphs.Length && ctx.CachedBlobCount >= lastCount)
+        {
+            lastCount = ctx.CachedBlobCount;
+            ctx.DrawParagraph(paragraphs[next++], new Point(10, 10));
+        }
+        Assert.True(next < paragraphs.Length - 500, "the blob cache never reached its bound");
+
+        int countBefore = ctx.CachedBlobCount;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = next; i < next + 500; i++)
+            ctx.DrawParagraph(paragraphs[i], new Point(10, 10));
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        int misses = ctx.CachedBlobCount - countBefore;
+        ctx.EndFrame();
+
+        Assert.True(misses >= 500, $"only {misses} new blobs over 500 new rows");
+        double perBlob = bytes / (double)misses;
+        // 136 B is the blob's own wrapper and its handle registration; a builder adds 80.
+        Assert.True(perBlob < 176, $"a new blob allocated {perBlob:0.#} B");
+    }
+
+    /// <summary>The kept builder starts each blob empty: text drawn after other new text looks
+    /// exactly as it does on a fresh surface, with none of the earlier glyphs in it.</summary>
+    [Fact]
+    public void ABlobBuiltAfterOthers_HoldsOnlyItsOwnGlyphs()
+    {
+        var style = Style();
+
+        using var fresh = Surface();
+        fresh.RenderContext.BeginFrame(600, 400, 1f, Color.White);
+        fresh.RenderContext.DrawText(Paragraph, new Rect(10, 10, 300, 200), style, TextOverflow.Clip, null);
+        fresh.RenderContext.EndFrame();
+        fresh.Present();
+        var expected = fresh.ReadPixels(out _, out _, out _);
+
+        using var used = Surface();
+        var ctx = used.RenderContext;
+        ctx.BeginFrame(600, 400, 1f, Color.White);
+        for (int i = 0; i < Labels.Length; i++)
+            ctx.DrawText(Labels[i], new Rect(10, 10 + i * 20, 200, 20), style, TextOverflow.Clip, null);
+        ctx.EndFrame();
+        ctx.BeginFrame(600, 400, 1f, Color.White);
+        ctx.DrawText(Paragraph, new Rect(10, 10, 300, 200), style, TextOverflow.Clip, null);
+        ctx.EndFrame();
+        used.Present();
+
+        Assert.Equal(expected, used.ReadPixels(out _, out _, out _));
+    }
+
     private static readonly string[] Labels =
         ["Name", "Size", "Modified", "Author", "Branch main", "3 files changed", "Commit", "Settings"];
 }

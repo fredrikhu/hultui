@@ -58,7 +58,13 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Keyed by what the run draws, not by the run: a paragraph laid out again after
     // an edit makes new runs for every line, the ones that did not change too.
     private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new(SameGlyphs.Instance);
-    private const int RunBlobCacheMaxSize = 2048;
+    internal const int RunBlobCacheMaxSize = 2048;
+    internal int CachedBlobCount => _runBlobCache.Count;
+
+    // Every new blob is built in this one builder: Build hands the blob over and leaves the
+    // builder empty for the next. A builder per blob was 80 B more per new blob (216 -> 136),
+    // and a scrolled list draws dozens of new rows a step.
+    private readonly SKTextBlobBuilder _blobBuilder = new();
 
     // The same runs as glyph outlines, for TextAsOutlines.
     private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new(SameGlyphs.Instance);
@@ -1489,8 +1495,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledFont.Typeface = typeface;
         _pooledFont.Size = run.FontSize;
 
-        using var builder = new SKTextBlobBuilder();
-        var buffer = builder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
+        var buffer = _blobBuilder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 
@@ -1500,7 +1505,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
         }
 
-        var blob = builder.Build();
+        var blob = _blobBuilder.Build();
 
         if (_runBlobCache.Count >= RunBlobCacheMaxSize)
             ClearRunBlobCache();
@@ -1560,6 +1565,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         ClearRunPathCache();
         ClearBlurFilters();
         ClearGradientShaders();
+        _blobBuilder.Dispose();
         _outlineFont.Dispose();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
