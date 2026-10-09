@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 2
-- **Phase:** survey — round 2 started 2026-10-09 after round 1's release (merge 64ba531,
+- **Phase:** build — round 2 surveys merged 2026-10-09 (no expert satisfied); building the
+  round 2 build order. Round 2 survey started 2026-10-09 after round 1's release (merge 64ba531,
   CI run 37861109308 green: test, test-linux, docs). To resume after a pause, run in this
   worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -21,205 +22,109 @@ file after every step and commits it with the step's work. Full survey reports a
 
 | Expert | Round | Satisfied | Review objections |
 |---|---|---|---|
-| 1. Layout | 1 | no | none |
-| 2. SkiaSharp: painting | 1 | no | none |
-| 3. GL and Vulkan | 1 | no | none |
-| 4. .NET runtime | 1 | no | none |
-| 5. Text pipeline | 1 | no | none |
-| 6. Reactivity and reconcile | 1 | no | none |
-| 7. Accessibility bridges | 1 | no | none |
-| 8. App workloads | 1 | no | none |
+| 1. Layout | 2 | no | none |
+| 2. SkiaSharp: painting | 2 | no | none |
+| 3. GL and Vulkan | 2 | no | 8aed816: idle pass not 0 B on a real SDL window (pump closure) |
+| 4. .NET runtime | 2 | no | 8aed816 (same); f3a31d6 + 0178784: shared caches bounded by entries, not bytes |
+| 5. Text pipeline | 2 | no | none |
+| 6. Reactivity and reconcile | 2 | no | none |
+| 7. Accessibility bridges | 2 | no | none |
+| 8. App workloads | 2 | no | none (round 1 helped every app: −20…−62 % bytes/frame) |
 
 ## Queued candidates
 
-Duplicates are folded into one id with one owner; the report each came from is in
-brackets. **Round 1 build order** is the numbered list; the rest wait for round 2's
-survey to re-rank them.
+Round 1's build order all landed (see Landed). Round 2's surveys (reports `17-reports/r2-*`)
+re-ranked everything. A build step may bundle one expert's related small candidates as
+separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
-### Round 1 build order
+### Round 2 build order
 
-1. ~~**gl-vk-swapchain-rebuild-leak**~~ LANDED 7a827e9 (3) — F16 Vulkan swapchain leaks ~52 MB VRAM per
-   resize (MAILBOX/IMMEDIATE); destroy old before create. Re-run the resize-stretch check.
-2. ~~**gl-no-depth-buffer**~~ LANDED 0f5816a (3) — `SDL_GL_DEPTH_SIZE` 0; −15 % GPU memory per GL window.
-3. ~~**paint-text-zero-alloc**~~ LANDED 17e3de4 (2; = runtime-text-draw-enumerators (4),
-   runtime-drawtext-boxed-enumerators (8), paint-text-draw-enumerators (1)) — index loops in
-   text draw, `PrefixMeasurer` closure, pooled corner `SKPath`; ~45 rows −10…−94 % allocKB.
-4. ~~**runtime-aot-trace-type-name**~~ LANDED 8ab877c (4) — trace args only while recording; Junction AOT
-   frame −40 % bytes.
-5. ~~**paint-image-zero-copy**~~ LANDED 12d1480 (2) — `SetImmutable` before `SKImage.FromBitmap`; −50 % decoded
-   image memory (Aperture up to ~375 MB, Vesper ~50 MB).
-5a. ~~**aperture-poster-decode-scale**~~ LANDED f84893d (2; user said yes 2026-10-07) — request posters at
-   card width × display scale instead of × 2; −75 % poster memory at 100 % scale (up to
-   ~280 MB), −44 % at 150 %. Refetch at the new scale after a DPI change.
-6. ~~**a11y-uia-wrapper-rebase**~~ LANDED 4195da4 + 7096431 (7; = part of a11y-uia-apply-and-retention (4)) — rebase
-   surviving wrappers, drop per-diff index; 34 MB leak after 200 toggles; fixes stale
-   sibling navigation.
-7. ~~**runtime-frame-floor**~~ LANDED 54631d4…65a01a3 (4; + layout-tree-walk-allocs (1) walk/FocusTraversal half,
-   layout-hover-common-ancestor (1)) — SlidingWindowMax nodes, PumpEvents delegate, boxed
-   Children enumerators in tree walks, FocusTraversal `OrderBy` skip, hover common-ancestor
-   HashSet; steady frames to ~0 B, input/tab −80 %.
-8. ~~**text-word-alloc-diet**~~ LANDED 0178784 (5) — exact-size glyph arrays, width-only MeasureString, span
-   word-cache lookups; 14 rows −10…−50 %.
-9. ~~**runtime-text-services-per-window**~~ LANDED f3a31d6 (+e962738, 5eebbf6) (4) — dispose or share SkiaTextServices; closes a
-   ~29 KB-per-window leak, stops per-window cache duplication.
-10. ~~**gl-vk-offscreen-scratch-pool**~~ LANDED 1785d16 (3) — unbudgeted F16 offscreen or purge scratch;
-    ~−80…−220 MB GPU per Vulkan window after resizes.
-11. ~~**a11y-build-diff-garbage**~~ LANDED e3cff87 (7) — index loops, lazy child lists, positional diff,
-    presized arrays, one slot lookup per list; a11y/edit 627 → ~425 KB/op.
-11a. ~~**a11y-scroll-bounds-event**~~ LANDED ab8917b (7; user said yes 2026-10-07) — on a scroll rebuild,
-    raise one scroll change on the scroll view (as browsers report a scroll; check
-    Chromium's UIA and AT-SPI mapping) instead of a BoundingRectangle change per on-screen
-    node (133 per rebuild over 1,000 rows, 3 provider callbacks each).
-11b. ~~**a11y-focus-state-on-tab**~~ LANDED 70d68c1 (7; user said yes 2026-10-07, correctness) — a focus move
-    updates HasKeyboardFocus/IsFocused at once (small patch per focus move) instead of
-    leaving them stale until the next rebuild.
-11c. ~~**a11y-uia-reparent-wrapper**~~ LANDED 4c3e3b1 (7, correctness, from 4195da4) — when an ElementId is in
-    both diff.Added and diff.Removed (an element moves to another a11y parent, e.g. a Box
-    gains an AccessibleName), the bridge processes Added before Removed and drops the
-    wrapper: UIA navigation to those children returns null. Process Removed first. Small.
-11d. ~~**layout-truncation-clamp-basis**~~ LANDED 6891682 (1; user chose clamp 2026-10-08) — a one-line
-    truncating label's flex base = min(natural single-line width, available width) from the
-    cached natural width, instead of truncating it to get that number. Prototype: ellipsis
-    rows halve their measurements, time −20…−43 %, alloc −21…−51 %; ordinary rows move by
-    the ellipsis slack (< 1 px, at most one character). See `17-reports/r1-truncation-basis.md`.
-11e. ~~**layout-truncating-min-zero**~~ LANDED 322df92 (1; user said yes 2026-10-08, correctness) — a one-line
-    truncating label's automatic minimum is 0, as CSS gives `overflow: hidden` items, instead
-    of its longest word. Fixes Junction Branches overlap at ≤1200 px and Meridian's Send
-    button pushed off-screen by a long URL. Build after 11d, as its own commit, with
-    before/after images of those screens for the user.
-11e-fix. ~~**apps-truncation-followups**~~ LANDED be1fd9d, 351e6cd (1, from 322df92) — Meridian: request tab titles and
-    sub-tab labels need MaxLines(1) + ellipsis (they wrap and overlap the URL bar at ≤1100 px
-    now that the editor gets its designed width). Junction: the FlexShrink(0) "current" tag
-    overlaps LAST COMMIT by 23 px at 1000 px. Before/after images for the user.
-11f. ~~**aperture-hero-scale**~~ LANDED 6cf4fe6, 17e94b0 (2; user said yes 2026-10-08) — the item-page and request
-    title-page heroes ask for the layout width at any scale (~0.7 source px per screen px at
-    150 %, soft). Request layout width × display scale like f84893d; ~5.5 MB more per cached
-    hero at a 1400-wide window. Show before/after crops at 150 %.
-11g. ~~**meridian-pane-breakpoint**~~ LANDED 5b2b676 (8/1; user said yes 2026-10-08) — move Meridian's
-    side-pane breakpoint from 1100 to ~1320 px so the editor keeps ≥ 448 px; below it the
-    response pane goes to the bottom. Update the plan's design decision. Before/after images.
-11h. ~~**junction-branches-compact**~~ LANDED 2bca842 (8/1; user said yes 2026-10-08) — a compact Branches
-    table at ≤1000 px (e.g. icon-only Checkout, narrower fixed columns) so names are not
-    starved to "…" with the sidebar open. Check Tags/Remotes/Worktrees use the same table
-    and stay consistent. Before/after images.
-11g-fix. ~~**meridian-bottom-pane-height**~~ LANDED 53442e2 (from 5b2b676) — the bottom response pane is a fixed
-    380 px, so short windows starve the editor (1280×672: ~90 px of sub-editor; that window
-    was side-by-side before). Share the height between editor and pane (proportional with
-    minimums, or a splitter), so a 1080p-at-150 % maximized window stays usable. Images.
-12. ~~**apps-scenario-virtual-selection-walk-a11y**~~ LANDED 1c8ee98, 758fa03 + **apps-scenario-textarea-highlighted-json**
-    (8) — two perf-suite scenarios the big round 2 items need.
-
-**Between items 1 and 2:** render before/after images for Needs-the-user question 1
-(flex basis of truncating labels) in a separate worktree, for the user to decide.
+1. **runtime-sdl-pump-closure + runtime-paced-wait-spin** (4; = sdl-pump-closure-per-pass (3))
+   — `SdlWindowingPlatform.cs:84` allocates 88/72 B per loop pass (idle 5.7 KB/s, animating
+   3–4 MB/s); SDL truncates `WaitForEvents(1)` to 0, so the loop spins the last ~1 ms of
+   every interval while dirty (41–46k passes/s for 200 frames). Real-window steady frames → 0 B.
+2. **vk-minimized-swapchain-lost** (3, correctness) — a Vulkan window that draws while
+   minimized never draws again (orphaned swapchain at SdlVulkanHost.cs:585, OUT_OF_DATE
+   forever, later resizes fail with ErrorNativeWindowInUseKHR) and spins ~50k passes/s.
+   Destroy on the zero-extent skip, retry at acquire, no spin while a dirty window cannot
+   begin a frame.
+3. **text-textarea-patch-keeps-lines + text-textarea-span-scan** (5) — a patch with the same
+   text re-wraps the whole TextArea (Meridian: 19,013 lines, 1.4 MB per keystroke in its
+   editors; 25k unique lines 64 MB); SpansForLine scans from span 0 (JSON wheel 612k
+   iterations per step → 117). Watch Meridian's overlapping search spans. Add a suite row
+   for a parent rebuild around a large TextArea.
+4. **text-shaper-direct** (5) — HarfBuzz called directly, one buffer/font per shaper:
+   −25…−50 % allocKB on 6 rows, bit-identical over 1.1 M shaper calls.
+5. **text-shape-cache-byte-bound** (5, from 4's review) — bound the shape and word caches by
+   bytes/glyphs; closing a TextArea keeps 4–155 MB in the app-lifetime caches today.
+6. **paint-effect-object-cache + paint-blob-builder-reuse + junction-lane-palette +
+   aperture-postercache-trim-thread** (2) — shadows/gradients create native objects per
+   draw (the last steady-frame bytes in real apps; suite rows → 0); blob builder per miss
+   (scroll/jump −39 %); Junction graph palette (History −1.97 KB/frame); Aperture disposes
+   posters on the download thread (correctness).
+7. **paint-selectable-label-paragraph** (2) — Junction diff and Vesper reader ~10 KB/frame of
+   paragraphs → ~0.
+8. **layout-grid-linear-tracks + layout-leaves-ignore-offered-height +
+   layout-maxlines-setter-dirty + checkbox-size-layout** (1) — grid O(rows² × cols) (~900
+   loop iterations per cell); spacers/chevrons keyed on exact height (expander animation
+   MeasureSize −72 %, leaf measurements −93 %); two correctness fixes.
+9. **a11y-node-extras + a11y-snapshot-stale-fields + a11y-atspi-snapshot-diet** (7) — node
+   136 → 80 B (9 of 11 a11y rows −13…−39 %); stale Role/AutomationId on rebased wrappers;
+   AT-SPI paths built once (−27…−34 % per Linux a11y frame). Plus, if approved,
+   **a11y-focus-unbuilt-node** and **a11y-virtual-item-selected** (user).
+10. **reconcile-blueprint-hashset** (6) — no HashSet for empty parents (component rows
+    −10.7…−11.8 %). Plus, if approved, **reactivity-tween-tick-per-frame** (user; Reel 13
+    rebuilds per presented frame, 172 MB per 11 s) with the
+    **apps-scenario-tween-signal-rebuild** suite row, and **reactivity-scope-threadstatic**
+    (user).
+11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) — sticky wheel 1.55 → ~0.3
+    KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
+12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
+    −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
+    thread (10 ms, 5 MB).
+13. **text-textarea-measure-lines** (5) — width-only FitsWhole (JSON open −36 %, −75 % with
+    item 4); Meridian response frame 25.7 MB.
+14. **gl-vk-one-submit-per-frame + gl-vk-resize-duplicate-frames** (3) — Flush is the 2nd
+    largest share in every app (14–36 %); 3 → 1 frames per resize step. Needs timing.
 
 ### Waiting
 
-- **a11y-virtual-item-selected** (7, correctness, code reading) — `BuildVirtualItems` gives item
-  nodes no `IsSelected`, so a VirtualList selection move that does not scroll gives an empty
-  diff and no UIA SelectionItem event. Verify, then fix.
-- **syntax-maxlines-uncoloured** (app/text) — responses over 20,000 lines get no spans
-  (`SyntaxHighlighter.MaxLineCount`), so large Meridian responses are drawn uncoloured.
-- **meridian-pane-choice-not-persisted** (app bug) — the design lists the Ctrl+\ pane choice as
-  persisted, but Meridian has no settings file, so it is not. Not perf.
-- **meridian-min-width-wraps** (app, not perf) — at the 760 dip minimum width the response tab
-  "Headers 6" wraps and a long header value pushes its remove button out of line.
-- **junction-narrow-gitlab-glyphs** (8, app) — below 724 px of content the Branches table
-  drops LAST COMMIT and with it the GitLab lock, pipeline glyph and MR chip. Move them next to
-  the name in narrow mode? Small.
-- **aperture-tmdb-size-fallback** (2, app robustness) — w1920 is not in TMDB's configuration
-  list; TMDB serves it today but answers 400 for unlisted sizes. If it stops, the request
-  hero shows nothing: fall back to w1280. Small.
-- **aperture-poster-as-hero** (2, app memory) — a film with no backdrop shows its 2000×3000
-  poster as the hero: 22.9 MB decoded at 150 %. Ask for the size the hero shows. Small.
-- **aperture-hero-scrim-seam** (app visual, not perf) — the 70 %-wide horizontal scrim ends at
-  15 % alpha, leaving a visible seam (luma 115 → 134). Pre-existing.
-- **layout-scroll-strip-narrowing** (1, framework gap) — a tab strip cannot both narrow its
-  tabs and scroll, because scroll content is laid out against an unbounded width; Meridian's
-  open tab can be cut off at the strip's end.
-- **layout-maxlines-setter-dirty** (1, correctness) — the MaxLines property setter does not
-  mark layout dirty (a patch does). Small.
-- **a11y-atspi-cache-child-index** (7) — from source reading: libatspi's AddAccessible writes
-  into the parent's cached child list by index (overwrites, not shifts); with one
-  children-changed per parent, inserting several siblings at once may leave stale entries.
-  Verify with a live libatspi client first.
-- **a11y-focus-unbuilt-node** (7, correctness) — focus moved onto an element mounted in the
-  same handler (no node yet) raises no UIA focus event.
-- **a11y-scrollpercent-role** (7) — a ScrollViewElement given a role other than ScrollView or
-  List raises ScrollPercent without a Scroll pattern. Small.
-- **tooling-textbench-warmup** (5) — TextBench filtered to a few rows measures tier-0 code
-  (3.6× slower, inflated differences) unless `DOTNET_TC_CallCountingDelayMs=0`; even full runs
-  showed a false +11 %. Warm up by time as the perf suite does. Small.
-- **layout-zorder-sorted-allocs** (1) — `ZOrderHelper.Sorted` allocates int[], a closure, a
-  Comparison and an Element[] per call for containers with sticky or z-index children:
-  ~1.4 KB/frame on scroll/sticky sections wheel. Small.
-- **reconcile-array-enumerator-boxing** (6) — boxed `SZGenericArrayEnumerator<Element>` on the
-  create and build path. Small; fold into reconcile-blueprint-hashset.
-- **a11y-snapshot-stale-fields** (7) — IsOffscreen, off-screen bounds, Role, AutomationId
-  update only when the diff names the node, so IsOffscreen can go stale after a viewport
-  resize. Seen in code only; test first.
-- **paint-cover-half-pixel-crop** (2) — at 1:1, Cover crops at half-pixel offsets when a
-  source is 1 px larger on the cropped axis (`ComputeImageFit` does not snap the source
-  rectangle): slightly soft pictures. Small.
-- **aperture-postercache-trim-thread** (2, app correctness) — `PosterCache.Trim` disposes
-  images on the download thread while the UI may draw them. Pre-existing.
-- **gl-image-retained-after-dispose** (2, lead for 3) — in a GL window, drawing 281 MB of
-  photos adds ~380 MB of private bytes beyond the pixels, and ~375 MB stays after every
-  source is disposed (437 vs 62 MB at start); before and after 12d1480 alike. Suspects:
-  Skia's GPU resource cache, its CPU mip build, NVIDIA system-memory copies. Measure first.
-- **layout-virtuallist-realize-in-render** (8; + layout-virtuallist-keep-rows (1)) —
-  realize is 12–19 % of key-walk frames, 84 % of a Vesper folder open (5.2 MB); patch rows
-  whose item is unchanged. Medium–large. Needs scenario 12 first.
-- **a11y-eager-virtual-items** (8) — a11y 30 % of Junction History walk, 55 % of Vesper
-  PageDown; on-demand item provisioning below 2,000 or diff item nodes by index. Medium.
-- **text-textarea-measure-lines** (5; + text-textarea-short-lines-open (8),
-  textarea-render-substrings (2)) — width-only FitsWhole, keep visible line strings, skip
-  shaping provably short lines; Meridian JSON open 30 MB / 24k calls. Medium.
-- **text-textarea-incremental-wrap** (5) — re-wrap only edited lines; keystroke O(lines) →
-  O(edited). Medium.
-- **text-textarea-span-scan** (5) — binary search spans per line; 2.28 M iterations per
-  frame on a 45k-span file. Small.
-- **text-shaper-reuse** (5; = runtime-shaper-allocs (4), text-shaper-per-call-objects (2))
-  — drop SKPaint, one SKFont, reuse HarfBuzz buffer; −11 % cold open, −7 % text/create.
-  Small.
-- **gl-vk-one-submit-per-frame** (3) — one submit per frame, no in-frame glGetError; Flush
-  is 19–28 % of frames. Small; needs timing.
-- **gl-vk-resize-duplicate-frames** (3) — skip same-size live-resize frames; 2.4–2.9 → ~1
-  frame per step. Small.
-- **gpu-aperture-startup-swapchain-x3** (8) — settle size before the first swapchain;
-  ~10 ms. Borderline.
-- **runtime-idle-wakeups** (3, 4) — deadline-based wait instead of 16 ms polling; ~65 →
-  ~0 wakes/s idle. Medium (explicit wakes for AT attach, action router, trailing a11y).
-- **reactivity-tween-rebuild-per-loop-iteration** (8) — tick animations once per frame;
-  Reel 22–62 rebuilds between frames during fades. Small–medium.
-- **layout-grid-linear-tracks** (1) — O(rows × cells) → linear; ≥30 % on grid rows. Small.
-- **layout-ordered-children** (1) — binary-search hit-test, z-order skip, visible-range
-  cull for ordered containers; O(n) → O(log n + visible) per event/frame. Medium.
-- **reconcile-restyle-on-change** (6; = layout-style-pass-after-patch (1)) — patch/mount
-  dirty style only when inherited style changed; Junction 587 → ~0 resolves per press.
+- **runtime-idle-wakeups** (4/3) — 65 wakes/s idle in every app. Medium; after items 1–2
+  (same loop code). WinForms host ticks every 8 ms.
+- **vk-swapchain-target-per-frame** (3) — Vulkan steady frame 2,658 → ~610 B; changes HDR.md's
+  "never cache a swapchain render target" invariant. Medium.
+- **vk-purge-disposed-image-textures** (3) — −178 MB DXGI after disposing 8 large photos on
+  Vulkan. Small.
+- **gpu-aperture-startup-swapchain-x3** (3) — ~10 ms, borderline.
+- **paint-spanned-line-glyph-work** (2) — glyphs processed ~16× per spanned line per frame
+  (Junction diff 26,210 per frame). (a) small, (b) medium; time unmeasured.
+- **text-textarea-incremental-wrap** (5) — keystroke O(lines) → O(edited), −46…−58 % on 3
+  rows. Medium.
+- **tooling-textbench-warmup** (5) — TextBench measures tier-0 code; the perf suite also tiers
+  up during rounds 1–4 (lead for 4). Small.
+- **layout-ordered-children** (1, narrowed) — hit-test and cull O(n) → O(log n + visible).
   Medium.
-- **reactivity-scope-threadstatic** (6) — `[ThreadStatic]` subscriber; −30 % on signal
-  fan-out. Small; update DECISIONS.md:97.
-- **reconcile-persistent-child-in-place** (6) — keep field-held child hosts in place; one
-  O(N) a11y rebuild less per parent rebuild. Medium.
-- **reconcile-blueprint-hashset** (6; = layout-tree-walk-allocs HashSet half (1)) — no
-  HashSet when the element has no children; ≈ −9 % on component rows. Small.
-- **reconcile-unkeyed-shrink-linear** (6, 1) — O(k·n) → O(n). Small, low priority.
-- **paint-selectable-label-paragraph** (2) — keep selectable label paragraphs between
-  frames; Junction diff 10.7 → 0.8 KB/frame. Small–medium.
-- **paint-spanned-line-glyph-work** (2) — identity-first blob lookup; optional per-stretch
-  sub-blobs. Small / medium.
-- **a11y-property-patch** (7) — patch only notified nodes; O(n) → O(changed) per
-  keystroke/toggle/value tick. Large.
-- **a11y-richtext-text-snapshot** (7) — lazy AccessibleText; a11y/type rich text 2,135 →
-  ~100–600 KB. Medium.
-- **a11y-atspi-snapshot-per-diff** (7) — reuse untouched AT-SPI objects; Linux only.
-  Medium.
-- **apps-tooling-generic-framelog** (8) — env-gated framework frame log for every app.
-  Small.
-- **apps-junction-heap-growth** (8) — GC heap 41 → 75 MB over 30 s; needs a heap census
-  first.
-- **junction-lane-palette** (2; = runtime-junction-graph-allocs (4)) — app: cache the lane
-  palette, index loops; History frame −13.9 KB. Small; guideline example.
+- **layout-applytheme-layout-on-change** (1) — theme switch rows −98 % alloc; patched
+  SplitterHandle re-dirties Junction's ancestor chain. Small, low priority.
+- **reconcile-restyle-on-change** (6, rank last) — Junction 585 → ~310 resolves; style is
+  0.6–1 % of app frames. Text's SelectionColor is overwritten by ApplyTheme (latent bug).
+- **a11y-property-patch** (7, large) — after a11y-node-extras; Linux needs snapshot-per-diff.
+- **a11y-atspi-snapshot-per-diff** (7) — 496 B/node rebuilt per apply on Linux. Medium.
+- **a11y-atspi-virtual-items** (7, correctness) — lists over 2,000 items are empty to Orca.
+  Medium; needs a live libatspi check.
+- **a11y-richtext-text-snapshot** (7) — −24 % as is, −90 %+ with the Value decision (user).
+- **a11y-atspi-cache-child-index** (7) — unverified; needs a live libatspi client.
+- **apps-tooling-generic-framelog** (8, built by 4) — env-gated HULTUI_BENCH/HULTUI_FRAMELOG.
+- **meridian-response-format-on-ui-thread** (8, app) — 15.3 ms on the UI thread per large
+  response; prerequisite for colouring > 20,000 lines (user).
+- **Suite scenarios** (8): apps-scenario-rich-row-walk, apps-scenario-document-switch,
+  apps-scenario-image-grid, apps-scenario-loop-wakes (real loop), a first-code-icon test.
+- **aperture-tmdb-size-fallback**, **aperture-poster-as-hero**, **aperture-hero-scrim-seam**,
+  **junction-narrow-gitlab-glyphs**, **meridian-pane-choice-not-persisted**,
+  **meridian-min-width-wraps** (apps; mostly not perf).
+- **layout-virtuallist-item-rows** (1, user) — opt-in `RenderWith((item, selected) => …)` API:
+  walk template calls 19 → 3 per step, −75 % bytes. Replaces layout-virtuallist-realize-in-render
+  (keep-rows prototyped and declined: +6 % bytes, the template is 88 % of realize).
 
 ## Landed
 
@@ -277,9 +182,45 @@ From the round 1 surveys (details in `17-reports/`):
 - **Apps:** style and non-realize layout shares; idle loop bytes; start-up (no new lever);
   Junction start-up allocation (app git loading).
 
+- **Round 2:** layout-virtuallist-keep-rows (prototyped: +6 % bytes, the template is 88 % of
+  realize); moving realization out of render; reconcile-persistent-child-in-place and
+  reconcile-unkeyed-shrink-linear (no app hits them); gl-image-retained-after-dispose GL
+  half (NVIDIA driver pool; guideline: decode at the drawn size); paint-cover-half-pixel-crop
+  (quality, not perf); a11y-scrollpercent-role (no such use); lazy UIA wrappers; Vulkan
+  driver-side private bytes; GL scratch purge after resize; skipping shaping of "short"
+  lines (no proven bound); apps-junction-heap-growth (not a leak: bounded caches + garbage).
+
 ## Needs the user
 
-None open.
+Round 2 questions (asked 2026-10-09; reports `17-reports/r2-*`):
+
+1. **a11y-atspi-active-on-status**: gate the Linux bridge on `org.a11y.Status`
+   IsEnabled/ScreenReaderEnabled (as Qt does, with an always-on override)? Today every
+   GNOME/KDE session pays it: a keystroke in a 603-node form 385 KB vs 3.2 KB.
+2. **a11y-eager-virtual-items**: provide list items on demand at any size? Per-item Name,
+   bounds and Added/Removed events become list-level invalidation.
+3. **a11y-value-for-text**: drop the Value change for elements with a text pattern? A rich
+   text keystroke sends the whole document (~1.5 MB UIA, ~750 KB AT-SPI).
+4. **a11y-range-value-events**: add UIA RangeValue.Value changes and an AT-SPI Value
+   interface for Slider/ProgressBar (today a keyboard user moving a slider hears nothing)?
+5. **a11y-focus-unbuilt-node + a11y-virtual-item-selected**: approve the added events (a
+   missing focus event; IsSelected changes on two items per selection move)?
+6. **reactivity-tween-tick-per-frame**: tweens step once per rendered frame (like
+   requestAnimationFrame); delay timers can end up to one display interval later while the
+   window redraws.
+7. **reactivity-scope-threadstatic**: a signal read on another thread or after an `await`
+   inside Build/an effect no longer subscribes (today a data race).
+8. **syntax-maxlines-uncoloured**: colour Meridian responses over 20,000 lines (after moving
+   tokenizing off the UI thread)?
+9. **layout-virtuallist-item-rows**: add the opt-in VirtualList API and adopt it in
+   Junction and Vesper lists one at a time?
+10. **layout-scroll-strip-narrowing** (not perf): pursue the CSS shrink-then-scroll
+    behaviour outside plan 17, or drop it?
+11. **wsl-mesa**: install Mesa (EGL, DRI, Vulkan) in WSL Fedora to check 0f5816a/7a827e9 on
+    software GL/Vulkan?
+12. (later) **gl-noop-geterror**: only if timing shows the last glGetError round trip costs.
+
+Note: the round 2 app survey registered a Jellyfin device named "aperture-survey".
 
 Provided 2026-10-07: **Aperture API key file** at `C:\Users\fredr\.secrets\jellyfin-api-key.txt`
 (outside the repo; never copy or print its contents). Use with the run-hultui-app driver:
@@ -337,3 +278,5 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   64ba531 on a detached origin/main (main had 3dca7b4/de5f0e6 from another session), suite
   passed again on the merge, pushed de5f0e6..64ba531, primary fast-forwarded behind the guard.
 - 2026-10-09: CI green on 64ba531 (run 37861109308). Round 2 survey started, eight experts.
+- 2026-10-09: round 2 surveys in (all eight not satisfied); reports in `17-reports/r2-*`;
+  queue re-ranked into 14 build steps; 12 questions for the user; survey worktrees removed.
