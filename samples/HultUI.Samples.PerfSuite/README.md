@@ -618,7 +618,7 @@ yield return new Scenario("group/what it does",
   measure-cache hits; `Ui.DragWidth(step)` walks 40 distinct widths. Toggling a value back
   to what it was may dirty nothing.
 - **Live property changes may not dirty anything.** Layout and inherited-text setters
-  (`.Width()`, `.MaxLines()`, `.TextColor()`) are builder state; after mount, call
+  (`.Width()`, `.TextColor()`) are builder state; after mount, call
   `MarkLayoutDirty()` / `MarkStyleDirty()` yourself, as an app would.
 - **Aim input with `WindowBorderBox`**, never `Layout` boxes, which ignore scrolling.
 - **Give it a `Check`**, and see it fail once: make `Run` do nothing and run `--verify`.

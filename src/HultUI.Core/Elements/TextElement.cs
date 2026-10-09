@@ -34,8 +34,36 @@ public class TextElement : Element
         }
     }
 
-    public TextOverflow Overflow { get; set; } = TextOverflow.Clip;
-    public int? MaxLines { get; set; }
+    private TextOverflow _overflow = TextOverflow.Clip;
+    private int? _maxLines;
+
+    /// <summary>What a line too long for the box shows at its end. A change lays the label out
+    /// again: its measured width, its flex base and its automatic minimum all depend on it.</summary>
+    public TextOverflow Overflow
+    {
+        get => _overflow;
+        set
+        {
+            if (_overflow == value) return;
+            _overflow = value;
+            MarkLayoutDirty();
+            MarkPaintDirty();
+        }
+    }
+
+    /// <summary>The most lines the label wraps to, or null for no limit. A change lays the label out
+    /// again, as <see cref="Overflow"/> does.</summary>
+    public int? MaxLines
+    {
+        get => _maxLines;
+        set
+        {
+            if (_maxLines == value) return;
+            _maxLines = value;
+            MarkLayoutDirty();
+            MarkPaintDirty();
+        }
+    }
 
     private IReadOnlyList<TextSpan>? _spans;
 
@@ -470,7 +498,7 @@ public class TextElement : Element
             ? pos - 1
             : pos;
 
-    // Content and Spans mark their layout when they change; Overflow and MaxLines are checked below.
+    // Content, Spans, Overflow and MaxLines mark their layout when they change.
     private protected override bool PatchMarksOwnLayout => GetType() == typeof(TextElement);
 
     internal override void PatchFrom(Element source)
@@ -478,8 +506,6 @@ public class TextElement : Element
         base.PatchFrom(source);
         if (source is TextElement text)
         {
-            if (Overflow != text.Overflow || MaxLines != text.MaxLines)
-                MarkLayoutDirty();
             Content = text.Content;
             Overflow = text.Overflow;
             MaxLines = text.MaxLines;
