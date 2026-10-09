@@ -549,20 +549,40 @@ public class TextElement : Element
         if (hitTestable)
         {
             _contentBox = contentBox;
-            // The same layout DrawText draws below — same text, style, width, spans, line limit
-            // and overflow, so the same cache entry — kept so a click reads the drawn lines.
-            _paragraph = ctx.LayoutParagraph(Content, style, contentBox.Width, _spans, MaxLines, Overflow);
+            // The lines a click reads are the lines drawn: one paragraph, laid out from the text,
+            // style, width, spans, line limit and overflow DrawText would lay out, and kept from
+            // frame to frame until one of them changes. A frame that only moves the label (a
+            // scroll) or repaints around it (a hover) draws the one it has: a new one every frame
+            // was ~320 B a label, 10 KB a frame over a screen of diff or file viewer lines
+            // (plan 17, round 2).
+            if (_paragraph is not { } paragraph || !StillLaidOutAs(paragraph, style, contentBox.Width))
+                _paragraph = paragraph = ctx.LayoutParagraph(Content, style, contentBox.Width, _spans, MaxLines, Overflow);
             if (_selectable && HasSelection)
-                DrawSelection(ctx, _paragraph, style);
+                DrawSelection(ctx, paragraph, style);
+            // Drawn from it too, rather than looked up again by DrawText: at the box's width a
+            // line's LineLeft is DrawText's alignment offset, so the glyphs land where DrawText
+            // puts them.
+            ctx.DrawParagraph(paragraph, new Point(contentBox.X, contentBox.Y));
+            return;
         }
-        else
-            _paragraph = null;
 
+        _paragraph = null;
         if (_spans is { Count: > 0 } spans)
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, spans);
         else
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);
     }
+
+    /// <summary>Whether <paramref name="paragraph"/> is what laying this label out now would give:
+    /// everything it was laid out from is as it was. Spans compare by reference — the setter keeps
+    /// the list it has when handed an equal one, so only a real change replaces it.</summary>
+    private bool StillLaidOutAs(TextParagraph paragraph, ResolvedInheritedStyle style, float width) =>
+        paragraph.MaxWidth == width
+        && paragraph.Style == style
+        && ReferenceEquals(paragraph.Spans, _spans)
+        && paragraph.MaxLines == MaxLines
+        && paragraph.Overflow == Overflow
+        && paragraph.Text == _content;
 
     /// <summary>The border box and the text's ink, which overflows it whenever the text is
     /// longer than the box. A selection is left unbounded: its highlight runs past a line's

@@ -127,6 +127,51 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"a repaint allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>A screen of selectable lines as Junction's diff and Vesper's reader draw them —
+    /// syntax spans, one selection group with a live selection, a bold word — and a linked label,
+    /// a truncated one and a right-to-left one, repainted. Each label laid a new paragraph out
+    /// every frame for its hit-testing, ~320 B a label: 10 KB a frame over a diff (plan 17,
+    /// round 2). The least of three rounds, so a one-off allocation while the frame's code is
+    /// still being compiled does not count.</summary>
+    [Fact]
+    public void ASteadyRepaintOfSelectableLabels_AllocatesNothing()
+    {
+        var lines = new string[40];
+        var group = new TextSelectionGroup();
+        var rows = new Element[lines.Length + 3];
+        Core.Rendering.TextSpan[] spans =
+        [
+            new(0, 3, Color.FromHex("#569CD6")),
+            new(4, 6, Color.FromHex("#9CDCFE"), Weight: Core.Styling.FontWeight.Bold),
+            new(13, 5, Color.FromHex("#CE9178"), Color.FromHex("#3A3D41")),
+        ];
+        // On screen first, above the lines: the session shows ~20 rows and culls the rest.
+        rows[0] = TextElement.New("See ABCD-4291 for the details").Links([new TextLink(4, 9, "issue://4291")], _ => { });
+        rows[1] = TextElement.New("A long line that is cut short with an ellipsis at the box's edge, far before its end")
+            .Selectable().MaxLines(1).TextOverflow(TextOverflow.Ellipsis);
+        var hebrew = TextElement.New("שלום עולם, שורה שנקראת מימין לשמאל").Selectable();
+        hebrew.Inherited.TextDirection = Core.Styling.TextDirection.Rtl;
+        rows[2] = hebrew;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            lines[i] = $"var line{i,-3} = \"text\"; // the line's comment, number {i}";
+            rows[3 + i] = TextElement.New(lines[i]).Selectable().SelectionGroup(group, i).Spans(spans);
+        }
+        group.Bind(lines, lines.Length, i => lines[i]);
+        group.Anchor(3, 5);
+        group.ExtendTo(6, 12);
+        var root = ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows));
+        using var session = Session(root);
+        for (int i = 0; i < 10; i++)
+            Assert.NotNull(((TextElement)rows[i]).DrawnParagraph);
+
+        double perFrame = double.MaxValue;
+        for (int round = 0; round < 3; round++)
+            perFrame = Math.Min(perFrame, PerFrame(session.Application, () => root.MarkPaintDirty()));
+
+        Assert.True(perFrame < 1, $"repainting 43 selectable and linked labels allocated {perFrame:0.#} B per frame");
+    }
+
     /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key
     /// and focus events. It was ~28 KB per Tab (a tree walk with a boxed enumerator per
     /// container, a fresh list, and a sort of keys that were all equal); the bound is far above

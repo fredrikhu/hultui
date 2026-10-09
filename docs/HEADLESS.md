@@ -166,6 +166,8 @@ window.RenderLog.Ops;                         // RenderOp { Name, Args, Depth }
 
 **Element attribution is not implemented** — ops carry no element identity, so "what did *this* element draw?" means matching on coordinates or text.
 
+**A selectable or linked label logs as `DrawParagraph`, not `DrawText`.** It keeps the paragraph it hit-tests clicks against and draws from it, so its op reads `DrawParagraph "text" at x,y width=w …` with the content box's corner and width. A query for a selectable label's text asks for both: `Named("DrawText").Concat(Named("DrawParagraph"))`.
+
 ## Pixels
 
 ```csharp
