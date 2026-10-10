@@ -7,7 +7,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 3
 - **Phase:** build — **paused after the round 3 survey** (the user asked for a break once the
   surveys were in, 2026-10-10). All eight reports are in `17-reports/r3-*`; the round 3 build
-  order is below, and 15 questions wait in Needs the user. Steps marked **(user)** wait for an
+  order is below; 13 questions wait in Needs the user (14 and 15 answered). Steps marked **(user)** wait for an
   answer; the others can start. Next: round 3 build step 1. To resume, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -104,7 +104,7 @@ Round 2 regressions first, then value per cost.
    per swapchain image (2,048 B per Vulkan frame → ≤0.1 KB; Aperture's quiet frames are all of it).
    The second changes HDR.md's "never cache a wrapped swapchain target": barrier each acquired image
    back to COLOR_ATTACHMENT_OPTIMAL, reused-frame capture, validation with a positive control.
-   With **vk-drag-swapchain-overallocate (user)** (user report, `17-reports/r3-aperture-resize.md`):
+   With **vk-drag-swapchain-overallocate** (approved 2026-10-10; user report, `17-reports/r3-aperture-resize.md`):
    every live-resize step rebuilds the F16 swapchain, 92 % of the step (Aperture and Reel ~37 ms
    per step vs GL apps ~4.6); between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE build to a 256-px bucket
    with maintenance1 ONE_TO_ONE and rebuild exact at release (prototype 37–39 → ~9 ms JIT and AOT,
@@ -177,7 +177,7 @@ Re-ranked by the round 4 survey.
   (Junction TODO.md open 2.8 MB, text 84 %; Meridian first response 7.5 MB, text 90 %). Medium.
 - **apps-junction-components (user)** (8) — re-open "split Junction into components" (declined
   2026-10-06): unchanged titlebar, sidebar and toolbar are 70 % of History's Build bytes.
-- **vk-8bit-unless-hdr (user)** (3) — an 8-bit swapchain unless video or a GPU image source is on
+- **vk-8bit-unless-hdr** (3; user: not now, 2026-10-10; revisit for memory) — an 8-bit swapchain unless video or a GPU image source is on
   screen: resize step 37 → 8.7 ms on its own, steady present 0.96 → 0.33 ms, GPU memory 213 → 63 MB;
   UI pixels change on HDR displays and a format switch at playback start/stop. A + B not measured.
 - **aperture-resize-rebuild-on-change** (8, app, low) — rebuild on resize only when a size-derived
@@ -372,10 +372,12 @@ Round 3 questions (2026-10-10, open). Recommendations in brackets.
     an over-allocated swapchain presented unscaled and rebuild once at the exact size on release
     (resize step 37 → ~9 ms; video playing during a drag costs more CPU while dragging; one ~33 ms
     frame at release; maintenance1 on by default; NVIDIA verified only)? And fix the broken
-    `HULTUI_VULKAN_FIXED_EXTENT=1` opt-in rather than remove it? [Yes; fix it.]
+    `HULTUI_VULKAN_FIXED_EXTENT=1` opt-in rather than remove it? [Yes; fix it.] → **yes, and fix
+    the opt-in** (2026-10-10, after asking about 60+ fps video: playback unchanged outside a
+    drag; window moves must not trigger it; video proof added to step 9).
 15. **vk-8bit-unless-hdr:** 8-bit swapchain unless HDR content (video) is on screen — UI pixels
     change on HDR displays, a format switch when playback starts and stops? [Not now: A gets most of
-    the resize gain without a pixel change; revisit for memory.]
+    the resize gain without a pixel change; revisit for memory.] → **not now** (2026-10-10).
 
 To do for the user when the work is done: remove the "aperture-survey" device registrations on
 jellyfin.home (rounds 2 and 3, plus 51 runs of the resize diagnosis) and revoke the API key.
@@ -477,3 +479,5 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   every step rebuilds the Vulkan F16 swapchain (92 %, 32 of ~37 ms; Reel the same; GL apps 4.6 ms).
   Drag over-allocation prototyped 37 → 9 ms; joins step 9 if approved (question 14); the
   FIXED_EXTENT opt-in is broken. Questions now 15.
+- 2026-10-10: the user took the recommendations on 14 (yes, fix the opt-in) and 15 (not now);
+  questions 1–13 still open.
