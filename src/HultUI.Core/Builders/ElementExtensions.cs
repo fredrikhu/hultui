@@ -327,6 +327,12 @@ public static class ElementExtensions
     public static VirtualListElement<T> RowHeights<T>(this VirtualListElement<T> el, Func<T, int, float>? height) { el.ItemHeightFor = height; return el; }
     public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
+
+    /// <summary>Rows made from their item and whether it is selected, and from nothing else: a
+    /// rebuild keeps every realized row whose item and selected state are unchanged. Anything
+    /// else a row shows needs <see cref="VirtualListElement{T}.InvalidateRows"/> when it changes;
+    /// see <see cref="VirtualListElement{T}.ItemRowTemplate"/>.</summary>
+    public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, bool, Element> template) { el.ItemRowTemplate = template; return el; }
     public static VirtualListElement<T> AccessibleItemLabel<T>(this VirtualListElement<T> el, Func<T, string?> label) { el.AccessibleLabel = label; return el; }
     public static VirtualListElement<T> OnActivateItem<T>(this VirtualListElement<T> el, Action<T> handler) { el.OnItemActivate = handler; return el; }
     public static VirtualListElement<T> SelectedIndex<T>(this VirtualListElement<T> el, int index) { el.SelectedIndex = index; return el; }
