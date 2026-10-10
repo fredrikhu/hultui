@@ -18,6 +18,15 @@ file after every step and commits it with the step's work. Full survey reports a
   `painting-probes.patch`, `PaintProbe.cs`, `probedriver.cs`): a11y hidden-HWND rig,
   reactivity counters and Junction probe, painting probes.
 
+**Round 2 release adds app releases (user, 2026-10-10):** after round 2 is merged into main and
+CI is green, cut new releases of all five apps. Follow memory `release-tagging`: check the
+latest tags first (on 2026-10-10: junction-v1.19.0, vesper-v1.19.0, meridian-v1.2.0,
+aperture-v1.18.0, reel-v1.3.0, all on 4aa5653 of 2026-10-06; proposed next: minor bumps
+junction-v1.20.0, vesper-v1.20.0, meridian-v1.3.0, aperture-v1.19.0, reel-v1.4.0); annotated
+tags `<App> X.Y.Z` + blank line + one-sentence summary, written with `git tag -F <file>`; push
+at most 3 tags per `git push` (3, then 2); wait for each installer workflow with
+`gh run watch <id> --exit-status` and confirm each GitHub release has its installer.
+
 ## Verdicts
 
 | Expert | Round | Satisfied | Review objections |
