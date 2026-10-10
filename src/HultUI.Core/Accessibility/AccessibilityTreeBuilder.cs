@@ -100,6 +100,10 @@ public static class AccessibilityTreeBuilder
     {
         var box = element.Layout.AbsoluteBorderBox;
         var onScreen = new Rect(box.X - scrollX, box.Y - scrollY, box.Width, box.Height);
+        var textSource = element.AccessibleTextSource;
+        // A source that makes its text on request gives a version, and the value comes from it
+        // too: a long document's text and value are made when a reader asks, not on every rebuild.
+        var versioned = textSource as IVersionedAccessibleTextSource;
         var node = new AccessibilityNode(
             element.Id,
             ResolveRole(element),
@@ -110,7 +114,7 @@ public static class AccessibilityTreeBuilder
             isFocused: focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element),
             isEnabled: element.IsEnabledForAccessibility,
             isToggled: ResolveIsToggled(element),
-            value: ResolveValue(element),
+            value: versioned is null ? ResolveValue(element) : null,
             automationId: element.AutomationId,
             expanded: element.AccessibleExpanded,
             isPassword: element is TextInputElement { Masked: true },
@@ -119,10 +123,11 @@ public static class AccessibilityTreeBuilder
         // What ChildScroll subtracts from everything under it.
         if (element is ScrollViewElement sv)
             node.ScrollOffset = new Point(sv.ScrollOffsetX, sv.ScrollOffsetY);
-        if (element.AccessibleTextSource is { } text)
+        if (textSource is not null)
         {
-            node.TextSource = text;
-            node.Text = text.AccessibleText;
+            node.TextSource = textSource;
+            if (versioned is not null) node.TextVersion = versioned.CurrentVersion;
+            else node.Text = textSource.AccessibleText;
         }
         return node;
     }

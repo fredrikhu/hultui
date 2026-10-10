@@ -155,7 +155,17 @@ public static class AccessibilityTreeDiffer
         }
         if (rare && prev.NativeContent != curr.NativeContent)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
-        if (rare && !ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
+        if (rare && prev.TextVersion is { } pv && curr.TextVersion is { } cv && pv.GetType() == cv.GetType())
+        {
+            // Text made on request: the versions say what changed without making either. A long
+            // document's text was made on every rebuild, and compared here character by character.
+            if (!cv.SameText(pv))
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Text, prev));
+            if (!cv.SameSelection(pv))
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
+        }
+        else if (rare && (prev.OffersText || curr.OffersText)
+            && !ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
         {
             var (a, b) = (prev.Text, curr.Text);
             if (a?.Text != b?.Text)

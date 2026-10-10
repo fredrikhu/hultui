@@ -95,7 +95,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     {
         _name = node.Name;
         _description = node.Description;
-        _value = node.Value;
+        // A node that offers text has its value read on request (GetPropertyValue): a long
+        // document's is made only when asked, and its changes are told as text changes.
+        _value = node.TextSource is null ? node.Value : null;
         _isFocusable = node.IsFocusable;
         _isFocused = node.IsFocused;
         _isEnabled = node.IsEnabled;
@@ -158,7 +160,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaValueProvider(_bridge, ElementId),
             // A document with a value (a terminal's screen) offers it read-only: the reader
             // reads it, and nothing writes it.
-            AccessibilityRole.Document when patternId == UiaInterop.UIA_ValuePatternId && _value is not null
+            AccessibilityRole.Document when patternId == UiaInterop.UIA_ValuePatternId && (_value is not null || _hasText)
                 => new UiaValueProvider(_bridge, ElementId, readOnly: true),
             // A progress bar exposes the same pattern read-only; the bridge refuses SetValue.
             (AccessibilityRole.Slider or AccessibilityRole.ProgressBar or AccessibilityRole.SpinButton) when patternId == UiaInterop.UIA_RangeValuePatternId
@@ -194,6 +196,13 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             && !node.NativeContent.IsEmpty)
         {
             pRetVal = UiaVariant.FromBool(true);
+            return 0;
+        }
+
+        // The value of a node that offers text, read on request: the element's as it is now.
+        if (propertyId == UiaInterop.UIA_ValueValuePropertyId && _value is null && _hasText)
+        {
+            pRetVal = _bridge.GetValue(ElementId) is { } now ? UiaVariant.FromBStr(now) : UiaVariant.Empty;
             return 0;
         }
 

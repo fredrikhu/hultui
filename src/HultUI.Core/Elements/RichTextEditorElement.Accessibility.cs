@@ -11,15 +11,36 @@ public partial class RichTextEditorElement
     //
     // The document as text a reader moves through by character, word, line and paragraph: UIA's
     // text pattern, AT-SPI's Text. A block is a paragraph and its drawn lines are the lines; a
-    // picture reads as its words; a table's cells are paragraphs in reading order. The snapshot
-    // is made on the UI thread, from the layout, when the accessibility tree is built, and the
-    // bridges read it on their own threads. Its geometry reads where the editor is now from a
-    // record the render replaces, so scrolling needs no new snapshot.
+    // picture reads as its words; a table's cells are paragraphs in reading order.
+    //
+    // Made when something asks, not when the tree is built. The tree is built on every change a
+    // reader could see, and the text of a 5,000-block document is 749,017 characters (1.5 MB) with
+    // tables of its lines and paragraphs (~480 KB) on top: most of a keystroke's cost with a reader
+    // listening, and all of it wasted for one that never reads (a recording bridge, a UI Automation
+    // client that only follows the focus). So the tree takes a version: the document, the selection
+    // and the layout as they were, and the caret's and selection's offsets, which is what the differ
+    // compares (the document by identity; the text only when two documents are different instances
+    // of the same length, as a formatting change makes). The text is made from a version when
+    // something asks: on the UI thread from the layout, with its drawn lines and where each
+    // character is; on a bridge's thread from the document alone, its paragraphs as its lines and
+    // no boxes. A bridge's thread asking says a reader is reading: the UI thread then makes that
+    // version's text from the layout, and the next version's as it takes it, so the reader's next
+    // questions find the lines made — until a version goes unread. The geometry reads where the
+    // editor is now from a record the render replaces, so scrolling needs no new text.
 
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
+    // Where a bridge's thread asks the UI thread to make a version's text from the layout: the UI
+    // thread's context when it last took a version (an editor can be made before the loop runs).
+    private volatile SynchronizationContext? _uiContext;
     private EditorTextSource? _textSource;
-    private volatile AccessibleText? _accessibleText;
-    private (RichDocument? Document, RichSelection Selection, float Width, int Stamp, float Scroll, bool ReadOnly) _accessibleKey;
+
+    /// <summary>The version the last tree was built with: written on the UI thread, read by the
+    /// bridges' threads.</summary>
+    private volatile EditorTextVersion? _textVersion;
+
+    /// <summary>A bridge's thread read the text since a version was last taken: a reader is
+    /// reading, so the next version's text is made from the layout as it is taken.</summary>
+    private volatile bool _readerAsked;
 
     /// <summary>Where the document's top-left is in the window, scroll included, as last drawn.
     /// Replaced, never changed, so a bridge thread reads it whole.</summary>
@@ -29,41 +50,212 @@ public partial class RichTextEditorElement
 
     internal override IAccessibleTextSource? AccessibleTextSource => _textSource ??= new EditorTextSource(this);
 
-    private sealed class EditorTextSource(RichTextEditorElement owner) : IAccessibleTextSource
+    private sealed class EditorTextSource(RichTextEditorElement owner) : IVersionedAccessibleTextSource
     {
+        // The tree's builder, on the UI thread.
+        public AccessibleTextVersion CurrentVersion => owner.TakeTextVersion();
+
         public AccessibleText? AccessibleText
         {
             get
             {
-                // Made where the layout is: on the UI thread, when the tree is built. A bridge's
-                // thread gets the one made last.
-                if (Environment.CurrentManagedThreadId == owner._uiThread) owner.RefreshAccessibleText();
-                return owner._accessibleText;
+                // On the UI thread: the text as it is now, from the layout.
+                if (Environment.CurrentManagedThreadId == owner._uiThread) return owner.TakeTextVersion().Text;
+                // A bridge's thread: the version the last tree was built with.
+                if (owner._textVersion is not { } version) return null;
+                owner._readerAsked = true;
+                if (!version.IsMadeFromLayout) owner.MakeFromLayoutSoon(version);
+                return version.Text;
             }
         }
     }
 
-    // Called from Render: where the document is drawn now. A snapshot made before there was a
+    // Called from Render: where the document is drawn now. A version taken before there was a
     // layout to read, or at another width or theme, has lines and boxes that are not these: the
-    // tree is built again, which makes a new one. The tree is built before the frame is drawn,
-    // so the first one an editor gets is always made without its layout.
+    // tree is built again, which takes a new one. The tree is built before the frame is drawn,
+    // so the first version an editor gives is always taken without its layout.
     private void NoteViewFrame()
     {
         var box = WindowContentBox;
         var frame = new ViewFrame(box.X, box.Y - _scrollY);
         if (frame != _viewFrame) _viewFrame = frame;
-        if (_accessibleText is not null && AccessibilityClients.Active
-            && (_accessibleKey.Width != _laidOutWidth || _accessibleKey.Stamp != _laidOutStamp || _accessibleText.Geometry is null))
+        if (_textVersion is { } version && AccessibilityClients.Active
+            && (version.Key.Width != _laidOutWidth || version.Key.Stamp != _laidOutStamp || !version.LaidOut))
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.Text);
     }
 
-    private void RefreshAccessibleText()
+    /// <summary>The version of the text as it is now: the last one when nothing it holds has
+    /// changed, else a new one. On the UI thread.</summary>
+    private EditorTextVersion TakeTextVersion()
     {
         bool laidOut = EnsureFreshLayout();
-        var key = (_state.Document, _state.Selection, _laidOutWidth, _laidOutStamp, _scrollY, _readOnly);
-        if (_accessibleText is not null && key == _accessibleKey) return;
-        _accessibleKey = key;
-        _accessibleText = BuildAccessibleText(_state.Document, laidOut);
+        _uiContext = SynchronizationContext.Current;
+        var key = new TextKey(_state.Document, _state.Selection, _laidOutWidth, _laidOutStamp, _scrollY, _readOnly);
+        var version = _textVersion;
+        if (version is not null && version.Key == key) return version;
+
+        int first = -1, last = -1;
+        if (laidOut && _blocks.Length == key.Document.BlockCount)
+        {
+            first = BlockAt(_scrollY);
+            last = BlockAt(_scrollY + Layout.AbsoluteContentBox.Height);
+            if (_blocks[first].Table is { } t) first = t.Range.Start;
+            if (_blocks[last].Table is { } u) last = u.Range.End - 1;
+        }
+        _textVersion = version = new EditorTextVersion(this, key, first, last);
+        // A reader read the last one: make this one's now, while the layout is this one's.
+        if (_readerAsked)
+        {
+            _readerAsked = false;
+            version.MakeFromLayout();
+        }
+        return version;
+    }
+
+    /// <summary>Has the UI thread make <paramref name="version"/>'s text from the layout, if it is
+    /// still the latest when it gets there; if the editor has changed since it was taken (it was
+    /// taken before the first layout, say), the tree is built again, which takes a new version and
+    /// makes it, since a reader asked. From a bridge's thread.</summary>
+    private void MakeFromLayoutSoon(EditorTextVersion version) =>
+        _uiContext?.Post(static state =>
+        {
+            var v = (EditorTextVersion)state!;
+            var owner = v.Owner;
+            if (!ReferenceEquals(owner._textVersion, v) || v.MakeFromLayout() is not null) return;
+            if (owner.IsHosted) owner.NotifyAccessibilityPropertyChanged(AccessibilityProperties.Text);
+        }, version);
+
+    /// <summary>Whether the editor is still as <paramref name="key"/> has it; on the UI thread.</summary>
+    private bool IsAsTaken(TextKey key)
+    {
+        EnsureFreshLayout();
+        return key == new TextKey(_state.Document, _state.Selection, _laidOutWidth, _laidOutStamp, _scrollY, _readOnly);
+    }
+
+    private readonly record struct TextKey(RichDocument Document, RichSelection Selection, float Width, int Stamp,
+        float Scroll, bool ReadOnly);
+
+    /// <summary>
+    /// The text as one tree was built with it: cheap to take on every rebuild, compared by the
+    /// differ, made into an <see cref="AccessibleText"/> only when something asks.
+    /// </summary>
+    private sealed class EditorTextVersion : AccessibleTextVersion
+    {
+        public readonly RichTextEditorElement Owner;
+        public readonly TextKey Key;
+
+        // The text's length, and the caret, the anchor and the part on screen as offsets in it,
+        // as the text has them, so the differ compares what it compared before.
+        private readonly int _length, _focus, _anchor, _visibleStart, _visibleEnd;
+
+        private AccessibleText? _text;
+        private volatile bool _fromLayout;
+        private string? _plain;
+
+        public EditorTextVersion(RichTextEditorElement owner, TextKey key, int first, int last)
+        {
+            Owner = owner;
+            Key = key;
+            LaidOut = first >= 0;
+            // By adding the blocks' lengths up, with nothing allocated: a document makes a table of
+            // its block starts for the first offset asked of it, and every edit makes a new one.
+            var doc = key.Document;
+            var (focus, anchor) = (key.Selection.Focus, key.Selection.Anchor);
+            int at = 0;
+            _focus = _anchor = -1;
+            _visibleStart = 0;
+            _visibleEnd = -1;
+            for (int i = 0; i < doc.BlockCount; i++)
+            {
+                if (i > 0) at++;
+                var block = doc[i];
+                bool picture = block.Kind == BlockKind.Image;
+                if (i == focus.Block) _focus = at + (picture ? 0 : focus.Offset);
+                if (i == anchor.Block) _anchor = at + (picture ? 0 : anchor.Offset);
+                if (i == first) _visibleStart = at;
+                at += picture ? PictureWords(block.Image).Length : block.Text.Length;
+                if (i == last) _visibleEnd = at;
+            }
+            _length = at;
+        }
+
+        /// <summary>Whether it was taken with a layout to read: lines as drawn, boxes.</summary>
+        public bool LaidOut { get; }
+
+        /// <summary>Whether its text was made from the layout, with its drawn lines and boxes.</summary>
+        public bool IsMadeFromLayout => _fromLayout;
+
+        // As AccessibleText keeps them: the caret clamped into the text, a selection ordered and
+        // clamped, none where the anchor is the caret.
+        private int Caret => _focus < 0 ? -1 : Math.Min(_focus, _length);
+
+        private (int Start, int End) Selection =>
+            _focus >= 0 && _anchor >= 0 && _focus != _anchor
+                ? (Math.Clamp(Math.Min(_focus, _anchor), 0, _length), Math.Clamp(Math.Max(_focus, _anchor), 0, _length))
+                : (0, 0);
+
+        public override bool SameText(AccessibleTextVersion other) =>
+            other is EditorTextVersion o
+            && (ReferenceEquals(Key.Document, o.Key.Document)
+                // Another document with the same text, as a formatting change makes: only then is
+                // the text made and compared, as every text was before.
+                || (_length == o._length && string.Equals(PlainText, o.PlainText, StringComparison.Ordinal)));
+
+        public override bool SameSelection(AccessibleTextVersion other) =>
+            other is EditorTextVersion o && Caret == o.Caret && Selection == o.Selection;
+
+        /// <summary>The document's plain text, the editor's value; any thread.</summary>
+        public override string? Value => Key.Document.ToPlainText();
+
+        /// <summary>The text, a picture's words where it has none of its own; any thread.</summary>
+        private string PlainText => _plain ??= TextOf(Key.Document);
+
+        public override AccessibleText Text
+        {
+            get
+            {
+                if (_fromLayout) return Volatile.Read(ref _text)!;
+                if (Environment.CurrentManagedThreadId == Owner._uiThread && MakeFromLayout() is { } made) return made;
+                return Volatile.Read(ref _text) ?? MakeFromDocument();
+            }
+        }
+
+        /// <summary>On the UI thread: the text from the layout, while the editor is as this version
+        /// has it; null once it is not.</summary>
+        public AccessibleText? MakeFromLayout()
+        {
+            if (_fromLayout) return _text;
+            if (!Owner.IsAsTaken(Key)) return null;
+            var text = Owner.BuildAccessibleText(Key.Document, LaidOut);
+            Volatile.Write(ref _text, text);
+            _fromLayout = true;
+            return text;
+        }
+
+        // Any thread: from the document alone. Its paragraphs are its lines, and nothing says where
+        // a character is.
+        private AccessibleText MakeFromDocument()
+        {
+            var text = new AccessibleText(PlainText, _focus, _anchor, _focus, geometry: null,
+                _visibleStart, _visibleEnd, isReadOnly: Key.ReadOnly);
+            return Interlocked.CompareExchange(ref _text, text, null) ?? text;
+        }
+    }
+
+    /// <summary>The text of <paramref name="doc"/>: its plain text, a picture's words where it has
+    /// none of its own.</summary>
+    private static string TextOf(RichDocument doc)
+    {
+        bool pictures = false;
+        foreach (var b in doc.Blocks) pictures |= b.Kind == BlockKind.Image;
+        if (!pictures) return doc.ToPlainText();
+        var sb = new StringBuilder(doc.Length + 64);
+        for (int i = 0; i < doc.BlockCount; i++)
+        {
+            if (i > 0) sb.Append('\n');
+            sb.Append(doc[i].Kind == BlockKind.Image ? PictureWords(doc[i].Image) : doc[i].Text);
+        }
+        return sb.ToString();
     }
 
     /// <summary>The words a picture reads as: its own, or what it is.</summary>

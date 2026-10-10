@@ -55,8 +55,10 @@ public sealed class AccessibilityNode
     /// <summary>
     /// String value for elements that expose UIA's ValueProvider — text inputs
     /// and (later) sliders. <c>null</c> for elements without a value concept.
+    /// An element whose text is made on request (<see cref="IVersionedAccessibleTextSource"/>, a
+    /// long document's) makes its value on the first ask too.
     /// </summary>
-    public string? Value => _extras?.Value;
+    public string? Value => _extras is { } x ? x.Value ?? x.TextVersion?.Value : null;
 
     /// <summary>A password field: its <see cref="Value"/> is the bullets on screen, never the
     /// text, and a reader says what it is (UIA's IsPassword, AT-SPI's password-text role).</summary>
@@ -114,15 +116,29 @@ public sealed class AccessibilityNode
     /// <summary>
     /// The text a reader can move through (UIA's text pattern, AT-SPI's Text), as it was when
     /// this tree was built; null for an element that offers none. The differ compares it to
-    /// tell bridges the text, caret or selection changed.
+    /// tell bridges the text, caret or selection changed. An element whose text is costly to make
+    /// on every rebuild gives the tree a <see cref="TextVersion"/> instead, and the text is made
+    /// from it on the first ask.
     /// </summary>
     public AccessibleText? Text
     {
-        get => _extras?.Text;
+        get => _extras is { } x ? x.Text ?? x.TextVersion?.Text : null;
         internal set
         {
             if (_extras is null && value is null) return;
             Extras.Text = value;
+        }
+    }
+
+    /// <summary>The text as this tree was built with it, not yet made (see <see cref="Text"/>);
+    /// null for a node whose text was made with the tree, or that has none.</summary>
+    internal AccessibleTextVersion? TextVersion
+    {
+        get => _extras?.TextVersion;
+        set
+        {
+            if (_extras is null && value is null) return;
+            Extras.TextVersion = value;
         }
     }
 
@@ -144,7 +160,7 @@ public sealed class AccessibilityNode
     /// <summary>Whether the node offers text a reader moves through (UIA's text pattern, AT-SPI's
     /// Text): a change of it is told as a text change, never as a change of its
     /// <see cref="Value"/>.</summary>
-    internal bool OffersText => _extras is { } x && (x.TextSource is not null || x.Text is not null);
+    internal bool OffersText => _extras is { } x && (x.TextSource is not null || x.Text is not null || x.TextVersion is not null);
 
     // An array of the exact length: a tree is rebuilt in full on every change an assistive
     // technology can see, and most nodes are leaves, which share the one empty array.
@@ -166,6 +182,7 @@ public sealed class AccessibilityNode
         public NativeAccessibleContent NativeContent;
         public AccessibleText? Text;
         public IAccessibleTextSource? TextSource;
+        public AccessibleTextVersion? TextVersion;
     }
 
     private RareFields? _extras;

@@ -52,8 +52,8 @@ internal sealed class AtSpiAccessible
     /// <summary>Open or closed, for an object that can be either; null for one that cannot.</summary>
     public bool? Expanded { get; init; }
 
-    /// <summary>The text a reader moves through (seam A1), as when the tree was built, and where
-    /// to read it now; both null for an object with none.</summary>
+    /// <summary>The text a reader moves through (seam A1): where to read it now, or, for an object
+    /// with no source, the text as the tree was built with it; both null for an object with none.</summary>
     public AccessibleText? Text { get; init; }
     public IAccessibleTextSource? TextSource { get; init; }
 
@@ -163,7 +163,9 @@ internal sealed class AtSpiAccessible
             // The root is the application, named as one; the window's content is its children.
             Name = isRoot ? ApplicationName : node.Name ?? "",
             Description = node.Description ?? "",
-            Value = node.Value,
+            // A node that offers text is read through its source when asked: its text and value
+            // are made only then (a long document's are 1.5 MB), and its changes are text changes.
+            Value = node.TextSource is null ? node.Value : null,
             X = (int)MathF.Round(rect.X * scale),
             Y = (int)MathF.Round(rect.Y * scale),
             Width = (int)MathF.Round(rect.Width * scale),
@@ -179,7 +181,7 @@ internal sealed class AtSpiAccessible
             Selected = node.IsSelected == true,
             Toggled = node.IsToggled,
             Expanded = node.Expanded,
-            Text = node.Text,
+            Text = node.TextSource is null ? node.Text : null,
             TextSource = node.TextSource,
             Scale = scale,
             ParentPath = parentPath,

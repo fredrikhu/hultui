@@ -375,6 +375,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
   the snapshot the tree was built with, and the source, which the bridges read on their
   own threads between rebuilds. The differ compares snapshots and tells `Text` (with the
   previous node, so a bridge can describe the change) and `TextSelection`.
+  - **Made when asked (2026-10-10).** A source whose text is costly to make on every rebuild
+    (`IVersionedAccessibleTextSource`: the rich text editor's) gives the tree an
+    `AccessibleTextVersion` instead, which the differ compares without making the text, and the
+    node's `Text` and `Value` are made from it on the first ask. The bridges read a node with a
+    source through the source, its value on request (UIA's ValueValue property), so nothing makes
+    the text unless a reader asks or AT-SPI needs it to describe a change.
   - **Lines and paragraphs (2026-10-07).** A paragraph is a `'\n'`-separated run. A line
     is a paragraph unless the element says where its text wraps (`lineStarts`), and then
     it is a line as drawn, which is what a word processor's reader means by one.

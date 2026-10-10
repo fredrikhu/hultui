@@ -270,6 +270,40 @@ public interface IAccessibleTextSource
     AccessibleText? AccessibleText { get; }
 }
 
+/// <summary>
+/// An element's text as one tree was built with it, kept cheap: enough for the differ to tell
+/// whether the text, or its caret and selection, changed since another version, and to make the
+/// <see cref="AccessibleText"/> when something asks for it. For an element whose text is costly to
+/// make on every rebuild and that a reader may never read: a long document's
+/// (<see cref="IVersionedAccessibleTextSource"/>).
+/// </summary>
+internal abstract class AccessibleTextVersion
+{
+    /// <summary>Whether <paramref name="other"/>, a version of the same element's text, has the same
+    /// text: what comparing the two snapshots' <see cref="AccessibleText.Text"/> would answer.</summary>
+    public abstract bool SameText(AccessibleTextVersion other);
+
+    /// <summary>Whether <paramref name="other"/> has the caret and the selection at the same offsets.</summary>
+    public abstract bool SameSelection(AccessibleTextVersion other);
+
+    /// <summary>The text of this version, made on first ask; any thread.</summary>
+    public abstract AccessibleText Text { get; }
+
+    /// <summary>The element's value with this text (UIA's ValueValue), made on first ask; any thread.</summary>
+    public abstract string? Value { get; }
+}
+
+/// <summary>
+/// A text source whose text is made only when something asks for it: the tree's builder takes a
+/// <see cref="AccessibleTextVersion"/> from it in place of the text, and the node's
+/// <see cref="AccessibilityNode.Value"/> comes from the version too.
+/// </summary>
+internal interface IVersionedAccessibleTextSource : IAccessibleTextSource
+{
+    /// <summary>The version of the text as it is now. On the UI thread, when a tree is built.</summary>
+    AccessibleTextVersion CurrentVersion { get; }
+}
+
 /// <summary>How urgently a screen reader should speak an announcement
 /// (<see cref="Element.Announce"/>): ARIA's live-region politeness.</summary>
 public enum AnnouncementPoliteness
