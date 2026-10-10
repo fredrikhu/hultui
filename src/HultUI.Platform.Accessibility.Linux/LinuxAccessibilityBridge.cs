@@ -20,6 +20,19 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
+/// <para>
+/// <b>Active only while assistive technology is on.</b> The bus is reachable in every GNOME and
+/// KDE session, screen reader or not, and an active bridge rebuilds the tree and sends AT-SPI its
+/// changes on every change a reader could see: a keystroke in a 603-node form cost 385 KB
+/// against 3.2 KB with no bridge. So the bridge connects and registers, and is
+/// <see cref="IsActive"/> only while <c>org.a11y.Status</c> says <c>IsEnabled</c> or
+/// <c>ScreenReaderEnabled</c>, which Orca and accerciser set, as Qt does; or while
+/// <see cref="AccessibilityClients.Force"/> (<c>HULTUI_ACCESSIBILITY=1</c>) says so, for clients
+/// that never set the status: a plain pyatspi script, <c>samples/AtSpiVerify</c>. When the status
+/// turns on, the window builds the tree afresh and the bridge publishes all of it (cache-add for
+/// every object, cache-remove for any it published before that is gone now); when it turns off,
+/// nothing is built or sent.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("linux")]
 public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree, IDisposable
@@ -38,6 +51,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     private readonly IAccessibilityActionHost? _actionHost;
     private readonly IAccessibilityGeometryHost? _geometryHost;
     private readonly bool _registered;
+    // Whether assistive technology is on (org.a11y.Status). Null for a test's bridge with no
+    // status, which is always on. Written on the watcher's thread, read on the UI thread.
+    private readonly IAtSpiStatus? _status;
+    private volatile bool _statusOn;
     private volatile Snapshot _snapshot = Snapshot.Empty;
     private bool _hasBuilt;
     private string? _focusedPath;
@@ -74,19 +91,33 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
         _registered = _bus.RegisterApplication();
 
-        // Whether anyone listens, for content costly to describe (seam W11).
-        AccessibilityClients.Report(_bus.ReadStatus());
-        _bus.WatchStatus(AccessibilityClients.Report);
+        // Whether anyone listens: what makes this bridge active, and what content costly to
+        // describe reads (seam W11).
+        WatchStatus(_status = _bus);
     }
 
     /// <summary>For tests: a bridge registered with no bus, whose signals go to
-    /// <paramref name="signals"/>.</summary>
-    internal LinuxAccessibilityBridge(IAtSpiSignals signals, IAccessibilityActionHost? actionHost = null)
+    /// <paramref name="signals"/>, active whenever <paramref name="status"/> says assistive
+    /// technology is on; always active with no status.</summary>
+    internal LinuxAccessibilityBridge(IAtSpiSignals signals, IAccessibilityActionHost? actionHost = null,
+        IAtSpiStatus? status = null)
     {
         _actionHost = actionHost;
         _geometryHost = actionHost as IAccessibilityGeometryHost;
         _signals = signals;
         _registered = true;
+        if (status is not null) WatchStatus(_status = status);
+    }
+
+    private void WatchStatus(IAtSpiStatus status)
+    {
+        _statusOn = status.ReadStatus();
+        AccessibilityClients.Report(_statusOn);
+        status.WatchStatus(on =>
+        {
+            _statusOn = on;
+            AccessibilityClients.Report(on);
+        });
     }
 
     /// <summary>A childless application root, valid from Embed until the first build.</summary>
@@ -100,7 +131,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         IndexInParent = -1,
     };
 
-    public bool IsActive => _registered;
+    /// <summary>Registered, and assistive technology is on: <c>org.a11y.Status</c>, unless
+    /// <see cref="AccessibilityClients.Force"/> says otherwise. Polled by the window every frame.</summary>
+    public bool IsActive => _registered && (_status is null || (AccessibilityClients.Force ?? _statusOn));
 
     // Diagnostics for the verification harness — cheap counters, no bus needed.
     public int DebugApplyChangesCalls { get; private set; }
@@ -149,10 +182,27 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!_registered || _signals is null) return;
         DebugApplyChangesCalls++;
 
+        var previous = _snapshot;
         _snapshot = Build(root, _geometryHost?.Scale ?? 1f);
 
         bool firstBuild = !_hasBuilt;
         _hasBuilt = true;
+
+        // A tree from nothing: the first, or the first since the bridge went inactive (the
+        // window drops its tree then, and builds it afresh when assistive technology is on
+        // again). The cache-adds below publish all of it; what was published before and is not
+        // in it any more went while nobody was told, and goes now. The object the bridge last
+        // marked focused may be gone too: the window names the focused one with the next move.
+        if (diff.Added.Count > 0 && diff.Added[0].Parent is null && diff.Removed.Count == 0)
+        {
+            foreach (var path in previous.ByPath.Keys)
+            {
+                if (_snapshot.ByPath.ContainsKey(path)) continue;
+                _signals.EmitCacheRemove(path);
+                DebugSignalsEmitted++;
+            }
+            _focusedPath = null;
+        }
 
         // Cache-add is genuinely per-node: it populates the AT client's object
         // cache (the first build's diff carries the whole tree) so navigation is

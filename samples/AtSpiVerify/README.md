@@ -26,6 +26,12 @@ python3 samples/AtSpiVerify/atspi_events.py
 The Python scripts use `gi.repository.Atspi` (pyatspi) — the client library
 Orca is built on — so a clean run here is strong evidence the bridge is correct.
 
+The bridge works only while `org.a11y.Status` says assistive technology is on
+(`IsEnabled` or `ScreenReaderEnabled`), which Orca and accerciser set and these scripts do
+not. The harness therefore says itself that a reader listens
+(`AccessibilityClients.Force`), as `HULTUI_ACCESSIBILITY=1` does for any HultUI app; an app
+inspected with a plain pyatspi script needs that variable (docs/ENVIRONMENT.md).
+
 ## What "good" looks like
 
 `atspi_inspect.py` should print the app with toolkit `HultUI`, a root

@@ -21,8 +21,10 @@ internal static class AccessibilityBridgeFactory
         // Master opt-out, honored on every platform: skip the accessibility
         // bridge entirely. Lets a benchmark equalize against a machine with no
         // assistive tech attached (on Linux the AT-SPI bridge otherwise
-        // eager-connects whenever an a11y bus is reachable — e.g. any live
-        // desktop session), and is an escape hatch if a bridge misbehaves.
+        // connects and registers whenever an a11y bus is reachable — any live
+        // desktop session — though it builds and sends nothing until
+        // org.a11y.Status says assistive technology is on), and is an escape
+        // hatch if a bridge misbehaves.
         // Windows also has the finer HULTUI_UIA_EVENTS=0, which keeps the tree
         // exported but suppresses only the live event notifications.
         if (Environment.GetEnvironmentVariable("HULTUI_A11Y") == "0")

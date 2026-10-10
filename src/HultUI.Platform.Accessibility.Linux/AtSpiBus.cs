@@ -23,6 +23,21 @@ internal interface IAtSpiSignals
 }
 
 /// <summary>
+/// Whether assistive technology is on: <c>org.a11y.Status</c>'s <c>IsEnabled</c> or
+/// <c>ScreenReaderEnabled</c>, which Orca and accerciser set on the session bus. The bus's, or,
+/// in tests, a stand-in that is switched by hand.
+/// </summary>
+[SupportedOSPlatform("linux")]
+internal interface IAtSpiStatus
+{
+    /// <summary>The status now.</summary>
+    bool ReadStatus();
+
+    /// <summary>Calls <paramref name="changed"/> with the status, on any thread, whenever it changes.</summary>
+    void WatchStatus(Action<bool> changed);
+}
+
+/// <summary>
 /// Owns the two D-Bus connections the AT-SPI protocol needs — the session bus
 /// (used only to discover the a11y bus address) and the a11y bus itself — plus
 /// the outgoing traffic the bridge produces: the <c>Socket.Embed</c>
@@ -34,7 +49,7 @@ internal interface IAtSpiSignals
 /// deals with the calls and signals the application <em>originates</em>.
 /// </remarks>
 [SupportedOSPlatform("linux")]
-internal sealed class AtSpiBus : IAtSpiSignals, IDisposable
+internal sealed class AtSpiBus : IAtSpiSignals, IAtSpiStatus, IDisposable
 {
     private readonly DBusConnection _session;
     private readonly DBusConnection _a11y;

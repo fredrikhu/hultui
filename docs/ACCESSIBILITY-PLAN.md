@@ -217,8 +217,17 @@ Files:
   `org.a11y.atspi.Socket.Embed`.
 - **`LinuxAccessibilityBridge.cs`** — the `IAccessibilityBridge` impl.
   - `IsActive` returns true once registration with the AT-SPI registry
-    succeeds. No per-poll check like Windows — if nothing was listening,
-    registration fails/returns an empty socket and we stay inactive.
+    succeeds **and** `org.a11y.Status` says assistive technology is on
+    (`IsEnabled` or `ScreenReaderEnabled`, which Orca and accerciser set; the
+    bridge watches the property), as Qt does (2026-10-10, plan 17). The bus is
+    reachable in every GNOME and KDE session, and an active bridge rebuilt the
+    tree and sent AT-SPI every change with no reader running: a keystroke in a
+    603-node form cost 385 KB against 3.2 KB with no bridge. When the status
+    turns on, the window builds the tree afresh and the bridge publishes all of
+    it (a cache-add per object, a cache-remove for anything published before that
+    went while it was off); when it turns off, nothing is built or sent.
+    `HULTUI_ACCESSIBILITY=1` (`AccessibilityClients.Force`) turns it on for a
+    client that never sets the status — a plain pyatspi script, `samples/AtSpiVerify`.
   - `ApplyChanges(diff)`:
     - Added → export new `AtSpiAccessible` on the bus, emit
       `children-changed::add` signal on parent.
