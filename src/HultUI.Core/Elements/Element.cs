@@ -1136,12 +1136,16 @@ public abstract class Element
 
         // Remove old children. Only unmount elements that are genuinely
         // leaving — not those that reappear in the new list.
-        var newSet = new HashSet<Element>(children);
-        if (_children is not null)
+        if (_children is { Count: > 0 } current)
         {
-            foreach (var old in _children)
+            // Asking whether an old child stays costs a search of the new list; a set pays for
+            // itself only when there are many of both. Most calls have no old children at all —
+            // every builder .Children(...) on a fresh element — and made a set anyway: 208 of
+            // the 272–288 bytes such a call allocated.
+            var staying = (long)current.Count * children.Length > SearchBeforeSet ? SetOf(children) : null;
+            foreach (var old in current)
             {
-                if (!newSet.Contains(old))
+                if (!(staying?.Contains(old) ?? Array.IndexOf(children, old) >= 0))
                 {
                     ClearFocusIfRemoved(old);
                     old.Unmount();
@@ -1149,7 +1153,7 @@ public abstract class Element
                 }
                 old.Parent = null;
             }
-            _children.Clear();
+            current.Clear();
         }
 
         // Add new children.
@@ -1167,6 +1171,19 @@ public abstract class Element
         }
         MarkLayoutDirty();
         MarkChildrenDirty();
+    }
+
+    /// <summary>Old × new children up to which <see cref="ReplaceChildren"/> searches the new
+    /// list for each old child rather than building a set of it.</summary>
+    internal const int SearchBeforeSet = 64;
+
+    /// <summary>A set of <paramref name="children"/>, filled by index: the set's own constructor
+    /// enumerates an array through its interface, boxing the enumerator.</summary>
+    private static HashSet<Element> SetOf(Element[] children)
+    {
+        var set = new HashSet<Element>(children.Length);
+        for (int i = 0; i < children.Length; i++) set.Add(children[i]);
+        return set;
     }
 
     /// <summary>
