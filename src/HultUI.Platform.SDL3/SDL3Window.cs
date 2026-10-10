@@ -755,6 +755,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     if (_registry.TryGetValue(evt.window.windowID, out var focusWin))
                     {
                         focusWin.ActivatedPending = true;
+                        // On screen again, whatever SDL's minimized flag still says (Wayland).
+                        // The event itself wakes an idle loop to draw what waited.
+                        focusWin._focusedSinceMinimize = true;
                         // SDL has just started text input again for the focused window, which
                         // on Windows re-arms the input method in a password field.
                         focusWin.KeepInputMethodOut();
@@ -825,7 +828,20 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     // ──── Window management (for custom chrome) ────
 
-    public void Minimize() => SDL_MinimizeWindow(_window);
+    public void Minimize()
+    {
+        // From here only a focus gain says the window is back on Wayland (see MinimizedState).
+        _focusedSinceMinimize = false;
+        SDL_MinimizeWindow(_window);
+    }
+
+    /// <summary>The keyboard focus came to this window after <see cref="Minimize"/>.</summary>
+    private bool _focusedSinceMinimize;
+
+    private static bool? s_wayland;
+
+    private static bool IsWayland =>
+        s_wayland ??= string.Equals(SDL_GetCurrentVideoDriver(), "wayland", StringComparison.Ordinal);
 
     // With the Windows custom frame installed, SDL_MaximizeWindow/SDL_RestoreWindow
     // only flip SDL's maximized flag without resizing the window, so route through
@@ -859,9 +875,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// SDL's flag, read live rather than kept from events: on Windows SDL sets and clears it
     /// inside the window procedure, so a <c>ShowWindow</c> on this thread is seen before it
     /// returns, and the restore queues an event that wakes an idle loop to draw what waited.
+    /// On Wayland the flag can outlive the restore; a focus gain since the minimize ends it
+    /// there (see <see cref="MinimizedState"/>).
     /// </summary>
     public bool IsMinimized => _window != null
-        && ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MINIMIZED) != 0;
+        && MinimizedState.IsMinimized(
+            ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MINIMIZED) != 0,
+            IsWayland, _focusedSinceMinimize);
 
     public bool IsFullscreen =>
         _customFrame is { } frame ? frame.IsFullscreen
