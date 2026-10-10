@@ -185,6 +185,7 @@ firing on those would be noise, and warning noise is the failure these rules exi
 | IRenderContext abstraction | Backend-swappable. Core doesn't depend on SkiaSharp |
 | SKPaint pooling | Avoid per-draw-call allocation. Reuse paint objects |
 | **No damage rects** (2026-08-16) | Measured, not assumed — see below |
+| **A frame keeps its extra GPU submits** (2026-10-10) | Measured and declined — see "One submit per frame" below |
 | **A scroll reaches assistive tech on the resize schedule** (2026-10-06) | A scroll moves the bounds of everything under the view and changes nothing else, so it is a layout-only change: the accessibility tree is rebuilt as the scroll starts, at most every 100 ms while it goes on, and once after it stops — the batching browsers apply to location updates, and the one a resize already had. The scroll offset reported its change as a property change instead, which rebuilt the whole tree on every frame of a wheel turn. Junction's History list (Native AOT, a UIA client listening, 3 interleaved runs a side): a frame while scrolling 1.90 → 1.20 ms down and 1.76 → 0.98 ms up, the tree rebuilt on 100 % → 18 % of those frames, p95 4.4 → 2.3 ms; the accessibility time of the whole scripted session 131 → 63 ms. The coalescing runs on the platform clock, so a headless session's virtual time drives it and tests count the rebuilds exactly |
 
 ### Damage rects: measured and declined
@@ -226,6 +227,32 @@ Three reasons partial repaints don't pay here:
 
 Revisit only if a workload appears where frames are frequent, small-change, and
 expensive — the probe stays in the tree to make that check cheap.
+
+### One submit per frame: measured and declined
+
+A GL frame submits three times: the render context's `EndFrame` flushes and submits, and
+`SkiaGLRenderSurface.Present` submits twice more with nothing in them. Each submit ends in a
+`glGetError`, which under NVIDIA's threaded driver waits for the driver's thread. A frame drawn
+through the scRGB offscreen on Vulkan makes two `vkQueueSubmit`s (the frame, then the blit into
+the swapchain). Plan 17 (round 2) built one submit per frame — `EndFrame` issues the commands
+without submitting, the surface submits once in `Present` and then returns the frames borrowed
+from pixel sources — and measured it in real windows (counters on the resolvers handed to Skia;
+captures `2026-10-10-f8e449e-onesubmit-{before,after}.json`, 2 idle-gated runs a side, alternated):
+
+| Window | glGetError / Skia submits a frame | Frame, wall min | UI-thread cycles | Flush → Present |
+|---|---|---|---|---|
+| GL, Junction-like, unpaced, JIT / AOT | 3 → 1 | −0.8 % / −2.4 % | −1.3 % / −2.0 % | 0.086 → 0.057 ms; 0.026 → 0.047 |
+| GL, paced at 5 ms, JIT / AOT | 3 → 1 | −2.9 % / −1.1 % | −2.9 % / −1.8 % | 0.110 → 0.070; 0.035 → 0.065 |
+| Vulkan F16, Aperture-like, unpaced, JIT / AOT | 2 → 1 | −4.1 % / −3.7 % | −4.2 % / −3.3 % | 0.097 → 0.051; 0.165 → 0.166 |
+| Vulkan F16, paced at 5 ms, JIT / AOT | 2 → 1 | −2.5 % / −4.5 % | −3.5 % / −2.8 % | 0.123 → 0.064; 0.162 → 0.209 |
+| Vulkan 8-bit (one submit before too) | 1 → 1 | flat | flat | 0.076 → 0.047; 0.069 → 0.101 |
+
+Pixels were identical (GL back buffer and Vulkan swapchain captures, F16 and 8-bit). **The wait
+moves, it does not go:** on GL the first `glGetError` of a frame is the one that waits for the
+driver's thread, and it now waits in `Present` instead of `Flush`; the two empty submits cost a
+few microseconds each. No row reached the 5 % bar. The lever left is not calling `glGetError` at
+all, which costs Skia its GL out-of-memory detection (a question for the user, not taken). The
+DevTools "Flush" phase stays where it was: issuing and submitting the frame.
 
 ### Allocation items P4/P5: measured and declined
 
