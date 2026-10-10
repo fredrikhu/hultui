@@ -402,20 +402,40 @@ public sealed class Application : IDisposable
     /// Runs the application event loop until all windows are closed. A host that owns
     /// its own message loop drives <see cref="RunFrame"/> instead.
     /// </summary>
-    public void Run()
+    public void Run() => RunUntil(null);
+
+    /// <summary>
+    /// <see cref="Run"/>'s loop, which also ends when <paramref name="done"/> returns true; it
+    /// is asked once per pass, before the pass. HultUI.Headless runs the real loop this way on
+    /// its virtual clock, to see what only the loop does: how often it passes, ticks and
+    /// renders.
+    /// </summary>
+    /// <remarks>
+    /// The loop reads time from the platform's <see cref="IWindowingPlatform.TimeProvider"/>:
+    /// the system clock behind a real window (whose timestamps are the
+    /// <see cref="Stopwatch"/>'s), the virtual one under a headless session, where a wait is
+    /// virtual time moving on.
+    /// </remarks>
+    internal void RunUntil(Func<bool>? done)
     {
         if (_windows.Count == 0)
             throw new InvalidOperationException("No windows created.");
 
         InstallSynchronizationContext();
 
-        var frameStopwatch = Stopwatch.StartNew();
-        long nextRenderAt = 0;   // Stopwatch ticks; the earliest the next frame may render
+        var clock = _platform.TimeProvider;
+        long frequency = clock.TimestampFrequency;
+        long lastPass = clock.GetTimestamp();
+        // Clock ticks; the earliest the next frame may render. A second ago: the first frame
+        // may render at once, and starts the schedule (a virtual clock starts near 0, where a
+        // deadline of 0 put the first frame on the schedule and let the next pass draw again).
+        long nextRenderAt = lastPass - frequency;
 
-        while (IsRunning)
+        while (IsRunning && done?.Invoke() != true)
         {
-            var delta = frameStopwatch.Elapsed;
-            frameStopwatch.Restart();
+            long now = clock.GetTimestamp();
+            var delta = clock.GetElapsedTime(lastPass, now);
+            lastPass = now;
 
             // Rendering is paced to the display. The swap interval is 0 (a vsync'd swap
             // blocks the modal resize loop), so nothing else would stop a 300 ms fade
@@ -425,8 +445,7 @@ public sealed class Application : IDisposable
             // wait below never has to be shorter than one. Unpaced (FramePacing.Unlimited,
             // or the DevTools continuous-redraw mode) renders whenever anything is dirty.
             bool unpaced = FramePacing == FramePacing.Unlimited || AnyWindowContinuousRedraw();
-            long now = Stopwatch.GetTimestamp();
-            bool due = unpaced || now >= nextRenderAt - Stopwatch.Frequency / 1000;
+            bool due = unpaced || now >= nextRenderAt - frequency / 1000;
             if (RunFrameCore(delta, forceRender: false, allowRender: due))
             {
                 // The next deadline follows the schedule, not this render: a frame that
@@ -436,7 +455,7 @@ public sealed class Application : IDisposable
                 // An unpaced frame keeps no schedule: advancing it per frame at thousands
                 // of frames a second once pushed the deadline tens of seconds out, and the
                 // window stayed frozen after continuous redraw was switched off.
-                long interval = (long)(Stopwatch.Frequency / DisplayHz());
+                long interval = (long)(frequency / DisplayHz());
                 nextRenderAt = unpaced ? now
                     : now > nextRenderAt + interval ? now + interval
                     : nextRenderAt + interval;
@@ -448,7 +467,7 @@ public sealed class Application : IDisposable
                 // Dirty, but too soon: wait out what is left of the interval. An event
                 // ends the wait early and is handled on the next iteration; the render
                 // still waits its turn.
-                long remainingMs = (nextRenderAt - Stopwatch.GetTimestamp()) * 1000 / Stopwatch.Frequency;
+                long remainingMs = (nextRenderAt - clock.GetTimestamp()) * 1000 / frequency;
                 _platform.WaitForEvents((int)Math.Max(1, remainingMs));
             }
             else

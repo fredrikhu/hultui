@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 95 scenarios over every feature area (89 off Windows) | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 98 scenarios over every feature area (92 off Windows) | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -42,7 +42,7 @@ below). `--list` prints every scenario, `--help` every option.
 | `window/` | Opening a second window beside a busy one: its platform window, surface and tree under **build**, its first frame under style, layout and render (`Op.TimedWindow`) |
 | `controls/`, `icons/` | Mounting a control screen, tabs, an animated expander, a slider drag, 600 icons |
 | `theme/` | Light ⇄ dark, and cycling the `HultUI.Themes` catalogue, on the control screen |
-| `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition |
+| `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition; and a 300 ms fade of a transport bar whose Build reads the signal the tween writes, while a worker posts to the UI thread every millisecond (`anim/signal tween, 1 kHz posts, real loop`): the one row that runs `Application.Run`'s own loop, on the virtual clock (`HeadlessSession.RunLoop`), because only the loop shows how often the bar is rebuilt for each frame drawn — the row reports that count beside its time, all of which shows under **build** |
 | `paint/` | The same 400 tiles plain, rounded, shadowed, gradient-filled, transformed: the price of each effect |
 | `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge; and the selection walk, whose list publishes a node for each of its 1,000 items on every rebuild. On Windows, six rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke, a label edit, a Tab, a wheel turn and the selection walk, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** (a Tab's focus event under **build**, where the key is handled). The wheel row and the selection walks space their frames 120 ms apart, past the 100 ms a scroll's accessibility refresh waits, so every step rebuilds |
 
@@ -88,6 +88,9 @@ layout/resize 2,000-row list  12002    5.271    5.723    0.11    0.00    4.85   
   regression, publish the base with a small unrelated change and see whether it moves too.
 - A row that ends in `! n/m steps rendered nothing` timed nothing: the scenario's change
   never dirtied anything. Fix the scenario.
+- A row may report a count beside its allocation (`Op.Figure`), the mean over its timed
+  steps: `15.1 rebuilds/frame`. Captures store it as `figure` and `figureUnit`, and
+  `--compare` prints both sides.
 
 ## What the harness does, and why
 
@@ -630,3 +633,8 @@ yield return new Scenario("group/what it does",
   `MarkLayoutDirty()` / `MarkStyleDirty()` yourself, as an app would.
 - **Aim input with `WindowBorderBox`**, never `Layout` boxes, which ignore scrolling.
 - **Give it a `Check`**, and see it fail once: make `Run` do nothing and run `--verify`.
+- **What only the loop does** — how often it passes, ticks and renders while events arrive
+  between frames — a pump cannot show: it is one pass that always may render. Run the loop
+  in `Run` with `ctx.Session.RunLoop(until, eventEvery, onEvent)`, set `Frames = 0` (the loop
+  renders its own frames; the time all lands under build) and report the count with
+  `Figure`.

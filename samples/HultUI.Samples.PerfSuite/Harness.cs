@@ -40,8 +40,20 @@ sealed class Op
     /// </summary>
     public Func<HultUI.Window>? TimedWindow { get; init; }
 
-    /// <summary>Frames pumped after <see cref="Run"/>, inside the timing. More than one for animations.</summary>
+    /// <summary>Frames pumped after <see cref="Run"/>, inside the timing. More than one for
+    /// animations; 0 for a step that renders its own, by running the application's loop
+    /// (<c>HeadlessSession.RunLoop</c>): its whole time then shows under build.</summary>
     public int Frames { get; init; } = 1;
+
+    /// <summary>
+    /// A count the step reports beside its time, read after each timed step and averaged over
+    /// them — what the loop did, for a row whose point is how often something happens (rebuilds
+    /// per rendered frame). <see cref="FigureUnit"/> names it in the table and the capture.
+    /// </summary>
+    public Func<double>? Figure { get; init; }
+
+    /// <summary>What <see cref="Figure"/> counts, e.g. "rebuilds/frame".</summary>
+    public string? FigureUnit { get; init; }
 
     /// <summary>Virtual time each of those frames advances; default one 60 Hz frame. Longer for a tooltip's delay.</summary>
     public TimeSpan? FrameDelta { get; init; }
@@ -82,6 +94,8 @@ sealed class Samples
 {
     public readonly List<double> Total = [], Build = [], Style = [], Layout = [], Render = [], Other = [];
     public readonly List<int> Gcs = [];
+    public readonly List<double> Figures = [];
+    public string? FigureUnit;
     public long AllocatedBytes;
     public int Count;
     public int Elements;
@@ -91,7 +105,8 @@ sealed class Samples
 sealed record Result(
     string Name, string Description, int Elements, int N,
     double MinMs, double MedianMs, double BuildMs, double StyleMs, double LayoutMs,
-    double RenderMs, double OtherMs, double AllocKB, int UnrenderedSteps);
+    double RenderMs, double OtherMs, double AllocKB, int UnrenderedSteps,
+    double? Figure = null, string? FigureUnit = null);
 
 sealed record Options
 {
@@ -236,12 +251,18 @@ static class Runner
         into.Other.Add(Math.Max(0, total - build - style - layout - render));
         into.AllocatedBytes += alloc1 - alloc0;
         into.Gcs.Add(GC.CollectionCount(0) - gc0);
+        if (op.Figure is not null)
+        {
+            into.Figures.Add(op.Figure());
+            into.FigureUnit = op.FigureUnit;
+        }
         into.Count++;
         if (Verbose)
             Console.WriteLine($"    {ctx.Window.Window.Title,-36} step {step,2}  total {total,8:0.000}  build {build,7:0.000}  style {style,6:0.00}  layout {layout,7:0.00}  render {render,7:0.00}  gc {GC.CollectionCount(0) - gc0}");
         // A step that rendered nothing timed nothing but the mutation: the scenario is
-        // broken (its change never dirtied anything), and the report says so.
-        if (rendered == 0) into.UnrenderedSteps++;
+        // broken (its change never dirtied anything), and the report says so. One that
+        // renders its own frames (Frames 0) pumps none here.
+        if (rendered == 0 && op.Frames > 0) into.UnrenderedSteps++;
     }
 
     private static double Ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
@@ -258,6 +279,7 @@ static class Runner
         return new Result(s.Name, s.Description, x.Elements, x.Count,
             x.Total.Count == 0 ? 0 : x.Total.Min(), Median(x.Total),
             Median(x.Build), Median(x.Style), Median(x.Layout), Median(x.Render), Median(x.Other),
-            x.Count == 0 ? 0 : x.AllocatedBytes / 1024.0 / x.Count, x.UnrenderedSteps);
+            x.Count == 0 ? 0 : x.AllocatedBytes / 1024.0 / x.Count, x.UnrenderedSteps,
+            x.Figures.Count == 0 ? null : x.Figures.Average(), x.FigureUnit);
     }
 }
