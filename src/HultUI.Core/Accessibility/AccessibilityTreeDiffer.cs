@@ -120,11 +120,14 @@ public static class AccessibilityTreeDiffer
     private static void CompareProperties(TreeDiff diff, AccessibilityNode prev, AccessibilityNode curr,
         Point prevScroll, Point currScroll)
     {
+        // Most nodes carry none of the rarely set fields (a description, a value, native
+        // content, text, a scroll offset); then there is nothing of them to compare.
+        bool rare = prev.EitherHasRareFields(curr);
         if (prev.Name != curr.Name)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
-        if (prev.Description != curr.Description)
+        if (rare && prev.Description != curr.Description)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
-        if (prev.Value != curr.Value)
+        if (rare && prev.Value != curr.Value)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
         // The states share one field: when it is the same, none of them changed.
         if (prev.States != curr.States)
@@ -142,9 +145,9 @@ public static class AccessibilityTreeDiffer
             if (prev.IsFocused != curr.IsFocused)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
         }
-        if (prev.NativeContent != curr.NativeContent)
+        if (rare && prev.NativeContent != curr.NativeContent)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
-        if (!ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
+        if (rare && !ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
         {
             var (a, b) = (prev.Text, curr.Text);
             if (a?.Text != b?.Text)
@@ -170,7 +173,7 @@ public static class AccessibilityTreeDiffer
         // the ~130 rows on screen.
         if (!(prev.IsOffscreen && curr.IsOffscreen) && Moved(prev.BoundingRect, curr.BoundingRect, prevScroll, currScroll))
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.BoundingRect));
-        if (prev.ScrollOffset != curr.ScrollOffset)
+        if (rare && prev.ScrollOffset != curr.ScrollOffset)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.ScrollPosition, prev));
     }
 

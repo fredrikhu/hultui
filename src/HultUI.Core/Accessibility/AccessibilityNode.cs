@@ -8,7 +8,7 @@ public sealed class AccessibilityNode
     public ElementId ElementId { get; }
     public AccessibilityRole Role { get; }
     public string? Name { get; }
-    public string? Description { get; }
+    public string? Description => _extras?.Description;
 
     /// <summary>The node's box on screen, in layout units: every scroll container above it
     /// subtracted (<see cref="ScrollOffset"/>).</summary>
@@ -19,7 +19,15 @@ public sealed class AccessibilityNode
     /// list's) offset; zero for anything that does not scroll. Its descendants' bounds have it
     /// subtracted, so a scroll moves them on screen and leaves them where they were within it.
     /// </summary>
-    public Point ScrollOffset { get; internal set; }
+    public Point ScrollOffset
+    {
+        get => _extras?.ScrollOffset ?? default;
+        internal set
+        {
+            if (_extras is null && value == default) return;
+            Extras.ScrollOffset = value;
+        }
+    }
 
     public bool IsFocusable => (_flags & FocusableBit) != 0;
 
@@ -48,14 +56,14 @@ public sealed class AccessibilityNode
     /// String value for elements that expose UIA's ValueProvider — text inputs
     /// and (later) sliders. <c>null</c> for elements without a value concept.
     /// </summary>
-    public string? Value { get; }
+    public string? Value => _extras?.Value;
 
     /// <summary>A password field: its <see cref="Value"/> is the bullets on screen, never the
     /// text, and a reader says what it is (UIA's IsPassword, AT-SPI's password-text role).</summary>
     public bool IsPassword => (_flags & PasswordBit) != 0;
 
     /// <summary>Stable automation identifier (UIA AutomationId), for test selectors.</summary>
-    public string? AutomationId { get; }
+    public string? AutomationId => _extras?.AutomationId;
 
     /// <summary>Expanded state for an expandable node, or null if not expandable.</summary>
     public bool? Expanded => GetTriState(ExpandedShift);
@@ -92,25 +100,75 @@ public sealed class AccessibilityNode
     /// The bridge makes that tree this node's children and sends hit tests inside the node
     /// there. Empty for everything else.
     /// </summary>
-    public NativeAccessibleContent NativeContent { get; internal set; }
+    public NativeAccessibleContent NativeContent
+    {
+        get => _extras?.NativeContent ?? default;
+        internal set
+        {
+            if (_extras is null && value.Equals(default(NativeAccessibleContent))) return;
+            Extras.NativeContent = value;
+        }
+    }
 
     /// <summary>
     /// The text a reader can move through (UIA's text pattern, AT-SPI's Text), as it was when
     /// this tree was built; null for an element that offers none. The differ compares it to
     /// tell bridges the text, caret or selection changed.
     /// </summary>
-    public AccessibleText? Text { get; internal set; }
+    public AccessibleText? Text
+    {
+        get => _extras?.Text;
+        internal set
+        {
+            if (_extras is null && value is null) return;
+            Extras.Text = value;
+        }
+    }
 
     /// <summary>Where a bridge reads the text as it is now, from its own thread, between
     /// rebuilds; null with <see cref="Text"/>.</summary>
-    public IAccessibleTextSource? TextSource { get; internal set; }
+    public IAccessibleTextSource? TextSource
+    {
+        get => _extras?.TextSource;
+        internal set
+        {
+            if (_extras is null && value is null) return;
+            Extras.TextSource = value;
+        }
+    }
 
     /// <summary>The text now: the source's, or the snapshot this tree was built with.</summary>
-    public AccessibleText? CurrentText => TextSource?.AccessibleText ?? Text;
+    public AccessibleText? CurrentText => _extras is { } x ? x.TextSource?.AccessibleText ?? x.Text : null;
 
     // An array of the exact length: a tree is rebuilt in full on every change an assistive
     // technology can see, and most nodes are leaves, which share the one empty array.
     private AccessibilityNode[] _children = [];
+
+    /// <summary>
+    /// The fields most nodes leave empty, in one object that only the nodes that set one of them
+    /// get: a description, a value, an automation id, a scroll offset, native content, text. A
+    /// tree is rebuilt in full on every change a reader can see, and these were 64 bytes of every
+    /// node (136 → 80) for the few that use them: a text field, a scroll view, a described control.
+    /// Written while the tree is built, on the UI thread, never after it is out.
+    /// </summary>
+    private sealed class RareFields
+    {
+        public string? Description;
+        public string? Value;
+        public string? AutomationId;
+        public Point ScrollOffset;
+        public NativeAccessibleContent NativeContent;
+        public AccessibleText? Text;
+        public IAccessibleTextSource? TextSource;
+    }
+
+    private RareFields? _extras;
+
+    private RareFields Extras => _extras ??= new RareFields();
+
+    /// <summary>Whether this node or <paramref name="other"/> carries any of the rarely set
+    /// fields; when neither does, the differ has none of them to compare.</summary>
+    internal bool EitherHasRareFields(AccessibilityNode other) => _extras is not null || other._extras is not null;
 
     // The node's states in one field, for the same reason: six bools and three nullable bools
     // were 12 bytes of every node, and ScrollOffset took their place. A nullable state is two
@@ -153,10 +211,9 @@ public sealed class AccessibilityNode
         ElementId = elementId;
         Role = role;
         Name = name;
-        Description = description;
         BoundingRect = boundingRect;
-        Value = value;
-        AutomationId = automationId;
+        if (description is not null || value is not null || automationId is not null)
+            _extras = new RareFields { Description = description, Value = value, AutomationId = automationId };
         _flags = (ushort)((isFocusable ? FocusableBit : 0) | (isFocused ? FocusedBit : 0)
             | (isEnabled ? EnabledBit : 0) | (isPassword ? PasswordBit : 0)
             | TriState(isToggled, ToggledShift) | TriState(expanded, ExpandedShift)

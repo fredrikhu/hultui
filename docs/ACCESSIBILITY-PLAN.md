@@ -60,8 +60,11 @@ Files to add in `src/HultUI.Core/Accessibility/`:
   every change a reader can see. A node takes its children as one array of the
   exact length (leaves share the empty one), and the differ pairs children by
   position while their ids agree, indexing by id only from the first difference:
-  building costs the 136-byte node and 8 bytes in its parent's array, and diffing
-  an unchanged tree allocates only the `TreeDiff` (was 230 and 40 bytes a node).
+  building costs the node and 8 bytes in its parent's array, and diffing an
+  unchanged tree allocates only the `TreeDiff` (was 230 and 40 bytes a node). The
+  node is 80 bytes: the fields few nodes set (description, value, automation id,
+  scroll offset, native content, text and its source) live in an object of their
+  own that only those nodes get (was 136 bytes, those fields in every node).
 - **Evolve `IAccessibilityBridge`** from `Update(root)` to:
   - `bool IsActive { get; }` — cheap "is anyone listening" check, polled per frame
   - `void ApplyChanges(TreeDiff diff)`

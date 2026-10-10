@@ -12,7 +12,8 @@ namespace HultUI.Core.Tests.Accessibility;
 /// While an assistive technology listens, every change it can see rebuilds the whole
 /// accessibility tree and diffs it against the last one. What that leaves behind besides the new
 /// tree is garbage on every rebuild (plan 17, a11y-build-diff-garbage): 1,000 rows of three
-/// labels built 230 bytes a node and diffed 40, where the nodes themselves are 136.
+/// labels built 230 bytes a node and diffed 40, where the nodes themselves were 136. A node is
+/// 80 bytes since its rarely set fields went into an object of their own (a11y-node-extras).
 /// </summary>
 public class AccessibilityRebuildAllocationTests
 {
@@ -122,6 +123,47 @@ public class AccessibilityRebuildAllocationTests
         // Nothing else: no list per node, no enumerator per child list, no list grown in steps,
         // no string to name a button whose one text names it.
         Assert.Equal(expected, built);
+    }
+
+    [Fact]
+    public void ANode_KeepsItsRarelySetFields_InAnObjectOnlyTheNodesThatSetOneGet()
+    {
+        // Description, value, automation id, scroll offset, native content and text: most nodes
+        // have none of them, and they were 64 bytes of every node.
+        long plain = Bytes(() => s_kept = new AccessibilityNode(default, AccessibilityRole.Label, "Name", null, default));
+        long described = Bytes(() => s_kept = new AccessibilityNode(default, AccessibilityRole.Label, "Name", "Help", default));
+        if (IntPtr.Size == 8)
+            Assert.Equal(80, plain);
+        Assert.True(described > plain, $"{described} B with a description, {plain} without");
+
+        // What the builder sets on every node of a kind leaves a node without them as it is: a
+        // scroll view at its origin, an element with no native content or text.
+        var node = new AccessibilityNode(default, AccessibilityRole.ScrollView, null, null, default);
+        long defaults = Bytes(() =>
+        {
+            node.ScrollOffset = default;
+            node.NativeContent = default;
+            node.Text = null;
+            node.TextSource = null;
+        });
+        Assert.Equal(0, defaults);
+        Assert.Null(node.Description);
+        Assert.Null(node.Value);
+        Assert.Null(node.AutomationId);
+        Assert.Equal(default, node.ScrollOffset);
+        Assert.True(node.NativeContent.IsEmpty);
+        Assert.Null(node.CurrentText);
+
+        // And a node that has them reads them back.
+        var rich = new AccessibilityNode(default, AccessibilityRole.TextInput, "Field", "Help", default,
+            value: "text", automationId: "field")
+        {
+            ScrollOffset = new Point(3, 4),
+            NativeContent = new NativeAccessibleContent(7, 8),
+        };
+        Assert.Equal(("Help", "text", "field"), (rich.Description, rich.Value, rich.AutomationId));
+        Assert.Equal(new Point(3, 4), rich.ScrollOffset);
+        Assert.Equal(new NativeAccessibleContent(7, 8), rich.NativeContent);
     }
 
     [Fact]
