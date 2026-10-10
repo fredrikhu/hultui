@@ -12,6 +12,8 @@ internal interface IAtSpiSignals
 {
     void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd);
     void EmitPropertyChange(string path, string atSpiProperty, string newValue);
+    /// <summary><c>property-change:accessible-value</c> with the number now: a slider's, a progress bar's.</summary>
+    void EmitValueChanged(string path, double value);
     void EmitRoleChange(string path, uint role);
     void EmitStateChanged(string path, string state, bool active);
     void EmitTextChanged(string path, bool insert, int offset, string text);
@@ -226,6 +228,21 @@ internal sealed class AtSpiBus : IAtSpiSignals, IAtSpiStatus, IDisposable
     public void EmitPropertyChange(string path, string atSpiProperty, string newValue) =>
         EmitEvent("PropertyChange", path, atSpiProperty, 0, 0,
             (ref MessageWriter w) => w.WriteVariantString(newValue));
+
+    /// <summary>
+    /// A range's value changed: <c>accessible-value</c> with the value as a double, as GTK 4 sends it
+    /// (gtkatspicontext.c, for GTK_ACCESSIBLE_PROPERTY_VALUE_NOW) and as Chromium's AtkValue does
+    /// (ax_platform_node_auralinux.cc, OnValueChanged, only for a range value). at-spi2-atk sends
+    /// an int32 0 there and leaves the client to read <c>CurrentValue</c>; the value itself saves it
+    /// the round trip.
+    /// </summary>
+    public void EmitValueChanged(string path, double value) =>
+        EmitEvent("PropertyChange", path, AtSpiConstants.PropAccessibleValue, 0, 0,
+            (ref MessageWriter w) =>
+            {
+                w.WriteSignature("d");
+                w.WriteDouble(value);
+            });
 
     /// <summary>The role, as at-spi2-atk sends it: a uint32, where the other properties are strings.</summary>
     public void EmitRoleChange(string path, uint role) =>

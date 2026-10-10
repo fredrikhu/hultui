@@ -29,9 +29,9 @@ public class SliderElement : Element, IRangeValueElement
     private Color _focusRingColor = new(66, 135, 245);
     private Color _hoverFillColor = new(66, 135, 245, 120);
 
-    public double Minimum { get => _min; set { _min = value; Value = _value; } }
-    public double Maximum { get => _max; set { _max = value; Value = _value; } }
-    public double Step { get => _step; set => _step = value; }
+    public double Minimum { get => _min; set { if (_min == value) return; _min = value; Value = _value; RangeChanged(); } }
+    public double Maximum { get => _max; set { if (_max == value) return; _max = value; Value = _value; RangeChanged(); } }
+    public double Step { get => _step; set { if (_step == value) return; _step = value; RangeChanged(); } }
 
     public double Value
     {
@@ -42,9 +42,13 @@ public class SliderElement : Element, IRangeValueElement
             if (clamped == _value) return;
             _value = clamped;
             MarkPaintDirty();
-            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
+            RangeChanged();
         }
     }
+
+    // A reader is told the value on a schedule, not every frame of a drag or a playback
+    // (AccessibilityProperties.RangeValue).
+    private void RangeChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.RangeValue);
 
     public Action<double>? OnChanged { get; set; }
 
@@ -275,9 +279,11 @@ public class SliderElement : Element, IRangeValueElement
         base.PatchFrom(source);
         if (source is SliderElement s)
         {
+            bool range = _min != s._min || _max != s._max || _step != s._step;
             _min = s._min;
             _max = s._max;
             _step = s._step;
+            if (range) RangeChanged();
             TrackHeight = s.TrackHeight;
             ThumbRadius = s.ThumbRadius;
             OnChanged = s.OnChanged;

@@ -283,6 +283,43 @@ public class VideoPlayerTests
     }
 
     [Fact]
+    public void APlayingScrubber_TellsAReaderWhereItIs_OnASchedule_NotEveryFrame()
+    {
+        // The Seek slider moved with the playback and told a reader nothing: its node carried no
+        // value. It now does, and the window tells a range's change at most every 250 ms (and its
+        // last value once it stops), so a playing video costs no whole-tree rebuild per frame.
+        using var f = new Fixture();
+        f.Backend.Duration = TimeSpan.FromSeconds(30);
+        var bridge = f.Session.Window.InstallAccessibilityBridge();
+        f.Player.Open(Clip);
+        f.Session.PumpFrames(3);
+        f.Player.Play();
+        f.Session.Window.MoveMouse(320, 380);
+        f.Session.PumpFrames(5);
+        bridge.ClearDiffs();
+
+        // Ten seconds at 60 frames a second, the pointer keeping the bar up.
+        for (int i = 0; i < 600; i++)
+        {
+            if (i % 60 == 30) f.Session.Window.MoveMouse(320 + i / 60 % 2, 380);
+            f.Backend.Advance(f.Session.DefaultFrameDelta);
+            f.Session.PumpFrame();
+        }
+        f.Player.Pause();
+        f.Session.PumpFrames(30);
+
+        var seek = f.Session.Window.FindByAutomationId("video-seek")!;
+        var told = bridge.Diffs.SelectMany(d => d.PropertyChanged)
+            .Where(c => c.PropertyName == AccessibilityProperties.RangeValue && c.Node.ElementId == seek.Element.Id)
+            .Select(c => c.Node.Range!.Value.Value).ToList();
+        // The slider steps every half second: twenty moves in ten seconds, each told.
+        Assert.InRange(told.Count, 15, 21);
+        Assert.Equal(((HultUI.Core.Elements.SliderElement)seek.Element).Value, told[^1]);
+        Assert.Equal(f.Player.Position.TotalSeconds, told[^1], 0.5);
+        Assert.True(bridge.Diffs.Count <= 60, $"{bridge.Diffs.Count} applied diffs in ten seconds");
+    }
+
+    [Fact]
     public void TheMuteButton_TogglesMute_AndTheVolumeSliderShowsIt()
     {
         using var f = new Fixture();

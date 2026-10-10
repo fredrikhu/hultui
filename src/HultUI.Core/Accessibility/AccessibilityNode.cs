@@ -60,6 +60,18 @@ public sealed class AccessibilityNode
     /// </summary>
     public string? Value => _extras is { } x ? x.Value ?? x.TextVersion?.Value : null;
 
+    /// <summary>The value in a range of a slider, a progress bar or a number field
+    /// (<see cref="IRangeValueElement"/>), as this tree was built; null for anything else.</summary>
+    public AccessibleRange? Range
+    {
+        get => _extras?.Range;
+        internal set
+        {
+            if (_extras is null && value is null) return;
+            Extras.Range = value;
+        }
+    }
+
     /// <summary>A password field: its <see cref="Value"/> is the bullets on screen, never the
     /// text, and a reader says what it is (UIA's IsPassword, AT-SPI's password-text role).</summary>
     public bool IsPassword => (_flags & PasswordBit) != 0;
@@ -183,6 +195,7 @@ public sealed class AccessibilityNode
         public AccessibleText? Text;
         public IAccessibleTextSource? TextSource;
         public AccessibleTextVersion? TextVersion;
+        public AccessibleRange? Range;
     }
 
     private RareFields? _extras;

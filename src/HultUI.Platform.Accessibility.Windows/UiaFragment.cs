@@ -220,6 +220,13 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             UiaInterop.UIA_SelectionItemIsSelectedPropertyId when _isSelected is { } selected
                 => UiaVariant.FromBool(selected),
             UiaInterop.UIA_ValueValuePropertyId when _value is not null => UiaVariant.FromBStr(_value),
+            // A range as the tree was built with it, which is what its change events carry.
+            UiaInterop.UIA_RangeValueValuePropertyId when node.Range is { } r => UiaVariant.FromDouble(r.Value),
+            UiaInterop.UIA_RangeValueMinimumPropertyId when node.Range is { } r => UiaVariant.FromDouble(r.Minimum),
+            UiaInterop.UIA_RangeValueMaximumPropertyId when node.Range is { } r => UiaVariant.FromDouble(r.Maximum),
+            UiaInterop.UIA_RangeValueSmallChangePropertyId when node.Range is { } r => UiaVariant.FromDouble(r.SmallChange),
+            UiaInterop.UIA_RangeValueLargeChangePropertyId when node.Range is { } r => UiaVariant.FromDouble(r.LargeChange),
+            UiaInterop.UIA_RangeValueIsReadOnlyPropertyId when node.Range is { } r => UiaVariant.FromBool(r.IsReadOnly),
             UiaInterop.UIA_ToggleToggleStatePropertyId when _isToggled is { } t
                 => UiaVariant.FromInt(t ? UiaInterop.ToggleState_On : UiaInterop.ToggleState_Off),
             UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId when _expanded is { } e

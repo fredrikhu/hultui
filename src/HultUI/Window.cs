@@ -133,6 +133,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private bool _a11yLayoutRefreshPending;
     private long _lastA11yRebuildMs;
     private const long A11yCoalesceMs = 100;
+    // A value in a range (a slider's, a progress bar's) can move on every frame: a drag, a
+    // download, a playing video's scrubber, a key held down. Each refresh rebuilds the whole tree,
+    // so such changes are told on the leading edge, then at most every A11yRangeCoalesceMs, then
+    // once on the trailing edge with the value the range came to rest at. 250 ms is how often
+    // Chromium moves a playing video's scrubber (HTMLMediaElement's timeupdate,
+    // kMaxTimeupdateEventFrequency), whose aria-valuetext it leaves alone while playing.
+    private bool _a11yRangeRefreshPending;
+    private long _lastA11yRangeMs = long.MinValue / 2;
+    private const long A11yRangeCoalesceMs = 250;
 
     private long A11yClockMs
     {
@@ -814,6 +823,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // (during the drag, layout dirty already keeps frames coming).
         || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
             && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        // The same for a range value's trailing edge: the value it came to rest at.
+        || (_a11yRangeRefreshPending && _accessibilityBridge.IsActive
+            && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs)
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
         // AT thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame. Platform-neutral: the
@@ -958,9 +970,17 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         long nowMs = A11yClockMs;
         bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
             && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
+        bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
+            && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
 
-        if (a11yImmediate || a11yLayoutDue)
+        if (a11yImmediate || a11yLayoutDue || a11yRangeDue)
         {
+            // Whatever the rebuild was for, it tells a range's value as it is now.
+            if (_a11yRangeRefreshPending)
+            {
+                _a11yRangeRefreshPending = false;
+                _lastA11yRangeMs = nowMs;
+            }
             using (_tracer.Begin("Phase", "A11y"))
             {
                 var newTree = BuildAccessibilityTreeWithOverlays(_root);
@@ -980,6 +1000,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             _previousA11yTree = null;
             _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
+            _a11yRangeRefreshPending = false;
         }
         if (_announcements.Count > 0)
         {
@@ -3273,6 +3294,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             // frame of a 1.9 ms frame in a scrolling History list, and up to 9 ms.
             if (propertyName == AccessibilityProperties.BoundingRect)
                 window._a11yLayoutRefreshPending = true;
+            // A range's value can move every frame (a drag, a playback): on its own schedule.
+            else if (propertyName == AccessibilityProperties.RangeValue)
+                window._a11yRangeRefreshPending = true;
             else
                 window._a11yPropertyDirty = true;
         }

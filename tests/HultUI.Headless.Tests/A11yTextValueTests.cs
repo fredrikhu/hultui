@@ -154,6 +154,7 @@ public class A11yTextValueTests
                 ? path[AtSpiConstants.AccessiblePathPrefix.Length..] : "root";
         public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) => Lines.Add($"children-changed {Short(parentPath)}");
         public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Lines.Add($"property-change:{atSpiProperty} {Short(path)} {newValue}");
+        public void EmitValueChanged(string path, double value) => Lines.Add(FormattableString.Invariant($"property-change:accessible-value {Short(path)} {value}"));
         public void EmitRoleChange(string path, uint role) => Lines.Add($"property-change:accessible-role {Short(path)}");
         public void EmitStateChanged(string path, string state, bool active) => Lines.Add($"state-changed:{state} {Short(path)} {(active ? 1 : 0)}");
         public void EmitTextChanged(string path, bool insert, int offset, string text) => Lines.Add($"text-changed:{(insert ? "insert" : "delete")} {Short(path)} {offset} {text}");

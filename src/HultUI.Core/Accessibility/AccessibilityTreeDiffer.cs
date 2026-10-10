@@ -137,6 +137,10 @@ public static class AccessibilityTreeDiffer
         // request. A text input with no text pattern keeps its value change, as an <input> does.
         if (rare && !(prev.OffersText && curr.OffersText) && prev.Value != curr.Value)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
+        // A slider, a progress bar or a number field moved, or its bounds or steps changed: the
+        // bridge tells which (UIA RangeValue.Value, Minimum, Maximum; AT-SPI accessible-value).
+        if (rare && prev.Range != curr.Range)
+            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.RangeValue, prev));
         // The states share one field: when it is the same, none of them changed.
         if (prev.States != curr.States)
         {

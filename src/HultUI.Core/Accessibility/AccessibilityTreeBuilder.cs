@@ -120,6 +120,8 @@ public static class AccessibilityTreeBuilder
             isPassword: element is TextInputElement { Masked: true },
             isSelected: ResolveIsSelected(element));
         node.NativeContent = element.NativeAccessibleContent;
+        if (element is IRangeValueElement range)
+            node.Range = AccessibleRange.Of(range);
         // What ChildScroll subtracts from everything under it.
         if (element is ScrollViewElement sv)
             node.ScrollOffset = new Point(sv.ScrollOffsetX, sv.ScrollOffsetY);

@@ -177,6 +177,7 @@ public class A11yScrollEventTests
         public readonly List<string> Lines = [];
         public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) => Lines.Add("children-changed");
         public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Lines.Add($"property-change:{atSpiProperty}");
+        public void EmitValueChanged(string path, double value) => Lines.Add("property-change:accessible-value");
         public void EmitRoleChange(string path, uint role) => Lines.Add("property-change:accessible-role");
         public void EmitStateChanged(string path, string state, bool active) => Lines.Add($"state-changed:{state}");
         public void EmitTextChanged(string path, bool insert, int offset, string text) => Lines.Add("text-changed");

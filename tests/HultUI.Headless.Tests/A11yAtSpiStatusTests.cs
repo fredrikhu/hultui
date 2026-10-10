@@ -39,6 +39,7 @@ public class A11yAtSpiStatusTests
         public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) =>
             Lines.Add($"children-changed:{(isAdd ? "add" : "remove")} {Short(parentPath)} {Short(childPath)}");
         public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Lines.Add($"property-change:{atSpiProperty} {Short(path)} {newValue}");
+        public void EmitValueChanged(string path, double value) => Lines.Add(FormattableString.Invariant($"property-change:accessible-value {Short(path)} {value}"));
         public void EmitRoleChange(string path, uint role) => Lines.Add($"property-change:accessible-role {Short(path)}");
         public void EmitStateChanged(string path, string state, bool active) => Lines.Add($"state-changed:{state} {Short(path)} {(active ? 1 : 0)}");
         public void EmitTextChanged(string path, bool insert, int offset, string text) => Lines.Add($"text-changed {Short(path)}");
@@ -160,6 +161,8 @@ public class A11yAtSpiStatusTests
         Assert.Equal($"cache-remove {gone.Id.Value}", rig.Signals.Lines[0]);
         Assert.Equal(rig.Nodes, rig.Signals.Lines.Count(l => l.StartsWith("cache-add ", StringComparison.Ordinal)));
         Assert.Equal(rig.Nodes + 1, rig.Signals.Lines.Count);
+        Assert.Contains($"cache-add {rig.Input.Id.Value}", rig.Signals.Lines);
+        Assert.Null(((IAtSpiTree)rig.Bridge).Find(AtSpiConstants.AccessiblePathPrefix + gone.Id.Value));
         var input = ((IAtSpiTree)rig.Bridge).Find(AtSpiConstants.AccessiblePathPrefix + rig.Input.Id.Value)!;
         Assert.Equal("ab", input.Value);   // typed while off: the object has it now
     }

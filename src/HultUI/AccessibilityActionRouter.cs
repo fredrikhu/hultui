@@ -119,6 +119,14 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     // ──── Extra actions the Windows UIA host routes through the same queue.
 
+    /// <summary>A range's value from assistive technology (AT-SPI's Value.CurrentValue): set
+    /// through the element, which clamps it and tells its own change; nothing for a read-only one.</summary>
+    public void SetRangeValue(ElementId id, double value) => _pendingActions.Enqueue(() =>
+    {
+        if (FindElement(id) is IRangeValueElement range && !range.IsReadOnly)
+            range.SetAccessibleValue(value);
+    });
+
     public void SetValue(ElementId id, string value) => _pendingActions.Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.SetValue, value)) return;

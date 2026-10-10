@@ -462,6 +462,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             if (!_wrappers.TryGetValue(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)
                 RaiseScrolled(wrapper, change.Previous, change.Node);
+            else if (change.PropertyName == AccessibilityProperties.RangeValue)
+                RaiseRange(wrapper, change.Previous, change.Node);
             else
                 RaisePropertyChanged(wrapper, change.PropertyName);
         }
@@ -651,6 +653,31 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (before.Y != after.Y)
             RaiseProperty(wrapper, UiaInterop.UIA_ScrollVerticalScrollPercentPropertyId,
                 known ? UiaVariant.FromDouble(info.VerticalPercent) : UiaVariant.Empty);
+    }
+
+    /// <summary>
+    /// A slider, a progress bar or a number field moved, or its bounds or steps changed: what
+    /// Chromium raises for one (browser_accessibility_manager_win.cc: RANGE_VALUE_CHANGED is a
+    /// RangeValue.Value property change, RANGE_VALUE_MIN/MAX_CHANGED Minimum and Maximum,
+    /// RANGE_VALUE_STEP_CHANGED SmallChange and LargeChange), each with its new value, for the parts
+    /// that changed. The window tells a range on a schedule (Window.A11yRangeCoalesceMs), so a
+    /// playing video's scrubber is not a whole-tree rebuild a frame.
+    /// </summary>
+    private void RaiseRange(UiaFragment wrapper, AccessibilityNode? previous, AccessibilityNode node)
+    {
+        if (!RaiseEvents || node.Range is not { } now) return;
+        var before = previous?.Range;
+        if (before?.Value != now.Value)
+            RaiseProperty(wrapper, UiaInterop.UIA_RangeValueValuePropertyId, UiaVariant.FromDouble(now.Value));
+        if (before?.Minimum != now.Minimum)
+            RaiseProperty(wrapper, UiaInterop.UIA_RangeValueMinimumPropertyId, UiaVariant.FromDouble(now.Minimum));
+        if (before?.Maximum != now.Maximum)
+            RaiseProperty(wrapper, UiaInterop.UIA_RangeValueMaximumPropertyId, UiaVariant.FromDouble(now.Maximum));
+        if (before?.SmallChange != now.SmallChange || before?.LargeChange != now.LargeChange)
+        {
+            RaiseProperty(wrapper, UiaInterop.UIA_RangeValueSmallChangePropertyId, UiaVariant.FromDouble(now.SmallChange));
+            RaiseProperty(wrapper, UiaInterop.UIA_RangeValueLargeChangePropertyId, UiaVariant.FromDouble(now.LargeChange));
+        }
     }
 
     /// <summary>A property change with its new value, which this frees; the old one is left empty,

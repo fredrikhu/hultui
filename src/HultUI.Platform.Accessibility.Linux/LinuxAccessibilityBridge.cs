@@ -161,6 +161,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         return true;
     }
 
+    bool IAtSpiTree.SetCurrentValue(AtSpiAccessible node, double value)
+    {
+        if (_actionHost is null || node.Range is not { IsReadOnly: false }) return false;
+        _actionHost.SetRangeValue(node.ElementId, value);
+        return true;
+    }
+
     bool IAtSpiTree.DoAction(AtSpiAccessible node)
     {
         if (_actionHost is null || node.Action is null) return false;
@@ -358,7 +365,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleDescription, change.Node.Description ?? "");
                 return true;
             case AccessibilityProperties.Value:
+                // A number field's text: its range's accessible-value says it, as a number.
+                if (change.Node.Range is not null) return false;
                 _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleValue, change.Node.Value ?? "");
+                return true;
+            case AccessibilityProperties.RangeValue:
+                // The value; a change of the bounds or steps alone is read from the Value interface.
+                if (change.Node.Range is not { } range || change.Previous?.Range?.Value == range.Value) return false;
+                _signals!.EmitValueChanged(path, range.Value);
                 return true;
             case AccessibilityProperties.IsPassword:
                 // A client caches the role from the cache-add, so a field masked or revealed

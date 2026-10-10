@@ -362,7 +362,23 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   ignores both scroll events) and GTK do. Bounds and the offscreen state are read
   from the current tree when a client asks.
 - **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
-  read/set the value and its bounds.
+  read/set the value and its bounds. Each node carries its range (`AccessibilityNode.Range`,
+  2026-10-10), so a move is a `RangeValue` change: UIA raises a RangeValue.Value property change
+  with the value (Minimum, Maximum, SmallChange and LargeChange when those change), as Chromium does
+  for `RANGE_VALUE_CHANGED` and its min/max/step events (`browser_accessibility_manager_win.cc`),
+  and AT-SPI offers `org.a11y.atspi.Value` (MinimumValue, MaximumValue, MinimumIncrement,
+  CurrentValue, settable, and Text) on a slider, a progress bar and a number field, with a
+  `property-change:accessible-value` signal carrying the number, as GTK 4 does
+  (`gtkatspicontext.c`) and Chromium does only for a range value (`ax_platform_node_auralinux.cc`,
+  `OnValueChanged`). A number field's text change and its number change tell AT-SPI once, with the
+  number. Before, a slider or a progress bar that moved told nothing on either platform, and AT-SPI
+  had no Value interface: a keyboard user moving VideoPlayer's Seek slider heard nothing.
+  A range can move on every frame — a drag, a download, a playing video, a key held down — and
+  each refresh rebuilds the whole tree, so the window tells a range's change on the leading edge,
+  then at most every 250 ms, then once with the value it came to rest at (`Window.A11yRangeCoalesceMs`).
+  250 ms is how often Chromium moves a playing video's scrubber (`html_media_element.cc`,
+  `kMaxTimeupdateEventFrequency`; `media_controls_impl.cc` leaves its aria-valuetext alone on
+  `timeupdate`). A progress bar moved every frame for two seconds is told 8–10 times, not 120.
 
 Not yet wired (candidates): container-level `Selection` (needs a SAFEARRAY of
 providers), a UIA `ItemContainer` on virtualized lists.
@@ -411,7 +427,8 @@ providers), a UIA `ItemContainer` on virtualized lists.
   listened (only the Linux bridge did), so content that describes itself only while one
   listens never did on Windows; it reports from `UiaClientsAreListening` now. The Linux
   bridge advertised `org.a11y.atspi.Value` for every string value, with no handler behind
-  it; AT-SPI's Value is a number, and it is no longer advertised.
+  it; AT-SPI's Value is a number, and it is no longer advertised. (Since 2026-10-10 it is, for a
+  range, with its properties answered: see RangeValue above.)
 
 ## Out of scope (follow-ups)
 

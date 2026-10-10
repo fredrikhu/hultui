@@ -26,7 +26,13 @@ internal sealed class AtSpiAccessible
     public uint Role { get; init; }
     public string Name { get; init; } = "";
     public string Description { get; init; } = "";
-    public string? Value { get; init; }
+
+    /// <summary>The node's string value: a text field's text (a password's bullets).</summary>
+    public string? Value
+    {
+        get => _value is RangeBox box ? box.Value : (string?)_value;
+        init => _value = _value is RangeBox box ? box with { Value = value } : value;
+    }
 
     // Bounding box in window-relative layout coordinates.
     public int X { get; init; }
@@ -51,6 +57,21 @@ internal sealed class AtSpiAccessible
     public bool? Toggled { get; init; }
     /// <summary>Open or closed, for an object that can be either; null for one that cannot.</summary>
     public bool? Expanded { get; init; }
+
+    /// <summary>A value in a range, for the Value interface: a slider's, a progress bar's, a number
+    /// field's; null for anything else. Kept with the string value in one field, in an object of
+    /// its own that only those nodes get: a snapshot makes an object per node on every apply, and
+    /// the range inline would have been 56 bytes more in each, a fifth of a node's cost on AT-SPI.</summary>
+    public AccessibleRange? Range
+    {
+        get => (_value as RangeBox)?.Range;
+        init => _value = value is { } range ? new RangeBox(range, Value) : _value;
+    }
+
+    // The string value, or a RangeBox holding a range and the string value.
+    private readonly object? _value;
+
+    private sealed record RangeBox(AccessibleRange Range, string? Value);
 
     /// <summary>The text a reader moves through (seam A1): where to read it now, or, for an object
     /// with no source, the text as the tree was built with it; both null for an object with none.</summary>
@@ -97,6 +118,9 @@ internal sealed class AtSpiAccessible
             // Not Value for a string value: AT-SPI's Value is a number (a slider's), and it was
             // advertised here with no handler behind it, so a client asking got UnknownMethod.
             if (Text is not null || TextSource is not null) list.Add(AtSpiConstants.TextInterface);
+            // A number in a range, as Chromium and GTK advertise it for a slider, a progress bar and
+            // a spin button.
+            if (Range is not null) list.Add(AtSpiConstants.ValueInterface);
             return [.. list];
         }
     }
@@ -181,6 +205,7 @@ internal sealed class AtSpiAccessible
             Selected = node.IsSelected == true,
             Toggled = node.IsToggled,
             Expanded = node.Expanded,
+            Range = node.Range,
             Text = node.TextSource is null ? node.Text : null,
             TextSource = node.TextSource,
             Scale = scale,
