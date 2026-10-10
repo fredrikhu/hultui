@@ -91,7 +91,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 12. ~~**runtime-palette-filter-allocs + runtime-syntax-registry-first-use**~~ LANDED 8b40fde, 6457f94, c1b8918 (4) — palette filter
     −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
     thread (10 ms, 5 MB).
-13. **text-textarea-measure-lines** (5) — width-only FitsWhole (JSON open −36 %, −75 % with
+13. ~~**text-textarea-measure-lines**~~ LANDED b23b203, 40d054d, 28fbeb8, 05414ab (5) — width-only FitsWhole (JSON open −36 %, −75 % with
     item 4); Meridian response frame 25.7 MB. Once it lands, lower `ShapeCacheBytes` to ~8 MB
     and give any new width cache a weight (48823d5).
 14. **gl-vk-one-submit-per-frame + gl-vk-resize-duplicate-frames** (3) — Flush is the 2nd
@@ -133,8 +133,9 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 - **gpu-aperture-startup-swapchain-x3** (3) — ~10 ms, borderline.
 - **paint-spanned-line-glyph-work** (2) — glyphs processed ~16× per spanned line per frame
   (Junction diff 26,210 per frame). (a) small, (b) medium; time unmeasured.
-- **text-textarea-incremental-wrap** (5) — keystroke O(lines) → O(edited), −46…−58 % on 3
-  rows. Medium.
+- **text-textarea-incremental-wrap** (5) — keystroke O(lines) → O(edited) (b23b203 already
+  measures only touched lines for widths). Also: opening a 20,000-line log of 160-char wrapped
+  lines costs ~405 ms and 207 MB, mostly prefix tables in the wrap search. Medium.
 - **tooling-textbench-warmup** (5) — TextBench measures tier-0 code; the perf suite also tiers
   up during rounds 1–4 (lead for 4). Small.
 - **layout-ordered-children** (1, narrowed) — hit-test and cull O(n) → O(log n + visible).
@@ -215,6 +216,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 913204a | maxlines-setter-thread | Fix-up of 19b94e9: setters mark only what is not already marked, so `.MaxLines(1)` on a new label off the UI thread no longer throws in Debug; a laid-out label still re-lays out and is thread-checked. Perf flat. |
 | 2 | 8b40fde, c1b8918 | runtime-palette-filter-allocs | Joined text kept while the palette is open, title-only commands matched once, one array sort: palette row 592.5 → 430.3 KB/op JIT (−27.4 %), 651.9 → 424.3 AOT (−34.9 %); min −11.1 % JIT, −7.3 % AOT; Filter 167/357 → 4.7/9.0 KB per query; results identical to the old code. |
 | 2 | 6457f94 | runtime-syntax-registry-first-use | `CanHighlight` answers from a 297-extension table checked against the registry. Vesper's first code folder AOT 7.0 → 2.2 ms and 5.3 MB → 761 KB (JIT 32–38 → 4.4 ms); the TextMate registry loads at the first tokenize instead. |
+| 2 | b23b203, 40d054d, 28fbeb8, 05414ab | text-textarea-measure-lines | Width per hard line measured without layout (`IRenderContext.MeasureTextWidth`, bit-equal; 4 MB width cache with a weight); last frame's line strings reused; shape bound 24 → 8 MB. JSON open −21 % JIT / −20 % AOT (median −35 %), 6,599 → 1,903 KB; typing in 2,000 lines −22 %, 465 → 222 KB; undo-redo −28 %; steady TextArea repaint 2.2 KB → 0; 10,000-line JSON keystroke 1.66 ms even at 8 MB (was 25 ms at 8 MB). Meridian first response frame 12.4 → 5.8 MB. Retained after closing the JSON 9.6 → 4.3 MB. JSON wheel +3.4 KB (lines shaped when drawn). Line starts identical over ~2 M lines. AOT TableView sort +5…7 % unproven placement. |
 
 ## Examined, not worth it
 
