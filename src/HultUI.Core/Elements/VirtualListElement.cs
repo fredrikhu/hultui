@@ -63,7 +63,19 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// In multi-select mode (see <see cref="CanSelectMultiple"/>) the selection is
     /// tracked as a set instead — see <see cref="SelectedIndices"/>.
     /// </summary>
-    public int SelectedIndex { get; set; } = -1;
+    /// <remarks>A change tells assistive technology, as a checkbox's toggle does: the item that
+    /// had the selection and the one that has it change their selected state.</remarks>
+    public int SelectedIndex
+    {
+        get => _selectedIndex;
+        set
+        {
+            if (_selectedIndex == value) return;
+            _selectedIndex = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
+        }
+    }
+    private int _selectedIndex = -1;
 
     /// <summary>
     /// When true, the list manages a set of selected indices that assistive tech
@@ -83,6 +95,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private void NotifySelectionChanged()
     {
         MarkPaintDirty();
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
         OnSelectionChanged?.Invoke(SelectedIndices);
     }
 

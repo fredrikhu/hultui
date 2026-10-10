@@ -214,6 +214,56 @@ public class VirtualListAccessibilityTests
         Assert.Equal(4, ((IAccessibleItemSource)list).SelectedIndex);
     }
 
+    private sealed class RecordingObserver : IElementPropertyObserver
+    {
+        public List<string> Changes { get; } = [];
+        public void OnElementPropertyChanged(Element element, string propertyName) => Changes.Add(propertyName);
+    }
+
+    [Fact]
+    public void VirtualList_ItemNodes_CarryTheirSelectedState()
+    {
+        // Without it a move of the selection that scrolled nothing changed no node, and the
+        // differ had nothing to tell a reader.
+        var list = MakeList(10);
+        list.SelectedIndex = 3;
+        var before = BuildLaidOut(list);
+        Assert.All(before.Children, (item, i) => Assert.Equal(i == 3, item.IsSelected));
+
+        list.SelectedIndex = 4;
+        var after = BuildLaidOut(list);
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+        Assert.Equal(
+            [(before.Children[3].ElementId, AccessibilityProperties.IsSelected), (after.Children[4].ElementId, AccessibilityProperties.IsSelected)],
+            diff.PropertyChanged.Select(c => (c.Node.ElementId, c.PropertyName)));
+    }
+
+    [Fact]
+    public void VirtualList_SelectionChanges_AskForARebuild_OncePerChange()
+    {
+        var list = MakeList(10);
+        var observer = new RecordingObserver();
+        list.AccessibilityObserver = observer;
+
+        list.SelectedIndex = 2;
+        list.SelectedIndex = 2;
+        list.SelectedIndex = -1;
+        Assert.Equal([AccessibilityProperties.IsSelected, AccessibilityProperties.IsSelected], observer.Changes);
+
+        // A patch carries the selection of the list built anew; it is the same change.
+        observer.Changes.Clear();
+        var rebuilt = MakeList(10);
+        rebuilt.SelectedIndex = 5;
+        list.PatchFrom(rebuilt);
+        Assert.Equal([AccessibilityProperties.IsSelected], observer.Changes);
+
+        // And a multi-selection changed by assistive technology.
+        observer.Changes.Clear();
+        list.CanSelectMultiple = true;
+        ((IAccessibleItemSource)list).SetItemSelected(1, true);
+        Assert.Equal([AccessibilityProperties.IsSelected], observer.Changes);
+    }
+
     [Fact]
     public void VirtualList_PatchFrom_CarriesAccessibilitySelectionAndWiring()
     {

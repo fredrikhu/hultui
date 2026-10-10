@@ -299,6 +299,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   takes AT-SPI's `password text` role (40) and the same bullets, and masking or revealing a
   field sends a `property-change:accessible-role` signal.
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
+  Each item node carries its selected state (2026-10-10), and setting `SelectedIndex` asks for
+  a rebuild, so a move is an IsSelected change on the item that had the selection and the one
+  that has it (UIA property events, AT-SPI `state-changed:selected`). Before, a move that
+  scrolled nothing changed no node and no reader was told.
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
   Expand/Collapse reuse the element's click-to-toggle. A change raises the
   ExpandCollapseState property event (2026-10-05), and on Linux the node carries AT-SPI's

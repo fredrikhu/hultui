@@ -68,8 +68,9 @@ public sealed class AccessibilityNode
     /// <summary>Expanded state for an expandable node, or null if not expandable.</summary>
     public bool? Expanded => GetTriState(ExpandedShift);
 
-    /// <summary>Selected state for one of a set — a radio button, a tab — or null for a node
-    /// that is not selectable that way. List items answer through their list instead.</summary>
+    /// <summary>Selected state for one of a set — a radio button, a tab, an item of a list —
+    /// or null for a node that is not selectable that way. A list's item nodes take it from
+    /// their list (<see cref="IAccessibleItemSource.IsItemSelected"/>).</summary>
     public bool? IsSelected => GetTriState(SelectedShift);
 
     /// <summary>True when the node is scrolled/clipped out of the visible viewport.</summary>

@@ -293,7 +293,10 @@ public static class AccessibilityTreeBuilder
                 isFocused: false,
                 isEnabled: true,
                 isToggled: source.ItemIsToggled(i),
-                value: null)
+                value: null,
+                // In the node, so the differ sees a move of the selection: without it a move that
+                // scrolled nothing changed no node, and no reader heard which item was selected.
+                isSelected: source.IsItemSelected(i))
             {
                 IsOffscreen = !RectsIntersect(clip, rect),
             };
