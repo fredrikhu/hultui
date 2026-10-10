@@ -74,8 +74,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    5.4 B/frame; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame` 22.9 B/frame). Find
    the cause (tier-0/OSR, JIT stack allocation, a one-time lazy init) and fix it for all of
    them before the round's full suite and CI.
-8. **layout-grid-linear-tracks + layout-leaves-ignore-offered-height +
-   layout-maxlines-setter-dirty + checkbox-size-layout** (1) — grid O(rows² × cols) (~900
+8. ~~**layout-grid-linear-tracks + layout-leaves-ignore-offered-height +
+   layout-maxlines-setter-dirty + checkbox-size-layout**~~ LANDED 0cfdbfc, d13fe82, 19b94e9, 30cb978, 289faf9 (1) — grid O(rows² × cols) (~900
    loop iterations per cell); spacers/chevrons keyed on exact height (expander animation
    MeasureSize −72 %, leaf measurements −93 %); two correctness fixes.
 9. **a11y-node-extras + a11y-snapshot-stale-fields + a11y-atspi-snapshot-diet** (7) — node
@@ -86,7 +86,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     −10.7…−11.8 %); **reactivity-tween-tick-per-frame** (approved; Reel 13 rebuilds per
     presented frame, 172 MB per 11 s) with the **apps-scenario-tween-signal-rebuild** suite
     row; **reactivity-scope-threadstatic** (approved, low priority).
-11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) — sticky wheel 1.55 → ~0.3
+11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) + **maxlines-setter-thread** (from 19b94e9: the setter now marks layout from builder calls like `.MaxLines(1)`, so in Debug an element built off the UI thread would throw; mark only when attached) — sticky wheel 1.55 → ~0.3
     KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
 12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
     −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
@@ -195,6 +195,10 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 93b8fef | aperture-postercache-trim-thread | Correctness: the poster cache's evictions are disposed on the UI thread at the next Get (the download thread disposed images the UI could be drawing). ELEMENTS.md: dispose image sources on the UI thread. |
 | 2 | e7a7b03, bf5adcc, fbb5afc, 7755670 | paint-selectable-label-paragraph | A selectable/linked label keeps its paragraph and draws from it. Render-pass bytes per hover frame: Junction diff 10.6 → 0.0 KB (AOT 12.2 → 0), Vesper reader 10.9 → 0.0 (AOT 12.6 → 0); wheel −10…−11 KB/frame (rest is VirtualList realization). New rows text/selectable viewer hover 13.8 → 0.4 KB/op, wheel 14.7 → 3.3. Time flat, 0 slower, pixels byte-identical (pixel test over alignments, RTL, ellipsis, spans, selection). |
 | 2 | da2ccd8, f578b55 | test-alloc-first-run-flake | Two causes. Headless: real code — the DevTools peak trackers' ring grew (536 B) while frame times fell; now a fixed 64-sample ring of time slices. Skia: no object at all — `GetAllocatedBytesForCurrentThread` counted the unused rest of the thread's allocation piece retired by a background-GC suspension (heap walk: one free object). All allocation tests now use `tests/Shared/Allocations.cs` (least of up to 8 rounds) with TieredPGO off in 6 test projects. Failed runs over 30 fresh runs per project: Headless 1 → 0, Skia 2 → 0; mutation checks still fail. |
+| 2 | 0cfdbfc, 289faf9 | layout-grid-linear-tracks | Grid cells bucketed in one pass, origins by prefix sums: grid/create −42 %, resize −54 %, edit −64 % JIT (AOT −61/−72/−78 %, placement control 3–6 %); 1.63 M loop steps per step → a few linear passes; bit-identical (random tests vs the old loops). Grid plan examined, not worth it. |
+| 2 | d13fe82 | layout-leaves-ignore-offered-height | `IgnoresAvailableHeight` defaults true; VideoElement opts out. controls/expander toggle MeasureSize −72 %, leaf measurements −93 %, row −7 % JIT / −6 % AOT, layout −39/−47 %. Every box identical across all 97 rows and ~556k audited cache hits. |
+| 2 | 19b94e9 | layout-maxlines-setter-dirty | Correctness: MaxLines and Overflow setters mark layout. Perf flat. |
+| 2 | 30cb978 | checkbox-size-layout | Correctness: Checkbox, RadioButton and ToggleSwitch sizes from the theme re-lay out. Perf flat. |
 
 ## Examined, not worth it
 
