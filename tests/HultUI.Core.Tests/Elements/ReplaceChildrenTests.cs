@@ -36,10 +36,11 @@ public class ReplaceChildrenTests
         }
         int next = 0;
 
-        double perCall = Allocations.PerCall(calls, () => { parents[next].ReplaceChildren(kids[next]); next++; }, goal: 80);
+        double perCall = Allocations.PerCall(calls, () => { parents[next].ReplaceChildren(kids[next]); next++; }, goal: 88);
 
-        // A List<Element> (32 B) and its array of three (48 B), and nothing else.
-        Assert.True(perCall <= 80, $"ReplaceChildren of three on an empty parent allocated {perCall:0} B a call");
+        // The child list (40 B: a List<Element> and the paint order it keeps for its children)
+        // and its array of three (48 B), and nothing else.
+        Assert.True(perCall <= 88, $"ReplaceChildren of three on an empty parent allocated {perCall:0} B a call");
     }
 
     [Theory]

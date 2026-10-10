@@ -199,6 +199,93 @@ public class FrameAllocationTests
         Assert.True(perTab < 1024, $"a Tab allocated {perTab:0} B");
     }
 
+    /// <summary>A screen with sticky section headers in a scroll view and a raised panel at
+    /// the root, as Junction's panels and dialogs are (ZIndex 42 on the root's backdrop), drawn,
+    /// scrolled and hovered: each parent sorted its children for every paint and every hit test —
+    /// three sorts a frame on the perf suite's sticky sections, 1.3 of its 1.6 KB — and scanned
+    /// them all to see whether it had to. The order is kept now, so the frames allocate nothing and
+    /// sort nothing; a ZIndex changed in place (a repaint is all it asks for) re-orders the next
+    /// frame's paint and hit test (plan 17, round 2, layout-zorder-sorted-allocs).</summary>
+    [Fact]
+    public void FramesOverStickyHeadersAndARaisedPanel_SortNothing_UntilAZIndexChanges()
+    {
+        var panelFill = new Color(200, 30, 30);
+        var rowFill = new Color(30, 30, 200);
+        var sections = new Element[6];
+        for (int s = 0; s < sections.Length; s++)
+        {
+            var rows = new Element[12];
+            rows[0] = Box.New().Height(Dimension.Px(24)).FlexShrink(0).Background(new Color(128, 128, 128)).Sticky();
+            for (int i = 1; i < rows.Length; i++)
+                rows[i] = Box.New().Height(Dimension.Px(20)).FlexShrink(0).Background(rowFill);
+            sections[s] = Flex.Column(gap: 0).FlexShrink(0).Children(rows);
+        }
+        var scroll = ScrollView.Vertical().FlexGrow(1).Children(Flex.Column(gap: 0).FlexShrink(0).Children(sections));
+        var panel = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(120)).Background(panelFill).ZIndex(42);
+        panel.Position.Type = PositionType.Absolute;
+        panel.Position.Top = Dimension.Px(0);
+        panel.Position.Left = Dimension.Px(0);
+        // The panel first: only its ZIndex puts it over the scroll view.
+        var root = Flex.Column(gap: 0).FlexGrow(1).Children(panel, scroll);
+        using var session = Session(root);
+        var app = session.Application;
+        var window = session.Window;
+        scroll.ScrollOffsetY = 130;   // the first section's header held at the top, rows under it
+        for (int i = 0; i < 4; i++) app.RunFrame(Frame);
+
+        var rootOrder = ZOrderHelper.GetChildrenInZOrder(root);
+        var sectionOrder = ZOrderHelper.GetChildrenInZOrder(sections[0]);
+        Assert.Equal([scroll, panel], rootOrder);
+        Assert.Same(sections[0].Children[0], sectionOrder[^1]);
+
+        float y = 130;
+        double repaint = PerFrame(app, () => root.MarkPaintDirty());
+        double scrolled = PerFrame(app, () => scroll.ScrollOffsetY = y = y == 130 ? 150 : 130);
+        // The pointer over a row of the second section, moving within it: the platform's input
+        // and the move event are all a move should allocate.
+        for (int i = 0; i < 10; i++) { window.MoveMouse(300 + i % 2, 200); app.RunFrame(Frame); }
+        long events = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                _sink = new InputEvent.MouseMoveInput(300, 200, 1, 0, KeyModifiers.None);
+                _sink = new PointerMoveEvent { Position = new Point(300, 200), Delta = new Point(1, 0) };
+            }
+        });
+        long moves = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                window.MoveMouse(300 + i % 2, 200);
+                app.RunFrame(Frame);
+            }
+        }, goal: events);
+
+        Assert.True(repaint < 1, $"a repaint allocated {repaint:0.#} B per frame");
+        Assert.True(scrolled < 1, $"a scrolled frame allocated {scrolled:0.#} B");
+        Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
+        Assert.Same(rootOrder, ZOrderHelper.GetChildrenInZOrder(root));
+        Assert.Same(sectionOrder, ZOrderHelper.GetChildrenInZOrder(sections[0]));
+        Assert.Same(panel, HitTester.HitTest(root, new Point(60, 60)));
+        Assert.Equal(panelFill, PixelAt(session, 60, 60));
+
+        panel.Position.ZIndex = 0;
+        panel.MarkPaintDirty();
+        app.RunFrame(Frame);
+
+        Assert.Same(root.Children, ZOrderHelper.GetChildrenInZOrder(root));
+        Assert.NotSame(panel, HitTester.HitTest(root, new Point(60, 60)));
+        Assert.Equal(rowFill, PixelAt(session, 60, 60));
+    }
+
+    private static Color PixelAt(HeadlessSession session, int x, int y)
+    {
+        using var image = session.Window.CapturePixels();
+        using var bitmap = SkiaSharp.SKBitmap.FromImage(image);
+        var c = bitmap.GetPixel(x, y);
+        return new Color(c.Red, c.Green, c.Blue);
+    }
+
     private static object? _sink;
 
     /// <summary>The pointer moving within one element allocates the platform's input and the

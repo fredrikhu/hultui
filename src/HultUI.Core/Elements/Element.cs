@@ -72,8 +72,36 @@ public abstract class Element
     public Element? Parent { get; internal set; }
     // Allocated on first child: roughly half of a real tree is leaves (text,
     // icons), and an empty List per leaf adds up at 10k+ elements.
-    private List<Element>? _children;
+    private ChildList? _children;
     public IReadOnlyList<Element> Children => (IReadOnlyList<Element>?)_children ?? [];
+
+    /// <summary>
+    /// <see cref="Children"/> in the order they are painted, and hit-tested from the back:
+    /// by ZIndex, a sticky child after the others at its ZIndex, then in list order
+    /// (<see cref="ZOrderHelper"/>). The renderer and the hit tester ask for it on every element
+    /// of every frame and every pointer move, so it is worked out on the first ask and kept
+    /// until the child list changes or a child's ZIndex or position type is set — a change
+    /// layout never sees: a ZIndex written in a handler asks only for a repaint.
+    /// </summary>
+    internal IReadOnlyList<Element> ChildrenInZOrder
+    {
+        get
+        {
+            var children = _children;
+            if (children is not { Count: > 1 })
+                return Children;
+            var order = children.ZOrder ??= ZOrderHelper.Order(children);
+            return order.Length == 0 ? children : order;
+        }
+    }
+
+    /// <summary>A child's ZIndex or position type was set (<see cref="PositionStyle"/>): the
+    /// order <see cref="ChildrenInZOrder"/> keeps is worked out again on the next ask.</summary>
+    internal void ChildZOrderChanged()
+    {
+        if (_children is { } children)
+            children.ZOrder = null;
+    }
 
     // ──── Layout input ────
     // Style objects are allocated on first write. Most elements never touch
@@ -91,7 +119,7 @@ public abstract class Element
 
     public FlexStyle Flex => _flex ??= new();
     public BoxStyle Box => _box ??= new();
-    public PositionStyle Position => _position ??= new();
+    public PositionStyle Position => _position ??= new(this);
     public GridStyle Grid => _grid ??= new();
     public GridItemStyle GridItem => _gridItem ??= new();
 
@@ -1087,7 +1115,9 @@ public abstract class Element
             DetachSilently(child);
 
         child.Parent = this;
-        (_children ??= []).Add(child);
+        var children = _children ??= new();
+        children.Add(child);
+        children.ZOrder = null;
         MarkLayoutDirty();
         MarkChildrenDirty();
 
@@ -1101,7 +1131,9 @@ public abstract class Element
             DetachSilently(child);
 
         child.Parent = this;
-        (_children ??= []).Insert(index, child);
+        var children = _children ??= new();
+        children.Insert(index, child);
+        children.ZOrder = null;
         MarkLayoutDirty();
         MarkChildrenDirty();
 
@@ -1113,6 +1145,7 @@ public abstract class Element
     {
         if (_children?.Remove(child) == true)
         {
+            _children.ZOrder = null;
             ClearFocusIfRemoved(child);
             child.Unmount();
             child.Parent = null;
@@ -1157,7 +1190,7 @@ public abstract class Element
         }
 
         // Add new children.
-        var list = _children ??= new List<Element>(children.Length);
+        var list = _children ??= new ChildList(children.Length);
         foreach (var child in children)
         {
             if (child.Parent is not null) // only an element listed twice
@@ -1169,6 +1202,8 @@ public abstract class Element
             if (!child._mounted)
                 child.Mount();
         }
+        // After the adds: mounting a child can run a component's code, which may ask for the order.
+        list.ZOrder = null;
         MarkLayoutDirty();
         MarkChildrenDirty();
     }
@@ -1193,7 +1228,8 @@ public abstract class Element
     /// </summary>
     private static void DetachSilently(Element child)
     {
-        child.Parent?._children?.Remove(child);
+        if (child.Parent?._children is { } siblings && siblings.Remove(child))
+            siblings.ZOrder = null;
         child.Parent?.MarkLayoutDirty();
         child.Parent?.MarkChildrenDirty();
         child.Parent = null;

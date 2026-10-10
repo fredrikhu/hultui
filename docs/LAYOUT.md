@@ -496,6 +496,12 @@ centered.Position.Left = Dimension.Percent(50);
 
 The default position type is `Relative`, which keeps the element in normal flow.
 
+`ZIndex` orders an element among its siblings only: higher is painted later and hit first,
+and equal values keep their order in the list. A parent works the order out once and keeps it
+until its children change or one of them gets a new `ZIndex` or position type, so a raised
+panel or a sticky header costs nothing per frame. Setting `ZIndex` on an element already
+shown needs only `MarkPaintDirty()`; the parent sorts again on the next frame.
+
 ### Sticky
 
 `Sticky()` (`PositionType.Sticky`) keeps an element in the flow but holds it against an edge
