@@ -111,6 +111,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // The element whose node _previousA11yTree marks focused: the focused one when the tree
     // was built, then each focus move's (see MoveA11yFocus). Null for none.
     private ElementId? _a11yFocusId;
+    // The element the focus moved onto while it had no node in the applied tree — mounted in the
+    // same handler, as Ctrl+F mounts a find bar and focuses its field. The bridge was told the
+    // focus went nowhere; it is told where once the next rebuild has the node.
+    private ElementId? _a11yPendingFocusId;
     private bool _a11yWasActive;
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
@@ -657,14 +661,20 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// that had the focus and the one that has it now, found in one walk. A reader asking
     /// either is then answered as of now, and the next rebuild's diff, which compares against
     /// this tree, does not report the move again, late. Returns both nodes; null where the
-    /// element has none, or the tree marked no node.
+    /// element has none, or the tree marked no node. An element with no node yet is remembered
+    /// (<see cref="NotifyPendingA11yFocus"/>).
     /// </summary>
     private (AccessibilityNode? Previous, AccessibilityNode? Focused) MoveA11yFocus(Element? element)
     {
         var tree = _previousA11yTree;
         var previousId = _a11yFocusId;
         _a11yFocusId = element?.Id;
-        if (tree is null) return (null, null);
+        _a11yPendingFocusId = null;
+        if (tree is null)
+        {
+            _a11yPendingFocusId = element?.Id;
+            return (null, null);
+        }
 
         AccessibilityNode? previous = null, focused = null;
         FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
@@ -672,7 +682,24 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             previous = null;
         if (previous is not null) previous.IsFocused = false;
         if (focused is not null) focused.IsFocused = true;
+        else if (element is not null) _a11yPendingFocusId = element.Id;
         return (previous, focused);
+    }
+
+    /// <summary>
+    /// After a rebuild: tells the bridge of a focus move onto an element that had no node when it
+    /// moved, now that the tree has one and marks it focused. The move itself told the bridge the
+    /// focus went nowhere (and the element that lost it), so a reader got no focus event and
+    /// UIA's GetFocus answered nothing until the next move. Nothing when the focus has moved on,
+    /// or the element still has no node (it is not one a reader sees).
+    /// </summary>
+    private void NotifyPendingA11yFocus(AccessibilityNode tree)
+    {
+        if (_a11yPendingFocusId is not { } id) return;
+        _a11yPendingFocusId = null;
+        if (id != _a11yFocusId) return;
+        if (FindById(tree, id) is { IsFocused: true } node)
+            _accessibilityBridge.NotifyFocusChanged(node, previous: null);
     }
 
     /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
@@ -942,6 +969,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
                 _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
+                NotifyPendingA11yFocus(newTree);
             }
             _a11yLayoutRefreshPending = false;
             _lastA11yRebuildMs = nowMs;
@@ -950,6 +978,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
+            _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
         }
         if (_announcements.Count > 0)
