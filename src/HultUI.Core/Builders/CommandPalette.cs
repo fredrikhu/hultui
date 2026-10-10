@@ -1,3 +1,4 @@
+using System.Buffers;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Components;
 using HultUI.Core.Dialogs;
@@ -47,6 +48,9 @@ public sealed class CommandPalette
     private readonly Func<IEnumerable<PaletteCommand>> _commands;
     private List<PaletteCommand> _all = [];
     private IReadOnlyList<PaletteCommand> _matches = [];
+    // Each command's text past its title, joined the first time a query needs it and kept
+    // until the palette closes: the list is fixed while it is open.
+    private string?[]? _searchText;
     private string _query = "";
     private int _selected;
     private IDialogController<bool>? _dialog;
@@ -92,7 +96,7 @@ public sealed class CommandPalette
         set
         {
             _query = value ?? "";
-            _matches = Filter(_all, _query);
+            _matches = Filter(_all, _query, _searchText ??= new string?[_all.Count]);
             _selected = 0;
             _view?.Changed(reveal: true);
         }
@@ -110,6 +114,7 @@ public sealed class CommandPalette
         ArgumentNullException.ThrowIfNull(host);
         if (IsOpen) return;
         _all = _commands().ToList();
+        _searchText = null;
         _query = "";
         _matches = _all;
         _selected = 0;
@@ -168,39 +173,98 @@ public sealed class CommandPalette
         _dialog = null;
         _view = null;
         _all = [];
+        _searchText = null;
         _matches = [];
         Closed?.Invoke();
     }
 
     /// <summary>The commands matching <paramref name="query"/>, best first; all of them, in
     /// order, for an empty one. See the type's remarks for the ranking.</summary>
-    public static IReadOnlyList<PaletteCommand> Filter(IReadOnlyList<PaletteCommand> commands, string query)
+    public static IReadOnlyList<PaletteCommand> Filter(IReadOnlyList<PaletteCommand> commands, string query) =>
+        Filter(commands, query, searchText: null);
+
+    /// <summary>
+    /// <see cref="Filter(IReadOnlyList{PaletteCommand}, string)"/>, keeping each command's
+    /// <see cref="SearchText"/> in <paramref name="searchText"/> (one slot per command, null until
+    /// it is first needed) so the next query over the same list does not build it again. An open
+    /// palette keeps one for as long as it is open: a keystroke used to join every unmatched
+    /// command's text afresh.
+    /// </summary>
+    internal static IReadOnlyList<PaletteCommand> Filter(IReadOnlyList<PaletteCommand> commands, string query,
+        string?[]? searchText)
     {
         query = query.Trim();
         if (query.Length == 0) return commands;
-        return commands
-            .Select((command, index) => (command, index, score: ScoreOf(command, query)))
-            .Where(x => x.score >= 0)
-            .OrderBy(x => x.score)
-            // Ties are common — "save" matches "Save" and "Save all" with the same span — and
-            // the shorter title is the tighter match.
-            .ThenBy(x => x.command.Title.Length)
-            .ThenBy(x => x.index)
-            .Select(x => x.command)
-            .ToList();
+        var ranked = ArrayPool<Ranked>.Shared.Rent(commands.Count);
+        try
+        {
+            int count = 0;
+            for (int i = 0; i < commands.Count; i++)
+            {
+                var command = commands[i];
+                int score = FuzzyMatch.Score(command.Title, query);
+                if (score < 0)
+                {
+                    var rest = searchText is null ? SearchText(command) : searchText[i] ??= SearchText(command);
+                    // Empty: the row says nothing but its title, which did not match.
+                    if (rest.Length == 0) continue;
+                    score = FuzzyMatch.Score(rest, query);
+                    if (score < 0) continue;
+                    score += Elsewhere;
+                }
+                ranked[count++] = new Ranked(score, command.Title.Length, i);
+            }
+            Array.Sort(ranked, 0, count);
+            var matches = new List<PaletteCommand>(count);
+            for (int i = 0; i < count; i++) matches.Add(commands[ranked[i].Index]);
+            return matches;
+        }
+        finally
+        {
+            ArrayPool<Ranked>.Shared.Return(ranked);
+        }
     }
 
     /// <summary>Everything a title match scores under; a match elsewhere ranks after them all.</summary>
     private const int Elsewhere = 1_000_000;
 
-    private static int ScoreOf(PaletteCommand command, string query)
+    /// <summary>What a command is matched against when its title is not: the title, group,
+    /// detail and keywords that it has, joined by spaces. Empty when it has none but the title,
+    /// since matching the title again can only miss again.</summary>
+    private static string SearchText(PaletteCommand command)
     {
-        int score = FuzzyMatch.Score(command.Title, query);
-        if (score >= 0) return score;
-        var rest = string.Join(" ", new[] { command.Title, command.Group, command.Detail, command.Keywords }
-            .Where(s => !string.IsNullOrEmpty(s)));
-        score = FuzzyMatch.Score(rest, query);
-        return score < 0 ? -1 : Elsewhere + score;
+        if (string.IsNullOrEmpty(command.Group) && string.IsNullOrEmpty(command.Detail)
+            && string.IsNullOrEmpty(command.Keywords))
+            return "";
+        int length = -1;
+        foreach (var part in (ReadOnlySpan<string?>)[command.Title, command.Group, command.Detail, command.Keywords])
+            if (!string.IsNullOrEmpty(part)) length += part.Length + 1;
+        return string.Create(length, command, static (span, c) =>
+        {
+            int at = 0;
+            foreach (var part in (ReadOnlySpan<string?>)[c.Title, c.Group, c.Detail, c.Keywords])
+            {
+                if (string.IsNullOrEmpty(part)) continue;
+                if (at > 0) span[at++] = ' ';
+                part.CopyTo(span[at..]);
+                at += part.Length;
+            }
+        });
+    }
+
+    /// <summary>One match's place in the ranking: by score, then — ties are common, "save"
+    /// matches "Save" and "Save all" with the same span — the shorter title, the tighter match,
+    /// then list order.</summary>
+    private readonly struct Ranked(int score, int titleLength, int index) : IComparable<Ranked>
+    {
+        private readonly int _score = score;
+        private readonly int _titleLength = titleLength;
+        public readonly int Index = index;
+
+        public int CompareTo(Ranked other) =>
+            _score != other._score ? _score.CompareTo(other._score)
+            : _titleLength != other._titleLength ? _titleLength.CompareTo(other._titleLength)
+            : Index.CompareTo(other.Index);
     }
 
     // ──── View ────
