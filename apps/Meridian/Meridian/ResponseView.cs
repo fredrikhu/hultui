@@ -24,8 +24,20 @@ internal sealed class ResponseView
 {
     /// <summary>A body of at most this many lines is tokenized with its formatting, so it
     /// appears coloured rather than plain for a frame and then coloured: JSON tokenizes at
-    /// ~5 µs a line, so this is about 10 ms of a worker's time.</summary>
+    /// ~5.5 µs a line, so this is about 11 ms of a worker's time.</summary>
     internal const int ColourWithTextMaxLines = 2_000;
+
+    /// <summary>
+    /// The most lines a body is coloured at; a longer one stays plain. Ten times
+    /// <see cref="SyntaxHighlighter.DefaultMaxLines"/>, which was this pane's cap while the
+    /// tokenize ran on the UI thread. On a worker a JSON response tokenizes at ~5.5 µs a line
+    /// (a number array at ~2.9), allocating ~4 KB a line that dies young, and keeps 40 bytes
+    /// a span (~1.25 spans a line) plus the body's index of them, 4 bytes a span. The
+    /// highlighter's 2,000,000-character cap stops a JSON object response near 100,000 lines
+    /// anyway (0.54 s, 4.7 MB of spans); this one bounds a body of short lines, which that
+    /// cap lets reach ~400,000: 200,000 lines of numbers is 0.57 s and 7.6 MB.
+    /// </summary>
+    internal const int MaxColouredLines = 200_000;
 
     public required HttpResponseData Response { get; init; }
     public required bool Raw { get; init; }
@@ -128,7 +140,7 @@ internal sealed class ResponseView
         IReadOnlyList<TextSpan>[]? perLine;
         try
         {
-            perLine = SyntaxHighlighter.TokenizeLines(grammar, text, SyntaxHighlighter.DefaultMaxLines, cancellationToken);
+            perLine = SyntaxHighlighter.TokenizeLines(grammar, text, MaxColouredLines, cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
         catch { return null; }   // highlight is best-effort

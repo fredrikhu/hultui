@@ -470,11 +470,24 @@ public partial class MeridianApp
     /// <summary>Search tints merged into the syntax spans, both in absolute
     /// offsets — and sorted, because TextArea slices the list per visible line
     /// and stops at the first span past the line end (the lesson Junction's
-    /// Files view learned the hard way).</summary>
+    /// Files view learned the hard way).
+    ///
+    /// <para>Kept between builds while the spans, the text and the search stay the same: the
+    /// app rebuilds whole on every keystroke in the URL or body editor, and a merge per build
+    /// copied and sorted every span and made the body index the new list again — with find
+    /// open on an 18,884-line response 9 ms and 2.9 MB a keystroke, on a 98,004-line one
+    /// coloured ~15 ms and 14.5 MB.</para></summary>
     private IReadOnlyList<TextSpan>? DecorateResponseBody(int[] starts, IReadOnlyList<TextSpan>? syntax)
     {
         var search = _responseFind.Search;
         if (!search.HasHits) return syntax;
+
+        // The hits follow from the query, its options and the bound text (one per shown view,
+        // so its line starts name it); the tint from the current one.
+        var key = (search.Query, search.MatchCase, search.UseRegex, search.Index, search.Hits.Count);
+        if (_decorated is not null && ReferenceEquals(_decoratedSyntax, syntax)
+            && ReferenceEquals(_decoratedStarts, starts) && _decoratedSearch == key)
+            return _decorated;
 
         var current = search.Current;
         var merged = syntax is null ? new List<TextSpan>() : new List<TextSpan>(syntax);
@@ -486,8 +499,13 @@ public partial class MeridianApp
                 isCurrent ? Azimuth.Alpha(Azimuth.Accent, 0.55) : Azimuth.Alpha(Azimuth.Accent700, 0.55)));
         }
         merged.Sort(static (a, b) => a.Start.CompareTo(b.Start));
+        (_decorated, _decoratedSyntax, _decoratedStarts, _decoratedSearch) = (merged, syntax, starts, key);
         return merged;
     }
+
+    private IReadOnlyList<TextSpan>? _decorated, _decoratedSyntax;
+    private int[]? _decoratedStarts;
+    private (string Query, bool MatchCase, bool UseRegex, int Index, int Count) _decoratedSearch;
 
     // ── Headers / Cookies / Timeline ─────────────────────────────────────
 

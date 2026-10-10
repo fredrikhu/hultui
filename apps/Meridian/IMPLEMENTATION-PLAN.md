@@ -102,7 +102,7 @@ tables, Timeline mini-waterfall from P2 timings, pane flip (Ctrl+\ + <1320dip br
 sent, in-flight with greyed previous, huge body, binary hex stub, DNS, refused, TLS with
 scoped trust action, timeout). The body is pretty-printed, split and tokenized on the thread
 pool (`ResponseView`), never in a build: a body of more than 2,000 lines shows plain and takes
-its colour when the tokenize lands, the previous answer stays up greyed while the next is
+its colour when the tokenize lands (up to 200,000 lines; HultUI.Syntax's default is 20,000), the previous answer stays up greyed while the next is
 formatted, and a newer response, the other mode, another tab's response or closing the tab
 stops the work for the old one.
 Headless tests: state renders via accessibility tree; RenderLog asserts the find-bar tint

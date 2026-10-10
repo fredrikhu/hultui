@@ -449,9 +449,11 @@ static partial class Scenarios
     }
 
     /// <summary>
-    /// Meridian's response size, near the most it colours: HultUI.Syntax leaves a text of more
-    /// than 20,000 lines without spans. Meridian's survey response was 312 KB in ~22,500 lines;
-    /// this one is 368 KB in 19,013 (see <see cref="Ui.JsonResponse"/>).
+    /// Meridian's response size, near the most it coloured while it tokenized on the UI thread:
+    /// HultUI.Syntax leaves a text of more than 20,000 lines without spans unless the caller
+    /// asks for more, as Meridian has since its tokenize moved to a worker (200,000). Meridian's
+    /// survey response was 312 KB in 24,005 lines; this one is 368 KB in 19,013 (see
+    /// <see cref="Ui.JsonResponse"/>).
     /// </summary>
     private const int JsonLines = 19_000;
 

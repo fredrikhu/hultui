@@ -45,10 +45,10 @@ public class ResponseBodyWorkerTests : IDisposable
 
     /// <summary>The response lands, as the send's continuation lands it: the result set, then a
     /// rebuild.</summary>
-    private static void Arrive(MeridianApp app, string json)
+    private static void Arrive(MeridianApp app, string body, string contentType = "application/json")
     {
-        app.ActiveTab!.Result = SendResult.Ok(new HttpResponseData(200, "OK", [("Content-Type", "application/json")],
-            "application/json", new ResponseBody(BodyKind.Text, json, [], json.Length, false, null),
+        app.ActiveTab!.Result = SendResult.Ok(new HttpResponseData(200, "OK", [("Content-Type", contentType)],
+            contentType, new ResponseBody(BodyKind.Text, body, [], body.Length, false, null),
             new PhaseTimings(default, default, default, default, default, default, false, "HTTP/1.1", null),
             "http://127.0.0.1/big"));
         typeof(MeridianApp).GetMethod("MarkDirty",
@@ -61,9 +61,9 @@ public class ResponseBodyWorkerTests : IDisposable
 
     /// <summary>The spans the build used to make on the UI thread: the tokenize of the shown
     /// text, flattened by its '\n' line starts.</summary>
-    private static List<TextSpan> SynchronousSpans(string text)
+    private static List<TextSpan> SynchronousSpans(string text, int maxLines = SyntaxHighlighter.DefaultMaxLines)
     {
-        var perLine = SyntaxHighlighter.TokenizeLines("response.json", text);
+        var perLine = SyntaxHighlighter.TokenizeLines("response.json", text, maxLines, CancellationToken.None);
         Assert.NotNull(perLine);
         var lines = text.Split('\n');
         var flat = new List<TextSpan>();
@@ -218,6 +218,113 @@ public class ResponseBodyWorkerTests : IDisposable
             session.PumpFrame();
             Assert.Contains("\"id\": 90000", Body(session)!.Text);
         });
+    }
+
+    // ── Longer than the highlighter's default cap ────────────────────────
+
+    /// <summary>A response of more than 20,000 lines is coloured, to its last line, now that its
+    /// tokenize runs on a worker: it used to be drawn plain.</summary>
+    [Fact]
+    public void AResponseOfMoreThanTwentyThousandLinesIsColoured()
+    {
+        Hosted((session, app) =>
+        {
+            Arrive(app, Json(1_300, seed: 10));
+            session.PumpFrames(2);
+
+            var body = Body(session)!;
+            string text = body.Text;
+            int lines = text.Count(c => c == '\n') + 1;
+            Assert.True(lines > SyntaxHighlighter.DefaultMaxLines, $"only {lines} lines");
+            AssertSameSpans(SynchronousSpans(text, int.MaxValue), body.Spans);
+            int lastItem = text.LastIndexOf("\"id\"", StringComparison.Ordinal);
+            Assert.Contains(body.Spans!, s => s.Start >= lastItem);
+        });
+    }
+
+    /// <summary>Past <see cref="ResponseView.MaxColouredLines"/> a body stays plain.</summary>
+    [Fact]
+    public void ABodyPastTheCapStaysPlain()
+    {
+        Hosted((session, app) =>
+        {
+            // "[", a number a line, "]": one line over the cap.
+            Arrive(app, Numbers(ResponseView.MaxColouredLines - 1));
+            session.PumpFrames(3);
+
+            var body = Body(session)!;
+            Assert.Equal(ResponseView.MaxColouredLines + 1, body.Text.Count(c => c == '\n') + 1);
+            Assert.Null(body.Spans);
+        });
+    }
+
+    /// <summary>With find open, a rebuild that changes neither the spans nor the search hands
+    /// the body the same list — the app rebuilds whole on every keystroke in the URL, and the
+    /// merge copied and sorted every span each time — and moving to the next match makes a
+    /// new one, with the current tint moved.</summary>
+    [Fact]
+    public void ARebuildWithFindOpenKeepsTheMergedSpans()
+    {
+        Hosted((session, app) =>
+        {
+            Arrive(app, Json(150, seed: 11));
+            session.PumpFrames(2);
+            int syntax = Body(session)!.Spans!.Count;
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("customer-0");
+            session.PumpFrames(3);
+
+            var merged = Body(session)!.Spans;
+            Assert.Equal(syntax + 150, merged!.Count);
+
+            MarkDirty(app);
+            session.PumpFrame();
+            Assert.Same(merged, Body(session)!.Spans);
+
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            var next = Body(session)!.Spans;
+            Assert.NotSame(merged, next);
+            Assert.Equal(merged.Count, next!.Count);
+            Assert.False(merged.SequenceEqual(next), "the current match's tint did not move");
+        });
+    }
+
+    /// <summary>The kept merge belongs to the text it tinted: the next response, plain text with
+    /// as many hits for the same query and no syntax spans either, gets its own tints.</summary>
+    [Fact]
+    public void TheKeptMergeIsTheShownTexts()
+    {
+        Hosted((session, app) =>
+        {
+            Arrive(app, "alpha\nthe needle\n", "text/plain");
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("needle");
+            session.PumpFrames(3);
+            Assert.Equal(10, Assert.Single(Body(session)!.Spans!).Start);
+
+            Arrive(app, "needle first\nbeta\n", "text/plain");
+            session.PumpFrames(3);
+            Assert.StartsWith("needle", Body(session)!.Text);
+            Assert.Equal(0, Assert.Single(Body(session)!.Spans!).Start);
+        });
+    }
+
+    private static void MarkDirty(MeridianApp app) =>
+        typeof(MeridianApp).GetMethod("MarkDirty",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(app, null);
+
+    /// <summary>A JSON array of <paramref name="count"/> small numbers, one a line when pretty.</summary>
+    private static string Numbers(int count)
+    {
+        var rng = new Random(3);
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < count; i++) sb.Append(i > 0 ? "," : "").Append(rng.Next(1_000));
+        return sb.Append(']').ToString();
     }
 
     /// <summary>Compact JSON the way the survey's server sent it; pretty-printed it is about 16
