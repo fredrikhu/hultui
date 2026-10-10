@@ -355,15 +355,21 @@ public sealed class Application : IDisposable
     /// Pass <paramref name="forceRender"/> to render regardless — a host that must
     /// repaint on demand (a <c>WM_PAINT</c> after occlusion, where the back buffer's
     /// contents are undefined) needs it, and so does golden-image capture.</para>
+    ///
+    /// <para>Every call steps animations by <paramref name="delta"/>, and a tween that writes
+    /// a signal a <c>Build</c> reads, or calls <c>MarkDirty</c>, rebuilds on every step. Call
+    /// it once per frame the host may draw, as <see cref="Run"/> steps them once per frame it
+    /// may draw — not once per message.</para>
     /// </summary>
-    /// <param name="delta">Time since the previous frame, for animation.</param>
+    /// <param name="delta">Time since the previous call, for animation.</param>
     /// <param name="forceRender">Render every open window even when nothing is dirty.</param>
     public bool RunFrame(TimeSpan delta, bool forceRender = false) => RunFrameCore(delta, forceRender, allowRender: true);
 
-    /// <param name="allowRender">False lets the frame pump, drain and tick but not render,
+    /// <param name="allowRender">False lets the frame pump and drain but not render,
     /// which is how <see cref="Run"/> holds a dirty window back until the display's next
     /// interval; the dirt stays, so the next allowed frame draws it.</param>
-    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender)
+    /// <param name="tick">Whether to step animations, by <paramref name="delta"/>.</param>
+    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -383,8 +389,9 @@ public sealed class Application : IDisposable
         // Drain actions posted from background threads
         DrainMainThreadQueue();
 
-        // Tick animations (marks elements dirty as needed)
-        AnimationManager.Tick((float)delta.TotalSeconds);
+        // Tick animations (marks elements dirty as needed). Run asks for it once per frame
+        // it may draw, not once per pass (see RunUntil).
+        if (tick) AnimationManager.Tick((float)delta.TotalSeconds);
 
         // Run any inspector refresh its rate limit deferred, so the panel still
         // catches up after the inspected window goes idle mid-interval.
@@ -425,17 +432,18 @@ public sealed class Application : IDisposable
 
         var clock = _platform.TimeProvider;
         long frequency = clock.TimestampFrequency;
-        long lastPass = clock.GetTimestamp();
+        long slack = frequency / 1000;
+        long lastTick = clock.GetTimestamp();
         // Clock ticks; the earliest the next frame may render. A second ago: the first frame
         // may render at once, and starts the schedule (a virtual clock starts near 0, where a
         // deadline of 0 put the first frame on the schedule and let the next pass draw again).
-        long nextRenderAt = lastPass - frequency;
+        long nextRenderAt = lastTick - frequency;
+        // The earliest animations may step again after a step that drew nothing.
+        long nextTickAt = nextRenderAt;
 
         while (IsRunning && done?.Invoke() != true)
         {
             long now = clock.GetTimestamp();
-            var delta = clock.GetElapsedTime(lastPass, now);
-            lastPass = now;
 
             // Rendering is paced to the display. The swap interval is 0 (a vsync'd swap
             // blocks the modal resize loop), so nothing else would stop a 300 ms fade
@@ -445,8 +453,25 @@ public sealed class Application : IDisposable
             // wait below never has to be shorter than one. Unpaced (FramePacing.Unlimited,
             // or the DevTools continuous-redraw mode) renders whenever anything is dirty.
             bool unpaced = FramePacing == FramePacing.Unlimited || AnyWindowContinuousRedraw();
-            bool due = unpaced || now >= nextRenderAt - frequency / 1000;
-            if (RunFrameCore(delta, forceRender: false, allowRender: due))
+            bool due = unpaced || now >= nextRenderAt - slack;
+
+            // Animations step once per frame that may be drawn, by all the time since their
+            // last step: what a browser's requestAnimationFrame does. They stepped on every
+            // pass, and every event that ends a wait early is a pass (a 1,000 Hz mouse, a
+            // worker's post, a playing video's frames), so a tween writing a signal a Build
+            // reads rebuilt that component on each: 15 times a frame with an event every
+            // millisecond, 2.2 in Reel while its bar faded. A step that draws nothing (a pure
+            // delay, a minimized window, which is not drawn) puts the next one an interval on,
+            // so events arriving in between do not step them either.
+            bool tick = due && (unpaced || now >= nextTickAt - slack);
+            var elapsed = TimeSpan.Zero;
+            if (tick)
+            {
+                elapsed = clock.GetElapsedTime(lastTick, now);
+                lastTick = now;
+            }
+
+            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick))
             {
                 // The next deadline follows the schedule, not this render: a frame that
                 // took its slack and drew a millisecond early shifts the phase, not the
@@ -462,6 +487,9 @@ public sealed class Application : IDisposable
                 continue;
             }
 
+            if (tick && AnimationManager.HasActiveAnimations)
+                nextTickAt = now + (long)(frequency / DisplayHz());
+
             if (AnyWindowNeedsRender())
             {
                 // Dirty, but too soon: wait out what is left of the interval. An event
@@ -473,8 +501,9 @@ public sealed class Application : IDisposable
             else
             {
                 // Nothing to draw. An animation that changed nothing visible (a pure
-                // delay, e.g. the tooltip show timer) only needs ~60Hz ticks, so wait
-                // instead of busy-spinning until it fires; a post or an event wakes this.
+                // delay, e.g. the tooltip show timer) only needs a step an interval, so
+                // wait instead of busy-spinning until it fires; a post or an event wakes
+                // this.
                 _platform.WaitForEvents(16);
             }
         }

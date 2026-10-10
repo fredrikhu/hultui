@@ -183,6 +183,22 @@ target by hit-testing again, so the drop still arrives, but
 `Application.InvokeOnMainThread(MarkDirty)` keeps the gesture off the rebuild path
 altogether.
 
+### A tween rebuilds once per frame
+
+A tween's setter runs when the loop steps animations, which `Application.Run` does once
+per frame it may draw, by all the time since the last step (see
+[When a tween steps](ANIMATIONS.md#when-a-tween-steps)). A tween that writes a signal a
+`Build()` reads, or calls `MarkDirty()`, rebuilds that component once per frame drawn —
+not once per event that wakes the loop, as it did until plan 17 (15 rebuilds a frame with
+an event every millisecond; a video player's bar fading over a playing film, 2.2). Its
+setter and `OnComplete` run at most once per display interval, and a delay ends up to one
+interval late.
+
+A rebuild per frame is still a rebuild per frame: a `ToastHost` handed the app's
+`MarkDirty`, or a spinner that marks the whole app dirty on every step, rebuilds the whole
+app sixty times a second while it runs. Animate the element instead (`Animate.Opacity`, a
+`Transform`, `SpinnerElement`), or keep the animated part in a small component of its own.
+
 ---
 
 ## Component Model
