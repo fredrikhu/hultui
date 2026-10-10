@@ -82,7 +82,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    136 → 80 B (9 of 11 a11y rows −13…−39 %); stale Role/AutomationId on rebased wrappers;
    AT-SPI paths built once (−27…−34 % per Linux a11y frame); plus
    **a11y-focus-unbuilt-node** and **a11y-virtual-item-selected** (approved 2026-10-09).
-10. **reconcile-blueprint-hashset** (6) — no HashSet for empty parents (component rows
+10. ~~**reconcile-blueprint-hashset**~~ LANDED c7dffaa, bd808d4, 65cdae0, 495b0b4, 6527b0d, e1d86a1, c583ef3 (6) — no HashSet for empty parents (component rows
     −10.7…−11.8 %); **reactivity-tween-tick-per-frame** (approved; Reel 13 rebuilds per
     presented frame, 172 MB per 11 s) with the **apps-scenario-tween-signal-rebuild** suite
     row; **reactivity-scope-threadstatic** (approved, low priority).
@@ -116,6 +116,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **apps-whole-app-tween-rebuilds** (8/6, app) — Junction's spinner and remote-op tweens and `ToastHost(MarkDirty)` in Aperture/Junction/Meridian rebuild the whole app every drawn frame while animating (Junction ~186 KB per rebuild). Animate the element (`Animate.Opacity`, Transform, `SpinnerElement`) or move the animated part into its own component. Guideline example.
 - **apps-scenario-atspi-rows** (7/8) — perf-suite rows that run the AT-SPI bridge with signals recorded (any OS), so Linux a11y changes get timing and AOT numbers.
 - **a11y-atspi-role-change** (7, correctness) — an AT-SPI role change sends no signal; a client keeps the role it cached at cache-add.
 - **test-alloc-first-run-flake** (4, test reliability; in step 12) — two "allocates nothing" tests failed once each on the first run right after a build (Headless `ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing`; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame`, 22.9 B/frame); reruns pass. Likely tier-0/JIT warm-up; would flake CI. Harden the warm-up.
@@ -206,6 +207,10 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | d40d301 | a11y-atspi-snapshot-diet | AT-SPI path built once (TryFormat + span concat; WSL caught boxing on Fedora's .NET), string[] child paths, presized dictionary: ~500 → ~270 B/node; AT-SPI steps −38…−47 % (−44…−51 % with ae90f1f). Snapshots and signals identical; WSL green. No live AT-SPI client run. |
 | 2 | 94ba38d | a11y-focus-unbuilt-node | Correctness (approved): a focus move onto an element mounted in the same handler is told after the next rebuild — +1 UIA focus and AT-SPI state-changed:focused (FindBar Ctrl+F, mount+focus); GetFocus answers. Perf flat. |
 | 2 | 0912a5e | a11y-virtual-item-selected | Correctness (approved): list item nodes carry IsSelected; SelectedIndex notifies; a no-scroll move raises IsSelected on the old and new item on both bridges. UIA walk +0.2 KB/op (+2–3 %): one rebuild per move while a reader listens. |
+| 2 | c7dffaa | apps-scenario-tween-signal-rebuild | Real-loop suite row via `HeadlessSession.RunLoop` (virtual clock, 1 kHz posts; loop is `Application.RunUntil`): 15.1 rebuilds per frame at baseline. |
+| 2 | bd808d4 | reconcile-blueprint-hashset | No set for a parent with no children: 288 → 80 B per `.Children` call; component edit/reverse −10.7…−11.0 % allocKB and −9…−17 % time (JIT/AOT), tabs −8.4 %, a11y/create −10.5 %; 0 slower. |
+| 2 | 65cdae0, e1d86a1, c583ef3 | reactivity-tween-tick-per-frame | Animations step once per frame that may be drawn (approved). Row 15.1 → 1.0 rebuilds/frame, −93.7 % KB, −7/−8 % time. Reel (AOT, Vulkan, 11 s): VideoPlayer rebuilds 616–653 → 312–313, 2.1–2.2 → 1.06 per frame, UI-thread 25 → 13 MB, gen-0 1 → 0, frames 511–518. e1d86a1 fixed 65cdae0 holding drawn tweens to the 16 ms idle wait (120 Hz tween 89 → 121 fps). Minimized auto-hide and toasts run to time. |
+| 2 | 495b0b4, 6527b0d | reactivity-scope-threadstatic | `[ThreadStatic]` reactive scope (approved): 160 → 0 B per effect run; fan-out 94.4 → 16.2 KB/op (−83 %), −6 % JIT; reads off-thread or after an await no longer subscribe; DECISIONS.md updated. |
 
 ## Examined, not worth it
 
