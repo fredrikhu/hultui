@@ -5,13 +5,14 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 2
-- **Phase:** release — round 2 merged into main as 0951288 and pushed 2026-10-10 (full suite
-  passed on fa86982: 30 projects, 0 failures; origin/main was an ancestor, so the merged tree is
-  the tested one). Waiting for CI on 0951288; then cut the five app releases; then Round 3,
-  Phase survey. To resume after a pause, run in this worktree: `/loop Run the next step of the
-  performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
-  for, record it in the ledger, and commit.`
+- **Phase:** release — round 2 merged into main as 0951288; CI run 38072271269 green (test,
+  test-linux, docs). App releases tagged on 0951288 and pushed 3 + 2 (2026-10-10):
+  junction-v1.20.0, vesper-v1.20.0, meridian-v1.3.0, aperture-v1.19.0, reel-v1.4.0; installer
+  runs 38073054471, 38073054467, 38073054631, 38073089975, 38073090237 in progress. When all
+  are released with their installers: Round 3, Phase survey. To resume after a pause, run in
+  this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
+  Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** fc0f4f7 (round 2 reviews all of round 1: fc0f4f7..64ba531)
@@ -369,3 +370,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-09: the user answered all 12 round 2 questions (recommendations taken; WSL install yes). Queued items 15–18.
 - 2026-10-09: installed Mesa + Noto fonts in WSL Fedora (user approved); round 2 step 6 next.
 - 2026-10-10: round 2 full suite passed (30 projects, 0 failures); merged into main as 0951288, pushed 64ba531..0951288, primary fast-forwarded.
+- 2026-10-10: CI green on 0951288 (run 38072271269); tagged and pushed the five app releases (3 + 2).
