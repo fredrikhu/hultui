@@ -97,8 +97,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 14. ~~**gl-vk-one-submit-per-frame + gl-vk-resize-duplicate-frames**~~ DONE 61edb19 (declined), b471108 (3) — Flush is the 2nd
     largest share in every app (14–36 %); 3 → 1 frames per resize step. Needs timing.
 
-15. **a11y-atspi-active-on-status + a11y-value-for-text + a11y-richtext-text-snapshot +
-    a11y-range-value-events** (7; approved 2026-10-09) — gate the Linux bridge on
+15. ~~**a11y-atspi-active-on-status + a11y-value-for-text + a11y-richtext-text-snapshot +
+    a11y-range-value-events**~~ LANDED cfb5a1a, 2170222, 72a4f96, 9c8bf91, 6b8bbe4, 074d898, 333d7de (7; approved 2026-10-09) — gate the Linux bridge on
     org.a11y.Status (always-on override); drop whole-text Value changes for text-pattern
     elements (rich text keystroke ~1.5 MB UIA / ~750 KB AT-SPI); lazy rich text tables;
     announce Slider/ProgressBar values (UIA RangeValue, AT-SPI Value).
@@ -116,6 +116,10 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **a11y-videoplayer-layout-refresh** (7) — a playing VideoPlayer rebuilds the a11y tree ~10.5×/s from the bar's per-frame layout refresh (100 ms coalescer). Investigate.
+- **a11y-textarea-text-pattern** (7) — TextArea has no text pattern, so it keeps the whole-text Value change; give it one (like the rich text editor).
+- **a11y-atspi-richtext-tables** (7) — with an AT-SPI reader, the rich text tables are built per keystroke (~2 MB); exact-size arrays, no '
+' rescan (~190 KB). Small.
 - **apps-tokenize-on-ui-thread** (8, app) — Junction's markdown code fences tokenize during Build (`MdCodeSpans`, JunctionApp.Markdown.cs:119; `ExtensionForLanguage`), loading the TextMate registry and grammar on the UI thread (~5 MB, ~7 ms AOT, 30–40 ms JIT on first use). Move to a worker (Meridian's is step 16).
 - **apps-whole-app-tween-rebuilds** (8/6, app) — Junction's spinner and remote-op tweens and `ToastHost(MarkDirty)` in Aperture/Junction/Meridian rebuild the whole app every drawn frame while animating (Junction ~186 KB per rebuild). Animate the element (`Animate.Opacity`, Transform, `SpinnerElement`) or move the animated part into its own component. Guideline example.
 - **apps-scenario-atspi-rows** (7/8) — perf-suite rows that run the AT-SPI bridge with signals recorded (any OS), so Linux a11y changes get timing and AOT numbers.
@@ -218,6 +222,11 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 6457f94 | runtime-syntax-registry-first-use | `CanHighlight` answers from a 297-extension table checked against the registry. Vesper's first code folder AOT 7.0 → 2.2 ms and 5.3 MB → 761 KB (JIT 32–38 → 4.4 ms); the TextMate registry loads at the first tokenize instead. |
 | 2 | b23b203, 40d054d, 28fbeb8, 05414ab | text-textarea-measure-lines | Width per hard line measured without layout (`IRenderContext.MeasureTextWidth`, bit-equal; 4 MB width cache with a weight); last frame's line strings reused; shape bound 24 → 8 MB. JSON open −21 % JIT / −20 % AOT (median −35 %), 6,599 → 1,903 KB; typing in 2,000 lines −22 %, 465 → 222 KB; undo-redo −28 %; steady TextArea repaint 2.2 KB → 0; 10,000-line JSON keystroke 1.66 ms even at 8 MB (was 25 ms at 8 MB). Meridian first response frame 12.4 → 5.8 MB. Retained after closing the JSON 9.6 → 4.3 MB. JSON wheel +3.4 KB (lines shaped when drawn). Line starts identical over ~2 M lines. AOT TableView sort +5…7 % unproven placement. |
 | 2 | b471108 | gl-vk-resize-duplicate-frames | One live-resize frame per change, not per event: frames per SetWindowPos step 2–3 → 1 on GL, F16 and 8-bit, never 0, never at an old size. GL drag CPU −33 % (AOT −31 %), 8-bit −13…−33 %, F16 flat (driver-side swapchain rebuild); F16 drag submits Skia 278 → 120, host 119 → 40. Held live-resize timer 90 frames/s → 0 with video still drawn (mpv 0 dropped). Resize stretch 0 of ~1,000 samples. |
+| 2 | 2170222 | a11y-atspi-active-on-status | Linux bridge active only while org.a11y.Status says AT is on (HULTUI_ACCESSIBILITY=1 overrides). 603-node keystroke with no reader 212.8 KB → 1.54 KB (= no bridge). Live-verified in WSL with pyatspi (off: 1-object tree, 0 events; on: full tree; off/on republishes). |
+| 2 | 72a4f96 | a11y-value-for-text | No Value change for nodes that offer text (Chromium-cited): UIA rich text keystroke −16.7 % JIT / −14.0 % AOT; the whole-document ValueValue (1.5 MB BSTR) and AT-SPI accessible-value (~750 KB) gone; Value still readable on request. TextArea unchanged (no text pattern yet). |
+| 2 | 9c8bf91, cfb5a1a | a11y-richtext-text-snapshot | Rich text editor's accessible text made on request (versioned). a11y/type in rich text 2,100 → 54 KB/op, −43 % JIT / −48 % AOT (UIA −39/−46 %). Streams identical. AT-SPI with a reader still builds it per keystroke (its text-changed needs it). |
+| 2 | 6b8bbe4 | a11y-range-value-events | Range on nodes; UIA RangeValue property changes; AT-SPI Value interface + accessible-value; told at most every 250 ms (Chromium's media timeupdate rate). Progress tick rebuilds 60 → 5 per second, −45 % JIT / −52 % AOT; VideoPlayer seek now announced (0 → 19 per 10 s). Live-verified. |
+| 2 | 074d898, 333d7de | linux-bridge-sync-context | Correctness (found by the live check): the Linux bridge's connecting constructor hung under HultUI's UI SynchronizationContext. Now connects at once; samples/AtSpiVerify bulk check PASS (also live-verifies d40d301). |
 
 ## Examined, not worth it
 
