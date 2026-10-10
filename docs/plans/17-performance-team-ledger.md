@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; step 1 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; step 1 landed, step 2 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
   and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
   only their (user) parts. To resume after a pause, run in this worktree:
@@ -48,7 +48,7 @@ Needs the user; the rest of their step can go ahead.
 
 Round 2 regressions first, then value per cost.
 
-1. **gl-vk-minimized-children-flag + gl-vk-undrawn-sources-walk** (3; regressions from 82e382b and
+1. ~~**gl-vk-minimized-children-flag + gl-vk-undrawn-sources-walk**~~ LANDED dd3dec3, 8cd854f (3; regressions from 82e382b and
    7e52ff5) — the minimized branch returns before `ClearAllFlags`, so `DirtyFlags.Children` stays
    set and, with an AT client listening, the a11y tree is rebuilt every loop pass (2,016 elements
    7.0 MB/s GL, 10.8 MB/s Vulkan; 5,016 elements 26.9 MB/s) until restore; `CollectGpuSources`
@@ -276,6 +276,8 @@ Re-ranked by the round 4 survey.
 | 2 | 337140a | wsl-shaper-real-fonts | d049be7 bit-identical on real Linux faces: 116,438 shaper calls, 0 differences, 80 faces, 0 missing glyphs in every script; Text 192/192, goldens 39/39 in WSL. New test that the corpus reaches real glyphs (mutation caught). |
 | 2 | 595b8dd | wayland-minimized-restore | Correctness (found in WSL): after the app minimizes its own window on Wayland, SDL keeps the minimized flag after a restore, so since 82e382b the window stayed undrawn (0 frames in 15 s). A focus gain after a minimize now ends the minimized state on Wayland. Also verified: 0f5816a on Mesa gets depth 24/stencil 8 anyway (no stencil-only config; no saving, no risk, 48 contexts, 0 failures); Vulkan on lavapipe and Dozen pixel-exact through resizes, validation 0 messages; destroy-first not taken on Linux. WSL Linux suite: 9,917 passed, 0 failed. |
 | 3 | e0b816f | vesper-grid-resize | User report (2026-10-10): after a window resize the thumbnail area kept the old width until a key press. Brief and Thumbnail grids are sized in the build from the window, but a resize rebuilt only for a scale change or a wrapped diff/viewer. Now rebuilds when either pane shows Brief or Thumbnails. Correctness; two headless tests (fail without it). |
+| 3 | dd3dec3 | gl-vk-minimized-children-flag | Regression fix (82e382b): a change made while minimized rebuilds the a11y tree once, not every loop pass; the root also keeps paint dirt so the restore draws (a style- or layout-only change while minimized now draws at restore too). One element added while minimized, UIA listening, real window never focused: a11y rebuilds 61/s → 0; GL 2,016 elements 10.8 MB/s → 29 B/s, UI 33.8 → 12 Mcyc/s; Vulkan 10.8 MB/s → 10.7 KB/s (display-colour poll); 5,016 elements 26.8 MB/s → 29 B/s, 69–74 → 21–22 Mcyc/s. `HULTUI_A11Y=0` unchanged. Perf suite 0 slower/faster. MinimizedWindowTests (mutation: 31 builds for 1). |
+| 3 | 8cd854f | gl-vk-undrawn-sources-walk | Regression fix (7e52ff5): a dirty minimized window walks for GPU sources only while one can exist (process-wide count of live `GpuFrameSink`s and of other `IGpuImageSource`s set on images). Tree visits 122k–447k/s → 0 without video; UI −10…−20 % Mcyc/s; what is served unchanged (7e52ff5's real-window tests 7/7). Both commits: GL 31–35 → 7.7–8.5 Mcyc/s, Vulkan 33 → 9.6–10.1 while minimized with a change. Perf suite 0 slower/faster (richtext/open min noise, median −1 %). Remaining: the per-pass frame start of a dirty minimized window (~60/s) is step 10's. |
 
 ## Examined, not worth it
 
@@ -481,3 +483,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   FIXED_EXTENT opt-in is broken. Questions now 15.
 - 2026-10-10: the user took the recommendations on 14 (yes, fix the opt-in) and 15 (not now);
   questions 1–13 still open.
+- 2026-10-11: round 3 build resumed. Step 1 landed dd3dec3, 8cd854f (minimized-window
+  regressions). Guideline notes: dispose MediaPlayer and web view controllers when they close (a
+  live GpuFrameSink makes a dirty minimized window walk its tree); an app's own IGpuImageSource is
+  released by setting Source = null.
