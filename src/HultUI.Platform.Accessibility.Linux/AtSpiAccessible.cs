@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
@@ -102,7 +103,18 @@ internal sealed class AtSpiAccessible
 
     /// <summary>Builds the object path for a node from its element id (root is well-known).</summary>
     public static string PathFor(AccessibilityNode node, bool isRoot) =>
-        isRoot ? AtSpiConstants.RootPath : AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
+        isRoot ? AtSpiConstants.RootPath : PathFor(node.ElementId);
+
+    /// <summary>The object path of an element that is not the root: the id written straight into
+    /// the path's one string. Adding the id to the prefix made the id's own string first, then
+    /// the path, and the snapshot makes a path for every node on every rebuild. (Not an
+    /// interpolated string: until the JIT optimizes it, its generic append boxes the id.)</summary>
+    public static string PathFor(ElementId id)
+    {
+        Span<char> digits = stackalloc char[20];   // a ulong has at most 20 digits
+        id.Value.TryFormat(digits, out int length, provider: CultureInfo.InvariantCulture);
+        return string.Concat(AtSpiConstants.AccessiblePathPrefix.AsSpan(), digits[..length]);
+    }
 
     /// <summary>
     /// The application's name on the bus, which a screen reader announces for it: the entry
@@ -116,18 +128,36 @@ internal sealed class AtSpiAccessible
 
     public static AtSpiAccessible From(
         AccessibilityNode node, bool isRoot, string parentPath, int indexInParent, float scale)
+        => From(node, PathFor(node, isRoot), isRoot, parentPath, indexInParent, scale, ChildPathsOf(node));
+
+    /// <summary>The paths of a node's children, in order, in an array of the exact length.</summary>
+    public static string[] ChildPathsOf(AccessibilityNode node)
+    {
+        var children = node.Children;   // by index: foreach over the interface boxes an enumerator
+        if (children.Count == 0) return [];
+        var paths = new string[children.Count];
+        for (int i = 0; i < paths.Length; i++)
+            paths[i] = PathFor(children[i].ElementId);
+        return paths;
+    }
+
+    /// <summary>
+    /// The object for <paramref name="node"/>, published at <paramref name="path"/>, listing its
+    /// children at <paramref name="childPaths"/>. The bridge's walk makes each path once: it lists
+    /// a child under its parent and publishes the child at the same string.
+    /// </summary>
+    public static AtSpiAccessible From(
+        AccessibilityNode node, string path, bool isRoot, string parentPath, int indexInParent, float scale,
+        string[] childPaths)
     {
         uint role = isRoot ? AtSpiConstants.RoleApplication : RoleOf(node);
-        var childPaths = new List<string>(node.Children.Count);
-        foreach (var child in node.Children)
-            childPaths.Add(PathFor(child, isRoot: false));
 
         // Bounds are in layout units; AT-SPI reports device pixels.
         var rect = node.BoundingRect;
         return new AtSpiAccessible
         {
             ElementId = node.ElementId,
-            Path = PathFor(node, isRoot),
+            Path = path,
             IsRoot = isRoot,
             Role = role,
             // The root is the application, named as one; the window's content is its children.
