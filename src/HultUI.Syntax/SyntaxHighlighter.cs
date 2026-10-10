@@ -94,9 +94,18 @@ public static class SyntaxHighlighter
     // oversized files skip highlighting entirely, and a file that tokenizes
     // slowly gets whatever lines fit in the budget (the rest stay uncolored).
     private const int MaxChars = 2_000_000;
-    private const int MaxLineCount = 20_000;
     private static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan FileBudget = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The most lines <see cref="TokenizeLines(string, string)"/> colours: a text with more
+    /// gets no spans at all. A caller that tokenizes on a worker and can stop a tokenize it
+    /// no longer wants may pass its own cap to
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken)"/>; texts are still
+    /// held to 2,000,000 characters and three seconds, after which the remaining lines stay
+    /// uncoloured.
+    /// </summary>
+    public const int DefaultMaxLines = 20_000;
 
     /// <summary>
     /// Whether a grammar exists for <paramref name="path"/> — i.e. whether tokenizing
@@ -122,13 +131,25 @@ public static class SyntaxHighlighter
     /// (empty for lines with nothing to color; offsets are line-relative), or
     /// null when the extension has no grammar or the file is too large.
     /// </summary>
-    public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text)
+    public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text) =>
+        TokenizeLines(path, text, DefaultMaxLines, CancellationToken.None);
+
+    /// <summary>
+    /// <see cref="TokenizeLines(string, string)"/> for a caller on a worker: a text of more
+    /// than <paramref name="maxLines"/> lines gets null, and <paramref name="cancellationToken"/>
+    /// is checked before every line, so a tokenize nobody wants any more — a newer response,
+    /// a closed tab — throws <see cref="OperationCanceledException"/> within a line and lets
+    /// the next one have the gate. Tokenizes run one at a time.
+    /// </summary>
+    public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text, int maxLines,
+        CancellationToken cancellationToken)
     {
         if (text.Length > MaxChars) return null;
+        cancellationToken.ThrowIfCancellationRequested();
         lock (Gate)
         {
             var grammar = GrammarFor(path);
-            return grammar == null ? null : Tokenize(grammar, text);
+            return grammar == null ? null : Tokenize(grammar, text, maxLines, cancellationToken);
         }
     }
 
@@ -282,10 +303,11 @@ public static class SyntaxHighlighter
 
     // ── Tokenization ─────────────────────────────────────────────────────
 
-    private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, string text)
+    private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, string text, int maxLines,
+        CancellationToken cancellationToken)
     {
         var lines = SplitLines(text);
-        if (lines.Count > MaxLineCount) return null;
+        if (lines.Count > maxLines) return null;
 
         var result = new IReadOnlyList<TextSpan>[lines.Count];
         IStateStack? state = null;
@@ -294,6 +316,7 @@ public static class SyntaxHighlighter
 
         for (int i = 0; i < lines.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             result[i] = [];
             if (sw.Elapsed > FileBudget) continue;
 

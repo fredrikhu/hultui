@@ -57,6 +57,60 @@ public class HighlighterConcurrencyTests
             + $"{tokenizeMs}ms tokenize ran — they are queueing behind it again");
     }
 
+    /// <summary>A tokenize nobody wants any more stops within a line of being told, and gives
+    /// the gate to the next: Meridian stops a large response's tokenize when a newer response
+    /// arrives or its tab closes, and the newer one must not wait for the stale one to finish.</summary>
+    [Fact]
+    public async Task ACancelledTokenizeStopsAndTheNextOneRuns()
+    {
+        var big = CSharp(3000);
+        Assert.NotNull(SyntaxHighlighter.TokenizeLines("warm.cs", CSharp(10)));
+
+        var whole = Stopwatch.StartNew();
+        Assert.NotNull(SyntaxHighlighter.TokenizeLines("big.cs", big, int.MaxValue, CancellationToken.None));
+        whole.Stop();
+
+        using var stop = new CancellationTokenSource();
+        using var started = new ManualResetEventSlim();
+        var stopped = new Stopwatch();
+        var run = Task.Run(() =>
+        {
+            started.Set();
+            return SyntaxHighlighter.TokenizeLines("big.cs", big, int.MaxValue, stop.Token);
+        });
+        Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+        Thread.Sleep(15);   // well inside the tokenize
+        stopped.Start();
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        stopped.Stop();
+
+        Assert.True(whole.ElapsedMilliseconds > 60,
+            $"the whole tokenize took only {whole.ElapsedMilliseconds}ms, too short for this test to cancel inside it");
+        Assert.True(stopped.ElapsedMilliseconds < whole.ElapsedMilliseconds / 4,
+            $"the tokenize ran on for {stopped.ElapsedMilliseconds}ms after it was cancelled; the whole one takes {whole.ElapsedMilliseconds}ms");
+
+        // The gate is free: the next tokenize runs.
+        Assert.NotNull(SyntaxHighlighter.TokenizeLines("after.cs", CSharp(10), int.MaxValue, CancellationToken.None));
+        // And one cancelled before it starts never takes it.
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            SyntaxHighlighter.TokenizeLines("never.cs", big, int.MaxValue, new CancellationToken(canceled: true)));
+    }
+
+    /// <summary>The line cap is the caller's; the two-argument overload keeps the default.</summary>
+    [Fact]
+    public void TheLineCapIsTheCallers()
+    {
+        var text = CSharp(30);
+        Assert.Null(SyntaxHighlighter.TokenizeLines("a.cs", text, 29, CancellationToken.None));
+        Assert.Equal(30, SyntaxHighlighter.TokenizeLines("a.cs", text, 30, CancellationToken.None)!.Length);
+
+        var overDefault = string.Join("\n", Enumerable.Repeat("1,", SyntaxHighlighter.DefaultMaxLines + 1));
+        Assert.Null(SyntaxHighlighter.TokenizeLines("a.json", overDefault));
+        Assert.Equal(SyntaxHighlighter.DefaultMaxLines + 1,
+            SyntaxHighlighter.TokenizeLines("a.json", overDefault, SyntaxHighlighter.DefaultMaxLines + 1, CancellationToken.None)!.Length);
+    }
+
     [Fact]
     public void ConcurrentTokenizesStillProduceTheSameSpans()
     {
