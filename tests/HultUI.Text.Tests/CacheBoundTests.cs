@@ -110,23 +110,6 @@ public class CacheBoundTests
     }
 
     [Fact]
-    public void ADocumentOfOrdinaryLines_StaysWholeForTheNextKeystroke()
-    {
-        // A TextArea measures every line that fits again on each keystroke, and finds it in the
-        // shape cache. As many lines as the count bound allows, of 55 characters, must all
-        // still be there the next time round.
-        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
-        var lines = Enumerable.Range(0, 16_384)
-            .Select(i => $"    \"field_{i:00000}\": \"value {i * 7919 % 1_000_000:000000} with some words here\",")
-            .ToArray();
-        Assert.All(lines, l => Assert.Equal(55, l.Length));
-        var first = lines.Select(l => pipeline.Layout(l, Style, float.PositiveInfinity, 1)).ToArray();
-
-        for (int i = 0; i < lines.Length; i++)
-            Assert.Same(first[i], pipeline.Layout(lines[i], Style, float.PositiveInfinity, 1));
-    }
-
-    [Fact]
     public void ADocumentInOneLabel_StaysCachedBesideTheLabelsAroundIt()
     {
         // A whole document in one wrapped label lays out to more than the layout cache's bound.

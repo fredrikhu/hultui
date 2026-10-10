@@ -49,14 +49,17 @@ public sealed class TextPipeline
     // So each cache is also bounded by an estimate of the bytes its entries keep alive
     // (ShapedBytes, WordBytes, LayoutBytes, WidthBytes), least recently used out first.
     //
-    // The shape cache's bound is the count's worth of an ordinary document's lines (16,384
-    // of 55 characters), because a TextArea measures every line that fits again on each
-    // keystroke and finds it here: with 8 MB, typing in a 10,000-line JSON document went
-    // from 2 to 26 ms a keystroke. Longer lines get fewer entries. The word and layout
-    // bounds hold all that the perf suite, Junction and Vesper Commander find in them
-    // again: ordinary words fill the word cache's 8,192 entries with ~2 MB, and no scenario
-    // reuses more than ~1.5 MB of laid-out text.
-    internal const long ShapeCacheBytes = 24L << 20;
+    // The shape cache holds what a frame draws and lays out twice: a list or grid of labels,
+    // measured and then arranged, and the lines a TextArea shows. 8 MB holds 5,000 labels of a
+    // few words; at 4 MB the perf suite's 5,000-block rich text document no longer fitted and
+    // took twice as long to open. (It was 24 MB while a TextArea found each of its lines' widths
+    // here on every keystroke — 8 MB made typing in a 10,000-line JSON document go from 2 to
+    // 26 ms — until the TextArea kept its own widths.) The word and layout bounds hold all that
+    // the perf suite, Junction and Vesper Commander find in them again: ordinary words fill
+    // the word cache's 8,192 entries with ~2 MB, and no scenario reuses more than ~1.5 MB of
+    // laid-out text. The width cache holds the distinct lines of a 19,000-line JSON response
+    // (~7,000 of them, ~1.8 MB) with room for the next one's.
+    internal const long ShapeCacheBytes = 8L << 20;
     internal const long WordCacheBytes = 4L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
     internal const long WidthCacheBytes = 4L << 20;
