@@ -3089,7 +3089,12 @@ public partial class CommanderApp : Component, IDisposable
         // build is what corrects it once the frame has been laid out at the new size. Without
         // this call nothing rebuilds at all on a resize, so the settle is never registered
         // and never runs — it is only ever scheduled from a build.
-        if (scaleChanged || (_settings.DiffWrap && (_diffOpen || _viewerOpen))) MarkDirty();
+        // The Brief and Thumbnail grids are sized in the build too (tiles per row, rows per
+        // column, an explicit width from the window), so without a build they keep the old
+        // window's geometry until something else happens to rebuild — a key press, a decode.
+        bool gridView = ViewOf('L') is ViewMode.Brief or ViewMode.Thumbnails
+                     || ViewOf('R') is ViewMode.Brief or ViewMode.Thumbnails;
+        if (scaleChanged || gridView || (_settings.DiffWrap && (_diffOpen || _viewerOpen))) MarkDirty();
     }
 
     /// <summary>
