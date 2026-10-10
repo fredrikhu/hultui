@@ -337,6 +337,12 @@ A check that reports the same thing whether the code works or not reads as evide
   On the chained scRGB MAILBOX swapchain the old harness read 0 of 80 resizes stretched, while a
   thread sampling the screen during them found 72% of the composed frames scaled. Sample the
   screen while the resize is happening.
+- **A frame per event is not a frame per change.** A `SetWindowPos` step raises RESIZED and
+  PIXEL_SIZE_CHANGED for one size, a growing step a WM_PAINT besides, and SDL's live-resize timer
+  sends an EXPOSED every ~10 ms while an edge is held or the window is moved. The event watch drew
+  a whole frame for each: three a step at one size (2026-10-10: one now; the timer draws only a
+  window with something new). The converse holds too: more frames than resizes says nothing about
+  whether the frame at the new size was drawn. Count the steps that drew none.
 - **A fallback that was never exercised.** The GL fallback was "verified across the matrix", but
   only the environment override had run. The fallback itself first ran under fault injection
   (`VK_LOADER_VENDOR_ID_FILTER=0x1234` for a driver with no GPU, `VK_DRIVER_FILES` at a missing

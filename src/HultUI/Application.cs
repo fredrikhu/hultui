@@ -308,17 +308,33 @@ public sealed class Application : IDisposable
     ///
     /// <para>It costs about 36% more resize frames while a drag is in progress, which is the
     /// right trade: those frames are the ones the user is looking at.</para>
+    ///
+    /// <para>A resize, when the platform flagged one (a new size, or an area Windows asked to
+    /// have painted): laid out again, Resized raised, drawn. Anything else — the second event
+    /// of a step, SDL's live-resize timer every ~10 ms while an edge is held or the window is
+    /// moved — draws only a window with something new to show: one that is dirty, or one whose
+    /// posted work is waiting, which the held loop cannot run. That is how a video keeps
+    /// playing while its window is moved: its next frame is posted, and the draw takes it from
+    /// the decoder. Each of those events was a whole resize frame before, three to a step of a
+    /// drag at one size, and one every ~10 ms of the same picture while the mouse held still.</para>
     /// </summary>
-    private static void RenderLiveResizeFrame(Window window)
+    private void RenderLiveResizeFrame(Window window)
     {
         var platform = window.PlatformWindow;
-        long now = Environment.TickCount64;
-
-        platform.MakeCurrent();
-        window.OnWindowResized();
-        window.RenderFrame();
-        platform.LastResizeRenderTick = now;
-        platform.ResizePending = false;
+        if (platform.ResizePending)
+        {
+            long now = Environment.TickCount64;
+            platform.MakeCurrent();
+            window.OnWindowResized();
+            window.RenderFrame();
+            platform.LastResizeRenderTick = now;
+            platform.ResizePending = false;
+        }
+        else if (window.NeedsRender || !_mainThreadQueue.IsEmpty)
+        {
+            platform.MakeCurrent();
+            window.RenderFrame();
+        }
     }
 
     /// <summary>

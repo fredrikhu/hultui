@@ -175,21 +175,27 @@ internal static class Program
     private static int Resizes(RendererKind renderer, int count, bool newSizes)
     {
         using var app = new Application("vulkan-probe", 640, 400, renderer: renderer);
+        int frames = 0;
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
-            Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
+            Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF")),
+            Canvas.New(_ => frames++).Width(1f).Height(1f)));
         for (int i = 0; i < 12; i++)
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
 
         nint hwnd = app.PrimaryWindow.NativeHandle;
         var times = new double[count];
+        int inside = 0, without = 0;
         for (int i = 0; i < count; i++)
         {
             int width = newSizes ? 1000 + 24 * (i + 1) : i % 2 == 0 ? 1100 : 1000;
             int height = newSizes ? 700 + 16 * (i + 1) : i % 2 == 0 ? 760 : 700;
+            int before = frames;
             long start = System.Diagnostics.Stopwatch.GetTimestamp();
             SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
             times[i] = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            inside += frames - before;
+            if (frames == before) without++;
             for (int f = 0; f < 2; f++)
                 app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
         }
@@ -197,6 +203,8 @@ internal static class Program
         Array.Sort(times);
         Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"probe: {count} resizes, median {times[count / 2]:0.0} ms, max {times[^1]:0.0} ms"));
+        // Drawn from the event watch, before SetWindowPos returned.
+        Console.WriteLine($"probe: {inside} frames inside {count} resizes, {without} without one");
         Console.WriteLine("probe: done");
         return 0;
     }

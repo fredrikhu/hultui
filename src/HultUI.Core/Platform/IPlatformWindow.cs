@@ -102,8 +102,11 @@ public interface IPlatformWindow : IDisposable
     bool ActivatedPending { get; set; }
 
     /// <summary>
-    /// Invoked by platforms whose native resize runs a modal loop (Win32) to
-    /// render a throttled frame mid-resize. Headless platforms never call it.
+    /// Invoked by platforms whose native resize runs a modal loop (Win32) to draw a frame
+    /// from inside it, never throttled. The framework draws a resize frame when
+    /// <see cref="ResizePending"/> is set, so a platform sets it first for a new size or an
+    /// area the OS asked to have painted; otherwise it draws only a window with something new
+    /// to show. Headless platforms never call it.
     /// </summary>
     Action? LiveResizeFrame { get; set; }
 

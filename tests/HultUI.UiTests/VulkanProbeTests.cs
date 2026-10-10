@@ -205,6 +205,35 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
+    /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
+    /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217
+    /// host submits in an 80-step drag on the half-float swapchain. Never none: nothing comes
+    /// round again inside Win32's modal size loop, and a frame skipped there was the stretch.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    public void EachStepOfAResize_DrawsOneFrame(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through SetWindowPos
+        const int resizes = 16;
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = variant == "f16-mailbox" ? "1" : "0",
+            ["HULTUI_VULKAN_PRESENT"] = variant == "f16-mailbox" ? "mailbox" : null,
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+        }, $"--resizes={resizes} --new-sizes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        var frames = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: (\d+) frames inside (\d+) resizes, (\d+) without one");
+        Assert.True(frames.Success, run.Output);
+        int inside = int.Parse(frames.Groups[1].Value), without = int.Parse(frames.Groups[3].Value);
+        Assert.True(without == 0, $"{without} of {resizes} resizes drew no frame inside SetWindowPos:\n{run.Output}");
+        Assert.True(inside == resizes, $"{inside} frames inside {resizes} resizes:\n{run.Output}");
+    }
+
+    /// <summary>
     /// A resize frees the half-float offscreen it replaces. Left to Skia's scratch pool, which
     /// keeps a texture for a later surface of exactly its size, every size the window passed
     /// through held its offscreen (width × height × 8 bytes) until the context's 256 MB budget

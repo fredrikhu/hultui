@@ -671,8 +671,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     if (!evt->window.windowID.Equals(window.WindowId))
                         break;
 
-                    window.UpdateSize();
-                    window.ResizePending = true;
+                    bool changed = window.UpdateSize();
 
                     // Win32 enters a modal resize loop (WM_ENTERSIZEMOVE) that
                     // blocks SDL_PollEvent until the mouse is released. The
@@ -684,8 +683,30 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     // EXPOSED of its own; a frame drawn from here then cleared the dirty flags
                     // without revealing anything, the loop saw nothing left to draw, and the
                     // first frame that uncloaks it never came.
-                    if (OperatingSystem.IsWindows() && window._shown)
-                        window.LiveResizeFrame?.Invoke();
+                    if (!OperatingSystem.IsWindows() || !window._shown)
+                    {
+                        window.ResizePending = true;
+                        break;
+                    }
+
+                    // One frame for each change, not one for each event. A step of a resize
+                    // raises RESIZED and PIXEL_SIZE_CHANGED for the same new size, growing adds
+                    // a WM_PAINT for the area it exposed, and SDL's live-resize timer sends an
+                    // EXPOSED (data1 1) every ~10 ms while an edge is held still or the window is
+                    // moved: each was a whole frame, relaid out, three to a step. Now a new size,
+                    // and a WM_PAINT (data1 0: Windows wants that area painted), draw as a resize;
+                    // any other event draws only a window with something new to show
+                    // (Application.RenderLiveResizeFrame). The frame at a new size always draws:
+                    // nothing comes round again inside the modal loop.
+                    if (changed || (evt->type == (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED && evt->window.data1 == 0))
+                        window.ResizePending = true;
+                    long presented = window._presents;
+                    window.LiveResizeFrame?.Invoke();
+                    // A frame covers the whole client area, so it is painted; told so, Windows
+                    // does not ask for the area a growing step exposed with a WM_PAINT of its
+                    // own, which drew that size a second time.
+                    if (window._presents != presented && OperatingSystem.IsWindows())
+                        ValidateRect(window.GetWin32Hwnd(), 0);
                     break;
             }
         }
@@ -1135,6 +1156,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public void SwapBuffers()
     {
+        _presents++;
         // Vulkan has already presented inside Surface.Present(): the swapchain image is
         // handed to the presentation engine there, because that is where the frame's work
         // is known to be finished. There is nothing left to swap.
@@ -1473,6 +1495,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
     }
     private bool _shown;
+
+    /// <summary>Frames presented, for the live-resize watch to tell whether its call drew one.</summary>
+    private long _presents;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int ValidateRect(nint hwnd, nint rect);
 
     public void SetCursor(CursorType cursor)
     {
