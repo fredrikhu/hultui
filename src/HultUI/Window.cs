@@ -849,6 +849,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
     private readonly List<IGpuImageSource> _undrawnSources = [];
 
+    /// <summary>How many times this window has looked through its tree for GPU sources to serve
+    /// while it was not drawn. Tests read it: the walk is what a window with none is spared.</summary>
+    internal int UndrawnSourceWalks { get; private set; }
+
     /// <summary>
     /// Serves the GPU image sources of a window that is not being drawn (minimized), through
     /// <see cref="IGpuImageSource.ServiceUndrawn"/>. Such a source can be a producer that
@@ -859,6 +863,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// </summary>
     private void ServiceUndrawnSources()
     {
+        // The walk visits every element, on every pass a minimized window is dirty, and most
+        // windows have no GPU source for it to find: a looping tween over 2,015 elements was
+        // 123,000 visits a second. Only a live sink, or an image holding a source of another
+        // kind, can be found.
+        if (!GpuFrameSink.MayNeedUndrawnService) return;
+        UndrawnSourceWalks++;
         CollectGpuSources(_root!, _undrawnSources);
         for (int i = 0; i < _overlays.Count; i++)
             CollectGpuSources(_overlays[i].Content, _undrawnSources);

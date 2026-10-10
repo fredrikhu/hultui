@@ -1,6 +1,8 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
 
@@ -86,5 +88,125 @@ public class MinimizedWindowTests
             Assert.Equal(builds + change, root.Builds);
             Assert.True(Contains(bridge.CurrentTree!, $"change {change}"));
         }
+    }
+
+    // ── GPU image sources ──
+    //
+    // A minimized window still serves the GPU sources in its tree (a video: mpv waits for its
+    // frames to be taken), and finding them is a walk of the whole tree on every pass the window
+    // is dirty. It looks only while one can exist: a live GpuFrameSink, or an image holding a
+    // GPU source of another kind.
+
+    /// <summary>A producer that never has a frame; the sink in front of it is what gets served.</summary>
+    private sealed class IdleRenderer : IGpuFrameRenderer
+    {
+        public GpuSinkMode? Decided;
+        public void OnModeDecided(GpuSinkMode mode) => Decided = mode;
+        public void PrepareGL(Func<string, nint> getProcAddress) { }
+        public bool TryGetFrameSize(out int width, out int height)
+        {
+            width = height = 0;
+            return false;
+        }
+        public bool RendersBottomUp => true;
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height) => false;
+        public void ReleaseGL() { }
+    }
+
+    /// <summary>An app's own GPU source: not a sink, so no count of live sinks sees it.</summary>
+    private sealed class OwnGpuSource : IGpuImageSource
+    {
+        public int Served;
+        public Size IntrinsicSize => new(4, 4);
+        public bool IsLoaded => true;
+        public string? AlternateText => null;
+        public bool TryRenderFrame(IExternalGLSurface surface, out GpuFrame frame)
+        {
+            frame = default;
+            return false;
+        }
+        public void ServiceUndrawn(IExternalGLSurface? surface) => Served++;
+    }
+
+    /// <summary>A minimized window of 500 rows and a box to dirty on every pass, as a looping
+    /// tween does.</summary>
+    private static (HeadlessSession Session, BoxElement Root, BoxElement Ticker) Busy()
+    {
+        var session = HeadlessSession.Create(400, 300);
+        var ticker = Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10));
+        var root = Flex.Column().Children(ticker);
+        for (int i = 0; i < 500; i++) root.AddChild(TextB.New($"row {i}"));
+        session.Window.SetRoot(root);
+        session.PumpFrame();
+        session.Window.Minimized = true;
+        return (session, root, ticker);
+    }
+
+    private static void Tick(HeadlessSession session, BoxElement ticker, int passes)
+    {
+        for (int i = 0; i < passes; i++)
+        {
+            ticker.MarkPaintDirty();
+            Assert.False(session.PumpFrame(), "a minimized window drew a frame");
+        }
+    }
+
+    [Fact]
+    public void AMinimizedWindow_LooksForGpuSources_OnlyWhileOneCanExist()
+    {
+        Assert.False(GpuFrameSink.MayNeedUndrawnService,
+            "an earlier test left a GpuFrameSink undisposed, or an image holding a GPU source");
+        var (session, root, ticker) = Busy();
+        using var _ = session;
+        var window = session.Window.Window;
+        int walks = window.UndrawnSourceWalks;
+
+        // Dirty on every pass, with nothing to find: no walk.
+        Tick(session, ticker, 30);
+        Assert.Equal(walks, window.UndrawnSourceWalks);
+
+        // A player opened while minimized: looked for on every pass, found and served — with no
+        // GL here it decides pixels, as its first draw would have.
+        var renderer = new IdleRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var image = ImageElement.New(sink);
+        try
+        {
+            root.AddChild(image);
+            Tick(session, ticker, 3);
+            Assert.Equal(walks + 3, window.UndrawnSourceWalks);
+            Assert.Equal(GpuSinkMode.Pixels, renderer.Decided);
+        }
+        finally
+        {
+            sink.Dispose();
+        }
+
+        // Closed: no walk again.
+        root.RemoveChild(image);
+        walks = window.UndrawnSourceWalks;
+        Tick(session, ticker, 30);
+        Assert.Equal(walks, window.UndrawnSourceWalks);
+    }
+
+    [Fact]
+    public void AGpuSourceOfAnotherKind_IsStillServedWhileMinimized()
+    {
+        var (session, root, ticker) = Busy();
+        using var _ = session;
+        var source = new OwnGpuSource();
+        var image = ImageElement.New(source);
+        try
+        {
+            root.AddChild(image);
+            Tick(session, ticker, 3);
+            Assert.Equal(3, source.Served);
+        }
+        finally
+        {
+            // An image holding one keeps every minimized window looking; let go of it.
+            image.Source = null;
+        }
+        Assert.False(GpuFrameSink.MayNeedUndrawnService);
     }
 }

@@ -245,6 +245,27 @@ public class GpuFrameSinkTests
         Assert.Equal(0, renderer.Skips);
     }
 
+    /// <summary>
+    /// The window half of the two above. A player opened while its window is minimized has
+    /// never been drawn, and its decoder loads nothing until its sink has decided: the window
+    /// serves the sink in its tree, here on a surface without GL, so it decides pixels as its
+    /// first draw would. A minimized window looks for sources only while a sink is alive.
+    /// </summary>
+    [Fact]
+    public void Undrawn_APlayerOpenedInAMinimizedWindow_IsServedBeforeItIsEverDrawn()
+    {
+        using var session = HeadlessSession.Create(200, 200);
+        session.Window.Minimized = true;
+        var renderer = new CountingRenderer();
+        using var player = new MediaPlayer(new FakeMediaBackend { GpuRenderer = renderer });
+        session.Application.SetRoot(Box.New().Children(Video.New(player)));
+        player.Open(MediaSource.FromFile("clip.mp4"));
+
+        Assert.False(session.PumpFrame(), "a minimized window drew a frame");
+        Assert.Equal(GpuSinkMode.Pixels, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Pixels, renderer.DecidedMode);
+    }
+
     /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
     private sealed class LendingSurface : IExternalGLSurface
     {

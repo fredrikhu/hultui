@@ -17,6 +17,7 @@ public class ImageElement : Element
         set
         {
             if (ReferenceEquals(_source, value)) return;
+            GpuFrameSink.ImageSourceChanged(_source, value);
             _source = value;
             MarkLayoutDirty();
             MarkPaintDirty();
