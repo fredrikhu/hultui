@@ -111,7 +111,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     org.a11y.Status (always-on override); drop whole-text Value changes for text-pattern
     elements (rich text keystroke ~1.5 MB UIA / ~750 KB AT-SPI); lazy rich text tables;
     announce Slider/ProgressBar values (UIA RangeValue, AT-SPI Value).
-16. **meridian-response-format-on-ui-thread + syntax-maxlines-uncoloured** (8/5; approved)
+16. ~~**meridian-response-format-on-ui-thread + syntax-maxlines-uncoloured**~~ LANDED 466dce0, 9b512c6 (8/5; approved)
     — prettify and tokenize on the request worker (15.3 ms on the UI thread today), then
     colour responses over 20,000 lines.
 17. **layout-virtuallist-item-rows** (1; approved) — opt-in `RenderWith((item, selected) =>
@@ -125,6 +125,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **test-vesper-diffview-escape-flake** (8, test) — `DiffViewTests.EscapeStillClosesTheViewWhileItIsComparing` failed once under load (races a background diff), passed alone 3× and in a rerun. Watch for it in CI.
 - **a11y-videoplayer-layout-refresh** (7) — a playing VideoPlayer rebuilds the a11y tree ~10.5×/s from the bar's per-frame layout refresh (100 ms coalescer). Investigate.
 - **a11y-textarea-text-pattern** (7) — TextArea has no text pattern, so it keeps the whole-text Value change; give it one (like the rich text editor).
 - **a11y-atspi-richtext-tables** (7) — with an AT-SPI reader, the rich text tables are built per keystroke (~2 MB); exact-size arrays, no '
@@ -236,6 +237,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 9c8bf91, cfb5a1a | a11y-richtext-text-snapshot | Rich text editor's accessible text made on request (versioned). a11y/type in rich text 2,100 → 54 KB/op, −43 % JIT / −48 % AOT (UIA −39/−46 %). Streams identical. AT-SPI with a reader still builds it per keystroke (its text-changed needs it). |
 | 2 | 6b8bbe4 | a11y-range-value-events | Range on nodes; UIA RangeValue property changes; AT-SPI Value interface + accessible-value; told at most every 250 ms (Chromium's media timeupdate rate). Progress tick rebuilds 60 → 5 per second, −45 % JIT / −52 % AOT; VideoPlayer seek now announced (0 → 19 per 10 s). Live-verified. |
 | 2 | 074d898, 333d7de | linux-bridge-sync-context | Correctness (found by the live check): the Linux bridge's connecting constructor hung under HultUI's UI SynchronizationContext. Now connects at once; samples/AtSpiVerify bulk check PASS (also live-verifies d40d301). |
+| 2 | 466dce0 | meridian-response-format-on-ui-thread | Prettify, split, line starts and tokenize on the thread pool, cancellable (new response, mode, tab switch, close); plain first above 2,000 lines, colour when spans land. 18,884-line JSON: UI time to text 108.4 → 2.53 ms (−98 %), to colour 4.04 ms; 312 KB response 3.8 → 1.4 ms. Headless JIT. |
+| 2 | 9b512c6 | syntax-maxlines-uncoloured | Meridian colours responses up to 200,000 lines (JSON ~5.5 µs a line on a worker; 98k lines 0.54 s, 4.7 MB of spans; the 2 M-character cap stops JSON near 100k lines). Merged find list kept between builds: URL keystroke with find open 8.4 → 1.8 ms, 2,945 → 178 KB. Junction/Vesper keep the 20,000 default (already on workers). |
 
 ## Examined, not worth it
 
