@@ -974,14 +974,29 @@ public partial class JunctionApp
             ? -1
             : IndexOfHash(commits, _selectedCommitHash);
 
+        // The list keeps a row until its commit or its focus changes, so a move makes two rows
+        // instead of every row on screen. Everything else a row shows is told here: when any of
+        // it changes, the rows on screen are made again.
+        var shape = new HistoryRowShape(data.Graph, data.Remotes, stats, IssueRules(), _compactChrome,
+            _historyQuery.Trim(), data.Exhausted, GitLabRowData(), Nocturne.Theme);
+        // `|`, not `||`: the selection's snapshot is brought up to date either way.
+        if (HistoryRowSelectionChanged() | shape != _historyRowShape)
+        {
+            _commitListRef.Current?.InvalidateRows();
+            _historyRowShape = shape;
+        }
+
         return VirtualListElement<GitCommit>.New()
             .ItemHeight((int)RowHeight)
             .Items(commits)
-            .RenderWith(c => HistoryRow(c,
+            // `focused` is the list's selected index — the focus caret, which a plain move and
+            // Ctrl+arrows move. Membership of a wider selection is read live; HistoryRowSelection-
+            // Changed above remakes the rows when it is anything but the focused commit alone.
+            .RenderWith((c, focused) => HistoryRow(c,
                 data.Graph.TryGetValue(c.Hash, out var g) ? g : default,
                 stats.TryGetValue(c.Hash, out var s) ? s : (0, 0),
                 data.Remotes,
-                SelectionContains(c.Hash)))
+                SelectionContains(c.Hash), focused))
             .AccessibleItemLabel(c => $"{c.Subject}, {c.AuthorName}, {c.ShortHash}")
             .OnActivateItem(c =>
             {
@@ -995,6 +1010,60 @@ public partial class JunctionApp
             .WithRef(_commitListRef);
     }
 
+    /// <summary>
+    /// What a History row shows besides its commit and whether it has the focus — the two
+    /// things its list compares. References are compared by identity: the graph, remotes and
+    /// counts are new objects when a page or a chunk of counts lands, the issue rules when the
+    /// rules file changes, and GitLab's pipelines and merge requests when a refresh lands. The
+    /// query and the end of the log decide which rows ask for the next page.
+    /// </summary>
+    private readonly record struct HistoryRowShape(
+        object Graph, object Remotes, object Stats, object IssueRules, bool Compact,
+        string Query, bool Exhausted, (object? Pipelines, object? MergeRequests) GitLab, object Theme);
+
+    private HistoryRowShape _historyRowShape;
+
+    /// <summary>Rows History's template has made, for tests.</summary>
+    internal int HistoryRowsMade { get; private set; }
+
+    /// <summary>GitLab's data the rows draw from (pipeline glyphs, merge request chips), or
+    /// nothing when the repository is not on GitLab with an account — the same reads the rows
+    /// make, once a build.</summary>
+    private (object?, object?) GitLabRowData() =>
+        HasActiveRepo && GitLabActive(_activeRepoPath)
+            ? (PipelinesFor(_activeRepoPath).Value, MergeRequestsFor(_activeRepoPath).Value)
+            : (null, null);
+
+    // The multi-selection as the rows on screen last drew it; empty while the selection is the
+    // focused commit alone.
+    private readonly HashSet<string> _historyRowSelection = new(StringComparer.Ordinal);
+    private bool _historyRowSelectionSingle = true;
+
+    /// <summary>
+    /// Whether the selection changed in a way the list cannot see. The list is told the focused
+    /// commit; while the selection is that commit alone, a row is selected exactly when it has
+    /// the focus, and a move needs nothing more. A wider selection (Shift, Ctrl), or one the
+    /// focus is not in, colours rows by membership and names Compare on the focused row, so any
+    /// change to it makes the rows again.
+    /// </summary>
+    private bool HistoryRowSelectionChanged()
+    {
+        bool single = _selectedCommitHashes.Count == 1
+            && _selectedCommitHash is { } focus && _selectedCommitHashes.Contains(focus);
+        if (single)
+        {
+            if (_historyRowSelectionSingle) return false;
+            _historyRowSelectionSingle = true;
+            _historyRowSelection.Clear();
+            return true;
+        }
+        if (!_historyRowSelectionSingle && _historyRowSelection.SetEquals(_selectedCommitHashes)) return false;
+        _historyRowSelectionSingle = false;
+        _historyRowSelection.Clear();
+        _historyRowSelection.UnionWith(_selectedCommitHashes);
+        return true;
+    }
+
     private static int IndexOfHash(IReadOnlyList<GitCommit> commits, string hash)
     {
         for (var i = 0; i < commits.Count; i++)
@@ -1003,8 +1072,9 @@ public partial class JunctionApp
     }
 
     private Element HistoryRow(GitCommit commit, GitGraphRow graph, (int Added, int Deleted) stat,
-        HashSet<string> remotes, bool selected)
+        HashSet<string> remotes, bool selected, bool focused)
     {
+        HistoryRowsMade++;
         // A row near the loaded end coming on screen is the list being scrolled towards it —
         // by wheel, keyboard, scrollbar or autoscroll alike, since every one of them ends in
         // the list realizing the rows it now shows. This runs inside the render pass, so the
@@ -1021,7 +1091,6 @@ public partial class JunctionApp
 
         // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
         // hover-strength tint so keyboard navigation stays visible.
-        var focused = commit.Hash == _selectedCommitHash;
         var bg = selected ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900
             : Color.Transparent;

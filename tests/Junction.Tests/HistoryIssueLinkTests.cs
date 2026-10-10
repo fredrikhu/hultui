@@ -82,19 +82,20 @@ public class HistoryIssueLinkTests
     }
 
     /// <summary>
-    /// The rules are asked for once per rendered line, and every move of the selection builds
-    /// the visible rows again. Whether the file changed is a question for the file system, two
-    /// calls of it, and it was asked for each of those rows — most of what building a row cost.
-    /// It is asked once a build now.
+    /// The rules are asked for once per rendered line, and a change that makes the visible rows
+    /// again asks for every one of them. Whether the file changed is a question for the file
+    /// system, two calls of it, and it was asked for each of those rows — most of what building a
+    /// row cost. It is asked once a build now. (A plain move makes only two rows since the list
+    /// keeps the others; widening the selection still makes them all.)
     /// </summary>
     [Fact]
-    public void MovingTheSelectionLooksAtTheRulesFileOnceNotOnceARow()
+    public void MakingTheRowsAgainLooksAtTheRulesFileOnceNotOnceARow()
     {
         Hosted((session, app) =>
         {
             int asks = app.IssueRulesAsks, looks = app.IssueRulesLooks;
 
-            session.Window.PressKey(KeyCode.Down);
+            session.Window.PressKey(KeyCode.Down, KeyModifiers.Shift);
             session.PumpFrames(3);
 
             // Every one of the thirteen rows asked: the rows were built again. Each build looks
