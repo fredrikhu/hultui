@@ -78,7 +78,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
    layout-maxlines-setter-dirty + checkbox-size-layout**~~ LANDED 0cfdbfc, d13fe82, 19b94e9, 30cb978, 289faf9 (1) — grid O(rows² × cols) (~900
    loop iterations per cell); spacers/chevrons keyed on exact height (expander animation
    MeasureSize −72 %, leaf measurements −93 %); two correctness fixes.
-9. **a11y-node-extras + a11y-snapshot-stale-fields + a11y-atspi-snapshot-diet** (7) — node
+9. ~~**a11y-node-extras + a11y-snapshot-stale-fields + a11y-atspi-snapshot-diet**~~ LANDED ae90f1f, 7def7b1, d40d301, 94ba38d, 0912a5e, 4195353 (7) — node
    136 → 80 B (9 of 11 a11y rows −13…−39 %); stale Role/AutomationId on rebased wrappers;
    AT-SPI paths built once (−27…−34 % per Linux a11y frame); plus
    **a11y-focus-unbuilt-node** and **a11y-virtual-item-selected** (approved 2026-10-09).
@@ -116,6 +116,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **apps-scenario-atspi-rows** (7/8) — perf-suite rows that run the AT-SPI bridge with signals recorded (any OS), so Linux a11y changes get timing and AOT numbers.
+- **a11y-atspi-role-change** (7, correctness) — an AT-SPI role change sends no signal; a client keeps the role it cached at cache-add.
 - **test-alloc-first-run-flake** (4, test reliability; in step 12) — two "allocates nothing" tests failed once each on the first run right after a build (Headless `ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing`; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame`, 22.9 B/frame); reruns pass. Likely tier-0/JIT warm-up; would flake CI. Harden the warm-up.
 - **text-memo-cache-byte-bound** (5) — BiDi/styled memo caches are not byte-bounded: 15.2 MB after a 5,000-block rich text document is opened twice and resized; `MemoRange` keys keep evicted `TextMemo`s alive. richtext/open reuses ~11 MB of them, so a bound costs re-open speed.
 - **paint-drawspannedline-overlap** (2, correctness, latent) — `DrawSpannedLine` (`FirstSpanEndingAfter`) binary-searches on End and assumes spans do not overlap; a multi-line DrawText/paragraph given overlapping spans would skip spans (TextArea is safe: its per-line spans are clipped). Small.
@@ -199,6 +201,11 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | d13fe82 | layout-leaves-ignore-offered-height | `IgnoresAvailableHeight` defaults true; VideoElement opts out. controls/expander toggle MeasureSize −72 %, leaf measurements −93 %, row −7 % JIT / −6 % AOT, layout −39/−47 %. Every box identical across all 97 rows and ~556k audited cache hits. |
 | 2 | 19b94e9 | layout-maxlines-setter-dirty | Correctness: MaxLines and Overflow setters mark layout. Perf flat. |
 | 2 | 30cb978 | checkbox-size-layout | Correctness: Checkbox, RadioButton and ToggleSwitch sizes from the theme re-lay out. Perf flat. |
+| 2 | ae90f1f, 4195353 | a11y-node-extras | AccessibilityNode 136 → 80 B (rare fields in a side object). allocKB −13…−39 % on 9 a11y rows, JIT and AOT (checkbox UIA 142 → 87, edit every 10th 368 → 259, wheel UIA 425 → 260); 0 slower; events and trees identical. |
+| 2 | 7def7b1 | a11y-snapshot-stale-fields | Correctness: a UIA wrapper answers its node's current Role/AutomationId (Group → Dialog now 50032). No event change. |
+| 2 | d40d301 | a11y-atspi-snapshot-diet | AT-SPI path built once (TryFormat + span concat; WSL caught boxing on Fedora's .NET), string[] child paths, presized dictionary: ~500 → ~270 B/node; AT-SPI steps −38…−47 % (−44…−51 % with ae90f1f). Snapshots and signals identical; WSL green. No live AT-SPI client run. |
+| 2 | 94ba38d | a11y-focus-unbuilt-node | Correctness (approved): a focus move onto an element mounted in the same handler is told after the next rebuild — +1 UIA focus and AT-SPI state-changed:focused (FindBar Ctrl+F, mount+focus); GetFocus answers. Perf flat. |
+| 2 | 0912a5e | a11y-virtual-item-selected | Correctness (approved): list item nodes carry IsSelected; SelectedIndex notifies; a no-scroll move raises IsSelected on the old and new item on both bridges. UIA walk +0.2 KB/op (+2–3 %): one rebuild per move while a reader listens. |
 
 ## Examined, not worth it
 
@@ -251,6 +258,11 @@ Round 2 questions, answered 2026-10-09 (the user took every recommendation; 11 y
 10. Tab strips that narrow then scroll → **outside plan 17** (not perf).
 11. Install Mesa and Noto fonts in WSL Fedora → **yes**.
 12. (later) no-op glGetError — only if timing shows the round trip costs.
+
+13. **wsl-atspi-stack** (asked 2026-10-10): install at-spi2-core, dbus-daemon and PyGObject in
+    WSL Fedora, so a live AT-SPI client (samples/AtSpiVerify bulk, pyatspi) can verify the
+    Linux bridge changes (d40d301, step 15's org.a11y.Status gate, a11y-atspi-cache-child-index,
+    a11y-atspi-virtual-items)? The Mesa/fonts approval did not cover these packages.
 
 Note: the round 2 app survey registered a Jellyfin device named "aperture-survey".
 
