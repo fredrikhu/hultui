@@ -141,6 +141,11 @@ public sealed class AccessibilityNode
     /// <summary>The text now: the source's, or the snapshot this tree was built with.</summary>
     public AccessibleText? CurrentText => _extras is { } x ? x.TextSource?.AccessibleText ?? x.Text : null;
 
+    /// <summary>Whether the node offers text a reader moves through (UIA's text pattern, AT-SPI's
+    /// Text): a change of it is told as a text change, never as a change of its
+    /// <see cref="Value"/>.</summary>
+    internal bool OffersText => _extras is { } x && (x.TextSource is not null || x.Text is not null);
+
     // An array of the exact length: a tree is rebuilt in full on every change an assistive
     // technology can see, and most nodes are leaves, which share the one empty array.
     private AccessibilityNode[] _children = [];

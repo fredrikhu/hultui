@@ -134,6 +134,8 @@ public class AccessibleTextTests
 
         public AccessibleText? Current { get; set; }
         internal override IAccessibleTextSource? AccessibleTextSource => new Source(this);
+        // Its value is its text, as a rich text editor's is the document's.
+        internal override string? AccessibleValue => Current?.Text;
     }
 
     private static readonly BoxElement Root = BoxElement.New();
@@ -167,5 +169,23 @@ public class AccessibleTextTests
         // The same snapshot again: nothing.
         var same = Build(element);
         Assert.Empty(AccessibilityTreeDiffer.Diff(same, Build(element)).PropertyChanged);
+    }
+
+    [Fact]
+    public void ANodeThatOffersText_TellsAChange_AsItsText_NotItsValue()
+    {
+        // Its value is the text too (a rich text editor's is the whole document): telling both
+        // sent the whole document to every reader on every keystroke, besides the text change.
+        var element = new Texty { AccessibleName = "v", Current = new AccessibleText("abc", caret: 3) };
+        var before = Build(element);
+        Assert.Equal("abc", before.Children.Single(n => n.Name == "v").Value);
+
+        element.Current = new AccessibleText("abcd", caret: 4);
+        var after = Build(element);
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+        Assert.Equal([AccessibilityProperties.Text, AccessibilityProperties.TextSelection],
+            diff.PropertyChanged.Select(p => p.PropertyName));
+        // The value is still the node's, for a reader to read.
+        Assert.Equal("abcd", after.Children.Single(n => n.Name == "v").Value);
     }
 }

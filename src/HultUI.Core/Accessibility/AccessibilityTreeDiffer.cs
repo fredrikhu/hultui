@@ -127,7 +127,15 @@ public static class AccessibilityTreeDiffer
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
         if (rare && prev.Description != curr.Description)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
-        if (rare && prev.Value != curr.Value)
+        // A node that offers text tells a change of it as a text change (UIA TextChanged, AT-SPI
+        // text-changed), not as its value: the value of a rich text editor is the whole document,
+        // and a keystroke raised it in a UIA property change (a 749,017-character BSTR) and an
+        // AT-SPI accessible-value signal besides the text change. Chromium raises no text in a
+        // contenteditable's ValueValue change (Blink does not send the value of a non-atomic text
+        // field; ax_object.cc), and on Linux accessible-value only for a range value
+        // (ax_platform_node_auralinux.cc, OnValueChanged). A reader still reads the value on
+        // request. A text input with no text pattern keeps its value change, as an <input> does.
+        if (rare && !(prev.OffersText && curr.OffersText) && prev.Value != curr.Value)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
         // The states share one field: when it is the same, none of them changed.
         if (prev.States != curr.States)

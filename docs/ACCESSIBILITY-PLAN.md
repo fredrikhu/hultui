@@ -301,7 +301,18 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name.
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
-- **Value** — text inputs.
+- **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
+  AT-SPI `accessible-value` signal, as Chromium tells an `<input>`'s. Not for a node that also
+  offers text (below: the rich text editor, the terminal) (2026-10-10): its change is told as a text
+  change only (UIA `Text_TextChanged`, AT-SPI `text-changed`), and its value is read on request
+  (the ValueValue property and the Value pattern). A rich text keystroke raised a ValueValue change
+  carrying the whole document (749,017 characters, ~1.5 MB as a BSTR) and an `accessible-value`
+  with it over D-Bus. Chromium raises no text in a contenteditable's ValueValue change (Blink does
+  not send the value of a non-atomic text field, `ax_object.cc`; `ax_platform_node_win.cc` answers
+  ValueValue only from that value, `browser_accessibility_manager_win.cc` raises it for
+  `VALUE_IN_TEXT_FIELD_CHANGED`), and on Linux sends `accessible-value` only for a range value
+  (`ax_platform_node_auralinux.cc`, `OnValueChanged`). A multi-line `TextArea` offers no text
+  pattern yet, so its value change stays: it is the only change a reader hears from it.
 - **IsPassword** — a `TextInputElement` with `Masked` set (2026-10-05). Its Value, through
   both the property and the value pattern, is the bullets on screen, never the text: any
   process in the session can ask UIA for it, not only a screen reader. On Linux the node

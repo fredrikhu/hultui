@@ -221,7 +221,8 @@ public sealed partial class TerminalElement
     {
         StopScreenWait();
         if (!IsHosted) return;
-        // One rebuild tells the value, the text and the caret, whichever changed.
+        // One rebuild tells the text and the caret, whichever changed. The value (the screen) is
+        // read on request: a node that offers text tells a change as its text, not its value.
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
         AnnounceNewOutput();
     }
