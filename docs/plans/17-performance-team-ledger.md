@@ -5,10 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — **paused after the round 3 survey** (the user asked for a break once the
-  surveys were in, 2026-10-10). All eight reports are in `17-reports/r3-*`; the round 3 build
-  order is below; 13 questions wait in Needs the user (14 and 15 answered). Steps marked **(user)** wait for an
-  answer; the others can start. Next: round 3 build step 1. To resume, run in this worktree:
+- **Phase:** build — round 3, resumed 2026-10-11; step 1 in progress. All eight reports are in
+  `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
+  and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
+  only their (user) parts. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
   Phase calls for, record it in the ledger, and commit.`
