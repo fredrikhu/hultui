@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 98 scenarios over every feature area (92 off Windows) | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 101 scenarios over every feature area (93 off Windows) | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -44,7 +44,7 @@ below). `--list` prints every scenario, `--help` every option.
 | `theme/` | Light ⇄ dark, and cycling the `HultUI.Themes` catalogue, on the control screen |
 | `anim/` | One frame of 60 looping tweens, of spinners and progress bars, and a hover transition; and a 300 ms fade of a transport bar whose Build reads the signal the tween writes, while a worker posts to the UI thread every millisecond (`anim/signal tween, 1 kHz posts, real loop`): the one row that runs `Application.Run`'s own loop, on the virtual clock (`HeadlessSession.RunLoop`), because only the loop shows how often the bar is rebuilt for each frame drawn — the row reports that count beside its time, all of which shows under **build** |
 | `paint/` | The same 400 tiles plain, rounded, shadowed, gradient-filled, transformed: the price of each effect |
-| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge; and the selection walk, whose list publishes a node for each of its 1,000 items on every rebuild. On Windows, six rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke, a label edit, a Tab, a wheel turn and the selection walk, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** (a Tab's focus event under **build**, where the key is handled). The wheel row and the selection walks space their frames 120 ms apart, past the 100 ms a scroll's accessibility refresh waits, so every step rebuilds |
+| `a11y/` | Creates, edits, Tab and typing in a 5,000-block rich text document with an accessibility client attached: the tree build and diff, through a recording bridge; the selection walk, whose list publishes a node for each of its 1,000 items on every rebuild; and a progress bar above 1,000 rows that moves on every frame, as a download's or a playing video's does. On Windows, eight rows (`…, UIA`) put the real UI Automation bridge behind a checkbox click, a keystroke, a label edit, a Tab, a wheel turn, the selection walk, a keystroke in the 5,000-block rich text document and the progress bar, on a hidden window that never takes focus: its wrapper upkeep and the events it raises, under **other** (a Tab's focus event under **build**, where the key is handled). The wheel row and the selection walks space their frames 120 ms apart, past the 100 ms a scroll's accessibility refresh waits, so every step rebuilds |
 
 ## Reading the output
 

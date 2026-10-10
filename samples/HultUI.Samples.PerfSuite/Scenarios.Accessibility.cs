@@ -102,10 +102,36 @@ static partial class Scenarios
                     reset: bridge.ClearDiffs);
             });
 
+        yield return new Scenario("a11y/progress bar ticks over 1,000 rows, bridge on",
+            "A progress bar above 1,000 rows moves on every frame while an accessibility client listens, as a download's or a playing video's does",
+            ctx =>
+            {
+                ctx.Window.InstallAccessibilityBridge();
+                var (bar, root) = ProgressOverRows(ctx);
+                ctx.Mount(root);
+                return ProgressTicks(bar);
+            });
+
         if (OperatingSystem.IsWindows())
             foreach (var scenario in UiaAccessibility())
                 yield return scenario;
     }
+
+    /// <summary>A progress bar over 1,000 benchmark rows in a scroll view.</summary>
+    private static (ProgressBarElement Bar, Element Root) ProgressOverRows(Ctx ctx)
+    {
+        var bar = ProgressBar.New().Width(Dimension.Px(400));
+        return (bar, Flex.Column(gap: 8).FlexGrow(1).Padding(16).Children(
+            Text.New("Downloading").FontSize(13f), bar,
+            ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000))));
+    }
+
+    /// <summary>Each step moves the bar a thousandth, one 60 Hz frame apart.</summary>
+    private static Op ProgressTicks(ProgressBarElement bar) => new()
+    {
+        Run = step => bar.Value = (step % 1_000 + 1) / 1_000.0,
+        Check = step => bar.Value == (step % 1_000 + 1) / 1_000.0 ? null : $"the bar reads {bar.Value}",
+    };
 
     /// <summary>
     /// Whether a node of <paramref name="node"/>'s tree publishes a list of
@@ -244,6 +270,31 @@ static partial class Scenarios
             {
                 var rig = UiaRig.Install(ctx.Window);
                 return SelectionWalk(ctx, Applied(rig));
+            });
+
+        yield return new Scenario("a11y/type in rich text, UIA",
+            "Type in a 5,000-block document with the UIA bridge: the text and caret events, and whatever the keystroke's value change carries",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var editor = MountEditor(ctx, LongDocument(ctx.Rng, 5_000));
+                editor.State.Select(HultUI.Core.RichText.RichSelection.Caret(2_501, 3));
+                ctx.Pump();
+                return new Op
+                {
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = Applied(rig),
+                };
+            });
+
+        yield return new Scenario("a11y/progress bar ticks over 1,000 rows, UIA",
+            "A progress bar above 1,000 rows moves on every frame with the UIA bridge, as a download's or a playing video's does",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                var (bar, root) = ProgressOverRows(ctx);
+                ctx.Mount(root);
+                return ProgressTicks(bar);
             });
     }
 
