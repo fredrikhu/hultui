@@ -5,9 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 2
-- **Phase:** build — all round 2 build steps done 2026-10-10; next the end-of-round full test
-  suite, then Phase `release` (merge into main, push, wait for CI, then cut the five app
-  releases). To resume after a pause, run in this worktree: `/loop Run the next step of the
+- **Phase:** release — round 2 merged into main as 0951288 and pushed 2026-10-10 (full suite
+  passed on fa86982: 30 projects, 0 failures; origin/main was an ancestor, so the merged tree is
+  the tested one). Waiting for CI on 0951288; then cut the five app releases; then Round 3,
+  Phase survey. To resume after a pause, run in this worktree: `/loop Run the next step of the
   performance team: follow docs/plans/17-performance-team.md, with state in
   docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
   for, record it in the ledger, and commit.`
@@ -367,3 +368,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   queue re-ranked into 14 build steps; 12 questions for the user; survey worktrees removed.
 - 2026-10-09: the user answered all 12 round 2 questions (recommendations taken; WSL install yes). Queued items 15–18.
 - 2026-10-09: installed Mesa + Noto fonts in WSL Fedora (user approved); round 2 step 6 next.
+- 2026-10-10: round 2 full suite passed (30 projects, 0 failures); merged into main as 0951288, pushed 64ba531..0951288, primary fast-forwarded.
