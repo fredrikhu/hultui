@@ -1207,6 +1207,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) =>
         _pipeline?.MeasurePrefixes(text, style);
 
+    public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style) =>
+        text.IsEmpty || _pipeline is null ? 0f : _pipeline.MeasureWidth(text, style);
+
     public FontMetrics MeasureFont(ResolvedInheritedStyle style) =>
         _pipeline?.MeasureFont(style) ?? FontMetrics.Estimate(style, Size.Zero);
 

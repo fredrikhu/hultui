@@ -35,6 +35,10 @@ public sealed class TextPipeline
         new(capacity: 8192, WordShapeKeyComparer.Instance, maxWeight: WordCacheBytes);
     private readonly LruCache<WordShapeKey, ShapedRun>.InPlace<WordSpanKey> _wordsInPlace;
 
+    // Widths of whole strings on one unbounded line, for MeasureWidth (Widths, below). Made at
+    // the first width asked for: a pipeline that measures none — no TextArea — has none.
+    private Widths? _widths;
+
     // ── How much the caches above may hold ──
     //
     // An application keeps one pipeline for its whole life, so what these caches hold stays
@@ -43,7 +47,7 @@ public sealed class TextPipeline
     // file of 1,000-character lines without spaces in a TextArea left 23 MB of "words"
     // here, and a 5,000-block document in the rich text editor 8 MB of laid-out paragraphs.
     // So each cache is also bounded by an estimate of the bytes its entries keep alive
-    // (ShapedBytes, WordBytes, LayoutBytes), least recently used out first.
+    // (ShapedBytes, WordBytes, LayoutBytes, WidthBytes), least recently used out first.
     //
     // The shape cache's bound is the count's worth of an ordinary document's lines (16,384
     // of 55 characters), because a TextArea measures every line that fits again on each
@@ -55,11 +59,13 @@ public sealed class TextPipeline
     internal const long ShapeCacheBytes = 24L << 20;
     internal const long WordCacheBytes = 4L << 20;
     internal const long LayoutCacheBytes = 4L << 20;
+    internal const long WidthCacheBytes = 4L << 20;
 
     // What each holds now, for the tests that hold them to their bounds.
     internal (int Entries, long Bytes) ShapeCacheUse => (_shapeCache.Count, _shapeCache.Weight);
     internal (int Entries, long Bytes) WordCacheUse => (_wordShapeCache.Count, _wordShapeCache.Weight);
     internal (int Entries, long Bytes) LayoutCacheUse => (_cache.Count, _cache.Weight);
+    internal (int Entries, long Bytes) WidthCacheUse => _widths is { } w ? (w.Cache.Count, w.Cache.Weight) : (0, 0);
 
     // Roughly the bytes a cached result keeps alive: object headers and fields, the key's
     // string, 16 bytes a glyph. Measured with full collections (a label's shaping is ~420 bytes
@@ -70,6 +76,10 @@ public sealed class TextPipeline
         400 + 4 * text.Length + (shaped.SingleLine is { } line ? GlyphBytes(line) : 0);
 
     private static int WordBytes(string word, ShapedRun run) => 200 + 2 * word.Length + 16 * run.Glyphs.Length;
+
+    // A width's entry: its key's string, the cache's node and its slot (measured: 215 bytes for a
+    // line of 20 characters, 494 for one of 160).
+    private static int WidthBytes(string text) => 180 + 2 * text.Length;
 
     private static int LayoutBytes(string text, TextLayout layout)
     {
@@ -176,7 +186,11 @@ public sealed class TextPipeline
     {
         _paragraph = text;
         _hanContextKnown = false;
+        FollowCulture();
+    }
 
+    private void FollowCulture()
+    {
         var culture = System.Globalization.CultureInfo.CurrentUICulture;
         if (!ReferenceEquals(culture, _culture))
         {
@@ -184,6 +198,7 @@ public sealed class TextPipeline
             {
                 _cache.Clear();
                 _shapeCache.Clear();
+                _widths?.Cache.Clear();
                 _minContentCache.Clear();
                 _memos.Clear();
                 _memoWidths.Clear();
@@ -768,7 +783,7 @@ public sealed class TextPipeline
     /// the em dash in "Item 4 — 7 units" took that label to the BiDi path, at twice
     /// the time and memory of "Item 4 - 7 units".
     /// </remarks>
-    private static bool NeedsBidi(string text, ResolvedInheritedStyle style, bool plainPathForLtr)
+    private static bool NeedsBidi(ReadOnlySpan<char> text, ResolvedInheritedStyle style, bool plainPathForLtr)
     {
         // Auto needs no special case: with nothing right-to-left in the text,
         // first-strong detection can only answer left-to-right, which is what the
@@ -778,7 +793,7 @@ public sealed class TextPipeline
         // the same vectorized range search, but IndexOfAnyExceptInRange<char>
         // boxes its two bounds on every call (96 B, measured — see
         // samples/HultUI.Samples.TextBench) and the ushort one allocates nothing.
-        var chars = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(text.AsSpan());
+        var chars = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(text);
         int first = chars.IndexOfAnyExceptInRange((ushort)0, (ushort)0x058F);
         if (first < 0) return false;
         if (!plainPathForLtr) return true;
@@ -1834,6 +1849,100 @@ public sealed class TextPipeline
             if (!(lineWidth > 0f)) return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// The width <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow)"/>
+    /// gives <paramref name="text"/> on one unbounded line, to the bit, without laying it out:
+    /// its words' widths added up in the order the shaping adds them (<see cref="MeasureString"/>),
+    /// and kept as one number (the width cache). Laying it out would shape it whole and keep that
+    /// in the shape cache, which a text area's every line, measured once each when a document
+    /// opens to see whether it fits, filled with lines nobody draws. Text on the BiDi path or
+    /// with a newline in it is laid out.
+    /// </summary>
+    public float MeasureWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
+    {
+        if (text.IsEmpty)
+            return 0f;
+        if (text.Contains('\n') || NeedsBidi(text, style, PlainPathForLtr))
+            return Layout(text.ToString(), style, float.PositiveInfinity, maxLines: 1).Size.Width;
+
+        FollowCulture();  // before the lookup: a width is of the culture's Han faces
+        var widths = _widths ??= new Widths();
+        var key = widths.KeyOf(text, style);
+        if (widths.InPlace.TryGet(key, out float width))
+            return width;
+
+        var entry = WidthKeyComparer.Instance.Create(key);
+        BeginParagraph(entry.Text);
+        width = MeasureString(entry.Text, style);
+        widths.Keep(entry, width);
+        return width;
+    }
+
+    /// <summary>
+    /// MeasureWidth's widths. A text area's lines repeat — a JSON response's <c>"draft": false,</c>
+    /// every few dozen lines, a request sent again most of its last response — and finding one is
+    /// cheaper than adding its words up again: a few hundred bytes an entry (WidthBytes), where
+    /// the shape cache keeps each line's glyphs. Looked up by a span of the document
+    /// (<see cref="WidthSpanKey"/>): a line becomes a string of its own only on a miss, to be the
+    /// entry's key.
+    /// </summary>
+    private sealed class Widths
+    {
+        public readonly LruCache<WidthKey, float> Cache =
+            new(capacity: 16384, WidthKeyComparer.Instance, maxWeight: WidthCacheBytes);
+        public readonly LruCache<WidthKey, float>.InPlace<WidthSpanKey> InPlace;
+
+        // The style last asked in, and the hash of its share of a key.
+        private ResolvedInheritedStyle _style;
+        private int _styleHash;
+
+        // The last 16,384 hashes measured: about as many lines as two JSON responses have
+        // distinct. Two to a slot, the older one out: two lines that take turns would otherwise
+        // push each other out for good.
+        private readonly int[] _seen = new int[2 * 8192];
+
+        public Widths() => InPlace = Cache.LookedUpBy<WidthSpanKey>();
+
+        public WidthSpanKey KeyOf(ReadOnlySpan<char> text, in ResolvedInheritedStyle style)
+        {
+            if (!ReferenceEquals(style.FontFamily, _style.FontFamily) || style.FontSize != _style.FontSize
+                || style.FontWeight != _style.FontWeight || style.FontSlant != _style.FontSlant
+                || style.LetterSpacing != _style.LetterSpacing)
+            {
+                _style = style;
+                _styleHash = WidthKeyComparer.StyleHash(style);
+            }
+            return new WidthSpanKey(text, style, WidthKeyComparer.HashOf(text, _styleHash));
+        }
+
+        // Kept while there is room. Once the cache is full, only a line measured lately is: most
+        // lines of a document are measured once, and putting each in a full cache, to push another
+        // out, cost the lines that never repeat more than the cache saved on those that do (a
+        // 900-line document of prose opened 9 % slower than with no cache, the suite's 19,000-line
+        // JSON response 12 % faster; with this, 3 % and 24 %). Kept whatever the room, a line seen
+        // again in the next document stays: Meridian's response to a request sent again shares
+        // most of its lines with the last one, and measuring those again took 23 ms a response
+        // where the shape cache had them, 12 ms with them found here.
+        public void Keep(WidthKey entry, float width)
+        {
+            int bytes = WidthBytes(entry.Text);
+            if (SeenBefore(entry.Hash) | Cache.Weight + bytes <= WidthCacheBytes)
+            {
+                // Put, not Add, as for words: a key the lookup in place missed would make Add throw.
+                Cache.Put(entry, width, bytes);
+            }
+        }
+
+        private bool SeenBefore(int hash)
+        {
+            int at = (hash & 8191) << 1;
+            if (_seen[at] == hash || _seen[at + 1] == hash) return true;
+            _seen[at + 1] = _seen[at];
+            _seen[at] = hash;
+            return false;
+        }
     }
 
     // Total advance width of a string, itemized and shaped the same way as a line. Internal

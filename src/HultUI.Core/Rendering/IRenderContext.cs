@@ -89,6 +89,16 @@ public interface IRenderContext
     ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) => null;
 
     /// <summary>
+    /// <c>MeasureText(text, style).Width</c>, exactly, for text whose width is all the caller
+    /// wants: a context that lays text out can add the widths up without laying it out, and
+    /// without keeping a layout nobody draws. Something that measures many strings once each
+    /// to see whether they fit — a text area's lines when its document opens — asks for this.
+    /// The default measures the text.
+    /// </summary>
+    float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
+        => MeasureText(text.ToString(), style).Width;
+
+    /// <summary>
     /// Lays out <paramref name="text"/> into lines under the same wrapping rules
     /// <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?)"/> uses,
     /// and returns each line's source character range

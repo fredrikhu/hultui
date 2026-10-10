@@ -48,6 +48,20 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private System.Globalization.CultureInfo? _wrapMemoCulture;
     private readonly List<int> _breaks = [];
 
+    // The width of each hard line by its number, NaN where it was not measured, for the text in
+    // _widthsText. Line starts are worked out again on every edit and every resize, and a line
+    // that fits is the width of it; this keeps that width for each line the edit did not touch —
+    // those before it at the same number, those after it shifted by the lines it added or took
+    // away (CarryLineWidths) — so neither measures a line again. Measured in one style's metrics,
+    // one render context and one UI culture (which picks Han faces); another starts over.
+    // 4 bytes a line, where the pipeline's shape cache held each line's whole shaping for this.
+    private float[] _lineWidths = [];
+    private int _lineWidthCount;
+    private string? _widthsText;
+    private ResolvedInheritedStyle _widthsStyle;
+    private IRenderContext? _widthsContext;
+    private System.Globalization.CultureInfo? _widthsCulture;
+
     // Where each line's spans begin: _spanReach[k] is the furthest any of Spans[0..k] ends. The
     // spans are sorted by start but may overlap, so their ends alone are not sorted (a long
     // string's span ends after the search tint inside it, which comes next); this running
@@ -370,6 +384,9 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     private List<int> ComputeLineStarts(float wrapWidth, ResolvedInheritedStyle style)
     {
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        CarryLineWidths(style, culture);
+
         var starts = new List<int> { 0 };
         if (string.IsNullOrEmpty(_text))
             return starts;
@@ -380,7 +397,6 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         var clusterEnds = new List<int>();
 
         // The long lines' breaks from the last time, if they were found the same way.
-        var culture = System.Globalization.CultureInfo.CurrentUICulture;
         var previous = _wrapMemo is not null && _wrapMemoWidth == wrapWidth && _wrapMemoStyle.Equals(style)
             && ReferenceEquals(_wrapMemoContext, _renderCtx) && ReferenceEquals(_wrapMemoCulture, culture)
                 ? _wrapMemo
@@ -389,17 +405,16 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         Dictionary<string, int[]>? memo = null;
 
         int pos = 0;
-        while (pos < _text.Length)
+        for (int hardLine = 0; pos < _text.Length; hardLine++)
         {
             // Find the end of the current hard line (up to next \n or end)
             int hardEnd = _text.IndexOf('\n', pos);
             if (hardEnd < 0) hardEnd = _text.Length;
 
-            // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is measured
-            // once, whole, as it always was — every keystroke wraps all of them again, and
-            // the pipeline has each line's width cached — and only one that does not is
+            // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is one
+            // width, kept for the next time (_lineWidths), and only one that does not is
             // cut into clusters and searched, unless its text was searched last time.
-            if (!FitsWhole(pos, hardEnd, wrapWidth, style, ref charWidth))
+            if (!FitsWhole(hardLine, pos, hardEnd, wrapWidth, style, ref charWidth))
             {
                 var line = _text.AsSpan(pos, hardEnd - pos);
                 memo ??= new Dictionary<string, int[]>(StringComparer.Ordinal);
@@ -448,16 +463,100 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         return _breaks.ToArray();
     }
 
-    // Whether [start..end) fits whole. Measured only when it is no longer than a line of
-    // average characters; a longer one goes to the search, which finds it fitting if it does.
-    private bool FitsWhole(int start, int end, float wrapWidth, ResolvedInheritedStyle style, ref float charWidth)
+    // Whether hard line number `line`, [start..end), fits whole. Measured only when it is no
+    // longer than a line of average characters — a longer one goes to the search, which finds
+    // it fitting if it does — and then only if its width is not known from the last time.
+    private bool FitsWhole(int line, int start, int end, float wrapWidth, ResolvedInheritedStyle style,
+        ref float charWidth)
     {
         int length = end - start;
         if (length == 0) return true;
         if (length > wrapWidth / Math.Max(charWidth, 0.01f)) return false;
-        float width = MeasureSubstring(start, length, style);
+        float width = _lineWidths[line];
+        if (float.IsNaN(width))
+            _lineWidths[line] = width = _renderCtx is not null
+                ? _renderCtx.MeasureTextWidth(_text.AsSpan(start, length), style)
+                : length * style.FontSize * 0.6f; // fallback for tests, as MeasureSubstring's
         if (length >= 8) charWidth = width / length;
         return width <= wrapWidth;
+    }
+
+    /// <summary>
+    /// Brings <see cref="_lineWidths"/> from the text they were measured in to the text now. The
+    /// two are compared from each end: the hard lines wholly inside the part they start with
+    /// alike are the same lines at the same numbers, and those wholly inside the part they end
+    /// with alike are the same lines at numbers shifted by the difference in line count — with
+    /// the newline that ends or starts each inside the part too, or the text's end or start.
+    /// Those keep their widths; the lines between, which the edit touched, are not known. Any
+    /// change to what a width depends on — the style's metrics, the render context, the UI
+    /// culture — forgets them all.
+    /// </summary>
+    private void CarryLineWidths(ResolvedInheritedStyle style, System.Globalization.CultureInfo culture)
+    {
+        string text = _text;
+        string? old = _widthsText;
+        int oldCount = _lineWidthCount;
+        int front = 0, back = 0, count;
+        bool same = old is not null && ReferenceEquals(_widthsContext, _renderCtx)
+            && ReferenceEquals(_widthsCulture, culture) && StyleResolver.SameMetrics(_widthsStyle, style);
+        if (same && ReferenceEquals(old, text))
+            front = count = oldCount;  // a resize: every line as it was
+        else if (same && old is not null)
+        {
+            int p = old.AsSpan().CommonPrefixLength(text);
+            int s = CommonSuffixLength(old, text, Math.Min(old.Length, text.Length) - p);
+            int q = text.Length - s;  // the common end is text[q..], old[q + shift..]
+            int shift = old.Length - text.Length;
+            front = text.AsSpan(0, p).Count('\n');
+            back = text.AsSpan(q).Count('\n');
+            count = front + text.AsSpan(p, q - p).Count('\n') + back + 1;
+            // The line that ends at p ends there in both texts (they differ at p, so at most one
+            // has a newline there; the other must end).
+            if ((p == text.Length || text[p] == '\n') && (p == old.Length || old[p] == '\n'))
+                front++;
+            // The line that starts at q starts there in both.
+            if ((q == 0 || text[q - 1] == '\n') && (q + shift == 0 || old[q + shift - 1] == '\n'))
+                back++;
+            // An empty line where the two parts meet can be counted in both; and a count gone
+            // wrong must not reach past either text's lines.
+            front = Math.Min(front, Math.Min(count, oldCount));
+            back = Math.Max(0, Math.Min(back, Math.Min(count, oldCount) - front));
+        }
+        else
+            count = text.AsSpan().Count('\n') + 1;
+
+        var widths = _lineWidths;
+        if (widths.Length < count || widths.Length > 4 * count + 64)
+        {
+            // Room for some lines more, so typing Enter does not copy the array each time; and a
+            // document much shorter than the last gets an array of its own size.
+            var resized = new float[count + count / 4 + 16];
+            Array.Copy(widths, resized, front);
+            Array.Copy(widths, oldCount - back, resized, count - back, back);
+            _lineWidths = widths = resized;
+        }
+        else
+            Array.Copy(widths, oldCount - back, widths, count - back, back);  // overlapping is fine
+        widths.AsSpan(front, count - back - front).Fill(float.NaN);
+
+        _lineWidthCount = count;
+        _widthsText = text;
+        _widthsStyle = style;
+        _widthsContext = _renderCtx;
+        _widthsCulture = culture;
+    }
+
+    // How many chars a and b end with alike, at most max: whole blocks compared at once, then
+    // the block where they differ char by char.
+    private static int CommonSuffixLength(string a, string b, int max)
+    {
+        const int Block = 256;
+        int n = 0;
+        while (n + Block <= max && a.AsSpan(a.Length - n - Block, Block).SequenceEqual(b.AsSpan(b.Length - n - Block, Block)))
+            n += Block;
+        while (n < max && a[a.Length - 1 - n] == b[b.Length - 1 - n])
+            n++;
+        return n;
     }
 
     /// <summary>

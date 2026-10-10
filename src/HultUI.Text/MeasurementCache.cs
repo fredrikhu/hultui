@@ -71,6 +71,57 @@ internal sealed class WordShapeKeyComparer
         new(alternate.Segment.ToString(), alternate.Font, alternate.FontSize);
 }
 
+/// <summary>Key for a string's width on one unbounded line (<see cref="TextPipeline.MeasureWidth"/>):
+/// the string and what of the style a width depends on. <see cref="Hash"/> is worked out once,
+/// from the span the string was cut from (<see cref="WidthKeyComparer.HashOf"/>): a line can be a
+/// hundred characters, and hashing it again to put it in the cache cost as much as the lookup.</summary>
+internal readonly record struct WidthKey(
+    string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant, float LetterSpacing,
+    int Hash);
+
+/// <summary><see cref="WidthKey"/> for a string still inside a longer text — a line of a
+/// document — so a lookup makes no string; only a miss copies it out, to keep it as the key.</summary>
+internal readonly ref struct WidthSpanKey(ReadOnlySpan<char> text, in ResolvedInheritedStyle style, int hash)
+{
+    public readonly ReadOnlySpan<char> Text = text;
+    public readonly string FontFamily = style.FontFamily;
+    public readonly float FontSize = style.FontSize;
+    public readonly FontWeight FontWeight = style.FontWeight;
+    public readonly FontSlant FontSlant = style.FontSlant;
+    public readonly float LetterSpacing = style.LetterSpacing;
+    public readonly int Hash = hash;
+}
+
+/// <summary><see cref="WidthKey"/>'s equality, and the same for a <see cref="WidthSpanKey"/>; both
+/// hash as <see cref="HashOf"/> says, the span as the string of its characters would.</summary>
+internal sealed class WidthKeyComparer : IEqualityComparer<WidthKey>, IAlternateEqualityComparer<WidthSpanKey, WidthKey>
+{
+    public static readonly WidthKeyComparer Instance = new();
+
+    /// <summary>The style's share of a key's hash.</summary>
+    public static int StyleHash(in ResolvedInheritedStyle style) =>
+        HashCode.Combine(style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant, style.LetterSpacing);
+
+    /// <summary>A key's hash: the text's, as <see cref="string.GetHashCode()"/> has it, and the style's.</summary>
+    public static int HashOf(ReadOnlySpan<char> text, int styleHash) => string.GetHashCode(text) ^ styleHash;
+
+    public bool Equals(WidthKey x, WidthKey y) => x == y;
+
+    public int GetHashCode(WidthKey key) => key.Hash;
+
+    public bool Equals(WidthSpanKey alternate, WidthKey other) =>
+        alternate.Hash == other.Hash && alternate.FontSize.Equals(other.FontSize)
+        && alternate.FontWeight == other.FontWeight && alternate.FontSlant == other.FontSlant
+        && alternate.LetterSpacing.Equals(other.LetterSpacing) && string.Equals(alternate.FontFamily, other.FontFamily)
+        && alternate.Text.SequenceEqual(other.Text);
+
+    public int GetHashCode(WidthSpanKey alternate) => alternate.Hash;
+
+    public WidthKey Create(WidthSpanKey alternate) =>
+        new(alternate.Text.ToString(), alternate.FontFamily, alternate.FontSize, alternate.FontWeight,
+            alternate.FontSlant, alternate.LetterSpacing, alternate.Hash);
+}
+
 /// <summary>
 /// Simple LRU cache used for text measurement and shaping results. Bounded by a number of
 /// entries and, when given a <c>maxWeight</c>, by the sum of the weights its entries were put

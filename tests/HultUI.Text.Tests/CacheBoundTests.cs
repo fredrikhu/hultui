@@ -151,6 +151,109 @@ public class CacheBoundTests
         Assert.True(pipeline.LayoutCacheUse.Bytes <= TextPipeline.LayoutCacheBytes);
     }
 
+    [Fact]
+    public void ADocumentsWidths_LeaveTheWidthCacheWithinItsBound()
+    {
+        // Each line measured twice, the most a TextArea measures one: kept from the second time.
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        foreach (var text in Document())
+        {
+            pipeline.MeasureWidth(text, Style);
+            pipeline.MeasureWidth(text, Style);
+        }
+        var use = pipeline.WidthCacheUse;
+        Assert.True(use.Bytes <= TextPipeline.WidthCacheBytes, $"width cache holds {use.Bytes:N0} bytes");
+        Assert.True(use.Bytes > TextPipeline.WidthCacheBytes / 2, $"width cache holds only {use.Bytes:N0} bytes");
+        Assert.True(use.Entries < 3_000, $"width cache kept {use.Entries:N0} entries");
+
+        // An entry weighs at least the characters of its key.
+        var one = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        string line = Document().First();
+        one.MeasureWidth(line, Style);
+        one.MeasureWidth(line, Style);
+        Assert.InRange(one.WidthCacheUse.Bytes, 2 * line.Length, 2 * line.Length + 400);
+    }
+
+    /// <summary>
+    /// A width is kept while the cache has room. Once it is full only a line measured lately is
+    /// — most lines of a document are measured once — so it keeps the lines that repeat, among
+    /// any number that do not. A line found in it is not itemized again, which is all its fonts
+    /// are asked for.
+    /// </summary>
+    [Fact]
+    public void AFullWidthCache_KeepsTheLinesThatRepeat_AmongAnyNumberThatDoNot()
+    {
+        var fonts = new CountingFonts();
+        var pipeline = new TextPipeline(fonts, new StubTextShaper());
+        pipeline.MeasureWidth("measured once, with room", Style);
+        Assert.Equal(1, pipeline.WidthCacheUse.Entries);
+
+        // Full: a document of long lines, each measured once.
+        foreach (var text in Document())
+            pipeline.MeasureWidth(text, Style);
+        Assert.True(pipeline.WidthCacheUse.Bytes > TextPipeline.WidthCacheBytes - 4_000);
+
+        var repeated = Enumerable.Range(0, 50).Select(i => $"      \"field_{i}\": false,").ToArray();
+        var rng = new Random(9);
+        for (int i = 0; i < 19_000; i++)
+            pipeline.MeasureWidth(i % 4 == 0 ? repeated[rng.Next(repeated.Length)] : $"      \"id\": {i * 7919},", Style);
+        int asked = fonts.Resolves;
+        foreach (var line in repeated)
+            pipeline.MeasureWidth(line, Style);
+        Assert.Equal(asked, fonts.Resolves);
+
+        // Longer than any room an eviction leaves: not kept the first time, kept the second.
+        string fresh = string.Concat(Enumerable.Repeat("measured once when full ", 90));
+        pipeline.MeasureWidth(fresh, Style);
+        asked = fonts.Resolves;
+        pipeline.MeasureWidth(fresh, Style);
+        Assert.True(fonts.Resolves > asked, "a line measured once was kept in a full cache");
+        asked = fonts.Resolves;
+        pipeline.MeasureWidth(fresh, Style);
+        Assert.Equal(asked, fonts.Resolves);
+    }
+
+    [Fact]
+    public void TheWidthCache_IsForgotten_WhenTheUICultureChanges()
+    {
+        // A width is of the faces the culture picks for Han characters without kana.
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        try
+        {
+            var fonts = new CountingFonts();
+            var pipeline = new TextPipeline(fonts, new StubTextShaper());
+            pipeline.MeasureWidth("東京", Style);
+            pipeline.MeasureWidth("東京", Style);
+            Assert.Equal(1, pipeline.WidthCacheUse.Entries);
+            int asked = fonts.Resolves;
+            pipeline.MeasureWidth("東京", Style);
+            Assert.Equal(asked, fonts.Resolves);   // found
+
+            System.Globalization.CultureInfo.CurrentUICulture = culture.Name == "ja-JP" ? new("zh-CN") : new("ja-JP");
+            pipeline.MeasureWidth("東京", Style);
+            Assert.True(fonts.Resolves > asked, "the width from the other culture was found");
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = culture;
+        }
+    }
+
+    private sealed class CountingFonts : IFontCollection
+    {
+        private readonly StubFontCollection _inner = new();
+        public int Resolves;
+
+        public IResolvedFont Resolve(string familyName, FontWeight weight, FontSlant slant)
+        {
+            Resolves++;
+            return _inner.Resolve(familyName, weight, slant);
+        }
+
+        public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant) =>
+            _inner.MatchCharacter(codepoint, weight, slant);
+    }
+
     private sealed class CountingShaper : ITextShaper
     {
         private readonly StubTextShaper _inner = new();
