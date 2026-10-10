@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using HultUI.Core.Layout;
 using HultUI.Core.Styling;
 using HultUI.Testing;
@@ -174,6 +176,60 @@ public class ShaperEquivalenceTests(ITestOutputHelper output)
         var layout = new TextPipeline(new SkiaFontCollection(), shaper).Layout("東", Base, float.PositiveInfinity, null);
         var run = Assert.Single(Assert.Single(layout.Lines).Runs);
         Assert.NotEqual(0u, Assert.Single(run.Glyphs).GlyphId);
+    }
+
+    /// <summary>
+    /// The comparisons above are only as good as the glyphs they compare. A machine without a
+    /// script's fonts shapes its texts to missing glyphs, which both shapers agree on easily:
+    /// that is all WSL Fedora compared for the Indic, Thai and emoji texts until it had Noto's
+    /// faces. So wherever some installed face covers every character of a corpus text (as the
+    /// OS's font manager answers, not the collection under test), laying it out must reach those
+    /// faces: not one missing glyph. A text whose characters no face covers is left to the
+    /// machine, and its count is printed.
+    /// </summary>
+    [Fact]
+    public void WhereAFaceCoversAText_ItsRunsHaveNoMissingGlyphs()
+    {
+        var fonts = new SkiaFontCollection();
+        var primary = fonts.Resolve(Base.FontFamily, Base.FontWeight, Base.FontSlant);
+        using var shaper = new SkiaTextShaper();
+        var pipeline = new TextPipeline(fonts, shaper);
+        int covered = 0, uncovered = 0;
+        foreach (var text in Corpus.Concat(CjkCorpus))
+        {
+            // What a face is expected to draw. Format characters (ZWJ, isolates, BOM) and
+            // variation selectors are shaped away, so they are not asked about; a control, a
+            // private-use or an unassigned code point is the missing glyph by design, so such a
+            // text is not this test's.
+            bool coverable = true;
+            foreach (var rune in text.EnumerateRunes())
+            {
+                var category = Rune.GetUnicodeCategory(rune);
+                if (category is UnicodeCategory.Control or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
+                    coverable = false;
+                else if (category is UnicodeCategory.Format || rune.Value is >= 0xFE00 and <= 0xFE0F)
+                    continue;
+                // Asked of the OS's font manager directly, not through the collection under test.
+                // Its typefaces are shared, so never disposed here.
+                else if (!primary.HasGlyph(rune.Value) && SKFontManager.Default.MatchCharacter(rune.Value) is null)
+                    coverable = false;
+            }
+            if (!coverable)
+            {
+                uncovered++;
+                output.WriteLine($"  no face for all of: {Escape(text)}");
+                continue;
+            }
+
+            covered++;
+            var runs = pipeline.Layout(text, Base, float.PositiveInfinity, null).Lines.SelectMany(l => l.Runs).ToArray();
+            int missing = runs.Sum(r => r.Glyphs.Count(g => g.GlyphId == 0));
+            Assert.True(missing == 0, $"{missing} missing glyphs in {Escape(text)}, laid out in "
+                + string.Join(" + ", runs.Select(r => r.Font.FamilyName).Distinct()));
+        }
+        output.WriteLine($"{covered} texts covered by the installed faces, {uncovered} not");
+        // Latin, Greek, Cyrillic and the neutrals are on any machine with a font at all.
+        Assert.True(covered >= 15, $"only {covered} corpus texts had faces for every character");
     }
 
     /// <summary>Texts past the length the kept buffer takes shape in a buffer of their own, and
