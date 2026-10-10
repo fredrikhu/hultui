@@ -88,7 +88,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     row; **reactivity-scope-threadstatic** (approved, low priority).
 11. ~~**layout-zorder-sorted-allocs**~~ LANDED ca59c6d, 913204a, 4d82571 (1, widened to a z-order cache) + **maxlines-setter-thread** (from 19b94e9: the setter now marks layout from builder calls like `.MaxLines(1)`, so in Debug an element built off the UI thread would throw; mark only when attached) — sticky wheel 1.55 → ~0.3
     KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
-12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
+12. ~~**runtime-palette-filter-allocs + runtime-syntax-registry-first-use**~~ LANDED 8b40fde, 6457f94, c1b8918 (4) — palette filter
     −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
     thread (10 ms, 5 MB).
 13. **text-textarea-measure-lines** (5) — width-only FitsWhole (JSON open −36 %, −75 % with
@@ -116,10 +116,10 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **apps-tokenize-on-ui-thread** (8, app) — Junction's markdown code fences tokenize during Build (`MdCodeSpans`, JunctionApp.Markdown.cs:119; `ExtensionForLanguage`), loading the TextMate registry and grammar on the UI thread (~5 MB, ~7 ms AOT, 30–40 ms JIT on first use). Move to a worker (Meridian's is step 16).
 - **apps-whole-app-tween-rebuilds** (8/6, app) — Junction's spinner and remote-op tweens and `ToastHost(MarkDirty)` in Aperture/Junction/Meridian rebuild the whole app every drawn frame while animating (Junction ~186 KB per rebuild). Animate the element (`Animate.Opacity`, Transform, `SpinnerElement`) or move the animated part into its own component. Guideline example.
 - **apps-scenario-atspi-rows** (7/8) — perf-suite rows that run the AT-SPI bridge with signals recorded (any OS), so Linux a11y changes get timing and AOT numbers.
 - **a11y-atspi-role-change** (7, correctness) — an AT-SPI role change sends no signal; a client keeps the role it cached at cache-add.
-- **test-alloc-first-run-flake** (4, test reliability; in step 12) — two "allocates nothing" tests failed once each on the first run right after a build (Headless `ASteadyRepaintOfSlidersAndNumberFields_AllocatesNothing`; Skia `Paragraphs_AndTheirSelection_AllocateNothingPerFrame`, 22.9 B/frame); reruns pass. Likely tier-0/JIT warm-up; would flake CI. Harden the warm-up.
 - **text-memo-cache-byte-bound** (5) — BiDi/styled memo caches are not byte-bounded: 15.2 MB after a 5,000-block rich text document is opened twice and resized; `MemoRange` keys keep evicted `TextMemo`s alive. richtext/open reuses ~11 MB of them, so a bound costs re-open speed.
 - **paint-drawspannedline-overlap** (2, correctness, latent) — `DrawSpannedLine` (`FirstSpanEndingAfter`) binary-searches on End and assumes spans do not overlap; a multi-line DrawText/paragraph given overlapping spans would skip spans (TextArea is safe: its per-line spans are clipped). Small.
 - **mpv-vo-thread-minimized** (3, lead) — mpv's vo thread costs ~125 Mcyc/s at 60 fps whether drawing or skipping; while minimized a lower-cost mode (e.g. pausing video output, `vid=no`-like) might save it. Investigate.
@@ -213,6 +213,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 495b0b4, 6527b0d | reactivity-scope-threadstatic | `[ThreadStatic]` reactive scope (approved): 160 → 0 B per effect run; fan-out 94.4 → 16.2 KB/op (−83 %), −6 % JIT; reads off-thread or after an await no longer subscribe; DECISIONS.md updated. |
 | 2 | ca59c6d, 4d82571 | layout-zorder-sorted-allocs | Z-order kept on the child list, filled on first ask, dropped by child-list changes and the ZIndex/Type setters (layout never runs for a handler's ZIndex write). Sticky wheel 3.1 → 1.9 KB/op JIT (−38.7 %), 3.5 → 2.3 AOT; 5,000-row wheel −6.7 % JIT, −12.0 % AOT (placement control ≤ 2.8 %); jump −11.2 % AOT. Junction with a panel open: 1 sort + 52 scans per frame → 0. 0 slower. Child list 32 → 40 B, PositionStyle +8 B. |
 | 2 | 913204a | maxlines-setter-thread | Fix-up of 19b94e9: setters mark only what is not already marked, so `.MaxLines(1)` on a new label off the UI thread no longer throws in Debug; a laid-out label still re-lays out and is thread-checked. Perf flat. |
+| 2 | 8b40fde, c1b8918 | runtime-palette-filter-allocs | Joined text kept while the palette is open, title-only commands matched once, one array sort: palette row 592.5 → 430.3 KB/op JIT (−27.4 %), 651.9 → 424.3 AOT (−34.9 %); min −11.1 % JIT, −7.3 % AOT; Filter 167/357 → 4.7/9.0 KB per query; results identical to the old code. |
+| 2 | 6457f94 | runtime-syntax-registry-first-use | `CanHighlight` answers from a 297-extension table checked against the registry. Vesper's first code folder AOT 7.0 → 2.2 ms and 5.3 MB → 761 KB (JIT 32–38 → 4.4 ms); the TextMate registry loads at the first tokenize instead. |
 
 ## Examined, not worth it
 
