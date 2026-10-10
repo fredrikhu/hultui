@@ -4,6 +4,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -72,6 +73,59 @@ public class TextLayoutPropertyTests
         engine.PerformLayout(root, 800, 600);
 
         Assert.Equal(clipped - 5f, label.Layout.Width);
+    }
+
+    /// <summary>
+    /// A label built off the UI thread with <c>.MaxLines(1)</c> and <c>.TextOverflow(…)</c> does
+    /// not throw where the thread is checked (Debug builds): a new label is marked for layout and
+    /// paint already, and marking it again — the only part that checks — is skipped. Once it is
+    /// laid out, a change on the UI thread lays it out again, and the same change from another
+    /// thread still throws. The setters began marking in 19b94e9; until then building such a label
+    /// anywhere touched no mark.
+    /// </summary>
+    [Fact]
+    public void ALabelBuiltOffTheUIThread_TakesMaxLines_AndALaidOutOneStillChecks()
+    {
+        bool wasEnforcing = UIThread.Enforce;
+        UIThread.Enforce = true;
+        UIThread.Bind();
+        try
+        {
+            TextElement? built = null;
+            Assert.Null(RunOffThread(() => built = Text.New(Long).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)));
+            var label = built!;
+
+            var root = Flex.Column().AlignItems(AlignItems.FlexStart).Children(
+                Box.New().Width(Dimension.Px(100)).AlignItems(AlignItems.FlexStart).Children(label));
+            var engine = new LayoutEngine(new StubMeasureContext());
+            StyleResolver.Resolve(root);
+            engine.PerformLayout(root, 800, 600);
+            Assert.Equal(14f, label.Layout.Height);
+
+            label.MaxLines = null;
+            engine.PerformLayout(root, 800, 600);
+            Assert.True(label.Layout.Height > 14f);   // wrapped again
+
+            Assert.IsType<InvalidOperationException>(RunOffThread(() => label.MaxLines = 2));
+        }
+        finally
+        {
+            UIThread.Unbind();
+            UIThread.Enforce = wasEnforcing;
+        }
+    }
+
+    private static Exception? RunOffThread(Action action)
+    {
+        Exception? caught = null;
+        var thread = new Thread(() =>
+        {
+            try { action(); }
+            catch (Exception ex) { caught = ex; }
+        });
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)), "off-thread work did not finish");
+        return caught;
     }
 
     [Fact]

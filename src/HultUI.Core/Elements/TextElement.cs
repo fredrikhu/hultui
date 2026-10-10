@@ -46,8 +46,7 @@ public class TextElement : Element
         {
             if (_overflow == value) return;
             _overflow = value;
-            MarkLayoutDirty();
-            MarkPaintDirty();
+            WrapChanged();
         }
     }
 
@@ -60,9 +59,22 @@ public class TextElement : Element
         {
             if (_maxLines == value) return;
             _maxLines = value;
-            MarkLayoutDirty();
-            MarkPaintDirty();
+            WrapChanged();
         }
+    }
+
+    /// <summary>
+    /// Lays the label out and paints it again after <see cref="MaxLines"/> or
+    /// <see cref="Overflow"/> changed — unless it is marked for both already, as every label is
+    /// from its construction until its first frame. Marking again would then change nothing, and
+    /// the marks check the thread: a builder's <c>.MaxLines(1)</c> on a new label, which before
+    /// these setters marked anything ran on whatever thread built it, threw in a Debug build when
+    /// that was not the UI thread.
+    /// </summary>
+    private void WrapChanged()
+    {
+        if ((DirtyFlags & DirtyFlags.Layout) == 0) MarkLayoutDirty();
+        if ((DirtyFlags & DirtyFlags.Paint) == 0) MarkPaintDirty();
     }
 
     private IReadOnlyList<TextSpan>? _spans;
