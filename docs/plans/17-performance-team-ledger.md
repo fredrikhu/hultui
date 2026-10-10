@@ -86,7 +86,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
     −10.7…−11.8 %); **reactivity-tween-tick-per-frame** (approved; Reel 13 rebuilds per
     presented frame, 172 MB per 11 s) with the **apps-scenario-tween-signal-rebuild** suite
     row; **reactivity-scope-threadstatic** (approved, low priority).
-11. **layout-zorder-sorted-allocs** (1, widened to a z-order cache) + **maxlines-setter-thread** (from 19b94e9: the setter now marks layout from builder calls like `.MaxLines(1)`, so in Debug an element built off the UI thread would throw; mark only when attached) — sticky wheel 1.55 → ~0.3
+11. ~~**layout-zorder-sorted-allocs**~~ LANDED ca59c6d, 913204a, 4d82571 (1, widened to a z-order cache) + **maxlines-setter-thread** (from 19b94e9: the setter now marks layout from builder calls like `.MaxLines(1)`, so in Debug an element built off the UI thread would throw; mark only when attached) — sticky wheel 1.55 → ~0.3
     KB/frame; no per-frame/per-event child scans; Junction panels sort the root per move.
 12. **runtime-palette-filter-allocs + runtime-syntax-registry-first-use** (4) — palette filter
     −33 % on its row (Filter −84…−91 %); Vesper's first code folder loads TextMate on the UI
@@ -211,6 +211,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | bd808d4 | reconcile-blueprint-hashset | No set for a parent with no children: 288 → 80 B per `.Children` call; component edit/reverse −10.7…−11.0 % allocKB and −9…−17 % time (JIT/AOT), tabs −8.4 %, a11y/create −10.5 %; 0 slower. |
 | 2 | 65cdae0, e1d86a1, c583ef3 | reactivity-tween-tick-per-frame | Animations step once per frame that may be drawn (approved). Row 15.1 → 1.0 rebuilds/frame, −93.7 % KB, −7/−8 % time. Reel (AOT, Vulkan, 11 s): VideoPlayer rebuilds 616–653 → 312–313, 2.1–2.2 → 1.06 per frame, UI-thread 25 → 13 MB, gen-0 1 → 0, frames 511–518. e1d86a1 fixed 65cdae0 holding drawn tweens to the 16 ms idle wait (120 Hz tween 89 → 121 fps). Minimized auto-hide and toasts run to time. |
 | 2 | 495b0b4, 6527b0d | reactivity-scope-threadstatic | `[ThreadStatic]` reactive scope (approved): 160 → 0 B per effect run; fan-out 94.4 → 16.2 KB/op (−83 %), −6 % JIT; reads off-thread or after an await no longer subscribe; DECISIONS.md updated. |
+| 2 | ca59c6d, 4d82571 | layout-zorder-sorted-allocs | Z-order kept on the child list, filled on first ask, dropped by child-list changes and the ZIndex/Type setters (layout never runs for a handler's ZIndex write). Sticky wheel 3.1 → 1.9 KB/op JIT (−38.7 %), 3.5 → 2.3 AOT; 5,000-row wheel −6.7 % JIT, −12.0 % AOT (placement control ≤ 2.8 %); jump −11.2 % AOT. Junction with a panel open: 1 sort + 52 scans per frame → 0. 0 slower. Child list 32 → 40 B, PositionStyle +8 B. |
+| 2 | 913204a | maxlines-setter-thread | Fix-up of 19b94e9: setters mark only what is not already marked, so `.MaxLines(1)` on a new label off the UI thread no longer throws in Debug; a laid-out label still re-lays out and is thread-checked. Perf flat. |
 
 ## Examined, not worth it
 
