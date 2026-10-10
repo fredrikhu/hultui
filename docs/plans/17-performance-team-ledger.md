@@ -111,6 +111,10 @@ Round 2 regressions first, then value per cost.
    pixel-identical mid-drag, validation 0); fix the broken `HULTUI_VULKAN_FIXED_EXTENT` opt-in
    (SUBOPTIMAL rebuilds every step: 57 ms); cache the surface-format query (−1.4 ms per kept step);
    Reel needs a window-procedure subclass for ENTER/EXIT. Run the stretch harness before shipping.
+   Over-allocate on the first size change inside the modal loop, not at WM_ENTERSIZEMOVE: a title
+   bar move enters the same loop and must not pay two rebuilds. Proof with video (user asked about
+   60+ fps): mpv frame drops and A/V sync during a drag, a move, a held-still drag and the release,
+   at 1080p60 and a 120 fps clip, before vs after.
 10. **runtime-idle-wakeups + apps-tooling-generic-framelog** (4; with 3, 6, 7) — the loop waits for
     its next deadline or a wake instead of `WaitForEvents(16)`: idle ~60 → ≤1 wake/s in all five
     apps, minimized 38 → 0. Deadlines: animations incl. delay tweens, a11y trailing refresh 100 ms,
