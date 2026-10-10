@@ -5,12 +5,12 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 2
-- **Phase:** build — round 2 surveys merged 2026-10-09 (no expert satisfied); building the
-  round 2 build order. Round 2 survey started 2026-10-09 after round 1's release (merge 64ba531,
-  CI run 37861109308 green: test, test-linux, docs). To resume after a pause, run in this
-  worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
-  Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
+- **Phase:** build — all round 2 build steps done 2026-10-10; next the end-of-round full test
+  suite, then Phase `release` (merge into main, push, wait for CI, then cut the five app
+  releases). To resume after a pause, run in this worktree: `/loop Run the next step of the
+  performance team: follow docs/plans/17-performance-team.md, with state in
+  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
+  for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** fc0f4f7 (round 2 reviews all of round 1: fc0f4f7..64ba531)
@@ -117,7 +117,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 17. ~~**layout-virtuallist-item-rows**~~ LANDED 545d1b6, a96c185, b9e5a78 (1; approved) — opt-in `RenderWith((item, selected) =>
     …)` VirtualList API (walk template calls 19 → 3, −75 % bytes), adopted in Junction
     History first, then other lists one at a time.
-18. **wsl-mesa-verify** (3/5; approved) — Mesa 26.2.3 (EGL, DRI, Vulkan: Dozen on the RTX 4080
+18. ~~**wsl-mesa-verify**~~ DONE 337140a, 595b8dd (3/5; approved) — Mesa 26.2.3 (EGL, DRI, Vulkan: Dozen on the RTX 4080
     via D3D12, and llvmpipe) and 48 Noto font packages (Indic, Thai, Lao, Khmer, Myanmar,
     Tibetan, Ethiopic, CJK, colour emoji; 83 → 611 faces) installed in WSL Fedora 2026-10-09:
     check 0f5816a (GL depth 0) and 7a827e9 on Mesa EGL/llvmpipe and lavapipe, and re-run
@@ -125,6 +125,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **linux-emoji-colour-fallback** (5, correctness, changes pixels on Linux) — 😀 and ❤️ (VS16) fall back to monochrome DejaVu Sans instead of Noto Color Emoji: `SkiaFontCollection.MatchCharacter` passes no language for emoji (`fc-match lang=und-zsye` picks Noto Color Emoji). Needs emoji-presentation/VS16 handling in FontItemizer/ScriptLanguage, checked on Windows. Ubuntu users would see it.
 - **adopt-item-rows** (1/8) — move more lists onto `RenderWith`: Junction Commit, Files, Branches, Tags; Vesper panes; Aperture's poster grid; TableView (must call InvalidateRows on width, sort, hide). One at a time, each with a shape key and tests per input.
 - **virtuallist-row-style-inheritance** (1, correctness, changes pixels) — one-argument rows are resolved inline under the theme's defaults, not under their list, so an ancestor's inherited text style (e.g. `.TextColor(X)`) is ignored by those rows (confirmed by a test variant). Fix = resolve under the list (545d1b6 added `StyleResolver.ResolveUnder`). Changes pixels where an ancestor sets text style.
 - **test-vesper-diffview-escape-flake** (8, test) — `DiffViewTests.EscapeStillClosesTheViewWhileItIsComparing` failed once under load (races a background diff), passed alone 3× and in a rerun. Watch for it in CI.
@@ -243,6 +244,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 9b512c6 | syntax-maxlines-uncoloured | Meridian colours responses up to 200,000 lines (JSON ~5.5 µs a line on a worker; 98k lines 0.54 s, 4.7 MB of spans; the 2 M-character cap stops JSON near 100k lines). Merged find list kept between builds: URL keystroke with find open 8.4 → 1.8 ms, 2,945 → 178 KB. Junction/Vesper keep the 20,000 default (already on workers). |
 | 2 | 545d1b6, b9e5a78 | layout-virtuallist-item-rows | Opt-in `.RenderWith((item, selected) => …)` (`ItemRowTemplate`): kept rows whose item (EqualityComparer) and selected state are unchanged; `InvalidateRows()` for anything else; theme object switch re-makes rows. Twin row virtual/selection walk 1,000 item rows: rows per step 19 → 3, 96.8 → 25.7 KB/op (−73.5 %), −6 % JIT / −10 % AOT; layouts −72 %, resolves −40 %; a11y tree and pixels identical to the old template; 0 slower. |
 | 2 | a96c185 | junction-history-item-rows | Junction History on item rows (shape key: stats, compact, theme): rows per key 17 → 2.83; realize 0.155 → 0.072 ms JIT, 0.20 → 0.079 AOT; 212 → 41 KB per key (−80 %); frame bytes −53 %, frame time −7 % JIT / −10 % AOT (headless, 80 keys). 16/17 frames byte-identical; the 17th fixes hover lost on a key press. |
+| 2 | 337140a | wsl-shaper-real-fonts | d049be7 bit-identical on real Linux faces: 116,438 shaper calls, 0 differences, 80 faces, 0 missing glyphs in every script; Text 192/192, goldens 39/39 in WSL. New test that the corpus reaches real glyphs (mutation caught). |
+| 2 | 595b8dd | wayland-minimized-restore | Correctness (found in WSL): after the app minimizes its own window on Wayland, SDL keeps the minimized flag after a restore, so since 82e382b the window stayed undrawn (0 frames in 15 s). A focus gain after a minimize now ends the minimized state on Wayland. Also verified: 0f5816a on Mesa gets depth 24/stencil 8 anyway (no stencil-only config; no saving, no risk, 48 contexts, 0 failures); Vulkan on lavapipe and Dozen pixel-exact through resizes, validation 0 messages; destroy-first not taken on Linux. WSL Linux suite: 9,917 passed, 0 failed. |
 
 ## Examined, not worth it
 
