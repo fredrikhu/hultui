@@ -273,10 +273,9 @@ Round 2 questions, answered 2026-10-09 (the user took every recommendation; 11 y
 11. Install Mesa and Noto fonts in WSL Fedora → **yes**.
 12. No-op glGetError — moot: 61edb19 showed the driver wait only moves (declined).
 
-13. **wsl-atspi-stack** (asked 2026-10-10): install at-spi2-core, dbus-daemon and PyGObject in
-    WSL Fedora, so a live AT-SPI client (samples/AtSpiVerify bulk, pyatspi) can verify the
-    Linux bridge changes (d40d301, step 15's org.a11y.Status gate, a11y-atspi-cache-child-index,
-    a11y-atspi-virtual-items)? The Mesa/fonts approval did not cover these packages.
+13. **wsl-atspi-stack** → **yes** (2026-10-10): installed at-spi2-core 2.60.7, dbus-daemon
+    1.16.2, python3-gobject 3.56.3, python3-pyatspi 2.58.2 and gobject-introspection (needed for
+    pyatspi's typelibs) in WSL Fedora; `import pyatspi` works. Live AT-SPI checks are now possible.
 
 Note: the round 2 app survey registered a Jellyfin device named "aperture-survey".
 
