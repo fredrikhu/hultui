@@ -7,7 +7,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 3
 - **Phase:** build — **paused after the round 3 survey** (the user asked for a break once the
   surveys were in, 2026-10-10). All eight reports are in `17-reports/r3-*`; the round 3 build
-  order is below, and 13 questions wait in Needs the user. Steps marked **(user)** wait for an
+  order is below, and 15 questions wait in Needs the user. Steps marked **(user)** wait for an
   answer; the others can start. Next: round 3 build step 1. To resume, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -104,6 +104,13 @@ Round 2 regressions first, then value per cost.
    per swapchain image (2,048 B per Vulkan frame → ≤0.1 KB; Aperture's quiet frames are all of it).
    The second changes HDR.md's "never cache a wrapped swapchain target": barrier each acquired image
    back to COLOR_ATTACHMENT_OPTIMAL, reused-frame capture, validation with a positive control.
+   With **vk-drag-swapchain-overallocate (user)** (user report, `17-reports/r3-aperture-resize.md`):
+   every live-resize step rebuilds the F16 swapchain, 92 % of the step (Aperture and Reel ~37 ms
+   per step vs GL apps ~4.6); between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE build to a 256-px bucket
+   with maintenance1 ONE_TO_ONE and rebuild exact at release (prototype 37–39 → ~9 ms JIT and AOT,
+   pixel-identical mid-drag, validation 0); fix the broken `HULTUI_VULKAN_FIXED_EXTENT` opt-in
+   (SUBOPTIMAL rebuilds every step: 57 ms); cache the surface-format query (−1.4 ms per kept step);
+   Reel needs a window-procedure subclass for ENTER/EXIT. Run the stretch harness before shipping.
 10. **runtime-idle-wakeups + apps-tooling-generic-framelog** (4; with 3, 6, 7) — the loop waits for
     its next deadline or a wake instead of `WaitForEvents(16)`: idle ~60 → ≤1 wake/s in all five
     apps, minimized 38 → 0. Deadlines: animations incl. delay tweens, a11y trailing refresh 100 ms,
@@ -166,6 +173,12 @@ Re-ranked by the round 4 survey.
   (Junction TODO.md open 2.8 MB, text 84 %; Meridian first response 7.5 MB, text 90 %). Medium.
 - **apps-junction-components (user)** (8) — re-open "split Junction into components" (declined
   2026-10-06): unchanged titlebar, sidebar and toolbar are 70 % of History's Build bytes.
+- **vk-8bit-unless-hdr (user)** (3) — an 8-bit swapchain unless video or a GPU image source is on
+  screen: resize step 37 → 8.7 ms on its own, steady present 0.96 → 0.33 ms, GPU memory 213 → 63 MB;
+  UI pixels change on HDR displays and a format switch at playback start/stop. A + B not measured.
+- **aperture-resize-rebuild-on-change** (8, app, low) — rebuild on resize only when a size-derived
+  value changes (cards per row for six widths, hero steps, hero height, library rows): 333 → 26 KB
+  per resize step, time within noise.
 - **mpv-vo-thread-minimized (user)** (3) — `vid=no` while minimized: −38…−71 % process CPU, a
   glitch at every restore.
 - **layout-ordered-children** (1, low, medium) — hit test and cull O(n) → O(log n + visible);
@@ -351,8 +364,17 @@ Round 3 questions (2026-10-10, open). Recommendations in brackets.
     toolbar 70 % of the Build; Meridian URL key: Build 92 %; Vesper: both panes rebuilt every key.
     [Yes, Junction's chrome first, one app at a time.]
 
+14. **vk-drag-swapchain-overallocate:** during a window drag, Vulkan windows (Aperture, Reel) keep
+    an over-allocated swapchain presented unscaled and rebuild once at the exact size on release
+    (resize step 37 → ~9 ms; video playing during a drag costs more CPU while dragging; one ~33 ms
+    frame at release; maintenance1 on by default; NVIDIA verified only)? And fix the broken
+    `HULTUI_VULKAN_FIXED_EXTENT=1` opt-in rather than remove it? [Yes; fix it.]
+15. **vk-8bit-unless-hdr:** 8-bit swapchain unless HDR content (video) is on screen — UI pixels
+    change on HDR displays, a format switch when playback starts and stops? [Not now: A gets most of
+    the resize gain without a pixel change; revisit for memory.]
+
 To do for the user when the work is done: remove the "aperture-survey" device registrations on
-jellyfin.home (rounds 2 and 3) and revoke the API key.
+jellyfin.home (rounds 2 and 3, plus 51 runs of the resize diagnosis) and revoke the API key.
 
 Round 2 questions, answered 2026-10-09 (the user took every recommendation; 11 yes):
 
@@ -447,3 +469,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   resize until a key press: fixed e0b816f (Brief and Thumbnails rebuild on resize). Aperture's Home
   resizes much slower than other apps: an app-workloads diagnosis agent is measuring it (Vulkan F16
   swapchain vs whole-app rebuild per step vs card pictures); result goes into the round 3 build.
+- 2026-10-10: Aperture resize diagnosed (`17-reports/r3-aperture-resize.md`): not the start screen —
+  every step rebuilds the Vulkan F16 swapchain (92 %, 32 of ~37 ms; Reel the same; GL apps 4.6 ms).
+  Drag over-allocation prototyped 37 → 9 ms; joins step 9 if approved (question 14); the
+  FIXED_EXTENT opt-in is broken. Questions now 15.
