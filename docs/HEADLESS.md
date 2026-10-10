@@ -73,7 +73,10 @@ session.RunLoop(() => done, eventEvery: TimeSpan.FromMilliseconds(1),
 Assert.True(rebuilds <= frames + 1);             // a tween's writes: once per frame drawn
 ```
 
-A run past `limit` (default 60 s of virtual time) throws `TimeoutException`.
+A run past `limit` (default 60 s of virtual time) throws `TimeoutException`. Two window
+settings shape it: `window.RefreshRate = 120` paces it as on a 120 Hz display (0, the
+default, is taken as 60), and `window.Minimized = true` stands in for the OS minimizing the
+window, which then draws nothing (its animations still run) until it is set back.
 
 ## Virtual Time
 

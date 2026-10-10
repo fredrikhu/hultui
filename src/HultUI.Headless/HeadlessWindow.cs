@@ -52,6 +52,17 @@ public sealed partial class HeadlessWindow
         set => _platform.IsMinimized = value;
     }
 
+    /// <summary>
+    /// The display refresh rate the window reports, in Hz. 0, the default, is unknown, which the
+    /// loop takes as 60 Hz. Set it to run <see cref="HeadlessSession.RunLoop"/> as on a faster
+    /// display; a pump draws whenever it is asked, whatever this says.
+    /// </summary>
+    public float RefreshRate
+    {
+        get => _platform.RefreshRate;
+        set => _platform.RefreshRate = value;
+    }
+
     /// <summary>The last cursor the framework requested (e.g. the text I-beam over an input).</summary>
     public CursorType LastCursor => _platform.LastCursor;
 

@@ -121,6 +121,10 @@ What follows from it:
 
 - A tween's setter and `OnComplete` run at most once per display interval: 16.7 ms at
   60 Hz, 5 ms at 200 Hz.
+- A tween on screen is drawn at the display's rate, with or without events between frames:
+  between its frames the loop waits for the next one, not for its idle 16 ms. (A tween that
+  wrote a signal used to be drawn at ~60 frames a second on a faster display when nothing
+  else woke the loop: its zero-time step between frames changed nothing.)
 - A tween standing in for a timer — the tooltip's delay, a video player's auto-hide, a
   toast's hold — ends on the first step at or past its time, up to one interval late.
 - A window with nothing to draw still steps its tweens, at most once an interval: an idle

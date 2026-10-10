@@ -91,7 +91,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public float LayoutWidth => _layoutWidth / _userScale;
     public float LayoutHeight => _layoutHeight / _userScale;
     public float DisplayScale => _scale * _userScale;
-    public float RefreshRate => 0f;   // no display; the session drives frames itself
+    /// <summary>0, unknown, unless <see cref="HeadlessWindow.RefreshRate"/> set it: no display,
+    /// and a pump draws whenever it is asked.</summary>
+    public float RefreshRate { get; set; }
 
     private float _userScale = 1f;
 

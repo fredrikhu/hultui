@@ -440,6 +440,9 @@ public sealed class Application : IDisposable
         long nextRenderAt = lastTick - frequency;
         // The earliest animations may step again after a step that drew nothing.
         long nextTickAt = nextRenderAt;
+        // Whether the last step was drawn: a tween is moving on screen, and its next step
+        // is due with the next frame.
+        bool stepDrawn = false;
 
         while (IsRunning && done?.Invoke() != true)
         {
@@ -473,6 +476,7 @@ public sealed class Application : IDisposable
 
             if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick))
             {
+                if (tick) stepDrawn = true;
                 // The next deadline follows the schedule, not this render: a frame that
                 // took its slack and drew a millisecond early shifts the phase, not the
                 // rate (anchored to now it read 136 fps on a 120 Hz display). A frame
@@ -487,14 +491,20 @@ public sealed class Application : IDisposable
                 continue;
             }
 
-            if (tick && AnimationManager.HasActiveAnimations)
-                nextTickAt = now + (long)(frequency / DisplayHz());
-
-            if (AnyWindowNeedsRender())
+            if (tick)
             {
-                // Dirty, but too soon: wait out what is left of the interval. An event
-                // ends the wait early and is handled on the next iteration; the render
-                // still waits its turn.
+                stepDrawn = false;
+                if (AnimationManager.HasActiveAnimations)
+                    nextTickAt = now + (long)(frequency / DisplayHz());
+            }
+
+            // Dirty, but too soon: wait out what is left of the interval. An event ends the
+            // wait early and is handled on the next iteration; the render still waits its
+            // turn. A tween being drawn waits the same way, though nothing is dirty yet: it
+            // steps (and dirties) when its frame is due, and the idle wait below would hold
+            // it to ~60 frames a second on a faster display.
+            if (AnyWindowNeedsRender() || (stepDrawn && AnimationManager.HasActiveAnimations))
+            {
                 long remainingMs = (nextRenderAt - clock.GetTimestamp()) * 1000 / frequency;
                 _platform.WaitForEvents((int)Math.Max(1, remainingMs));
             }

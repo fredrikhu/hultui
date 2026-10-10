@@ -118,6 +118,30 @@ public class TweenStepTests
         Assert.True(rebuilds <= drawn + 1, $"{rebuilds} rebuilds for {drawn} frames drawn");
     }
 
+    [Theory]
+    [InlineData(false)]   // an element's tween: MarkPaintDirty on every step
+    [InlineData(true)]    // a tween writing a signal a Build reads
+    public void OnA120HzDisplay_ATweenIsDrawnEveryInterval_WithNoEventsBetweenFrames(bool throughASignal)
+    {
+        // Nothing is dirty between a tween's frames until it steps, and it steps when its frame
+        // is due: the loop must wait for that deadline, not for its idle 16 ms, or the tween is
+        // drawn at ~60 frames a second whatever the display does.
+        var fader = new Fader();
+        var box = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(20));
+        using var loop = new Loop(throughASignal ? fader.Mount() : box);
+        loop.Session.Window.RefreshRate = 120;
+        int frames = loop.Frames;
+        bool done = false;
+        Action<float> step = throughASignal
+            ? v => fader.Level.Value = v
+            : v => { box.Background(new Color((byte)(v * 255), 0, 0)); box.MarkPaintDirty(); };
+        Animate.Value(0f, 1f, step).Duration(1f).Ease(Easing.Linear).OnComplete(() => done = true).Start();
+
+        loop.Session.RunLoop(() => done);
+
+        Assert.InRange(loop.Frames - frames, 114, 122);
+    }
+
     [Fact]
     public void ATween_StillTakesItsDuration_AndItsLastValueIsDrawn()
     {
