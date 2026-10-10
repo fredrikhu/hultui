@@ -1012,8 +1012,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         }
         _a11yPropertyDirty = false;
         _a11yWasActive = a11yActive;
-        // Note: the Children flag is cleared with everything else by
-        // ClearAllFlags at the end of the frame, below.
+        // Note: the Children flag is cleared with everything else by ClearAllFlags at the end
+        // of the frame, below, or where a minimized window stops.
 
         // Keep the maximize button's non-client hover highlight alive across rebuilds.
         ReassertMaximizeButtonHover();
@@ -1038,6 +1038,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // after the restore draws it. A video still has to be served (ServiceUndrawnSources).
         if (!evenIfMinimized && PlatformWindow.IsMinimized)
         {
+            // A change that was only structure, style or layout has no paint dirt of its own,
+            // and none of it is on screen: the root takes some for the restore. The structural
+            // flag goes, as at the end of a drawn frame. Its one reader, the accessibility check
+            // above, has had its answer; left set, it rebuilt the whole tree on every pass of the
+            // loop until the restore — one element added to 2,016 while minimized, a UIA client
+            // listening: a rebuild on each of 61 passes a second, 10.8 MB/s.
+            if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0)
+                _root.MarkPaintDirty();
+            ClearFlags(_root, DirtyFlags.Children);
             ServiceUndrawnSources();
             return false;
         }
