@@ -224,6 +224,55 @@ public class UiaWrapperTreeTests
     }
 
     [WindowsFact]
+    public void ARoleAndAnAutomationIdChange_AreWhatTheWrapperAnswers()
+    {
+        // The differ compares neither, so a rebuild that changes only them names no node: the
+        // wrapper was moved to the new node and kept answering from the copy it took when it was
+        // made. A group that became a dialog still said it was a group (ControlType 50026).
+        using var rig = new Rig();
+        var label = TextB.New("Body");
+        var panel = Box.New().Children(TextB.New("Inside"), Checkbox.New(false, "Option"));
+        panel.Role = AccessibilityRole.Group;
+        panel.AccessibleName = "Panel";
+        panel.AutomationId = "panel-1";
+        rig.Mount(Flex.Column().FlexShrink(0).Children(label, panel));
+        var wrapper = rig.Wrapper(panel)!;
+        Assert.Equal(UiaInterop.UIA_GroupControlTypeId, IntProperty(wrapper, UiaInterop.UIA_ControlTypePropertyId));
+        Assert.Equal("panel-1", StringProperty(wrapper, UiaInterop.UIA_AutomationIdPropertyId));
+
+        panel.Role = AccessibilityRole.Dialog;
+        panel.AutomationId = "panel-2";
+        label.Content = "Body 2"; // a change a reader sees, so the tree is rebuilt
+        rig.Session.PumpFrame();
+
+        Assert.Same(wrapper, rig.Wrapper(panel));
+        Assert.Equal(UiaInterop.UIA_WindowControlTypeId, IntProperty(wrapper, UiaInterop.UIA_ControlTypePropertyId));
+        Assert.Equal("panel-2", StringProperty(wrapper, UiaInterop.UIA_AutomationIdPropertyId));
+
+        panel.Role = AccessibilityRole.Group;
+        panel.AutomationId = null;
+        label.Content = "Body 3";
+        rig.Session.PumpFrame();
+
+        Assert.Equal(UiaInterop.UIA_GroupControlTypeId, IntProperty(wrapper, UiaInterop.UIA_ControlTypePropertyId));
+        Assert.Null(StringProperty(wrapper, UiaInterop.UIA_AutomationIdPropertyId));
+    }
+
+    private static int IntProperty(UiaFragment wrapper, int propertyId)
+    {
+        wrapper.GetPropertyValue(propertyId, out var value);
+        Assert.Equal(UiaVariant.VT_I4, value.Vt);
+        return value.IntValue;
+    }
+
+    private static string? StringProperty(UiaFragment wrapper, int propertyId)
+    {
+        wrapper.GetPropertyValue(propertyId, out var value);
+        try { return value.Vt == UiaVariant.VT_BSTR ? value.AsString() : null; }
+        finally { value.Free(); }
+    }
+
+    [WindowsFact]
     public void ANewRoot_DropsTheWrappersOfTheOldOne()
     {
         // A new root diffs from no tree: everything is added and nothing removed, so the

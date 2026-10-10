@@ -13,9 +13,12 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// on demand. Exposed to UIA as IRawElementProviderSimple / Fragment.
 /// </summary>
 /// <remarks>
-/// Property values are snapshot-copied here (Name, Role, Value, etc.) rather
-/// than read live through the node reference — UIA may call provider methods
-/// from worker threads, so snapshots avoid cross-thread element access.
+/// Property values the diff reports changes of are snapshot-copied here (Name, Value, the
+/// states) and refreshed when it names the node. The role and the automation id are read
+/// from <see cref="Node"/>: the differ compares neither, so a copy taken when the wrapper was
+/// made answered for good — a group that became a dialog stayed a group. The node is the
+/// current tree's (the bridge moves every wrapper there after each diff), never changes once
+/// applied, and is no element, so reading it from a UIA worker thread is safe.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaFragment : INativeSimple, INativeFragment
@@ -38,8 +41,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private string? _name;
     private string? _description;
     private string? _value;
-    private string? _automationId;
-    private AccessibilityRole _role;
     private bool _isFocusable;
     private bool _isFocused;
     private bool _isEnabled;
@@ -95,8 +96,6 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _name = node.Name;
         _description = node.Description;
         _value = node.Value;
-        _automationId = node.AutomationId;
-        _role = node.Role;
         _isFocusable = node.IsFocusable;
         _isFocused = node.IsFocused;
         _isEnabled = node.IsEnabled;
@@ -130,7 +129,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     public int GetPatternProvider(int patternId, out IntPtr pPatternProvider)
     {
-        object? provider = _role switch
+        object? provider = Node.Role switch
         {
             // Text a reader moves through (seam A1), whatever the role: a terminal's document,
             // and later edit fields.
@@ -185,11 +184,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     public int GetPropertyValue(int propertyId, out UiaVariant pRetVal)
     {
+        // One read of the node per call: the UI thread may move the wrapper to a newer tree meanwhile.
+        var node = Node;
+
         // A node that stands for a child window answers together with that window's own
         // providers. Left to them, a web view's node was not a control: the control view
         // dropped it, and a hit test on it came back as its parent. So the node says it is.
         if (propertyId is UiaInterop.UIA_IsControlElementPropertyId or UiaInterop.UIA_IsContentElementPropertyId
-            && !Node.NativeContent.IsEmpty)
+            && !node.NativeContent.IsEmpty)
         {
             pRetVal = UiaVariant.FromBool(true);
             return 0;
@@ -198,9 +200,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         pRetVal = propertyId switch
         {
             UiaInterop.UIA_NamePropertyId when _name is not null => UiaVariant.FromBStr(_name),
-            UiaInterop.UIA_AutomationIdPropertyId when _automationId is not null => UiaVariant.FromBStr(_automationId),
+            UiaInterop.UIA_AutomationIdPropertyId when node.AutomationId is { } automationId => UiaVariant.FromBStr(automationId),
             UiaInterop.UIA_HelpTextPropertyId when _description is not null => UiaVariant.FromBStr(_description),
-            UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(MapControlType(_role)),
+            UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(MapControlType(node.Role)),
             UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(_isFocusable),
             UiaInterop.UIA_HasKeyboardFocusPropertyId => UiaVariant.FromBool(_isFocused),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(_isEnabled),
