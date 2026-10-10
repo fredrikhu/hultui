@@ -89,6 +89,7 @@ effect.Dispose(); // stop watching -- the effect will not run again
 - When any tracked dependency changes, the callback is scheduled to re-run.
 - Call `.Dispose()` to tear down the effect and stop all future executions.
 - Dependencies are re-captured on every run. If a conditional branch causes a signal to not be read in a particular run, that signal is no longer a dependency until it is read again.
+- Only reads made **on the thread running the callback, while it runs**, are tracked. A read on another thread (inside a `Task.Run` the callback starts) or after an `await` in an `async` lambda subscribes nothing — and should not happen: reactive state belongs to the UI thread (see [The thread guard](#the-thread-guard)). The same holds for `Computed` factories and a component's `Build()`.
 
 ---
 

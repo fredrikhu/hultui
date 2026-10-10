@@ -94,7 +94,7 @@ HultUI (meta-package)
 | Decision | Rationale |
 |----------|-----------|
 | Signal<T> / Computed<T> / Effect | Fine-grained reactivity (SolidJS-inspired). Most performant model — surgical updates, no diffing |
-| ReactiveScope with AsyncLocal | Thread-local dependency tracking. Safe nesting. Works with single UI thread |
+| ReactiveScope with `[ThreadStatic]` | Thread-local dependency tracking. Safe nesting. Works with single UI thread. Was an `AsyncLocal` until plan 17 (2026-10-10): it flowed into a `Task.Run` or the rest of an `async` lambda started inside an Effect, so a read there subscribed from another thread, and every set made an ExecutionContext (72 B an effect run, 160 B with another AsyncLocal live; a signal read by 500 effects 94 → 16 KB a write). A read on another thread or after an `await` no longer subscribes |
 | Batch updates | Multiple signal changes coalesce into one effect flush. Prevents redundant rebuilds |
 | [Reactive] source generator | Generates Signal<T> backing from property declaration. Reduces boilerplate |
 | Direct mutation as escape hatch | Any element can be mutated directly (dirty-flag style) for perf-critical paths |
