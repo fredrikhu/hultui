@@ -94,7 +94,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 13. ~~**text-textarea-measure-lines**~~ LANDED b23b203, 40d054d, 28fbeb8, 05414ab (5) — width-only FitsWhole (JSON open −36 %, −75 % with
     item 4); Meridian response frame 25.7 MB. Once it lands, lower `ShapeCacheBytes` to ~8 MB
     and give any new width cache a weight (48823d5).
-14. **gl-vk-one-submit-per-frame + gl-vk-resize-duplicate-frames** (3) — Flush is the 2nd
+14. ~~**gl-vk-one-submit-per-frame + gl-vk-resize-duplicate-frames**~~ DONE 61edb19 (declined), b471108 (3) — Flush is the 2nd
     largest share in every app (14–36 %); 3 → 1 frames per resize step. Needs timing.
 
 15. **a11y-atspi-active-on-status + a11y-value-for-text + a11y-richtext-text-snapshot +
@@ -217,6 +217,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 8b40fde, c1b8918 | runtime-palette-filter-allocs | Joined text kept while the palette is open, title-only commands matched once, one array sort: palette row 592.5 → 430.3 KB/op JIT (−27.4 %), 651.9 → 424.3 AOT (−34.9 %); min −11.1 % JIT, −7.3 % AOT; Filter 167/357 → 4.7/9.0 KB per query; results identical to the old code. |
 | 2 | 6457f94 | runtime-syntax-registry-first-use | `CanHighlight` answers from a 297-extension table checked against the registry. Vesper's first code folder AOT 7.0 → 2.2 ms and 5.3 MB → 761 KB (JIT 32–38 → 4.4 ms); the TextMate registry loads at the first tokenize instead. |
 | 2 | b23b203, 40d054d, 28fbeb8, 05414ab | text-textarea-measure-lines | Width per hard line measured without layout (`IRenderContext.MeasureTextWidth`, bit-equal; 4 MB width cache with a weight); last frame's line strings reused; shape bound 24 → 8 MB. JSON open −21 % JIT / −20 % AOT (median −35 %), 6,599 → 1,903 KB; typing in 2,000 lines −22 %, 465 → 222 KB; undo-redo −28 %; steady TextArea repaint 2.2 KB → 0; 10,000-line JSON keystroke 1.66 ms even at 8 MB (was 25 ms at 8 MB). Meridian first response frame 12.4 → 5.8 MB. Retained after closing the JSON 9.6 → 4.3 MB. JSON wheel +3.4 KB (lines shaped when drawn). Line starts identical over ~2 M lines. AOT TableView sort +5…7 % unproven placement. |
+| 2 | b471108 | gl-vk-resize-duplicate-frames | One live-resize frame per change, not per event: frames per SetWindowPos step 2–3 → 1 on GL, F16 and 8-bit, never 0, never at an old size. GL drag CPU −33 % (AOT −31 %), 8-bit −13…−33 %, F16 flat (driver-side swapchain rebuild); F16 drag submits Skia 278 → 120, host 119 → 40. Held live-resize timer 90 frames/s → 0 with video still drawn (mpv 0 dropped). Resize stretch 0 of ~1,000 samples. |
 
 ## Examined, not worth it
 
@@ -252,6 +253,8 @@ From the round 1 surveys (details in `17-reports/`):
   driver-side private bytes; GL scratch purge after resize; skipping shaping of "short"
   lines (no proven bound); apps-junction-heap-growth (not a leak: bounded caches + garbage).
 
+- **Round 2 build:** gl-vk-one-submit-per-frame (61edb19, DECISIONS.md "One submit per frame"): GL glGetError 3 → 1 and F16 submits 2 → 1 per frame, but frame time only −0.8…−4.5 % (JIT/AOT) because the driver wait moves from Flush to Present; pixels identical; reverted. So round 2 question 12 (no-op glGetError) is moot.
+
 ## Needs the user
 
 Round 2 questions, answered 2026-10-09 (the user took every recommendation; 11 yes):
@@ -268,7 +271,7 @@ Round 2 questions, answered 2026-10-09 (the user took every recommendation; 11 y
 9. Opt-in VirtualList item-rows API, adopted one list at a time → **yes**.
 10. Tab strips that narrow then scroll → **outside plan 17** (not perf).
 11. Install Mesa and Noto fonts in WSL Fedora → **yes**.
-12. (later) no-op glGetError — only if timing shows the round trip costs.
+12. No-op glGetError — moot: 61edb19 showed the driver wait only moves (declined).
 
 13. **wsl-atspi-stack** (asked 2026-10-10): install at-spi2-core, dbus-daemon and PyGObject in
     WSL Fedora, so a live AT-SPI client (samples/AtSpiVerify bulk, pyatspi) can verify the
