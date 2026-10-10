@@ -74,26 +74,41 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // The windowing layer's host implements both capabilities on one object.
         _geometryHost = actionHost as IAccessibilityGeometryHost;
         if (!connect) return;
-        // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
-        // "is anyone listening" contract the null bridge expresses everywhere.
-        _signals = _bus = AtSpiBus.Open();
-        if (_bus is null) return;
+        // With no synchronization context. The bus is opened and the application registered with
+        // blocking waits on D-Bus calls, and the connection takes the calling thread's context
+        // for its own work: on a thread with HultUI's (a headless session's, the loop's once it
+        // runs, so a window made then) that work went to the UI thread's queue, which nothing
+        // drains while the thread waits, and the constructor never returned (samples/AtSpiVerify
+        // hung at start). The handlers below run on the bus's receive thread, as they must.
+        var context = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
+        try
+        {
+            // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
+            // "is anyone listening" contract the null bridge expresses everywhere.
+            _signals = _bus = AtSpiBus.Open();
+            if (_bus is null) return;
 
-        _bus.AddMethodHandler(new AtSpiObjectHandler(this));
-        _bus.AddMethodHandler(new AtSpiCacheHandler(this));
+            _bus.AddMethodHandler(new AtSpiObjectHandler(this));
+            _bus.AddMethodHandler(new AtSpiCacheHandler(this));
 
-        // Seed a minimal application root *before* Embed: the registry probes
-        // our root during the Embed round-trip — on the bus receive thread,
-        // while this ctor thread is still blocked in the call — so the seed has
-        // to be visible first, or that probe answers UnknownObject. The first
-        // ApplyChanges swaps in the real tree.
-        _snapshot = new Snapshot { ByPath = new() { [SeedRoot.Path] = SeedRoot }, Root = SeedRoot };
+            // Seed a minimal application root *before* Embed: the registry probes
+            // our root during the Embed round-trip — on the bus receive thread,
+            // while this ctor thread is still blocked in the call — so the seed has
+            // to be visible first, or that probe answers UnknownObject. The first
+            // ApplyChanges swaps in the real tree.
+            _snapshot = new Snapshot { ByPath = new() { [SeedRoot.Path] = SeedRoot }, Root = SeedRoot };
 
-        _registered = _bus.RegisterApplication();
+            _registered = _bus.RegisterApplication();
 
-        // Whether anyone listens: what makes this bridge active, and what content costly to
-        // describe reads (seam W11).
-        WatchStatus(_status = _bus);
+            // Whether anyone listens: what makes this bridge active, and what content costly to
+            // describe reads (seam W11).
+            WatchStatus(_status = _bus);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+        }
     }
 
     /// <summary>For tests: a bridge registered with no bus, whose signals go to
