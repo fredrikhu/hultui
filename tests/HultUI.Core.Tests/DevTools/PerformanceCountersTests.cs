@@ -1,4 +1,5 @@
 using HultUI.Core.DevTools;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.DevTools;
@@ -27,9 +28,10 @@ public class PerformanceCountersTests
         var perf = new PerformanceCounters();
         for (int i = 0; i < 100; i++) Frame(perf);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 2_000; i++) Frame(perf);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 2_000; i++) Frame(perf);
+        });
 
         Assert.Equal(0, allocated);
         Assert.True(perf.Fps > 0);

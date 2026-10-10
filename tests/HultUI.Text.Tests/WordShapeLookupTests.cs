@@ -1,5 +1,6 @@
 using HultUI.Core.Layout;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Text.Tests;
@@ -202,12 +203,13 @@ public class WordShapeLookupTests
         pipeline.MeasureString("pretty red tab", Base);
         pipeline.MeasureString("chair", spaced);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        pipeline.MeasureString(text, Base);
-        pipeline.MeasureString(text, spaced);
-        pipeline.MeasureString("pretty red tab", Base);
-        pipeline.MeasureString("chair", spaced);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            pipeline.MeasureString(text, Base);
+            pipeline.MeasureString(text, spaced);
+            pipeline.MeasureString("pretty red tab", Base);
+            pipeline.MeasureString("chair", spaced);
+        }));
     }
 
     [Fact]
@@ -217,14 +219,11 @@ public class WordShapeLookupTests
         var pipeline = new TextPipeline(fonts, new WidthChangeEquivalenceTests.ContextShaper());
         var font = fonts.Resolve(Base.FontFamily, Base.FontWeight, Base.FontSlant);
         const string text = "pretty red table 4711 chair house keyboard";
-        pipeline.ShapeByWords(text, font, 16f);
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
         var run = pipeline.ShapeByWords(text, font, 16f);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         // 16 bytes a glyph, and two objects' headers and fields: the run and the array.
         long glyphBytes = 16L * run.Glyphs.Length;
+        long allocated = Allocations.Least(() => run = pipeline.ShapeByWords(text, font, 16f), goal: glyphBytes + 160);
         Assert.InRange(allocated, glyphBytes, glyphBytes + 160);
     }
 
@@ -309,14 +308,91 @@ public class LruCacheTests
         var cache = new LruCache<int, int>(capacity: 4);
         for (int i = 0; i < 8; i++) cache.Add(i, i);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 8; i < 1_008; i++)
+        int next = 8;   // every round inserts keys the cache has not seen
+        Assert.Equal(0, Allocations.Least(() =>
         {
-            if (!cache.TryGet(i, out _)) cache.Add(i, i);
-            cache.Put(10_000 + i, i);
+            for (int n = 0; n < 1_000; n++, next++)
+            {
+                if (!cache.TryGet(next, out _)) cache.Add(next, next);
+                cache.Put(10_000 + next, next);
+            }
+        }));
+        int last = next - 1;
+        Assert.True(cache.TryGet(last - 1, out _) && cache.TryGet(10_000 + last, out _));
+        Assert.False(cache.TryGet(last - 2, out _));
+    }
+
+    [Fact]
+    public void AWeightBound_EvictsTheLeastRecentlyUsed_UntilTheNewEntryFits()
+    {
+        var cache = new LruCache<string, int>(capacity: 100, maxWeight: 100);
+        cache.Add("a", 1, weight: 30);
+        cache.Add("b", 2, weight: 30);
+        cache.Add("c", 3, weight: 30);
+        Assert.Equal(90, cache.Weight);
+        Assert.True(cache.TryGet("a", out _));   // order now a, c, b
+
+        cache.Add("d", 4, weight: 40);           // 130 > 100: b goes, and that is enough
+        Assert.False(cache.TryGet("b", out _));
+        Assert.True(cache.TryGet("a", out _) && cache.TryGet("c", out _) && cache.TryGet("d", out _));
+        Assert.Equal(100, cache.Weight);
+        Assert.Equal(3, cache.Count);
+
+        cache.Put("d", 5, weight: 10);           // a key put again takes the new weight
+        Assert.Equal(70, cache.Weight);
+        cache.Add("e", 6, weight: 40);           // order d, c, a: a goes
+        cache.Put("f", 7, weight: 50);           // order e, d, c: c goes
+        Assert.False(cache.TryGet("a", out _));
+        Assert.False(cache.TryGet("c", out _));
+        Assert.True(cache.TryGet("d", out int d) && d == 5);
+        Assert.True(cache.TryGet("e", out _) && cache.TryGet("f", out _));
+        Assert.Equal(100, cache.Weight);
+
+        cache.Clear();
+        Assert.Equal(0, cache.Weight);
+        Assert.Equal(0, cache.Count);
+    }
+
+    [Fact]
+    public void AnEntryHeavierThanHalfTheBound_CountsForHalf_AndLeavesRoomForOthers()
+    {
+        var cache = new LruCache<int, int>(capacity: 100, maxWeight: 100);
+        for (int i = 0; i < 7; i++) cache.Add(i, i, weight: 10);
+
+        cache.Add(99, 99, weight: 250);          // counts 50: two of the seven go
+        Assert.Equal(6, cache.Count);
+        Assert.Equal(100, cache.Weight);
+        Assert.False(cache.TryGet(0, out _) || cache.TryGet(1, out _));
+
+        // Entries put after it while it is in use make room among the others first.
+        for (int i = 10; i < 20; i++)
+        {
+            Assert.True(cache.TryGet(99, out _));
+            cache.Add(i, i, weight: 10);
         }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.True(cache.TryGet(1_006, out _) && cache.TryGet(11_007, out _));
-        Assert.False(cache.TryGet(1_005, out _));
+        Assert.True(cache.TryGet(99, out _));
+        Assert.Equal(100, cache.Weight);
+
+        cache.Put(99, 99, weight: int.MaxValue); // and again, as half
+        Assert.Equal(100, cache.Weight);
+    }
+
+    [Fact]
+    public void ACacheFullByWeight_InsertsWithoutAllocating()
+    {
+        // Weights in turn that make an entry evict none, one or several: the nodes of the
+        // extra ones are kept for the entries that evict none.
+        var cache = new LruCache<int, int>(capacity: 1_000, maxWeight: 100);
+        int[] weights = [10, 30, 20, 10, 10, 45, 5, 5];
+        for (int i = 0; i < 64; i++) cache.Add(i, i, weights[i % weights.Length]);
+
+        int next = 64;   // every round inserts keys the cache has not seen
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            for (int n = 0; n < 1_000; n++, next++)
+                if (!cache.TryGet(next, out _)) cache.Add(next, next, weight: weights[next % weights.Length]);
+        }));
+        Assert.InRange(cache.Weight, 55, 100);
+        Assert.True(cache.TryGet(next - 1, out _));
     }
 }

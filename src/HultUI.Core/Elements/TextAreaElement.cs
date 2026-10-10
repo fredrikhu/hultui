@@ -23,9 +23,19 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     // Wrapped-line cache: each entry is the char index where that line starts.
     // Line i spans _lineStarts[i] .. _lineStarts[i+1]-1 (or end of text).
+    // Kept until the text changes or one of what the breaks were found with does: the width,
+    // the style's metrics, the render context and the UI culture (which picks Han faces). Every
+    // rebuild of a parent hands the area its text again, and wrapping a large document again
+    // for that was most of a keystroke elsewhere in the app.
     private List<int>? _lineStarts;
     private float _lastWrapWidth;
+    private ResolvedInheritedStyle _linesStyle;
+    private IRenderContext? _linesContext;
+    private System.Globalization.CultureInfo? _linesCulture;
+
+    // The height of a row, for the style metrics it was measured in.
     private float _lineHeight;
+    private ResolvedInheritedStyle _lineHeightStyle;
 
     // Where each hard line too long to fit broke the last time line starts were worked out, by
     // its text: an edit changes a line or two, and the rest come back from here instead of
@@ -37,6 +47,40 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private IRenderContext? _wrapMemoContext;
     private System.Globalization.CultureInfo? _wrapMemoCulture;
     private readonly List<int> _breaks = [];
+
+    // The width of each hard line by its number, NaN where it was not measured, for the text in
+    // _widthsText. Line starts are worked out again on every edit and every resize, and a line
+    // that fits is the width of it; this keeps that width for each line the edit did not touch —
+    // those before it at the same number, those after it shifted by the lines it added or took
+    // away (CarryLineWidths) — so neither measures a line again. Measured in one style's metrics,
+    // one render context and one UI culture (which picks Han faces); another starts over.
+    // 4 bytes a line, where the pipeline's shape cache held each line's whole shaping for this.
+    private float[] _lineWidths = [];
+    private int _lineWidthCount;
+    private string? _widthsText;
+    private ResolvedInheritedStyle _widthsStyle;
+    private IRenderContext? _widthsContext;
+    private System.Globalization.CultureInfo? _widthsCulture;
+
+    // Where each line's spans begin: _spanReach[k] is the furthest any of Spans[0..k] ends. The
+    // spans are sorted by start but may overlap, so their ends alone are not sorted (a long
+    // string's span ends after the search tint inside it, which comes next); this running
+    // maximum is, and the first span that can reach a line is the first whose entry passes the
+    // line's start. Worked out once per list (see SpansForLine).
+    private IReadOnlyList<TextSpan>? _spanReachOf;
+    private int _spanReachCount;
+    private int[] _spanReach = [];
+    private readonly List<TextSpan> _lineSpans = [];
+
+    // The text of each line drawn last frame, from line _shownFrom on, cut by the line starts in
+    // _shownStarts: a frame that draws the same lines — a caret blink, a selection drag, a wheel
+    // step that moves most of them — draws the same strings instead of cutting each anew.
+    // _shownNext is the other array, which the next frame fills.
+    private string?[] _shown = [];
+    private string?[] _shownNext = [];
+    private List<int>? _shownStarts;
+    private int _shownFrom;
+    private int _shownCount;
 
     // Preferred column (in pixels) for up/down navigation
     private float _preferredX = -1;
@@ -59,10 +103,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             _text = newValue;
             _cursorPos = Math.Min(_cursorPos, _text.Length);
             _selectionStart = _cursorPos;
-            InvalidateLines();
             MarkPaintDirty();
             if (changed)
             {
+                // Only then: a patch hands the area its text on every rebuild of its parent.
+                InvalidateLines();
                 _history.Clear();
                 NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
             }
@@ -171,7 +216,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     /// <summary>Optional per-range text colors (syntax highlighting and similar), in
     /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
-    /// measurement. Each visible line slices the spans it overlaps.</summary>
+    /// measurement. Each visible line slices the spans it overlaps.
+    /// <para>Sorted by start. They may overlap, as a search tint's background over a syntax
+    /// colour does. The list is indexed the first time it is drawn — where each line's spans
+    /// begin — and kept by reference: to change the spans, hand a new list rather than
+    /// changing this one in place.</para></summary>
     public IReadOnlyList<TextSpan>? Spans { get; set; }
 
     public IClipboard? Clipboard { get; set; }
@@ -329,16 +378,25 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// </summary>
     internal List<int> GetLineStarts(float wrapWidth, ResolvedInheritedStyle style)
     {
-        if (_lineStarts is not null && Math.Abs(_lastWrapWidth - wrapWidth) < 0.5f)
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        if (_lineStarts is not null && Math.Abs(_lastWrapWidth - wrapWidth) < 0.5f
+            && ReferenceEquals(_linesContext, _renderCtx) && ReferenceEquals(_linesCulture, culture)
+            && StyleResolver.SameMetrics(_linesStyle, style))
             return _lineStarts;
 
         _lastWrapWidth = wrapWidth;
+        _linesStyle = style;
+        _linesContext = _renderCtx;
+        _linesCulture = culture;
         _lineStarts = ComputeLineStarts(wrapWidth, style);
         return _lineStarts;
     }
 
     private List<int> ComputeLineStarts(float wrapWidth, ResolvedInheritedStyle style)
     {
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        CarryLineWidths(style, culture);
+
         var starts = new List<int> { 0 };
         if (string.IsNullOrEmpty(_text))
             return starts;
@@ -349,7 +407,6 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         var clusterEnds = new List<int>();
 
         // The long lines' breaks from the last time, if they were found the same way.
-        var culture = System.Globalization.CultureInfo.CurrentUICulture;
         var previous = _wrapMemo is not null && _wrapMemoWidth == wrapWidth && _wrapMemoStyle.Equals(style)
             && ReferenceEquals(_wrapMemoContext, _renderCtx) && ReferenceEquals(_wrapMemoCulture, culture)
                 ? _wrapMemo
@@ -358,17 +415,16 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         Dictionary<string, int[]>? memo = null;
 
         int pos = 0;
-        while (pos < _text.Length)
+        for (int hardLine = 0; pos < _text.Length; hardLine++)
         {
             // Find the end of the current hard line (up to next \n or end)
             int hardEnd = _text.IndexOf('\n', pos);
             if (hardEnd < 0) hardEnd = _text.Length;
 
-            // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is measured
-            // once, whole, as it always was — every keystroke wraps all of them again, and
-            // the pipeline has each line's width cached — and only one that does not is
+            // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is one
+            // width, kept for the next time (_lineWidths), and only one that does not is
             // cut into clusters and searched, unless its text was searched last time.
-            if (!FitsWhole(pos, hardEnd, wrapWidth, style, ref charWidth))
+            if (!FitsWhole(hardLine, pos, hardEnd, wrapWidth, style, ref charWidth))
             {
                 var line = _text.AsSpan(pos, hardEnd - pos);
                 memo ??= new Dictionary<string, int[]>(StringComparer.Ordinal);
@@ -417,16 +473,100 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         return _breaks.ToArray();
     }
 
-    // Whether [start..end) fits whole. Measured only when it is no longer than a line of
-    // average characters; a longer one goes to the search, which finds it fitting if it does.
-    private bool FitsWhole(int start, int end, float wrapWidth, ResolvedInheritedStyle style, ref float charWidth)
+    // Whether hard line number `line`, [start..end), fits whole. Measured only when it is no
+    // longer than a line of average characters — a longer one goes to the search, which finds
+    // it fitting if it does — and then only if its width is not known from the last time.
+    private bool FitsWhole(int line, int start, int end, float wrapWidth, ResolvedInheritedStyle style,
+        ref float charWidth)
     {
         int length = end - start;
         if (length == 0) return true;
         if (length > wrapWidth / Math.Max(charWidth, 0.01f)) return false;
-        float width = MeasureSubstring(start, length, style);
+        float width = _lineWidths[line];
+        if (float.IsNaN(width))
+            _lineWidths[line] = width = _renderCtx is not null
+                ? _renderCtx.MeasureTextWidth(_text.AsSpan(start, length), style)
+                : length * style.FontSize * 0.6f; // fallback for tests, as MeasureSubstring's
         if (length >= 8) charWidth = width / length;
         return width <= wrapWidth;
+    }
+
+    /// <summary>
+    /// Brings <see cref="_lineWidths"/> from the text they were measured in to the text now. The
+    /// two are compared from each end: the hard lines wholly inside the part they start with
+    /// alike are the same lines at the same numbers, and those wholly inside the part they end
+    /// with alike are the same lines at numbers shifted by the difference in line count — with
+    /// the newline that ends or starts each inside the part too, or the text's end or start.
+    /// Those keep their widths; the lines between, which the edit touched, are not known. Any
+    /// change to what a width depends on — the style's metrics, the render context, the UI
+    /// culture — forgets them all.
+    /// </summary>
+    private void CarryLineWidths(ResolvedInheritedStyle style, System.Globalization.CultureInfo culture)
+    {
+        string text = _text;
+        string? old = _widthsText;
+        int oldCount = _lineWidthCount;
+        int front = 0, back = 0, count;
+        bool same = old is not null && ReferenceEquals(_widthsContext, _renderCtx)
+            && ReferenceEquals(_widthsCulture, culture) && StyleResolver.SameMetrics(_widthsStyle, style);
+        if (same && ReferenceEquals(old, text))
+            front = count = oldCount;  // a resize: every line as it was
+        else if (same && old is not null)
+        {
+            int p = old.AsSpan().CommonPrefixLength(text);
+            int s = CommonSuffixLength(old, text, Math.Min(old.Length, text.Length) - p);
+            int q = text.Length - s;  // the common end is text[q..], old[q + shift..]
+            int shift = old.Length - text.Length;
+            front = text.AsSpan(0, p).Count('\n');
+            back = text.AsSpan(q).Count('\n');
+            count = front + text.AsSpan(p, q - p).Count('\n') + back + 1;
+            // The line that ends at p ends there in both texts (they differ at p, so at most one
+            // has a newline there; the other must end).
+            if ((p == text.Length || text[p] == '\n') && (p == old.Length || old[p] == '\n'))
+                front++;
+            // The line that starts at q starts there in both.
+            if ((q == 0 || text[q - 1] == '\n') && (q + shift == 0 || old[q + shift - 1] == '\n'))
+                back++;
+            // An empty line where the two parts meet can be counted in both; and a count gone
+            // wrong must not reach past either text's lines.
+            front = Math.Min(front, Math.Min(count, oldCount));
+            back = Math.Max(0, Math.Min(back, Math.Min(count, oldCount) - front));
+        }
+        else
+            count = text.AsSpan().Count('\n') + 1;
+
+        var widths = _lineWidths;
+        if (widths.Length < count || widths.Length > 4 * count + 64)
+        {
+            // Room for some lines more, so typing Enter does not copy the array each time; and a
+            // document much shorter than the last gets an array of its own size.
+            var resized = new float[count + count / 4 + 16];
+            Array.Copy(widths, resized, front);
+            Array.Copy(widths, oldCount - back, resized, count - back, back);
+            _lineWidths = widths = resized;
+        }
+        else
+            Array.Copy(widths, oldCount - back, widths, count - back, back);  // overlapping is fine
+        widths.AsSpan(front, count - back - front).Fill(float.NaN);
+
+        _lineWidthCount = count;
+        _widthsText = text;
+        _widthsStyle = style;
+        _widthsContext = _renderCtx;
+        _widthsCulture = culture;
+    }
+
+    // How many chars a and b end with alike, at most max: whole blocks compared at once, then
+    // the block where they differ char by char.
+    private static int CommonSuffixLength(string a, string b, int max)
+    {
+        const int Block = 256;
+        int n = 0;
+        while (n + Block <= max && a.AsSpan(a.Length - n - Block, Block).SequenceEqual(b.AsSpan(b.Length - n - Block, Block)))
+            n += Block;
+        while (n < max && a[a.Length - 1 - n] == b[b.Length - 1 - n])
+            n++;
+        return n;
     }
 
     /// <summary>
@@ -639,10 +779,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     private float GetLineHeight(ResolvedInheritedStyle style)
     {
-        if (_lineHeight > 0) return _lineHeight;
+        if (_lineHeight > 0 && StyleResolver.SameMetrics(_lineHeightStyle, style)) return _lineHeight;
         if (_renderCtx is not null)
         {
             _lineHeight = _renderCtx.MeasureText("X", style).Height;
+            _lineHeightStyle = style;
             return _lineHeight;
         }
         return style.FontSize; // fallback
@@ -1281,13 +1422,17 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// not, so the mapping goes through the render context's laid-out line.
     /// </summary>
     private float CaretXOnLine(int lineStart, int lineEnd, int pos, ResolvedInheritedStyle style)
+        => CaretXOnLine(-1, lineStart, lineEnd, pos, style);
+
+    // The same for visual line number `line`, whose text is the shown line's while it is on screen.
+    private float CaretXOnLine(int line, int lineStart, int lineEnd, int pos, ResolvedInheritedStyle style)
         => _renderCtx is null
             ? MeasureSubstring(lineStart, pos - lineStart, style)
-            : _renderCtx.TextCaretX(_text[lineStart..lineEnd], style, pos - lineStart);
+            : _renderCtx.TextCaretX(LineText(line, lineStart, lineEnd), style, pos - lineStart);
 
     /// <summary>Visual x-ranges covering <c>[from, to)</c> on one visual line.</summary>
     private IReadOnlyList<TextRangeBox> SelectionRangesOnLine(
-        int lineStart, int lineEnd, int from, int to, ResolvedInheritedStyle style)
+        int line, int lineStart, int lineEnd, int from, int to, ResolvedInheritedStyle style)
     {
         if (to <= from) return [];
         if (_renderCtx is null)
@@ -1297,7 +1442,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             return b > a ? [new TextRangeBox(a, b)] : [];
         }
         return _renderCtx.TextSelectionRanges(
-            _text[lineStart..lineEnd], style, from - lineStart, to - lineStart);
+            LineText(line, lineStart, lineEnd), style, from - lineStart, to - lineStart);
     }
 
     /// <summary>The character range of a visual line, excluding a trailing newline.</summary>
@@ -1325,7 +1470,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         if (_renderCtx != ctx)
         {
             _renderCtx = ctx;
-            _lineHeight = 0; // re-measure only when context changes
+            _lineHeight = 0; // a row is measured again in the new context
         }
 
         var origBorder = BorderColor;
@@ -1375,6 +1520,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         // Determine visible line range
         int firstVisible = Math.Max(0, (int)(_scrollOffsetY / lh));
         int lastVisible = Math.Min(lineCount - 1, (int)((_scrollOffsetY + contentBox.Height) / lh));
+        ShowLines(starts, firstVisible, lastVisible);
 
         // Draw selection highlight
         if (HasSelection)
@@ -1390,16 +1536,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         {
             for (int i = firstVisible; i <= lastVisible; i++)
             {
-                int lineStart = starts[i];
-                int lineEnd = i + 1 < starts.Count ? starts[i + 1] : _text.Length;
-                // Strip trailing \n for display
-                int displayEnd = lineEnd;
-                if (displayEnd > lineStart && displayEnd <= _text.Length && _text[displayEnd - 1] == '\n')
-                    displayEnd--;
-
+                var (lineStart, displayEnd) = VisualLineRange(starts, i);
                 if (displayEnd > lineStart)
                 {
-                    string lineText = _text[lineStart..displayEnd];
+                    string lineText = _shown[i - firstVisible]!;
                     float lineY = contentBox.Y + i * lh - _scrollOffsetY;
                     var lineRect = new Rect(contentBox.X, lineY, wrapWidth, lh);
                     var lineSpans = SpansForLine(lineStart, displayEnd);
@@ -1417,7 +1557,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             if (cursorLine < 0)
                 (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
             var (cursorLineStart, cursorLineEnd) = VisualLineRange(starts, cursorLine);
-            float cursorBaseX = contentBox.X + CaretXOnLine(cursorLineStart, cursorLineEnd, _cursorPos, style);
+            float cursorBaseX = contentBox.X + CaretXOnLine(cursorLine, cursorLineStart, cursorLineEnd, _cursorPos, style);
             float cy = contentBox.Y + cursorLine * lh - _scrollOffsetY;
 
             float caretX = cursorBaseX;
@@ -1474,21 +1614,89 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// <summary>The subset of <see cref="Spans"/> overlapping the visible line
     /// [<paramref name="lineStart"/>, <paramref name="lineEnd"/>), clipped and rebased
     /// to line-local offsets so the per-line DrawText colours the right characters.
-    /// Returns null when the element has no spans or none touch this line.</summary>
-    private List<TextSpan>? SpansForLine(int lineStart, int lineEnd)
+    /// Returns null when the element has no spans or none touch this line.
+    ///
+    /// <para>Read from the first span that can reach the line, found by a binary search on
+    /// the running maximum of the spans' ends, not from the first span: each line drawn of a
+    /// 23,000-span JSON response walked ~11,500 spans to its own, 600,000 a frame. One list
+    /// serves every line; the renderer reads it during its DrawText call only.</para></summary>
+    internal List<TextSpan>? SpansForLine(int lineStart, int lineEnd)
     {
-        if (Spans is not { Count: > 0 } spans) return null;
-        List<TextSpan>? result = null;
-        foreach (var s in spans)
+        if (Spans is not { Count: > 0 } spans)
         {
-            if (s.End <= lineStart) continue;      // entirely before this line
+            if (_spanReachOf is not null) { _spanReachOf = null; _spanReach = []; }
+            return null;
+        }
+        int count = spans.Count;
+        if (!ReferenceEquals(_spanReachOf, spans) || _spanReachCount != count)
+        {
+            // A list much shorter than the last gets an array of its own size, so a large
+            // response once shown does not keep its index for good.
+            if (_spanReach.Length < count || _spanReach.Length > 4 * count)
+                _spanReach = new int[count];
+            int r = int.MinValue;
+            for (int k = 0; k < count; k++)
+                _spanReach[k] = r = Math.Max(r, spans[k].End);
+            _spanReachOf = spans;
+            _spanReachCount = count;
+        }
+
+        var reach = _spanReach;
+        int lo = 0, hi = count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (reach[mid] <= lineStart) lo = mid + 1;
+            else hi = mid;
+        }
+
+        var result = _lineSpans;
+        result.Clear();
+        for (int k = lo; k < count; k++)
+        {
+            var s = spans[k];
+            if (s.End <= lineStart) continue;      // before this line; a longer one before it reaches it
             if (s.Start >= lineEnd) break;         // sorted ⇒ nothing left overlaps
             int start = Math.Max(s.Start, lineStart);
             int end = Math.Min(s.End, lineEnd);
             if (end <= start) continue;
-            (result ??= []).Add(new TextSpan(start - lineStart, end - start, s.Color, s.Background));
+            result.Add(new TextSpan(start - lineStart, end - start, s.Color, s.Background));
         }
-        return result;
+        return result.Count == 0 ? null : result;
+    }
+
+    // Fills _shown with the text of visual lines [first..last] (null for an empty one): last
+    // frame's string for each line it showed, if it was cut by the same line starts — a new list
+    // whenever the text or the wrap changes — and a new one for the rest.
+    private void ShowLines(List<int> starts, int first, int last)
+    {
+        int keptFrom = 0, keptCount = 0;
+        if (ReferenceEquals(_shownStarts, starts))
+            (keptFrom, keptCount) = (_shownFrom, _shownCount);
+        int count = Math.Max(0, last - first + 1);
+        if (_shownNext.Length < count)
+            _shownNext = new string?[count + 8];
+        for (int i = first; i <= last; i++)
+        {
+            var (lineStart, displayEnd) = VisualLineRange(starts, i);
+            _shownNext[i - first] = displayEnd <= lineStart ? null
+                : i >= keptFrom && i < keptFrom + keptCount ? _shown[i - keptFrom]
+                : _text[lineStart..displayEnd];
+        }
+        (_shown, _shownNext) = (_shownNext, _shown);
+        Array.Clear(_shownNext);  // last frame's lines: the new array keeps those still shown
+        (_shownStarts, _shownFrom, _shownCount) = (starts, first, count);
+    }
+
+    // The text of [lineStart..lineEnd): the shown string of visual line `line` when that is the
+    // line on screen, cut anew otherwise.
+    private string LineText(int line, int lineStart, int lineEnd)
+    {
+        if (line >= _shownFrom && line < _shownFrom + _shownCount && ReferenceEquals(_shownStarts, _lineStarts)
+            && _shown[line - _shownFrom] is { } shown && shown.Length == lineEnd - lineStart
+            && _shownStarts![line] == lineStart)
+            return shown;
+        return _text[lineStart..lineEnd];
     }
 
     private void RenderSelection(IRenderContext ctx, Rect contentBox, ResolvedInheritedStyle style,
@@ -1518,7 +1726,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             // (displayEnd = lineEnd - 1) and a soft wrap (displayEnd = lineEnd), so
             // wrapped mid-selection lines extend just like hard-broken ones.
             bool continues = selEnd > displayEnd && selStart <= displayEnd;
-            float leadingX = ls > lineStart ? CaretXOnLine(lineStart, displayEnd, ls, style) : 0;
+            float leadingX = ls > lineStart ? CaretXOnLine(i, lineStart, displayEnd, ls, style) : 0;
             if (continues)
             {
                 if (contentBox.Width > leadingX)
@@ -1529,7 +1737,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
             // One rect per contiguous visual stretch — a selection that crosses a
             // direction boundary covers two pieces of the line, not the gap between.
-            foreach (var r in SelectionRangesOnLine(lineStart, displayEnd, ls, le, style))
+            foreach (var r in SelectionRangesOnLine(i, lineStart, displayEnd, ls, le, style))
                 if (r.X1 > r.X0)
                     ctx.DrawRect(new Rect(contentBox.X + r.X0, lineY, r.X1 - r.X0, lh), SelectionColor);
         }

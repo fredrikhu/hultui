@@ -199,6 +199,78 @@ static partial class Scenarios
                     Frames = 10,
                 };
             });
+
+        yield return new Scenario("anim/signal tween, 1 kHz posts, real loop",
+            "A 300 ms tween writes a Signal<float> a transport bar's Build reads while a worker posts to the UI thread every ms: Application.Run's own loop on the virtual clock, start to end (all under build)",
+            ctx =>
+            {
+                // Reel's case: a video player's bar fades by a tween writing a signal its Build
+                // reads, while mpv's frames and the mouse wake the loop between frames. The suite's
+                // pump is one pass that renders, so only the real loop shows how often the bar is
+                // rebuilt for each frame drawn.
+                var bar = new FadingBar();
+                int frames = 0, posts = 0, startBuilds = 0, startFrames = 0;
+                Action post = () => posts++;
+                ctx.Mount(Flex.Column().FlexGrow(1).Children(
+                    ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 200)),
+                    bar.Mount(),
+                    Canvas.New(_ => frames++).Width(Dimension.Px(1)).Height(Dimension.Px(1))));
+                bool done = false;
+                int doneAtFrame = 0;
+                return new Op
+                {
+                    Reset = _ => bar.Level.Value = 0f,
+                    Run = _ =>
+                    {
+                        startBuilds = bar.Builds;
+                        startFrames = frames;
+                        posts = 0;
+                        done = false;
+                        Animate.Value(0f, 1f, v => bar.Level.Value = v)
+                            .Duration(0.3f).Ease(Easing.Linear)
+                            .OnComplete(() => { done = true; doneAtFrame = frames; })
+                            .Start();
+                        // Until the frame that shows the tween's end has been drawn.
+                        ctx.Session.RunLoop(() => done && frames > doneAtFrame,
+                            eventEvery: TimeSpan.FromMilliseconds(1), onEvent: () => HultUI.Application.InvokeOnMainThread(post));
+                    },
+                    Frames = 0,
+                    Figure = () => (bar.Builds - startBuilds) / (double)Math.Max(1, frames - startFrames),
+                    FigureUnit = "rebuilds/frame",
+                    Check = _ =>
+                        bar.Level.Peek() != 1f ? $"the tween stopped at {bar.Level.Peek():0.00}"
+                        : frames - startFrames < 15 ? $"{frames - startFrames} frames rendered in 300 ms at 60 Hz"
+                        : posts < 250 ? $"{posts} posts drained in 300 ms at 1 kHz"
+                        : null,
+                };
+            });
+    }
+
+    /// <summary>
+    /// A video player's transport bar: its Build reads <see cref="Level"/>, which a tween writes
+    /// as the bar fades, so every write rebuilds it.
+    /// </summary>
+    private sealed class FadingBar : HultUI.Core.Components.Component
+    {
+        public readonly HultUI.Core.Reactivity.Signal<float> Level = new(0f);
+        public int Builds;
+
+        public override Element Build()
+        {
+            Builds++;
+            float level = Level.Value;
+            return Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(8, 12))
+                .Background(Ui.CardFill).Opacity(0.2f + 0.8f * level)
+                .Children(
+                    Button.New("Play"),
+                    Button.New("Back 10 s", ButtonVariant.Secondary),
+                    Button.New("Forward 10 s", ButtonVariant.Secondary),
+                    Text.New("0:42:17").FontSize(12f),
+                    Slider.New(level * 100f, 0, 100).FlexGrow(1),
+                    Text.New("1:30:00").FontSize(12f),
+                    Button.New("Mute", ButtonVariant.Secondary),
+                    Button.New("Fullscreen", ButtonVariant.Secondary));
+        }
     }
 
     /// <summary>A settings screen: <paramref name="groups"/> cards of every common control.</summary>

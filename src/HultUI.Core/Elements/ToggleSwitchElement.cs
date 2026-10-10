@@ -44,13 +44,39 @@ public class ToggleSwitchElement : Element
         }
     }
 
+    // What MeasureContent reads lays the switch out again when it changes: the track comes from
+    // the theme (ApplyTheme), so a theme with a bigger track left the old one's room around it.
+    private string? _label;
+    private float _labelGap = 8f;
+    private float _trackWidth = 40f;
+    private float _trackHeight = 20f;
+
     /// <summary>Text drawn to the right of the track; part of the element so one click
     /// target covers both, like a checkbox's label.</summary>
-    public string? Label { get; set; }
-    public float LabelGap { get; set; } = 8f;
+    public string? Label
+    {
+        get => _label;
+        set { if (_label == value) return; _label = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
 
-    public float TrackWidth { get; set; } = 40f;
-    public float TrackHeight { get; set; } = 20f;
+    public float LabelGap
+    {
+        get => _labelGap;
+        set { if (_labelGap == value) return; _labelGap = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
+
+    public float TrackWidth
+    {
+        get => _trackWidth;
+        set { if (_trackWidth == value) return; _trackWidth = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
+
+    public float TrackHeight
+    {
+        get => _trackHeight;
+        set { if (_trackHeight == value) return; _trackHeight = value; MarkLayoutDirty(); MarkPaintDirty(); }
+    }
+
     public float KnobSize { get; set; } = 14f;
     public Color OnTrackColor { get; set; } = new(79, 70, 229);
     public Color OffTrackColor { get; set; } = new(241, 245, 249);
@@ -85,7 +111,6 @@ public class ToggleSwitchElement : Element
 
     public ToggleSwitchElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         OnOwn<ClickEvent>(_ => Toggle());

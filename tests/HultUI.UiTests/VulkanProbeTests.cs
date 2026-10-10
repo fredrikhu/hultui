@@ -25,6 +25,16 @@ public sealed class VulkanProbeTests
         }
     }
 
+    /// <summary>The <see cref="TheoryAttribute"/> counterpart of <see cref="VulkanUiFactAttribute"/>.</summary>
+    private sealed class VulkanUiTheoryAttribute : TheoryAttribute
+    {
+        public VulkanUiTheoryAttribute()
+        {
+            if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
+            else if (!NativeLibrary.TryLoad("vulkan-1.dll", out _)) Skip = "No Vulkan loader (vulkan-1.dll).";
+        }
+    }
+
     /// <summary>What the loader sees when every driver is filtered out: a driver, but no GPU.</summary>
     private static readonly Dictionary<string, string?> NoUsableGpu = new() { ["VK_LOADER_VENDOR_ID_FILTER"] = "0x1234" };
 
@@ -195,6 +205,35 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
+    /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
+    /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217
+    /// host submits in an 80-step drag on the half-float swapchain. Never none: nothing comes
+    /// round again inside Win32's modal size loop, and a frame skipped there was the stretch.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    public void EachStepOfAResize_DrawsOneFrame(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through SetWindowPos
+        const int resizes = 16;
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = variant == "f16-mailbox" ? "1" : "0",
+            ["HULTUI_VULKAN_PRESENT"] = variant == "f16-mailbox" ? "mailbox" : null,
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+        }, $"--resizes={resizes} --new-sizes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        var frames = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: (\d+) frames inside (\d+) resizes, (\d+) without one");
+        Assert.True(frames.Success, run.Output);
+        int inside = int.Parse(frames.Groups[1].Value), without = int.Parse(frames.Groups[3].Value);
+        Assert.True(without == 0, $"{without} of {resizes} resizes drew no frame inside SetWindowPos:\n{run.Output}");
+        Assert.True(inside == resizes, $"{inside} frames inside {resizes} resizes:\n{run.Output}");
+    }
+
+    /// <summary>
     /// A resize frees the half-float offscreen it replaces. Left to Skia's scratch pool, which
     /// keeps a texture for a later surface of exactly its size, every size the window passed
     /// through held its offscreen (width × height × 8 bytes) until the context's 256 MB budget
@@ -230,6 +269,142 @@ public sealed class VulkanProbeTests
         Assert.True(besides.Max() - besides[0] < smallest,
             $"Skia held {besides.Max() - besides[0]:0.0} MB more besides its offscreen after {resizes} new " +
             $"sizes than after the first, against {smallest:0.0} MB for one offscreen:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// A window that draws while minimized, then is restored and resized. On Windows a minimized
+    /// Vulkan surface has no area, so the frame's swapchain went out of date and none could be
+    /// built; the old one was dropped without being destroyed. Restored at the same size, the
+    /// window drew 0 frames of 20 for ever, a resize failed with ErrorNativeWindowInUseKHR, and
+    /// the loop retried a frame every display interval meanwhile (400 passes a second at 200 Hz).
+    /// GL drew while minimized instead, every frame of an animation nobody could see. Now neither
+    /// draws a minimized window, and the loop waits as if idle until the restore.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("gl")]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    [InlineData("fifo")]
+    public void AWindowThatDrewWhileMinimized_WaitsQuietly_AndDrawsOnceRestored(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe minimizes and resizes through user32
+        var environment = new Dictionary<string, string?>
+        {
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_VULKAN_F16"] = null,
+            ["HULTUI_VULKAN_PRESENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        };
+        string arguments = "--minimize";
+        switch (variant)
+        {
+            case "gl": arguments += " --renderer=default"; break;
+            case "f16-mailbox": environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_PRESENT"] = "mailbox"; break;
+            case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
+            case "fifo": environment["HULTUI_VULKAN_PRESENT"] = "fifo"; break;
+        }
+
+        var run = RunProbe(environment, arguments);
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        Assert.DoesNotContain("Exception", run.Output);
+        if (variant == "gl") Assert.DoesNotContain(" vulkan device=", run.Output);
+        else
+        {
+            Assert.Contains(" vulkan device=", run.Output);
+            // The frames forced while minimized took the swapchain the window had.
+            Assert.Contains("vulkan swapchain SKIPPED", run.Output);
+        }
+        const string halfFloat = @"vulkan swapchain \d+x\d+ x\d+ R16G16B16A16Sfloat";
+        if (variant == "f16-mailbox") Assert.Matches(halfFloat, run.Output);
+        if (variant == "8-bit") Assert.DoesNotMatch(halfFloat, run.Output);
+        if (variant == "fifo") Assert.Contains("vulkan present mode Fifo", run.Output);
+
+        var (minimizedPasses, minimizedFrames) = Stage(run.Output, "minimized");
+        var (_, restoredFrames) = Stage(run.Output, "restored");
+        var (_, resizedFrames) = Stage(run.Output, "resized");
+        // The change made while minimized waits for the restore.
+        Assert.True(minimizedFrames == 0, $"{minimizedFrames} frames drawn while minimized:\n{run.Output}");
+        // An idle window's loop passes about 60 times a second. Retrying a frame every display
+        // interval is two passes an interval: 400 at 200 Hz, 120 at 60.
+        Assert.True(minimizedPasses < 100, $"{minimizedPasses} loop passes a second while minimized:\n{run.Output}");
+        // A change every 33 ms: about 30 frames in the second after the restore, 15 after the resize.
+        Assert.True(restoredFrames >= 10, $"{restoredFrames} frames in the second after the restore:\n{run.Output}");
+        Assert.True(resizedFrames >= 5, $"{resizedFrames} frames in the half second after a resize:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// A video keeps playing in a minimized window, which is not drawn. The UI thread is mpv's
+    /// render thread, so mpv waited 200 ms for each frame to be taken and then dropped it, and a
+    /// player opened while minimized never loaded, its render context being made by a draw: in
+    /// Reel the next file in the folder stayed silent until the restore. The window now takes
+    /// the frames without drawing them, and lets a new player set up as a draw would.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("gl")]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    public void AVideoInAMinimizedWindow_KeepsPlaying_AndANewOneLoads(string variant)
+    {
+        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
+        // Ten seconds at 30 fps: longer than the probe runs.
+        string clip = HultUI.Media.Testing.TestClip.WriteTempY4m(160, 90, fps: 30, frames: 300);
+        try
+        {
+            var environment = new Dictionary<string, string?>
+            {
+                ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+                ["HULTUI_VULKAN_F16"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+            };
+            string arguments = $"--minimized-video \"--clip={clip}\"";
+            switch (variant)
+            {
+                case "gl": arguments += " --renderer=default"; break;
+                case "f16-mailbox": environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_PRESENT"] = "mailbox"; break;
+                case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
+            }
+
+            var run = RunProbe(environment, arguments);
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            Assert.DoesNotContain("Exception", run.Output);
+            if (variant == "gl") Assert.DoesNotContain(" vulkan device=", run.Output);
+
+            var minimized = System.Text.RegularExpressions.Regex.Match(run.Output,
+                @"probe: minimized 1\.5 s, (\d+) frames dropped, played ([\d.]+) s");
+            Assert.True(minimized.Success, run.Output);
+            int dropped = int.Parse(minimized.Groups[1].Value);
+            double played = double.Parse(minimized.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+            // Unserved, mpv dropped 42 of the 45 frames here; served, none.
+            Assert.True(dropped <= 1, $"mpv dropped {dropped} frames while minimized:\n{run.Output}");
+            Assert.True(played >= 1.2, $"the video played {played:0.00} s of 1.5 while minimized:\n{run.Output}");
+
+            var opened = System.Text.RegularExpressions.Regex.Match(run.Output,
+                @"probe: opened while minimized, at (-?[\d.]+) s, still minimized (\w+)");
+            Assert.True(opened.Success, run.Output);
+            Assert.Equal("True", opened.Groups[2].Value);
+            double reached = double.Parse(opened.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            // Unserved, it never loaded (-1); served, 1.33 s.
+            Assert.True(reached >= 0.5, $"a player opened while minimized reached {reached:0.00} s in 1.5:\n{run.Output}");
+
+            var restored = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: restored, (\d+) frames in 1 s");
+            Assert.True(restored.Success, run.Output);
+            Assert.True(int.Parse(restored.Groups[1].Value) >= 10, $"few frames after the restore:\n{run.Output}");
+        }
+        finally
+        {
+            File.Delete(clip);
+        }
+    }
+
+    private static (int PassesPerSecond, int Frames) Stage(string output, string stage)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(output, $@"probe: {stage} (\d+) passes/s, (\d+) frames");
+        Assert.True(match.Success, $"no '{stage}' line:\n{output}");
+        return (int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value));
     }
 
     /// <summary>

@@ -111,6 +111,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // The element whose node _previousA11yTree marks focused: the focused one when the tree
     // was built, then each focus move's (see MoveA11yFocus). Null for none.
     private ElementId? _a11yFocusId;
+    // The element the focus moved onto while it had no node in the applied tree — mounted in the
+    // same handler, as Ctrl+F mounts a find bar and focuses its field. The bridge was told the
+    // focus went nowhere; it is told where once the next rebuild has the node.
+    private ElementId? _a11yPendingFocusId;
     private bool _a11yWasActive;
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
@@ -129,6 +133,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     private bool _a11yLayoutRefreshPending;
     private long _lastA11yRebuildMs;
     private const long A11yCoalesceMs = 100;
+    // A value in a range (a slider's, a progress bar's) can move on every frame: a drag, a
+    // download, a playing video's scrubber, a key held down. Each refresh rebuilds the whole tree,
+    // so such changes are told on the leading edge, then at most every A11yRangeCoalesceMs, then
+    // once on the trailing edge with the value the range came to rest at. 250 ms is how often
+    // Chromium moves a playing video's scrubber (HTMLMediaElement's timeupdate,
+    // kMaxTimeupdateEventFrequency), whose aria-valuetext it leaves alone while playing.
+    private bool _a11yRangeRefreshPending;
+    private long _lastA11yRangeMs = long.MinValue / 2;
+    private const long A11yRangeCoalesceMs = 250;
 
     private long A11yClockMs
     {
@@ -657,14 +670,20 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// that had the focus and the one that has it now, found in one walk. A reader asking
     /// either is then answered as of now, and the next rebuild's diff, which compares against
     /// this tree, does not report the move again, late. Returns both nodes; null where the
-    /// element has none, or the tree marked no node.
+    /// element has none, or the tree marked no node. An element with no node yet is remembered
+    /// (<see cref="NotifyPendingA11yFocus"/>).
     /// </summary>
     private (AccessibilityNode? Previous, AccessibilityNode? Focused) MoveA11yFocus(Element? element)
     {
         var tree = _previousA11yTree;
         var previousId = _a11yFocusId;
         _a11yFocusId = element?.Id;
-        if (tree is null) return (null, null);
+        _a11yPendingFocusId = null;
+        if (tree is null)
+        {
+            _a11yPendingFocusId = element?.Id;
+            return (null, null);
+        }
 
         AccessibilityNode? previous = null, focused = null;
         FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
@@ -672,7 +691,24 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             previous = null;
         if (previous is not null) previous.IsFocused = false;
         if (focused is not null) focused.IsFocused = true;
+        else if (element is not null) _a11yPendingFocusId = element.Id;
         return (previous, focused);
+    }
+
+    /// <summary>
+    /// After a rebuild: tells the bridge of a focus move onto an element that had no node when it
+    /// moved, now that the tree has one and marks it focused. The move itself told the bridge the
+    /// focus went nowhere (and the element that lost it), so a reader got no focus event and
+    /// UIA's GetFocus answered nothing until the next move. Nothing when the focus has moved on,
+    /// or the element still has no node (it is not one a reader sees).
+    /// </summary>
+    private void NotifyPendingA11yFocus(AccessibilityNode tree)
+    {
+        if (_a11yPendingFocusId is not { } id) return;
+        _a11yPendingFocusId = null;
+        if (id != _a11yFocusId) return;
+        if (FindById(tree, id) is { IsFocused: true } node)
+            _accessibilityBridge.NotifyFocusChanged(node, previous: null);
     }
 
     /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
@@ -751,7 +787,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// Registers an action to run exactly once, immediately after the next frame
     /// is presented (after present + buffer swap). Runs on the UI thread. This
     /// forces a frame to render even if nothing else is dirty, so the callback is
-    /// guaranteed to fire on the following loop iteration. Useful for measuring
+    /// guaranteed to fire on the following loop iteration — or, for a minimized window,
+    /// which is not drawn, on the first frame after it is restored. Useful for measuring
     /// how long a state change takes to reach the screen, or for reacting once
     /// content is actually painted.
     /// </summary>
@@ -786,6 +823,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // (during the drag, layout dirty already keeps frames coming).
         || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
             && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        // The same for a range value's trailing edge: the value it came to rest at.
+        || (_a11yRangeRefreshPending && _accessibilityBridge.IsActive
+            && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs)
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
         // AT thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame. Platform-neutral: the
@@ -807,9 +847,50 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         Resized?.Invoke();
     }
 
-    internal void RenderFrame()
+    private readonly List<IGpuImageSource> _undrawnSources = [];
+
+    /// <summary>
+    /// Serves the GPU image sources of a window that is not being drawn (minimized), through
+    /// <see cref="IGpuImageSource.ServiceUndrawn"/>. Such a source can be a producer that
+    /// stops without its draws: mpv's render thread is this one, and its decoder waits up to
+    /// 200 ms for every frame to be taken. Measured in Reel minimized: every frame dropped after
+    /// that wait, and the next file in the folder never started (no render context until a
+    /// draw), so the sound stopped at the end of the file until the window was restored.
+    /// </summary>
+    private void ServiceUndrawnSources()
     {
-        if (_root is null) return;
+        CollectGpuSources(_root!, _undrawnSources);
+        for (int i = 0; i < _overlays.Count; i++)
+            CollectGpuSources(_overlays[i].Content, _undrawnSources);
+        if (_undrawnSources.Count == 0) return;
+
+        // Where foreign GL cannot run, the source settles on its other path, as a draw would.
+        var surface = PlatformWindow.Surface as IExternalGLSurface;
+        if (surface is not null && !surface.SupportsExternalGL) surface = null;
+        if (surface is not null) PlatformWindow.MakeCurrent();
+        try
+        {
+            foreach (var source in _undrawnSources) source.ServiceUndrawn(surface);
+        }
+        finally
+        {
+            _undrawnSources.Clear();
+        }
+    }
+
+    private static void CollectGpuSources(Element element, List<IGpuImageSource> into)
+    {
+        if (element is ImageElement { Source: IGpuImageSource source } && !into.Contains(source))
+            into.Add(source);
+        var children = element.Children;
+        for (int i = 0; i < children.Count; i++) CollectGpuSources(children[i], into);
+    }
+
+    /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
+    /// <returns>Whether a frame was drawn and presented.</returns>
+    internal bool RenderFrame(bool evenIfMinimized = false)
+    {
+        if (_root is null) return false;
 
         // Drain queued UI-thread actions from the accessibility action router.
         // AT callbacks (UIA worker threads, the AT-SPI D-Bus receive thread) run
@@ -889,9 +970,17 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         long nowMs = A11yClockMs;
         bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
             && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
+        bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
+            && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
 
-        if (a11yImmediate || a11yLayoutDue)
+        if (a11yImmediate || a11yLayoutDue || a11yRangeDue)
         {
+            // Whatever the rebuild was for, it tells a range's value as it is now.
+            if (_a11yRangeRefreshPending)
+            {
+                _a11yRangeRefreshPending = false;
+                _lastA11yRangeMs = nowMs;
+            }
             using (_tracer.Begin("Phase", "A11y"))
             {
                 var newTree = BuildAccessibilityTreeWithOverlays(_root);
@@ -900,6 +989,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
                 _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
+                NotifyPendingA11yFocus(newTree);
             }
             _a11yLayoutRefreshPending = false;
             _lastA11yRebuildMs = nowMs;
@@ -908,7 +998,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         {
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
+            _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
+            _a11yRangeRefreshPending = false;
         }
         if (_announcements.Count > 0)
         {
@@ -938,7 +1030,18 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // A backend that has to acquire a target before it can be drawn on says so here.
         // Skipping is normal — a resize in flight, or a window with no area — and the next
         // frame will find one.
-        if (!PlatformWindow.Surface.BeginFrame()) return;
+        //
+        // A minimized window stops here too. Nothing would show its frame; on Windows a Vulkan
+        // surface has no area to draw into anyway; and GL drew every frame of an animation or
+        // a video nobody could see. Everything above has run — assistive technology's actions,
+        // style, layout, the accessibility tree — and the paint dirt is kept, so the first frame
+        // after the restore draws it. A video still has to be served (ServiceUndrawnSources).
+        if (!evenIfMinimized && PlatformWindow.IsMinimized)
+        {
+            ServiceUndrawnSources();
+            return false;
+        }
+        if (!PlatformWindow.Surface.BeginFrame()) return false;
 
         var ctx = PlatformWindow.Surface.RenderContext;
         _perf.BeginRender();
@@ -1012,6 +1115,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         }
 
         FrameRendered?.Invoke();
+        return true;
     }
 
     /// <summary>
@@ -3190,6 +3294,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             // frame of a 1.9 ms frame in a scrolling History list, and up to 9 ms.
             if (propertyName == AccessibilityProperties.BoundingRect)
                 window._a11yLayoutRefreshPending = true;
+            // A range's value can move every frame (a drag, a playback): on its own schedule.
+            else if (propertyName == AccessibilityProperties.RangeValue)
+                window._a11yRangeRefreshPending = true;
             else
                 window._a11yPropertyDirty = true;
         }

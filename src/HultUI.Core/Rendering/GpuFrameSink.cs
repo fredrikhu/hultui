@@ -116,6 +116,30 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         return true;
     }
 
+    /// <summary>
+    /// What a draw would do, less the drawing, for a window that is not being drawn: decides
+    /// the mode and lets the renderer set up (a decoder loads nothing until it has), then takes
+    /// a waiting frame without drawing it. The first draw after the window comes back draws
+    /// the frame the renderer is on.
+    /// </summary>
+    public void ServiceUndrawn(IExternalGLSurface? surface)
+    {
+        if (_disposed) return;
+        if (surface is null)
+        {
+            Decide(GpuSinkMode.Pixels);
+            return;
+        }
+        _surface = surface;
+        if (_mode == GpuSinkMode.Undecided)
+        {
+            Decide(GpuSinkMode.Gpu);
+            surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
+        }
+        if (_mode == GpuSinkMode.Gpu && _renderer.FrameMayBeWaiting)
+            surface.RunExternalGL(() => _renderer.SkipFrame(surface.GetProcAddress));
+    }
+
     /// <summary>Drops the sink's own texture and framebuffer, for when the renderer started
     /// lending one — a surface can begin doing so at any time, and keeping both would leak
     /// the one nobody draws.</summary>

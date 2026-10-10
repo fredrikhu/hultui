@@ -625,6 +625,93 @@ public class ApertureUnitTests
         Assert.False(cache.HasRetired);
     }
 
+    /// <summary>
+    /// The count cap is held where a download lands, on the thread pool, while the UI thread may
+    /// be drawing the very picture it pushes out. Disposed there, the native image could be
+    /// freed under the draw, and the tile drew nothing on its next frame. A picture pushed out
+    /// now stays whole until the UI thread asks the cache again, and that ask disposes it.
+    /// </summary>
+    [Fact]
+    public void APicturePushedOutByTheCapStaysWholeUntilTheUiThreadAsksAgain()
+    {
+        using var landed = new SemaphoreSlim(0);
+        using var cache = new PosterCache(() => landed.Release(), capacity: 1, http: new HttpClient(new RedPngHandler()));
+        var a = new Uri("http://jellyfin.test/Items/a/Images/Primary?fillWidth=168");
+        var b = new Uri("http://jellyfin.test/Items/b/Images/Primary?fillWidth=168");
+        Land(cache, landed, a);
+        var drawn = cache.Get(a).Image!;
+        using var surface = new HultUI.Rendering.Skia.SkiaRasterRenderSurface();
+        surface.Resize(8, 8, 1f);
+        Assert.Equal(Red, Centre(surface, drawn));
+
+        // The tile goes on drawing a, while b lands on a download thread and the cap of one
+        // pushes a out.
+        Land(cache, landed, b);
+        Assert.False(cache.IsReady(a), "the cap of one kept two pictures");
+        Assert.True(drawn.IsLoaded, "the download thread disposed a picture the UI thread may be drawing");
+        Assert.Equal(Red, Centre(surface, drawn));
+
+        // The UI thread's next ask lets it go.
+        cache.Get(b);
+        Assert.False(drawn.IsLoaded, "a picture pushed out of the cache is still held");
+    }
+
+    [Fact]
+    public void APicturePushedOutByTheCapGoesWithTheCache()
+    {
+        using var landed = new SemaphoreSlim(0);
+        var cache = new PosterCache(() => landed.Release(), capacity: 1, http: new HttpClient(new RedPngHandler()));
+        var a = new Uri("http://jellyfin.test/Items/a/Images/Primary?fillWidth=168");
+        Land(cache, landed, a);
+        var first = cache.Get(a).Image!;
+        Land(cache, landed, new Uri("http://jellyfin.test/Items/b/Images/Primary?fillWidth=168"));
+        Assert.True(first.IsLoaded);
+
+        cache.Dispose();
+        Assert.False(first.IsLoaded, "a picture pushed out of the cache outlived it");
+    }
+
+    private static readonly (byte R, byte G, byte B) Red = (255, 0, 0);
+
+    /// <summary>Asks for <paramref name="url"/> and waits for its download (the only one running)
+    /// to land, without asking again: an ask is what disposes what the cap pushed out.</summary>
+    private static void Land(PosterCache cache, SemaphoreSlim landed, Uri url)
+    {
+        Assert.Equal(PosterCache.Status.Pending, cache.Get(url).Status);
+        Assert.True(landed.Wait(TimeSpan.FromSeconds(5)), $"{url} never landed");
+        Assert.True(cache.IsReady(url), $"{url} landed without a picture");
+    }
+
+    /// <summary>The colour at the centre of the picture drawn over the whole surface.</summary>
+    private static (byte R, byte G, byte B) Centre(HultUI.Rendering.Skia.SkiaRasterRenderSurface surface,
+        HultUI.Core.Rendering.IImageSource picture)
+    {
+        var ctx = surface.RenderContext;
+        ctx.BeginFrame(8, 8, 1f, HultUI.Core.Primitives.Color.White);
+        ctx.DrawImage(picture, new HultUI.Core.Primitives.Rect(0, 0, 8, 8), HultUI.Core.Layout.ImageFit.Fill);
+        ctx.EndFrame();
+        surface.Present();
+        var pixels = surface.ReadPixels(out _, out _, out int rowBytes);
+        int at = 4 * rowBytes + 4 * 4;
+        return (pixels[at], pixels[at + 1], pixels[at + 2]);
+    }
+
+    /// <summary>Every request answered with a small red PNG.</summary>
+    private sealed class RedPngHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            using var bitmap = new SkiaSharp.SKBitmap(4, 4);
+            bitmap.Erase(SkiaSharp.SKColors.Red);
+            using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(data.ToArray()),
+            });
+        }
+    }
+
     private static void TryDeleteDirectory(string path)
     {
         try { Directory.Delete(path, recursive: true); } catch (IOException) { }

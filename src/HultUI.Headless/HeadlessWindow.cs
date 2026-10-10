@@ -39,6 +39,30 @@ public sealed partial class HeadlessWindow
     /// <summary>The window's recorded text-input host (IME arm/disarm state).</summary>
     public HeadlessTextInputHost TextInputHost => (HeadlessTextInputHost)_platform.TextInputHost;
 
+    /// <summary>
+    /// Stands in for the OS minimizing the window (true) and restoring it (false). A minimized
+    /// window is not drawn: its frames stop before painting and keep their dirt for the first
+    /// frame after the restore, as on a real platform, and its animations still run.
+    /// <see cref="Window.Minimize"/> does not set it: there is no task bar to restore from, and
+    /// an app's own minimize button would leave a test with a window that never draws.
+    /// </summary>
+    public bool Minimized
+    {
+        get => _platform.IsMinimized;
+        set => _platform.IsMinimized = value;
+    }
+
+    /// <summary>
+    /// The display refresh rate the window reports, in Hz. 0, the default, is unknown, which the
+    /// loop takes as 60 Hz. Set it to run <see cref="HeadlessSession.RunLoop"/> as on a faster
+    /// display; a pump draws whenever it is asked, whatever this says.
+    /// </summary>
+    public float RefreshRate
+    {
+        get => _platform.RefreshRate;
+        set => _platform.RefreshRate = value;
+    }
+
     /// <summary>The last cursor the framework requested (e.g. the text I-beam over an input).</summary>
     public CursorType LastCursor => _platform.LastCursor;
 

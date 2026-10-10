@@ -1,7 +1,9 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
@@ -245,12 +247,213 @@ static partial class Scenarios
                     Check = ScrolledTo(() => area.ScrollOffsetY),
                 };
             });
+
+        yield return new Scenario("text/rebuild around highlighted JSON in a TextArea",
+            $"A keystroke elsewhere rebuilds the pane holding the {JsonLines:N0}-line JSON response, as Meridian's URL and body editors rebuild the app: the TextArea is patched with the same text and spans",
+            ctx =>
+            {
+                var text = Ui.JsonResponse(ctx.Rng, JsonLines);
+                var pane = new ResponsePane(text, Ui.JsonSpans(text));
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(pane.Mount()));
+                var area = pane.Area!;
+                return new Op
+                {
+                    Run = _ => pane.Edit(),
+                    Check = step => pane.Verify(area, step + 1) ?? JsonShown(ctx, area, text),
+                };
+            });
+
+        yield return new Scenario("text/selectable viewer hover",
+            $"Move the pointer to another line of a file viewer of {ViewerLines} selectable, syntax-coloured lines in one selection group, as Junction's diff and Vesper's reader are: every line on screen drawn again",
+            ctx =>
+            {
+                var viewer = new SelectableViewer(ctx);
+                // ~18 px lines: a 63 px step lands on another line each time.
+                static float PointerY(int step) => 30 + step * 63 % 660;
+                return new Op
+                {
+                    Run = step => ctx.Window.MoveMouse(500, PointerY(step)),
+                    Check = step => viewer.Hovered(PointerY(step)) ?? viewer.Drawn(),
+                };
+            });
+
+        yield return new Scenario("text/selectable viewer wheel",
+            $"Wheel 3 notches through the file viewer of {ViewerLines} selectable lines: every line on screen drawn at a new place",
+            ctx =>
+            {
+                var viewer = new SelectableViewer(ctx);
+                var scrolled = ScrolledTo(() => viewer.View.ScrollOffsetY);
+                return new Op
+                {
+                    Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
+                    Check = step => scrolled(step) ?? viewer.Drawn(),
+                };
+            });
+    }
+
+    private const int ViewerLines = 400;
+
+    /// <summary>
+    /// A file viewer as Junction's diff and Vesper's reader build one: a line number, then the
+    /// line itself, monospace 12 px in its syntax colours, selectable, every line in one
+    /// <see cref="TextSelectionGroup"/>, and a hover tint on the row. Not virtualized: the same
+    /// labels stay on screen from frame to frame, and only where they are drawn changes.
+    /// </summary>
+    private sealed class SelectableViewer
+    {
+        private static readonly Color Field = Color.FromHex("#1E1E1E");
+        private static readonly Color Plain = Color.FromHex("#D4D4D4");
+        private static readonly Color HoverLine = Color.FromHex("#2A2D2E");
+
+        private readonly Element[] _rows = new Element[ViewerLines];
+        private readonly TextElement[] _code = new TextElement[ViewerLines];
+
+        public ScrollViewElement View { get; }
+
+        public SelectableViewer(Ctx ctx)
+        {
+            var lines = new string[ViewerLines];
+            var group = new TextSelectionGroup();
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var (text, spans) = CodeLine(ctx.Rng, i);
+                lines[i] = text;
+                _code[i] = Text.New(text).FontFamily(FontFamilies.Monospace).FontSize(12f).TextColor(Plain)
+                    .Selectable().SelectionGroup(group, i).Spans(spans).Padding(new Thickness(2, 8)).FlexGrow(1);
+                _rows[i] = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Stretch)
+                    .OnHover(r => r.Background(HoverLine))
+                    .Children(
+                        Text.New($"{i + 1}").FontFamily(FontFamilies.Monospace).FontSize(12f).TextColor(Ui.Muted)
+                            .Width(Dimension.Px(48)).Padding(new Thickness(2, 8)),
+                        _code[i]);
+            }
+            group.Bind(lines, lines.Length, i => lines[i]);
+            View = ScrollView.New().FlexGrow(1).Background(Field).Children(Flex.Column().FlexShrink(0).Children(_rows));
+            ctx.Mount(View);
+        }
+
+        /// <summary>Null when the row under the pointer, and only it, is hovered.</summary>
+        public string? Hovered(float pointerY)
+        {
+            int hovered = -1;
+            for (int i = 0; i < _rows.Length; i++)
+            {
+                if (!_rows[i].IsHovered) continue;
+                if (hovered >= 0) return $"lines {hovered + 1} and {i + 1} are both hovered";
+                hovered = i;
+            }
+            if (hovered < 0) return "no line is hovered";
+            var box = _rows[hovered].WindowBorderBox;
+            return pointerY >= box.Y && pointerY < box.Bottom ? null
+                : $"line {hovered + 1} is hovered, but the pointer is at y = {pointerY}, not over it";
+        }
+
+        /// <summary>Null when every line on screen drew its text through the paragraph a click
+        /// hit-tests, and a screenful of them did.</summary>
+        public string? Drawn()
+        {
+            var viewport = View.WindowBorderBox;
+            int drawn = 0;
+            for (int i = 0; i < _code.Length; i++)
+            {
+                var box = _code[i].WindowBorderBox;
+                if (box.Bottom <= viewport.Y || box.Y >= viewport.Bottom) continue;
+                if (HultUI.Headless.LayoutProbe.DrawnLines(_code[i]).Count != 1)
+                    return $"line {i + 1} is on screen but did not draw one line of selectable text";
+                drawn++;
+            }
+            return drawn >= 30 ? null : $"only {drawn} lines are on screen";
+        }
+
+        // A line of code in a viewer's colours: indentation, then a keyword, names, a call with a
+        // number and a string, and on some lines a comment, each a span of its own colour.
+        private static (string Text, TextSpan[] Spans) CodeLine(Random rng, int line)
+        {
+            var keyword = Color.FromHex("#569CD6");
+            var name = Color.FromHex("#9CDCFE");
+            var number = Color.FromHex("#B5CEA8");
+            var str = Color.FromHex("#CE9178");
+            var comment = Color.FromHex("#6A9955");
+
+            var text = new System.Text.StringBuilder();
+            var spans = new List<TextSpan>();
+            void Add(string s, Color? colour = null)
+            {
+                if (colour is { } c) spans.Add(new TextSpan(text.Length, s.Length, c));
+                text.Append(s);
+            }
+
+            Add(new string(' ', 4 * (1 + line % 3)));
+            if (line % 7 == 0)
+            {
+                Add("// " + Ui.Paragraph(rng, 9), comment);
+                return (text.ToString(), spans.ToArray());
+            }
+            var words = Ui.Label(rng).Split(' ');
+            if (line % 5 == 0)
+                Add("return ", keyword);
+            else
+            {
+                Add("var ", keyword);
+                Add(words[0] + char.ToUpperInvariant(words[1][0]) + words[1][1..], name);
+                Add(" = ");
+            }
+            Add(words[2]);
+            Add(".Make(");
+            Add($"{rng.Next(10_000)}", number);
+            Add(", ");
+            Add($"\"{Ui.Label(rng)}\"", str);
+            Add(");");
+            if (line % 3 == 0) Add(" // " + Ui.Paragraph(rng, 4), comment);
+            return (text.ToString(), spans.ToArray());
+        }
     }
 
     /// <summary>
-    /// Meridian's response size, near the most it colours: HultUI.Syntax leaves a text of more
-    /// than 20,000 lines without spans. Meridian's survey response was 312 KB in ~22,500 lines;
-    /// this one is 368 KB in 19,013 (see <see cref="Ui.JsonResponse"/>).
+    /// Meridian's response pane as its editors rebuild it: a header whose label reads a signal
+    /// the request editor writes on every keystroke, over the read-only TextArea of the
+    /// response, handed the same text and spans on every build (Meridian keeps them per
+    /// response, so a rebuild formats and tokenizes nothing).
+    /// </summary>
+    private sealed class ResponsePane(string body, TextSpan[] spans) : Component
+    {
+        private readonly Signal<int> _edits = new(0);
+        private readonly Ref<TextAreaElement> _area = new();
+        private readonly Ref<TextElement> _label = new();
+
+        public TextAreaElement? Area => _area.Current;
+
+        public void Edit() => _edits.Value++;
+
+        public override Element Build()
+        {
+            var area = JsonViewer();
+            area.Text = body;
+            area.Spans = spans;
+            return Flex.Column(gap: 0).FlexGrow(1).Children(
+                Flex.Row(gap: 12).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(6, 12)).Children(
+                    Text.New("200 OK").FontSize(12f).TextColor(Ui.Accent),
+                    Text.New($"request edited {_edits.Value} times").FontSize(12f).TextColor(Ui.Muted).WithRef(_label)),
+                area.WithRef(_area));
+        }
+
+        /// <summary>Null when <paramref name="edits"/> rebuilds reached the header and the
+        /// TextArea that shows the response is still <paramref name="area"/>, patched rather
+        /// than mounted anew.</summary>
+        public string? Verify(TextAreaElement area, int edits)
+        {
+            if (_label.Current?.Content != $"request edited {edits} times")
+                return $"the header reads \"{_label.Current?.Content}\" after {edits} edits: the pane did not rebuild";
+            return ReferenceEquals(_area.Current, area) ? null : "the rebuild replaced the TextArea instead of patching it";
+        }
+    }
+
+    /// <summary>
+    /// Meridian's response size, near the most it coloured while it tokenized on the UI thread:
+    /// HultUI.Syntax leaves a text of more than 20,000 lines without spans unless the caller
+    /// asks for more, as Meridian has since its tokenize moved to a worker (200,000). Meridian's
+    /// survey response was 312 KB in 24,005 lines; this one is 368 KB in 19,013 (see
+    /// <see cref="Ui.JsonResponse"/>).
     /// </summary>
     private const int JsonLines = 19_000;
 
@@ -260,9 +463,12 @@ static partial class Scenarios
         var area = TextArea.New("").FontFamily(FontFamilies.Monospace).FontSize(12f)
             .TextColor(Color.FromHex("#D4D4D4")).FlexGrow(1);
         area.ReadOnly = true;
-        area.Style = new TextInputStyle { Background = Color.FromHex("#1E1E1E") };
+        area.Style = JsonField;
         return area;
     }
+
+    // One instance for every build: a TextArea compares its style by reference.
+    private static readonly TextInputStyle JsonField = new() { Background = Color.FromHex("#1E1E1E") };
 
     /// <summary>
     /// Null when <paramref name="text"/> is the TextArea's, every line of it is laid out (the

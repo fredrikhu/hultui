@@ -1,0 +1,295 @@
+{
+  "kind": "real-window probe (scratchpad S14Probe), not a perf-suite capture: the suite draws on a raster surface",
+  "date": "2026-10-10 11:54-12:40 +01:00",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, window on the 4K display at 150 % (1800x1170 px), 200 Hz HDR",
+  "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, Borderless 1200x750 DIP, P-cores, idle-gated before every run, before and after alternated, 2 runs each; 5 s warm-up of forced frames, then 4,000 forced frames unpaced or 1,500 paced at 5 ms; phases from Window.Performance (the HULTUI_TRACE phases), UI-thread cycles from QueryThreadCycleTime around each RunFrame; glGetError and vkQueueSubmit counted by wrapping the resolvers handed to Skia",
+  "scenes": "junction: sidebar of 28 rows, 40 history rows of 5 text columns, 44 monospace diff lines. aperture: 1600x600 hero under a gradient, 16 posters with shadows, a 320x180 pixel-frame video rewritten every frame",
+  "label": "gl-vk-one-submit-per-frame, before: f8e449e, the render context flushes and submits in EndFrame, the GL surface twice more in Present, the Vulkan surface once more for the scRGB blit",
+  "commit": "f8e449e",
+  "results": {
+    "AOT": {
+      "GL, junction-like, paced 5 ms": [
+        {
+          "frameWallMinMs": 0.478,
+          "frameWallMedianMs": 0.529,
+          "uiThreadKcyclesPerFrame": 1813.9,
+          "frameMedianMs": 0.4512,
+          "renderMedianMs": 0.287,
+          "flushMedianMs": 0.1118,
+          "presentMedianMs": 0.0379,
+          "glSwapMedianMs": 0.0258,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        },
+        {
+          "frameWallMinMs": 0.4751,
+          "frameWallMedianMs": 0.5308,
+          "uiThreadKcyclesPerFrame": 1805.3,
+          "frameMedianMs": 0.4525,
+          "renderMedianMs": 0.2873,
+          "flushMedianMs": 0.1105,
+          "presentMedianMs": 0.038,
+          "glSwapMedianMs": 0.0259,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        }
+      ],
+      "GL, junction-like, unpaced": [
+        {
+          "frameWallMinMs": 0.411,
+          "frameWallMedianMs": 0.4498,
+          "uiThreadKcyclesPerFrame": 1553.8,
+          "frameMedianMs": 0.3762,
+          "renderMedianMs": 0.2597,
+          "flushMedianMs": 0.0854,
+          "presentMedianMs": 0.0267,
+          "glSwapMedianMs": 0.0152,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        },
+        {
+          "frameWallMinMs": 0.4102,
+          "frameWallMedianMs": 0.4673,
+          "uiThreadKcyclesPerFrame": 1571.5,
+          "frameMedianMs": 0.3938,
+          "renderMedianMs": 0.2643,
+          "flushMedianMs": 0.0891,
+          "presentMedianMs": 0.027,
+          "glSwapMedianMs": 0.0162,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        }
+      ],
+      "Vulkan 8-bit, aperture-like, unpaced": [
+        {
+          "frameWallMinMs": 0.2782,
+          "frameWallMedianMs": 0.3065,
+          "uiThreadKcyclesPerFrame": 1063.8,
+          "frameMedianMs": 0.2325,
+          "renderMedianMs": 0.0669,
+          "flushMedianMs": 0.0766,
+          "presentMedianMs": 0.0705,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 1.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        },
+        {
+          "frameWallMinMs": 0.2799,
+          "frameWallMedianMs": 0.3344,
+          "uiThreadKcyclesPerFrame": 1099.3,
+          "frameMedianMs": 0.259,
+          "renderMedianMs": 0.069,
+          "flushMedianMs": 0.0836,
+          "presentMedianMs": 0.0747,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 1.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        }
+      ],
+      "Vulkan F16 MAILBOX, aperture-like, paced 5 ms": [
+        {
+          "frameWallMinMs": 0.4059,
+          "frameWallMedianMs": 0.4667,
+          "uiThreadKcyclesPerFrame": 1584.3,
+          "frameMedianMs": 0.3869,
+          "renderMedianMs": 0.0871,
+          "flushMedianMs": 0.1098,
+          "presentMedianMs": 0.1604,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        },
+        {
+          "frameWallMinMs": 0.4068,
+          "frameWallMedianMs": 0.473,
+          "uiThreadKcyclesPerFrame": 1602.4,
+          "frameMedianMs": 0.3893,
+          "renderMedianMs": 0.0891,
+          "flushMedianMs": 0.1093,
+          "presentMedianMs": 0.161,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        }
+      ],
+      "Vulkan F16 MAILBOX, aperture-like, unpaced": [
+        {
+          "frameWallMinMs": 0.3557,
+          "frameWallMedianMs": 0.3874,
+          "uiThreadKcyclesPerFrame": 1345.2,
+          "frameMedianMs": 0.3139,
+          "renderMedianMs": 0.0738,
+          "flushMedianMs": 0.0856,
+          "presentMedianMs": 0.1365,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        },
+        {
+          "frameWallMinMs": 0.3573,
+          "frameWallMedianMs": 0.4919,
+          "uiThreadKcyclesPerFrame": 1366.4,
+          "frameMedianMs": 0.4006,
+          "renderMedianMs": 0.0744,
+          "flushMedianMs": 0.1086,
+          "presentMedianMs": 0.1993,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        }
+      ]
+    },
+    "JIT": {
+      "GL, junction-like, paced 5 ms": [
+        {
+          "frameWallMinMs": 0.4212,
+          "frameWallMedianMs": 0.4666,
+          "uiThreadKcyclesPerFrame": 1583.7,
+          "frameMedianMs": 0.3883,
+          "renderMedianMs": 0.2339,
+          "flushMedianMs": 0.1097,
+          "presentMedianMs": 0.0346,
+          "glSwapMedianMs": 0.0231,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        },
+        {
+          "frameWallMinMs": 0.4245,
+          "frameWallMedianMs": 0.4759,
+          "uiThreadKcyclesPerFrame": 1605.0,
+          "frameMedianMs": 0.3981,
+          "renderMedianMs": 0.2399,
+          "flushMedianMs": 0.1104,
+          "presentMedianMs": 0.0358,
+          "glSwapMedianMs": 0.0234,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        }
+      ],
+      "GL, junction-like, unpaced": [
+        {
+          "frameWallMinMs": 0.3647,
+          "frameWallMedianMs": 0.4021,
+          "uiThreadKcyclesPerFrame": 1388.1,
+          "frameMedianMs": 0.3278,
+          "renderMedianMs": 0.2097,
+          "flushMedianMs": 0.0861,
+          "presentMedianMs": 0.0265,
+          "glSwapMedianMs": 0.0143,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        },
+        {
+          "frameWallMinMs": 0.3596,
+          "frameWallMedianMs": 0.4053,
+          "uiThreadKcyclesPerFrame": 1364.6,
+          "frameMedianMs": 0.332,
+          "renderMedianMs": 0.2104,
+          "flushMedianMs": 0.0853,
+          "presentMedianMs": 0.0263,
+          "glSwapMedianMs": 0.0145,
+          "glGetErrorPerFrame": 3.0,
+          "skiaVkQueueSubmitPerFrame": 0.0,
+          "hostVkQueueSubmitPerFrame": 0.0
+        }
+      ],
+      "Vulkan 8-bit, aperture-like, unpaced": [
+        {
+          "frameWallMinMs": 0.2662,
+          "frameWallMedianMs": 0.2919,
+          "uiThreadKcyclesPerFrame": 1025.6,
+          "frameMedianMs": 0.2202,
+          "renderMedianMs": 0.0586,
+          "flushMedianMs": 0.0764,
+          "presentMedianMs": 0.0689,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 1.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        },
+        {
+          "frameWallMinMs": 0.2662,
+          "frameWallMedianMs": 0.2922,
+          "uiThreadKcyclesPerFrame": 1024.8,
+          "frameMedianMs": 0.2199,
+          "renderMedianMs": 0.0583,
+          "flushMedianMs": 0.0762,
+          "presentMedianMs": 0.0687,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 1.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        }
+      ],
+      "Vulkan F16 MAILBOX, aperture-like, paced 5 ms": [
+        {
+          "frameWallMinMs": 0.4038,
+          "frameWallMedianMs": 0.4792,
+          "uiThreadKcyclesPerFrame": 1601.1,
+          "frameMedianMs": 0.3995,
+          "renderMedianMs": 0.0793,
+          "flushMedianMs": 0.1319,
+          "presentMedianMs": 0.164,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        },
+        {
+          "frameWallMinMs": 0.3897,
+          "frameWallMedianMs": 0.4631,
+          "uiThreadKcyclesPerFrame": 1551.7,
+          "frameMedianMs": 0.3845,
+          "renderMedianMs": 0.0787,
+          "flushMedianMs": 0.1148,
+          "presentMedianMs": 0.1608,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        }
+      ],
+      "Vulkan F16 MAILBOX, aperture-like, unpaced": [
+        {
+          "frameWallMinMs": 0.3446,
+          "frameWallMedianMs": 0.517,
+          "uiThreadKcyclesPerFrame": 1363.7,
+          "frameMedianMs": 0.3989,
+          "renderMedianMs": 0.0685,
+          "flushMedianMs": 0.1114,
+          "presentMedianMs": 0.1998,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        },
+        {
+          "frameWallMinMs": 0.3427,
+          "frameWallMedianMs": 0.3676,
+          "uiThreadKcyclesPerFrame": 1282.3,
+          "frameMedianMs": 0.295,
+          "renderMedianMs": 0.0648,
+          "flushMedianMs": 0.0831,
+          "presentMedianMs": 0.1307,
+          "glSwapMedianMs": 0.0,
+          "glGetErrorPerFrame": 0.0,
+          "skiaVkQueueSubmitPerFrame": 2.0,
+          "hostVkQueueSubmitPerFrame": 1.0
+        }
+      ]
+    }
+  }
+}

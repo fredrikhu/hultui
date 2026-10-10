@@ -20,6 +20,12 @@ public static class AccessibilityProperties
     /// <summary><see cref="AccessibilityNode.IsPassword"/> changed: a field was masked or
     /// revealed. On AT-SPI that is a role change.</summary>
     public const string IsPassword = "IsPassword";
+    /// <summary><see cref="AccessibilityNode.Range"/> changed: a slider, a progress bar or a number
+    /// field moved, or its bounds or steps did. The change carries the previous node, so a bridge
+    /// can tell which. An element raises it for its value's change, which the window refreshes on
+    /// a schedule (at most every 250 ms) rather than in every frame of a drag or a playback.</summary>
+    public const string RangeValue = "RangeValue";
+
     /// <summary><see cref="AccessibilityNode.BoundingRect"/> changed within the node's scroll
     /// views: it moved in its content, or resized. Not reported for a node that only scrolled.</summary>
     public const string BoundingRect = "BoundingRect";

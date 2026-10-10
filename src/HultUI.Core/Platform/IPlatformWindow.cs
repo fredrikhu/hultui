@@ -60,6 +60,13 @@ public interface IPlatformWindow : IDisposable
     bool IsMaximized { get; }
 
     /// <summary>
+    /// True while the window is minimized. The frame loop does not draw a minimized window
+    /// (a forced frame aside): nothing would show the frame, and on Windows a Vulkan surface
+    /// has no area to draw into. False where the platform cannot tell, which keeps drawing.
+    /// </summary>
+    bool IsMinimized => false;
+
+    /// <summary>
     /// The native window title — what the OS shows in the task bar, the Alt+Tab
     /// switcher and (for a decorated window) the caption. Settable after creation
     /// so an app can reflect its current document; a borderless window still has
@@ -95,8 +102,11 @@ public interface IPlatformWindow : IDisposable
     bool ActivatedPending { get; set; }
 
     /// <summary>
-    /// Invoked by platforms whose native resize runs a modal loop (Win32) to
-    /// render a throttled frame mid-resize. Headless platforms never call it.
+    /// Invoked by platforms whose native resize runs a modal loop (Win32) to draw a frame
+    /// from inside it, never throttled. The framework draws a resize frame when
+    /// <see cref="ResizePending"/> is set, so a platform sets it first for a new size or an
+    /// area the OS asked to have painted; otherwise it draws only a window with something new
+    /// to show. Headless platforms never call it.
     /// </summary>
     Action? LiveResizeFrame { get; set; }
 

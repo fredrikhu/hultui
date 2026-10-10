@@ -1,6 +1,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Events;
@@ -135,17 +136,19 @@ public class PointerStateHoverTests
         var state = new PointerState();
         for (int i = 0; i < 8; i++) state.UpdateHover(leaves[i % 4], new Point(i, i), KeyModifiers.None);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++)
+        long events = Allocations.Least(() =>
         {
-            _sink = new PointerLeaveEvent { Position = new Point(i, i) };
-            _sink = new PointerEnterEvent { Position = new Point(i, i) };
-        }
-        long events = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (int i = 0; i < 100; i++)
+            {
+                _sink = new PointerLeaveEvent { Position = new Point(i, i) };
+                _sink = new PointerEnterEvent { Position = new Point(i, i) };
+            }
+        });
 
-        before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++) state.UpdateHover(leaves[i % 4], new Point(i, i), KeyModifiers.None);
-        long changes = GC.GetAllocatedBytesForCurrentThread() - before;
+        long changes = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++) state.UpdateHover(leaves[i % 4], new Point(i, i), KeyModifiers.None);
+        }, goal: events);
 
         Assert.True(changes <= events,
             $"100 hover changes allocated {changes} B; their events alone are {events} B");

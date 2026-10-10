@@ -20,6 +20,19 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
+/// <para>
+/// <b>Active only while assistive technology is on.</b> The bus is reachable in every GNOME and
+/// KDE session, screen reader or not, and an active bridge rebuilds the tree and sends AT-SPI its
+/// changes on every change a reader could see: a keystroke in a 603-node form cost 385 KB
+/// against 3.2 KB with no bridge. So the bridge connects and registers, and is
+/// <see cref="IsActive"/> only while <c>org.a11y.Status</c> says <c>IsEnabled</c> or
+/// <c>ScreenReaderEnabled</c>, which Orca and accerciser set, as Qt does; or while
+/// <see cref="AccessibilityClients.Force"/> (<c>HULTUI_ACCESSIBILITY=1</c>) says so, for clients
+/// that never set the status: a plain pyatspi script, <c>samples/AtSpiVerify</c>. When the status
+/// turns on, the window builds the tree afresh and the bridge publishes all of it (cache-add for
+/// every object, cache-remove for any it published before that is gone now); when it turns off,
+/// nothing is built or sent.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("linux")]
 public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree, IDisposable
@@ -38,6 +51,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     private readonly IAccessibilityActionHost? _actionHost;
     private readonly IAccessibilityGeometryHost? _geometryHost;
     private readonly bool _registered;
+    // Whether assistive technology is on (org.a11y.Status). Null for a test's bridge with no
+    // status, which is always on. Written on the watcher's thread, read on the UI thread.
+    private readonly IAtSpiStatus? _status;
+    private volatile bool _statusOn;
     private volatile Snapshot _snapshot = Snapshot.Empty;
     private bool _hasBuilt;
     private string? _focusedPath;
@@ -57,36 +74,65 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // The windowing layer's host implements both capabilities on one object.
         _geometryHost = actionHost as IAccessibilityGeometryHost;
         if (!connect) return;
-        // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
-        // "is anyone listening" contract the null bridge expresses everywhere.
-        _signals = _bus = AtSpiBus.Open();
-        if (_bus is null) return;
+        // With no synchronization context. The bus is opened and the application registered with
+        // blocking waits on D-Bus calls, and the connection takes the calling thread's context
+        // for its own work: on a thread with HultUI's (a headless session's, the loop's once it
+        // runs, so a window made then) that work went to the UI thread's queue, which nothing
+        // drains while the thread waits, and the constructor never returned (samples/AtSpiVerify
+        // hung at start). The handlers below run on the bus's receive thread, as they must.
+        var context = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
+        try
+        {
+            // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
+            // "is anyone listening" contract the null bridge expresses everywhere.
+            _signals = _bus = AtSpiBus.Open();
+            if (_bus is null) return;
 
-        _bus.AddMethodHandler(new AtSpiObjectHandler(this));
-        _bus.AddMethodHandler(new AtSpiCacheHandler(this));
+            _bus.AddMethodHandler(new AtSpiObjectHandler(this));
+            _bus.AddMethodHandler(new AtSpiCacheHandler(this));
 
-        // Seed a minimal application root *before* Embed: the registry probes
-        // our root during the Embed round-trip — on the bus receive thread,
-        // while this ctor thread is still blocked in the call — so the seed has
-        // to be visible first, or that probe answers UnknownObject. The first
-        // ApplyChanges swaps in the real tree.
-        _snapshot = new Snapshot { ByPath = new() { [SeedRoot.Path] = SeedRoot }, Root = SeedRoot };
+            // Seed a minimal application root *before* Embed: the registry probes
+            // our root during the Embed round-trip — on the bus receive thread,
+            // while this ctor thread is still blocked in the call — so the seed has
+            // to be visible first, or that probe answers UnknownObject. The first
+            // ApplyChanges swaps in the real tree.
+            _snapshot = new Snapshot { ByPath = new() { [SeedRoot.Path] = SeedRoot }, Root = SeedRoot };
 
-        _registered = _bus.RegisterApplication();
+            _registered = _bus.RegisterApplication();
 
-        // Whether anyone listens, for content costly to describe (seam W11).
-        AccessibilityClients.Report(_bus.ReadStatus());
-        _bus.WatchStatus(AccessibilityClients.Report);
+            // Whether anyone listens: what makes this bridge active, and what content costly to
+            // describe reads (seam W11).
+            WatchStatus(_status = _bus);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+        }
     }
 
     /// <summary>For tests: a bridge registered with no bus, whose signals go to
-    /// <paramref name="signals"/>.</summary>
-    internal LinuxAccessibilityBridge(IAtSpiSignals signals, IAccessibilityActionHost? actionHost = null)
+    /// <paramref name="signals"/>, active whenever <paramref name="status"/> says assistive
+    /// technology is on; always active with no status.</summary>
+    internal LinuxAccessibilityBridge(IAtSpiSignals signals, IAccessibilityActionHost? actionHost = null,
+        IAtSpiStatus? status = null)
     {
         _actionHost = actionHost;
         _geometryHost = actionHost as IAccessibilityGeometryHost;
         _signals = signals;
         _registered = true;
+        if (status is not null) WatchStatus(_status = status);
+    }
+
+    private void WatchStatus(IAtSpiStatus status)
+    {
+        _statusOn = status.ReadStatus();
+        AccessibilityClients.Report(_statusOn);
+        status.WatchStatus(on =>
+        {
+            _statusOn = on;
+            AccessibilityClients.Report(on);
+        });
     }
 
     /// <summary>A childless application root, valid from Embed until the first build.</summary>
@@ -100,7 +146,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         IndexInParent = -1,
     };
 
-    public bool IsActive => _registered;
+    /// <summary>Registered, and assistive technology is on: <c>org.a11y.Status</c>, unless
+    /// <see cref="AccessibilityClients.Force"/> says otherwise. Polled by the window every frame.</summary>
+    public bool IsActive => _registered && (_status is null || (AccessibilityClients.Force ?? _statusOn));
 
     // Diagnostics for the verification harness — cheap counters, no bus needed.
     public int DebugApplyChangesCalls { get; private set; }
@@ -128,6 +176,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         return true;
     }
 
+    bool IAtSpiTree.SetCurrentValue(AtSpiAccessible node, double value)
+    {
+        if (_actionHost is null || node.Range is not { IsReadOnly: false }) return false;
+        _actionHost.SetRangeValue(node.ElementId, value);
+        return true;
+    }
+
     bool IAtSpiTree.DoAction(AtSpiAccessible node)
     {
         if (_actionHost is null || node.Action is null) return false;
@@ -149,10 +204,27 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!_registered || _signals is null) return;
         DebugApplyChangesCalls++;
 
+        var previous = _snapshot;
         _snapshot = Build(root, _geometryHost?.Scale ?? 1f);
 
         bool firstBuild = !_hasBuilt;
         _hasBuilt = true;
+
+        // A tree from nothing: the first, or the first since the bridge went inactive (the
+        // window drops its tree then, and builds it afresh when assistive technology is on
+        // again). The cache-adds below publish all of it; what was published before and is not
+        // in it any more went while nobody was told, and goes now. The object the bridge last
+        // marked focused may be gone too: the window names the focused one with the next move.
+        if (diff.Added.Count > 0 && diff.Added[0].Parent is null && diff.Removed.Count == 0)
+        {
+            foreach (var path in previous.ByPath.Keys)
+            {
+                if (_snapshot.ByPath.ContainsKey(path)) continue;
+                _signals.EmitCacheRemove(path);
+                DebugSignalsEmitted++;
+            }
+            _focusedPath = null;
+        }
 
         // Cache-add is genuinely per-node: it populates the AT client's object
         // cache (the first build's diff carries the whole tree) so navigation is
@@ -308,7 +380,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleDescription, change.Node.Description ?? "");
                 return true;
             case AccessibilityProperties.Value:
+                // A number field's text: its range's accessible-value says it, as a number.
+                if (change.Node.Range is not null) return false;
                 _signals!.EmitPropertyChange(path, AtSpiConstants.PropAccessibleValue, change.Node.Value ?? "");
+                return true;
+            case AccessibilityProperties.RangeValue:
+                // The value; a change of the bounds or steps alone is read from the Value interface.
+                if (change.Node.Range is not { } range || change.Previous?.Range?.Value == range.Value) return false;
+                _signals!.EmitValueChanged(path, range.Value);
                 return true;
             case AccessibilityProperties.IsPassword:
                 // A client caches the role from the cache-add, so a field masked or revealed
@@ -364,28 +443,46 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// <summary>For tests: publishes the snapshot of <paramref name="root"/>, as a rebuild would.</summary>
     internal void Publish(AccessibilityNode root, float scale = 1f) => _snapshot = Build(root, scale);
 
+    /// <summary>
+    /// The published view of <paramref name="root"/>'s tree, rebuilt in full on every apply. What
+    /// it makes per node is the object, its path and its place in its parent's list of children:
+    /// the dictionary is sized for the tree (grown entry by entry to 3,000, it reallocated a dozen
+    /// times), and each path is made once, in one string. A path was made twice, for the parent's
+    /// list and for the node itself, in two strings each (the id's, then the path), and every
+    /// parent kept its children's paths in a list: about 500 bytes a node, about 270 now.
+    /// </summary>
     private static Snapshot Build(AccessibilityNode root, float scale)
     {
-        var byPath = new Dictionary<string, AtSpiAccessible>();
-        var rootAcc = Walk(root, isRoot: true, parentPath: AtSpiConstants.NullPath, index: -1, scale, byPath);
+        var byPath = new Dictionary<string, AtSpiAccessible>(CountNodes(root));
+        var rootAcc = Walk(root, AtSpiConstants.RootPath, isRoot: true, parentPath: AtSpiConstants.NullPath,
+            index: -1, scale, byPath);
         return new Snapshot { ByPath = byPath, Root = rootAcc };
     }
 
+    private static int CountNodes(AccessibilityNode node)
+    {
+        int count = 1;
+        var children = node.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            count += CountNodes(children[i]);
+        return count;
+    }
+
     private static AtSpiAccessible Walk(
-        AccessibilityNode node, bool isRoot, string parentPath, int index, float scale,
+        AccessibilityNode node, string path, bool isRoot, string parentPath, int index, float scale,
         Dictionary<string, AtSpiAccessible> byPath)
     {
-        var acc = AtSpiAccessible.From(node, isRoot, parentPath, index, scale);
-        byPath[acc.Path] = acc;
-        for (int i = 0; i < node.Children.Count; i++)
-            Walk(node.Children[i], isRoot: false, acc.Path, i, scale, byPath);
+        var childPaths = AtSpiAccessible.ChildPathsOf(node);
+        var acc = AtSpiAccessible.From(node, path, isRoot, parentPath, index, scale, childPaths);
+        byPath[path] = acc;
+        var children = node.Children;
+        for (int i = 0; i < childPaths.Length; i++)
+            Walk(children[i], childPaths[i], isRoot: false, path, i, scale, byPath);
         return acc;
     }
 
     private static string PathOf(AccessibilityNode node) =>
-        node.Parent is null
-            ? AtSpiConstants.RootPath
-            : AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
+        node.Parent is null ? AtSpiConstants.RootPath : AtSpiAccessible.PathFor(node.ElementId);
 
     private static int IndexOf(AccessibilityNode parent, AccessibilityNode child)
     {

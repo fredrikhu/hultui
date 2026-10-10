@@ -64,6 +64,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public bool IsOpen { get; private set; }
     public bool IsMaximized { get; private set; }
 
+    /// <summary>Set by <see cref="HeadlessWindow.Minimized"/>; <see cref="Minimize"/> leaves it.</summary>
+    public bool IsMinimized { get; set; }
+
     /// <summary>
     /// Recorded rather than acted on: a headless surface is a fixed-size buffer, and
     /// resizing it to "the display" would mean inventing one. The flag is what an app's
@@ -88,7 +91,9 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public float LayoutWidth => _layoutWidth / _userScale;
     public float LayoutHeight => _layoutHeight / _userScale;
     public float DisplayScale => _scale * _userScale;
-    public float RefreshRate => 0f;   // no display; the session drives frames itself
+    /// <summary>0, unknown, unless <see cref="HeadlessWindow.RefreshRate"/> set it: no display,
+    /// and a pump draws whenever it is asked.</summary>
+    public float RefreshRate { get; set; }
 
     private float _userScale = 1f;
 

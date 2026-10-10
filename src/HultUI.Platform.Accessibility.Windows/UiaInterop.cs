@@ -187,6 +187,12 @@ internal static partial class UiaInterop
     public const int UIA_IsPasswordPropertyId = 30019;
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_ValueValuePropertyId = 30045;
+    public const int UIA_RangeValueValuePropertyId = 30047;
+    public const int UIA_RangeValueIsReadOnlyPropertyId = 30048;
+    public const int UIA_RangeValueMinimumPropertyId = 30049;
+    public const int UIA_RangeValueMaximumPropertyId = 30050;
+    public const int UIA_RangeValueLargeChangePropertyId = 30051;
+    public const int UIA_RangeValueSmallChangePropertyId = 30052;
     public const int UIA_ToggleToggleStatePropertyId = 30086;
     public const int UIA_ExpandCollapseExpandCollapseStatePropertyId = 30070;
     public const int UIA_SelectionItemIsSelectedPropertyId = 30079;

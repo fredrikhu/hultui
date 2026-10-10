@@ -38,4 +38,8 @@ internal interface IAtSpiTree
     /// <summary>Gives the node the keyboard (Component.GrabFocus), through the action host.
     /// False when it cannot take focus or nothing routes the request.</summary>
     bool GrabFocus(AtSpiAccessible node);
+
+    /// <summary>Sets a range's value (Value.CurrentValue), through the action host. False when the
+    /// node has no range, it is read-only, or nothing routes the request.</summary>
+    bool SetCurrentValue(AtSpiAccessible node, double value);
 }

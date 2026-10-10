@@ -1,0 +1,546 @@
+{
+  "kind": "real-window probes (scratchpad S14Probe and the SwapProbe of 7a827e9), not a perf-suite capture: the suite never runs a live resize",
+  "date": "2026-10-10 12:40-13:20 +01:00",
+  "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200; S14Probe on the 4K display at 150 %, SwapProbe at (100,100) on the 1440p display at 100 % with a 300 px bar",
+  "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, P-cores; resize runs idle-gated; before and after alternated (before, after, before, after), JIT; AOT drag pair alternated once (results.AOT)",
+  "probes": {
+    "resize drag / toggle": "40 SetWindowPos steps (NOACTIVATE) on a Borderless Junction-like window: drag grows 12x8 px a step, toggle alternates two sizes; framesInside = frames drawn before SetWindowPos returned (counted by a 1x1 canvas), sameSize = frames at a size the step had already drawn, framesAfter = frames in the 3 unforced loop passes after each step; process and UI-thread CPU over the 40 steps",
+    "invalidate": "InvalidateRect + UpdateWindow 20 times: a WM_PAINT each (EXPOSED, data1 0)",
+    "exposed held": "SDL's live-resize timer simulated: EXPOSED with data1 1 pushed every 10 ms for 3 s while the loop is held (as in Win32's modal size/move loop)",
+    "heldvideo": "the same for 2 s with mpv playing a 30 fps clip (libmpv-2.dll from native/mpv), frames drawn, frames mpv dropped, seconds played",
+    "stretch sampling": "7a827e9's harness: 60 resizes of a TOPMOST, never-activated window while a second thread samples the screen for a 300 px white bar; frames = frames drawn in the 60 resizes"
+  },
+  "label": "gl-vk-resize-duplicate-frames, after: the watch draws a resize for a new size or a WM_PAINT, validates the client area after a frame, and otherwise draws only a dirty window or one with posted work waiting",
+  "commit": "61edb19 + this change",
+  "results": {
+    "JIT": {
+      "GL: exposed": [
+        {
+          "ticks": 278,
+          "frames": 0,
+          "framesPerS": 0.0,
+          "uiMcycPerS": 3.2
+        },
+        {
+          "ticks": 278,
+          "frames": 0,
+          "framesPerS": 0.0,
+          "uiMcycPerS": 3.8
+        }
+      ],
+      "GL: heldvideo": [
+        {
+          "held": 2.01,
+          "ticks": 184,
+          "frames": 184,
+          "dropped": 0,
+          "played": 2.0
+        },
+        {
+          "held": 2.0,
+          "ticks": 183,
+          "frames": 183,
+          "dropped": 0,
+          "played": 2.0
+        }
+      ],
+      "GL: invalidate": [
+        {
+          "invalidations": 20,
+          "framesInside": 20
+        },
+        {
+          "invalidations": 20,
+          "framesInside": 20
+        }
+      ],
+      "GL: invalidate after": [
+        {
+          "after": 1
+        },
+        {
+          "after": 0
+        }
+      ],
+      "GL: resize drag": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 6.31,
+          "stepMax": 8.16,
+          "wallMs": 264,
+          "processCpuMs": 313,
+          "uiCpuMs": 250,
+          "processCpuPerS": 1183,
+          "skiaVkSubmit": 0,
+          "hostVkSubmit": 0,
+          "glGetError": 123
+        },
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 6.26,
+          "stepMax": 7.93,
+          "wallMs": 256,
+          "processCpuMs": 281,
+          "uiCpuMs": 266,
+          "processCpuPerS": 1098,
+          "skiaVkSubmit": 0,
+          "hostVkSubmit": 0,
+          "glGetError": 120
+        }
+      ],
+      "GL: resize toggle": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 3.46,
+          "stepMax": 7.43,
+          "wallMs": 151,
+          "processCpuMs": 188,
+          "uiCpuMs": 156,
+          "processCpuPerS": 1241,
+          "skiaVkSubmit": 0,
+          "hostVkSubmit": 0,
+          "glGetError": 120
+        },
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 3.38,
+          "stepMax": 8.4,
+          "wallMs": 148,
+          "processCpuMs": 156,
+          "uiCpuMs": 109,
+          "processCpuPerS": 1059,
+          "skiaVkSubmit": 0,
+          "hostVkSubmit": 0,
+          "glGetError": 123
+        }
+      ],
+      "GL: stretch sampling, 60 SetWindowPos resizes": [
+        {
+          "frames": 60,
+          "resizes": 60,
+          "barPx": 300,
+          "samples": 894,
+          "ok": 894,
+          "STRETCHED": 0,
+          "BLANK": 0,
+          "narrow": 0,
+          "cpuMsPerS": 59,
+          "wallMs": 7439
+        },
+        {
+          "frames": 60,
+          "resizes": 60,
+          "barPx": 300,
+          "samples": 893,
+          "ok": 893,
+          "STRETCHED": 0,
+          "BLANK": 0,
+          "narrow": 0,
+          "cpuMsPerS": 55,
+          "wallMs": 7448
+        }
+      ],
+      "Vulkan 8-bit: exposed": [
+        {
+          "ticks": 278,
+          "frames": 0,
+          "framesPerS": 0.0,
+          "uiMcycPerS": 3.3
+        },
+        {
+          "ticks": 277,
+          "frames": 0,
+          "framesPerS": 0.0,
+          "uiMcycPerS": 3.3
+        }
+      ],
+      "Vulkan 8-bit: heldvideo": [
+        {
+          "held": 2.01,
+          "ticks": 183,
+          "frames": 183,
+          "dropped": 0,
+          "played": 2.0
+        },
+        {
+          "held": 2.0,
+          "ticks": 182,
+          "frames": 182,
+          "dropped": 0,
+          "played": 2.0
+        }
+      ],
+      "Vulkan 8-bit: invalidate": [
+        {
+          "invalidations": 20,
+          "framesInside": 20
+        },
+        {
+          "invalidations": 20,
+          "framesInside": 20
+        }
+      ],
+      "Vulkan 8-bit: invalidate after": [
+        {
+          "after": 1
+        },
+        {
+          "after": 1
+        }
+      ],
+      "Vulkan 8-bit: resize drag": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 9.18,
+          "stepMax": 11.51,
+          "wallMs": 367,
+          "processCpuMs": 344,
+          "uiCpuMs": 313,
+          "processCpuPerS": 936,
+          "skiaVkSubmit": 81,
+          "hostVkSubmit": 41,
+          "glGetError": 0
+        },
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 8.22,
+          "stepMax": 9.56,
+          "wallMs": 330,
+          "processCpuMs": 328,
+          "uiCpuMs": 313,
+          "processCpuPerS": 995,
+          "skiaVkSubmit": 80,
+          "hostVkSubmit": 40,
+          "glGetError": 0
+        }
+      ],
+      "Vulkan 8-bit: resize toggle": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 4.83,
+          "stepMax": 7.96,
+          "wallMs": 206,
+          "processCpuMs": 203,
+          "uiCpuMs": 172,
+          "processCpuPerS": 985,
+          "skiaVkSubmit": 80,
+          "hostVkSubmit": 40,
+          "glGetError": 0
+        },
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 5.01,
+          "stepMax": 8.64,
+          "wallMs": 214,
+          "processCpuMs": 219,
+          "uiCpuMs": 156,
+          "processCpuPerS": 1022,
+          "skiaVkSubmit": 81,
+          "hostVkSubmit": 41,
+          "glGetError": 0
+        }
+      ],
+      "Vulkan 8-bit: stretch sampling, 60 SetWindowPos resizes": [
+        {
+          "frames": 60,
+          "resizes": 60,
+          "barPx": 300,
+          "samples": 960,
+          "ok": 960,
+          "STRETCHED": 0,
+          "BLANK": 0,
+          "narrow": 0,
+          "cpuMsPerS": 102,
+          "wallMs": 7999
+        },
+        {
+          "frames": 60,
+          "resizes": 60,
+          "barPx": 300,
+          "samples": 958,
+          "ok": 958,
+          "STRETCHED": 0,
+          "BLANK": 0,
+          "narrow": 0,
+          "cpuMsPerS": 76,
+          "wallMs": 7984
+        }
+      ],
+      "Vulkan F16 MAILBOX: exposed": [
+        {
+          "ticks": 278,
+          "frames": 0,
+          "framesPerS": 0.0,
+          "uiMcycPerS": 3.2
+        },
+        {
+          "ticks": 278,
+          "frames": 0,
+          "framesPerS": 0.0,
+          "uiMcycPerS": 3.5
+        }
+      ],
+      "Vulkan F16 MAILBOX: heldvideo": [
+        {
+          "held": 2.0,
+          "ticks": 181,
+          "frames": 181,
+          "dropped": 0,
+          "played": 2.0
+        },
+        {
+          "held": 2.01,
+          "ticks": 182,
+          "frames": 182,
+          "dropped": 0,
+          "played": 2.0
+        }
+      ],
+      "Vulkan F16 MAILBOX: invalidate": [
+        {
+          "invalidations": 20,
+          "framesInside": 20
+        },
+        {
+          "invalidations": 20,
+          "framesInside": 20
+        }
+      ],
+      "Vulkan F16 MAILBOX: invalidate after": [
+        {
+          "after": 1
+        },
+        {
+          "after": 1
+        }
+      ],
+      "Vulkan F16 MAILBOX: resize drag": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 34.43,
+          "stepMax": 229.86,
+          "wallMs": 1569,
+          "processCpuMs": 1609,
+          "uiCpuMs": 1172,
+          "processCpuPerS": 1026,
+          "skiaVkSubmit": 122,
+          "hostVkSubmit": 41,
+          "glGetError": 0
+        },
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 32.69,
+          "stepMax": 153.96,
+          "wallMs": 1434,
+          "processCpuMs": 1469,
+          "uiCpuMs": 1078,
+          "processCpuPerS": 1025,
+          "skiaVkSubmit": 120,
+          "hostVkSubmit": 40,
+          "glGetError": 0
+        }
+      ],
+      "Vulkan F16 MAILBOX: resize toggle": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 30.32,
+          "stepMax": 157.74,
+          "wallMs": 1348,
+          "processCpuMs": 1297,
+          "uiCpuMs": 1031,
+          "processCpuPerS": 962,
+          "skiaVkSubmit": 120,
+          "hostVkSubmit": 40,
+          "glGetError": 0
+        },
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 31.08,
+          "stepMax": 153.53,
+          "wallMs": 1370,
+          "processCpuMs": 1266,
+          "uiCpuMs": 1000,
+          "processCpuPerS": 924,
+          "skiaVkSubmit": 120,
+          "hostVkSubmit": 40,
+          "glGetError": 0
+        }
+      ],
+      "Vulkan F16 MAILBOX: stretch sampling, 60 SetWindowPos resizes": [
+        {
+          "frames": 60,
+          "resizes": 60,
+          "barPx": 300,
+          "samples": 1133,
+          "ok": 1133,
+          "STRETCHED": 0,
+          "BLANK": 0,
+          "narrow": 0,
+          "cpuMsPerS": 202,
+          "wallMs": 9433
+        },
+        {
+          "frames": 60,
+          "resizes": 60,
+          "barPx": 300,
+          "samples": 1133,
+          "ok": 1133,
+          "STRETCHED": 0,
+          "BLANK": 0,
+          "narrow": 0,
+          "cpuMsPerS": 149,
+          "wallMs": 9452
+        }
+      ]
+    },
+    "AOT": {
+      "GL: resize drag": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 0,
+          "stepMed": 3.0,
+          "stepMax": 5.29,
+          "wallMs": 128,
+          "processCpuMs": 141,
+          "uiCpuMs": 94,
+          "processCpuPerS": 1100,
+          "skiaVkSubmit": 0,
+          "hostVkSubmit": 0,
+          "glGetError": 120
+        }
+      ],
+      "Vulkan 8-bit: resize drag": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 4.93,
+          "stepMax": 6.33,
+          "wallMs": 202,
+          "processCpuMs": 156,
+          "uiCpuMs": 156,
+          "processCpuPerS": 775,
+          "skiaVkSubmit": 81,
+          "hostVkSubmit": 41,
+          "glGetError": 0
+        }
+      ],
+      "Vulkan F16 MAILBOX: resize drag": [
+        {
+          "steps": 40,
+          "framesInside": 40,
+          "perStep": 1.0,
+          "maxInStep": 1,
+          "stepsWithoutFrame": 0,
+          "newSize": 40,
+          "sameSize": 0,
+          "framesAfter": 1,
+          "stepMed": 31.35,
+          "stepMax": 213.64,
+          "wallMs": 1447,
+          "processCpuMs": 984,
+          "uiCpuMs": 969,
+          "processCpuPerS": 680,
+          "skiaVkSubmit": 122,
+          "hostVkSubmit": 41,
+          "glGetError": 0
+        }
+      ]
+    }
+  }
+}

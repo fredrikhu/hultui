@@ -780,6 +780,13 @@ while the window is dragged: round its size up to a step (Aperture uses 128 devi
 so it is asked for again only when the window passes one, keep drawing the old picture until
 the new one is in, and then drop the old one.
 
+**Dispose a picture on the UI thread.** Decode wherever you like, but an element that holds
+a source can draw it on any frame, and only the UI thread draws. Disposed on another thread,
+its native image can be freed in the middle of a draw. A cache that lets pictures go where a
+download lands, on the thread pool, should hand them to the UI thread instead: Aperture's
+`PosterCache` keeps what its count cap pushes out until the UI thread next asks it for a
+picture, and disposes them then.
+
 **Changing pixels.** A source whose pixels change over time — a video frame, a
 camera, a software-rendered view — implements `IPixelImageSource`, and the renderer
 draws its current bytes without copying. `PixelFrameSink` is the ready-made one: a
@@ -1131,19 +1138,60 @@ var list = VirtualListElement<FileEntry>.New()
 | `.ItemHeight(h)` | `ItemHeight` | one height for every row |
 | `.RowHeights(Func<T,int,float>)` | `ItemHeightFor` | per-row heights (the extension is not called `ItemHeightFor`: that name would bind to invoking the delegate) |
 | `.RenderWith(Func<T,Element>)` | `ItemTemplate` | builds a row; called for every realized row on every pass |
+| `.RenderWith(Func<T,bool,Element>)` | `ItemRowTemplate` | builds a row from its item and whether it is selected, and nothing else; the list keeps a realized row until one of those changes — see **Rows that show only their item** below |
 | `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, keyboard included |
 | `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
-| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see |
+| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 
-**How rows live.** The visible window plus a row or two of overscan is rebuilt on every
-patch — the template is re-invoked, so a rebuild of the owning component always shows
-current data with no reference tricks. A row with a `Key` is retained across passes and
+**How rows live.** With the one-argument template, the visible window plus a row or two of
+overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
+component always shows current data with no reference tricks. A row with a `Key` is retained across passes and
 patched instead of replaced, which is what keeps focus, a caret or a scroll offset alive
 inside it; key rows that hold state. Rows are force-sized to their height and
 `FlexShrink(0)`, so a template that wants a different height must say so through
 `RowHeights`.
+
+**Rows that show only their item.** Making every visible row again on every rebuild is
+what lets a row show anything, and it is most of what a key walk costs: in a list whose
+owner rebuilds on each selection move (Junction's History), twenty rows are made to change
+the look of two. `.RenderWith((item, selected) => Row(item, selected))` is the promise that
+a row shows its item and whether it is selected, and nothing else. The list then keeps a
+realized row across rebuilds while the item at its index is still equal to the one it was
+made from (`EqualityComparer<T>.Default`: the same object for a class, equal values for a
+record or struct — a reload that reads the same data keeps its rows) and its selected
+state (`SelectedIndex`, or the multi-selection with `CanSelectMultiple`) is unchanged. A
+selection move makes two rows; a rebuild that changes neither makes none. A kept row is
+the same element, so it keeps its hover, its focus and its layout.
+
+```csharp
+var list = VirtualListElement<Commit>.New()
+    .Items(commits)
+    .SelectedIndex(selected)                       // what `selected` below follows
+    .RenderWith((c, selected) => CommitRow(c, selected));
+```
+
+The contract has a second half. Anything else a row shows — data that arrives later for an
+unchanged item (counts, a CI status), a setting, the window width, a hover or focus tint
+the owner draws itself, a value captured from the build — is invisible to the list, and the
+kept rows go on showing what they showed when they were made, until they scroll out and back
+in. When such a thing changes, call `InvalidateRows()` on the mounted list (through its ref,
+at the top of the owner's build or after it): every row is made again from the latest
+template. A convenient shape is a tuple of what the rows read, compared with the last build's:
+
+```csharp
+var shape = (stats, compact, Nocturne.Theme);   // what the rows show besides the commit
+if (shape != _rowShape) { _listRef.Current?.InvalidateRows(); _rowShape = shape; }
+```
+
+Switching `Application.Theme` to another `Theme` object makes the rows again by itself; a
+theme changed in place does not. Handlers in a kept row are the ones it was made with, so
+they should read live state (`SelectionContains(c.Hash)`) rather than a value the build
+captured. Rows are matched by index: an insertion above the viewport makes the rows it moves
+again, as before. The one-argument template keeps its behaviour exactly; nothing changes for
+a list that does not opt in. On the perf suite's selection walk the opt-in makes 3 rows per
+step instead of 19 and allocates 26 KB instead of 97.
 
 **No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
 is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
@@ -1244,14 +1292,16 @@ Undo and redo work as in `TextInputElement` — Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, `
 `Redo()`, the right-click menu — and a line break typed with Enter counts as typing, so a new
 line's first word starts a step of its own. A read-only area ignores both keys and has no Undo
 in its menu.
-| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives |
+| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives. Sorted by start, may overlap (a tint over a token). Indexed when first drawn and kept by reference: hand a new list to change them, and the same list each build when they have not changed |
 | `ScrollOffsetY`, `ScrollSpeed`, `Scrollbar*` | | vertical only |
 | `TextChanged` | `Action<string>?` | |
 
 **Wrapping is unconditional.** Every hard line wraps at the content-box width; there is
-no wrap switch, and the wrapped rows are cached against the width they wrapped at, so a
-resize re-wraps with nothing for you to do. The corollary is that there is never
-anything to the right to scroll to: `ScrollBy` ignores `dx`, and autoscroll is vertical.
+no wrap switch, and the wrapped rows are cached against the text, the width and the font
+they wrapped with, so a resize or another font size re-wraps with nothing for you to do,
+and a rebuild that hands the area the text it already shows wraps nothing. The corollary
+is that there is never anything to the right to scroll to: `ScrollBy` ignores `dx`, and
+autoscroll is vertical.
 
 **Revealing a position.** Two calls:
 

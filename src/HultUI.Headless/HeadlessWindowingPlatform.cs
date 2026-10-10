@@ -43,11 +43,45 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
 
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose) => true;
 
+    /// <summary>The period of the event source <see cref="HeadlessSession.RunLoop"/> was given,
+    /// or null: then nothing arrives, and a wait runs its whole timeout.</summary>
+    internal TimeSpan? EventEvery { get; private set; }
+
+    private Action? _onEvent;
+    private TimeSpan _untilEvent;
+
+    /// <summary>Starts (or, with null, stops) an event every <paramref name="every"/> of virtual
+    /// time, the first one period from now, each running <paramref name="onEvent"/>.</summary>
+    internal void SetEventSource(TimeSpan? every, Action? onEvent)
+    {
+        if (every is { } period && period <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(every), "An event source needs a period above zero.");
+        EventEvery = every;
+        _onEvent = every is null ? null : onEvent;
+        _untilEvent = every ?? TimeSpan.Zero;
+    }
+
+    /// <summary>
+    /// Where <c>Application.Run</c> parks between frames. Time here is virtual, so a wait is
+    /// time moving on: the whole timeout, or up to the next event of the source
+    /// <see cref="HeadlessSession.RunLoop"/> set, which ends the wait early as an arriving
+    /// event does on a real platform. Nothing sleeps.
+    /// </summary>
     public void WaitForEvents(int timeoutMs)
     {
-        // Nothing can arrive; sleep a token amount so a caller that loops on
-        // this (none in the headless pump, but Run() would) yields the CPU.
-        Thread.Sleep(1);
+        var wait = TimeSpan.FromMilliseconds(Math.Max(0, timeoutMs));
+        if (EventEvery is { } every)
+        {
+            if (_untilEvent <= wait)
+            {
+                _time.Advance(_untilEvent);
+                _untilEvent = every;
+                _onEvent?.Invoke();
+                return;
+            }
+            _untilEvent -= wait;
+        }
+        _time.Advance(wait);
     }
 
     /// <summary>No-op: the session pumps frames explicitly, so there is never a wait to cut short.</summary>

@@ -59,6 +59,11 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
   FIFO never waited, and destroying first made their resizes slower (5 and 12 ms against 29 and
   33); the 8-bit swapchain never waited either and gained nothing. They keep the chained path.
+- **Minimized (Windows):** the surface's extent is 0×0, so no swapchain can exist. The one the
+  window had is destroyed, by every present mode, and the first frame after the restore builds a
+  new one. The loop does not draw a minimized window, so only a forced frame, a display change or
+  a present caught by the minimize gets here. Built during the restore, the scRGB MAILBOX
+  swapchain takes 150–220 ms to create (9 ms at start-up, 23 on a resize; 8-bit 1, scRGB FIFO 24).
 - **Synchronisation:** a semaphore per image orders the present after the frame. The acquire waits
   on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
 - **Per window:** each host has its own instance, device and command table. Device-level function
@@ -332,6 +337,12 @@ A check that reports the same thing whether the code works or not reads as evide
   On the chained scRGB MAILBOX swapchain the old harness read 0 of 80 resizes stretched, while a
   thread sampling the screen during them found 72% of the composed frames scaled. Sample the
   screen while the resize is happening.
+- **A frame per event is not a frame per change.** A `SetWindowPos` step raises RESIZED and
+  PIXEL_SIZE_CHANGED for one size, a growing step a WM_PAINT besides, and SDL's live-resize timer
+  sends an EXPOSED every ~10 ms while an edge is held or the window is moved. The event watch drew
+  a whole frame for each: three a step at one size (2026-10-10: one now; the timer draws only a
+  window with something new). The converse holds too: more frames than resizes says nothing about
+  whether the frame at the new size was drawn. Count the steps that drew none.
 - **A fallback that was never exercised.** The GL fallback was "verified across the matrix", but
   only the environment override had run. The fallback itself first ran under fault injection
   (`VK_LOADER_VENDOR_ID_FILTER=0x1234` for a driver with no GPU, `VK_DRIVER_FILES` at a missing
@@ -354,6 +365,10 @@ Anything holding a handle to something Skia or a driver also tracks goes stale, 
   other.
 - **`GL_DEDICATED_MEMORY_OBJECT_EXT` is required** for a dedicated allocation. Without it NVIDIA on
   Linux read every 4K texture as black, with no GL error. Windows happened to work.
+- **A swapchain forgotten is not a swapchain destroyed.** Minimized, the rebuild found no area and
+  set the handle to null. The orphan still owned the surface: the restored window drew nothing,
+  for ever, and a resize failed with `ErrorNativeWindowInUseKHR`. The validation layer named it
+  only at device destruction, as a leaked `VkSwapchainKHR` (`VUID-vkDestroyDevice-device-05137`).
 
 ### 3. Defaults that are not neutral
 

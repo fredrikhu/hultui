@@ -17,3 +17,16 @@ public interface IRangeValueElement
     /// <summary>Set the value from assistive tech (clamped to the range).</summary>
     void SetAccessibleValue(double value);
 }
+
+/// <summary>
+/// A value in a range — a slider's, a progress bar's, a number field's — as an accessibility tree
+/// was built with it (<see cref="AccessibilityNode.Range"/>): what UIA's RangeValue pattern and
+/// AT-SPI's Value interface report, and what the differ compares to tell a change.
+/// </summary>
+public readonly record struct AccessibleRange(
+    double Value, double Minimum, double Maximum, double SmallChange, double LargeChange, bool IsReadOnly)
+{
+    /// <summary>The range of <paramref name="element"/> as it is now.</summary>
+    public static AccessibleRange Of(IRangeValueElement element) =>
+        new(element.Value, element.Minimum, element.Maximum, element.SmallChange, element.LargeChange, element.IsReadOnly);
+}

@@ -1,56 +1,63 @@
+using HultUI.Core.Layout;
+
 namespace HultUI.Core.Elements;
 
 /// <summary>
 /// Provides z-index sorted child iteration for rendering and hit testing.
 /// Returns children sorted by ZIndex (ascending) for rendering (low = back, high = front),
 /// a sticky child after the others at its ZIndex — what scrolls under it must not paint over
-/// it. Only allocates when a child has a non-zero ZIndex or is sticky.
+/// it. The order is kept on the parent's child list (<see cref="Element.ChildrenInZOrder"/>), so
+/// a steady frame neither scans nor sorts; it is worked out again, and only then allocates,
+/// after the child list or a child's ZIndex or position type changed.
 /// </summary>
 internal static class ZOrderHelper
 {
     /// <summary>
     /// Returns children in z-order (ascending) for rendering.
-    /// When no child has a non-zero ZIndex, returns the original list to avoid allocation.
+    /// When no child has a non-zero ZIndex or is sticky, returns the original list.
     /// </summary>
-    public static IReadOnlyList<Element> GetChildrenInZOrder(Element parent)
-    {
-        var children = parent.Children;
-        if (children.Count <= 1)
-            return children;
+    public static IReadOnlyList<Element> GetChildrenInZOrder(Element parent) => parent.ChildrenInZOrder;
 
-        bool hasZIndex = false;
-        for (int i = 0; i < children.Count; i++)
+    /// <summary>
+    /// The paint order of two or more <paramref name="children"/>: empty when it is the order
+    /// they are in (no child has a ZIndex or is sticky), else the children sorted by ZIndex,
+    /// then sticky after the rest, then by their place in the list. The place is part of the
+    /// key, so the order is stable: List.Sort only looked stable while it insertion-sorted
+    /// sixteen or fewer.
+    /// </summary>
+    internal static Element[] Order(List<Element> children)
+    {
+        int count = children.Count;
+        bool any = false;
+        for (int i = 0; i < count; i++)
         {
-            if (children[i].PositionRead.ZIndex != 0 || children[i].PositionRead.Type == Layout.PositionType.Sticky)
+            var position = children[i].PositionRead;
+            if (position.ZIndex != 0 || position.Type == PositionType.Sticky)
             {
-                hasZIndex = true;
+                any = true;
                 break;
             }
         }
+        if (!any)
+            return [];
 
-        return hasZIndex ? Sorted(children) : children;
-    }
-
-    // A method of its own: the comparison captures `children`, and C# allocates a captured
-    // local's closure where the local's scope begins — in GetChildrenInZOrder that is its
-    // first line, which every element of every rendered frame runs.
-    private static Element[] Sorted(IReadOnlyList<Element> children)
-    {
-        // By ZIndex, then sticky last, then insertion order. The index is part of the key because
-        // List.Sort is not stable: it only looked stable while insertion sort handled sixteen or fewer.
-        var order = new int[children.Count];
-        for (int i = 0; i < order.Length; i++) order[i] = i;
-        Array.Sort(order, (a, b) =>
+        // One key per child, sorted with the children alongside, so no comparison delegate: the
+        // ZIndex in the high half, then the sticky bit above the place in the low half.
+        Span<long> keys = count <= StackKeys ? stackalloc long[StackKeys] : new long[count];
+        keys = keys[..count];
+        var sorted = new Element[count];
+        for (int i = 0; i < count; i++)
         {
-            var pa = children[a].PositionRead;
-            var pb = children[b].PositionRead;
-            int c = pa.ZIndex.CompareTo(pb.ZIndex);
-            if (c != 0) return c;
-            c = (pa.Type == Layout.PositionType.Sticky).CompareTo(pb.Type == Layout.PositionType.Sticky);
-            return c != 0 ? c : a.CompareTo(b);
-        });
-        var sorted = new Element[order.Length];
-        for (int i = 0; i < order.Length; i++) sorted[i] = children[order[i]];
+            var child = children[i];
+            var position = child.PositionRead;
+            keys[i] = ((long)position.ZIndex << 32)
+                | (position.Type == PositionType.Sticky ? 1L << 31 : 0L)
+                | (uint)i;
+            sorted[i] = child;
+        }
+        keys.Sort(sorted.AsSpan());
         return sorted;
     }
+
+    private const int StackKeys = 128;
 }

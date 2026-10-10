@@ -29,8 +29,6 @@ public class ProgressBarElement : Element, IRangeValueElement
     private float _sweep;
     private TweenHandle _sweepTween;
 
-    public ProgressBarElement() => IgnoresAvailableHeight = true;
-
     public double Value
     {
         get => _value;
@@ -40,12 +38,16 @@ public class ProgressBarElement : Element, IRangeValueElement
             if (_value == v) return;
             _value = v;
             MarkPaintDirty();
-            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
+            RangeChanged();
         }
     }
 
-    public double Minimum { get => _min; set { _min = value; Value = _value; } }
-    public double Maximum { get => _max; set { _max = value; Value = _value; } }
+    public double Minimum { get => _min; set { if (_min == value) return; _min = value; Value = _value; RangeChanged(); } }
+    public double Maximum { get => _max; set { if (_max == value) return; _max = value; Value = _value; RangeChanged(); } }
+
+    // A reader is told the value on a schedule, not every frame a download or a playback moves
+    // it (AccessibilityProperties.RangeValue).
+    private void RangeChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.RangeValue);
 
     /// <summary>Show activity without a known fraction. The fill is replaced by a
     /// segment that sweeps the track for as long as this stays set.</summary>
@@ -200,6 +202,7 @@ public class ProgressBarElement : Element, IRangeValueElement
             _fill = p._fill;
             IndeterminateSeconds = p.IndeterminateSeconds;
             IndeterminateFraction = p.IndeterminateFraction;
+            if (_min != p._min || _max != p._max) RangeChanged();
             _min = p._min;
             _max = p._max;
             Value = p._value;

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
@@ -25,7 +26,13 @@ internal sealed class AtSpiAccessible
     public uint Role { get; init; }
     public string Name { get; init; } = "";
     public string Description { get; init; } = "";
-    public string? Value { get; init; }
+
+    /// <summary>The node's string value: a text field's text (a password's bullets).</summary>
+    public string? Value
+    {
+        get => _value is RangeBox box ? box.Value : (string?)_value;
+        init => _value = _value is RangeBox box ? box with { Value = value } : value;
+    }
 
     // Bounding box in window-relative layout coordinates.
     public int X { get; init; }
@@ -51,8 +58,23 @@ internal sealed class AtSpiAccessible
     /// <summary>Open or closed, for an object that can be either; null for one that cannot.</summary>
     public bool? Expanded { get; init; }
 
-    /// <summary>The text a reader moves through (seam A1), as when the tree was built, and where
-    /// to read it now; both null for an object with none.</summary>
+    /// <summary>A value in a range, for the Value interface: a slider's, a progress bar's, a number
+    /// field's; null for anything else. Kept with the string value in one field, in an object of
+    /// its own that only those nodes get: a snapshot makes an object per node on every apply, and
+    /// the range inline would have been 56 bytes more in each, a fifth of a node's cost on AT-SPI.</summary>
+    public AccessibleRange? Range
+    {
+        get => (_value as RangeBox)?.Range;
+        init => _value = value is { } range ? new RangeBox(range, Value) : _value;
+    }
+
+    // The string value, or a RangeBox holding a range and the string value.
+    private readonly object? _value;
+
+    private sealed record RangeBox(AccessibleRange Range, string? Value);
+
+    /// <summary>The text a reader moves through (seam A1): where to read it now, or, for an object
+    /// with no source, the text as the tree was built with it; both null for an object with none.</summary>
     public AccessibleText? Text { get; init; }
     public IAccessibleTextSource? TextSource { get; init; }
 
@@ -96,13 +118,27 @@ internal sealed class AtSpiAccessible
             // Not Value for a string value: AT-SPI's Value is a number (a slider's), and it was
             // advertised here with no handler behind it, so a client asking got UnknownMethod.
             if (Text is not null || TextSource is not null) list.Add(AtSpiConstants.TextInterface);
+            // A number in a range, as Chromium and GTK advertise it for a slider, a progress bar and
+            // a spin button.
+            if (Range is not null) list.Add(AtSpiConstants.ValueInterface);
             return [.. list];
         }
     }
 
     /// <summary>Builds the object path for a node from its element id (root is well-known).</summary>
     public static string PathFor(AccessibilityNode node, bool isRoot) =>
-        isRoot ? AtSpiConstants.RootPath : AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
+        isRoot ? AtSpiConstants.RootPath : PathFor(node.ElementId);
+
+    /// <summary>The object path of an element that is not the root: the id written straight into
+    /// the path's one string. Adding the id to the prefix made the id's own string first, then
+    /// the path, and the snapshot makes a path for every node on every rebuild. (Not an
+    /// interpolated string: until the JIT optimizes it, its generic append boxes the id.)</summary>
+    public static string PathFor(ElementId id)
+    {
+        Span<char> digits = stackalloc char[20];   // a ulong has at most 20 digits
+        id.Value.TryFormat(digits, out int length, provider: CultureInfo.InvariantCulture);
+        return string.Concat(AtSpiConstants.AccessiblePathPrefix.AsSpan(), digits[..length]);
+    }
 
     /// <summary>
     /// The application's name on the bus, which a screen reader announces for it: the entry
@@ -116,24 +152,44 @@ internal sealed class AtSpiAccessible
 
     public static AtSpiAccessible From(
         AccessibilityNode node, bool isRoot, string parentPath, int indexInParent, float scale)
+        => From(node, PathFor(node, isRoot), isRoot, parentPath, indexInParent, scale, ChildPathsOf(node));
+
+    /// <summary>The paths of a node's children, in order, in an array of the exact length.</summary>
+    public static string[] ChildPathsOf(AccessibilityNode node)
+    {
+        var children = node.Children;   // by index: foreach over the interface boxes an enumerator
+        if (children.Count == 0) return [];
+        var paths = new string[children.Count];
+        for (int i = 0; i < paths.Length; i++)
+            paths[i] = PathFor(children[i].ElementId);
+        return paths;
+    }
+
+    /// <summary>
+    /// The object for <paramref name="node"/>, published at <paramref name="path"/>, listing its
+    /// children at <paramref name="childPaths"/>. The bridge's walk makes each path once: it lists
+    /// a child under its parent and publishes the child at the same string.
+    /// </summary>
+    public static AtSpiAccessible From(
+        AccessibilityNode node, string path, bool isRoot, string parentPath, int indexInParent, float scale,
+        string[] childPaths)
     {
         uint role = isRoot ? AtSpiConstants.RoleApplication : RoleOf(node);
-        var childPaths = new List<string>(node.Children.Count);
-        foreach (var child in node.Children)
-            childPaths.Add(PathFor(child, isRoot: false));
 
         // Bounds are in layout units; AT-SPI reports device pixels.
         var rect = node.BoundingRect;
         return new AtSpiAccessible
         {
             ElementId = node.ElementId,
-            Path = PathFor(node, isRoot),
+            Path = path,
             IsRoot = isRoot,
             Role = role,
             // The root is the application, named as one; the window's content is its children.
             Name = isRoot ? ApplicationName : node.Name ?? "",
             Description = node.Description ?? "",
-            Value = node.Value,
+            // A node that offers text is read through its source when asked: its text and value
+            // are made only then (a long document's are 1.5 MB), and its changes are text changes.
+            Value = node.TextSource is null ? node.Value : null,
             X = (int)MathF.Round(rect.X * scale),
             Y = (int)MathF.Round(rect.Y * scale),
             Width = (int)MathF.Round(rect.Width * scale),
@@ -149,7 +205,8 @@ internal sealed class AtSpiAccessible
             Selected = node.IsSelected == true,
             Toggled = node.IsToggled,
             Expanded = node.Expanded,
-            Text = node.Text,
+            Range = node.Range,
+            Text = node.TextSource is null ? node.Text : null,
             TextSource = node.TextSource,
             Scale = scale,
             ParentPath = parentPath,

@@ -105,7 +105,6 @@ public class DropdownElement : Element
 
     public DropdownElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Role = AccessibilityRole.ComboBox;
         AccessibleExpanded = false;

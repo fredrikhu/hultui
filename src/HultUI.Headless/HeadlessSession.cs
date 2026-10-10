@@ -131,6 +131,56 @@ public sealed class HeadlessSession : IDisposable
     }
 
     /// <summary>
+    /// Runs the application's own frame loop — <see cref="Application.Run"/>'s, not a copy —
+    /// on the virtual clock until <paramref name="until"/> returns true, or until no window is
+    /// open. Where the real loop parks the thread, between frames and while it waits out the
+    /// display's interval, virtual time moves on instead, so a second of the loop takes
+    /// milliseconds and does the same on every machine. Windows render at the display's rate,
+    /// 60 Hz here.
+    ///
+    /// <para>Use it for what <see cref="PumpFrame()"/> cannot show, because a pump is one pass
+    /// that always renders: how often the loop passes, ticks animations and renders while
+    /// events arrive between frames.</para>
+    /// </summary>
+    /// <param name="until">Asked once per pass of the loop, before the pass.</param>
+    /// <param name="eventEvery">Ends every wait after this much virtual time, as arriving
+    /// events do: a 1,000 Hz mouse, a worker posting to the UI thread, a video's frames. Null:
+    /// nothing arrives, and every wait runs its whole timeout.</param>
+    /// <param name="onEvent">Runs at each of those events, on this thread, inside the wait —
+    /// where a real platform would take the event in. Post from it with
+    /// <see cref="Application.InvokeOnMainThread"/>, as a worker does, and the next pass
+    /// drains it.</param>
+    /// <param name="limit">Virtual time after which the run fails with
+    /// <see cref="TimeoutException"/>; default 60 seconds.</param>
+    public void RunLoop(Func<bool> until, TimeSpan? eventEvery = null, Action? onEvent = null,
+        TimeSpan? limit = null)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(until);
+        long deadline = _time.GetTimestamp() + (limit ?? TimeSpan.FromSeconds(60)).Ticks;
+        bool timedOut = false;
+        _platform.SetEventSource(eventEvery, onEvent);
+        try
+        {
+            Application.RunUntil(() =>
+            {
+                if (until()) return true;
+                if (_time.GetTimestamp() > deadline) return timedOut = true;
+                // Where PumpFrame runs them: AsyncLoader's producers stay one frame behind.
+                DrainDeferredWork();
+                return false;
+            });
+        }
+        finally
+        {
+            _platform.SetEventSource(null, null);
+        }
+        if (timedOut)
+            throw new TimeoutException(
+                $"RunLoop's condition was not met within {(limit ?? TimeSpan.FromSeconds(60)).TotalSeconds:0.#} s of virtual time.");
+    }
+
+    /// <summary>
     /// Runs the AsyncLoader producers queued since the last frame, then queues their
     /// results for this frame's main-thread drain. Only what was pending when the drain
     /// began: work scheduled by a running item waits for the next frame, preserving the

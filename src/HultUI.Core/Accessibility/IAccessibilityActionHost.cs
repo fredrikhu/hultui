@@ -27,4 +27,8 @@ public interface IAccessibilityActionHost
 
     /// <summary>Gives the element (or a described node, seam W11) the keyboard.</summary>
     void FocusElement(ElementId id) { }
+
+    /// <summary>Sets a range's value (a slider's, a number field's: <see cref="IRangeValueElement"/>),
+    /// clamped to its range; nothing for a read-only one.</summary>
+    void SetRangeValue(ElementId id, double value) { }
 }

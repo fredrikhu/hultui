@@ -72,8 +72,36 @@ public abstract class Element
     public Element? Parent { get; internal set; }
     // Allocated on first child: roughly half of a real tree is leaves (text,
     // icons), and an empty List per leaf adds up at 10k+ elements.
-    private List<Element>? _children;
+    private ChildList? _children;
     public IReadOnlyList<Element> Children => (IReadOnlyList<Element>?)_children ?? [];
+
+    /// <summary>
+    /// <see cref="Children"/> in the order they are painted, and hit-tested from the back:
+    /// by ZIndex, a sticky child after the others at its ZIndex, then in list order
+    /// (<see cref="ZOrderHelper"/>). The renderer and the hit tester ask for it on every element
+    /// of every frame and every pointer move, so it is worked out on the first ask and kept
+    /// until the child list changes or a child's ZIndex or position type is set — a change
+    /// layout never sees: a ZIndex written in a handler asks only for a repaint.
+    /// </summary>
+    internal IReadOnlyList<Element> ChildrenInZOrder
+    {
+        get
+        {
+            var children = _children;
+            if (children is not { Count: > 1 })
+                return Children;
+            var order = children.ZOrder ??= ZOrderHelper.Order(children);
+            return order.Length == 0 ? children : order;
+        }
+    }
+
+    /// <summary>A child's ZIndex or position type was set (<see cref="PositionStyle"/>): the
+    /// order <see cref="ChildrenInZOrder"/> keeps is worked out again on the next ask.</summary>
+    internal void ChildZOrderChanged()
+    {
+        if (_children is { } children)
+            children.ZOrder = null;
+    }
 
     // ──── Layout input ────
     // Style objects are allocated on first write. Most elements never touch
@@ -91,7 +119,7 @@ public abstract class Element
 
     public FlexStyle Flex => _flex ??= new();
     public BoxStyle Box => _box ??= new();
-    public PositionStyle Position => _position ??= new();
+    public PositionStyle Position => _position ??= new(this);
     public GridStyle Grid => _grid ??= new();
     public GridItemStyle GridItem => _gridItem ??= new();
 
@@ -1087,7 +1115,9 @@ public abstract class Element
             DetachSilently(child);
 
         child.Parent = this;
-        (_children ??= []).Add(child);
+        var children = _children ??= new();
+        children.Add(child);
+        children.ZOrder = null;
         MarkLayoutDirty();
         MarkChildrenDirty();
 
@@ -1101,7 +1131,9 @@ public abstract class Element
             DetachSilently(child);
 
         child.Parent = this;
-        (_children ??= []).Insert(index, child);
+        var children = _children ??= new();
+        children.Insert(index, child);
+        children.ZOrder = null;
         MarkLayoutDirty();
         MarkChildrenDirty();
 
@@ -1113,6 +1145,7 @@ public abstract class Element
     {
         if (_children?.Remove(child) == true)
         {
+            _children.ZOrder = null;
             ClearFocusIfRemoved(child);
             child.Unmount();
             child.Parent = null;
@@ -1136,12 +1169,16 @@ public abstract class Element
 
         // Remove old children. Only unmount elements that are genuinely
         // leaving — not those that reappear in the new list.
-        var newSet = new HashSet<Element>(children);
-        if (_children is not null)
+        if (_children is { Count: > 0 } current)
         {
-            foreach (var old in _children)
+            // Asking whether an old child stays costs a search of the new list; a set pays for
+            // itself only when there are many of both. Most calls have no old children at all —
+            // every builder .Children(...) on a fresh element — and made a set anyway: 208 of
+            // the 272–288 bytes such a call allocated.
+            var staying = (long)current.Count * children.Length > SearchBeforeSet ? SetOf(children) : null;
+            foreach (var old in current)
             {
-                if (!newSet.Contains(old))
+                if (!(staying?.Contains(old) ?? Array.IndexOf(children, old) >= 0))
                 {
                     ClearFocusIfRemoved(old);
                     old.Unmount();
@@ -1149,11 +1186,11 @@ public abstract class Element
                 }
                 old.Parent = null;
             }
-            _children.Clear();
+            current.Clear();
         }
 
         // Add new children.
-        var list = _children ??= new List<Element>(children.Length);
+        var list = _children ??= new ChildList(children.Length);
         foreach (var child in children)
         {
             if (child.Parent is not null) // only an element listed twice
@@ -1165,8 +1202,23 @@ public abstract class Element
             if (!child._mounted)
                 child.Mount();
         }
+        // After the adds: mounting a child can run a component's code, which may ask for the order.
+        list.ZOrder = null;
         MarkLayoutDirty();
         MarkChildrenDirty();
+    }
+
+    /// <summary>Old × new children up to which <see cref="ReplaceChildren"/> searches the new
+    /// list for each old child rather than building a set of it.</summary>
+    internal const int SearchBeforeSet = 64;
+
+    /// <summary>A set of <paramref name="children"/>, filled by index: the set's own constructor
+    /// enumerates an array through its interface, boxing the enumerator.</summary>
+    private static HashSet<Element> SetOf(Element[] children)
+    {
+        var set = new HashSet<Element>(children.Length);
+        for (int i = 0; i < children.Length; i++) set.Add(children[i]);
+        return set;
     }
 
     /// <summary>
@@ -1176,7 +1228,8 @@ public abstract class Element
     /// </summary>
     private static void DetachSilently(Element child)
     {
-        child.Parent?._children?.Remove(child);
+        if (child.Parent?._children is { } siblings && siblings.Remove(child))
+            siblings.ZOrder = null;
         child.Parent?.MarkLayoutDirty();
         child.Parent?.MarkChildrenDirty();
         child.Parent = null;
@@ -1391,12 +1444,14 @@ public abstract class Element
 
     /// <summary>Whether <see cref="MeasureContent"/> ignores the available height, and no more: unlike
     /// <see cref="MeasuresAtWidthOnly"/> it promises nothing about a forced height or where the
-    /// baseline sits. Set by controls that measure their own fixed parts — a checkbox, a slider,
-    /// a text field. Layout keeps their measurement for any height offered (MeasureCache); without
-    /// it a column of controls held its measurement to the one height it was taken at, and was
-    /// laid out again at the height its row gave it. An override that reads the height must not
-    /// set this.</summary>
-    internal bool IgnoresAvailableHeight { get; private protected set; }
+    /// baseline sits. True unless an override reads the height, which must clear it — a video,
+    /// which scales down to the height offered, is the one that does. Everything else measures
+    /// at a width or not at all: an empty box (a spacer), a control's own fixed parts, a chevron.
+    /// Layout keeps such a leaf's measurement for any height offered (MeasureCache), and so the
+    /// row or column around it can keep its own: keyed on the exact height, one spacer or chevron
+    /// in a row had the row, and every container above it, measured again whenever the height on
+    /// offer moved — each frame of an expander's animation, a vertical resize, a splitter drag.</summary>
+    internal bool IgnoresAvailableHeight { get; private protected set; } = true;
 
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;

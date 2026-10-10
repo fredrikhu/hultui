@@ -35,6 +35,11 @@ var column = Flex.Column(gap: 8).Padding(12).Children(
     list);
 session.Window.SetRoot(column);
 
+// The bridge is active only while org.a11y.Status says assistive technology is on, which Orca
+// and accerciser set and a plain pyatspi script, like the ones beside this file, does not: say
+// here that one listens (HULTUI_ACCESSIBILITY=0 still turns it off).
+AccessibilityClients.Force ??= true;
+
 var actionHost = session.Window.InstallActionRouter();
 var bridge = session.Window.InstallAccessibilityBridge(new LinuxAccessibilityBridge(actionHost));
 session.PumpFrame();

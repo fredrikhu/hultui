@@ -39,18 +39,22 @@ public sealed partial class LayoutEngine
         var rowTracks = ArrayPool<GridTrack>.Shared.Rent(rowCount);
         var colSizes = ArrayPool<float>.Shared.Rent(colCount);
         var rowSizes = ArrayPool<float>.Shared.Rent(rowCount);
+        var colOrigins = ArrayPool<float>.Shared.Rent(colCount);
+        var rowOrigins = ArrayPool<float>.Shared.Rent(rowCount);
         try
         {
             BuildEffectiveTracks(grid.ColumnTemplate, grid.ImplicitColumn, colTracks, colCount);
             BuildEffectiveTracks(grid.RowTemplate, grid.ImplicitRow, rowTracks, rowCount);
 
             // ── Resolve columns first; row resolution needs known column widths ──
-            ResolveColumnTracks(colTracks, colCount, colSizes, contentAvailW, grid.ColumnGap, children);
-            ResolveRowTracks(rowTracks, rowCount, rowSizes, contentAvailH, grid.RowGap, children, colSizes, colCount);
+            ResolveColumnTracks(colTracks, colCount, colSizes, contentAvailW, grid.ColumnGap, children, flowCount);
+            ResolveRowTracks(rowTracks, rowCount, rowSizes, contentAvailH, grid.RowGap, children, flowCount, colSizes, colCount);
 
             // ── Compute cumulative track origins ──
             float colTotal = SumWithGaps(colSizes, colCount, grid.ColumnGap);
             float rowTotal = SumWithGaps(rowSizes, rowCount, grid.RowGap);
+            TrackOrigins(colSizes, colCount, grid.ColumnGap, colOrigins);
+            TrackOrigins(rowSizes, rowCount, grid.RowGap, rowOrigins);
 
             // ── Phase 6: position each cell ──
             for (int i = 0; i < children.Count; i++)
@@ -61,8 +65,8 @@ public sealed partial class LayoutEngine
                 int col = Math.Clamp(child.GridItemRead.Column, 0, colCount - 1);
                 int row = Math.Clamp(child.GridItemRead.Row, 0, rowCount - 1);
 
-                float cellX = contentAbsX + TrackOrigin(colSizes, col, grid.ColumnGap);
-                float cellY = contentAbsY + TrackOrigin(rowSizes, row, grid.RowGap);
+                float cellX = contentAbsX + colOrigins[col];
+                float cellY = contentAbsY + rowOrigins[row];
                 float cellW = colSizes[col];
                 float cellH = rowSizes[row];
 
@@ -119,8 +123,8 @@ public sealed partial class LayoutEngine
 
                 child.Layout = child.Layout with
                 {
-                    X = TrackOrigin(colSizes, col, grid.ColumnGap) + finalXOffset,
-                    Y = TrackOrigin(rowSizes, row, grid.RowGap) + finalYOffset,
+                    X = colOrigins[col] + finalXOffset,
+                    Y = rowOrigins[row] + finalYOffset,
                     AbsoluteX = newAbsX,
                     AbsoluteY = newAbsY,
                 };
@@ -137,6 +141,8 @@ public sealed partial class LayoutEngine
             ArrayPool<GridTrack>.Shared.Return(rowTracks, clearArray: true);
             ArrayPool<float>.Shared.Return(colSizes);
             ArrayPool<float>.Shared.Return(rowSizes);
+            ArrayPool<float>.Shared.Return(colOrigins);
+            ArrayPool<float>.Shared.Return(rowOrigins);
         }
     }
 
@@ -175,8 +181,8 @@ public sealed partial class LayoutEngine
             BuildEffectiveTracks(grid.ColumnTemplate, grid.ImplicitColumn, colTracks, colCount);
             BuildEffectiveTracks(grid.RowTemplate, grid.ImplicitRow, rowTracks, rowCount);
 
-            ResolveColumnTracks(colTracks, colCount, colSizes, contentAvailW, grid.ColumnGap, children);
-            ResolveRowTracks(rowTracks, rowCount, rowSizes, contentAvailH, grid.RowGap, children, colSizes, colCount);
+            ResolveColumnTracks(colTracks, colCount, colSizes, contentAvailW, grid.ColumnGap, children, flowCount);
+            ResolveRowTracks(rowTracks, rowCount, rowSizes, contentAvailH, grid.RowGap, children, flowCount, colSizes, colCount);
 
             return new Size(
                 SumWithGaps(colSizes, colCount, grid.ColumnGap),
@@ -205,7 +211,7 @@ public sealed partial class LayoutEngine
     /// measurement) → Fr (proportional distribution of remaining space).
     /// </summary>
     private void ResolveColumnTracks(GridTrack[] tracks, int count, float[] sizes,
-        float available, float gap, IReadOnlyList<Element> children)
+        float available, float gap, IReadOnlyList<Element> children, int flowCount)
     {
         // Pass 1: Fixed and Percent
         for (int i = 0; i < count; i++)
@@ -219,22 +225,34 @@ public sealed partial class LayoutEngine
         }
 
         // Pass 2: Auto — measure cells in each Auto column
-        for (int col = 0; col < count; col++)
+        if (AnyAuto(tracks, count))
         {
-            if (!tracks[col].IsAuto) continue;
-            float maxW = 0f;
-            for (int i = 0; i < children.Count; i++)
+            var starts = ArrayPool<int>.Shared.Rent(count + 1);
+            var order = ArrayPool<int>.Shared.Rent(flowCount);
+            try
             {
-                var child = children[i];
-                if (child.PositionRead.Type == PositionType.Absolute) continue;
-                if (child.GridItemRead.Column != col) continue;
+                BucketByTrack(children, rows: false, count, starts, order);
+                for (int col = 0; col < count; col++)
+                {
+                    if (!tracks[col].IsAuto) continue;
+                    float maxW = 0f;
+                    for (int k = starts[col]; k < starts[col + 1]; k++)
+                    {
+                        var child = children[order[k]];
 
-                // Measure unconstrained on the column axis so we get the cell's
-                // intrinsic width. Cross axis uses the container's available.
-                var measured = MeasureSize(child, new LayoutConstraint(available, available));
-                if (measured.Width > maxW) maxW = measured.Width;
+                        // Measure unconstrained on the column axis so we get the cell's
+                        // intrinsic width. Cross axis uses the container's available.
+                        var measured = MeasureSize(child, new LayoutConstraint(available, available));
+                        if (measured.Width > maxW) maxW = measured.Width;
+                    }
+                    sizes[col] = maxW;
+                }
             }
-            sizes[col] = maxW;
+            finally
+            {
+                ArrayPool<int>.Shared.Return(starts);
+                ArrayPool<int>.Shared.Return(order);
+            }
         }
 
         // Pass 3: Fr — distribute remaining space
@@ -246,7 +264,7 @@ public sealed partial class LayoutEngine
     /// height is measured against the width it will actually occupy.
     /// </summary>
     private void ResolveRowTracks(GridTrack[] tracks, int count, float[] sizes,
-        float available, float gap, IReadOnlyList<Element> children,
+        float available, float gap, IReadOnlyList<Element> children, int flowCount,
         float[] colSizes, int colCount)
     {
         for (int i = 0; i < count; i++)
@@ -259,36 +277,91 @@ public sealed partial class LayoutEngine
             };
         }
 
-        for (int row = 0; row < count; row++)
+        if (AnyAuto(tracks, count))
         {
-            if (!tracks[row].IsAuto) continue;
-            float maxH = 0f;
-            for (int i = 0; i < children.Count; i++)
+            var starts = ArrayPool<int>.Shared.Rent(count + 1);
+            var order = ArrayPool<int>.Shared.Rent(flowCount);
+            try
             {
-                var child = children[i];
-                if (child.PositionRead.Type == PositionType.Absolute) continue;
-                if (child.GridItemRead.Row != row) continue;
+                BucketByTrack(children, rows: true, count, starts, order);
+                for (int row = 0; row < count; row++)
+                {
+                    if (!tracks[row].IsAuto) continue;
+                    float maxH = 0f;
+                    for (int k = starts[row]; k < starts[row + 1]; k++)
+                    {
+                        var child = children[order[k]];
 
-                int col = Math.Clamp(child.GridItemRead.Column, 0, colCount - 1);
-                float colW = colSizes[col];
+                        int col = Math.Clamp(child.GridItemRead.Column, 0, colCount - 1);
+                        float colW = colSizes[col];
 
-                // Force the child's border-box width to the column width minus
-                // its margins so text wrapping happens against the actual cell
-                // size — that's what determines the row height.
-                float childMargin = child.BoxRead.Margin.Horizontal;
-                float? forcedW = colW - childMargin;
-                if (forcedW < 0f) forcedW = 0f;
+                        // Force the child's border-box width to the column width minus
+                        // its margins so text wrapping happens against the actual cell
+                        // size — that's what determines the row height.
+                        float childMargin = child.BoxRead.Margin.Horizontal;
+                        float? forcedW = colW - childMargin;
+                        if (forcedW < 0f) forcedW = 0f;
 
-                var measured = MeasureSize(child,
-                    new LayoutConstraint(colW, available),
-                    forcedWidth: forcedW);
+                        var measured = MeasureSize(child,
+                            new LayoutConstraint(colW, available),
+                            forcedWidth: forcedW);
 
-                if (measured.Height > maxH) maxH = measured.Height;
+                        if (measured.Height > maxH) maxH = measured.Height;
+                    }
+                    sizes[row] = maxH;
+                }
             }
-            sizes[row] = maxH;
+            finally
+            {
+                ArrayPool<int>.Shared.Return(starts);
+                ArrayPool<int>.Shared.Return(order);
+            }
         }
 
         DistributeFr(tracks, count, sizes, available, gap);
+    }
+
+    private static bool AnyAuto(GridTrack[] tracks, int count)
+    {
+        for (int i = 0; i < count; i++)
+            if (tracks[i].IsAuto) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// The in-flow children grouped by the track they name on one axis, in one pass over them
+    /// (a counting sort, stable): track t's cells are <c>children[order[k]]</c> for k from
+    /// <c>starts[t]</c> to <c>starts[t + 1] - 1</c>, in child order. A cell naming a track
+    /// outside 0..count-1 is in none, as the auto passes never matched it there (placement
+    /// clamps it into the last track; measurement leaves it out). Each auto track used to look
+    /// at every child, which made the passes O(tracks × cells): 1,080,000 visits a layout for
+    /// a 300-row grid. <paramref name="starts"/> needs count + 1 slots, <paramref name="order"/>
+    /// one per in-flow child.
+    /// </summary>
+    internal static void BucketByTrack(IReadOnlyList<Element> children, bool rows, int count,
+        int[] starts, int[] order)
+    {
+        Array.Clear(starts, 0, count + 1);
+        for (int i = 0; i < children.Count; i++)
+        {
+            var c = children[i];
+            if (c.PositionRead.Type == PositionType.Absolute) continue;
+            int t = rows ? c.GridItemRead.Row : c.GridItemRead.Column;
+            if ((uint)t < (uint)count) starts[t + 1]++;
+        }
+        for (int t = 0; t < count; t++) starts[t + 1] += starts[t];
+
+        // Fill with starts[t] as track t's cursor; it ends at track t's end, which is where
+        // track t + 1 starts, so moving every slot up by one puts the starts back.
+        for (int i = 0; i < children.Count; i++)
+        {
+            var c = children[i];
+            if (c.PositionRead.Type == PositionType.Absolute) continue;
+            int t = rows ? c.GridItemRead.Row : c.GridItemRead.Column;
+            if ((uint)t < (uint)count) order[starts[t]++] = i;
+        }
+        for (int t = count; t > 0; t--) starts[t] = starts[t - 1];
+        starts[0] = 0;
     }
 
     private static void DistributeFr(GridTrack[] tracks, int count, float[] sizes,
@@ -324,12 +397,22 @@ public sealed partial class LayoutEngine
         return total;
     }
 
-    private static float TrackOrigin(float[] sizes, int trackIndex, float gap)
+    /// <summary>
+    /// Where each track starts: the sizes and gaps before it, added up from the first track in
+    /// the order a per-track loop adds them (<c>origin += size + gap</c>), so every origin is the
+    /// same float to the bit — in one pass for all tracks rather than one per cell, which summed
+    /// ~900 tracks a cell in a 300-row grid.
+    /// </summary>
+    internal static void TrackOrigins(float[] sizes, int count, float gap, float[] origins)
     {
+        if (count == 0) return;
         float origin = 0f;
-        for (int i = 0; i < trackIndex; i++)
-            origin += sizes[i] + gap;
-        return origin;
+        origins[0] = origin;
+        for (int i = 1; i < count; i++)
+        {
+            origin += sizes[i - 1] + gap;
+            origins[i] = origin;
+        }
     }
 
     // ── Cell alignment helpers ──

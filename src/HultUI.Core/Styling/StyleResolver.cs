@@ -28,6 +28,14 @@ public static class StyleResolver
         ResolveRecursive(root, theme.ToResolvedStyle(), theme);
     }
 
+    /// <summary>Resolves <paramref name="element"/> as the style pass would as a child of a
+    /// parent that resolved to <paramref name="parent"/> — for an element realized outside the
+    /// pass that must come out the same as one the pass resolved.</summary>
+    internal static void ResolveUnder(Element element, ResolvedInheritedStyle parent, Theme? theme)
+    {
+        ResolveRecursive(element, parent, theme);
+    }
+
     private static void ResolveRecursive(Element element, ResolvedInheritedStyle parent, Theme? theme)
     {
         // The theme first. An element that takes its text style from the theme — a
@@ -80,7 +88,7 @@ public static class StyleResolver
 
     /// <summary>Whether two styles measure text alike: everything shaping and line breaking
     /// read, nothing only painting reads (colour, decoration, alignment, cursor).</summary>
-    private static bool SameMetrics(in ResolvedInheritedStyle a, in ResolvedInheritedStyle b) =>
+    internal static bool SameMetrics(in ResolvedInheritedStyle a, in ResolvedInheritedStyle b) =>
         a.FontSize == b.FontSize
         && a.FontWeight == b.FontWeight
         && a.FontSlant == b.FontSlant

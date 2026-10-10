@@ -48,6 +48,7 @@ public class A11yFocusMoveTests
         private static string Short(string path) => path[(path.LastIndexOf('/') + 1)..];
         public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) => Lines.Add($"children-changed {Short(childPath)}");
         public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Lines.Add($"property-change:{atSpiProperty} {Short(path)}");
+        public void EmitValueChanged(string path, double value) => Lines.Add($"property-change:accessible-value {Short(path)}");
         public void EmitRoleChange(string path, uint role) => Lines.Add($"property-change:accessible-role {Short(path)}");
         public void EmitStateChanged(string path, string state, bool active) => Lines.Add($"state-changed:{state} {Short(path)} {(active ? 1 : 0)}");
         public void EmitTextChanged(string path, bool insert, int offset, string text) => Lines.Add($"text-changed {Short(path)}");
@@ -93,6 +94,21 @@ public class A11yFocusMoveTests
             Bridge = new WindowsAccessibilityBridge(_hwnd.Handle, host);
             Bridge.Raised = Raised.Add;
             Forward = Session.Window.InstallAccessibilityBridge(new Forwarding(Bridge));
+        }
+
+        /// <summary>The element UIA's GetFocus on the window's root answers, or null.</summary>
+        public ElementId? GetFocus()
+        {
+            var root = Bridge.NativeRootFragmentRoot();
+            try
+            {
+                var logic = Assert.IsType<UiaFragmentRoot>(NativeProvider.LogicOf(root));
+                Assert.Equal(0, logic.GetFocus(out var focus));
+                if (focus == IntPtr.Zero) return null;
+                try { return Assert.IsType<UiaFragment>(NativeProvider.LogicOf(focus)).ElementId; }
+                finally { Marshal.Release(focus); }
+            }
+            finally { Marshal.Release(root); }
         }
 
         /// <summary>What the element's wrapper answers for HasKeyboardFocus.</summary>
@@ -186,7 +202,92 @@ public class A11yFocusMoveTests
         ], rig.Raised);
     }
 
+    /// <summary>A button whose click mounts a field and focuses it, as Ctrl+F opens a find bar and
+    /// a popover its first field: the field has no node until the frame's rebuild.</summary>
+    private static (ButtonElement Open, Func<TextInputElement?> Field, Element Root) MountsAndFocuses()
+    {
+        var host = Flex.Column().FlexShrink(0);
+        TextInputElement? field = null;
+        var open = Button.New("Open");
+        open.On<ClickEvent>(_ =>
+        {
+            field = TextInput.New("seed");
+            host.AddChild(field);
+            field.Focus();
+        });
+        return (open, () => field, Flex.Column().Children(open, TextInput.New("other"), host));
+    }
+
+    [WindowsFact]
+    public void UIA_AFieldMountedAndFocusedInOneHandler_IsToldOnce_ItHasTheFocus()
+    {
+        // The focus moved onto an element with no node yet, so the bridge was told the focus
+        // went nowhere: no focus event, and GetFocus answered nothing until the next move.
+        using var rig = new UiaRig();
+        var (open, field, root) = MountsAndFocuses();
+        rig.Session.Window.SetRoot(root);
+        rig.Session.PumpFrames(2);
+        rig.Raised.Clear();
+
+        rig.Session.Window.Click(open);
+        rig.Session.PumpFrame();
+
+        var focused = Assert.IsType<TextInputElement>(field());
+        Assert.Single(rig.Raised, e => e == new UiaRaised(UiaRaisedKind.Event, FocusChanged, focused.Id));
+        Assert.Equal(focused.Id, rig.Raised.Last(e => e.Id == FocusChanged).Element);
+        Assert.Equal(focused.Id, rig.GetFocus());
+        Assert.True(rig.HasFocus(focused));
+
+        // The next move goes on from it as from any other.
+        rig.Raised.Clear();
+        rig.Session.Window.PressKey(KeyCode.Tab, KeyModifiers.Shift);
+        rig.Session.PumpFrame();
+        Assert.False(rig.HasFocus(focused));
+        Assert.Contains(new UiaRaised(UiaRaisedKind.Property, HasKeyboardFocus, focused.Id), rig.Raised);
+        Assert.NotEqual(focused.Id, rig.GetFocus());
+    }
+
+    [WindowsFact]
+    public void UIA_AFieldFocusedBeforeTheFirstTree_IsToldItHasTheFocus_WhenTheTreeIsBuilt()
+    {
+        // An app that focuses its first field as it starts: the window has no tree yet.
+        using var rig = new UiaRig();
+        var (fields, root) = Form();
+        rig.Session.Window.SetRoot(root);
+        fields[1].Focus();
+        rig.Session.PumpFrame();
+
+        Assert.Single(rig.Raised, e => e == new UiaRaised(UiaRaisedKind.Event, FocusChanged, fields[1].Id));
+        Assert.Equal(fields[1].Id, rig.GetFocus());
+        Assert.True(rig.HasFocus(fields[1]));
+    }
+
     // ── AT-SPI ──
+
+    [Fact]
+    public void ATSPI_AFieldMountedAndFocusedInOneHandler_IsToldOnce_ItHasTheFocus()
+    {
+        using var rig = new AtSpiRig();
+        var (open, field, root) = MountsAndFocuses();
+        rig.Session.Window.SetRoot(root);
+        rig.Session.PumpFrames(2);
+        rig.Signals.Lines.Clear();
+
+        rig.Session.Window.Click(open);
+        rig.Session.PumpFrame();
+
+        var focused = Assert.IsType<TextInputElement>(field());
+        Assert.Single(rig.Signals.Lines, l => l == $"state-changed:focused {Id(focused)} 1");
+        Assert.Equal($"state-changed:focused {Id(focused)} 1",
+            rig.Signals.Lines.Last(l => l.StartsWith("state-changed:focused", StringComparison.Ordinal)));
+        Assert.True(rig.Focused(focused));
+
+        rig.Signals.Lines.Clear();
+        rig.Session.Window.PressKey(KeyCode.Tab, KeyModifiers.Shift);
+        rig.Session.PumpFrame();
+        Assert.Contains($"state-changed:focused {Id(focused)} 0", rig.Signals.Lines);
+        Assert.False(rig.Focused(focused));
+    }
 
     private sealed class AtSpiRig : IDisposable
     {

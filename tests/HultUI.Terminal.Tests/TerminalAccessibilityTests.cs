@@ -5,7 +5,8 @@ using Xunit;
 namespace HultUI.Terminal.Tests;
 
 /// <summary>The terminal for a screen reader: a document named after the title, whose value is
-/// the screen, told of a change once the output pauses.</summary>
+/// the screen, its text told changed once the output pauses (a node that offers text tells a
+/// change as its text, not as its value).</summary>
 public class TerminalAccessibilityTests
 {
     private static bool ToldOf(HultUI.Headless.HeadlessAccessibilityBridge bridge, string property) =>
@@ -27,11 +28,12 @@ public class TerminalAccessibilityTests
 
             t.Emit(" again");
             t.Session.PumpFrames(3);
-            Assert.False(ToldOf(bridge, AccessibilityProperties.Value)); // not a change a frame
+            Assert.False(ToldOf(bridge, AccessibilityProperties.Text)); // not a change a frame
 
             t.Session.PumpFrame(TerminalElement.ScreenSettle + TimeSpan.FromMilliseconds(50));
             t.Session.PumpFrames(2);
-            Assert.True(ToldOf(bridge, AccessibilityProperties.Value));
+            Assert.True(ToldOf(bridge, AccessibilityProperties.Text));
+            Assert.False(ToldOf(bridge, AccessibilityProperties.Value));
             Assert.Equal("hello\nworld again", bridge.CurrentTree is { } tree ? FindDocument(tree)?.Value : null);
         }
         finally { AccessibilityClients.Force = null; }
@@ -56,7 +58,7 @@ public class TerminalAccessibilityTests
                 t.Session.PumpFrame(TimeSpan.FromMilliseconds(400));
                 waited += TimeSpan.FromMilliseconds(400);
             }
-            Assert.True(ToldOf(bridge, AccessibilityProperties.Value));
+            Assert.True(ToldOf(bridge, AccessibilityProperties.Text));
         }
         finally { AccessibilityClients.Force = null; }
     }

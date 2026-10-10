@@ -13,6 +13,7 @@ namespace HultUI.Platform.Accessibility.Linux.Tests;
 /// it reaches the action host by the node's id. And whether assistive technology listens
 /// follows <c>org.a11y.Status</c>.
 /// </summary>
+[Collection(AccessibilityClientsCollection.Name)]
 public class AccessibleContentBridgeTests
 {
     private sealed class Described : BoxElement, IAccessibleContentSource
@@ -109,7 +110,8 @@ public class AccessibleContentBridgeTests
     }
 
     /// <summary>Linux with an accessibility bus: set <c>org.a11y.Status.IsEnabled</c> as an
-    /// assistive technology does, and see the bridge report it; then put it back.</summary>
+    /// assistive technology does, and see the bridge report it and turn on, and off again; then
+    /// put it back.</summary>
     [Fact]
     public void WhetherAnyoneListens_FollowsTheStatusOnTheBus()
     {
@@ -120,12 +122,15 @@ public class AccessibleContentBridgeTests
         using var bridge = new LinuxAccessibilityBridge();
         try
         {
-            Assert.True(bridge.IsActive);
             Busctl("set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true");
             Assert.True(SpinUntil(() => AccessibilityClients.Active), "IsEnabled true was not seen");
+            Assert.True(bridge.IsActive);
             Busctl("set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b false");
             if (Busctl("get-property org.a11y.Bus /org/a11y/bus org.a11y.Status ScreenReaderEnabled")?.Trim() == "b false")
+            {
                 Assert.True(SpinUntil(() => !AccessibilityClients.Active), "IsEnabled false was not seen");
+                Assert.False(bridge.IsActive);
+            }
         }
         finally
         {

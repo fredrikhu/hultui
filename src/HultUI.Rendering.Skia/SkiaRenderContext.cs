@@ -58,7 +58,13 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Keyed by what the run draws, not by the run: a paragraph laid out again after
     // an edit makes new runs for every line, the ones that did not change too.
     private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new(SameGlyphs.Instance);
-    private const int RunBlobCacheMaxSize = 2048;
+    internal const int RunBlobCacheMaxSize = 2048;
+    internal int CachedBlobCount => _runBlobCache.Count;
+
+    // Every new blob is built in this one builder: Build hands the blob over and leaves the
+    // builder empty for the next. A builder per blob was 80 B more per new blob (216 -> 136),
+    // and a scrolled list draws dozens of new rows a step.
+    private readonly SKTextBlobBuilder _blobBuilder = new();
 
     // The same runs as glyph outlines, for TextAsOutlines.
     private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new(SameGlyphs.Instance);
@@ -162,9 +168,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             box.Width + shadow.Spread * 2f,
             box.Height + shadow.Spread * 2f);
 
-        using var blur = shadow.Blur > 0f
-            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, shadow.Blur * 0.5f)
-            : null;
+        var blur = shadow.Blur > 0f ? BlurFilter(shadow.Blur * 0.5f) : null;
 
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(shadow.Color);
@@ -177,9 +181,96 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         else
             Canvas.DrawRoundRect(ToSkRoundRect(skRect, InflateRadius(radius, shadow.Spread)), _pooledPaint);
 
-        // Detach the blur before it is disposed so the pooled paint never holds a
-        // freed native filter.
+        // Detach the blur so the pooled paint never holds a filter the cache may dispose.
         _pooledPaint.MaskFilter = null;
+    }
+
+    // ── Effect objects ──
+    //
+    // A blur and a gradient are native objects with a managed wrapper each: made and disposed
+    // per draw they cost 104 B a shadow and 168 B a gradient, on every frame they are on screen
+    // (a popover's or a dialog's shadow, the scrims over a picture). They are kept instead:
+    // filters by sigma, shaders by what they draw. Both maps are bounded and emptied whole when
+    // full, like the blob cache; a draw detaches what it used, so emptying never frees an object
+    // a paint still holds, and Skia keeps its own reference to anything a pending draw needs.
+
+    private readonly Dictionary<float, SKMaskFilter?> _blurFilters = new();
+    internal const int BlurFilterCacheMaxSize = 32;
+
+    // Keyed by content, not by the Gradient: an app that builds its gradient in Build hands an
+    // equal new one on every rebuild. The rect is the snapped one the shader spans, so a box
+    // keeps its shader while it does not move; a scrolled box does not move (scrolling
+    // translates the canvas).
+    private readonly Dictionary<GradientKey, SKShader?> _gradientShaders = new(GradientKeyComparer.Instance);
+    internal const int GradientShaderCacheMaxSize = 256;
+
+    internal int CachedBlurFilterCount => _blurFilters.Count;
+    internal int CachedGradientShaderCount => _gradientShaders.Count;
+
+    private SKMaskFilter? BlurFilter(float sigma)
+    {
+        if (_blurFilters.TryGetValue(sigma, out var filter))
+            return filter;
+        if (_blurFilters.Count >= BlurFilterCacheMaxSize)
+            ClearBlurFilters();
+        filter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, sigma);
+        _blurFilters[sigma] = filter;
+        return filter;
+    }
+
+    private void ClearBlurFilters()
+    {
+        foreach (var filter in _blurFilters.Values)
+            filter?.Dispose();
+        _blurFilters.Clear();
+    }
+
+    private void ClearGradientShaders()
+    {
+        foreach (var shader in _gradientShaders.Values)
+            shader?.Dispose();
+        _gradientShaders.Clear();
+    }
+
+    /// <summary>What a gradient shader draws: the gradient's kind, angle and stops over a rect. A
+    /// stored key holds a copy of the stops, so a stop array the app changes later cannot change
+    /// a key inside the map.</summary>
+    private readonly struct GradientKey(GradientKind kind, float angle, IReadOnlyList<GradientStop> stops, SKRect rect)
+    {
+        public readonly GradientKind Kind = kind;
+        public readonly float Angle = angle;
+        public readonly IReadOnlyList<GradientStop> Stops = stops;
+        public readonly SKRect Rect = rect;
+    }
+
+    private sealed class GradientKeyComparer : IEqualityComparer<GradientKey>
+    {
+        public static readonly GradientKeyComparer Instance = new();
+
+        public bool Equals(GradientKey a, GradientKey b)
+        {
+            if (a.Kind != b.Kind || !a.Angle.Equals(b.Angle) || !a.Rect.Equals(b.Rect)
+                || a.Stops.Count != b.Stops.Count)
+                return false;
+            for (int i = 0; i < a.Stops.Count; i++)
+                if (!a.Stops[i].Equals(b.Stops[i]))
+                    return false;
+            return true;
+        }
+
+        public int GetHashCode(GradientKey key)
+        {
+            var hash = new HashCode();
+            hash.Add((int)key.Kind);
+            hash.Add(key.Angle);
+            hash.Add(key.Rect.Left);
+            hash.Add(key.Rect.Top);
+            hash.Add(key.Rect.Right);
+            hash.Add(key.Rect.Bottom);
+            for (int i = 0; i < key.Stops.Count; i++)
+                hash.Add(key.Stops[i]);
+            return hash.ToHashCode();
+        }
     }
 
     private static CornerRadius InflateRadius(CornerRadius r, float d) => new(
@@ -196,37 +287,49 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // Same grid as a solid background, or a gradient-filled box and a solid one beside it
         // would sit half a pixel apart.
         rect = SnapBox(rect);
-
-        var colors = new SKColor[stops.Count];
-        var positions = new float[stops.Count];
-        for (int i = 0; i < stops.Count; i++)
-        {
-            colors[i] = ToSkColor(stops[i].Color);
-            positions[i] = stops[i].Offset;
-        }
-
         var skRect = ToSkRect(rect);
-        float cx = skRect.MidX, cy = skRect.MidY;
-
-        using var shader = gradient.Kind == GradientKind.Linear
-            ? CreateLinearShader(gradient.AngleDegrees, skRect, colors, positions)
-            : SKShader.CreateRadialGradient(
-                new SKPoint(cx, cy),
-                MathF.Sqrt(skRect.Width * skRect.Width + skRect.Height * skRect.Height) * 0.5f,
-                colors, positions, SKShaderTileMode.Clamp);
 
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
-        _pooledPaint.Shader = shader;
+        _pooledPaint.Shader = GradientShader(gradient, skRect);
 
         if (radius.IsZero)
             Canvas.DrawRect(skRect, _pooledPaint);
         else
             Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
 
-        // Detach before the shader is disposed so the pooled paint never holds a
-        // freed native shader.
+        // Detach so the pooled paint never holds a shader the cache may dispose.
         _pooledPaint.Shader = null;
+    }
+
+    private SKShader? GradientShader(Gradient gradient, SKRect skRect)
+    {
+        var stops = gradient.Stops;
+        if (_gradientShaders.TryGetValue(new GradientKey(gradient.Kind, gradient.AngleDegrees, stops, skRect), out var cached))
+            return cached;
+
+        var colors = new SKColor[stops.Count];
+        var positions = new float[stops.Count];
+        var copy = new GradientStop[stops.Count];
+        for (int i = 0; i < stops.Count; i++)
+        {
+            copy[i] = stops[i];
+            colors[i] = ToSkColor(stops[i].Color);
+            positions[i] = stops[i].Offset;
+        }
+
+        float cx = skRect.MidX, cy = skRect.MidY;
+        var shader = gradient.Kind == GradientKind.Linear
+            ? CreateLinearShader(gradient.AngleDegrees, skRect, colors, positions)
+            : SKShader.CreateRadialGradient(
+                new SKPoint(cx, cy),
+                MathF.Sqrt(skRect.Width * skRect.Width + skRect.Height * skRect.Height) * 0.5f,
+                colors, positions, SKShaderTileMode.Clamp);
+
+        if (_gradientShaders.Count >= GradientShaderCacheMaxSize)
+            ClearGradientShaders();
+        _gradientShaders[new GradientKey(gradient.Kind, gradient.AngleDegrees, copy, skRect)] = shader;
+        return shader;
     }
 
     // Builds a linear-gradient shader whose axis spans the rect edge-to-edge along
@@ -1104,6 +1207,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) =>
         _pipeline?.MeasurePrefixes(text, style);
 
+    public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style) =>
+        text.IsEmpty || _pipeline is null ? 0f : _pipeline.MeasureWidth(text, style);
+
     public FontMetrics MeasureFont(ResolvedInheritedStyle style) =>
         _pipeline?.MeasureFont(style) ?? FontMetrics.Estimate(style, Size.Zero);
 
@@ -1392,8 +1498,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledFont.Typeface = typeface;
         _pooledFont.Size = run.FontSize;
 
-        using var builder = new SKTextBlobBuilder();
-        var buffer = builder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
+        var buffer = _blobBuilder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 
@@ -1403,7 +1508,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
         }
 
-        var blob = builder.Build();
+        var blob = _blobBuilder.Build();
 
         if (_runBlobCache.Count >= RunBlobCacheMaxSize)
             ClearRunBlobCache();
@@ -1461,6 +1566,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _wrappedTextures.Clear();
         ClearRunBlobCache();
         ClearRunPathCache();
+        ClearBlurFilters();
+        ClearGradientShaders();
+        _blobBuilder.Dispose();
         _outlineFont.Dispose();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();

@@ -50,7 +50,11 @@ anything — the loop is running that code, not parked.
 Rendering is paced to the display (`Window.RefreshRate`, from the platform; 60 Hz
 when unknown). The swap interval is 0, because a vsync'd swap blocks the modal
 resize loop, so the loop itself holds a dirty window back until one interval has
-passed since the last render. Events are pumped and handled on every iteration
+passed since the last render. Meanwhile it parks in the platform's wait for what is
+left of the interval: an animating window costs two or three passes of the loop a
+frame. (On Windows SDL used to cut every such wait a millisecond short and a 1 ms
+wait to nothing, so the loop spun through the end of every interval: ~240 passes a
+frame at 200 Hz.) Events are pumped and handled on every iteration
 regardless, so a 1000 Hz mouse updates hover a thousand times a second and is
 drawn at the display's rate; a posted video frame is drawn on the next interval.
 The DevTools HUD shows the measured rate next to the display's, and
@@ -61,6 +65,27 @@ dirty, as fast as the GPU returns; the DevTools continuous-redraw mode (F12
 twice) does the same on its own, so the throughput figure it exists to show is
 not capped. Neither touches the swap interval: this is the loop's pacing, not
 the driver's vsync.
+
+**A minimized window is not drawn.** Its frame runs up to the drawing — actions
+from assistive technology, style, layout and the accessibility tree stay current
+— and stops there with the paint dirt kept, so the first frame after the restore
+draws what changed; the restore's own event wakes the loop. Meanwhile the loop
+parks as an idle one does, about 60 passes a second. Before, GL drew every frame
+of an animation or a video nobody could see, and a Vulkan window, whose minimized
+surface on Windows has no area, retried a frame every display interval (220 to
+400 passes a second at 200 Hz). So a `Window.RequestPostFrameCallback` made
+while a window is minimized runs after the restore, not on the next pass, and
+nothing that must keep going while minimized should be driven by frames. A
+forced frame, `RunFrame(forceRender: true)`, still draws. The minimized state is
+SDL's, which the real-window test checks on Windows only.
+
+A video in a minimized window keeps playing, because the window still serves its GPU
+image sources without drawing them (`IGpuImageSource.ServiceUndrawn`): on each pass
+it is dirty, it takes the frame mpv has waiting (`MPV_RENDER_PARAM_SKIP_RENDERING`)
+and lets a new player set up as a draw would. Without that, mpv, whose render thread
+is the UI thread, waited 200 ms for every frame and dropped it, and a player opened
+while minimized never loaded: in Reel the next file in a folder stayed silent until
+the window was restored.
 
 ```csharp
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());

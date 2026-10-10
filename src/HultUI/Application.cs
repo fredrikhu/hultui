@@ -308,17 +308,33 @@ public sealed class Application : IDisposable
     ///
     /// <para>It costs about 36% more resize frames while a drag is in progress, which is the
     /// right trade: those frames are the ones the user is looking at.</para>
+    ///
+    /// <para>A resize, when the platform flagged one (a new size, or an area Windows asked to
+    /// have painted): laid out again, Resized raised, drawn. Anything else — the second event
+    /// of a step, SDL's live-resize timer every ~10 ms while an edge is held or the window is
+    /// moved — draws only a window with something new to show: one that is dirty, or one whose
+    /// posted work is waiting, which the held loop cannot run. That is how a video keeps
+    /// playing while its window is moved: its next frame is posted, and the draw takes it from
+    /// the decoder. Each of those events was a whole resize frame before, three to a step of a
+    /// drag at one size, and one every ~10 ms of the same picture while the mouse held still.</para>
     /// </summary>
-    private static void RenderLiveResizeFrame(Window window)
+    private void RenderLiveResizeFrame(Window window)
     {
         var platform = window.PlatformWindow;
-        long now = Environment.TickCount64;
-
-        platform.MakeCurrent();
-        window.OnWindowResized();
-        window.RenderFrame();
-        platform.LastResizeRenderTick = now;
-        platform.ResizePending = false;
+        if (platform.ResizePending)
+        {
+            long now = Environment.TickCount64;
+            platform.MakeCurrent();
+            window.OnWindowResized();
+            window.RenderFrame();
+            platform.LastResizeRenderTick = now;
+            platform.ResizePending = false;
+        }
+        else if (window.NeedsRender || !_mainThreadQueue.IsEmpty)
+        {
+            platform.MakeCurrent();
+            window.RenderFrame();
+        }
     }
 
     /// <summary>
@@ -355,15 +371,21 @@ public sealed class Application : IDisposable
     /// Pass <paramref name="forceRender"/> to render regardless — a host that must
     /// repaint on demand (a <c>WM_PAINT</c> after occlusion, where the back buffer's
     /// contents are undefined) needs it, and so does golden-image capture.</para>
+    ///
+    /// <para>Every call steps animations by <paramref name="delta"/>, and a tween that writes
+    /// a signal a <c>Build</c> reads, or calls <c>MarkDirty</c>, rebuilds on every step. Call
+    /// it once per frame the host may draw, as <see cref="Run"/> steps them once per frame it
+    /// may draw — not once per message.</para>
     /// </summary>
-    /// <param name="delta">Time since the previous frame, for animation.</param>
+    /// <param name="delta">Time since the previous call, for animation.</param>
     /// <param name="forceRender">Render every open window even when nothing is dirty.</param>
     public bool RunFrame(TimeSpan delta, bool forceRender = false) => RunFrameCore(delta, forceRender, allowRender: true);
 
-    /// <param name="allowRender">False lets the frame pump, drain and tick but not render,
+    /// <param name="allowRender">False lets the frame pump and drain but not render,
     /// which is how <see cref="Run"/> holds a dirty window back until the display's next
     /// interval; the dirt stays, so the next allowed frame draws it.</param>
-    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender)
+    /// <param name="tick">Whether to step animations, by <paramref name="delta"/>.</param>
+    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -383,8 +405,9 @@ public sealed class Application : IDisposable
         // Drain actions posted from background threads
         DrainMainThreadQueue();
 
-        // Tick animations (marks elements dirty as needed)
-        AnimationManager.Tick((float)delta.TotalSeconds);
+        // Tick animations (marks elements dirty as needed). Run asks for it once per frame
+        // it may draw, not once per pass (see RunUntil).
+        if (tick) AnimationManager.Tick((float)delta.TotalSeconds);
 
         // Run any inspector refresh its rate limit deferred, so the panel still
         // catches up after the inspected window goes idle mid-interval.
@@ -402,20 +425,44 @@ public sealed class Application : IDisposable
     /// Runs the application event loop until all windows are closed. A host that owns
     /// its own message loop drives <see cref="RunFrame"/> instead.
     /// </summary>
-    public void Run()
+    public void Run() => RunUntil(null);
+
+    /// <summary>
+    /// <see cref="Run"/>'s loop, which also ends when <paramref name="done"/> returns true; it
+    /// is asked once per pass, before the pass. HultUI.Headless runs the real loop this way on
+    /// its virtual clock, to see what only the loop does: how often it passes, ticks and
+    /// renders.
+    /// </summary>
+    /// <remarks>
+    /// The loop reads time from the platform's <see cref="IWindowingPlatform.TimeProvider"/>:
+    /// the system clock behind a real window (whose timestamps are the
+    /// <see cref="Stopwatch"/>'s), the virtual one under a headless session, where a wait is
+    /// virtual time moving on.
+    /// </remarks>
+    internal void RunUntil(Func<bool>? done)
     {
         if (_windows.Count == 0)
             throw new InvalidOperationException("No windows created.");
 
         InstallSynchronizationContext();
 
-        var frameStopwatch = Stopwatch.StartNew();
-        long nextRenderAt = 0;   // Stopwatch ticks; the earliest the next frame may render
+        var clock = _platform.TimeProvider;
+        long frequency = clock.TimestampFrequency;
+        long slack = frequency / 1000;
+        long lastTick = clock.GetTimestamp();
+        // Clock ticks; the earliest the next frame may render. A second ago: the first frame
+        // may render at once, and starts the schedule (a virtual clock starts near 0, where a
+        // deadline of 0 put the first frame on the schedule and let the next pass draw again).
+        long nextRenderAt = lastTick - frequency;
+        // The earliest animations may step again after a step that drew nothing.
+        long nextTickAt = nextRenderAt;
+        // Whether the last step was drawn: a tween is moving on screen, and its next step
+        // is due with the next frame.
+        bool stepDrawn = false;
 
-        while (IsRunning)
+        while (IsRunning && done?.Invoke() != true)
         {
-            var delta = frameStopwatch.Elapsed;
-            frameStopwatch.Restart();
+            long now = clock.GetTimestamp();
 
             // Rendering is paced to the display. The swap interval is 0 (a vsync'd swap
             // blocks the modal resize loop), so nothing else would stop a 300 ms fade
@@ -425,10 +472,27 @@ public sealed class Application : IDisposable
             // wait below never has to be shorter than one. Unpaced (FramePacing.Unlimited,
             // or the DevTools continuous-redraw mode) renders whenever anything is dirty.
             bool unpaced = FramePacing == FramePacing.Unlimited || AnyWindowContinuousRedraw();
-            long now = Stopwatch.GetTimestamp();
-            bool due = unpaced || now >= nextRenderAt - Stopwatch.Frequency / 1000;
-            if (RunFrameCore(delta, forceRender: false, allowRender: due))
+            bool due = unpaced || now >= nextRenderAt - slack;
+
+            // Animations step once per frame that may be drawn, by all the time since their
+            // last step: what a browser's requestAnimationFrame does. They stepped on every
+            // pass, and every event that ends a wait early is a pass (a 1,000 Hz mouse, a
+            // worker's post, a playing video's frames), so a tween writing a signal a Build
+            // reads rebuilt that component on each: 15 times a frame with an event every
+            // millisecond, 2.2 in Reel while its bar faded. A step that draws nothing (a pure
+            // delay, a minimized window, which is not drawn) puts the next one an interval on,
+            // so events arriving in between do not step them either.
+            bool tick = due && (unpaced || now >= nextTickAt - slack);
+            var elapsed = TimeSpan.Zero;
+            if (tick)
             {
+                elapsed = clock.GetElapsedTime(lastTick, now);
+                lastTick = now;
+            }
+
+            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick))
+            {
+                if (tick) stepDrawn = true;
                 // The next deadline follows the schedule, not this render: a frame that
                 // took its slack and drew a millisecond early shifts the phase, not the
                 // rate (anchored to now it read 136 fps on a 120 Hz display). A frame
@@ -436,26 +500,36 @@ public sealed class Application : IDisposable
                 // An unpaced frame keeps no schedule: advancing it per frame at thousands
                 // of frames a second once pushed the deadline tens of seconds out, and the
                 // window stayed frozen after continuous redraw was switched off.
-                long interval = (long)(Stopwatch.Frequency / DisplayHz());
+                long interval = (long)(frequency / DisplayHz());
                 nextRenderAt = unpaced ? now
                     : now > nextRenderAt + interval ? now + interval
                     : nextRenderAt + interval;
                 continue;
             }
 
-            if (AnyWindowNeedsRender())
+            if (tick)
             {
-                // Dirty, but too soon: wait out what is left of the interval. An event
-                // ends the wait early and is handled on the next iteration; the render
-                // still waits its turn.
-                long remainingMs = (nextRenderAt - Stopwatch.GetTimestamp()) * 1000 / Stopwatch.Frequency;
+                stepDrawn = false;
+                if (AnimationManager.HasActiveAnimations)
+                    nextTickAt = now + (long)(frequency / DisplayHz());
+            }
+
+            // Dirty, but too soon: wait out what is left of the interval. An event ends the
+            // wait early and is handled on the next iteration; the render still waits its
+            // turn. A tween being drawn waits the same way, though nothing is dirty yet: it
+            // steps (and dirties) when its frame is due, and the idle wait below would hold
+            // it to ~60 frames a second on a faster display.
+            if (AnyWindowNeedsRender() || (stepDrawn && AnimationManager.HasActiveAnimations))
+            {
+                long remainingMs = (nextRenderAt - clock.GetTimestamp()) * 1000 / frequency;
                 _platform.WaitForEvents((int)Math.Max(1, remainingMs));
             }
             else
             {
                 // Nothing to draw. An animation that changed nothing visible (a pure
-                // delay, e.g. the tooltip show timer) only needs ~60Hz ticks, so wait
-                // instead of busy-spinning until it fires; a post or an event wakes this.
+                // delay, e.g. the tooltip show timer) only needs a step an interval, so
+                // wait instead of busy-spinning until it fires; a post or an event wakes
+                // this.
                 _platform.WaitForEvents(16);
             }
         }
@@ -471,10 +545,12 @@ public sealed class Application : IDisposable
         return hz > 0f ? hz : 60f;
     }
 
+    /// <summary>Whether a window is waiting for its next frame. A minimized one is not: it is
+    /// drawn after its restore, whose event wakes the loop (see RenderDirtyWindows).</summary>
     private bool AnyWindowNeedsRender()
     {
         foreach (var w in _windows)
-            if (w.IsOpen && w.NeedsRender) return true;
+            if (w.IsOpen && w.NeedsRender && !w.PlatformWindow.IsMinimized) return true;
         return false;
     }
 
@@ -560,11 +636,20 @@ public sealed class Application : IDisposable
         foreach (var window in _windows)
         {
             if (!window.IsOpen || (!force && !window.NeedsRender)) continue;
+            // A minimized window's frame stops before drawing (see Window.RenderFrame). It is
+            // neither timed nor counted as rendered, so a dirty one leaves Run waiting as if
+            // idle instead of pacing frames nobody would see: on Vulkan they could not be drawn
+            // at all, and the loop retried one every display interval until the restore.
+            if (!force && window.PlatformWindow.IsMinimized)
+            {
+                window.RenderFrame();
+                continue;
+            }
             window.PlatformWindow.MakeCurrent();
             window.Performance.DisplayHz = window.PlatformWindow.RefreshRate;
             window.Performance.Unpaced = FramePacing == FramePacing.Unlimited || window.ContinuousRedraw;
             window.Performance.BeginFrame();
-            window.RenderFrame();
+            window.RenderFrame(evenIfMinimized: force);
             window.Performance.EndFrame();
             // The window is created hidden; reveal it only now that its first
             // frame has been presented, so the OS never composites the blank

@@ -208,6 +208,38 @@ public class AccessibilityTreeDifferTests
     }
 
     [Fact]
+    public void ARangesValue_IsInItsNode_AndAMoveIsARangeValueChange_WithThePreviousNode()
+    {
+        // A slider's, a progress bar's, a number field's: the node carried none, so a move told
+        // nothing (the bridges read the value live and were never told it changed).
+        var root = AppRoot();
+        var slider = SliderElement.New(20, 0, 50);
+        var bar = ProgressBarElement.New();
+        var number = NumericUpDownElement.New(3, 0, 10);
+        root.AddChild(slider);
+        root.AddChild(bar);
+        root.AddChild(number);
+        Layout(root);
+        var before = AccessibilityTreeBuilder.Build(root);
+        Assert.Equal(new AccessibleRange(20, 0, 50, 1, 10, false), before.Children[0].Range);
+        Assert.Equal(new AccessibleRange(0, 0, 1, 0, 0, true), before.Children[1].Range);
+        Assert.Equal(3, before.Children[2].Range!.Value.Value);
+        Assert.Empty(AccessibilityTreeDiffer.Diff(before, AccessibilityTreeBuilder.Build(root)).PropertyChanged);
+
+        slider.Value = 21;
+        bar.Maximum = 2;
+        var after = AccessibilityTreeBuilder.Build(root);
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+        Assert.Equal(2, diff.PropertyChanged.Count);
+        Assert.All(diff.PropertyChanged, c => Assert.Equal(AccessibilityProperties.RangeValue, c.PropertyName));
+        var moved = diff.PropertyChanged.Single(c => c.Node.ElementId == slider.Id);
+        Assert.Equal(20, moved.Previous!.Range!.Value.Value);
+        Assert.Equal(21, moved.Node.Range!.Value.Value);
+        var widened = diff.PropertyChanged.Single(c => c.Node.ElementId == bar.Id);
+        Assert.Equal(2, widened.Node.Range!.Value.Maximum);
+    }
+
+    [Fact]
     public void Diff_TextInputValueChanged_EmitsValueChange()
     {
         var root = AppRoot();

@@ -42,7 +42,6 @@ public class NumericUpDownElement : Element, IRangeValueElement
 
     public NumericUpDownElement()
     {
-        IgnoresAvailableHeight = true;
         IsFocusable = true;
         Role = AccessibilityRole.SpinButton;
         Inherited.Cursor = CursorType.Pointer;
@@ -82,10 +81,13 @@ public class NumericUpDownElement : Element, IRangeValueElement
         }
     }
 
-    public double Minimum { get => _min; set { _min = value; Value = _value; MarkLayoutDirty(); } }
-    public double Maximum { get => _max; set { _max = value; Value = _value; MarkLayoutDirty(); } }
+    public double Minimum { get => _min; set { _min = value; Value = _value; MarkLayoutDirty(); RangeChanged(); } }
+    public double Maximum { get => _max; set { _max = value; Value = _value; MarkLayoutDirty(); RangeChanged(); } }
     /// <summary>How far one press moves, and the grid values snap to. Zero disables snapping.</summary>
-    public double Step { get => _step; set { _step = value; Value = _value; } }
+    public double Step { get => _step; set { _step = value; Value = _value; RangeChanged(); } }
+
+    // Its value is told at once, as its text (AccessibilityProperties.Value); the range with it.
+    private void RangeChanged() => NotifyAccessibilityPropertyChanged(AccessibilityProperties.RangeValue);
     /// <summary>How far PageUp/PageDown move; null is ten steps.</summary>
     public double? LargeStep { get; set; }
 
@@ -397,6 +399,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
     {
         base.PatchFrom(source);
         if (source is not NumericUpDownElement n) return;
+        if (_min != n._min || _max != n._max || _step != n._step) RangeChanged();
         _min = n._min;
         _max = n._max;
         _step = n._step;

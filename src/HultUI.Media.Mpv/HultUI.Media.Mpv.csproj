@@ -27,6 +27,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Media.Backends.Tests" />
     <InternalsVisibleTo Include="HultUI.UiTests" />
+    <InternalsVisibleTo Include="HultUI.UiTests.VulkanProbe" />
   </ItemGroup>
 
   <ItemGroup>

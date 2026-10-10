@@ -368,6 +368,12 @@ stuck" line:
   the core, which is waiting for the frame. `SkipFrame` takes the frame with
   `MPV_RENDER_PARAM_SKIP_RENDERING`, and the first render with a size draws it.
   Reopening a file went from about 600 ms to 3–8 ms.
+- **The minimized window.** A minimized window is not drawn (plan 17, 82e382b), so
+  nothing took mpv's frames: each waited out the timeout and was dropped, and a file
+  opened meanwhile never loaded, the render context being made by a draw. In Reel the
+  next file in a folder stayed silent until the restore. The window now serves its
+  GPU sources undrawn (`IGpuImageSource.ServiceUndrawn`): `SkipFrame` takes each
+  frame, and a new sink sets up as its first draw would.
 
 Plan 15 (items 8.1, 8.3 and 8.4) has the measurements.
 

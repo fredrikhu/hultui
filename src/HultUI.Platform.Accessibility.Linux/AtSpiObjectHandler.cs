@@ -108,6 +108,11 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
                     reader.ReadSignature(); // variant signature "i"
                     _tree.ApplicationId = reader.ReadInt32();
                 }
+                else if (iface == AtSpiConstants.ValueInterface && prop == "CurrentValue" && node.Range is not null)
+                {
+                    reader.ReadSignature(); // variant signature "d"
+                    _tree.SetCurrentValue(node, reader.ReadDouble());
+                }
                 Reply(context, "", static (ref MessageWriter _) => { });
                 break;
             }
@@ -158,6 +163,17 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
             w.WriteVariantInt32(text is null ? 0 : prop == "CharacterCount" ? text.Length : text.Caret);
             return;
         }
+        else if (iface == AtSpiConstants.ValueInterface && node.Range is { } range)
+        {
+            switch (prop)
+            {
+                case "MinimumValue": WriteVariantDouble(ref w, range.Minimum); return;
+                case "MaximumValue": WriteVariantDouble(ref w, range.Maximum); return;
+                case "MinimumIncrement": WriteVariantDouble(ref w, range.SmallChange); return;
+                case "CurrentValue": WriteVariantDouble(ref w, range.Value); return;
+                case "Text": w.WriteVariantString(""); return;
+            }
+        }
 
         // Unknown property — an empty string keeps the reply well-formed.
         w.WriteVariantString("");
@@ -192,7 +208,28 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
             WriteInt32Entry(ref w, "CharacterCount", text.Length);
             WriteInt32Entry(ref w, "CaretOffset", text.Caret);
         }
+        else if (iface == AtSpiConstants.ValueInterface && node.Range is { } range)
+        {
+            WriteDoubleEntry(ref w, "MinimumValue", range.Minimum);
+            WriteDoubleEntry(ref w, "MaximumValue", range.Maximum);
+            WriteDoubleEntry(ref w, "MinimumIncrement", range.SmallChange);
+            WriteDoubleEntry(ref w, "CurrentValue", range.Value);
+            WriteStringEntry(ref w, "Text", "");
+        }
         w.WriteDictionaryEnd(dict);
+    }
+
+    private static void WriteVariantDouble(ref MessageWriter w, double value)
+    {
+        w.WriteSignature("d");
+        w.WriteDouble(value);
+    }
+
+    private static void WriteDoubleEntry(ref MessageWriter w, string key, double value)
+    {
+        w.WriteDictionaryEntryStart();
+        w.WriteString(key);
+        WriteVariantDouble(ref w, value);
     }
 
     private static void WriteStringEntry(ref MessageWriter w, string key, string value)
@@ -575,5 +612,6 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
         "  <interface name=\"org.a11y.atspi.Accessible\"/>\n" +
         "  <interface name=\"org.a11y.atspi.Component\"/>\n" +
         "  <interface name=\"org.a11y.atspi.Text\"/>\n" +
+        "  <interface name=\"org.a11y.atspi.Value\"/>\n" +
         "</node>";
 }

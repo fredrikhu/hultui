@@ -32,6 +32,9 @@ public class VideoElement : ImageElement
     {
         Role = AccessibilityRole.Image;
         Fit = ImageFit.Contain;
+        // MeasureContent scales the frame down to the height offered, so a measurement holds at
+        // that height only.
+        IgnoresAvailableHeight = false;
     }
 
     public MediaPlayer? Player

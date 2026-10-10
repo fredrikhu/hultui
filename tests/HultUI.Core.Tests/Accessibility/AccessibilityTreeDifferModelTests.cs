@@ -399,7 +399,8 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
             if (prev.Description != curr.Description)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
-            if (prev.Value != curr.Value)
+            // A node with text on both sides tells a change of it as its text, not its value.
+            if (!(prev.Text is not null && curr.Text is not null) && prev.Value != curr.Value)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
             if (prev.IsPassword != curr.IsPassword)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsPassword));

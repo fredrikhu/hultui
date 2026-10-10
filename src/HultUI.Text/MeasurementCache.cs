@@ -71,20 +71,87 @@ internal sealed class WordShapeKeyComparer
         new(alternate.Segment.ToString(), alternate.Font, alternate.FontSize);
 }
 
-/// <summary>Simple LRU cache used for text measurement and shaping results.</summary>
+/// <summary>Key for a string's width on one unbounded line (<see cref="TextPipeline.MeasureWidth"/>):
+/// the string and what of the style a width depends on. <see cref="Hash"/> is worked out once,
+/// from the span the string was cut from (<see cref="WidthKeyComparer.HashOf"/>): a line can be a
+/// hundred characters, and hashing it again to put it in the cache cost as much as the lookup.</summary>
+internal readonly record struct WidthKey(
+    string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant, float LetterSpacing,
+    int Hash);
+
+/// <summary><see cref="WidthKey"/> for a string still inside a longer text — a line of a
+/// document — so a lookup makes no string; only a miss copies it out, to keep it as the key.</summary>
+internal readonly ref struct WidthSpanKey(ReadOnlySpan<char> text, in ResolvedInheritedStyle style, int hash)
+{
+    public readonly ReadOnlySpan<char> Text = text;
+    public readonly string FontFamily = style.FontFamily;
+    public readonly float FontSize = style.FontSize;
+    public readonly FontWeight FontWeight = style.FontWeight;
+    public readonly FontSlant FontSlant = style.FontSlant;
+    public readonly float LetterSpacing = style.LetterSpacing;
+    public readonly int Hash = hash;
+}
+
+/// <summary><see cref="WidthKey"/>'s equality, and the same for a <see cref="WidthSpanKey"/>; both
+/// hash as <see cref="HashOf"/> says, the span as the string of its characters would.</summary>
+internal sealed class WidthKeyComparer : IEqualityComparer<WidthKey>, IAlternateEqualityComparer<WidthSpanKey, WidthKey>
+{
+    public static readonly WidthKeyComparer Instance = new();
+
+    /// <summary>The style's share of a key's hash.</summary>
+    public static int StyleHash(in ResolvedInheritedStyle style) =>
+        HashCode.Combine(style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant, style.LetterSpacing);
+
+    /// <summary>A key's hash: the text's, as <see cref="string.GetHashCode()"/> has it, and the style's.</summary>
+    public static int HashOf(ReadOnlySpan<char> text, int styleHash) => string.GetHashCode(text) ^ styleHash;
+
+    public bool Equals(WidthKey x, WidthKey y) => x == y;
+
+    public int GetHashCode(WidthKey key) => key.Hash;
+
+    public bool Equals(WidthSpanKey alternate, WidthKey other) =>
+        alternate.Hash == other.Hash && alternate.FontSize.Equals(other.FontSize)
+        && alternate.FontWeight == other.FontWeight && alternate.FontSlant == other.FontSlant
+        && alternate.LetterSpacing.Equals(other.LetterSpacing) && string.Equals(alternate.FontFamily, other.FontFamily)
+        && alternate.Text.SequenceEqual(other.Text);
+
+    public int GetHashCode(WidthSpanKey alternate) => alternate.Hash;
+
+    public WidthKey Create(WidthSpanKey alternate) =>
+        new(alternate.Text.ToString(), alternate.FontFamily, alternate.FontSize, alternate.FontWeight,
+            alternate.FontSlant, alternate.LetterSpacing, alternate.Hash);
+}
+
+/// <summary>
+/// Simple LRU cache used for text measurement and shaping results. Bounded by a number of
+/// entries and, when given a <c>maxWeight</c>, by the sum of the weights its entries were put
+/// with: the least recently used go first until both bounds hold. An entry counts for at most
+/// half the weight bound, so one heavier than that — the layout of a whole document in one
+/// label — still leaves room for others, rather than taking the cache alone and being pushed
+/// out by the next entry, every frame that draws both.
+/// </summary>
 internal sealed class LruCache<TKey, TValue> where TKey : notnull
 {
     private readonly int _capacity;
+    private readonly long _maxWeight;
+    private long _weight;
     private readonly Dictionary<TKey, LinkedListNode<CacheEntry>> _map;
     private readonly LinkedList<CacheEntry> _order = new();
 
-    public LruCache(int capacity, IEqualityComparer<TKey>? comparer = null)
+    public LruCache(int capacity, IEqualityComparer<TKey>? comparer = null, long maxWeight = long.MaxValue)
     {
         _capacity = capacity;
+        _maxWeight = maxWeight;
         // Grow on demand rather than pre-allocating the full capacity — a large
         // eviction bound shouldn't cost memory in apps with few distinct strings.
         _map = new(comparer);
     }
+
+    /// <summary>The number of entries.</summary>
+    public int Count => _map.Count;
+
+    /// <summary>The sum of the entries' weights, as counted: never above the bound.</summary>
+    public long Weight => _weight;
 
     public bool TryGet(TKey key, out TValue value)
     {
@@ -134,15 +201,20 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
         }
     }
 
-    public void Put(TKey key, TValue value)
+    /// <summary>Puts <paramref name="value"/> under <paramref name="key"/>, replacing what was
+    /// there, as the most recently used entry. <paramref name="weight"/> counts towards the
+    /// cache's weight bound (the caller's estimate of the bytes the entry keeps alive).</summary>
+    public void Put(TKey key, TValue value, int weight = 0)
     {
+        weight = Counted(weight);
         if (_map.TryGetValue(key, out var existing))
         {
             _order.Remove(existing);
             _map.Remove(key);
+            _weight -= existing.Value.Weight;
         }
 
-        _map[key] = FirstNode(key, value);
+        _map[key] = FirstNode(key, value, weight);
     }
 
     /// <summary>
@@ -150,28 +222,62 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
     /// looking the key up again. On a path that meets most strings once, the lookups of a
     /// TryGet-then-Put pair are a measurable part of what the cache costs.
     /// </summary>
-    public void Add(TKey key, TValue value) => _map.Add(key, FirstNode(key, value));
+    public void Add(TKey key, TValue value, int weight = 0) => _map.Add(key, FirstNode(key, value, Counted(weight)));
 
-    // A new entry, most recently used. In a full cache it takes the node of the least recently
-    // used one, which it evicts: a full cache inserts without allocating.
-    private LinkedListNode<CacheEntry> FirstNode(TKey key, TValue value)
+    private int Counted(int weight) => weight <= _maxWeight / 2 ? weight : (int)(_maxWeight / 2);
+
+    // A new entry, most recently used, after the least recently used ones it leaves no room
+    // for. It takes the node of one it evicts, or of one evicted before: a full cache inserts
+    // without allocating.
+    private LinkedListNode<CacheEntry> FirstNode(TKey key, TValue value, int weight)
     {
-        if (_map.Count < _capacity)
-            return _order.AddFirst(new CacheEntry(key, value));
+        LinkedListNode<CacheEntry>? node = null;
+        while (_order.Last is { } last && (_map.Count >= _capacity || _weight + weight > _maxWeight))
+        {
+            _order.RemoveLast();
+            _map.Remove(last.Value.Key);
+            _weight -= last.Value.Weight;
+            if (node is null) node = last;
+            else Keep(last);
+        }
+        node ??= TakeSpare();
 
-        var last = _order.Last!;
-        _order.RemoveLast();
-        _map.Remove(last.Value.Key);
-        last.Value = new CacheEntry(key, value);
-        _order.AddFirst(last);
-        return last;
+        _weight += weight;
+        var entry = new CacheEntry(key, value, weight);
+        if (node is null)
+            return _order.AddFirst(entry);
+        node.Value = entry;
+        _order.AddFirst(node);
+        return node;
+    }
+
+    // Nodes evicted beyond the one the new entry took, emptied, for entries that evict none: a
+    // cache full by weight takes a light entry in for nothing and a heavy one for several.
+    private LinkedListNode<CacheEntry>?[]? _spares;
+    private int _spareCount;
+
+    private void Keep(LinkedListNode<CacheEntry> node)
+    {
+        _spares ??= new LinkedListNode<CacheEntry>?[16];
+        if (_spareCount == _spares.Length) return;
+        node.Value = default;
+        _spares[_spareCount++] = node;
+    }
+
+    private LinkedListNode<CacheEntry>? TakeSpare()
+    {
+        if (_spareCount == 0) return null;
+        var node = _spares![--_spareCount];
+        _spares[_spareCount] = null;
+        return node;
     }
 
     public void Clear()
     {
         _map.Clear();
         _order.Clear();
+        _weight = 0;
     }
 
-    private readonly record struct CacheEntry(TKey Key, TValue Value);
+    private readonly record struct CacheEntry(TKey Key, TValue Value, int Weight);
 }

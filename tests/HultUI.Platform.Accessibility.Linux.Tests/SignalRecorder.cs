@@ -19,6 +19,8 @@ internal sealed class SignalRecorder : IAtSpiSignals
         Lines.Add($"children-changed:{(isAdd ? "add" : "remove")} {Short(parentPath)} {Short(childPath)} {index}");
     public void EmitPropertyChange(string path, string atSpiProperty, string newValue) =>
         Lines.Add($"property-change:{atSpiProperty} {Short(path)} {newValue}");
+    public void EmitValueChanged(string path, double value) =>
+        Lines.Add(FormattableString.Invariant($"property-change:accessible-value {Short(path)} {value}"));
     public void EmitRoleChange(string path, uint role) => Lines.Add($"property-change:accessible-role {Short(path)} {role}");
     public void EmitStateChanged(string path, string state, bool active) =>
         Lines.Add($"state-changed:{state} {Short(path)} {(active ? 1 : 0)}");

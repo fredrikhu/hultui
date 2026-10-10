@@ -21,8 +21,11 @@ public interface IWindowingPlatform : IDisposable
 
     /// <summary>
     /// Parks the loop until a native event arrives, <see cref="Wake"/> is called,
-    /// or the timeout elapses. Called only when no window needed a frame this
-    /// iteration.
+    /// or the timeout elapses. <c>Application.Run</c> calls it when no window rendered
+    /// in an iteration: when nothing needs a frame, and when a window does but its
+    /// display interval has not yet passed. A platform that runs that loop parks for
+    /// the whole timeout when nothing arrives, a timeout of 1 ms included: a wait that
+    /// returns at once makes the second case a busy loop.
     /// </summary>
     void WaitForEvents(int timeoutMs);
 

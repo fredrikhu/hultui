@@ -211,8 +211,13 @@ directions:
   cell measurement passes below.
 - **Auto tracks**: each cell in an auto track gets one extra `MeasureSize`
   call to determine its intrinsic width. The measurement cache absorbs
-  repeated calls within a frame, so the cost scales with `(cells × 1)`,
-  not `(cells × layout passes)`.
+  repeated calls within a frame, so the measuring scales with the number of
+  cells, not with cells × layout passes.
+- **The bookkeeping is linear too**: one pass over the children groups the
+  cells by column and by row, and each track's start is added up once per
+  layout. Until plan 17 (round 2) every auto track looked at every child and
+  every cell added up all the tracks before it — about 900 loop steps a cell
+  in a 300-row grid, so the cost grew with rows² × columns.
 - **Auto rows after auto columns**: row resolution measures cells *with the
   resolved column width forced*, so text cells wrap correctly. This is one
   more cache miss per cell than the column pass.

@@ -33,12 +33,10 @@ public static class SyntaxHighlighter
     private static Color? _defaultFg;
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
-    // Concurrent, and read outside Gate on purpose. A tokenize holds Gate for as long as it
-    // takes to parse the file — tens of milliseconds for a large one — and the UI thread asks
-    // CanHighlight once per visible row per frame. Sharing one lock meant a background
-    // tokenize stalled the very frame that was meant to show the text it had already read.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> CanHighlightByExt =
-        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How many times this thread has needed the registry, loaded or not. A test
+    /// reads it to show that a question answered from a table never touched it.</summary>
+    [ThreadStatic] internal static int RegistryUsesOnThisThread;
 
     /// <summary>
     /// Extensions absent from TextMateSharp's bundled language table that are
@@ -96,9 +94,18 @@ public static class SyntaxHighlighter
     // oversized files skip highlighting entirely, and a file that tokenizes
     // slowly gets whatever lines fit in the budget (the rest stay uncolored).
     private const int MaxChars = 2_000_000;
-    private const int MaxLineCount = 20_000;
     private static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan FileBudget = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The most lines <see cref="TokenizeLines(string, string)"/> colours: a text with more
+    /// gets no spans at all. A caller that tokenizes on a worker and can stop a tokenize it
+    /// no longer wants may pass its own cap to
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken)"/>; texts are still
+    /// held to 2,000,000 characters and three seconds, after which the remaining lines stay
+    /// uncoloured.
+    /// </summary>
+    public const int DefaultMaxLines = 20_000;
 
     /// <summary>
     /// Whether a grammar exists for <paramref name="path"/> — i.e. whether tokenizing
@@ -109,27 +116,14 @@ public static class SyntaxHighlighter
     /// such a list silently diverges from the grammar set, which is exactly how
     /// <c>.slnx</c>, <c>.csproj</c>, and <c>.ps1</c> ended up highlighting in one app
     /// and not the other.</para>
+    ///
+    /// <para>A file list asks once per visible row per frame, so this is answered from a
+    /// table of the bundled grammars' extensions (<see cref="BundledGrammarExtensions"/>):
+    /// it neither loads the registry — 5 MB and up to 10 ms on the UI thread, the first
+    /// time — nor takes the gate a running tokenize holds.</para>
     /// </summary>
-    public static bool CanHighlight(string path)
-    {
-        var ext = ResolveExtension(path);
-        if (ext is null) return false;
-        // Answer from the cache without taking Gate: a running tokenize holds it, and a file
-        // list asking per row per frame must not queue behind a parse.
-        if (CanHighlightByExt.TryGetValue(ext, out var cached)) return cached;
-        lock (Gate)
-        {
-            if (CanHighlightByExt.TryGetValue(ext, out var known)) return known;
-            EnsureRegistry();
-            // Scope lookup only — deliberately NOT LoadGrammar. A file list asks this
-            // once per visible row per frame, and loading a grammar means parsing a
-            // sizeable JSON on the UI thread for a language that may never be shown.
-            // The real load stays deferred to the first tokenize.
-            bool can = _options!.GetScopeByExtension(ext) != null;
-            CanHighlightByExt[ext] = can;
-            return can;
-        }
-    }
+    public static bool CanHighlight(string path) =>
+        ResolveExtension(path) is { } ext && BundledGrammarExtensions.All.Contains(ext);
 
     /// <summary>
     /// Tokenizes <paramref name="text"/> as the language implied by
@@ -137,13 +131,25 @@ public static class SyntaxHighlighter
     /// (empty for lines with nothing to color; offsets are line-relative), or
     /// null when the extension has no grammar or the file is too large.
     /// </summary>
-    public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text)
+    public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text) =>
+        TokenizeLines(path, text, DefaultMaxLines, CancellationToken.None);
+
+    /// <summary>
+    /// <see cref="TokenizeLines(string, string)"/> for a caller on a worker: a text of more
+    /// than <paramref name="maxLines"/> lines gets null, and <paramref name="cancellationToken"/>
+    /// is checked before every line, so a tokenize nobody wants any more — a newer response,
+    /// a closed tab — throws <see cref="OperationCanceledException"/> within a line and lets
+    /// the next one have the gate. Tokenizes run one at a time.
+    /// </summary>
+    public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text, int maxLines,
+        CancellationToken cancellationToken)
     {
         if (text.Length > MaxChars) return null;
+        cancellationToken.ThrowIfCancellationRequested();
         lock (Gate)
         {
             var grammar = GrammarFor(path);
-            return grammar == null ? null : Tokenize(grammar, text);
+            return grammar == null ? null : Tokenize(grammar, text, maxLines, cancellationToken);
         }
     }
 
@@ -247,13 +253,14 @@ public static class SyntaxHighlighter
             GrammarByExt.Clear();
             ColorById.Clear();
         }
-        // Which extensions are highlightable does not depend on the theme, so that cache
-        // survives — and it is read outside Gate, which clearing it under Gate would not fix.
+        // Which extensions are highlightable does not depend on the theme: CanHighlight answers
+        // from a fixed table.
         return true;
     }
 
     private static void EnsureRegistry()
     {
+        RegistryUsesOnThisThread++;
         if (_registry != null) return;
         _options = new RegistryOptions(_themeName);
         _registry = new Registry(_options);
@@ -269,7 +276,7 @@ public static class SyntaxHighlighter
     /// nothing maps. Pure string work, so both the predicate and the loader share it
     /// without either touching the registry.
     /// </summary>
-    private static string? ResolveExtension(string path)
+    internal static string? ResolveExtension(string path)
     {
         var ext = System.IO.Path.GetExtension(path);
         if (ext.Length == 0)
@@ -296,10 +303,11 @@ public static class SyntaxHighlighter
 
     // ── Tokenization ─────────────────────────────────────────────────────
 
-    private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, string text)
+    private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, string text, int maxLines,
+        CancellationToken cancellationToken)
     {
         var lines = SplitLines(text);
-        if (lines.Count > MaxLineCount) return null;
+        if (lines.Count > maxLines) return null;
 
         var result = new IReadOnlyList<TextSpan>[lines.Count];
         IStateStack? state = null;
@@ -308,6 +316,7 @@ public static class SyntaxHighlighter
 
         for (int i = 0; i < lines.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             result[i] = [];
             if (sw.Elapsed > FileBudget) continue;
 

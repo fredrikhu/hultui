@@ -4,6 +4,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
@@ -225,6 +226,157 @@ public sealed class CommandPaletteTests
         Assert.Equal(-1, FuzzyMatch.Score("Go to Runner", "rg"));
         Assert.True(FuzzyMatch.Score("Go to Runner", "run") < FuzzyMatch.Score("Go to Runner", "gtr"));
     }
+
+    // ──── The ranking, against the first implementation ────
+    //
+    // Filter used to join every unmatched command's text afresh on each keystroke, match a
+    // title-only command's title twice, and rank through a three-key LINQ sort: 232 KB a query
+    // over 2,000 commands with groups and details. It now keeps the joined text for as long as
+    // the palette is open and sorts an array. The answers must not move, item for item.
+
+    [Fact]
+    public void Filter_RanksExactlyAsTheFirstImplementationDid()
+    {
+        int ties = 0, pastTitle = 0;
+        for (int seed = 1; seed <= 6; seed++)
+        {
+            var commands = Corpus(300, seed);
+            var index = IndexOf(commands);
+            var kept = new string?[commands.Count];   // one per open palette, filled as needed
+            foreach (var query in Queries)
+            {
+                var expected = Indices(ReferenceFilter(commands, query), index);
+                Assert.Equal(expected, Indices(CommandPalette.Filter(commands, query), index));
+                Assert.Equal(expected, Indices(CommandPalette.Filter(commands, query, kept), index));
+
+                var scores = commands.Select(c => ReferenceScore(c, query.Trim())).ToList();
+                var matched = scores.Where(s => s >= 0).ToList();
+                ties += matched.Count - matched.Distinct().Count();
+                pastTitle += matched.Count(s => s >= 1_000_000);
+            }
+        }
+        // The corpus must exercise what the ranking orders by, or the comparison above proves little.
+        Assert.True(ties > 1_000, $"only {ties} tied scores");
+        Assert.True(pastTitle > 1_000, $"only {pastTitle} matches past the title");
+    }
+
+    [Fact]
+    public void AnOpenPalette_RanksAsTheFirstImplementationDid_AndForgetsTheListItClosedOn()
+    {
+        var first = Corpus(200, 7);
+        var second = Corpus(200, 8);   // as many commands, other words: a kept text would show
+        var current = first;
+        using var session = HeadlessSession.Create(1000, 700);
+        session.Window.SetRoot(Box.New());
+        session.PumpFrame();
+        var palette = new CommandPalette(() => current);
+        palette.Query = "save";   // closed: nothing to match, and nothing kept for the list it opens on
+        Assert.Empty(palette.Matches);
+
+        foreach (var commands in new[] { first, second })
+        {
+            current = commands;
+            palette.Open(session.Window.Window);
+            session.PumpFrame();
+            var index = IndexOf(commands);
+            foreach (var query in Queries)
+            {
+                palette.Query = query;
+                Assert.Equal(Indices(ReferenceFilter(commands, query), index), Indices(palette.Matches, index));
+            }
+            palette.Close();
+            session.PumpFrame();
+            Assert.False(palette.IsOpen);
+        }
+    }
+
+    [Fact]
+    public void Filter_AllocatesOnlyTheListItReturns()
+    {
+        // Titles only: nothing past the title to match, so nothing to join.
+        var titles = Enumerable.Range(0, 2_000)
+            .Select(i => new PaletteCommand($"{(i % 3 == 0 ? "Save" : "Open")} document {i}", () => { })).ToList();
+        int saves = CommandPalette.Filter(titles, "sav").Count;
+        Assert.Equal(667, saves);
+        double plain = Allocations.PerCall(10, () => CommandPalette.Filter(titles, "sav"), goal: ListBytes(saves));
+        Assert.True(plain <= ListBytes(saves), $"Filter over 2,000 titles allocated {plain:F0} B; its list is {ListBytes(saves)} B");
+
+        // Groups and details: an open palette joins each command's text once, not per keystroke.
+        var grouped = titles.Select((c, i) => c with { Group = i % 2 == 0 ? "File" : "Edit", Detail = $"C:\\docs\\folder {i}" }).ToList();
+        var kept = new string?[grouped.Count];
+        int folders = CommandPalette.Filter(grouped, "fold", kept).Count;
+        Assert.Equal(2_000, folders);   // every one past its title
+        double again = Allocations.PerCall(10, () => CommandPalette.Filter(grouped, "fold", kept), goal: ListBytes(folders));
+        Assert.True(again <= ListBytes(folders), $"a second query allocated {again:F0} B; its list is {ListBytes(folders)} B");
+    }
+
+    /// <summary>A List of <paramref name="count"/> references sized to them: the object and its array.</summary>
+    private static long ListBytes(int count) => 32 + 24 + 8L * count;
+
+    /// <summary>The ranking as it was first written, LINQ and all.</summary>
+    private static List<PaletteCommand> ReferenceFilter(IReadOnlyList<PaletteCommand> commands, string query)
+    {
+        query = query.Trim();
+        if (query.Length == 0) return commands.ToList();
+        return commands
+            .Select((command, index) => (command, index, score: ReferenceScore(command, query)))
+            .Where(x => x.score >= 0)
+            .OrderBy(x => x.score)
+            .ThenBy(x => x.command.Title.Length)
+            .ThenBy(x => x.index)
+            .Select(x => x.command)
+            .ToList();
+    }
+
+    private static int ReferenceScore(PaletteCommand command, string query)
+    {
+        int score = FuzzyMatch.Score(command.Title, query);
+        if (score >= 0) return score;
+        var rest = string.Join(" ", new[] { command.Title, command.Group, command.Detail, command.Keywords }
+            .Where(s => !string.IsNullOrEmpty(s)));
+        score = FuzzyMatch.Score(rest, query);
+        return score < 0 ? -1 : 1_000_000 + score;
+    }
+
+    /// <summary>Commands from a few words, so titles tie on score and on length, with a group,
+    /// detail and keywords each missing, empty or set at random, and some titles empty.</summary>
+    private static List<PaletteCommand> Corpus(int count, int seed)
+    {
+        string[] words = ["Save", "save", "all", "Go", "to", "Runner", "requests", "Branch", "main", "tidy", "Sabre",
+            "x", "Open", "recent", "Ünïcode", "go to"];
+        string?[] extras = [null, "", "Go", "Branch", "refs/heads/main", "feature/cleanup-runner", "Request",
+            "zeta quux", "Ctrl+S", "Ünï"];
+        var rng = new Random(seed);
+        var commands = new List<PaletteCommand>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var title = string.Join(" ", Enumerable.Range(0, rng.Next(0, 4)).Select(_ => words[rng.Next(words.Length)]));
+            commands.Add(new PaletteCommand(title, () => { })
+            {
+                Group = extras[rng.Next(extras.Length)],
+                Detail = extras[rng.Next(extras.Length)],
+                Keywords = extras[rng.Next(extras.Length)],
+            });
+        }
+        return commands;
+    }
+
+    private static readonly string[] Queries =
+    [
+        "", "  ", "s", "save", "SAVE", " save ", "sa", "gtr", "go to", "g t r", "main", "refs", "heads/main",
+        "zeta", "quux", "zq", "ctrl", "cleanup", "x", "ü", "ÜNÏ", "zzzz", "rq", "a", "e", "o", "br", "tidy main", "req",
+    ];
+
+    // By identity: commands are records, and two built alike are equal.
+    private static Dictionary<PaletteCommand, int> IndexOf(List<PaletteCommand> commands)
+    {
+        var index = new Dictionary<PaletteCommand, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < commands.Count; i++) index[commands[i]] = i;
+        return index;
+    }
+
+    private static int[] Indices(IReadOnlyList<PaletteCommand> matches, Dictionary<PaletteCommand, int> index) =>
+        matches.Select(c => index[c]).ToArray();
 
     private static IEnumerable<AccessibilityNode> Walk(AccessibilityNode node) =>
         node.Children.SelectMany(Walk).Prepend(node);

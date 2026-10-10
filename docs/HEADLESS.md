@@ -54,6 +54,30 @@ session.PumpFrames(30);                             // n default frames
 session.AdvanceTime(TimeSpan.FromSeconds(2));       // clock only, no frame
 ```
 
+### The real loop, on virtual time
+
+A pump is one pass of the loop that always may render, so it cannot show what the loop does
+between frames. `RunLoop(until)` runs `Application.Run`'s own loop instead, until the
+condition holds (asked once per pass) or no window is open. Where the real loop parks the
+thread, between frames and while it waits out the display's interval, virtual time moves on,
+so a second of it takes milliseconds and repeats exactly. Windows render at 60 Hz.
+
+`eventEvery` ends every wait after that much virtual time, as arriving events do (a 1,000 Hz
+mouse, a worker posting to the UI thread, a video's frames), and `onEvent` runs at each one:
+post from it with `Application.InvokeOnMainThread`, as a worker would.
+
+```csharp
+int rebuilds = 0, frames = 0;                    // counted by the test's component and a Canvas
+session.RunLoop(() => done, eventEvery: TimeSpan.FromMilliseconds(1),
+    onEvent: () => Application.InvokeOnMainThread(post));
+Assert.True(rebuilds <= frames + 1);             // a tween's writes: once per frame drawn
+```
+
+A run past `limit` (default 60 s of virtual time) throws `TimeoutException`. Two window
+settings shape it: `window.RefreshRate = 120` paces it as on a 120 Hz display (0, the
+default, is taken as 60), and `window.Minimized = true` stands in for the OS minimizing the
+window, which then draws nothing (its animations still run) until it is set back.
+
 ## Virtual Time
 
 The session clock only moves when you move it. Everything time-dependent is driven by it:
@@ -165,6 +189,8 @@ window.RenderLog.Ops;                         // RenderOp { Name, Args, Depth }
 **Determinism.** `DeterministicRecording()` also swaps in `FixedMetricsMeasureContext`, which derives text geometry from font size alone (0.5× width, 1.2× height) instead of real font data. Baselines then match across operating systems — at the cost of positions no longer reflecting real rendering. Use it for layout/paint regression baselines committed to a repo that CI runs on another OS. Use plain `new HeadlessOptions { RecordDrawCalls = true }` to keep real metrics when a test is pinned to one platform.
 
 **Element attribution is not implemented** — ops carry no element identity, so "what did *this* element draw?" means matching on coordinates or text.
+
+**A selectable or linked label logs as `DrawParagraph`, not `DrawText`.** It keeps the paragraph it hit-tests clicks against and draws from it, so its op reads `DrawParagraph "text" at x,y width=w …` with the content box's corner and width. A query for a selectable label's text asks for both: `Named("DrawText").Concat(Named("DrawParagraph"))`.
 
 ## Pixels
 

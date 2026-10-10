@@ -52,6 +52,10 @@ static partial class Scenarios
             "Press Down in a 1,000-row list of two-line rows whose selection the owning component's Build reads: the owner rebuilds, the rows are realized again in the render pass",
             ctx => SelectionWalk(ctx, null));
 
+        yield return new Scenario("virtual/selection walk 1,000 item rows",
+            "The same walk with .RenderWith((item, selected) => …): the list keeps the rows whose item and selection did not change and makes only the old and the new selected row (and the one scrolled in)",
+            ctx => SelectionWalk(ctx, null, itemRows: true));
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
@@ -106,11 +110,13 @@ static partial class Scenarios
     /// list shows whole, so every press also scrolls a row, as it does once a walk is under
     /// way. Each frame comes 120 ms after the last — a key pressed and released, not held — so
     /// with an accessibility client listening every step rebuilds its tree: a scroll's refresh
-    /// waits 100 ms. <paramref name="check"/> adds what the bridge must have seen.
+    /// waits 100 ms. <paramref name="check"/> adds what the bridge must have seen. With
+    /// <paramref name="itemRows"/> the rows come from <c>.RenderWith((item, selected) => …)</c>,
+    /// which keeps the ones that did not change. The row reports the rows made per step.
     /// </summary>
-    internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null)
+    internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false)
     {
-        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000));
+        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -121,11 +127,18 @@ static partial class Scenarios
         pane.Select(pane.LastWholeRow());
         ctx.Session.PumpFrame(WalkFrame);
         int first = pane.Selected;
+        int madeBefore = 0;
         return new Op
         {
             Reset = reset is null ? null : _ => reset(),
-            Run = _ => ctx.Window.PressKey(KeyCode.Down),
+            Run = _ =>
+            {
+                madeBefore = pane.RowsMade;
+                ctx.Window.PressKey(KeyCode.Down);
+            },
             FrameDelta = WalkFrame,
+            Figure = () => pane.RowsMade - madeBefore,
+            FigureUnit = "rows made",
             Check = step => pane.Verify(first + step + 1) ?? check?.Invoke(step),
         };
     }
@@ -161,9 +174,10 @@ sealed record WalkItem(int Index, string Icon, string Subject, string Hash, stri
 /// selection drawn by the template from the index the pane's Build read, the list told the
 /// selected index for assistive technology, and its rows named for it by a label made on
 /// each call. A selection move writes a signal; the rebuild scrolls the row into view after
-/// the build, as Junction's <c>OnAfterBuild</c> does.
+/// the build, as Junction's <c>OnAfterBuild</c> does. With <paramref name="itemRows"/> the
+/// template is the two-argument one, whose rows the list keeps while they are unchanged.
 /// </summary>
-sealed class WalkPane(List<WalkItem> items) : Component
+sealed class WalkPane(List<WalkItem> items, bool itemRows = false) : Component
 {
     public const float RowHeight = 46f;
 
@@ -171,6 +185,9 @@ sealed class WalkPane(List<WalkItem> items) : Component
     private readonly Ref<VirtualListElement<WalkItem>> _list = new();
     private int _built;
     private bool _reveal;
+
+    /// <summary>Rows the template has made.</summary>
+    public int RowsMade { get; private set; }
 
     public int Selected => _selected.Value;
 
@@ -189,6 +206,14 @@ sealed class WalkPane(List<WalkItem> items) : Component
     public override Element Build()
     {
         int selected = _built = _selected.Value;
+        var list = VirtualListElement<WalkItem>.New()
+            .ItemHeight(RowHeight)
+            .Items(items)
+            .AccessibleItemLabel(item => $"{item.Subject}, {item.Author}, {item.Hash}")
+            .SelectedIndex(selected)
+            .FlexGrow(1);
+        if (itemRows) list.RenderWith((item, isSelected) => Row(item, isSelected));
+        else list.RenderWith(item => Row(item, item.Index == selected));
         return Flex.Column(gap: 0).FlexGrow(1).Children(
             Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(9, 16))
                 .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))
@@ -196,14 +221,7 @@ sealed class WalkPane(List<WalkItem> items) : Component
                     Phosphor.Draw("git-branch", 14f, Ui.Muted),
                     Text.New("History").FontSize(13f).FontWeight(FontWeight.SemiBold),
                     Text.New($"{items.Count:N0} commits").FontSize(12f).TextColor(Ui.Muted)),
-            VirtualListElement<WalkItem>.New()
-                .ItemHeight(RowHeight)
-                .Items(items)
-                .RenderWith(item => Row(item, item.Index == selected))
-                .AccessibleItemLabel(item => $"{item.Subject}, {item.Author}, {item.Hash}")
-                .SelectedIndex(selected)
-                .FlexGrow(1)
-                .WithRef(_list));
+            list.WithRef(_list));
     }
 
     protected override void OnAfterBuild()
@@ -215,6 +233,7 @@ sealed class WalkPane(List<WalkItem> items) : Component
 
     private BoxElement Row(WalkItem item, bool selected)
     {
+        RowsMade++;
         var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(0, 16))
             .Background(selected ? Ui.Selected : Color.Transparent)
             .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))

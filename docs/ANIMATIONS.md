@@ -1,6 +1,6 @@
 # Animations
 
-HultUI includes a tween-based animation system for smoothly transitioning element properties over time. Animations are created with the `Animate` factory, configured with a fluent builder, and managed centrally so they tick automatically every frame.
+HultUI includes a tween-based animation system for smoothly transitioning element properties over time. Animations are created with the `Animate` factory, configured with a fluent builder, and managed centrally so they step automatically once per frame (see [When a tween steps](#when-a-tween-steps)).
 
 ---
 
@@ -100,6 +100,45 @@ Custom CSS-style cubic bezier:
 var custom = Easing.CubicBezier(0.25f, 0.1f, 0.25f, 1.0f);
 Animate.Opacity(box, 0f, 1f).Ease(custom).Start();
 ```
+
+---
+
+## When a tween steps
+
+`Application.Run` steps every running tween once per frame it may draw, by all the time since
+the last step — what a browser's `requestAnimationFrame` does. A tween that writes a signal a
+`Build()` reads, or calls `MarkDirty()`, therefore rebuilds that component once per frame
+drawn, however many events wake the loop in between.
+
+Until plan 17 the loop stepped them on every pass, and every event that ends the loop's wait
+is a pass: a 1,000 Hz mouse, a worker posting to the UI thread, a playing video's frames.
+With an event every millisecond a fade rebuilt its component 15 times for each frame drawn
+(the perf suite's `anim/signal tween, 1 kHz posts, real loop` row: now 1.0, and 5.4 MB of
+garbage a fade is 0.3), and Reel rebuilt its player 2.2 times for each frame drawn while the
+bar faded over a film (now 1.08; 25 MB of garbage in 11 s is 12).
+
+What follows from it:
+
+- A tween's setter and `OnComplete` run at most once per display interval: 16.7 ms at
+  60 Hz, 5 ms at 200 Hz.
+- A tween on screen is drawn at the display's rate, with or without events between frames:
+  between its frames the loop waits for the next one, not for its idle 16 ms. (A tween that
+  wrote a signal used to be drawn at ~60 frames a second on a faster display when nothing
+  else woke the loop: its zero-time step between frames changed nothing.)
+- A tween standing in for a timer — the tooltip's delay, a video player's auto-hide, a
+  toast's hold — ends on the first step at or past its time, up to one interval late.
+- A window with nothing to draw still steps its tweens, at most once an interval: an idle
+  window waiting out a delay, and a **minimized** window, which is not drawn at all. A
+  minimized player's bar still hides on time and a toast still comes and goes; the first
+  frame after the restore draws where they ended.
+- A host that drives `Application.RunFrame` from its own loop (the WinForms host, a game
+  loop) steps them once per call, by the delta it passes: call it once per frame it means to
+  draw. A headless `PumpFrame()` is one such call; `HeadlessSession.RunLoop` runs the real
+  loop on the virtual clock, events between frames included.
+
+Once per frame is still a rebuild per frame. An animation that only moves, fades or turns
+something is cheaper on the element itself (`Animate.Opacity`, a `Transform`, a
+`SpinnerElement`, which repaint without a rebuild) than through a component's `Build()`.
 
 ---
 

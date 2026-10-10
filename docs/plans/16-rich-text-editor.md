@@ -233,9 +233,18 @@ text labels (**B**, *I*, U̲, H1…) by default and takes app artwork per comman
    - **Lines are drawn lines.** `AccessibleText` takes the element's line starts. A line is then
      what is drawn and a paragraph what a newline ends; UIA got a paragraph unit and AT-SPI a
      paragraph granularity for it. Text that does not wrap (the terminal) is unchanged.
-   - **Made on the UI thread.** The snapshot is built from the layout when the tree is built, and
-     bridge threads get the last one built. The tree is built before the frame is drawn, so an
-     editor's first snapshot has no layout; its first paint, a new width or a new theme asks for
+   - **Made when asked (plan 17, 2026-10-10).** The tree takes a version of the text, not the
+     text: the document, the selection and the layout as they were, and the caret's and
+     selection's offsets. The differ compares versions (the document by identity, the text only
+     when two documents of the same length differ, as a formatting change makes), and the text is
+     made from a version when something asks: on the UI thread from the layout; on a bridge's
+     thread from the document alone (its paragraphs as its lines, no boxes), after which the UI
+     thread makes it from the layout, and makes each next version's as it is taken while a reader
+     keeps reading. The value (the plain text) is made on request too. A keystroke in a 5,000-block
+     document with a client listening that never reads went from 1,653 KB to 46 KB, what it costs
+     with no client (45.5 KB): the text (749,017 characters) and its tables were made on every
+     keystroke. With a reader reading, as before. The tree is built before the frame is drawn, so
+     an editor's first version has no layout; its first paint, a new width or a new theme asks for
      the tree again. Geometry is each line's box in document coordinates, plus exact character
      positions for the lines on screen when the snapshot was made (others spread their characters
      evenly). Boxes are placed through a record the paint replaces, so scrolling needs no new

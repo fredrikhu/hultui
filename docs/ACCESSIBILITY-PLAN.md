@@ -60,8 +60,11 @@ Files to add in `src/HultUI.Core/Accessibility/`:
   every change a reader can see. A node takes its children as one array of the
   exact length (leaves share the empty one), and the differ pairs children by
   position while their ids agree, indexing by id only from the first difference:
-  building costs the 136-byte node and 8 bytes in its parent's array, and diffing
-  an unchanged tree allocates only the `TreeDiff` (was 230 and 40 bytes a node).
+  building costs the node and 8 bytes in its parent's array, and diffing an
+  unchanged tree allocates only the `TreeDiff` (was 230 and 40 bytes a node). The
+  node is 80 bytes: the fields few nodes set (description, value, automation id,
+  scroll offset, native content, text and its source) live in an object of their
+  own that only those nodes get (was 136 bytes, those fields in every node).
 - **Evolve `IAccessibilityBridge`** from `Update(root)` to:
   - `bool IsActive { get; }` — cheap "is anyone listening" check, polled per frame
   - `void ApplyChanges(TreeDiff diff)`
@@ -214,8 +217,17 @@ Files:
   `org.a11y.atspi.Socket.Embed`.
 - **`LinuxAccessibilityBridge.cs`** — the `IAccessibilityBridge` impl.
   - `IsActive` returns true once registration with the AT-SPI registry
-    succeeds. No per-poll check like Windows — if nothing was listening,
-    registration fails/returns an empty socket and we stay inactive.
+    succeeds **and** `org.a11y.Status` says assistive technology is on
+    (`IsEnabled` or `ScreenReaderEnabled`, which Orca and accerciser set; the
+    bridge watches the property), as Qt does (2026-10-10, plan 17). The bus is
+    reachable in every GNOME and KDE session, and an active bridge rebuilt the
+    tree and sent AT-SPI every change with no reader running: a keystroke in a
+    603-node form cost 385 KB against 3.2 KB with no bridge. When the status
+    turns on, the window builds the tree afresh and the bridge publishes all of
+    it (a cache-add per object, a cache-remove for anything published before that
+    went while it was off); when it turns off, nothing is built or sent.
+    `HULTUI_ACCESSIBILITY=1` (`AccessibilityClients.Force`) turns it on for a
+    client that never sets the status — a plain pyatspi script, `samples/AtSpiVerify`.
   - `ApplyChanges(diff)`:
     - Added → export new `AtSpiAccessible` on the bus, emit
       `children-changed::add` signal on parent.
@@ -289,13 +301,28 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name.
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
-- **Value** — text inputs.
+- **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
+  AT-SPI `accessible-value` signal, as Chromium tells an `<input>`'s. Not for a node that also
+  offers text (below: the rich text editor, the terminal) (2026-10-10): its change is told as a text
+  change only (UIA `Text_TextChanged`, AT-SPI `text-changed`), and its value is read on request
+  (the ValueValue property and the Value pattern). A rich text keystroke raised a ValueValue change
+  carrying the whole document (749,017 characters, ~1.5 MB as a BSTR) and an `accessible-value`
+  with it over D-Bus. Chromium raises no text in a contenteditable's ValueValue change (Blink does
+  not send the value of a non-atomic text field, `ax_object.cc`; `ax_platform_node_win.cc` answers
+  ValueValue only from that value, `browser_accessibility_manager_win.cc` raises it for
+  `VALUE_IN_TEXT_FIELD_CHANGED`), and on Linux sends `accessible-value` only for a range value
+  (`ax_platform_node_auralinux.cc`, `OnValueChanged`). A multi-line `TextArea` offers no text
+  pattern yet, so its value change stays: it is the only change a reader hears from it.
 - **IsPassword** — a `TextInputElement` with `Masked` set (2026-10-05). Its Value, through
   both the property and the value pattern, is the bullets on screen, never the text: any
   process in the session can ask UIA for it, not only a screen reader. On Linux the node
   takes AT-SPI's `password text` role (40) and the same bullets, and masking or revealing a
   field sends a `property-change:accessible-role` signal.
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
+  Each item node carries its selected state (2026-10-10), and setting `SelectedIndex` asks for
+  a rebuild, so a move is an IsSelected change on the item that had the selection and the one
+  that has it (UIA property events, AT-SPI `state-changed:selected`). Before, a move that
+  scrolled nothing changed no node and no reader was told.
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
   Expand/Collapse reuse the element's click-to-toggle. A change raises the
   ExpandCollapseState property event (2026-10-05), and on Linux the node carries AT-SPI's
@@ -335,7 +362,23 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   ignores both scroll events) and GTK do. Bounds and the offscreen state are read
   from the current tree when a client asks.
 - **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
-  read/set the value and its bounds.
+  read/set the value and its bounds. Each node carries its range (`AccessibilityNode.Range`,
+  2026-10-10), so a move is a `RangeValue` change: UIA raises a RangeValue.Value property change
+  with the value (Minimum, Maximum, SmallChange and LargeChange when those change), as Chromium does
+  for `RANGE_VALUE_CHANGED` and its min/max/step events (`browser_accessibility_manager_win.cc`),
+  and AT-SPI offers `org.a11y.atspi.Value` (MinimumValue, MaximumValue, MinimumIncrement,
+  CurrentValue, settable, and Text) on a slider, a progress bar and a number field, with a
+  `property-change:accessible-value` signal carrying the number, as GTK 4 does
+  (`gtkatspicontext.c`) and Chromium does only for a range value (`ax_platform_node_auralinux.cc`,
+  `OnValueChanged`). A number field's text change and its number change tell AT-SPI once, with the
+  number. Before, a slider or a progress bar that moved told nothing on either platform, and AT-SPI
+  had no Value interface: a keyboard user moving VideoPlayer's Seek slider heard nothing.
+  A range can move on every frame — a drag, a download, a playing video, a key held down — and
+  each refresh rebuilds the whole tree, so the window tells a range's change on the leading edge,
+  then at most every 250 ms, then once with the value it came to rest at (`Window.A11yRangeCoalesceMs`).
+  250 ms is how often Chromium moves a playing video's scrubber (`html_media_element.cc`,
+  `kMaxTimeupdateEventFrequency`; `media_controls_impl.cc` leaves its aria-valuetext alone on
+  `timeupdate`). A progress bar moved every frame for two seconds is told 8–10 times, not 120.
 
 Not yet wired (candidates): container-level `Selection` (needs a SAFEARRAY of
 providers), a UIA `ItemContainer` on virtualized lists.
@@ -348,6 +391,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
   the snapshot the tree was built with, and the source, which the bridges read on their
   own threads between rebuilds. The differ compares snapshots and tells `Text` (with the
   previous node, so a bridge can describe the change) and `TextSelection`.
+  - **Made when asked (2026-10-10).** A source whose text is costly to make on every rebuild
+    (`IVersionedAccessibleTextSource`: the rich text editor's) gives the tree an
+    `AccessibleTextVersion` instead, which the differ compares without making the text, and the
+    node's `Text` and `Value` are made from it on the first ask. The bridges read a node with a
+    source through the source, its value on request (UIA's ValueValue property), so nothing makes
+    the text unless a reader asks or AT-SPI needs it to describe a change.
   - **Lines and paragraphs (2026-10-07).** A paragraph is a `'\n'`-separated run. A line
     is a paragraph unless the element says where its text wraps (`lineStarts`), and then
     it is a line as drawn, which is what a word processor's reader means by one.
@@ -378,7 +427,8 @@ providers), a UIA `ItemContainer` on virtualized lists.
   listened (only the Linux bridge did), so content that describes itself only while one
   listens never did on Windows; it reports from `UiaClientsAreListening` now. The Linux
   bridge advertised `org.a11y.atspi.Value` for every string value, with no handler behind
-  it; AT-SPI's Value is a number, and it is no longer advertised.
+  it; AT-SPI's Value is a number, and it is no longer advertised. (Since 2026-10-10 it is, for a
+  range, with its properties answered: see RangeValue above.)
 
 ## Out of scope (follow-ups)
 

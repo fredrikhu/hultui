@@ -313,6 +313,7 @@ public partial class MeridianApp : Component, IDisposable
             return;
         }
         _workspace = ws;
+        StopResponseWork();
         _tabs.Clear();
         _activeTab = -1;
         RescanWorkspace();
@@ -447,6 +448,7 @@ public partial class MeridianApp : Component, IDisposable
     {
         if (ActiveTab is not { } tab) return;
         tab.Sending?.Cancel();
+        StopResponseWork(tab);
         _tabs.RemoveAt(_activeTab);
         if (_activeTab >= _tabs.Count) _activeTab = _tabs.Count - 1;
         MarkDirty();
@@ -699,6 +701,7 @@ public partial class MeridianApp : Component, IDisposable
     {
         _window.Resized -= OnWindowResize;
         foreach (var tab in _tabs) tab.Sending?.Cancel();
+        StopResponseWork();
         _watcher?.Dispose();
         Engine.Dispose();
     }

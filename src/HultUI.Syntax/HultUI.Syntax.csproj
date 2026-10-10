@@ -23,4 +23,12 @@
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The table tests compare CanHighlight with the registry, and count registry use; so does
+         Meridian's, to show that a response is tokenized on a worker, never on the UI thread. -->
+    <InternalsVisibleTo Include="HultUI.Syntax.Tests" />
+    <InternalsVisibleTo Include="HultUI.Icons.Tests" />
+    <InternalsVisibleTo Include="Meridian.Tests" />
+  </ItemGroup>
+
 </Project>

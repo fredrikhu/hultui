@@ -203,6 +203,62 @@ public class LeafMeasureCacheTests
         Assert.Equal(0, context.Calls);
     }
 
+    /// <summary>A leaf that measures parts of its own and never reads the height — as an empty box, a
+    /// chevron, a sort mark or a calendar do — counting its measurements.</summary>
+    private sealed class FixedPartsLeaf : Element
+    {
+        public int Calls;
+
+        internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
+        {
+            Calls++;
+            return new Size(12, 12);
+        }
+    }
+
+    /// <summary>A leaf whose measurement does read the height, as a video's does (scaled down to fit).</summary>
+    private sealed class HeightReadingLeaf : Element
+    {
+        public HeightReadingLeaf() => IgnoresAvailableHeight = false;
+
+        internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
+            new(10, Math.Min(availableHeight, 100));
+    }
+
+    [Fact]
+    public void ALeafThatIgnoresTheHeightIsMeasuredOnceWhateverHeightIsOffered()
+    {
+        // Every element says it ignores the height unless it reads it. Keyed on the exact height, a
+        // window getting shorter measured each of these again at every height — and the row around
+        // it, and every container above, which can only hold where their children hold.
+        var leaves = Enumerable.Range(0, 20).Select(_ => new FixedPartsLeaf()).ToArray();
+        var root = Flex.Column().Children(leaves.Select(leaf =>
+            (Element)Flex.Row().FlexShrink(0).Children(Text.New("label"), Box.New().FlexGrow(1), leaf)).ToArray());
+        var engine = new LayoutEngine(new CountingMeasureContext());
+        engine.PerformLayout(root, 800, 600);
+        int first = leaves.Sum(l => l.Calls);
+
+        foreach (float height in new[] { 590f, 580f, 420f, 300f, 600f })
+            engine.PerformLayout(root, 800, height);
+
+        Assert.Equal(first, leaves.Sum(l => l.Calls));
+        Assert.All(leaves, l => Assert.Equal(12, l.Layout.Width));
+    }
+
+    [Fact]
+    public void ALeafThatReadsTheHeightIsMeasuredAgainAtEachHeight()
+    {
+        var leaf = new HeightReadingLeaf();
+        var root = Flex.Row().AlignItems(AlignItems.FlexStart).Children(leaf);
+        var engine = new LayoutEngine(new CountingMeasureContext());
+
+        engine.PerformLayout(root, 800, 600);
+        Assert.Equal(100, leaf.Layout.Height);
+
+        engine.PerformLayout(root, 800, 50);
+        Assert.Equal(50, leaf.Layout.Height);
+    }
+
     private static IEnumerable<Element> Flatten(Element e)
     {
         yield return e;

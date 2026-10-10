@@ -1,4 +1,4 @@
-using System.Text.Json;
+using HultUI;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -336,15 +336,19 @@ public partial class MeridianApp
 
             default:
             {
-                var (text, spans) = ResponseBodyTextAndSpans(tab, response);
-                var area = TextArea.New(text);
+                if (ResponseBody(tab, response) is not { } shown)
+                    break;   // this tab's first look at the body is still being formatted
+                var (view, spans, stale) = shown;
+                var area = TextArea.New(view.Text);
                 area.FontFamily(Fonts.Mono).FontSize(12f).TextColor(Azimuth.TextDim).FlexGrow(1);
                 area.ReadOnly = true;
-                area.Spans = spans;
+                area.Spans = DecorateResponseBody(view.LineStarts, spans);
                 area.AutomationId("response-body");
                 area.WithRef(_responseBodyRef);
                 var box = Flex.Column(gap: 0).FlexGrow(1)
                     .Padding(new Thickness(Azimuth.S2, Azimuth.S3, Azimuth.S2, Azimuth.S3));
+                // The previous answer while the new one is formatted, greyed as during a send.
+                if (stale) box.Opacity(0.45f);
                 box.AddChild(area);
                 col.AddChild(box);
                 break;
@@ -353,110 +357,137 @@ public partial class MeridianApp
         return col;
     }
 
-    // The displayed body text + merged spans, memoized per (result, raw-mode):
-    // pretty-printing and re-tokenizing on every repaint would drag the pane.
-    private object? _respBodyMemoKey;
-    private string _respBodyText = "";
-    private string[] _respBodyLines = [];
-    /// <summary>Character offset where each displayed line begins. Both the search tinting and
-    /// the scroll-to-match speak absolute offsets into the flattened body, so this is computed
-    /// once with the text rather than rebuilt on every repaint.</summary>
-    private int[] _respLineStarts = [];
-    private IReadOnlyList<TextSpan>? _respSyntaxSpans;
+    // ── The body's text and colour, made on a worker ────────────────────
+    //
+    // Pretty-printing, splitting and tokenizing a large response took the UI thread for as
+    // long as they ran, in the build that first showed it (see ResponseView). They run on the
+    // thread pool now, one job per tab, response and pretty/raw choice: the body appears when
+    // its text is ready and, past ResponseView.ColourWithTextMaxLines lines, takes its colour
+    // when the tokenize lands. A newer response, the other mode, another tab or a closed tab
+    // stops the job that is no longer wanted (its token), and a result that lands for one is
+    // dropped.
 
-    private (string Text, IReadOnlyList<TextSpan>? Spans) ResponseBodyTextAndSpans(RequestTab tab, HttpResponseData response)
+    private readonly AsyncLoader<ResponseView?> _respViews = new(null);
+    private readonly AsyncLoader<ResponseColour?> _respColours = new(null);
+
+    /// <summary>The body the pane asked for last, and the token that stops its work.</summary>
+    private ResponseJob? _respJob;
+
+    private sealed class ResponseJob(RequestTab tab, HttpResponseData response, bool raw)
     {
-        var key = (response, tab.RespRaw);
-        if (!Equals(_respBodyMemoKey, key))
-        {
-            _respBodyMemoKey = key;
-            string text = tab.RespRaw ? response.Body.Text : Prettify(response);
-            text = text.ReplaceLineEndings("\n");
-            _respBodyText = text;
-            _respBodyLines = text.Split('\n');
-            _respLineStarts = LineStarts(_respBodyLines);
-            _respSyntaxSpans = SyntaxSpans(text, response.ContentType);
+        public RequestTab Tab { get; } = tab;
+        public HttpResponseData Response { get; } = response;
+        public bool Raw { get; } = raw;
+        public CancellationTokenSource Stop { get; } = new();
+        /// <summary>The colour job has been asked for.</summary>
+        public bool Colouring;
+    }
 
-            // (Re)bind the search to the displayed text.
-            var lines = _respBodyLines;
+    /// <summary>The body the pane showed last, with its spans and the tab it was shown for —
+    /// what stays up, greyed, while that tab's next body is formatted.</summary>
+    private ResponseView? _respShown;
+    private IReadOnlyList<TextSpan>? _respShownSpans;
+    private RequestTab? _respShownTab;
+
+    /// <summary>Character offset where each shown line begins (the shown view's). Both the
+    /// search tinting and the scroll-to-match speak absolute offsets into the body.</summary>
+    private int[] _respLineStarts = [];
+
+    /// <summary>
+    /// The body to show for <paramref name="response"/> in <paramref name="tab"/>, and its colour
+    /// spans once they are in. Asks the workers for what is missing. While the text is being
+    /// formatted: the body this tab showed last, <c>Stale</c>, or null when it showed none.
+    /// </summary>
+    private (ResponseView View, IReadOnlyList<TextSpan>? Spans, bool Stale)? ResponseBody(
+        RequestTab tab, HttpResponseData response)
+    {
+        bool raw = tab.RespRaw;
+        var job = _respJob;
+        if (job is null || job.Tab != tab || !ReferenceEquals(job.Response, response) || job.Raw != raw
+            || job.Stop.IsCancellationRequested)
+        {
+            job?.Stop.Cancel();
+            job = _respJob = new ResponseJob(tab, response, raw);
+            var token = job.Stop.Token;
+            _respViews.Load(job, () => FormatOnWorker(response, raw, token));
+        }
+
+        // Reactive reads: the view or its colour landing rebuilds.
+        var view = _respViews.Value;
+        if (view is null || !ReferenceEquals(view.Response, response) || view.Raw != raw)
+            return _respShown is { } shown && _respShownTab == tab ? (shown, _respShownSpans, true) : null;
+
+        var spans = view.Spans;
+        if (view.ColourToCome)
+        {
+            if (_respColours.Value is { } colour && ReferenceEquals(colour.View, view))
+                spans = colour.Spans;
+            else if (!job.Colouring)
+            {
+                job.Colouring = true;
+                var token = job.Stop.Token;
+                _respColours.Load(job, () => ColourOnWorker(view, token));
+            }
+        }
+
+        if (!ReferenceEquals(_respShown, view))
+        {
+            // (Re)bind the search to the shown text.
+            _respLineStarts = view.LineStarts;
+            var lines = view.Lines;
             _responseFind.Search.Bind(lines.Length, lanes: 1,
                 (line, _) => line >= 0 && line < lines.Length ? lines[line] : null);
         }
-        return (_respBodyText, DecorateResponseBody(_respLineStarts, _respSyntaxSpans));
+        _respShown = view;
+        _respShownSpans = spans;
+        _respShownTab = tab;
+        return (view, spans, false);
     }
 
-    private static int[] LineStarts(string[] lines)
+    private static ResponseView? FormatOnWorker(HttpResponseData response, bool raw, CancellationToken token)
     {
-        var starts = new int[lines.Length];
-        int offset = 0;
-        for (int i = 0; i < lines.Length; i++) { starts[i] = offset; offset += lines[i].Length + 1; }
-        return starts;
+        try { return ResponseView.Format(response, raw, token); }
+        catch (OperationCanceledException) { return null; }
     }
 
-    /// <summary>Pretty mode: JSON re-indented via a real parse; anything that
-    /// isn't valid JSON (or isn't JSON at all) shows as received.</summary>
-    internal static string Prettify(HttpResponseData response)
+    private static ResponseColour? ColourOnWorker(ResponseView view, CancellationToken token)
     {
-        if (response.Body.Truncated) return response.Body.Text;   // a cut JSON never parses
-        var ct = response.ContentType;
-        bool json = ct != null && (ct.Contains("/json", StringComparison.OrdinalIgnoreCase)
-            || ct.Contains("+json", StringComparison.OrdinalIgnoreCase));
-        if (!json) return response.Body.Text;
-        try
-        {
-            // Utf8JsonWriter, not JsonSerializer: no reflection, so Native AOT
-            // has nothing to trim away.
-            using var doc = JsonDocument.Parse(response.Body.Text);
-            using var buffer = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
-                doc.WriteTo(writer);
-            return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
-        }
-        catch (JsonException)
-        {
-            return response.Body.Text;
-        }
+        try { return new ResponseColour(view, ResponseView.Highlight(view, token)); }
+        catch (OperationCanceledException) { return null; }
     }
 
-    private static IReadOnlyList<TextSpan>? SyntaxSpans(string text, string? contentType)
+    /// <summary>Test seam: the token that stops the body work the pane asked for last.</summary>
+    internal CancellationToken ResponseWorkToken => _respJob?.Stop.Token ?? CancellationToken.None;
+
+    /// <summary>Stops the body work for <paramref name="tab"/> (any tab when null): it is
+    /// closing, or the app is.</summary>
+    private void StopResponseWork(RequestTab? tab = null)
     {
-        string? ext = contentType switch
-        {
-            null => null,
-            var ct when ct.Contains("json", StringComparison.OrdinalIgnoreCase) => ".json",
-            var ct when ct.Contains("xml", StringComparison.OrdinalIgnoreCase) => ".xml",
-            var ct when ct.Contains("html", StringComparison.OrdinalIgnoreCase) => ".html",
-            _ => null,
-        };
-        if (ext == null) return null;
-
-        IReadOnlyList<TextSpan>[]? perLine = null;
-        try { perLine = HultUI.Syntax.SyntaxHighlighter.TokenizeLines("response" + ext, text); }
-        catch { /* highlight is best-effort */ }
-        if (perLine == null) return null;
-
-        // Flatten per-line spans to absolute offsets into the joined text.
-        var lines = text.Split('\n');
-        var flat = new List<TextSpan>();
-        int offset = 0;
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (i < perLine.Length && perLine[i] is { } lineSpans)
-                foreach (var s in lineSpans)
-                    flat.Add(new TextSpan(offset + s.Start, s.Length, s.Color, s.Background));
-            offset += lines[i].Length + 1;
-        }
-        return flat;
+        if (_respJob is { } job && (tab is null || job.Tab == tab))
+            job.Stop.Cancel();
     }
 
     /// <summary>Search tints merged into the syntax spans, both in absolute
     /// offsets — and sorted, because TextArea slices the list per visible line
     /// and stops at the first span past the line end (the lesson Junction's
-    /// Files view learned the hard way).</summary>
+    /// Files view learned the hard way).
+    ///
+    /// <para>Kept between builds while the spans, the text and the search stay the same: the
+    /// app rebuilds whole on every keystroke in the URL or body editor, and a merge per build
+    /// copied and sorted every span and made the body index the new list again — with find
+    /// open on an 18,884-line response 9 ms and 2.9 MB a keystroke, on a 98,004-line one
+    /// coloured ~15 ms and 14.5 MB.</para></summary>
     private IReadOnlyList<TextSpan>? DecorateResponseBody(int[] starts, IReadOnlyList<TextSpan>? syntax)
     {
         var search = _responseFind.Search;
         if (!search.HasHits) return syntax;
+
+        // The hits follow from the query, its options and the bound text (one per shown view,
+        // so its line starts name it); the tint from the current one.
+        var key = (search.Query, search.MatchCase, search.UseRegex, search.Index, search.Hits.Count);
+        if (_decorated is not null && ReferenceEquals(_decoratedSyntax, syntax)
+            && ReferenceEquals(_decoratedStarts, starts) && _decoratedSearch == key)
+            return _decorated;
 
         var current = search.Current;
         var merged = syntax is null ? new List<TextSpan>() : new List<TextSpan>(syntax);
@@ -468,8 +499,13 @@ public partial class MeridianApp
                 isCurrent ? Azimuth.Alpha(Azimuth.Accent, 0.55) : Azimuth.Alpha(Azimuth.Accent700, 0.55)));
         }
         merged.Sort(static (a, b) => a.Start.CompareTo(b.Start));
+        (_decorated, _decoratedSyntax, _decoratedStarts, _decoratedSearch) = (merged, syntax, starts, key);
         return merged;
     }
+
+    private IReadOnlyList<TextSpan>? _decorated, _decoratedSyntax;
+    private int[]? _decoratedStarts;
+    private (string Query, bool MatchCase, bool UseRegex, int Index, int Count) _decoratedSearch;
 
     // ── Headers / Cookies / Timeline ─────────────────────────────────────
 

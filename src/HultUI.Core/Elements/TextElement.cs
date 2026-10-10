@@ -34,8 +34,48 @@ public class TextElement : Element
         }
     }
 
-    public TextOverflow Overflow { get; set; } = TextOverflow.Clip;
-    public int? MaxLines { get; set; }
+    private TextOverflow _overflow = TextOverflow.Clip;
+    private int? _maxLines;
+
+    /// <summary>What a line too long for the box shows at its end. A change lays the label out
+    /// again: its measured width, its flex base and its automatic minimum all depend on it.</summary>
+    public TextOverflow Overflow
+    {
+        get => _overflow;
+        set
+        {
+            if (_overflow == value) return;
+            _overflow = value;
+            WrapChanged();
+        }
+    }
+
+    /// <summary>The most lines the label wraps to, or null for no limit. A change lays the label out
+    /// again, as <see cref="Overflow"/> does.</summary>
+    public int? MaxLines
+    {
+        get => _maxLines;
+        set
+        {
+            if (_maxLines == value) return;
+            _maxLines = value;
+            WrapChanged();
+        }
+    }
+
+    /// <summary>
+    /// Lays the label out and paints it again after <see cref="MaxLines"/> or
+    /// <see cref="Overflow"/> changed — unless it is marked for both already, as every label is
+    /// from its construction until its first frame. Marking again would then change nothing, and
+    /// the marks check the thread: a builder's <c>.MaxLines(1)</c> on a new label, which before
+    /// these setters marked anything ran on whatever thread built it, threw in a Debug build when
+    /// that was not the UI thread.
+    /// </summary>
+    private void WrapChanged()
+    {
+        if ((DirtyFlags & DirtyFlags.Layout) == 0) MarkLayoutDirty();
+        if ((DirtyFlags & DirtyFlags.Paint) == 0) MarkPaintDirty();
+    }
 
     private IReadOnlyList<TextSpan>? _spans;
 
@@ -470,7 +510,7 @@ public class TextElement : Element
             ? pos - 1
             : pos;
 
-    // Content and Spans mark their layout when they change; Overflow and MaxLines are checked below.
+    // Content, Spans, Overflow and MaxLines mark their layout when they change.
     private protected override bool PatchMarksOwnLayout => GetType() == typeof(TextElement);
 
     internal override void PatchFrom(Element source)
@@ -478,8 +518,6 @@ public class TextElement : Element
         base.PatchFrom(source);
         if (source is TextElement text)
         {
-            if (Overflow != text.Overflow || MaxLines != text.MaxLines)
-                MarkLayoutDirty();
             Content = text.Content;
             Overflow = text.Overflow;
             MaxLines = text.MaxLines;
@@ -549,20 +587,40 @@ public class TextElement : Element
         if (hitTestable)
         {
             _contentBox = contentBox;
-            // The same layout DrawText draws below — same text, style, width, spans, line limit
-            // and overflow, so the same cache entry — kept so a click reads the drawn lines.
-            _paragraph = ctx.LayoutParagraph(Content, style, contentBox.Width, _spans, MaxLines, Overflow);
+            // The lines a click reads are the lines drawn: one paragraph, laid out from the text,
+            // style, width, spans, line limit and overflow DrawText would lay out, and kept from
+            // frame to frame until one of them changes. A frame that only moves the label (a
+            // scroll) or repaints around it (a hover) draws the one it has: a new one every frame
+            // was ~320 B a label, 10 KB a frame over a screen of diff or file viewer lines
+            // (plan 17, round 2).
+            if (_paragraph is not { } paragraph || !StillLaidOutAs(paragraph, style, contentBox.Width))
+                _paragraph = paragraph = ctx.LayoutParagraph(Content, style, contentBox.Width, _spans, MaxLines, Overflow);
             if (_selectable && HasSelection)
-                DrawSelection(ctx, _paragraph, style);
+                DrawSelection(ctx, paragraph, style);
+            // Drawn from it too, rather than looked up again by DrawText: at the box's width a
+            // line's LineLeft is DrawText's alignment offset, so the glyphs land where DrawText
+            // puts them.
+            ctx.DrawParagraph(paragraph, new Point(contentBox.X, contentBox.Y));
+            return;
         }
-        else
-            _paragraph = null;
 
+        _paragraph = null;
         if (_spans is { Count: > 0 } spans)
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, spans);
         else
             ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);
     }
+
+    /// <summary>Whether <paramref name="paragraph"/> is what laying this label out now would give:
+    /// everything it was laid out from is as it was. Spans compare by reference — the setter keeps
+    /// the list it has when handed an equal one, so only a real change replaces it.</summary>
+    private bool StillLaidOutAs(TextParagraph paragraph, ResolvedInheritedStyle style, float width) =>
+        paragraph.MaxWidth == width
+        && paragraph.Style == style
+        && ReferenceEquals(paragraph.Spans, _spans)
+        && paragraph.MaxLines == MaxLines
+        && paragraph.Overflow == Overflow
+        && paragraph.Text == _content;
 
     /// <summary>The border box and the text's ink, which overflows it whenever the text is
     /// longer than the box. A selection is left unbounded: its highlight runs past a line's
