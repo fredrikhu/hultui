@@ -72,6 +72,16 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private int[] _spanReach = [];
     private readonly List<TextSpan> _lineSpans = [];
 
+    // The text of each line drawn last frame, from line _shownFrom on, cut by the line starts in
+    // _shownStarts: a frame that draws the same lines — a caret blink, a selection drag, a wheel
+    // step that moves most of them — draws the same strings instead of cutting each anew.
+    // _shownNext is the other array, which the next frame fills.
+    private string?[] _shown = [];
+    private string?[] _shownNext = [];
+    private List<int>? _shownStarts;
+    private int _shownFrom;
+    private int _shownCount;
+
     // Preferred column (in pixels) for up/down navigation
     private float _preferredX = -1;
 
@@ -1412,13 +1422,17 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// not, so the mapping goes through the render context's laid-out line.
     /// </summary>
     private float CaretXOnLine(int lineStart, int lineEnd, int pos, ResolvedInheritedStyle style)
+        => CaretXOnLine(-1, lineStart, lineEnd, pos, style);
+
+    // The same for visual line number `line`, whose text is the shown line's while it is on screen.
+    private float CaretXOnLine(int line, int lineStart, int lineEnd, int pos, ResolvedInheritedStyle style)
         => _renderCtx is null
             ? MeasureSubstring(lineStart, pos - lineStart, style)
-            : _renderCtx.TextCaretX(_text[lineStart..lineEnd], style, pos - lineStart);
+            : _renderCtx.TextCaretX(LineText(line, lineStart, lineEnd), style, pos - lineStart);
 
     /// <summary>Visual x-ranges covering <c>[from, to)</c> on one visual line.</summary>
     private IReadOnlyList<TextRangeBox> SelectionRangesOnLine(
-        int lineStart, int lineEnd, int from, int to, ResolvedInheritedStyle style)
+        int line, int lineStart, int lineEnd, int from, int to, ResolvedInheritedStyle style)
     {
         if (to <= from) return [];
         if (_renderCtx is null)
@@ -1428,7 +1442,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             return b > a ? [new TextRangeBox(a, b)] : [];
         }
         return _renderCtx.TextSelectionRanges(
-            _text[lineStart..lineEnd], style, from - lineStart, to - lineStart);
+            LineText(line, lineStart, lineEnd), style, from - lineStart, to - lineStart);
     }
 
     /// <summary>The character range of a visual line, excluding a trailing newline.</summary>
@@ -1506,6 +1520,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         // Determine visible line range
         int firstVisible = Math.Max(0, (int)(_scrollOffsetY / lh));
         int lastVisible = Math.Min(lineCount - 1, (int)((_scrollOffsetY + contentBox.Height) / lh));
+        ShowLines(starts, firstVisible, lastVisible);
 
         // Draw selection highlight
         if (HasSelection)
@@ -1521,16 +1536,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         {
             for (int i = firstVisible; i <= lastVisible; i++)
             {
-                int lineStart = starts[i];
-                int lineEnd = i + 1 < starts.Count ? starts[i + 1] : _text.Length;
-                // Strip trailing \n for display
-                int displayEnd = lineEnd;
-                if (displayEnd > lineStart && displayEnd <= _text.Length && _text[displayEnd - 1] == '\n')
-                    displayEnd--;
-
+                var (lineStart, displayEnd) = VisualLineRange(starts, i);
                 if (displayEnd > lineStart)
                 {
-                    string lineText = _text[lineStart..displayEnd];
+                    string lineText = _shown[i - firstVisible]!;
                     float lineY = contentBox.Y + i * lh - _scrollOffsetY;
                     var lineRect = new Rect(contentBox.X, lineY, wrapWidth, lh);
                     var lineSpans = SpansForLine(lineStart, displayEnd);
@@ -1548,7 +1557,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             if (cursorLine < 0)
                 (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
             var (cursorLineStart, cursorLineEnd) = VisualLineRange(starts, cursorLine);
-            float cursorBaseX = contentBox.X + CaretXOnLine(cursorLineStart, cursorLineEnd, _cursorPos, style);
+            float cursorBaseX = contentBox.X + CaretXOnLine(cursorLine, cursorLineStart, cursorLineEnd, _cursorPos, style);
             float cy = contentBox.Y + cursorLine * lh - _scrollOffsetY;
 
             float caretX = cursorBaseX;
@@ -1656,6 +1665,40 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         return result.Count == 0 ? null : result;
     }
 
+    // Fills _shown with the text of visual lines [first..last] (null for an empty one): last
+    // frame's string for each line it showed, if it was cut by the same line starts — a new list
+    // whenever the text or the wrap changes — and a new one for the rest.
+    private void ShowLines(List<int> starts, int first, int last)
+    {
+        int keptFrom = 0, keptCount = 0;
+        if (ReferenceEquals(_shownStarts, starts))
+            (keptFrom, keptCount) = (_shownFrom, _shownCount);
+        int count = Math.Max(0, last - first + 1);
+        if (_shownNext.Length < count)
+            _shownNext = new string?[count + 8];
+        for (int i = first; i <= last; i++)
+        {
+            var (lineStart, displayEnd) = VisualLineRange(starts, i);
+            _shownNext[i - first] = displayEnd <= lineStart ? null
+                : i >= keptFrom && i < keptFrom + keptCount ? _shown[i - keptFrom]
+                : _text[lineStart..displayEnd];
+        }
+        (_shown, _shownNext) = (_shownNext, _shown);
+        Array.Clear(_shownNext);  // last frame's lines: the new array keeps those still shown
+        (_shownStarts, _shownFrom, _shownCount) = (starts, first, count);
+    }
+
+    // The text of [lineStart..lineEnd): the shown string of visual line `line` when that is the
+    // line on screen, cut anew otherwise.
+    private string LineText(int line, int lineStart, int lineEnd)
+    {
+        if (line >= _shownFrom && line < _shownFrom + _shownCount && ReferenceEquals(_shownStarts, _lineStarts)
+            && _shown[line - _shownFrom] is { } shown && shown.Length == lineEnd - lineStart
+            && _shownStarts![line] == lineStart)
+            return shown;
+        return _text[lineStart..lineEnd];
+    }
+
     private void RenderSelection(IRenderContext ctx, Rect contentBox, ResolvedInheritedStyle style,
         List<int> starts, float lh, int firstVisible, int lastVisible)
     {
@@ -1683,7 +1726,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             // (displayEnd = lineEnd - 1) and a soft wrap (displayEnd = lineEnd), so
             // wrapped mid-selection lines extend just like hard-broken ones.
             bool continues = selEnd > displayEnd && selStart <= displayEnd;
-            float leadingX = ls > lineStart ? CaretXOnLine(lineStart, displayEnd, ls, style) : 0;
+            float leadingX = ls > lineStart ? CaretXOnLine(i, lineStart, displayEnd, ls, style) : 0;
             if (continues)
             {
                 if (contentBox.Width > leadingX)
@@ -1694,7 +1737,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
             // One rect per contiguous visual stretch — a selection that crosses a
             // direction boundary covers two pieces of the line, not the gap between.
-            foreach (var r in SelectionRangesOnLine(lineStart, displayEnd, ls, le, style))
+            foreach (var r in SelectionRangesOnLine(i, lineStart, displayEnd, ls, le, style))
                 if (r.X1 > r.X0)
                     ctx.DrawRect(new Rect(contentBox.X + r.X0, lineY, r.X1 - r.X0, lh), SelectionColor);
         }

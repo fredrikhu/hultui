@@ -177,6 +177,75 @@ public class TextAreaLineWidthTests
         AssertWidthsAreTheLinesOwn(area, "after a text that shares its ends");
     }
 
+    // What a frame drew, in order.
+    private sealed class Drawing : NullRenderContext
+    {
+        public readonly List<string> Drawn = [];
+
+        public override Size MeasureText(string text, ResolvedInheritedStyle style) =>
+            new(Counting.Width(text, style), style.FontSize);
+
+        public override void DrawText(string text, Rect bounds, ResolvedInheritedStyle style,
+            TextOverflow overflow, int? maxLines) => Drawn.Add(text);
+
+        public List<string> Frame(TextAreaElement area)
+        {
+            Drawn.Clear();
+            area.Render(this);
+            return Drawn.ToList();
+        }
+    }
+
+    /// <summary>
+    /// A frame that draws the lines the last one drew draws the same strings — the text is not
+    /// cut into lines again for a caret blink or a wheel step — and each is still its line's text
+    /// after an edit, a scroll or a resize.
+    /// </summary>
+    [Fact]
+    public void ARepaint_DrawsLastFramesLineStrings_WhileTheyAreStillTheLines()
+    {
+        var ctx = new Drawing();
+        var (area, root) = Mount(Lines(new Random(4), 200), width: 300);
+
+        void AssertDrawnAreTheLines(List<string> drawn, string when)
+        {
+            float wrapWidth = area.Layout.AbsoluteContentBox.Width;
+            var starts = area.GetLineStarts(wrapWidth, area.ResolvedInherited);
+            var shown = new List<string>();
+            for (int i = 0; i < starts.Count; i++)
+            {
+                int end = i + 1 < starts.Count ? starts[i + 1] : area.Text.Length;
+                if (end > starts[i] && area.Text[end - 1] == '\n') end--;
+                if (end > starts[i]) shown.Add(area.Text[starts[i]..end]);
+            }
+            int first = shown.IndexOf(drawn[0]);
+            Assert.True(first >= 0, $"{when}: \"{drawn[0]}\" is no line of the text");
+            Assert.True(drawn.SequenceEqual(shown.Skip(first).Take(drawn.Count)), $"{when}: the lines drawn are not the text's");
+        }
+
+        var first = ctx.Frame(area);
+        Assert.True(first.Count > 10);
+        var again = ctx.Frame(area);
+        Assert.Equal(first.Count, again.Count);
+        for (int i = 0; i < first.Count; i++)
+            Assert.Same(first[i], again[i]);
+
+        // Scrolled by a few lines: the lines still on screen are the same strings.
+        area.ScrollOffsetY = 3 * area.ResolvedInherited.FontSize * 1.4f;
+        var scrolled = ctx.Frame(area);
+        AssertDrawnAreTheLines(scrolled, "after a scroll");
+        Assert.Contains(scrolled, s => first.Any(f => ReferenceEquals(f, s)));
+
+        // Typed into and resized: the text and the wrap changed, and so did what is drawn.
+        Type(area, area.Text.IndexOf('\n', 40) - 1, "typed in here");
+        AssertDrawnAreTheLines(ctx.Frame(area), "after typing");
+        area.Box.Width = 200;
+        _layout.PerformLayout(root, 900, 400);
+        AssertDrawnAreTheLines(ctx.Frame(area), "after a resize");
+        area.Text = Lines(new Random(5), 200);
+        AssertDrawnAreTheLines(ctx.Frame(area), "after a new text");
+    }
+
     [Fact]
     public void AfterRandomEdits_EveryKeptWidthIsItsOwnLines_AndTheLineStartsAreAFreshAreas()
     {

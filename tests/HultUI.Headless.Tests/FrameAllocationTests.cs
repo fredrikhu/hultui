@@ -172,6 +172,40 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"repainting 43 selectable and linked labels allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>A TextArea of syntax-coloured code, read-only as a viewer is and editable with the
+    /// caret on a line, repainted, as a caret blink or a search tint repaints it. It cut each
+    /// line it drew out of its text again every frame, and the caret's line too: ~3 KB a frame
+    /// over a screen of JSON. It keeps last frame's line strings while its line starts stand.
+    /// (A selection still allocates the array of its boxes on a line it does not fill.)</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ASteadyRepaintOfATextArea_AllocatesNothing(bool readOnly)
+    {
+        var text = string.Join('\n', Enumerable.Range(0, 300).Select(i => $"    \"field_{i}\": \"value {i * 7919 % 10_007}\","));
+        var spans = new List<Core.Rendering.TextSpan>();
+        int at = 0;
+        foreach (var line in text.Split('\n'))
+        {
+            spans.Add(new(at + 4, line.IndexOf(':') - 4, Color.FromHex("#4EC9B0")));
+            spans.Add(new(at + line.IndexOf(':') + 2, line.Length - line.IndexOf(':') - 3, Color.FromHex("#CE9178")));
+            at += line.Length + 1;
+        }
+        var area = TextArea.New(text).FlexGrow(1).FontFamily(Core.Styling.FontFamilies.Monospace).FontSize(12f);
+        area.Spans = spans;
+        area.ReadOnly = readOnly;
+        using var session = Session(Flex.Column().FlexGrow(1).Children(area));
+        area.Focus();
+        area.CursorPosition = 40;
+        session.Window.PressKey(KeyCode.Down);
+        for (int i = 0; i < 4; i++) session.Application.RunFrame(Frame);
+        Assert.True(area.IsFocused);
+
+        double perFrame = PerFrame(session.Application, () => area.MarkPaintDirty());
+
+        Assert.True(perFrame < 1, $"repainting a TextArea allocated {perFrame:0.#} B per frame");
+    }
+
     /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key
     /// and focus events. It was ~28 KB per Tab (a tree walk with a boxed enumerator per
     /// container, a fresh list, and a sort of keys that were all equal); the bound is far above
