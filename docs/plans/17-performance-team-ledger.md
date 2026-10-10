@@ -258,6 +258,7 @@ Re-ranked by the round 4 survey.
 | 2 | a96c185 | junction-history-item-rows | Junction History on item rows (shape key: stats, compact, theme): rows per key 17 → 2.83; realize 0.155 → 0.072 ms JIT, 0.20 → 0.079 AOT; 212 → 41 KB per key (−80 %); frame bytes −53 %, frame time −7 % JIT / −10 % AOT (headless, 80 keys). 16/17 frames byte-identical; the 17th fixes hover lost on a key press. |
 | 2 | 337140a | wsl-shaper-real-fonts | d049be7 bit-identical on real Linux faces: 116,438 shaper calls, 0 differences, 80 faces, 0 missing glyphs in every script; Text 192/192, goldens 39/39 in WSL. New test that the corpus reaches real glyphs (mutation caught). |
 | 2 | 595b8dd | wayland-minimized-restore | Correctness (found in WSL): after the app minimizes its own window on Wayland, SDL keeps the minimized flag after a restore, so since 82e382b the window stayed undrawn (0 frames in 15 s). A focus gain after a minimize now ends the minimized state on Wayland. Also verified: 0f5816a on Mesa gets depth 24/stencil 8 anyway (no stencil-only config; no saving, no risk, 48 contexts, 0 failures); Vulkan on lavapipe and Dozen pixel-exact through resizes, validation 0 messages; destroy-first not taken on Linux. WSL Linux suite: 9,917 passed, 0 failed. |
+| 3 | e0b816f | vesper-grid-resize | User report (2026-10-10): after a window resize the thumbnail area kept the old width until a key press. Brief and Thumbnail grids are sized in the build from the window, but a resize rebuilt only for a scale change or a wrapped diff/viewer. Now rebuilds when either pane shows Brief or Thumbnails. Correctness; two headless tests (fail without it). |
 
 ## Examined, not worth it
 
@@ -442,3 +443,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   round 2 regressions (82e382b, 7e52ff5, 0912a5e) and a UIA closed-window leak lead the queue;
   16 build steps, 13 questions for the user; survey worktrees removed (probe code kept in the
   scratchpad). Paused for a break at the user's request.
+- 2026-10-10: two user reports during the pause. Vesper's thumbnail area kept its old width after a
+  resize until a key press: fixed e0b816f (Brief and Thumbnails rebuild on resize). Aperture's Home
+  resizes much slower than other apps: an app-workloads diagnosis agent is measuring it (Vulkan F16
+  swapchain vs whole-app rebuild per step vs card pictures); result goes into the round 3 build.
