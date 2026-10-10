@@ -114,7 +114,7 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 16. ~~**meridian-response-format-on-ui-thread + syntax-maxlines-uncoloured**~~ LANDED 466dce0, 9b512c6 (8/5; approved)
     — prettify and tokenize on the request worker (15.3 ms on the UI thread today), then
     colour responses over 20,000 lines.
-17. **layout-virtuallist-item-rows** (1; approved) — opt-in `RenderWith((item, selected) =>
+17. ~~**layout-virtuallist-item-rows**~~ LANDED 545d1b6, a96c185, b9e5a78 (1; approved) — opt-in `RenderWith((item, selected) =>
     …)` VirtualList API (walk template calls 19 → 3, −75 % bytes), adopted in Junction
     History first, then other lists one at a time.
 18. **wsl-mesa-verify** (3/5; approved) — Mesa 26.2.3 (EGL, DRI, Vulkan: Dozen on the RTX 4080
@@ -125,6 +125,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 
 ### Waiting
 
+- **adopt-item-rows** (1/8) — move more lists onto `RenderWith`: Junction Commit, Files, Branches, Tags; Vesper panes; Aperture's poster grid; TableView (must call InvalidateRows on width, sort, hide). One at a time, each with a shape key and tests per input.
+- **virtuallist-row-style-inheritance** (1, correctness, changes pixels) — one-argument rows are resolved inline under the theme's defaults, not under their list, so an ancestor's inherited text style (e.g. `.TextColor(X)`) is ignored by those rows (confirmed by a test variant). Fix = resolve under the list (545d1b6 added `StyleResolver.ResolveUnder`). Changes pixels where an ancestor sets text style.
 - **test-vesper-diffview-escape-flake** (8, test) — `DiffViewTests.EscapeStillClosesTheViewWhileItIsComparing` failed once under load (races a background diff), passed alone 3× and in a rerun. Watch for it in CI.
 - **a11y-videoplayer-layout-refresh** (7) — a playing VideoPlayer rebuilds the a11y tree ~10.5×/s from the bar's per-frame layout refresh (100 ms coalescer). Investigate.
 - **a11y-textarea-text-pattern** (7) — TextArea has no text pattern, so it keeps the whole-text Value change; give it one (like the rich text editor).
@@ -239,6 +241,8 @@ separate commits. Items marked **(user)** wait for a decision in Needs the user.
 | 2 | 074d898, 333d7de | linux-bridge-sync-context | Correctness (found by the live check): the Linux bridge's connecting constructor hung under HultUI's UI SynchronizationContext. Now connects at once; samples/AtSpiVerify bulk check PASS (also live-verifies d40d301). |
 | 2 | 466dce0 | meridian-response-format-on-ui-thread | Prettify, split, line starts and tokenize on the thread pool, cancellable (new response, mode, tab switch, close); plain first above 2,000 lines, colour when spans land. 18,884-line JSON: UI time to text 108.4 → 2.53 ms (−98 %), to colour 4.04 ms; 312 KB response 3.8 → 1.4 ms. Headless JIT. |
 | 2 | 9b512c6 | syntax-maxlines-uncoloured | Meridian colours responses up to 200,000 lines (JSON ~5.5 µs a line on a worker; 98k lines 0.54 s, 4.7 MB of spans; the 2 M-character cap stops JSON near 100k lines). Merged find list kept between builds: URL keystroke with find open 8.4 → 1.8 ms, 2,945 → 178 KB. Junction/Vesper keep the 20,000 default (already on workers). |
+| 2 | 545d1b6, b9e5a78 | layout-virtuallist-item-rows | Opt-in `.RenderWith((item, selected) => …)` (`ItemRowTemplate`): kept rows whose item (EqualityComparer) and selected state are unchanged; `InvalidateRows()` for anything else; theme object switch re-makes rows. Twin row virtual/selection walk 1,000 item rows: rows per step 19 → 3, 96.8 → 25.7 KB/op (−73.5 %), −6 % JIT / −10 % AOT; layouts −72 %, resolves −40 %; a11y tree and pixels identical to the old template; 0 slower. |
+| 2 | a96c185 | junction-history-item-rows | Junction History on item rows (shape key: stats, compact, theme): rows per key 17 → 2.83; realize 0.155 → 0.072 ms JIT, 0.20 → 0.079 AOT; 212 → 41 KB per key (−80 %); frame bytes −53 %, frame time −7 % JIT / −10 % AOT (headless, 80 keys). 16/17 frames byte-identical; the 17th fixes hover lost on a key press. |
 
 ## Examined, not worth it
 
