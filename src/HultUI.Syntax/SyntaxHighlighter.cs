@@ -33,12 +33,10 @@ public static class SyntaxHighlighter
     private static Color? _defaultFg;
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
-    // Concurrent, and read outside Gate on purpose. A tokenize holds Gate for as long as it
-    // takes to parse the file — tens of milliseconds for a large one — and the UI thread asks
-    // CanHighlight once per visible row per frame. Sharing one lock meant a background
-    // tokenize stalled the very frame that was meant to show the text it had already read.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> CanHighlightByExt =
-        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How many times this thread has needed the registry, loaded or not. A test
+    /// reads it to show that a question answered from a table never touched it.</summary>
+    [ThreadStatic] internal static int RegistryUsesOnThisThread;
 
     /// <summary>
     /// Extensions absent from TextMateSharp's bundled language table that are
@@ -109,27 +107,14 @@ public static class SyntaxHighlighter
     /// such a list silently diverges from the grammar set, which is exactly how
     /// <c>.slnx</c>, <c>.csproj</c>, and <c>.ps1</c> ended up highlighting in one app
     /// and not the other.</para>
+    ///
+    /// <para>A file list asks once per visible row per frame, so this is answered from a
+    /// table of the bundled grammars' extensions (<see cref="BundledGrammarExtensions"/>):
+    /// it neither loads the registry — 5 MB and up to 10 ms on the UI thread, the first
+    /// time — nor takes the gate a running tokenize holds.</para>
     /// </summary>
-    public static bool CanHighlight(string path)
-    {
-        var ext = ResolveExtension(path);
-        if (ext is null) return false;
-        // Answer from the cache without taking Gate: a running tokenize holds it, and a file
-        // list asking per row per frame must not queue behind a parse.
-        if (CanHighlightByExt.TryGetValue(ext, out var cached)) return cached;
-        lock (Gate)
-        {
-            if (CanHighlightByExt.TryGetValue(ext, out var known)) return known;
-            EnsureRegistry();
-            // Scope lookup only — deliberately NOT LoadGrammar. A file list asks this
-            // once per visible row per frame, and loading a grammar means parsing a
-            // sizeable JSON on the UI thread for a language that may never be shown.
-            // The real load stays deferred to the first tokenize.
-            bool can = _options!.GetScopeByExtension(ext) != null;
-            CanHighlightByExt[ext] = can;
-            return can;
-        }
-    }
+    public static bool CanHighlight(string path) =>
+        ResolveExtension(path) is { } ext && BundledGrammarExtensions.All.Contains(ext);
 
     /// <summary>
     /// Tokenizes <paramref name="text"/> as the language implied by
@@ -247,13 +232,14 @@ public static class SyntaxHighlighter
             GrammarByExt.Clear();
             ColorById.Clear();
         }
-        // Which extensions are highlightable does not depend on the theme, so that cache
-        // survives — and it is read outside Gate, which clearing it under Gate would not fix.
+        // Which extensions are highlightable does not depend on the theme: CanHighlight answers
+        // from a fixed table.
         return true;
     }
 
     private static void EnsureRegistry()
     {
+        RegistryUsesOnThisThread++;
         if (_registry != null) return;
         _options = new RegistryOptions(_themeName);
         _registry = new Registry(_options);
@@ -269,7 +255,7 @@ public static class SyntaxHighlighter
     /// nothing maps. Pure string work, so both the predicate and the loader share it
     /// without either touching the registry.
     /// </summary>
-    private static string? ResolveExtension(string path)
+    internal static string? ResolveExtension(string path)
     {
         var ext = System.IO.Path.GetExtension(path);
         if (ext.Length == 0)

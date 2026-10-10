@@ -54,7 +54,7 @@ var kind = FileIcons.KindFor(entry.Name, entry.IsDir);
 var glyph = FileIcons.Draw(kind, palette, tint: null, size: 16f, scale: displayScale);
 ```
 
-`KindFor` matches specific families first, then **defers to the syntax highlighter** — whatever `HultUI.Syntax` can colour gets the code glyph. That is deliberate: a hand-written list of "code" extensions drifts from the grammar set, and two apps' lists drift from each other. `FileIconPalette` takes six theme colours, so the library tints itself from your palette without knowing your theme.
+`KindFor` matches specific families first, then **defers to the syntax highlighter** — whatever `HultUI.Syntax` can colour gets the code glyph. That is deliberate: a hand-written list of "code" extensions drifts from the grammar set, and two apps' lists drift from each other. Asking is a table lookup, safe per row per frame: `SyntaxHighlighter.CanHighlight` answers from the bundled grammars' extensions and does not load TextMate's registry (about 5 MB and 7 ms in NativeAOT, 30 ms under the JIT). The first tokenize does load it, so tokenize off the UI thread. `FileIconPalette` takes six theme colours, so the library tints itself from your palette without knowing your theme.
 
 ### Context menus
 

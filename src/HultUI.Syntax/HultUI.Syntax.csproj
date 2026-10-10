@@ -23,4 +23,10 @@
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The table tests compare CanHighlight with the registry, and count registry use. -->
+    <InternalsVisibleTo Include="HultUI.Syntax.Tests" />
+    <InternalsVisibleTo Include="HultUI.Icons.Tests" />
+  </ItemGroup>
+
 </Project>
