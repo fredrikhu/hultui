@@ -4,18 +4,17 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 2
-- **Phase:** release — round 2 merged into main as 0951288; CI run 38072271269 green (test,
-  test-linux, docs). App releases tagged on 0951288 and pushed 3 + 2 (2026-10-10):
-  junction-v1.20.0, vesper-v1.20.0, meridian-v1.3.0, aperture-v1.19.0, reel-v1.4.0; installer
-  runs 38073054471, 38073054467, 38073054631, 38073089975, 38073090237 in progress. When all
-  are released with their installers: Round 3, Phase survey. To resume after a pause, run in
-  this worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
-  Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
+- **Round:** 3
+- **Phase:** survey — round 3 started 2026-10-10 after round 2's release: merge 0951288, CI run
+  38072271269 green, and five app releases published with installers (junction-v1.20.0,
+  vesper-v1.20.0 — re-run after "not acquired by Runner" —, meridian-v1.3.0, aperture-v1.19.0,
+  reel-v1.4.0). To resume after a pause, run in this worktree: `/loop Run the next step of the
+  performance team: follow docs/plans/17-performance-team.md, with state in
+  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls
+  for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
-- **Review commits since:** fc0f4f7 (round 2 reviews all of round 1: fc0f4f7..64ba531)
+- **Review commits since:** 64ba531 (round 3 reviews all of round 2: 64ba531..0951288)
 - **Probe code kept for the build phase** (session scratchpad `probes/`, plus
   `painting-probes.patch`, `PaintProbe.cs`, `probedriver.cs`): a11y hidden-HWND rig,
   reactivity counters and Junction probe, painting probes.
@@ -371,3 +370,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-09: installed Mesa + Noto fonts in WSL Fedora (user approved); round 2 step 6 next.
 - 2026-10-10: round 2 full suite passed (30 projects, 0 failures); merged into main as 0951288, pushed 64ba531..0951288, primary fast-forwarded.
 - 2026-10-10: CI green on 0951288 (run 38072271269); tagged and pushed the five app releases (3 + 2).
+- 2026-10-10: all five app releases published with installers (Vesper re-run once: runner not acquired). Round 3 survey started.
