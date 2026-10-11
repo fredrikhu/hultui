@@ -547,6 +547,9 @@ public partial class JunctionApp
             .Items(rows)
             // No list selection: `selected` is always false, and a row is its item alone.
             .RenderWith((r, _) => RenderDiffRow(r, interact))
+            // Named for assistive technology by what each row says ("added, line 12: …").
+            // Unset, every row was read out as the DiffRow record's ToString().
+            .AccessibleItemLabel(review is null ? _diffRows!.Label : RowLabels(rows))
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Unwrapped every row is the same height and the list does its own arithmetic; only
@@ -732,9 +735,27 @@ public partial class JunctionApp
     // diff, the layout, the colours of its syntax and the scheme's word-diff tint, and on
     // nothing else; they are flattened again when one of those is a different object.
 
-    /// <summary>The rows last flattened and what they were flattened from.</summary>
-    private sealed record DiffRowsMemo(GitFileDiff Diff, bool Split, FileHighlight? Highlight, object Theme,
-        List<DiffRow> Rows);
+    /// <summary>The rows last flattened, what they were flattened from, and their labels.</summary>
+    private sealed class DiffRowsMemo(GitFileDiff diff, bool split, FileHighlight? highlight, object theme,
+        List<DiffRow> rows)
+    {
+        public GitFileDiff Diff { get; } = diff;
+        public bool Split { get; } = split;
+        public FileHighlight? Highlight { get; } = highlight;
+        public object Theme { get; } = theme;
+        public List<DiffRow> Rows { get; } = rows;
+
+        // What a reader hears for each row, made the first time assistive technology asks for
+        // it and kept with the rows: the tree asks for every item's label each time it is built.
+        private string?[]? _labels;
+        private Func<DiffRow, string?>? _label;
+
+        /// <summary>The list's item label for these rows (one delegate, so a build adds nothing).</summary>
+        public Func<DiffRow, string?> Label => _label ??= r =>
+            (uint)r.Index < (uint)Rows.Count && ReferenceEquals(Rows[r.Index], r)
+                ? (_labels ??= new string?[Rows.Count])[r.Index] ??= DiffRowLabel(r)
+                : DiffRowLabel(r);
+    }
 
     private DiffRowsMemo? _diffRows;
 
@@ -906,6 +927,62 @@ public partial class JunctionApp
                 return true;
         return false;
     }
+
+    // ── What a reader hears for a row ────────────────────────────────────
+
+    /// <summary>Item labels for the review's woven rows, which are new each build: made when
+    /// first asked for, kept for the build.</summary>
+    private static Func<DiffRow, string?> RowLabels(List<DiffRow> rows)
+    {
+        string?[]? labels = null;
+        return r => (uint)r.Index < (uint)rows.Count
+            ? (labels ??= new string?[rows.Count])[r.Index] ??= DiffRowLabel(r)
+            : DiffRowLabel(r);
+    }
+
+    /// <summary>A row as a screen reader says it: what happened to the line, its number in
+    /// the file it belongs to, and its text (the hunk header as git writes it; a thread by
+    /// where it is and how many comments it holds).</summary>
+    private static string DiffRowLabel(DiffRow r) => r.Type switch
+    {
+        DiffRowType.Hunk => "hunk " + r.Hunk,
+        DiffRowType.Unified => r.Line is { } line ? LineLabel(line) : "",
+        DiffRowType.Split => SplitLabel(r.Left, r.Right),
+        DiffRowType.Thread => r.Thread is { } t ? ThreadLabel(t) : "thread",
+        DiffRowType.Composer => "new comment",
+        _ => "outdated threads",
+    };
+
+    private static string LineLabel(GitDiffLine l) => l.Kind switch
+    {
+        DiffLineKind.Addition => $"added, line {l.NewLineNumber}: {Spoken(l.Content)}",
+        DiffLineKind.Deletion => $"removed, line {l.OldLineNumber}: {Spoken(l.Content)}",
+        _ => $"line {l.NewLineNumber}: {Spoken(l.Content)}",
+    };
+
+    /// <summary>A split row: a context line once, a changed pair as both its halves.</summary>
+    private static string SplitLabel(GitDiffLine? left, GitDiffLine? right) => (left, right) switch
+    {
+        ({ } l, { } r) when ReferenceEquals(l, r) => LineLabel(l),
+        ({ } l, { } r) => LineLabel(l) + "; " + LineLabel(r),
+        ({ } l, null) => LineLabel(l),
+        (null, { } r) => LineLabel(r),
+        _ => "",
+    };
+
+    private static string ThreadLabel(ThreadView t)
+    {
+        int n = t.Notes.Count;
+        var what = (t.Pending ? "pending " : "") + (t.Resolved ? "resolved " : "") + "thread";
+        var first = t.Notes.Count > 0 ? t.Notes[0] : null;
+        var line = first is null ? "" : first.Body.ReplaceLineEndings("\n").Split('\n', 2)[0];
+        return $"{what} on {t.Where}, {n} comment{(n == 1 ? "" : "s")}"
+            + (first is null ? "" : $": {first.Author}: {line}")
+            + (t.Outdated ? ", outdated" : "") + (t.New ? ", new" : "");
+    }
+
+    /// <summary>A line's text as a reader says it: an empty or all-blank line is "blank".</summary>
+    private static string Spoken(string text) => string.IsNullOrWhiteSpace(text) ? "blank" : text;
 
     private Element RenderDiffRow(DiffRow r, DiffInteract? interact)
     {
