@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; step 1 landed, step 2 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–2 landed, step 3 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
   and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
   only their (user) parts. To resume after a pause, run in this worktree:
@@ -55,7 +55,7 @@ Round 2 regressions first, then value per cost.
    walks the whole tree every pass of a dirty minimized window even without video (123k–447k
    visits/s). Clear the consumed dirt (keep paint dirt); walk only when GPU image sources exist.
    Keep 7e52ff5's "new player loads while minimized" test green. Small.
-2. **a11y round 2 fix-ups** (7): **a11y-selection-move-patch** (regression from 0912a5e: a move
+2. ~~**a11y round 2 fix-ups**~~ LANDED c52e8fa, 40b1e97, c662dbf, 4eeec65, 3788a33, 1f294c4, 184b9d5 (7): **a11y-selection-move-patch** (regression from 0912a5e: a move
    forces a full a11y rebuild; Junction History a11y bytes per key 217 → 294 KB, a11y share of the
    walk 7 → 30 %; patch IsSelected on the two item nodes as `MoveA11yFocus` does),
    **a11y-uia-disconnect-on-close** (leak raised by 4: `UiaReturnRawElementProvider(hwnd, 0, 0,
@@ -159,6 +159,11 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **a11y-uia-host-reads-off-thread** (7, found in step 2; pre-existing) — the other `UiaHostBridge`
+  reads still walk the live element tree on UIA threads: Value pattern for TextInput and TextArea,
+  toggle state, item count, label and selected, scroll and range info. Answer from the node, as
+  3788a33 did for text nodes. Also: the Linux bridge's first status read happens before the watcher
+  subscribes, so a change in that gap is missed (small).
 - **reconcile-restyle-on-change** (6/1, medium–large) — mark style on patch only when inherited style
   or theme-fed values changed (component/edit 6,003 unchanged re-resolves of 6,003; Junction ~−90 %
   resolves, −9 layout marks per rebuild from Button/Kbd/TextInput/Toast ApplyTheme flip-flops). After
@@ -278,6 +283,12 @@ Re-ranked by the round 4 survey.
 | 3 | e0b816f | vesper-grid-resize | User report (2026-10-10): after a window resize the thumbnail area kept the old width until a key press. Brief and Thumbnail grids are sized in the build from the window, but a resize rebuilt only for a scale change or a wrapped diff/viewer. Now rebuilds when either pane shows Brief or Thumbnails. Correctness; two headless tests (fail without it). |
 | 3 | dd3dec3 | gl-vk-minimized-children-flag | Regression fix (82e382b): a change made while minimized rebuilds the a11y tree once, not every loop pass; the root also keeps paint dirt so the restore draws (a style- or layout-only change while minimized now draws at restore too). One element added while minimized, UIA listening, real window never focused: a11y rebuilds 61/s → 0; GL 2,016 elements 10.8 MB/s → 29 B/s, UI 33.8 → 12 Mcyc/s; Vulkan 10.8 MB/s → 10.7 KB/s (display-colour poll); 5,016 elements 26.8 MB/s → 29 B/s, 69–74 → 21–22 Mcyc/s. `HULTUI_A11Y=0` unchanged. Perf suite 0 slower/faster. MinimizedWindowTests (mutation: 31 builds for 1). |
 | 3 | 8cd854f | gl-vk-undrawn-sources-walk | Regression fix (7e52ff5): a dirty minimized window walks for GPU sources only while one can exist (process-wide count of live `GpuFrameSink`s and of other `IGpuImageSource`s set on images). Tree visits 122k–447k/s → 0 without video; UI −10…−20 % Mcyc/s; what is served unchanged (7e52ff5's real-window tests 7/7). Both commits: GL 31–35 → 7.7–8.5 Mcyc/s, Vulkan 33 → 9.6–10.1 while minimized with a change. Perf suite 0 slower/faster (richtext/open min noise, median −1 %). Remaining: the per-pass frame start of a dirty minimized window (~60/s) is step 10's. |
+| 3 | c52e8fa | apps-scenario-selection-walk-real-loop-a11y | Suite rows `a11y/selection walk beside details, keys 60 ms apart, real loop, {bridge on, UIA}`: one Down key then `RunLoop` on the virtual clock to the next key; 1,000 commits on item rows beside an unchanged details pane; reports a11y trees built per key. Shows 0912a5e's regression: 1.0 trees/key → 0.4 after 40b1e97. |
+| 3 | 40b1e97 | a11y-selection-move-patch | Regression fix (0912a5e): a selection move marks IsSelected on the changed item nodes of the applied tree and hands the bridge a patch (`IAccessibilityBridge.ApplyPatchedProperties`, default = apply as a diff; UIA and AT-SPI override) instead of forcing a rebuild; falls back to a rebuild for no tree, a list mounted in the same handler, count change, composite rows, crossing 2,000. Event streams identical on 0912a5e's 12 scripts and two walks, except UIA VerticalScrollPercent 28 → 16 in a 200-item scrolling walk (one per refresh, not per key). Junction History AOT, UIA listening, 80 keys at 60 ms: a11y trees 82 → 50, a11y bytes per key 293.6 → 179 KB (−40 %), UI bytes 553 → 438 KB (−21 %). Walk row 380.6 → 227.6 KB/op, min −8…−15 % JIT/AOT; 0 slower. 9 + 3 tests, 7 mutations caught. |
+| 3 | c662dbf | a11y-undrawn-frame | Found in step 2: 40b1e97 alone made a refresh coming due between keys its own full repaint (+20 % frame time per key). A frame only accessibility asks for now stops after the a11y phase: not drawn, timed or counted (`PumpFrame`/`RunFrame` return false for it; live resize still draws a clean window with posted work via internal `RenderFrame(drawClean:)`). Junction History net c52e8fa → c662dbf: frame time per key −9 % (1.386 → 1.266 ms mean), bytes −21 %, a11y bytes −40 %; drawn frames per key 1.02. Walk median −14 %/−6 % JIT, −11 %/−1 % AOT; 0 slower. With a client listening, coalesced refreshes (scroll trailing edge, range values, attach) no longer repaint. |
+| 3 | 4eeec65 | a11y-atspi-status-serialize | Correctness (2170222): status reads one at a time (`AtSpiStatusReader`), re-read when a change arrived during a read. Live WSL (pyatspi, private bus, bursts of four changes): wrong final state 5/40 and 7/100 → 0/40 and 0/100 (every wrong case: status on, bridge off). 2 mutations caught. |
+| 3 | 3788a33 | a11y-uia-text-value-from-node | Thread safety (72a4f96/9c8bf91): ValueValue and the Value pattern's GetValue for a node with text answer from `Node.Value` (editor: the told text version; terminal: the screen as the tree read it), no live-tree walk on a UIA thread. 2 mutations caught. |
+| 3 | 1f294c4 | a11y-uia-disconnect-on-close | Leak closed (found by 4): Dispose calls `UiaReturnRawElementProvider(hwnd, 0, 0, NULL)` after restoring the window procedure. 150 open/close cycles of a 60-row window, UIA listening: managed 36,693 → 1,289 KB, private 174–177 → 140 MB (`HULTUI_A11Y=0`: 1,185 KB / 139 MB). Perf suite (with 3788a33, captures 184b9d5): 0 slower; heavy-allocation row medians −15…−30 % and a full run 32 → 28 s, likely the suite's own UIA rows no longer leaking sessions (not measured further). |
 
 ## Examined, not worth it
 
@@ -487,3 +498,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   regressions). Guideline notes: dispose MediaPlayer and web view controllers when they close (a
   live GpuFrameSink makes a dirty minimized window walk its tree); an app's own IGpuImageSource is
   released by setting Source = null.
+- 2026-10-11: step 2 landed (c52e8fa..184b9d5): selection moves patched, not rebuilt (+ a11y-only
+  frames draw nothing, c662dbf), AT-SPI status serialized, UIA text value from the node, UIA
+  providers released on close. Windows and WSL test projects pass. New waiting item
+  a11y-uia-host-reads-off-thread. Guideline notes: `SelectedIndex` costs no a11y rebuild up to 2,000
+  items; in tests `PumpFrame()` is false for a frame only accessibility asked for.
