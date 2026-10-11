@@ -200,6 +200,14 @@ A rebuild per frame is still a rebuild per frame: a `ToastHost` handed the app's
 app sixty times a second while it runs. Animate the element instead (`Animate.Opacity`, a
 `Transform`, `SpinnerElement`), or keep the animated part in a small component of its own.
 
+When a rebuild in the middle of the animation must not undo it, keep the animated value in a
+plain field as well: the tween's setter writes the field and the live element (through a
+`Ref<T>`), and `Build()` reads the field, which is not a signal and so rebuilds nothing. The
+`VideoPlayer`'s bar fades this way. Its level was a signal its `Build()` read, so every frame
+of a fade rebuilt the player (Reel: 166 rebuilds in 12 s, three quarters of what its UI
+thread allocated); a fade frame now costs about 0.9 KB instead of 41 KB (headless, JIT), and
+the player rebuilds only where the bar appears and where it goes.
+
 ### A value that changes ten times a second
 
 Some signals move on their own, many times a second: `MediaPlayer.Position` while a film

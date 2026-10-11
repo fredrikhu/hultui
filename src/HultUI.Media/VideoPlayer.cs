@@ -41,8 +41,9 @@ public sealed class VideoPlayer : Component
 
     private readonly Signal<bool> _controlsVisible = new(true);
     private readonly Signal<TimeSpan> _jumpStep = new(TimeSpan.FromSeconds(10));   // the buttons carry it in their names
-    // The bar's opacity while it fades; driven by a tween, read by Build.
-    private readonly Signal<float> _barOpacity = new(1f);
+    // The bar's level while it fades. A tween writes it and the bar on screen (SetBarOpacity);
+    // Build reads it as a plain field, so a fade frame rebuilds nothing.
+    private float _barOpacity = 1f;
     private readonly Signal<bool> _fullscreen = new(false);
     private readonly Signal<VideoPlayerTheme> _theme = new(VideoPlayerTheme.CreateDefault(Theme.Light));
     /// <summary>Where the pointer is on the scrubber, in seconds, while it is over it.</summary>
@@ -52,6 +53,8 @@ public sealed class VideoPlayer : Component
     private readonly Ref<SliderElement> _scrubber = new();
     /// <summary>The elapsed time, which a position report rewrites in place.</summary>
     private readonly Ref<TextElement> _elapsed = new();
+    /// <summary>The transport bar, whose opacity a fade writes in place.</summary>
+    private readonly Ref<BoxElement> _bar = new();
     private TweenHandle _hideTimer;
     private TweenHandle _fade;
     private Effect? _playingWatch;
@@ -213,10 +216,10 @@ public sealed class VideoPlayer : Component
         _hideTimer.Cancel();
         _fade.Cancel();
         _controlsVisible.Value = true;
-        float from = _barOpacity.Peek();
+        float from = _barOpacity;
         if (from >= 1f) return;
         // Coming back is quick — half the fade-out — so the pointer never waits on it.
-        _fade = Animate.Value(from, 1f, v => _barOpacity.Value = v)
+        _fade = Animate.Value(from, 1f, SetBarOpacity)
             .Duration((float)FadeDuration.TotalSeconds * 0.5f)
             .Start();
     }
@@ -238,11 +241,31 @@ public sealed class VideoPlayer : Component
     {
         if (!Player.IsPlaying) return;
         _fade.Cancel();
-        _fade = Animate.Value(_barOpacity.Peek(), 0f, v => _barOpacity.Value = v)
+        _fade = Animate.Value(_barOpacity, 0f, SetBarOpacity)
             .Duration((float)FadeDuration.TotalSeconds)
             .OnComplete(() => _controlsVisible.Value = false)
             .Start();
     }
+
+    /// <summary>
+    /// A step of a fade: the level, and the bar on screen at it — a repaint, nothing more. The
+    /// level was a signal Build read, so every frame of a fade rebuilt the player (Reel: 166
+    /// rebuilds in 12 s, 38 KB each, three quarters of what its UI thread allocated). Where the
+    /// fade starts and ends, <see cref="_controlsVisible"/> still rebuilds the player, which
+    /// takes the level from here.
+    /// </summary>
+    private void SetBarOpacity(float level)
+    {
+        _barOpacity = level;
+        // Read outside any effect: the tween steps from the frame loop.
+        if (_bar.Current is { } bar)
+            bar.Opacity = BarOpacity(_controlsVisible.Peek(), Player.IsPlaying);
+    }
+
+    /// <summary>The bar's opacity: gone while hidden, whole while paused (the fade runs only
+    /// while playing), otherwise the fade's level.</summary>
+    private float BarOpacity(bool controlsVisible, bool playing) =>
+        controlsVisible || !playing ? (playing ? _barOpacity : 1f) : 0f;
 
     // ──── Build ────
 
@@ -319,7 +342,7 @@ public sealed class VideoPlayer : Component
         var player = Player;
         bool playing = player.IsPlaying;
         bool controls = _controlsVisible.Value || !playing;
-        float opacity = controls ? (playing ? _barOpacity.Value : 1f) : 0f;
+        float opacity = BarOpacity(controls, playing);
 
         // Read before building: WithRef points a ref at the element just created, whose
         // layout has not been computed yet, so the scrubber's geometry has to be taken
@@ -464,6 +487,7 @@ public sealed class VideoPlayer : Component
         bar.Position.Bottom = Dimension.Px(0);
         bar.Width(Dimension.Percent(100));
         bar.Role = AccessibilityRole.Group;
+        bar.WithRef(_bar);
 
         // Children(...) replaces, so the bar is assembled first and set once.
         var items = new List<Element>();

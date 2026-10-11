@@ -320,6 +320,47 @@ public class VideoPlayerTests
     }
 
     [Fact]
+    public void AFadeFrame_RebuildsNothing_AndTheBarStillEndsWhereItShould()
+    {
+        // The fade wrote a signal Build read, so every frame of it rebuilt the player (Reel: 166
+        // rebuilds in 12 s, three quarters of what its UI thread allocated). It writes the bar's
+        // opacity in place; the player rebuilds only where the bar comes and where it goes.
+        using var f = new Fixture();
+        f.VideoPlayer.AutoHideDelay = TimeSpan.FromSeconds(1);
+        f.VideoPlayer.FadeDuration = TimeSpan.FromSeconds(1);
+        f.Player.Play();
+        f.Elapse(1.05);                                   // the hide has fired; the fade has begun
+        var bar = f.Session.Window.FindByAutomationId("video-controls")!.Element;
+        int builds = f.VideoPlayer.Builds;
+
+        f.Elapse(0.15);
+        Assert.InRange(bar.Opacity, 0.3f, 0.8f);
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+
+        f.Elapse(1.0);                                    // the fade has ended
+        Assert.False(f.VideoPlayer.ControlsVisible);
+        Assert.Equal(0f, bar.Opacity);
+        Assert.Equal(builds + 1, f.VideoPlayer.Builds);   // the bar went
+
+        f.Session.Window.MoveMouse(300, 150);             // back, over half the fade
+        f.Elapse(0.05);
+        Assert.True(f.VideoPlayer.ControlsVisible);
+        Assert.InRange(bar.Opacity, 0.2f, 0.95f);
+        f.Elapse(0.5);
+        Assert.Equal(1f, bar.Opacity);
+        Assert.Equal(builds + 2, f.VideoPlayer.Builds);   // the bar came
+
+        // Paused halfway through the next fade, the bar is whole at once: the fade is for a
+        // playing film only.
+        f.Elapse(0.65);
+        Assert.InRange(bar.Opacity, 0.3f, 0.8f);
+        f.Player.Pause();
+        f.Session.PumpFrame();
+        Assert.True(f.VideoPlayer.ControlsVisible);
+        Assert.Equal(1f, bar.Opacity);
+    }
+
+    [Fact]
     public void APositionReport_RebuildsNothing_ButMovesTheTimeAndTheThumb()
     {
         // mpv reports the position ten times a second while playing. Each report rebuilt the
