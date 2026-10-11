@@ -7,6 +7,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using HultUI.Media;
 
@@ -20,8 +21,8 @@ namespace Aperture;
 /// than a video player pointed at a URL. Three reports matter — started, progress,
 /// stopped — and between them they drive the dashboard's "now playing", the Continue
 /// watching row, and the resume point on every other device. They are sent on every
-/// state change and every ten seconds, and the last one is sent even when the app is
-/// closing, because a film that keeps its place is the whole promise.</para>
+/// state change and every ten seconds while playing, and the last one is sent even when the
+/// app is closing, because a film that keeps its place is the whole promise.</para>
 /// </summary>
 public sealed partial class ApertureApp
 {
@@ -38,11 +39,17 @@ public sealed partial class ApertureApp
     private TimeSpan _resumeTo;
     private bool _resumeApplied;
 
-    /// <summary>When the last progress report went out, and what it said. Both are needed:
-    /// the clock paces the heartbeat, and the state decides whether a change is worth an
-    /// immediate report.</summary>
-    private long _lastReportTicks;
+    /// <summary>When the last report went out, on the application's clock
+    /// (<see cref="Application.Time"/>, which a headless test moves by hand), and what it said.
+    /// Both are needed: the clock paces the heartbeat, and the state decides whether a change is
+    /// worth an immediate report. Null until the stream's first report, the started one.</summary>
+    private long? _lastReportAt;
     private bool _lastReportedPaused;
+
+    /// <summary>The stream's bookkeeping, made with its player: <see cref="OnPlaybackChanged"/>
+    /// and <see cref="Heartbeat"/>. See <see cref="WatchPlayback"/>.</summary>
+    private Effect? _playbackWatch;
+    private Effect? _heartbeat;
 
     /// <summary>The heartbeat Jellyfin's own clients keep.</summary>
     private static readonly TimeSpan ReportInterval = TimeSpan.FromSeconds(10);
@@ -159,6 +166,7 @@ public sealed partial class ApertureApp
 
     private void OpenStream(PlaybackTarget target)
     {
+        StopWatchingPlayback();
         _player?.Dispose();
         _player = new MediaPlayer(_backends!());
         _player.Volume = _settings.Data.Volume;
@@ -185,7 +193,8 @@ public sealed partial class ApertureApp
         _videoPlayer.FocusPicture();
         ForgetPlaybackEnding();
         ForgetTrackSelection();
-        _lastReportTicks = 0;
+        _lastReportAt = null;
+        WatchPlayback(_player);
         Rerender();
     }
 
@@ -202,6 +211,7 @@ public sealed partial class ApertureApp
         var target = _playback;
         var position = _player?.Position ?? TimeSpan.Zero;
 
+        StopWatchingPlayback();
         if (_player is { } player)
         {
             _settings.Data.Volume = player.Volume;
@@ -253,39 +263,91 @@ public sealed partial class ApertureApp
     // ── Reporting ────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called from the sheet's build — which runs on every frame while a film plays,
-    /// because the transport bar reads the position signal. Two things come out of it: the
-    /// resume seek once the backend is ready, and the progress heartbeat.
+    /// Watches a new stream's player. What comes out of it: the resume seek once the backend
+    /// is ready, the track preference, the started report, a report on every pause, play and
+    /// end, the progress heartbeat, and the next episode when one ends.
+    ///
+    /// <para>Two effects on the player's signals, not code in the sheet's build. This ran in
+    /// the build until 2026-10-11, whose comment said the build "runs on every frame while a
+    /// film plays, because the transport bar reads the position signal" — but the transport
+    /// bar is a component of its own and rebuilds alone, so during quiet playback the app built
+    /// once (when the bar hid), and the heartbeat, which waited for a build ten seconds after
+    /// the last report, never went out (a minute of playing with no input: no progress report).
+    /// Build is not a clock.</para>
     /// </summary>
-    private void PumpPlayback()
+    private void WatchPlayback(MediaPlayer player)
     {
-        if (_player is not { } player || _playback is not { } target || _library is not { } lib) return;
+        StopWatchingPlayback();
+        _playbackWatch = new Effect(() => OnPlaybackChanged(player));
+        _heartbeat = new Effect(() => Heartbeat(player));
+    }
+
+    private void StopWatchingPlayback()
+    {
+        _playbackWatch?.Dispose();
+        _playbackWatch = null;
+        _heartbeat?.Dispose();
+        _heartbeat = null;
+    }
+
+    /// <summary>
+    /// Runs when the player's state, length or tracks change — a few times a film, never per
+    /// position report: the position is read untracked (<see cref="Report"/>).
+    /// </summary>
+    private void OnPlaybackChanged(MediaPlayer player)
+    {
+        var state = player.State;
+        if (_playback is not { } target || _library is not { } lib) return;
 
         ApplyResumeSeek(player);
         PumpTrackPreference(player);
 
-        // The file ran out: report it as a stop at the end (which is what marks it
-        // watched), then ask what comes next.
-        if (player.State == PlaybackState.Ended && _upNext is null)
-        {
-            OnPlaybackEnded();
-        }
-
-        bool paused = !player.IsPlaying;
-        long now = Environment.TickCount64;
-        bool first = _lastReportTicks == 0;
-        bool stateChanged = !first && paused != _lastReportedPaused;
-        bool due = !first && now - _lastReportTicks >= (long)ReportInterval.TotalMilliseconds;
-
         // Nothing is reported until the backend has actually started: a report at
         // position zero from a file that has not loaded would move the resume point to
         // the beginning of a film someone is half-way through.
-        if (first && player.State is PlaybackState.NoMedia or PlaybackState.Opening) return;
-        if (!first && !stateChanged && !due) return;
+        bool paused = state != PlaybackState.Playing;
+        if (_lastReportAt is null)
+        {
+            if (state is not (PlaybackState.NoMedia or PlaybackState.Opening)) Report(player, target, lib);
+        }
+        else if (paused != _lastReportedPaused)
+        {
+            Report(player, target, lib);
+        }
 
-        _lastReportTicks = now;
+        // The file ran out. The report above told the server where (paused, at the end);
+        // the stop report that marks it watched goes when the picture closes or the next
+        // one starts. Meanwhile, ask what comes next.
+        if (state == PlaybackState.Ended && _upNext is null)
+        {
+            OnPlaybackEnded();
+        }
+    }
+
+    /// <summary>
+    /// The progress report every <see cref="ReportInterval"/>. Runs on every position report —
+    /// ten a second while playing — and checks the application's clock, so the heartbeat
+    /// keeps time while a film plays with nothing else happening, and costs a comparison when
+    /// it is not due. While paused nothing moves and nothing is sent between the pause's
+    /// report and the next change.
+    /// </summary>
+    private void Heartbeat(MediaPlayer player)
+    {
+        _ = player.Position;
+        if (_lastReportAt is not { } last || _playback is not { } target || _library is not { } lib) return;
+        if (_app.Time.GetElapsedTime(last) < ReportInterval) return;
+        Report(player, target, lib);
+    }
+
+    /// <summary>Sends the stream's first report (started) or another (progress). Reads the
+    /// position untracked: <see cref="OnPlaybackChanged"/> must not run per position report.</summary>
+    private void Report(MediaPlayer player, PlaybackTarget target, IMediaLibrary lib)
+    {
+        bool paused = !player.IsPlaying;
+        bool first = _lastReportAt is null;
+        _lastReportAt = _app.Time.GetTimestamp();
         _lastReportedPaused = paused;
-        var position = player.Position;
+        var position = ReactiveScope.Untracked(() => player.Position);
 
         if (first) _ = lib.ReportStartedAsync(target, position, paused);
         else _ = lib.ReportProgressAsync(target, position, paused);
@@ -310,8 +372,6 @@ public sealed partial class ApertureApp
 
     private Element BuildPlayerSheet()
     {
-        PumpPlayback();
-
         var sheet = Box.New()
             .Size(Dimension.Percent(100), Dimension.Percent(100))
             .Background(Halide.Bg)

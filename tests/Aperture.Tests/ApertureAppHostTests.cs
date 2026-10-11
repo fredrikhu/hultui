@@ -97,9 +97,10 @@ public class ApertureAppHostTests
     /// <summary>Hosts the app over a fixture. The poster cache is given an HttpClient that
     /// answers nothing, so no test ever reaches the network for artwork.</summary>
     private static void Host(FakeMediaLibrary library, Action<HeadlessSession, ApertureApp> body,
-        Func<IMediaBackend>? backends = null, HttpMessageHandler? artwork = null)
+        Func<IMediaBackend>? backends = null, HttpMessageHandler? artwork = null,
+        int width = 1440, int height = 900)
     {
-        using var session = HeadlessSession.Create(1440, 900);
+        using var session = HeadlessSession.Create(width, height);
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
         ApertureApp? app = null;
         try
@@ -483,6 +484,159 @@ public class ApertureAppHostTests
             Assert.Null(app.Playback);
             Assert.Contains(library.Calls, c => c.StartsWith("ReportStopped(m2", StringComparison.Ordinal));
         }, () => backend);
+    }
+
+    /// <summary>
+    /// Plays under the application's own loop (<see cref="HeadlessSession.RunLoop"/>) for
+    /// <paramref name="seconds"/> of virtual time with nothing touched: the backend posts its
+    /// position every 100 ms, as mpv does, with the frames that fall due. <paramref name="eachPass"/>
+    /// runs once per pass of the loop.
+    /// </summary>
+    private static void PlayQuietly(HeadlessSession session, FakeMediaBackend backend, double seconds,
+        Action? eachPass = null)
+    {
+        long end = session.Time.GetTimestamp() + TimeSpan.FromSeconds(seconds).Ticks;
+        session.RunLoop(() =>
+            {
+                eachPass?.Invoke();
+                return session.Time.GetTimestamp() >= end;
+            },
+            eventEvery: TimeSpan.FromMilliseconds(100),
+            onEvent: () => HultUI.Application.InvokeOnMainThread(() => backend.Advance(TimeSpan.FromMilliseconds(100))),
+            limit: TimeSpan.FromSeconds(seconds + 5));
+    }
+
+    private static int Count(FakeMediaLibrary library, string prefix) =>
+        library.Calls.Count(c => c.StartsWith(prefix, StringComparison.Ordinal));
+
+    /// <summary>
+    /// A film that plays with nobody touching anything still tells the server where it is,
+    /// every ten seconds — the dashboard's "now playing", and the resume point another device
+    /// picks up. The heartbeat ran from the app's build, said to run on every frame of a film;
+    /// the transport bar rebuilds on its own, so the app built once, when the bar hid, and from
+    /// Aperture's first version until 2026-10-11 a quiet film sent no progress at all.
+    /// </summary>
+    [Fact]
+    public void AFilmPlayingQuietlyIsReportedEveryTenSeconds_WithoutRebuildingTheApp()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Equal(1, Count(library, "ReportStarted(m1"));
+            PlayQuietly(session, backend, 4);
+            // The bar has gone, and the title strip with it: the one app build quiet playback makes.
+            Assert.Null(session.Window.FindByAutomationId("player-back"));
+            int builds = app.Builds;
+
+            var reports = new List<double>();
+            int seen = Count(library, "ReportProgress(");
+            long start = session.Time.GetTimestamp();
+            PlayQuietly(session, backend, 61, () =>
+            {
+                int now = Count(library, "ReportProgress(");
+                if (now == seen) return;
+                seen = now;
+                reports.Add(session.Time.GetElapsedTime(start).TotalSeconds);
+            });
+
+            // 4 s in when the minute began: reports at 10, 20 … 60 s of playing.
+            Assert.Equal(6, reports.Count);
+            for (int i = 1; i < reports.Count; i++)
+                Assert.InRange(reports[i] - reports[i - 1], 10.0, 10.2);
+            Assert.All(library.Calls.Where(c => c.StartsWith("ReportProgress(", StringComparison.Ordinal)),
+                c => Assert.DoesNotContain("paused", c, StringComparison.Ordinal));
+            Assert.Equal(builds, app.Builds);
+        }, () => backend, width: 960, height: 600);
+    }
+
+    /// <summary>A pause is reported at once, and so is playing again: the server's "now
+    /// playing" shows the pause, and the resume point is where it happened.</summary>
+    [Fact]
+    public void APauseIsReportedAtOnce_AndSoIsPlayingAgain()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("m1")!, TimeSpan.Zero);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 3);
+
+            app.Player!.Pause();
+            session.PumpFrame();
+            var at = app.Player.Position;
+            Assert.True(at > TimeSpan.FromSeconds(2));
+            Assert.Equal($"ReportProgress(m1, at={at:g}, paused)", library.Calls[^1]);
+
+            app.Player.Play();
+            session.PumpFrame();
+            Assert.Equal($"ReportProgress(m1, at={at:g})", library.Calls[^1]);
+        }, () => backend, width: 960, height: 600);
+    }
+
+    /// <summary>
+    /// mpv loads a stream after it opens. Until it has, nothing is reported — a report at zero
+    /// would move the resume point to the start of a film someone is half-way through — and
+    /// the resume seek waits for the length. Once loaded, both happen with nothing else going on:
+    /// the seek first, so the started report carries the resume point.
+    /// </summary>
+    [Fact]
+    public void NothingIsReportedOrSoughtUntilTheStreamHasLoaded()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167), HoldOpening = true };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("m2")!, TimeSpan.FromMinutes(58));
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.NotNull(app.Playback);
+            Assert.Equal(PlaybackState.Opening, app.Player!.State);
+            Assert.Equal(0, Count(library, "ReportStarted("));
+            Assert.DoesNotContain(backend.Calls, c => c.StartsWith("Seek(", StringComparison.Ordinal));
+
+            backend.FinishOpening();
+            session.PumpFrame();
+
+            Assert.Equal(TimeSpan.FromMinutes(58), app.Player.Position);
+            Assert.Equal(["ReportStarted(m2, at=0:58:00)"], library.Calls.Where(c => c.StartsWith("Report", StringComparison.Ordinal)));
+        }, () => backend, width: 960, height: 600);
+    }
+
+    /// <summary>
+    /// An episode that runs out is reported where it ended, the next one is offered, and when
+    /// it starts the finished one is reported stopped at its end — the report that marks it
+    /// watched — before the new stream's own started report.
+    /// </summary>
+    [Fact]
+    public void AnEpisodeThatRunsOutIsReportedAtItsEnd_AndStoppedWhenTheNextStarts()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            app.Play(library.Item("e1")!, TimeSpan.FromMinutes(20));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            PlayQuietly(session, backend, 2);
+
+            backend.Advance(TimeSpan.FromMinutes(5));      // past the end
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal("ReportProgress(e1, at=0:24:00, paused)",
+                library.Calls.Last(c => c.StartsWith("Report", StringComparison.Ordinal)));
+            Assert.Equal("e5", app.UpNextItem?.Id);
+
+            app.PlayUpNext(deliberate: true);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            var reports = library.Calls.Where(c => c.StartsWith("Report", StringComparison.Ordinal)).ToList();
+            int stopped = reports.IndexOf("ReportStopped(e1, at=0:24:00)");
+            Assert.True(stopped >= 0, string.Join(" | ", reports));
+            Assert.Equal("ReportStarted(e5, at=0:00:00)", reports[stopped + 1]);
+        }, () => backend, width: 960, height: 600);
     }
 
     [Fact]
