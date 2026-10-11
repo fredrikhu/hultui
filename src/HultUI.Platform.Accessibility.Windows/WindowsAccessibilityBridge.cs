@@ -794,6 +794,24 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal bool? GetToggleState(ElementId id) => _host.GetToggleState(id);
     internal void RequestFocus(ElementId id) => _host.RequestFocus(id);
 
+    /// <summary>For tests: told of the window when the bridge tells UI Automation its providers
+    /// are gone (<see cref="ReleaseProviders"/>).</summary>
+    internal Action<IntPtr>? ProvidersReleased;
+
+    /// <summary>
+    /// Tells UI Automation the window's providers are gone, as a window being destroyed must:
+    /// UiaReturnRawElementProvider with no provider releases every reference UI Automation holds to
+    /// providers of the window. A client that ever asked for the window's tree keeps a reference to
+    /// its root provider until then, and through it this bridge, its host and the closed window's
+    /// whole element and accessibility trees: with this machine's UIA client listening, each closed
+    /// 60-row window kept ~357 KB, up to about 100 windows at a time.
+    /// </summary>
+    private void ReleaseProviders()
+    {
+        UiaInterop.UiaReturnRawElementProvider(_hwnd, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        ProvidersReleased?.Invoke(_hwnd);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -802,6 +820,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (_originalWndProc != IntPtr.Zero)
             UiaInterop.SetWindowLongPtr(_hwnd, UiaInterop.GWLP_WNDPROC, _originalWndProc);
         _byHwnd.TryRemove(_hwnd, out _);
+
+        // After the window procedure is restored, so no WM_GETOBJECT hands out a provider being
+        // torn down; the window itself is destroyed after its bridge, so it still exists here.
+        ReleaseProviders();
 
         _wrappers.Clear();
 
