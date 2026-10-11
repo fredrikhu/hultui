@@ -50,9 +50,11 @@ public sealed class TrackPreference
     }
 
     /// <summary>
-    /// Call from the frame while a file is open. Waits for the backend to report the file's
-    /// tracks — they arrive after the file loads, not with it — then applies the remembered
-    /// languages, and afterwards watches for the viewer changing one.
+    /// Call whenever the player's tracks may have changed while a file is open: from an
+    /// <c>Effect</c>, which this subscribes to the track lists and selections it reads, so it
+    /// runs again when they change. Waits for the backend to report the file's tracks — they
+    /// arrive after the file loads, not with it — then applies the remembered languages, and
+    /// afterwards watches for the viewer changing one.
     /// </summary>
     public void Pump(MediaPlayer player)
     {

@@ -268,6 +268,47 @@ int current = _chapterHere.Value;
 
 A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture).
 
+### `Build()` is not a clock
+
+`Build()` runs when something it read changes, and at no other time. Work that has to happen
+every so often, or when a signal changes, does not belong in it. Aperture's progress report
+to the server (every ten seconds) and Reel's resume save (every fifteen) ran from the app's
+`Build()`, whose comment said it ran on every frame of a playing film. It did not: the
+transport bar is a component of its own and rebuilds alone, so a film playing with nobody
+touching anything built the app once at most (Aperture, when the bar hid), and from each app's
+first version until 2026-10-11 neither the report nor the save ran during quiet playback.
+
+Put such work in an `Effect` made with the thing it watches and disposed with it:
+
+```csharp
+// Made with each player; disposed when the player goes.
+_saveClock = new Effect(() =>
+{
+    _ = player.Position;                      // every position report runs this…
+    if (!player.IsPlaying) return;
+    if (_app.Time.GetElapsedTime(_lastSave) < SaveInterval) return;   // …and checks the clock
+    _lastSave = _app.Time.GetTimestamp();
+    SaveResumePoint();
+});
+```
+
+- **Something that follows the clock** rides a signal that ticks (a playing film's `Position`,
+  ten times a second) and checks `Application.Time`, or is a delayed tween, the framework's
+  timer (see [ANIMATIONS.md](ANIMATIONS.md)). Read the time from `Application.Time`, which a
+  headless test moves by hand, not `Environment.TickCount64`.
+- **Something that follows state** (a seek once the length is known, the next file when one
+  ends) is an effect that reads that state. Read the signals it waits for before any early
+  return: an effect depends on what its last run read, and one that returned first hears
+  nothing again.
+- **Read the rest untracked** (`ReactiveScope.Untracked`), or the effect runs again for every
+  value it happens to touch; Aperture's state watch reads the position for its reports that
+  way, so it runs a few times a film, not ten times a second.
+
+Neither effect rebuilds anything. A minute of quiet playback once the bar has gone (headless,
+the real loop, a position report every 100 ms) still builds each app 0 times; the UI thread
+allocates 22,130 → 22,158 B/s in Aperture (six reports) and 22,115 → 22,472 B/s in Reel (four
+settings writes), so a check that is not due costs nothing measurable.
+
 ---
 
 ## Component Model

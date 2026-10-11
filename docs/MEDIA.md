@@ -94,6 +94,15 @@ cannot start without a render context, and the kind of context is only known at 
 first draw. `VideoElement` renders even before the first frame for exactly this reason;
 a player whose element is never mounted stays in `Opening`.
 
+**Your `Build()` is not a playback clock.** A playing film rebuilds the `VideoPlayer`, which
+is a component of its own, not the app around it: during quiet playback the app's `Build()`
+hardly runs. Work that a film drives belongs in an `Effect` made with the player and disposed
+with it: a progress report or a resume save in one that reads `Position` and checks
+`Application.Time`, a resume seek (once `Duration` is known), track memory and the end of a
+file in one that reads `State`, `Duration` and the track lists. Aperture's ten-second report
+and Reel's fifteen-second save waited in `Build()` and never ran while a film simply played;
+see [`Build()` is not a clock](REACTIVITY.md#build-is-not-a-clock).
+
 **A plain property on a component does not rebuild.** `VideoPlayer.JumpStep` is
 signal-backed because the transport buttons carry it in their accessible names
 ("Back 10 s"); anything your own `Build()` reads must be a signal too. See
