@@ -6,7 +6,9 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
+using HultUI.Media;
 
 namespace Aperture;
 
@@ -59,6 +61,30 @@ public sealed partial class ApertureApp
         }
         return index;
     }
+
+    /// <summary>
+    /// The chapter the playhead is in, for the panel to mark — as a value a build can depend
+    /// on. The panel read <see cref="MediaPlayer.Position"/> in the app's build, so while it was
+    /// open every position report (ten a second while playing) rebuilt the whole app; this
+    /// changes only when the playhead crosses into another chapter, and a build that reads it
+    /// runs again only then. Made again for each player and for each item the chapters come
+    /// from (the full item, with its marks, arrives a moment after playback starts).
+    /// </summary>
+    private int ChapterHere()
+    {
+        if (_player is not { } player) return -1;
+        if (!ReferenceEquals(_chapterHereOf, player) || !ReferenceEquals(_chapterHereItem, _playingItem))
+        {
+            _chapterHereOf = player;
+            _chapterHereItem = _playingItem;
+            _chapterHere = new Computed<int>(() => CurrentChapterIndex(player.Position));
+        }
+        return _chapterHere!.Value;
+    }
+
+    private Computed<int>? _chapterHere;
+    private MediaPlayer? _chapterHereOf;
+    private MediaItem? _chapterHereItem;
 
     /// <summary>
     /// Steps a chapter. Back from just inside a chapter goes to its start rather than the
@@ -146,7 +172,7 @@ public sealed partial class ApertureApp
     private Element BuildChapterPanel()
     {
         var chapters = PlayingChapters;
-        int current = CurrentChapterIndex(_player?.Position ?? TimeSpan.Zero);
+        int current = ChapterHere();
 
         var panel = Flex.Column(gap: 0)
             .Width(320)

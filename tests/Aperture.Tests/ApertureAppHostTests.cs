@@ -1309,6 +1309,48 @@ public class ApertureAppHostTests
         }, () => backend);
     }
 
+    /// <summary>
+    /// The panel marks the chapter playing now and follows the playhead, rebuilding the app
+    /// only when the playhead crosses into another chapter. It read the position in the app's
+    /// build, so while it was open every position report (ten a second) rebuilt the whole app.
+    /// </summary>
+    [Fact]
+    public void TheChapterPanelFollowsThePlayhead_RebuildingOnlyWhenTheChapterChanges()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            // Resumes at 58 minutes, inside "The Ocean" (30-90).
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.C);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            for (int m = 58; m < 60; m++)
+            {
+                backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromMinutes(m)));
+                session.PumpFrame();
+            }
+            Assert.True(Shows(session, "The Ocean, playing now"), session.Window.DumpAccessibilityTree());
+            int builds = app.Builds;
+
+            // Thirty reports inside the chapter.
+            for (int m = 60; m < 90; m++)
+            {
+                backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromMinutes(m)));
+                session.PumpFrame();
+            }
+            Assert.Equal(builds, app.Builds);
+
+            backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromMinutes(91)));
+            session.PumpFrame();
+            Assert.Equal(builds + 1, app.Builds);
+            Assert.True(Shows(session, "Return, playing now"));
+            Assert.False(Shows(session, "The Ocean, playing now"));
+        }, () => backend);
+    }
+
     [Fact]
     public void PageDownStepsToTheNextChapterAndPageUpRestartsThisOne()
     {

@@ -321,8 +321,12 @@ public sealed partial class ReelApp : Component, IDisposable
 
     // ── The window ───────────────────────────────────────────────────────
 
+    /// <summary>How many times <see cref="Build"/> has run, for the tests.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         _ = _revision.Value;
         Pump();
 

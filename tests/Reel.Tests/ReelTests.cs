@@ -488,6 +488,41 @@ public class ReelTests : IDisposable
         Assert.False(app.ChaptersOpen);
     }
 
+    /// <summary>
+    /// The panel marks the chapter playing now and follows the playhead, rebuilding the app
+    /// only when the playhead crosses into another chapter. It read the position in the app's
+    /// build, so while it was open every position report (ten a second) rebuilt the whole app.
+    /// </summary>
+    [Fact]
+    public void TheChapterPanelFollowsThePlayhead_RebuildingOnlyWhenTheChapterChanges()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(first);
+        session.PumpFrames(4);
+        session.Window.PressKey(KeyCode.C);
+        session.PumpFrames(2);
+        Assert.NotNull(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Button, "Opening, playing now"));
+        int builds = app.Builds;
+
+        // Eighteen reports inside the first chapter.
+        for (int s = 30; s < 600; s += 32)
+        {
+            backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromSeconds(s)));
+            session.PumpFrame();
+        }
+        Assert.Equal(builds, app.Builds);
+
+        backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromMinutes(10.5)));
+        session.PumpFrame();
+        Assert.Equal(builds + 1, app.Builds);
+        Assert.NotNull(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Button, "Chapter 2, playing now"));
+        Assert.Null(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Button, "Opening, playing now"));
+    }
+
     /// <summary>Clicking a row seeks there and puts the panel away.</summary>
     [Fact]
     public void ClickingAChapterSeeksToItAndClosesThePanel()

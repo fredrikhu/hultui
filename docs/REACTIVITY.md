@@ -251,6 +251,23 @@ The `Ref` follows the element on screen across rebuilds, so the effect always wr
 one, and the build's own value is never stale because it reads the current one. The player's
 position report now costs 420 B instead of 41 KB (headless, JIT).
 
+When the build needs only something coarse derived from the value, read that through a
+`Computed<T>` instead. An effect that read a computed value runs again only when the value it
+computes changes, so a build reading it reruns a few times a film, not ten times a second.
+Reel's and Aperture's chapter panels mark the chapter playing now; they read the position in
+the app's `Build()`, so with the panel open every report rebuilt the whole app (Reel 66.6 KB,
+Aperture 179.5 KB a report, headless). They now read the chapter's index:
+
+```csharp
+// Made once per player; a build that reads it reruns when the playhead crosses a mark.
+_chapterHere = new Computed<int>(() => CurrentChapterIndex(player.Position));
+
+// in Build():
+int current = _chapterHere.Value;
+```
+
+A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture).
+
 ---
 
 ## Component Model

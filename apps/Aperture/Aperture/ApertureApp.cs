@@ -168,8 +168,12 @@ public sealed partial class ApertureApp : Component, IDisposable
         FocusPendingSearchField();
     }
 
+    /// <summary>How many times <see cref="Build"/> has run, for the tests.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         // Track the revision signal so Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
 
