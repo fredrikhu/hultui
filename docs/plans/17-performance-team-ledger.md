@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–6 landed, step 7 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–7 landed, step 8 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -102,7 +102,7 @@ Round 2 regressions first, then value per cost.
    mark visits −73…−90 % (Junction Files search 383,482 → 37,432 per key; every other counter
    identical on 102 rows); ApplyTheme marks layout only when a measured value changed (theme rows
    8.91 → 0.19 KB/op). Small.
-7. **paint-raw-run-buffer + paint-polygon-pooled-path + paint-cluster-line-measurer** (2) —
+7. ~~**paint-raw-run-buffer + paint-polygon-pooled-path + paint-cluster-line-measurer**~~ LANDED 5cd0bdf, 6c70dbe, 4e85cdd (2) —
    `AllocateRawPositionedRun` (AOT −17…−40 % on 6 rows); pooled SKPath and span for
    FillPolygon/DrawPolyline and Terminal's HalfEllipse (Powerline frame 12.49 → 1.62 KB); one
    measurer per merged-cluster line (1.1 KB per such line per steady frame → 0). Small.
@@ -172,6 +172,10 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **terminal-row-strings** (2/Terminal, from step 7) — `TerminalElement.Render.cs:~356` cuts each drawn
+  row into a new string every frame: 1.1–1.9 KB per forced terminal frame, now all of it.
+- **richtext-viewframe-record** (2/5, from step 7, small) — `RichTextEditorElement.Accessibility.cs:~80`
+  (`NoteViewFrame`) makes a `ViewFrame` record every Render (24 B per editor frame); compare first.
 - **reel-still-previews-rebuild** (8, app, from step 4b) — Reel's still previews call
   `InvokeOnMainThread(Rerender)` per still as it lands: ~120 whole-app rebuilds over the first minute
   or two of a file.
@@ -325,6 +329,9 @@ Re-ranked by the round 4 survey.
 | 3 | 7754fe7 | text-prefix-measure-span | New public `TextPrefixMeasurer(string text, int length)` and `TextLine` overloads (CaretXAt, OffsetAtX, VisualRanges, TryMoveCaretVisually) so merged-cluster lines measure prefixes without cutting substrings; old `Func<string,float>` overloads kept (a literal `null` measurer is now ambiguous; no caller). `MeasureWidth` now caches BiDi-path widths keyed by paragraph direction (TextArea BiDi lines hit the cache too; DECISIONS.md updated). Hover frame with two merged-cluster lines −192 B (JIT 1,464 → 1,272, AOT 1,336 → 1,144); the rest (closures) is expert 2's step 7. Bit-equal prefix widths; 10 mutations caught. Not run on WSL: run the Linux tests in the release phase. |
 | 3 | dc4800d | layout-style-mark-once | `DirtyFlags.StyleSubtree` claim: the style mark walk stops at an element whose subtree is already marked; cleared with Style; a mounted unmarked child joining a claimed parent drops the claim up the chain (`NoteChildJoined` in the three add paths), so marked sets are unchanged. Mark visits: component/edit 44,004 → 18,004, tabs −76 %, a11y/create −54 %, palette −71 %, Junction History −75 %, Branches −64 %, Tags −76 %, Files search 383,482 → 60,731 per key. Every other counter and allocation identical on 110 rows. Time: component/edit keyed 1.458 → 1.246 ms JIT (−15 %), −6 % AOT; unkeyed −9/−10 %; reverse −10/−8 %; 0 slower. Shadow audit: 0 differences over ~4.3 M elements in 10 suites (positive control 2,548). 18 tests, 7 mutations caught. |
 | 3 | 51f3126 | layout-applytheme-layout-on-change | Five leaf controls mark layout in ApplyTheme only when a measured value changed; Expander marks the parts whose written sizes changed (fixes a header keeping 32 px on a 48 px theme); Toast's ApplyTheme no longer calls ReplaceChildren (no Children/a11y rebuild per restyle). Theme rows: layouts 78 → 0, MeasureContent 100 → 0; light/dark 8.7 → 0.0 KB/op, −6 % JIT / −7 % AOT; named scheme 10.9 → 2.2 KB/op, −6 %. THEMES.md control-author paragraph. 14 tests, 17 of 18 mutations caught (the 18th's code removed). |
+| 3 | 5cd0bdf | paint-raw-run-buffer | `AllocateRawPositionedRun` (struct): per new blob 136 → 80 B (AOT and tier-0 JIT; warm JIT kept the class on the stack). AOT KB/op: scroll/jump 9.1 → 6.3 (−31 %), nested 3.0 → 2.2, wheel 2.3 → 1.8, sticky 2.3 → 1.9, selectable viewer wheel 4.0 → 3.3, richtext wheel 1.0 → 0.6; JIT unchanged; 0 slower. (103f30e's "136 B wrapper" was 80 B wrapper + 56 B run buffer.) |
+| 3 | 6c70dbe | paint-polygon-pooled-path | `FillPolygon`/`DrawPolyline` reuse the kept SKPath (Rewind); Terminal `BoxDrawing.HalfEllipse` uses a stackalloc span. Per forced frame (JIT = AOT): six Powerline lines 12,880 → 1,744 B; 40 ticked tasks 3,224 → 24 B. Pixels byte-identical (6 shots, scale 1 and 1.5). The kept SKPath is shared by polygons, polylines, corner clips and the canvas context: nothing may hold it across those calls. |
+| 3 | 4e85cdd | paint-cluster-line-measurer | One `TextPrefixMeasurer` per style, cached by style value (≤ 64) on SkiaRenderContext and on TextPipeline (`PrefixMeasurer(style)`, used by PipelineTextParagraph). Hover frame with two merged-cluster lines: JIT 1,272 → 312 B, AOT 1,144 → 312 B (= the ASCII baseline: the lines now cost 0 B); with selection 1,400/1,240 → 312. 0 slower. |
 
 ## Examined, not worth it
 
@@ -570,3 +577,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   −15 % JIT), theme switches lay out only what changed size. Guideline note (THEMES.md): ApplyTheme
   runs every style pass — mark layout only when a measured size changed, and mark a part whose box
   you wrote. For reconcile-restyle-on-change: `NoteChildJoined` must stay in the three add paths.
+- 2026-10-11: step 7 landed (5cd0bdf, 6c70dbe, 4e85cdd): AOT blob building −56 B per blob,
+  Powerline/task-tick frames ~0 B, merged-cluster lines 0 B per steady frame. Guideline notes: AOT
+  and tier-0 JIT heap-allocate helpers warm JIT keeps on the stack — prefer struct APIs and check
+  AOT bytes; pass polygon points as a span; a closure capturing a struct on a draw path costs ~120 B
+  per call — cache by value on a shared owner.
