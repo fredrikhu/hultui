@@ -773,6 +773,10 @@ public partial class JunctionApp : Component, IDisposable
 
     // ── Build ────────────────────────────────────────────────────────────
 
+    /// <summary>Whole-window builds so far, for tests: each one makes every view element again,
+    /// so a stray one (a background result nothing on screen reads) is a cost worth pinning.</summary>
+    internal int Builds { get; private set; }
+
     /// <summary>Keep the OS window title on the repository in front of you. Junction draws
     /// its own chrome, so this is not the caption — it is what the task bar and Alt+Tab show,
     /// and two Junction windows over two repos are otherwise indistinguishable there.</summary>
@@ -790,6 +794,8 @@ public partial class JunctionApp : Component, IDisposable
         SyncWindowTitle();
         _spinnerWanted = false;   // set again by any Spinner() built below
         _issueRulesLooked = false;   // the rules file is looked at again, once (see IssueRules)
+        _highlightShown = null;   // set again by the diff pane built below (see HighlightForCurrent)
+        Builds++;
 
         // Track the revision signal so a Rerender() re-runs Build through the
         // Effect (re-subscribing to the active repo's loaders — see _revision).
