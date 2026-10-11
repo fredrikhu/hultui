@@ -1501,7 +1501,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledFont.Typeface = typeface;
         _pooledFont.Size = run.FontSize;
 
-        var buffer = _blobBuilder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
+        // The raw buffer is a struct. AllocatePositionedRun hands out the same two spans in a
+        // class, 56 B more per new blob wherever the compiler does not keep it on the stack:
+        // NativeAOT's build of the perf suite heap-allocated it (scroll/jump 9.1 -> 6.3 KB/op).
+        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, run.Glyphs.Length);
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 

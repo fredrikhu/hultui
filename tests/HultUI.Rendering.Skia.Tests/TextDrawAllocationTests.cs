@@ -144,7 +144,10 @@ public class TextDrawAllocationTests
     /// A run drawn for the first time becomes a text blob, built in one builder the context
     /// keeps: <c>Build</c> hands the blob over and leaves the builder empty for the next. A new
     /// <c>SKTextBlobBuilder</c> per blob was 80 B more per new blob (216 → 136 B; plan 17, round
-    /// 2), ~4 KB a step when a scrolled list draws ~50 new rows.
+    /// 2), ~4 KB a step when a scrolled list draws ~50 new rows. The glyphs go in through the raw
+    /// run buffer, a struct: <c>AllocatePositionedRun</c>'s buffer is a class, 56 B more per new
+    /// blob (136 → 80 B; plan 17, round 3) wherever the compiler does not keep it on the stack —
+    /// here, and in the NativeAOT build of the perf suite (scroll/jump 9.1 → 6.3 KB a step).
     /// </summary>
     [Fact]
     public void ANewBlob_IsBuiltInTheKeptBuilder()
@@ -177,8 +180,9 @@ public class TextDrawAllocationTests
 
         Assert.True(misses >= 500, $"only {misses} new blobs over 500 new rows");
         double perBlob = bytes / (double)misses;
-        // 136 B is the blob's own wrapper and its handle registration; a builder adds 80.
-        Assert.True(perBlob < 176, $"a new blob allocated {perBlob:0.#} B");
+        // 80 B is the blob's own wrapper and its handle registration; a run buffer object adds
+        // 56, a builder 80.
+        Assert.True(perBlob < 112, $"a new blob allocated {perBlob:0.#} B");
     }
 
     /// <summary>The kept builder starts each blob empty: text drawn after other new text looks
