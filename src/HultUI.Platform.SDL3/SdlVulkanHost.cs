@@ -227,6 +227,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private Action? _swapchainReleasing;
 
     private VkFormat _format = VkFormat.B8G8R8A8Unorm;
+
+    /// <summary>The wide-colour wish <see cref="_format"/> was chosen for, so a resize that keeps the
+    /// swapchain need not ask the surface again; null after a display change (see
+    /// <see cref="VulkanSwapchainChoice.FormatStillChosen"/>).</summary>
+    private bool? _formatChosenForWide;
     private VkColorSpaceKHR _colorSpace = VkColorSpaceKHR.SrgbNonLinear;
     private VkPresentModeKHR _presentMode = VkPresentModeKHR.Fifo;
     private VkCommandPool _pool;
@@ -441,6 +446,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         DisplayIsHdr = isHdr;
         SdrWhiteScale = sdrWhiteScale;
+        // Another display may list other formats: the next resize that keeps the swapchain asks.
+        _formatChosenForWide = null;
 
         // Against what the choice would actually produce, not against what was wanted.
         //
@@ -698,6 +705,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         var replacedPresentMode = _presentMode;
         _format = ChooseFormat(out var colorSpace);
         _colorSpace = colorSpace;
+        _formatChosenForWide = WantsWideColor;
 
         // A surface that cannot offer these is one this renderer cannot draw on, and saying
         // so here beats a null surface three call frames later.
@@ -1316,7 +1324,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // kept the skipping and lost only the scaling that justifies it.
         if (VulkanSwapchainChoice.CanKeepSwapchain(force, _builtOneToOne && OverAllocating, !_swapchain.IsNull,
                 widthPx, heightPx, _allocWidthPx, _allocHeightPx)
-            && ChooseFormat(out _, trace: false) == _format)
+            && FormatUnchanged())
         {
             _widthPx = widthPx;
             _heightPx = heightPx;
@@ -1329,6 +1337,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);
+    }
+
+    /// <summary>Whether the format would be chosen again, asking the surface only when the answer
+    /// it gave last may no longer hold (<see cref="VulkanSwapchainChoice.FormatStillChosen"/>).</summary>
+    private bool FormatUnchanged()
+    {
+        if (VulkanSwapchainChoice.FormatStillChosen(_formatChosenForWide, WantsWideColor)) return true;
+        if (ChooseFormat(out _, trace: false) != _format) return false;
+        _formatChosenForWide = WantsWideColor;
+        return true;
     }
 
     /// <summary>

@@ -186,6 +186,19 @@ public class VulkanSwapchainChoiceTests
     }
 
     [Fact]
+    public void AKeptResize_AsksTheSurfaceForFormats_OnlyWhenTheAnswerMayHaveChanged()
+    {
+        // Chosen for the wish that holds now: not asked again (1.37 ms a kept step of a drag).
+        Assert.True(FormatStillChosen(formatChosenForWide: true, wantsWideColor: true));
+        Assert.True(FormatStillChosen(formatChosenForWide: false, wantsWideColor: false));
+        // The wish changed (HDR switched on or off), or the display did (forgotten): asked.
+        Assert.False(FormatStillChosen(formatChosenForWide: true, wantsWideColor: false));
+        Assert.False(FormatStillChosen(formatChosenForWide: false, wantsWideColor: true));
+        Assert.False(FormatStillChosen(formatChosenForWide: null, wantsWideColor: true));
+        Assert.False(FormatStillChosen(formatChosenForWide: null, wantsWideColor: false));
+    }
+
+    [Fact]
     public void TheFixedExtentOverride_DecidesAlone_AndOnlyWhereOneToOneIsOffered()
     {
         foreach (var loop in new[] { SizeMoveLoop.None, SizeMoveLoop.Moving, SizeMoveLoop.Sizing })
