@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.RichText;
 using HultUI.Testing;
 using Xunit;
 
@@ -204,6 +205,28 @@ public class FrameAllocationTests
         double perFrame = PerFrame(session.Application, () => area.MarkPaintDirty());
 
         Assert.True(perFrame < 1, $"repainting a TextArea allocated {perFrame:0.#} B per frame");
+    }
+
+    /// <summary>A rich text editor's ticked tasks, repainted, allocate no more than the same tasks
+    /// unticked. Each tick is a polyline, and each polyline was a new <c>SKPath</c>: ~80 B a tick a
+    /// frame, 3.1 KB a frame over a screen of 40 ticked tasks (plan 17, round 3). (The editor
+    /// allocates 24 B a frame either way: the record it notes where it was drawn in.)</summary>
+    [Fact]
+    public void ASteadyRepaintOfTickedTasks_AllocatesNoMoreThanOfOpenTasks()
+    {
+        double ticked = Repaint(done: true), open = Repaint(done: false);
+
+        Assert.True(ticked <= open, $"repainting ticked tasks allocated {ticked:0.#} B per frame; open ones, {open:0.#} B");
+
+        static double Repaint(bool done)
+        {
+            var blocks = new List<RichBlock>();
+            for (int i = 0; i < 30; i++)
+                blocks.Add(RichBlock.Of(BlockKind.TaskItem, $"Task number {i}") with { Checked = done });
+            var editor = RichTextEditor.New(new RichDocument(blocks)).FlexGrow(1);
+            using var session = Session(Flex.Column().FlexGrow(1).Children(editor));
+            return PerFrame(session.Application, () => editor.MarkPaintDirty());
+        }
     }
 
     /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key

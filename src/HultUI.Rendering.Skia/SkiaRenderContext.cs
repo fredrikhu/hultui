@@ -1338,7 +1338,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void FillPolygon(ReadOnlySpan<Point> points, Color fill)
     {
         if (points.Length < 3 || fill.A == 0) return;
-        using var path = PathThrough(points);
+        var path = PathThrough(points);
         path.Close();
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(fill);
@@ -1349,7 +1349,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
     {
         if (points.Length < 2 || color.A == 0 || strokeWidth <= 0) return;
-        using var path = PathThrough(points);
+        var path = PathThrough(points);
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(color);
         _pooledPaint.IsAntialias = true;
@@ -1360,9 +1360,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         Canvas.DrawPath(path, _pooledPaint);
     }
 
-    private static SKPath PathThrough(ReadOnlySpan<Point> points)
+    // The pooled path, emptied, through the points. The draw copies the geometry, so the path is
+    // free again once it returns. A new SKPath per shape was ~80 B, and the shapes are drawn
+    // again every frame: a terminal's Powerline separators (5.6 KB a frame over six prompt
+    // lines), a rich text editor's ticks.
+    private SKPath PathThrough(ReadOnlySpan<Point> points)
     {
-        var path = new SKPath();
+        var path = _pooledPath;
+        path.Rewind();
         path.MoveTo(points[0].X, points[0].Y);
         for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
         return path;
