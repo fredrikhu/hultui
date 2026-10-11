@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–2 landed, step 3 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–3 landed, step 4 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
   and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
   only their (user) parts. To resume after a pause, run in this worktree:
@@ -64,7 +64,7 @@ Round 2 regressions first, then value per cost.
    **a11y-atspi-status-serialize** (out-of-order status reads). With suite row
    **apps-scenario-selection-walk-real-loop-a11y** (8: keys every 60 ms in the real loop, bridge
    on, a11y rebuilds per key — would have caught 0912a5e).
-3. **Junction rebuild costs** (8/6, app): **apps-junction-prefetch-rebuild** (the highlight
+3. ~~**Junction rebuild costs**~~ LANDED 88fa622, 16fc8ec, 83050a6, df6441c, 6902403 (8/6, app): **apps-junction-prefetch-rebuild** (the highlight
    prefetch's completion rebuilds the whole app outside Commit/Changes: History 2.05 → 1.0
    rebuilds per key, −26…−45 % bytes), **apps-junction-diff-flatten-per-build** (every build
    re-flattens the shown diff: Changes typing 1.19 MB per keystroke, ~−85 %; memoize rows by
@@ -159,6 +159,9 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **junction-review-rows-shape** (8, app, from step 3) — Junction's review mode still remakes every
+  diff row each build (the woven list is new each build); give it its own shape key. Vesper's diff
+  and viewer lists are still one-argument templates (with adopt-item-rows, step 14).
 - **a11y-uia-host-reads-off-thread** (7, found in step 2; pre-existing) — the other `UiaHostBridge`
   reads still walk the live element tree on UIA threads: Value pattern for TextInput and TextArea,
   toggle state, item count, label and selected, scroll and range info. Answer from the node, as
@@ -289,6 +292,11 @@ Re-ranked by the round 4 survey.
 | 3 | 4eeec65 | a11y-atspi-status-serialize | Correctness (2170222): status reads one at a time (`AtSpiStatusReader`), re-read when a change arrived during a read. Live WSL (pyatspi, private bus, bursts of four changes): wrong final state 5/40 and 7/100 → 0/40 and 0/100 (every wrong case: status on, bridge off). 2 mutations caught. |
 | 3 | 3788a33 | a11y-uia-text-value-from-node | Thread safety (72a4f96/9c8bf91): ValueValue and the Value pattern's GetValue for a node with text answer from `Node.Value` (editor: the told text version; terminal: the screen as the tree read it), no live-tree walk on a UIA thread. 2 mutations caught. |
 | 3 | 1f294c4 | a11y-uia-disconnect-on-close | Leak closed (found by 4): Dispose calls `UiaReturnRawElementProvider(hwnd, 0, 0, NULL)` after restoring the window procedure. 150 open/close cycles of a 60-row window, UIA listening: managed 36,693 → 1,289 KB, private 174–177 → 140 MB (`HULTUI_A11Y=0`: 1,185 KB / 139 MB). Perf suite (with 3788a33, captures 184b9d5): 0 slower; heavy-allocation row medians −15…−30 % and a full run 32 → 28 s, likely the suite's own UIA rows no longer leaking sessions (not measured further). |
+| 3 | 88fa622 | apps-junction-prefetch-rebuild | App: a highlight that lands rebuilds only when the build on screen asked for that key (`_highlightShown`, cleared each Build); otherwise cached for Commit/Changes' first frame. History, Down every 500 ms, AOT: builds per key 2.00 → 1.00; a11y off 469.9 → 268.8 KB per key (−43 %), frame 1.96 → 1.13 ms (−42 %); a11y on 1,042 → 573 KB (−45 %), a11y trees 2.00 → 1.06. At 60 ms/key bytes −2…−4 %. HighlightRebuildTests (4 mutations caught). |
+| 3 | 16fc8ec | apps-junction-diff-flatten-per-build | App: diff rows flattened once per (diff, split, highlight, theme) object and the list on item rows with a `DiffRowShape` (staging context, wrap, pan, code font, theme, find state) + `InvalidateRows`. Changes typing beside a 184-row hunk, a11y off, AOT: 1,217.9 → 233.4 KB per keystroke (−81 %), rows made 39 → 0, frame 1.82 → 1.36 ms (−25 %); a11y on 1,962.8 → 978.6 KB. Commit no-op keys 650.7 → 272.2 KB (−58 %), frame −18 %. Review mode unchanged (rows still made per build). DiffRowKeepTests (9; 11 mutations caught). |
+| 3 | 83050a6 | junction-diff-item-labels | App, a11y correctness: diff rows named for readers ("added, line 12: …", hunk headers, split pairs, threads) instead of a `DiffRow { … }` dump, made on first ask and kept with the rows. Changes typing, a11y on: a11y 744.4 → 31.5 KB per keystroke (−96 %), total 978.7 → 265.4 KB, a11y share 27 → 4–5 %. Step net with a reader: 1,962.8 → 265.4 KB (−86 %), frame −31 %. |
+| 3 | df6441c | vesper-item-labels | App, a11y correctness: Vesper's comparison (removed/added/changed/"12 unchanged lines"), viewer ("line N: text") and thumbnail rows (the row's file names) named for readers, cached. One a11y tree of a 400-line comparison 1,093.5 → 40.5 KB (−96 %, headless JIT). ItemLabelTests (5 mutations caught). |
+| 3 | 6902403 | apps-scenario-type-beside-diff | Suite rows `input/type beside a 150-line diff, rows {made in Build, kept}` and `a11y/…, bridge on`: made in Build 381 KB/op, 37 rows per key (JIT 0.635 ms) vs kept 19 KB/op (0.519 ms); bridge on 579–653 vs 33–34 KB/op labelled. 108 scenarios; `--verify` passes; full compare 0 slower/faster JIT and AOT. |
 
 ## Examined, not worth it
 
@@ -503,3 +511,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   providers released on close. Windows and WSL test projects pass. New waiting item
   a11y-uia-host-reads-off-thread. Guideline notes: `SelectedIndex` costs no a11y rebuild up to 2,000
   items; in tests `PumpFrame()` is false for a frame only accessibility asked for.
+- 2026-10-11: step 3 landed (88fa622..6902403): Junction History one rebuild per key; diff rows
+  memoized on item rows; diff, comparison, viewer and thumbnail rows named for readers; two suite
+  rows. Guideline notes: rebuild for a background result only if the build on screen read it;
+  never derive list rows in Build (memoize by input identity, item rows + shape key, mutation-test
+  every shape input); label every record/index list (ToString() dumps cost 744 KB per keystroke);
+  removing allocations can move a gen-0 GC into a frame — compare frames without a GC.
