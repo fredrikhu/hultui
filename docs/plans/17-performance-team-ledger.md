@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–4b landed, step 5 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–5 landed, step 6 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
   and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
   only their (user) parts. To resume after a pause, run in this worktree:
@@ -89,7 +89,7 @@ Round 2 regressions first, then value per cost.
    builds in 13 s after step 4). Find since when (before plan 17, or a plan 17 change), make the
    time-based work run on a timer or an effect, and pin every pump duty with tests over a long
    virtual playback (heartbeat every 10 s, save every 15 s, Ended handled, resume seek applied).
-5. **text-prefix-table-scratch** (5) — BuildPrefixWidths reuses one kept segment list and font-run
+5. ~~**text-prefix-table-scratch**~~ LANDED 7a8f516, 7754fe7 (5) — BuildPrefixWidths reuses one kept segment list and font-run
    list: long-document open −60 % (3,418 → 1,377 KB/op), wrap resize −11 %, wrapped typing −10 %,
    20,000-line wrapped log 207.7 → 75.2 MB. Also the span-based prefix measure that
    paint-cluster-line-measurer needs (TextTypes.cs:272). Small.
@@ -317,6 +317,8 @@ Re-ranked by the round 4 survey.
 | 3 | 7016de4 | media-patch-keeps-layout | Canvas, Slider (marks layout when ThumbRadius changes), VideoElement and the player root opt into PatchMarksOwnLayout: a player rebuild that moves nothing costs layout 6 → 0 µs per scrubber-hover move and no empty a11y rebuild 100 ms later. DECISIONS.md updated. Perf compare flat. |
 | 3 | 1e3edff | apps-chapters-computed | App: Reel's and Aperture's chapter panels read the playhead through a `Computed<int>` chapter index; the app rebuilds only when a mark is crossed. Panel open, per report: Reel 66,591 → 591 B, Aperture 179,530 → 1,752 B, 1 → 0 builds. REACTIVITY.md shows the pattern. |
 | 3 | 133bd8a, 7bfc1e7, 5e28b9a, 58fe439 | apps-playback-pump-out-of-build | App correctness, **broken since each app's first commit** (not plan 17; releases aperture-v1.19.0/reel-v1.4.0 and the previous ones affected): the time-based playback duties ran in the app Build, which barely runs during quiet playback (Aperture 1 build, Reel 0). Aperture's 10 s progress heartbeat and Reel's 15 s resume save never went out: 0 in 25/33 s at 01e5bd7/1093bfa, 4aa5653, 64ba531, 0951288 and 1569c9d → 2 after the fix. State-driven duties (resume seek, tracks, chapters, volume, Ended) worked. Fix: two Effects per player made when the stream opens — state (State, Duration, tracks; Position untracked) and clock (Position + `Application.Time`); nothing left in Build. App builds per 60 s quiet playback 0 → 0. `FakeMediaBackend.HoldOpening/FinishOpening` for load-order tests; 17 mutations caught. REACTIVITY.md "Build is not a clock", MEDIA.md trap. |
+| 3 | 7a8f516 | text-prefix-table-scratch | `BuildPrefixWidths` builds in two kept lists (runs cleared after each build; segments capped at 4,096 kept) and copies exact arrays out. Bit-identical over 500,000 random strings in 15 scripts × 5 styles. KB/op JIT (AOT within 0.2 %): text/open long document 3,418 → 1,442 (−58 %), richtext/open 11,248 → 10,027 (−11 %), richtext/resize −10 %, text/wrap resize −11 %, wrapped 900-line typing −10 %; time flat on min, medians −6…−22 %; 0 slower. 20,000-line wrapped log open 202.7 → 73.3 MB allocated (−64 %), later opens 125 → 102 ms. TextBench ellipsis-2lines −36 % B/call. |
+| 3 | 7754fe7 | text-prefix-measure-span | New public `TextPrefixMeasurer(string text, int length)` and `TextLine` overloads (CaretXAt, OffsetAtX, VisualRanges, TryMoveCaretVisually) so merged-cluster lines measure prefixes without cutting substrings; old `Func<string,float>` overloads kept (a literal `null` measurer is now ambiguous; no caller). `MeasureWidth` now caches BiDi-path widths keyed by paragraph direction (TextArea BiDi lines hit the cache too; DECISIONS.md updated). Hover frame with two merged-cluster lines −192 B (JIT 1,464 → 1,272, AOT 1,336 → 1,144); the rest (closures) is expert 2's step 7. Bit-equal prefix widths; 10 mutations caught. Not run on WSL: run the Linux tests in the release phase. |
 
 ## Examined, not worth it
 
@@ -547,3 +549,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   save now run during quiet playback; broken since each app's first commit, so the current and
   previous releases have it. Guideline: Build is not a clock — periodic work rides a ticking signal
   and checks `Application.Time`; state-driven work goes in an Effect disposed with what it watches.
+- 2026-10-11: step 5 landed (7a8f516, 7754fe7): prefix tables in kept lists (long document open
+  −58 % bytes, 20k-line log −64 %); span prefix measure for merged-cluster lines. **Release phase:
+  run the WSL Linux tests** (text change; not run in the step). Guideline notes: build one-off tables
+  in capped kept scratch lists and copy exact arrays out; measuring callbacks take text + length;
+  a BiDi width cache must key on paragraph direction.
