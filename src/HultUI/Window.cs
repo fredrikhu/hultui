@@ -457,7 +457,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         TextInputHost = platformWindow.TextInputHost;
         _devTools = new DevToolsOverlay(_perf);
         _a11yObserver = new AccessibilityObserverAdapter(this);
-        PlatformWindow.InputReceived += HandleInputEvent;
+        PlatformWindow.InputReceived += FrameLog.On ? HandleInputEventLogged : HandleInputEvent;
 
         if (platformWindow.Style == WindowStyle.Borderless && _chrome is { } chrome)
         {
@@ -1337,6 +1337,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         ModifierKeys = key.ModifierKeys,
         Text = key.Text,
     };
+
+    /// <summary><see cref="HandleInputEvent"/>, counted with its bytes for <see cref="FrameLog"/>.</summary>
+    private void HandleInputEventLogged(InputEvent evt)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        HandleInputEvent(evt);
+        FrameLog.Input(GC.GetAllocatedBytesForCurrentThread() - before);
+    }
 
     private void HandleInputEvent(InputEvent evt)
     {

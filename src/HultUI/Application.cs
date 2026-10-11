@@ -78,7 +78,8 @@ public sealed class Application : IDisposable
         var app = _current;
         if (app is null) return;
         app._mainThreadQueue.Enqueue(action);
-        app.WakeIfParked();
+        if (FrameLog.On) FrameLog.Post();
+        app.WakeIfParked(WakeSource.Post);
     }
 
     /// <summary>
@@ -86,11 +87,14 @@ public sealed class Application : IDisposable
     /// cannot be parked while it runs this, and whose wake would only queue a spurious
     /// event that makes the next idle wait return at once.
     /// </summary>
-    private void WakeIfParked()
+    private void WakeIfParked(WakeSource source)
     {
         if (Environment.CurrentManagedThreadId == UIThread.BoundThreadId) return;
+        if (FrameLog.On) FrameLog.Wake(source);
         _platform.Wake();
     }
+
+    private Action? _wakeForAwait;
 
     public Theme Theme
     {
@@ -388,7 +392,17 @@ public sealed class Application : IDisposable
     private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick);
 
+        FrameLog.PassStart(this, _platform.TimeProvider);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool rendered = RunPass(delta, forceRender, allowRender, tick);
+        FrameLog.PassEnd(rendered, tick, GC.GetAllocatedBytesForCurrentThread() - before);
+        return rendered;
+    }
+
+    private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick)
+    {
         // Poll and route all native events. A platform asking to quit ends the frame
         // here, before anything touches a tree the platform may already have torn down.
         // The callback is created once: a method group passed as an argument is a new
@@ -522,7 +536,7 @@ public sealed class Application : IDisposable
             if (AnyWindowNeedsRender() || (stepDrawn && AnimationManager.HasActiveAnimations))
             {
                 long remainingMs = (nextRenderAt - clock.GetTimestamp()) * 1000 / frequency;
-                _platform.WaitForEvents((int)Math.Max(1, remainingMs));
+                Wait(clock, idle: false, IdleDeadline.Poll16, (int)Math.Max(1, remainingMs));
             }
             else
             {
@@ -530,9 +544,23 @@ public sealed class Application : IDisposable
                 // delay, e.g. the tooltip show timer) only needs a step an interval, so
                 // wait instead of busy-spinning until it fires; a post or an event wakes
                 // this.
-                _platform.WaitForEvents(16);
+                Wait(clock, idle: true, IdleDeadline.Poll16, 16);
             }
         }
+        if (FrameLog.On) FrameLog.LoopEnded(this);
+    }
+
+    /// <summary>Parks the loop in the platform's wait, timed for <see cref="FrameLog"/>.</summary>
+    private void Wait(TimeProvider clock, bool idle, IdleDeadline deadline, int timeoutMs)
+    {
+        if (!FrameLog.On)
+        {
+            _platform.WaitForEvents(timeoutMs);
+            return;
+        }
+        long start = clock.GetTimestamp();
+        _platform.WaitForEvents(timeoutMs);
+        FrameLog.Waited(idle, deadline, timeoutMs, clock.GetTimestamp() - start);
     }
 
     /// <summary>The refresh rate of the fastest display any open window is on, in Hz;
@@ -582,7 +610,8 @@ public sealed class Application : IDisposable
     {
         var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(
-            new UIThreadSynchronizationContext(_mainThreadQueue, WakeIfParked));
+            new UIThreadSynchronizationContext(_mainThreadQueue,
+                _wakeForAwait ??= () => WakeIfParked(WakeSource.Await)));
         return previous;
     }
 
@@ -653,6 +682,7 @@ public sealed class Application : IDisposable
             window.Performance.BeginFrame();
             window.RenderFrame(evenIfMinimized: force);
             window.Performance.EndFrame();
+            if (FrameLog.On) FrameLog.Frame();
             // The window is created hidden; reveal it only now that its first
             // frame has been presented, so the OS never composites the blank
             // GL surface. No-op after the first frame.
@@ -750,6 +780,7 @@ internal sealed class UIThreadSynchronizationContext : SynchronizationContext
     public override void Post(SendOrPostCallback d, object? state)
     {
         _queue.Enqueue(() => d(state));
+        if (FrameLog.On) FrameLog.Post();
         _wake();
     }
 
