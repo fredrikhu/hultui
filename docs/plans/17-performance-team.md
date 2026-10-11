@@ -316,7 +316,12 @@ round, with CI waited for.
   when the change is in the a11y path.
 - **Never take focus** from the user's desktop: no `SendKeys`, no foreground windows,
   no clicks in Junction; drive apps headlessly or through `JUNCTION_BENCH`
-  (branch `claude/render-probe`).
+  (branch `claude/render-probe`). The `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0` environment variable
+  is **not enough**: on 2026-10-11 a probe's Borderless window took the foreground four times
+  with only that set. Every real window an agent opens uses the default frame unless the
+  frame is what is measured, sets `SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0` in-process before
+  the window is made, and runs a guard that hands the foreground straight back if it is ever
+  taken (step 8's probe in the scratchpad `r3b8/gpu8` has one).
 - **One build at a time per worktree** (memory `concurrent-dotnet-test-trap`).
 - **Create files with the Write tool**, not shell heredocs (they hang).
 - **Commit on this branch only.** Agents never push, merge or tag. The orchestrator merges

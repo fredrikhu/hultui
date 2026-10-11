@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–7 landed, step 8 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–8 landed, step 9 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -106,7 +106,7 @@ Round 2 regressions first, then value per cost.
    `AllocateRawPositionedRun` (AOT −17…−40 % on 6 rows); pooled SKPath and span for
    FillPolygon/DrawPolyline and Terminal's HalfEllipse (Powerline frame 12.49 → 1.62 KB); one
    measurer per merged-cluster line (1.1 KB per such line per steady frame → 0). Small.
-8. **paint-spanned-line-sub-blobs** (2, medium) — draw each colour stretch from a kept sub-blob of
+8. ~~**paint-spanned-line-sub-blobs**~~ LANDED 27024f6, 5cc9892, b183aa0 (2, medium) — draw each colour stretch from a kept sub-blob of
    only the glyphs that can reach its clip: glyphs per frame −76…−89 % (Junction diff hover
    24,527 → 3,420), pixel-identical by construction. Needs a non-outline pixel test, a GPU readback
    check, an empty-bounds fallback (colour emoji). Managed sub-blobs cost bytes (selectable viewer
@@ -172,6 +172,11 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **subblob-variable-fonts** (2, from step 8) — Skia flags every variable font's box as untrusted, so
+  those faces draw whole runs per colour stretch (no sub-blob win): Cascadia Mono
+  (`FontFamilies.Monospace` on Windows) and Fedora's Noto Sans. Per-glyph ink extents for flagged
+  faces would extend it. Also: one unexplained 1–4 pixel difference (max delta 51) on the first JIT
+  probe run after the step 8 builds, never reproduced in 15+ runs — watch for it.
 - **terminal-row-strings** (2/Terminal, from step 7) — `TerminalElement.Render.cs:~356` cuts each drawn
   row into a new string every frame: 1.1–1.9 KB per forced terminal frame, now all of it.
 - **richtext-viewframe-record** (2/5, from step 7, small) — `RichTextEditorElement.Accessibility.cs:~80`
@@ -332,6 +337,8 @@ Re-ranked by the round 4 survey.
 | 3 | 5cd0bdf | paint-raw-run-buffer | `AllocateRawPositionedRun` (struct): per new blob 136 → 80 B (AOT and tier-0 JIT; warm JIT kept the class on the stack). AOT KB/op: scroll/jump 9.1 → 6.3 (−31 %), nested 3.0 → 2.2, wheel 2.3 → 1.8, sticky 2.3 → 1.9, selectable viewer wheel 4.0 → 3.3, richtext wheel 1.0 → 0.6; JIT unchanged; 0 slower. (103f30e's "136 B wrapper" was 80 B wrapper + 56 B run buffer.) |
 | 3 | 6c70dbe | paint-polygon-pooled-path | `FillPolygon`/`DrawPolyline` reuse the kept SKPath (Rewind); Terminal `BoxDrawing.HalfEllipse` uses a stackalloc span. Per forced frame (JIT = AOT): six Powerline lines 12,880 → 1,744 B; 40 ticked tasks 3,224 → 24 B. Pixels byte-identical (6 shots, scale 1 and 1.5). The kept SKPath is shared by polygons, polylines, corner clips and the canvas context: nothing may hold it across those calls. |
 | 3 | 4e85cdd | paint-cluster-line-measurer | One `TextPrefixMeasurer` per style, cached by style value (≤ 64) on SkiaRenderContext and on TextPipeline (`PrefixMeasurer(style)`, used by PipelineTextParagraph). Hover frame with two merged-cluster lines: JIT 1,272 → 312 B, AOT 1,144 → 312 B (= the ASCII baseline: the lines now cost 0 B); with selection 1,400/1,240 → 312. 0 slower. |
+| 3 | 27024f6 | paint-native-blob-handles | Approved (question 11, "as long as headless still works"). Text blobs are native handles through SkiaSharp's C API: `sk_textblob_builder_make`, `sk_canvas_draw_text_blob`, `sk_textblob_unref` **and `sk_textblob_get_bounds`** (a fourth, for TextPaintBounds), resolved from the library SkiaSharp loaded; a missing export throws by name. Released once (cache empty, Dispose, finalizer). KB/op JIT = AOT: scroll/jump 6.3 → 2.4 (−62 %), nested −45 %, sticky −37 %, wheel −33 %, selectable viewer wheel −33 %, richtext wheel 0.6 → 0.2; new blob 80 → 0 B; 0 slower. Condition met: Headless 767, Rendering.Skia 250, 17 golden scenes byte-identical, 27/27 non-outline headless frames identical, GL and Vulkan readback identical, WSL Fedora 10,012 passed / 0 failed. Leak test: 100k blobs < 32 MB (81.9 MB with unref removed). DECISIONS.md records the pin. |
+| 3 | 5cc9892, b183aa0 | paint-spanned-line-sub-blobs | Each colour stretch draws a kept native sub-blob of only the glyphs whose ink (face box + 1/8 em, 3/8 slanted, + 2 device px) reaches its clip; colour/bitmap/untrusted-box faces draw whole runs. Glyphs per frame −73…−91 % (Junction diff hover 10,650 → 2,763; spans recolor 99,167 → 8,734). Time: Junction diff hover −15/−17 %, wheel −19/−21 %, Vesper reader hover −19/−21 %, wheel −25/−27 %, spans recolor −70/−71 %, spans bold −53/−55 % (JIT/AOT); suite spans recolor −65/−67 %, bold −24/−41 %, rich text rows −9…−14 %; richtext/wheel 0.2 → 1.3 KB/op from a one-time map growth (not presized: ~57 KB per window). Pixels byte-identical (in-process A/B over 8 scripts × 3 scales × 5 transforms, 17 goldens, 27 frames, GPU readback). WSL 10,030 passed / 0 failed. No win yet on variable fonts (Cascadia Mono). |
 
 ## Examined, not worth it
 
@@ -582,3 +589,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   and tier-0 JIT heap-allocate helpers warm JIT keeps on the stack — prefer struct APIs and check
   AOT bytes; pass polygon points as a span; a closure capturing a struct on a draw path costs ~120 B
   per call — cache by value on a shared owner.
+- 2026-10-11: step 8 landed (27024f6, 5cc9892, b183aa0): native text blob handles (the user's
+  headless condition met; a fourth C function, `sk_textblob_get_bounds`, was needed — told to the
+  user) and per-stretch sub-blobs (spanned text −15…−70 % time). **Incident:** step 8's GPU probe
+  window (Borderless, env var only) took the foreground four times, ~1 s each, while the user was in
+  their browser; the brief's focus rule now requires the default frame, the in-process SDL hint and
+  a foreground guard.
