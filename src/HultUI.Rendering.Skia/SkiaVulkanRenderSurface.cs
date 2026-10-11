@@ -365,10 +365,17 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     }
 
     /// <summary>
-    /// A new size may mean a new swapchain, and a new swapchain means this frame's wrapped
-    /// surface names an image that no longer exists. It goes first, deliberately: destroying a
+    /// A new size may mean a new swapchain, and a new swapchain means the wrapped surfaces name
+    /// images that no longer exist. They go before the images do, deliberately: destroying a
     /// swapchain while Skia still holds render targets over its images is a use-after-free
     /// that the validation layers catch and a release build does not.
+    ///
+    /// <para><b>Only when the host rebuilds.</b> A host that calls before its images go
+    /// (<see cref="IVulkanSurfaceHost.SetSwapchainReleasing"/>) drops them itself, at the rebuild;
+    /// a resize that keeps the swapchain — an over-allocated one, during a drag — keeps them, and a
+    /// target made for the old size is replaced when its image next comes round (the size is part
+    /// of its key). Dropped here, every step of a drag paid a synchronous submit and every kept
+    /// target. A host that cannot say so gets them dropped first, as before.</para>
     ///
     /// <para>Only a new <i>pixel</i> size. The scale is not a property of the swapchain, and
     /// on Wayland a move between outputs arrives as two calls — the new pixels at the old
@@ -383,7 +390,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _width = widthPx;
         _height = heightPx;
 
-        DropWrappedSurfaces();
+        if (!_keepTargets) DropWrappedSurfaces();
         if (widthPx > 0 && heightPx > 0) _host.RecreateSwapchain(widthPx, heightPx);
     }
 

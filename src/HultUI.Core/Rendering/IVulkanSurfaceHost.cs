@@ -127,8 +127,10 @@ public interface IVulkanSurfaceHost
     void PresentAcquiredImage();
 
     /// <summary>
-    /// Rebuilds the swapchain for a new size. The renderer drops every wrapped surface
-    /// first, because they name images that are about to be destroyed.
+    /// Resizes the swapchain for a new size: rebuilt, or kept when it was allocated large enough
+    /// and is shown one-to-one. A renderer whose host calls <see cref="SetSwapchainReleasing"/>
+    /// leaves its wrapped surfaces to that call, which comes only when the images go; any other
+    /// drops them first, because they may name images about to be destroyed.
     /// </summary>
     void RecreateSwapchain(int widthPx, int heightPx);
 
