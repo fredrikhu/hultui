@@ -784,7 +784,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal void ToggleElement(ElementId id) => _host.ToggleElement(id);
     internal void SelectElement(ElementId id) => _host.SelectElement(id);
     internal void SetValue(ElementId id, string value) => _host.SetValue(id, value);
-    internal string? GetValue(ElementId id) => _host.GetValue(id);
+    /// <summary>
+    /// A node's value for the Value pattern. A node that offers text answers from its node, as its
+    /// ValueValue property does (<see cref="UiaFragment.GetPropertyValue"/>): the version its text
+    /// events describe, on any thread. Anything else is read from its element, as it is now.
+    /// </summary>
+    internal string? GetValue(ElementId id) =>
+        _wrappers.TryGetValue(id, out var wrapper) && wrapper.OffersText ? wrapper.Node.Value : _host.GetValue(id);
     internal bool? GetToggleState(ElementId id) => _host.GetToggleState(id);
     internal void RequestFocus(ElementId id) => _host.RequestFocus(id);
 

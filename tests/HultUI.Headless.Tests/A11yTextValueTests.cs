@@ -144,6 +144,39 @@ public class A11yTextValueTests
         finally { AccessibilityClients.Force = null; }
     }
 
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_TheValueOfANodeWithText_IsTheVersionItsTextEventsDescribe_OnAnyThread()
+    {
+        // It was read from the element through the window, on the client's thread: a walk of the
+        // live tree there, and the document as it is now, ahead of what the events had told.
+        AccessibilityClients.Force = true;
+        try
+        {
+            using var rig = new UiaRig();
+            var (editor, _, root) = Fixture();
+            Mount(rig.Session, root, editor);
+            rig.Session.Window.TypeText("x");
+            rig.Session.PumpFrame();
+            string told = editor.Document.ToPlainText();
+            Assert.StartsWith("x", told);
+
+            // A keystroke handled, and no frame yet to tell it.
+            rig.Session.Window.TypeText("y");
+            Assert.NotEqual(told, editor.Document.ToPlainText());
+            Assert.Equal((told, told), rig.Value(editor));
+            Assert.Equal((told, told), Task.Run(() => rig.Value(editor)).Result);
+
+            // The frame tells it, and the value follows.
+            rig.Session.PumpFrame();
+            string now = editor.Document.ToPlainText();
+            Assert.Contains(new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextChangedEventId, editor.Id), rig.Raised);
+            Assert.Equal((now, now), rig.Value(editor));
+            Assert.Equal((now, now), Task.Run(() => rig.Value(editor)).Result);
+        }
+        finally { AccessibilityClients.Force = null; }
+    }
+
     // ── AT-SPI ──
 
     private sealed class Signals : IAtSpiSignals
