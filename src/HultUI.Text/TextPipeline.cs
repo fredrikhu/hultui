@@ -39,6 +39,11 @@ public sealed class TextPipeline
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
     private Widths? _widths;
 
+    // The prefix measurer of each style its paragraphs asked for (PrefixMeasurer, below). Made at
+    // the first: only a line that merged clusters asks.
+    private Dictionary<ResolvedInheritedStyle, TextPrefixMeasurer>? _prefixMeasurers;
+    private const int PrefixMeasurerCacheMaxSize = 64;
+
     // ── How much the caches above may hold ──
     //
     // An application keeps one pipeline for its whole life, so what these caches hold stays
@@ -1877,6 +1882,28 @@ public sealed class TextPipeline
         }
         return true;
     }
+
+    /// <summary>
+    /// <see cref="MeasureWidth"/> of a prefix of a run's text in <paramref name="style"/>, as a
+    /// <see cref="TextPrefixMeasurer"/>: one per style, kept. A paragraph's selection drawn over a
+    /// line that merged clusters asks for it every frame; a new one each time was 64 B, and one
+    /// kept on each paragraph would be 8 B more on every paragraph laid out. Keyed by the style's
+    /// value: it is a struct.
+    /// </summary>
+    internal TextPrefixMeasurer PrefixMeasurer(ResolvedInheritedStyle style)
+    {
+        var measurers = _prefixMeasurers ??= new();
+        if (measurers.TryGetValue(style, out var measurer))
+            return measurer;
+        if (measurers.Count >= PrefixMeasurerCacheMaxSize)
+            measurers.Clear();
+        return measurers[style] = NewPrefixMeasurer(style);
+    }
+
+    // Its own method: a lambda capturing a parameter makes its closure on entry to the method
+    // that declares it, so PrefixMeasurer would make one on a hit too.
+    private TextPrefixMeasurer NewPrefixMeasurer(ResolvedInheritedStyle style) =>
+        (text, length) => MeasureWidth(text.AsSpan(0, length), style);
 
     /// <summary>
     /// The width <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow)"/>

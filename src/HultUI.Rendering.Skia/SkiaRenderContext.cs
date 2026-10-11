@@ -1291,11 +1291,28 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return null;
     }
 
+    // One measurer per style, kept. A line that merged clusters asks for one every time it is
+    // drawn with spans or a selection (for its backgrounds and decorations, and again for each
+    // colour stretch), and a caret or a click on it asks again: a new closure each time was
+    // ~120 B, ~1 KB a frame over two such lines in a viewer. Keyed by the style's value, which is
+    // a struct: a key by reference would never find the one made before.
+    private readonly Dictionary<ResolvedInheritedStyle, TextPrefixMeasurer> _prefixMeasurers = new();
+    private const int PrefixMeasurerCacheMaxSize = 64;
+
+    private TextPrefixMeasurer MeasurerFor(ResolvedInheritedStyle style)
+    {
+        if (_prefixMeasurers.TryGetValue(style, out var measurer))
+            return measurer;
+        if (_prefixMeasurers.Count >= PrefixMeasurerCacheMaxSize)
+            _prefixMeasurers.Clear();
+        return _prefixMeasurers[style] = NewMeasurer(style);
+    }
+
     // Its own method because a lambda capturing a parameter makes C# allocate the closure on
-    // entry to the method that declares it — on every call, the 1:1 ones included. A prefix is
-    // measured where it stands in the run's text (MeasureTextWidth, the width MeasureText gives
-    // it, to the bit), not cut out as a string for every boundary asked about.
-    private TextPrefixMeasurer MeasurerFor(ResolvedInheritedStyle style) =>
+    // entry to the method that declares it, so MeasurerFor would make one on a hit too. A prefix
+    // is measured where it stands in the run's text (MeasureTextWidth, the width MeasureText
+    // gives it, to the bit), not cut out as a string for every boundary asked about.
+    private TextPrefixMeasurer NewMeasurer(ResolvedInheritedStyle style) =>
         (text, length) => MeasureTextWidth(text.AsSpan(0, length), style);
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)

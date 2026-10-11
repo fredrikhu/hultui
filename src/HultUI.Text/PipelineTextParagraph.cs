@@ -101,7 +101,8 @@ public sealed class PipelineTextParagraph : TextParagraph
     /// map one to one onto characters: measures a prefix of a run's text the way the renderer's
     /// own caret methods do, in the paragraph's style, where it stands in the run's text
     /// (<see cref="TextPipeline.MeasureWidth"/>: the width its own line has, to the bit). Null —
-    /// no closure — for the common case.
+    /// no closure — for the common case. The pipeline keeps one per style: a selection drawn over
+    /// such a line asks for it every frame.
     /// </summary>
     internal TextPrefixMeasurer? PrefixMeasurer(TextLine line)
     {
@@ -109,7 +110,7 @@ public sealed class PipelineTextParagraph : TextParagraph
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
             if (runs[i].Glyphs.Length != runs[i].Text.Length)
-                return (text, length) => _pipeline.MeasureWidth(text.AsSpan(0, length), Style);
+                return _pipeline.PrefixMeasurer(Style);
         return null;
     }
 }

@@ -173,6 +173,49 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"repainting 43 selectable and linked labels allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>Selectable, span-coloured lines as above, two of whose shaping merged clusters —
+    /// emoji, combining marks — under a selection. Such a line maps offsets to x through a prefix
+    /// measurer, and a new closure for each pass over it was ~1 KB a frame over two such lines
+    /// (plan 17, round 3).</summary>
+    [Fact]
+    public void ASteadyRepaintOfSelectableLinesThatMergedClusters_AllocatesNothing()
+    {
+        string[] lines =
+        [
+            "    var greeting = \"hello\"; // a plain line",
+            "  Emoji:     \U0001F600 \U0001F389 \U0001F44D\U0001F3FD \U0001F468\u200D\U0001F469\u200D\U0001F467 \U0001F1F8\U0001F1EA",
+            "  Combining: e\u0301 a\u0308 o\u0302 n\u0303 and so on",
+            "    var farewell = \"goodbye\"; // another plain line",
+        ];
+        var group = new TextSelectionGroup();
+        var rows = new Element[lines.Length];
+        for (int i = 0; i < lines.Length; i++)
+        {
+            int third = lines[i].Length / 3;
+            Core.Rendering.TextSpan[] spans =
+            [
+                new(0, third, Color.FromHex("#569CD6")),
+                new(third, third, Color.FromHex("#9CDCFE")),
+                new(2 * third, lines[i].Length - 2 * third, Color.FromHex("#CE9178")),
+            ];
+            rows[i] = TextElement.New(lines[i]).Selectable().SelectionGroup(group, i).Spans(spans);
+        }
+        group.Bind(lines, lines.Length, i => lines[i]);
+        group.Anchor(0, 6);
+        group.ExtendTo(3, 9);
+        var root = Flex.Column().FlexGrow(1).Children(rows);
+        using var session = Session(root);
+        for (int i = 1; i <= 2; i++)
+        {
+            var paragraph = Assert.IsType<HultUI.Text.PipelineTextParagraph>(((TextElement)rows[i]).DrawnParagraph);
+            Assert.Contains(paragraph.TextLines, line => line.Runs.Any(run => run.Glyphs.Length != run.Text.Length));
+        }
+
+        double perFrame = PerFrame(session.Application, () => root.MarkPaintDirty());
+
+        Assert.True(perFrame < 1, $"repainting selectable lines that merged clusters allocated {perFrame:0.#} B per frame");
+    }
+
     /// <summary>A TextArea of syntax-coloured code, read-only as a viewer is and editable with the
     /// caret on a line, repainted, as a caret blink or a search tint repaints it. It cut each
     /// line it drew out of its text again every frame, and the caret's line too: ~3 KB a frame

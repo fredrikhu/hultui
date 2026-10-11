@@ -125,6 +125,43 @@ public class TextDrawAllocationTests
         Assert.True(perFrame < 1, $"drawing two paragraphs and a selection allocated {perFrame:0.#} B per frame");
     }
 
+    // A line whose shaping merged clusters: a combining mark composed with its letter into one
+    // glyph, a character outside the BMP (two chars, one glyph).
+    private const string MergedClusters =
+        "Cafe\u0301 and nai\u0308ve \U0001F600 with re\u0301sume\u0301s, and more words to wrap the line";
+
+    /// <summary>
+    /// A line whose shaping merged clusters (marks, emoji, ligatures) maps offsets to x through a
+    /// prefix measurer, not its glyphs: a spanned line asks for one for its backgrounds and
+    /// decorations and again for each colour stretch, a selection for each line it covers, a
+    /// caret or a click for each. A new closure each time was ~1 KB a frame over two such lines
+    /// in a viewer (plan 17, round 3); the context keeps one measurer per style, the paragraph
+    /// one of its own.
+    /// </summary>
+    [Fact]
+    public void LinesThatMergedClusters_SpannedSelectedAndCareted_AllocateNothingPerFrame()
+    {
+        var style = Style();
+        using var surface = Surface();
+        var spanned = (HultUI.Text.PipelineTextParagraph)surface.RenderContext.LayoutParagraph(MergedClusters, style, 180, Spans);
+        Assert.Contains(spanned.TextLines, line => line.Runs.Any(run => run.Glyphs.Length != run.Text.Length));
+        var boxes = new List<Rect>();
+        float caret = 0;
+
+        double perFrame = AllocatedPerFrame(surface, ctx =>
+        {
+            ctx.DrawText(MergedClusters, new Rect(10, 10, 180, 200), style, TextOverflow.Clip, null, Spans);
+            ctx.DrawParagraph(spanned, new Point(200, 10));
+            boxes.Clear();
+            spanned.SelectionBoxes(2, 50, boxes, lineEndWidth: 4);
+            caret += ctx.TextCaretX("Cafe\u0301 \U0001F600", style, 5) + ctx.TextOffsetAtX("Cafe\u0301 \U0001F600", style, 30f);
+        });
+
+        Assert.NotEmpty(boxes);
+        Assert.True(caret > 0);
+        Assert.True(perFrame < 1, $"drawing, selecting and placing a caret in lines that merged clusters allocated {perFrame:0.#} B per frame");
+    }
+
     [Fact]
     public void ARoundedBorderWithSidesOfTheirOwn_AllocatesNothingPerFrame()
     {
