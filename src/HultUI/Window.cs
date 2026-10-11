@@ -864,7 +864,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// <summary>DevTools' continuous-redraw mode (F12 twice): render every iteration, unpaced.</summary>
     internal bool ContinuousRedraw => _devTools.ContinuousRedraw;
 
-    internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
+    internal bool NeedsRender => NeedsDraw || NeedsAccessibilityFrame;
+
+    /// <summary>
+    /// Whether the window has something to draw: what <see cref="NeedsRender"/> asks a frame for,
+    /// less what only accessibility asks one for (<see cref="NeedsAccessibilityFrame"/>), which
+    /// needs the frame's accessibility phase and nothing it draws.
+    /// </summary>
+    internal bool NeedsDraw => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
         // DevTools continuous-redraw mode (F12 second press): render every
         // iteration so the HUD shows raw render throughput.
         || _devTools.ContinuousRedraw
@@ -877,28 +884,35 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
         // the frames itself — otherwise holding the pointer still would stop the scroll.
         || _autoScrollTarget is not null
-        // Render once when an assistive tech attaches, so the accessibility tree
-        // gets built even if the app is otherwise idle (the build runs in the
-        // render pass). After that frame _a11yWasActive is set and this clears.
-        || (!_a11yWasActive && _accessibilityBridge.IsActive)
-        // An a11y-visible property changed (e.g. a label's text) with no visual
-        // change of its own; the tree refresh happens in the render pass.
-        || (_a11yPropertyDirty && _accessibilityBridge.IsActive)
-        // A list's selection moved: the frame tells it (the list has paint dirt of its own anyway).
-        || (_a11ySelectionMoved.Count > 0 && _accessibilityBridge.IsActive)
-        // A coalesced layout-driven a11y refresh is due — force the trailing frame
-        // so the last resize/scroll position reaches the tree once the drag stops
-        // (during the drag, layout dirty already keeps frames coming).
-        || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
-            && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
-        // The same for a range value's trailing edge: the value it came to rest at.
-        || (_a11yRangeRefreshPending && _accessibilityBridge.IsActive
-            && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs)
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
         // AT thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame. Platform-neutral: the
-        // router is set on any platform with an active bridge.
+        // router is set on any platform with an active bridge. What it changes is drawn.
         || (_actionRouter?.HasPendingActions ?? false);
+
+    /// <summary>
+    /// A frame that only accessibility asks for: a tree to build when a client attaches, a change
+    /// a reader must hear that draws nothing, a coalesced refresh coming due. Such a frame runs
+    /// the accessibility phase and draws nothing (<see cref="RenderFrame"/>).
+    /// </summary>
+    private bool NeedsAccessibilityFrame => (
+        // Build once when an assistive tech attaches, so the accessibility tree
+        // gets built even if the app is otherwise idle (the build runs in the
+        // frame). After that frame _a11yWasActive is set and this clears.
+        !_a11yWasActive
+        // An a11y-visible property changed (e.g. a label's text) with no visual
+        // change of its own; the tree refresh happens in the frame.
+        || _a11yPropertyDirty
+        // A list's selection moved: the frame tells it (the list has paint dirt of its own anyway).
+        || _a11ySelectionMoved.Count > 0
+        // A coalesced layout-driven a11y refresh is due — force the trailing frame
+        // so the last resize/scroll position reaches the tree once the drag stops
+        // (during the drag, layout dirty already keeps frames coming).
+        || (_a11yLayoutRefreshPending && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        // The same for a range value's trailing edge: the value it came to rest at.
+        || (_a11yRangeRefreshPending && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs))
+        // Asked last: on Windows it asks UI Automation whether a client listens.
+        && _accessibilityBridge.IsActive;
 
     private bool AnyOverlayContentDirty()
     {
@@ -965,8 +979,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     }
 
     /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
+    /// <param name="drawClean">Draw even with nothing dirty: a live resize holds the loop, and a
+    /// video's next frame, posted and not yet run, is taken from its decoder by the draw.</param>
     /// <returns>Whether a frame was drawn and presented.</returns>
-    internal bool RenderFrame(bool evenIfMinimized = false)
+    internal bool RenderFrame(bool evenIfMinimized = false, bool drawClean = false)
     {
         if (_root is null) return false;
 
@@ -988,6 +1004,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // outer reconcile was signal-driven has no such caller — this catches it before
         // style/layout so its effect is visible this frame.
         TreeDiffer.DrainDeferred();
+
+        // Whether this frame has anything to draw. A frame only accessibility asked for (a
+        // coalesced refresh coming due between keys of a walk, a client attaching) runs the
+        // accessibility phase and stops there, as a minimized window's does: drawing it painted
+        // the whole window again for nothing.
+        bool draws = evenIfMinimized || drawClean || NeedsDraw;
 
         var theme = Application.Theme;
 
@@ -1101,6 +1123,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         _a11yWasActive = a11yActive;
         // Note: the Children flag is cleared with everything else by ClearAllFlags at the end
         // of the frame, below, or where a minimized window stops.
+
+        // Nothing to draw: the tree is built and told, and the window shows what it showed.
+        // Junction's History walked a key every 60 ms: a refresh came due between keys on every
+        // other key, and each drew the window again, 0.5 frames a key on top of the keys' own.
+        if (!draws) return false;
 
         // Keep the maximize button's non-client hover highlight alive across rebuilds.
         ReassertMaximizeButtonHover();

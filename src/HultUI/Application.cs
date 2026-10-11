@@ -333,7 +333,7 @@ public sealed class Application : IDisposable
         else if (window.NeedsRender || !_mainThreadQueue.IsEmpty)
         {
             platform.MakeCurrent();
-            window.RenderFrame();
+            window.RenderFrame(drawClean: !_mainThreadQueue.IsEmpty);
         }
     }
 
@@ -640,7 +640,9 @@ public sealed class Application : IDisposable
             // neither timed nor counted as rendered, so a dirty one leaves Run waiting as if
             // idle instead of pacing frames nobody would see: on Vulkan they could not be drawn
             // at all, and the loop retried one every display interval until the restore.
-            if (!force && window.PlatformWindow.IsMinimized)
+            // A frame only accessibility asked for (Window.NeedsDraw false) stops there too: it
+            // builds and tells the tree and draws nothing, so it is not a frame either.
+            if (!force && (window.PlatformWindow.IsMinimized || !window.NeedsDraw))
             {
                 window.RenderFrame();
                 continue;
