@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–4 landed, step 4b in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–4b landed, step 5 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
   and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
   only their (user) parts. To resume after a pause, run in this worktree:
@@ -80,7 +80,7 @@ Round 2 regressions first, then value per cost.
    and Aperture's chapter panels read `Position` untracked (ReelApp.Chapters.cs:126,
    ApertureApp.Chapters.cs:149: whole-app rebuild 10×/s while open). Expert 3 reviews. Suite row
    **apps-scenario-video-bar-fade**.
-4b. **apps-playback-pump-out-of-build** (6/8, app correctness; found in step 4) — Aperture's
+4b. ~~**apps-playback-pump-out-of-build**~~ LANDED 133bd8a, 7bfc1e7, 5e28b9a, 58fe439 (6/8, app correctness; found in step 4) — Aperture's
    `PumpPlayback` (ApertureApp.Player.cs:~255-292: resume seek, track preference, Ended → stop
    report and up next, the 10 s progress heartbeat) and Reel's pump (ReelApp.cs:~240-265: tracks,
    chapter marks, the 15 s resume save, Ended → next file) run inside the app's Build, whose
@@ -168,6 +168,9 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **reel-still-previews-rebuild** (8, app, from step 4b) — Reel's still previews call
+  `InvokeOnMainThread(Rerender)` per still as it lands: ~120 whole-app rebuilds over the first minute
+  or two of a file.
 - **componenthost-patch-keeps-layout** (1, lead from step 4) — ComponentHost is not opted into
   PatchMarksOwnLayout, so every parent rebuild marks a persistent child component's host for layout.
 - **junction-review-rows-shape** (8, app, from step 3) — Junction's review mode still remakes every
@@ -313,6 +316,7 @@ Re-ranked by the round 4 survey.
 | 3 | 91893ba | media-videoplayer-fade-rebuild | The fade level is a plain field; the tween writes it and the live bar's Opacity through a Ref (hidden 0, paused 1, else the level). `_controlsVisible` flips at the same moments. Per fade frame 40,872 → 927 B; suite fade row 31 → 2 builds, 1,238 → 88 KB/op (−93 %). Reel AOT, Vulkan, 10 s 1080p24 with pointer sweep and seeks, step net: VideoPlayer rebuilds 287–291 → 5, UI-thread 12.1 → 1.42 MB a11y off (−88 %), 12.4 → 1.55 MB on (−87 %), quiet frame 13.7 → 2.9 KB, mpv drops 0 → 0. |
 | 3 | 7016de4 | media-patch-keeps-layout | Canvas, Slider (marks layout when ThumbRadius changes), VideoElement and the player root opt into PatchMarksOwnLayout: a player rebuild that moves nothing costs layout 6 → 0 µs per scrubber-hover move and no empty a11y rebuild 100 ms later. DECISIONS.md updated. Perf compare flat. |
 | 3 | 1e3edff | apps-chapters-computed | App: Reel's and Aperture's chapter panels read the playhead through a `Computed<int>` chapter index; the app rebuilds only when a mark is crossed. Panel open, per report: Reel 66,591 → 591 B, Aperture 179,530 → 1,752 B, 1 → 0 builds. REACTIVITY.md shows the pattern. |
+| 3 | 133bd8a, 7bfc1e7, 5e28b9a, 58fe439 | apps-playback-pump-out-of-build | App correctness, **broken since each app's first commit** (not plan 17; releases aperture-v1.19.0/reel-v1.4.0 and the previous ones affected): the time-based playback duties ran in the app Build, which barely runs during quiet playback (Aperture 1 build, Reel 0). Aperture's 10 s progress heartbeat and Reel's 15 s resume save never went out: 0 in 25/33 s at 01e5bd7/1093bfa, 4aa5653, 64ba531, 0951288 and 1569c9d → 2 after the fix. State-driven duties (resume seek, tracks, chapters, volume, Ended) worked. Fix: two Effects per player made when the stream opens — state (State, Duration, tracks; Position untracked) and clock (Position + `Application.Time`); nothing left in Build. App builds per 60 s quiet playback 0 → 0. `FakeMediaBackend.HoldOpening/FinishOpening` for load-order tests; 17 mutations caught. REACTIVITY.md "Build is not a clock", MEDIA.md trap. |
 
 ## Examined, not worth it
 
@@ -539,3 +543,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   as step 4b (correctness) ahead of step 5. Guideline notes: read fast signals untracked in Build
   and write live elements from an OnMount Effect; read coarse facts through a Computed; keep an
   animation level in a plain field; new suite rows can shift other rows' JIT timings.
+- 2026-10-11: step 4b landed (133bd8a..58fe439): Aperture's progress heartbeat and Reel's resume
+  save now run during quiet playback; broken since each app's first commit, so the current and
+  previous releases have it. Guideline: Build is not a clock — periodic work rides a ticking signal
+  and checks `Application.Time`; state-driven work goes in an Effect disposed with what it watches.
