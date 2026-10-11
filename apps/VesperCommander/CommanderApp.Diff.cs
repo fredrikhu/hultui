@@ -740,6 +740,9 @@ public partial class CommanderApp
             .RowHeights((_, row) => row + 1 < _diffTops.Length ? _diffTops[row + 1] - _diffTops[row] : DiffLineH)
             .Items(_diffRows)
             .RenderWith(BuildDiffRow)
+            // Named for assistive technology by what the row says. Unset, each item was read out
+            // as the DiffRow record's ToString() — "DiffRow { Line = Line { Op = Change, … } }".
+            .AccessibleItemLabel(_diffLabelFn ??= DiffRowLabel)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Keyed by comparison so each file pair starts at the top instead of inheriting the
@@ -752,6 +755,38 @@ public partial class CommanderApp
         list.ScrollSidewaysWith(_diffPan);
         return list;
     }
+
+    // The rows' labels, made the first time assistive technology asks for each and kept with
+    // the comparison's rows: the tree asks for every item's label each time it is built, and
+    // a label made per ask would be a string per row per keystroke.
+    private (List<DiffRow>? Rows, string?[] Labels) _diffLabels = (null, []);
+    private Func<DiffRow, string?>? _diffLabelFn;
+
+    private string DiffRowLabel(DiffRow r)
+    {
+        if (!ReferenceEquals(_diffLabels.Rows, _diffRows)) _diffLabels = (_diffRows, new string?[_diffRows.Count]);
+        var labels = _diffLabels.Labels;
+        return (uint)r.Index < (uint)labels.Length ? labels[r.Index] ??= DiffRowText(r) : DiffRowText(r);
+    }
+
+    /// <summary>What a reader hears for a row: what happened to the line, where, and its text.</summary>
+    private static string DiffRowText(DiffRow r)
+    {
+        if (r.CollapseCount is int n) return $"{n} unchanged line{(n == 1 ? "" : "s")}";
+        if (r.Line is not { } l) return "";
+        return l.Op switch
+        {
+            DiffEngine.Op.Del => $"removed, line {l.LeftNo}: {Spoken(l.Left)}",
+            DiffEngine.Op.Add => $"added, line {l.RightNo}: {Spoken(l.Right)}",
+            DiffEngine.Op.Change => $"changed, left line {l.LeftNo}: {Spoken(l.Left)}; right line {l.RightNo}: {Spoken(l.Right)}",
+            _ => l.LeftNo == l.RightNo
+                ? $"line {l.LeftNo}: {Spoken(l.Right)}"
+                : $"line {l.LeftNo} left, {l.RightNo} right: {Spoken(l.Right)}",
+        };
+    }
+
+    /// <summary>A line's text as a reader says it: an empty or all-blank line is "blank".</summary>
+    internal static string Spoken(string? text) => string.IsNullOrWhiteSpace(text) ? "blank" : text;
 
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>
     private Element BuildDiffRow(DiffRow r)

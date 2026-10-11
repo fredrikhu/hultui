@@ -544,6 +544,9 @@ public partial class CommanderApp
             .RowHeights((_, row) => row + 1 < _viewerTops.Length ? _viewerTops[row + 1] - _viewerTops[row] : DiffLineH)
             .Items(_viewerItems)
             .RenderWith(BuildViewerRow)
+            // Named for assistive technology by the line it shows. Unset, each item was read
+            // out as its index: "0", "1", "2".
+            .AccessibleItemLabel(_viewerLabelFn ??= ViewerLineLabel)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Keyed by file so opening another one starts at the top instead of inheriting the
@@ -560,6 +563,19 @@ public partial class CommanderApp
         // Shift+wheel) and the middle-click autoscroll's both go to the pan.
         list.ScrollSidewaysWith(_viewerPan);
         return list;
+    }
+
+    // The lines' labels, made the first time assistive technology asks for each and kept with
+    // the file's lines (the tree asks for every item's label each time it is built).
+    private (string[]? Lines, string?[] Labels) _viewerLabels = (null, []);
+    private Func<int, string?>? _viewerLabelFn;
+
+    private string ViewerLineLabel(int index)
+    {
+        if (!ReferenceEquals(_viewerLabels.Lines, _viewerLines)) _viewerLabels = (_viewerLines, new string?[_viewerLines.Length]);
+        var labels = _viewerLabels.Labels;
+        if ((uint)index >= (uint)labels.Length) return "";
+        return labels[index] ??= $"line {index + 1}: {Spoken(_viewerLines[index])}";
     }
 
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>

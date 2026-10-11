@@ -96,14 +96,38 @@ public partial class CommanderApp
         int rowCount = (n + perRow - 1) / perRow;
         var rows = new List<int>(rowCount);
         for (int r = 0; r < rowCount; r++) rows.Add(r);
+        // A row of tiles is one item to assistive technology (the tiles are not controls of
+        // their own), named by the files on it, as the list view names one. Unset, each row was
+        // read out as its index: "0", "1". Made once per row per build, when first asked for.
+        string?[]? labels = null;
 
         return VirtualListElement<int>.New()
             .ItemHeight((int)stride)
             .Items(rows)   // fresh list reference each build → re-realizes visible rows
             .RenderWith(r => ThumbRow(side, list, r * perRow, perRow, m, cursorPath, marks))
+            .AccessibleItemLabel(r => (uint)r < (uint)rowCount
+                ? (labels ??= new string?[rowCount])[r] ??= ThumbRowLabel(list, r * perRow, perRow, marks)
+                : null)
             .WithRef(ThumbVList(side))
             .FlexGrow(1)
             .Width(Dimension.Px(paneW));
+    }
+
+    /// <summary>A row of tiles as a reader says it: each file's name, a folder said to be one,
+    /// and the marked ones said to be marked.</summary>
+    private string ThumbRowLabel(IReadOnlyList<FileEntry> list, int start, int perRow, HashSet<string> marks)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int k = 0; k < perRow && start + k < list.Count; k++)
+        {
+            var e = list[start + k];
+            if (k > 0) sb.Append("; ");
+            if (e.IsParent) { sb.Append("Parent folder"); continue; }
+            sb.Append(e.Name);
+            if (e.IsDir) sb.Append(", folder");
+            if (marks.Contains(MarkKey(e))) sb.Append(", marked");
+        }
+        return sb.ToString();
     }
 
     private Element ThumbRow(char side, IReadOnlyList<FileEntry> list, int start, int perRow, ThumbM m,
