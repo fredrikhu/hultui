@@ -110,6 +110,22 @@ static partial class Scenarios
                 return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index));
             });
 
+        yield return new Scenario("a11y/type beside a 150-line diff, rows made in Build, bridge on",
+            "Type beside a 150-line diff whose rows Build flattens anew, an accessibility client listening: the list has no item label, so every item is named by its record's ToString()",
+            ctx =>
+            {
+                ctx.Window.InstallAccessibilityBridge();
+                return TypeBesideDiffOp(ctx, kept: false);
+            });
+
+        yield return new Scenario("a11y/type beside a 150-line diff, rows kept and labelled, bridge on",
+            "The same with the rows flattened once, on item rows, and named by a label made once per row",
+            ctx =>
+            {
+                ctx.Window.InstallAccessibilityBridge();
+                return TypeBesideDiffOp(ctx, kept: true);
+            });
+
         yield return new Scenario("a11y/progress bar ticks over 1,000 rows, bridge on",
             "A progress bar above 1,000 rows moves on every frame while an accessibility client listens, as a download's or a playing video's does",
             ctx =>

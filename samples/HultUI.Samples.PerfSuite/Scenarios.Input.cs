@@ -67,6 +67,14 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("input/type beside a 150-line diff, rows made in Build",
+            "Type into a summary field beside a 150-line diff in a list, one component rebuilt per keystroke, whose Build flattens the diff anew (a record and word-diff spans per line) and whose one-argument template makes every row on screen again",
+            ctx => TypeBesideDiffOp(ctx, kept: false));
+
+        yield return new Scenario("input/type beside a 150-line diff, rows kept",
+            "The same keystroke with the diff flattened once and the list on item rows (two-argument RenderWith): the rebuild makes no row",
+            ctx => TypeBesideDiffOp(ctx, kept: true));
+
         yield return new Scenario("input/type in 2,000-line TextArea",
             "Type one character in the middle of a 2,000-line TextArea",
             ctx =>
