@@ -137,7 +137,7 @@ Round 2 regressions first, then value per cost.
     and auto-hide as `.Delay`; ~60 → 1 wake per delay) — a tween started after idle must not jump
     to its end. The env-gated per-loop log (r3rt patch) is the measurement; suite row
     **apps-scenario-loop-wakes**.
-11. **runtime-pointer-events-on-demand + reactivity-pointer-rebuild-per-frame** (4/6; user chose (a): every pointer-move handler at most once per frame that may be drawn, with the last position — offer the coalesced points for drawing apps if cheap) — make
+11. **runtime-pointer-events-on-demand + reactivity-pointer-rebuild-per-frame** (4/6; user chose (b) on 2026-10-11, after first choosing (a): only the splitter, pan, slider and scrubber callbacks coalesce to once per frame that may be drawn; other pointer-move handlers keep every move) — make
     PointerMove/Enter/Leave event objects only when a handler wants them (hover frame 568 → ~150 B);
     pointer-driven rebuilds once per drawn frame (splitter, pan, slider, scrubber: 8–16 rebuilds per
     frame with a fast mouse, −78…−94 % bytes per drag frame).
@@ -384,7 +384,8 @@ Round 3 questions, all answered (14–15 on 2026-10-10, the rest on 2026-10-11).
    stall in 2 of 3 runs. [Keep today's behaviour.] → **keep** (2026-10-11).
 2. **Pointer moves once per frame:** (a) every pointer-move handler runs at most once per frame
    that may be drawn, with the last position (as browsers do; a drawing app would lose points
-   without a coalesced-points API), or (b) only the splitter, pan, slider and scrubber? [(b).] → **(a)** (2026-10-11).
+   without a coalesced-points API), or (b) only the splitter, pan, slider and scrubber? [(b).] → **(b)** (2026-10-11;
+   first answered (a), changed to (b) the same day).
 3. **ToastHost:** `onChanged` runs on appear, change and go only, not per fade step? [Yes.] → **yes** (2026-10-11).
 4. **SelectionColor:** with reconcile-restyle-on-change, an app-set `TextElement.SelectionColor`
    would start to show (today the theme overwrites it; no app sets it)? [Yes.] → **yes** (2026-10-11).
@@ -562,3 +563,4 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   a BiDi width cache must key on paragraph direction.
 - 2026-10-11: the user answered questions 1–13: recommendations on 1, 3–10, 12, 13; (a) on 2 (every
   pointer-move handler once per frame); yes on 11 as long as headless still works.
+- 2026-10-11: the user changed question 2 to (b): only splitter, pan, slider and scrubber coalesce.
