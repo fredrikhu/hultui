@@ -42,6 +42,8 @@ using HultUI.WebView.WebView2;
 // opens the next file in a folder, 1.5 s more, then restored. It prints the frames mpv dropped
 // while minimized, how far the second player got, and the frames drawn in the second after the
 // restore (Windows). Exits 4 when there is no libmpv.
+//
+// No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
 {
@@ -49,6 +51,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        Foreground.Keep();
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--minimized-video"))
@@ -62,7 +65,7 @@ internal static class Program
 
         int frames = args.FirstOrDefault(a => a.StartsWith("--frames=")) is { } f ? int.Parse(f["--frames=".Length..]) : 12;
 
-        using var app = new Application("vulkan-probe", 320, 200, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 320, 200, renderer: renderer));
         app.SetRoot(Flex.Row().Width(320f).Height(200f).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
             Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
@@ -76,7 +79,7 @@ internal static class Program
 
     private static int TwoPages(RendererKind renderer)
     {
-        using var app = new Application("vulkan-probe", 480, 240, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 240, renderer: renderer));
         using IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
         if (!engine.Availability.IsAvailable) { Console.WriteLine("probe: no engine: " + engine.Availability.Reason); return 3; }
         var options = OperatingSystem.IsWindows()
@@ -124,7 +127,7 @@ internal static class Program
     private static int PageAndVideo(RendererKind renderer, string clip)
     {
         if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
-        using var app = new Application("vulkan-probe", 480, 240, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 240, renderer: renderer));
         using IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
         if (!engine.Availability.IsAvailable) { Console.WriteLine("probe: no engine: " + engine.Availability.Reason); return 3; }
         var options = OperatingSystem.IsWindows()
@@ -174,7 +177,7 @@ internal static class Program
     /// </summary>
     private static int Resizes(RendererKind renderer, int count, bool newSizes)
     {
-        using var app = new Application("vulkan-probe", 640, 400, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer));
         int frames = 0;
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
@@ -221,7 +224,7 @@ internal static class Program
     private static int MinimizeAndRestore(RendererKind renderer)
     {
         var platform = new CountingPlatform(new HultUI.Platform.SDL3.SdlWindowingPlatform(renderer));
-        using var app = new Application(platform, "vulkan-probe", 640, 400);
+        using var app = Foreground.NoActivate(new Application(platform, "vulkan-probe", 640, 400));
         int frames = 0;
         var changing = Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"));
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
@@ -295,7 +298,7 @@ internal static class Program
     private static int MinimizedVideo(RendererKind renderer, string clip)
     {
         if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
-        using var app = new Application("vulkan-probe", 480, 270, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 270, renderer: renderer));
         int frames = 0;
         HultUI.Core.Elements.Element Show(MediaPlayer player) => Flex.Row().FlexGrow(1).Children(
             VideoElement.New(player).FlexGrow(1),
@@ -388,4 +391,74 @@ internal static class Program
 
     private static string Page(string colour) =>
         $"<html><body style='margin:0;background:{colour}'><script>chrome.webview.postMessage('ready');</script></body></html>";
+}
+
+/// <summary>
+/// No window this probe makes may become the foreground: the tests run on a desktop someone is
+/// using. <c>SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0</c> in the environment was not enough on its own
+/// (2026-10-11, plan 17: a probe window took the foreground four times). So SDL is told in
+/// process before any window exists; every window is <c>WS_EX_NOACTIVATE</c>, which neither a
+/// click nor Windows' choice of a window to activate when the foreground one closes can
+/// override; and a watcher hands the foreground straight back and ends the run with exit code 5
+/// if this process ever holds it, which fails the test that started it.
+/// </summary>
+internal static class Foreground
+{
+    private static nint _previous;
+
+    public static void Keep()
+    {
+        SDL.SDL3.SDL_SetHint(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+        if (!OperatingSystem.IsWindows()) return;
+        _previous = GetForegroundWindow();
+        new Thread(() =>
+        {
+            uint self = (uint)Environment.ProcessId;
+            while (true)
+            {
+                nint foreground = GetForegroundWindow();
+                if (foreground != 0)
+                {
+                    GetWindowThreadProcessId(foreground, out uint owner);
+                    if (owner != self) _previous = foreground;
+                    else
+                    {
+                        if (_previous != 0) SetForegroundWindow(_previous);
+                        Console.WriteLine("probe: took the foreground; handed it back");
+                        Console.Out.Flush();
+                        Environment.Exit(5);
+                    }
+                }
+                Thread.Sleep(5);
+            }
+        }) { IsBackground = true, Name = "foreground watcher" }.Start();
+    }
+
+    public static Application NoActivate(Application app)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            nint hwnd = app.PrimaryWindow.NativeHandle;
+            SetWindowLongPtrW(hwnd, ExStyle, GetWindowLongPtrW(hwnd, ExStyle) | ExNoActivate);
+        }
+        return app;
+    }
+
+    private const int ExStyle = -20;           // GWL_EXSTYLE
+    private const nint ExNoActivate = 0x08000000;   // WS_EX_NOACTIVATE
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hwnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetWindowLongPtrW(nint hwnd, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint SetWindowLongPtrW(nint hwnd, int index, nint value);
 }
