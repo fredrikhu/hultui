@@ -331,6 +331,12 @@ round, with CI waited for.
   (WM_CLOSE, then wait), never kill one mid-frame unless it hangs; batch measurements per
   launch; log a timeline of window creates, destroys, swapchain builds and stalls over 100 ms;
   stop and report a device-lost, a TDR or a stall over 1 s instead of repeating it.
+- **Never capture the screen; capture the app's own frame.** On 2026-10-11 two "mid-drag
+  captures" read the desktop and got the user's browser because the probe window was not on
+  top. Read pixels in-process (the swapchain or surface the app drew, `HULTUI_VULKAN_CAPTURE`,
+  `glReadPixels`, headless frames). A test that truly needs the composed screen (the stretch
+  harness) samples only the probe window's rectangle, checks the probe's own marker is there
+  before keeping anything, and never saves or views a sample without it.
 - **One build at a time per worktree** (memory `concurrent-dotnet-test-trap`).
 - **Create files with the Write tool**, not shell heredocs (they hang).
 - **Commit on this branch only.** Agents never push, merge or tag. The orchestrator merges
