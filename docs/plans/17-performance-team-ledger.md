@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–8 and 9a landed, step 9b in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–9 landed, step 10 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -117,7 +117,7 @@ Round 2 regressions first, then value per cost.
    per swapchain image (2,048 B per Vulkan frame → ≤0.1 KB; Aperture's quiet frames are all of it).
    The second changes HDR.md's "never cache a wrapped swapchain target": barrier each acquired image
    back to COLOR_ATTACHMENT_OPTIMAL, reused-frame capture, validation with a positive control.
-   **9b, in progress:** **vk-drag-swapchain-overallocate** (approved 2026-10-10; user report, `17-reports/r3-aperture-resize.md`):
+   ~~**9b:** **vk-drag-swapchain-overallocate**~~ LANDED c6bc336, 3be8ce1, 31500ab, 939bf33 (approved 2026-10-10; user report, `17-reports/r3-aperture-resize.md`):
    every live-resize step rebuilds the F16 swapchain, 92 % of the step (Aperture and Reel ~37 ms
    per step vs GL apps ~4.6); between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE build to a 256-px bucket
    with maintenance1 ONE_TO_ONE and rebuild exact at release (prototype 37–39 → ~9 ms JIT and AOT,
@@ -172,6 +172,12 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **customframe-install-activates** (3, correctness, from step 9b) — `WindowsCustomFrame.Install` calls
+  `SetWindowPos` without `SWP_NOACTIVATE` inside the Application constructor, so a custom-frame app
+  window (Aperture) activates at creation even with `SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0`. Small.
+- **modal-loop-video-rate** (3, lead from step 9b) — inside the Windows modal size/move loop, video is
+  drawn only by SDL's live-resize timer at ~64 Hz: a 120 fps clip drops about half its frames while a
+  window is moved or a drag is held still (48–52 per move, 110–114 per 2 s held; unchanged by 9b).
 - **gl-uitests-focus-hardening** (3, test harness, from step 9a) — the in-process GL UiTests
   (GpuFrameSinkGL, MpvGL, GpuImageSourceGL, PixelFrameGL) make activating windows without the
   in-process hint; give them b0ed204's hardening (hint, WS_EX_NOACTIVATE, foreground watcher).
@@ -345,6 +351,7 @@ Re-ranked by the round 4 survey.
 | 3 | b0ed204 | vk-uitests-no-foreground | Test harness: the Vulkan probe UiTests' windows get the in-process SDL hint, `WS_EX_NOACTIVATE` and a foreground watcher that fails the test (exit 5) if one is ever taken. |
 | 3 | 58f78dd | vk-purge-disposed-image-textures | Sources disposed after a draw are counted (any thread); the Vulkan surface runs its scratch purge after a frame once the count moved, at most once a second, no GPU wait (0.02–0.2 ms). 8 × 3840×2400 photos drawn then disposed: DXGI 391.5 → 213.2 MB (−45 %), Skia purgeable 176 → 0 MB, nvidia-smi +355 → +175 MiB, private 538–586 → 401 MB. Poster-grid churn (27 disposals/s): uploads 25.8/s unchanged (no re-uploads), frame time no slower. GL untouched (driver keeps the memory). |
 | 3 | 68424c2 | vk-swapchain-target-per-frame | One GRBackendRenderTarget + SKSurface per swapchain image for the swapchain's life (`SwapchainTargets`); F16 blit with DrawSurface; host contract `SetSwapchainReleasing` (targets dropped before images go) and `TransitionAcquiredImage` (barrier to COLOR_ATTACHMENT_OPTIMAL: just before the blit on the offscreen path, at once on the direct path; a frame after a GPU source draw wraps per frame as before — a barrier at every acquire slowed mpv's GL draw, 1.25–1.47 vs 0.97–1.14 ms). Idle-animating window: 2,046–2,048 B/frame → 0 (F16 and 8-bit, JIT and AOT), frame min −10…−16 %, median −7…−15 %; vkCreateImageView/Framebuffer per frame 1 → 0. Reel HDR playback 2,580 → 530–552 B/frame (8-bit video unchanged by design), mpv drops 0. Validation (SDK 1.4.357, core + sync) clean on reused-frame captures (40th frame, 3 resizes + minimize, F16/offscreen/scaled/8-bit/FIFO/IMMEDIATE/fixed extent); positive control (no barrier) `VUID-vkCmdDraw-None-09600` ×10 — NVIDIA drew correctly anyway, so the capture UiTest runs under the layer. HDR.md invariant rewritten. |
+| 3 | c6bc336, 3be8ce1, 31500ab, 939bf33 | vk-drag-swapchain-overallocate | Approved (question 14). maintenance1 on by default on Windows; a drag (first size change inside WM_ENTERSIZEMOVE…EXITSIZEMOVE, seen by a new comctl32 subclass `WindowsSizeMoveWatch` on every Vulkan window incl. Reel's default frame) over-allocates a one-to-one swapchain the window still fits (kept on SUBOPTIMAL) and rebuilds exact at the end; a title-bar move never over-allocates (`SizeMoveTracker`). **MAILBOX only:** under FIFO a one-to-one swapchain hung for good (acquire fence never signals, 3 repros); under IMMEDIATE its first build cost 172–196 ms and showed a stretch — both keep exact rebuilds. `HULTUI_VULKAN_FIXED_EXTENT=1` fixed (60–65 → 6.9 ms/step; `=0` turns maintenance1 off). Surface-format query cached on kept steps; Resize skips the target drop when the host keeps the swapchain. Median ms per drag step JIT/AOT: probe 32.9 → 5.6 / 34.5 → 5.9–7.8; Aperture Home 35.5 → 8.1 / 36.5–38.1 → 8.0–8.1; Reel idle 33.9 → 5.6–7.3 / 33.2–35.2 → 5.8–7.3; p95 36–41 → 7–12.6; builds per drag 80 → 5; release frame 29.6–36.3 ms; Aperture AOT drag CPU 6.6–6.9 → 1.3–1.4 Gcycles. Move: 0 builds before and after. Video drops per drag (Reel AOT): 1080p60 35–36 → 0–2, 1080p120 228–241 → 11–12; release 0 → 0 (60) / 0 → 2–3 (120); A/V desync max 17.5–20 → 10–13 ms (60). GPU memory during a drag 299–318 → 321–322 MB, back to 214 after. Stretch 0/519 and 0/494 sampled (positive control 64/581); mid-drag capture 0 px differ; validation 0 messages incl. maximize/snap/minimize (positive control fired). The 157–163 ms FIXED_EXTENT outlier was the first swapchain replacement after show (190–290 ms on every path). |
 
 ## Examined, not worth it
 
@@ -606,3 +613,13 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   **Focus, again:** an early 9a probe window (default frame, in-process hint) took the foreground
   twice; its guard handed it straight back and stopped the run. `WS_EX_NOACTIVATE` fixed it over
   several hundred runs; the brief's focus rule now requires it too.
+- 2026-10-11: the user reported that when 9a's probe stopped mid-frame, Brave's videos paused for a
+  while and recovered; information only (runs continue as they are). Brief: close windows
+  gracefully, batch launches, log a timeline, stop on device-lost or stalls over 1 s.
+- 2026-10-11: step 9b landed (c6bc336..939bf33): drag steps ~35 → 6–8 ms on Vulkan (MAILBOX).
+  Incidents, told to the user: the focus guard fired once (21:18, Aperture's custom frame activates in
+  its constructor — queued as customframe-install-activates); FIFO one-to-one probes hung (one window
+  21:49–22:00 until terminated) → MAILBOX-only rule; **two mid-drag screen captures at ~23:40 grabbed
+  the user's browser instead of the probe window** (the driver's HWND_TOPMOST did not raise it); the
+  agent viewed one and deleted both. Captures are now in-process only and saved only when the probe's
+  marker is on screen; the remaining four are 1618×904 window frames.
