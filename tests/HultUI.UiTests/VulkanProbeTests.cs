@@ -238,6 +238,68 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// A drag keeps an over-allocated swapchain, and its end rebuilds it at the window's size; a
+    /// title-bar move builds nothing. Rebuilt for every size, the half-float swapchain was 32 ms of
+    /// a 37 ms step in Aperture and Reel; kept, a drag rebuilds only when it crosses a 256-px
+    /// bucket, and the end of the loop goes back to an exact swapchain, which keeps the
+    /// compositor's direct path that video needs. A move runs the same loop and must not pay a
+    /// rebuild at either end. Where the surface offers no ONE_TO_ONE, and in any present mode but
+    /// MAILBOX, every size rebuilds and the end of the loop does nothing.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    [InlineData("fifo")]
+    [InlineData("immediate")]
+    public void ADrag_OverAllocatesTheSwapchain_AndItsEndRebuildsItExact(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // Win32's size/move loop
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = variant == "8-bit" ? "0" : "1",
+            // Only MAILBOX shows a swapchain one-to-one: under FIFO it stalled for good, under
+            // IMMEDIATE a drag's first one cost 172-196 ms (NVIDIA 610.62).
+            ["HULTUI_VULKAN_PRESENT"] = variant switch { "8-bit" => null, "fifo" => "fifo", "immediate" => "immediate", _ => "mailbox" },
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, "--drag");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        var drag = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"probe: drag (\d+) steps, (\d+) builds \((\d+) one-to-one\), (\d+) frames");
+        var ended = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"probe: drag ended, (\d+) builds \((\d+) one-to-one, last (\d+x\d+) (\w+)\), (\d+) frames, client (\d+x\d+)");
+        var move = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: move (\d+) steps, (\d+) builds, (\d+) frames");
+        Assert.True(drag.Success && ended.Success && move.Success, run.Output);
+        int N(System.Text.RegularExpressions.Match m, int group) => int.Parse(m.Groups[group].Value);
+        int steps = N(drag, 1), builds = N(drag, 2), oneToOne = N(drag, 3), frames = N(drag, 4);
+
+        // Every step is drawn inside the loop, as ever: nothing else comes round there.
+        Assert.True(frames >= steps, $"{frames} frames for {steps} steps of the drag:\n{run.Output}");
+        // A move changes no size: no swapchain at either end of it.
+        Assert.True(N(move, 2) == 0, $"a move built {N(move, 2)} swapchains:\n{run.Output}");
+
+        if (variant == "fifo") Assert.Contains("vulkan present scaling: not under Fifo", run.Output);
+        if (variant == "immediate") Assert.Contains("vulkan present scaling: not under Immediate", run.Output);
+        if (!run.Output.Contains("fixed extent available"))
+        {
+            Assert.True(builds == steps && oneToOne == 0, $"{builds} builds ({oneToOne} one-to-one) for {steps} steps:\n{run.Output}");
+            Assert.True(N(ended, 1) == 0, $"the end of a drag built {N(ended, 1)} swapchains:\n{run.Output}");
+            return;
+        }
+        // The first step and each bucket crossed after it: three here, all one-to-one. Rebuilt for
+        // every size, sixteen.
+        Assert.True(builds >= 1 && builds == oneToOne, $"{builds} builds ({oneToOne} one-to-one) during the drag:\n{run.Output}");
+        Assert.True(builds <= 4, $"{builds} swapchain builds for {steps} steps of a drag:\n{run.Output}");
+        // One exact swapchain at the end, at the window's size, and its frame drawn at once.
+        Assert.True(N(ended, 1) == 1 && N(ended, 2) == 0 && ended.Groups[4].Value == "exact",
+            $"the end of the drag: {ended.Value}\n{run.Output}");
+        Assert.Equal(ended.Groups[6].Value, ended.Groups[3].Value);
+        Assert.True(N(ended, 5) >= 1, $"no frame was drawn when the drag ended:\n{run.Output}");
+    }
+
+    /// <summary>
     /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
     /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
     /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217
@@ -336,6 +398,8 @@ public sealed class VulkanProbeTests
             {
                 ["HULTUI_VULKAN_CAPTURE"] = capture,
                 ["HULTUI_VULKAN_CAPTURE_FRAME"] = "40",
+                // Says whether the surface offers ONE_TO_ONE ("fixed extent available").
+                ["HULTUI_STARTUP"] = "1",
                 // Nothing happens here without the layer installed (the Vulkan SDK).
                 ["VK_LOADER_LAYERS_ENABLE"] = "*validation*",
                 ["VK_LAYER_VALIDATE_SYNC"] = "1",
@@ -367,8 +431,10 @@ public sealed class VulkanProbeTests
             Assert.Contains("probe: done", run.Output);
             Assert.Contains(" vulkan device=", run.Output);
             var captures = System.Text.RegularExpressions.Regex.Matches(run.Output, @"probe: capture (right|WRONG)");
-            // One a swapchain: the first, two resizes, and the restore after a minimize.
-            int expected = OperatingSystem.IsWindows() ? 4 : 1;
+            // One a swapchain: the first, two resizes, the restore after a minimize, and where the
+            // surface shows a swapchain one-to-one, a drag's (drawn into at four sizes) and the
+            // exact one its end builds.
+            int expected = !OperatingSystem.IsWindows() ? 1 : run.Output.Contains("fixed extent available") ? 6 : 4;
             Assert.True(captures.Count >= expected, $"{captures.Count} captures, expected {expected}:\n{run.Output}");
             Assert.DoesNotContain("probe: capture WRONG", run.Output);
 

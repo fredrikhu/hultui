@@ -156,6 +156,15 @@ internal static class VulkanSwapchainChoice
         && widthPx <= allocatedWidthPx && heightPx <= allocatedHeightPx;
 
     /// <summary>
+    /// Whether the end of a size/move loop rebuilds the swapchain at the window's exact size: only
+    /// when the drag left it over-allocated. A swapchain presented one-to-one at a larger extent
+    /// loses the compositor's direct path, which cost 4K video about 70% more CPU; a move, which
+    /// never over-allocated, costs nothing here.
+    /// </summary>
+    internal static bool RebuildWhenSizeMoveEnds(bool haveSwapchain, bool builtOneToOne, bool overAllocatingAfter) =>
+        haveSwapchain && builtOneToOne && !overAllocatingAfter;
+
+    /// <summary>
     /// Whether a rebuild destroys the swapchain it replaces <i>before</i> creating the new one,
     /// instead of handing it over as <c>oldSwapchain</c> and destroying it afterwards. True for
     /// the half-float scRGB swapchain under MAILBOX on Windows: the default on an HDR display.

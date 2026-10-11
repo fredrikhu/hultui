@@ -291,6 +291,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// fullscreen the custom frame does, for apps that did not ask for custom chrome.</summary>
     private WindowsPlainFullscreen? _plainFullscreen;
 
+    /// <summary>Tells the Vulkan host when Win32's modal size/move loop starts and ends, with
+    /// either frame (<see cref="WindowsSizeMoveWatch"/>). Vulkan windows on Windows only.</summary>
+    private IDisposable? _sizeMoveWatch;
+
     /// <summary>
     /// True when this window uses the native Windows custom frame (borderless on
     /// Windows) rather than SDL's borderless + hit-test path. In that mode Windows
@@ -528,6 +532,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // drop (see WindowsDropTarget). Not on a thread that cannot host OLE: SDL's stays.
         if (OperatingSystem.IsWindows())
             _dropTarget = WindowsDropTarget.Install(GetWin32Hwnd(), e => InputReceived?.Invoke(e), () => DisplayScale);
+        // A drag over-allocates the swapchain and its end rebuilds it exact (SdlVulkanHost.
+        // FixedExtentOverride). After the custom frame, so it sees the messages first.
+        if (_vulkanHost is not null && OperatingSystem.IsWindows())
+            _sizeMoveWatch = WindowsSizeMoveWatch.Install(GetWin32Hwnd(), OnSizeMoveStarted, OnSizeMoveEnded);
 
         // The DIP-to-pixel correction already happened, before the renderer was built. This
         // re-sync stays because installing a custom frame changes the non-client area, and so
@@ -716,6 +724,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         return true;
+    }
+
+    /// <summary>Win32's modal size/move loop started: the Vulkan host over-allocates from the
+    /// first size change inside it, if it is a sizing loop.</summary>
+    private void OnSizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop) => _vulkanHost?.SizeMoveStarted(loop);
+
+    /// <summary>
+    /// The loop ended. When the drag left the swapchain over-allocated, the host has just rebuilt
+    /// it at the window's size, and its first frame is drawn now, from the window procedure, as a
+    /// step of the drag is: the old swapchain is gone, and nothing else comes round until the
+    /// loop that sent this returns. A move rebuilt nothing and draws nothing.
+    /// </summary>
+    private void OnSizeMoveEnded()
+    {
+        if (_vulkanHost is not { } host || !host.SizeMoveEnded()) return;
+        ResizePending = true;
+        if (!_shown) return;
+        long presented = _presents;
+        LiveResizeFrame?.Invoke();
+        if (_presents != presented && OperatingSystem.IsWindows())
+            ValidateRect(GetWin32Hwnd(), 0);
     }
 
     /// <summary>
@@ -1922,7 +1951,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         _registry.Remove(WindowId);
 
-        // Restore SDL's window procedure before the window is destroyed.
+        // Restore SDL's window procedure before the window is destroyed. The size/move watch was
+        // hooked after the custom frame, so it goes before it.
+        _sizeMoveWatch?.Dispose();
+        _sizeMoveWatch = null;
         if (OperatingSystem.IsWindows())
         {
             _customFrame?.Dispose();

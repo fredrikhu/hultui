@@ -150,6 +150,42 @@ public class VulkanSwapchainChoiceTests
     }
 
     [Fact]
+    public void ByDefault_OnlyASizingLoopOverAllocates()
+    {
+        // An edge drag, or a loop nobody said was a move: over-allocate from its first size change.
+        Assert.True(OverAllocate(available: true, fixedExtentOverride: null, SizeMoveLoop.Sizing));
+        // A title-bar move runs the same loop; a size change inside it (another monitor's scale,
+        // or out of the maximized state) rebuilds exact, once, as before.
+        Assert.False(OverAllocate(true, null, SizeMoveLoop.Moving));
+        // Snap, maximize, a program's SetWindowPos: no loop, exact.
+        Assert.False(OverAllocate(true, null, SizeMoveLoop.None));
+    }
+
+    [Fact]
+    public void TheEndOfALoop_RebuildsExact_OnlyWhatTheDragOverAllocated()
+    {
+        Assert.True(RebuildWhenSizeMoveEnds(haveSwapchain: true, builtOneToOne: true, overAllocatingAfter: false));
+        // A move, or a drag that changed no size: the exact swapchain stays.
+        Assert.False(RebuildWhenSizeMoveEnds(haveSwapchain: true, builtOneToOne: false, overAllocatingAfter: false));
+        // HULTUI_VULKAN_FIXED_EXTENT=1: over-allocated for good.
+        Assert.False(RebuildWhenSizeMoveEnds(haveSwapchain: true, builtOneToOne: true, overAllocatingAfter: true));
+        // Minimized: nothing to rebuild; the restore builds one.
+        Assert.False(RebuildWhenSizeMoveEnds(haveSwapchain: false, builtOneToOne: true, overAllocatingAfter: false));
+    }
+
+    [Fact]
+    public void ADragsSuboptimal_KeepsTheSwapchain_AndOnceItEndsNoLonger()
+    {
+        // Built one-to-one when the drag began; the window then moves around inside the images.
+        bool during = OverAllocate(true, null, SizeMoveLoop.Sizing), after = OverAllocate(true, null, SizeMoveLoop.None);
+        Assert.True(KeepSuboptimal(builtOneToOne: true, during, 1600, 1000, 2048, 1280));
+        Assert.True(CanKeepSwapchain(false, oneToOne: during, true, 1700, 1100, 2048, 1280));
+        // Once it ended, the same swapchain is rebuilt by either path rather than kept.
+        Assert.False(KeepSuboptimal(builtOneToOne: true, after, 1600, 1000, 2048, 1280));
+        Assert.False(CanKeepSwapchain(false, oneToOne: after, true, 1700, 1100, 2048, 1280));
+    }
+
+    [Fact]
     public void TheFixedExtentOverride_DecidesAlone_AndOnlyWhereOneToOneIsOffered()
     {
         foreach (var loop in new[] { SizeMoveLoop.None, SizeMoveLoop.Moving, SizeMoveLoop.Sizing })

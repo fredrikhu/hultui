@@ -78,27 +78,26 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         };
 
     /// <summary>
-    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> allocates the swapchain larger than the window and
-    /// presents it un-scaled, through <c>VK_KHR_swapchain_maintenance1</c>. <b>Off by default,
-    /// and the reason is video.</b>
+    /// Whether the swapchain is allocated larger than the window and presented un-scaled, through
+    /// <c>VK_KHR_swapchain_maintenance1</c>. <b>By default only while the window is being sized by
+    /// a drag</b> (Windows); <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> always, <c>=0</c> never.
     ///
     /// <para>It does what it was built for. Rebuilding three half-float images for every size a
-    /// dragged window passes through is what a resize costs — 122 rebuilds and roughly 5 GB of
-    /// allocation churn across one drag — and over-allocating to a 256-pixel bucket takes that
-    /// to 10 rebuilds and resize CPU from 801 to 466 ms/s. It also removes the resize stretch
-    /// <i>structurally</i> rather than by racing: with ONE_TO_ONE the compositor has nothing to
-    /// scale, and even IMMEDIATE, which stretched 18 frames in 150 with an exact-size swapchain,
-    /// stretched 0 in 150 with this on.</para>
+    /// dragged window passes through is what a resize costs — 32 of a 37 ms step in Aperture and
+    /// Reel (GL apps take 4.6), 122 rebuilds and roughly 5 GB of allocation churn across one drag
+    /// — and over-allocating to a 256-pixel bucket rebuilds only when a bucket is crossed. It also
+    /// removes the resize stretch <i>structurally</i> rather than by racing: with ONE_TO_ONE the
+    /// compositor has nothing to scale, and even IMMEDIATE, which stretched 18 frames in 150 with
+    /// an exact-size swapchain, stretched 0 in 150 with this on.</para>
     ///
     /// <para><b>And it costs 4K HDR playback about 70% more CPU: 91–95 ms/s against 48–63</b>,
     /// measured three times against GL as a drift reference. A swapchain whose extent matches
     /// the window can be handed to the compositor directly; one that does not appears to lose
     /// that path and be copied instead. Video runs for hours and a drag lasts a second, so the
-    /// default is the one that favours video — the same reasoning that chose MAILBOX over FIFO,
-    /// pointing the other way.</para>
-    ///
-    /// <para>Turning this on only <i>during</i> a drag would get both, and is the obvious next
-    /// step; it needs a settled-size signal the renderer does not have today.</para>
+    /// swapchain is over-allocated only between the first size change inside Win32's modal
+    /// size/move loop and the end of the loop, which rebuilds it at the window's exact size
+    /// (<see cref="SizeMoveStarted"/>, <see cref="SizeMoveEnded"/>). A title-bar move runs the same
+    /// loop and over-allocates nothing; snap and maximize do not run it and rebuild exact.</para>
     ///
     /// <para><b>A swapchain larger than its window is SUBOPTIMAL</b>, and NVIDIA (610) says so on
     /// every present. Answered with a rebuild, as an exact swapchain's SUBOPTIMAL is, this built
@@ -134,6 +133,28 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <see cref="VulkanSwapchainChoice.OverAllocate"/>.</summary>
     private bool OverAllocating =>
         VulkanSwapchainChoice.OverAllocate(_oneToOneAvailable, FixedExtentOverride, _sizeMoveLoop);
+
+    /// <summary>
+    /// Win32's modal size/move loop started (<c>WM_ENTERSIZEMOVE</c>). Nothing is rebuilt here: the
+    /// first size change inside the loop builds the over-allocated swapchain, so a move, which
+    /// changes no size, costs nothing.
+    /// </summary>
+    public void SizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop) => _sizeMoveLoop = loop;
+
+    /// <summary>
+    /// The loop ended (<c>WM_EXITSIZEMOVE</c>). A swapchain the drag left over-allocated is rebuilt
+    /// at the window's exact size, so the window presents on the compositor's direct path again
+    /// (see <see cref="FixedExtentOverride"/>); the renderer's targets over its images go first, as
+    /// for any rebuild. Returns whether it rebuilt, and so whether a frame is owed.
+    /// </summary>
+    public bool SizeMoveEnded()
+    {
+        _sizeMoveLoop = VulkanSwapchainChoice.SizeMoveLoop.None;
+        if (_disposed || !VulkanSwapchainChoice.RebuildWhenSizeMoveEnds(!_swapchain.IsNull, _builtOneToOne, OverAllocating))
+            return false;
+        Rebuild(_widthPx, _heightPx, force: true);
+        return true;
+    }
 
     /// <summary>The extent the swapchain images were actually allocated at, which is at least
     /// the window's and may be larger. The window size is <see cref="_widthPx"/>.</summary>
@@ -524,9 +545,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             HasDeviceExtension("VK_KHR_swapchain_maintenance1") ? "VK_KHR_swapchain_maintenance1"
             : HasDeviceExtension("VK_EXT_swapchain_maintenance1") ? "VK_EXT_swapchain_maintenance1"
             : null;
-        // Opt-in, not opt-out: see FixedExtentOverride for why the default favours video.
+        // On Windows unless HULTUI_VULKAN_FIXED_EXTENT=0, for the drag (see FixedExtentOverride);
+        // elsewhere only when =1 asks, since nothing else there over-allocates. Enabled and not
+        // chained into a swapchain, it changes nothing.
         bool wantMaintenance = _surfaceMaintenanceEnabled && maintenanceExtension is not null
-            && FixedExtentOverride == true
+            && (FixedExtentOverride ?? OperatingSystem.IsWindows())
             && OneToOnePresentMode();
         if (wantMaintenance) wanted.Add(maintenanceExtension!);
         EnabledDeviceExtensions = [.. wanted];
@@ -1267,8 +1290,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// are already big enough for the new window size, nothing is reallocated: the window size is
     /// simply recorded, and the next frame draws into the same images and presents a smaller
     /// top-left region of them. A drag that only shrinks the window never rebuilds at all, and
-    /// one that grows rebuilds when it crosses a bucket. Only with
-    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c>: by default every new size rebuilds.</para>
+    /// one that grows rebuilds when it crosses a bucket. Only while the swapchain is built
+    /// one-to-one and still wanted so — during a drag, or always with
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c>: otherwise every new size rebuilds.</para>
     ///
     /// <para>No device wait either, because nothing is being destroyed — that wait was there to
     /// make it safe to throw the old images away.</para>

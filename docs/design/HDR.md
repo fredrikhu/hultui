@@ -52,8 +52,14 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   `B8G8R8A8_UNORM` or `R8G8B8A8_UNORM` in sRGB-nonlinear. Never the `_SRGB` formats.
 - **Present mode:** MAILBOX, then IMMEDIATE, then FIFO. IMMEDIATE let the compositor stretch the
   previous image into a resized window.
-- **Resize:** rebuilt for every size by default. `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates and
-  presents one-to-one through `swapchain_maintenance1` instead.
+- **Resize:** while a drag sizes the window (Win32's modal size/move loop, from its first size
+  change), the swapchain is allocated to a 256-pixel bucket and presented one-to-one through
+  `swapchain_maintenance1`, so the drag rebuilds only when it crosses a bucket; when the loop ends
+  it is rebuilt at the window's exact size, which video needs (a larger extent loses the
+  compositor's direct path). A title-bar move runs the same loop and builds nothing; snap,
+  maximize and a program's resize rebuild for every size. Only under MAILBOX: under FIFO a
+  one-to-one swapchain stalled for good, and under IMMEDIATE a drag's first one cost about 180 ms.
+  `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates always, `=0` never.
 - **Rebuild:** the old swapchain is handed to the new one as `oldSwapchain`, except the scRGB one
   under MAILBOX on Windows, which is destroyed first. Handed over, it made the next present wait
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
@@ -255,7 +261,7 @@ Every switch is described in [ENVIRONMENT.md](../ENVIRONMENT.md).
 | Renderer | GL; Vulkan per app | Vulkan costs start-up, memory and resize CPU that apps without HDR video would pay for nothing | `renderer:`, `HULTUI_RENDERER` |
 | Swapchain format | follows the display | enumeration lists the same formats in HDR and out | `HULTUI_VULKAN_F16` |
 | Present mode | MAILBOX | no resize stretch, and video level with GL | `HULTUI_VULKAN_PRESENT` |
-| Fixed extent | off | halves resize CPU, costs 4K video about 70% | `HULTUI_VULKAN_FIXED_EXTENT` |
+| Fixed extent | during a drag (Windows, MAILBOX) | a drag step without a rebuild; outside a drag it would cost 4K video about 70% | `HULTUI_VULKAN_FIXED_EXTENT` |
 | Scaled colour space | off | 0.10 ms a frame and no memory saved, on a path off Skia's usual one | `HULTUI_VULKAN_SCALED_SPACE` |
 | Display-colour events | off, apps opt in | COM in the message loop, which apps without HDR do not need | `displayColorEvents:`, `HULTUI_DISPLAY_INFORMATION` |
 | HDR video | on | an HDR swapchain with a tone-mapped picture wastes the swapchain | `HULTUI_VIDEO_HDR` |
@@ -282,9 +288,14 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   of GL, resizes at GL's cost, and sits 5 MB above it.
 - **On NVIDIA Linux F16 is nearly free.** There the fixed costs are the API's: about +95 ms of
   start-up and +23 MB, with or without F16.
-- **The fixed extent**, in its own A/B: 10 swapchain builds instead of 122, and resize CPU from
-  801 to 466 ms/s (GL 264), which is 3.0x GL's down to 1.8x. It costs 4K video 91–95 ms/s against
-  48–63.
+- **Over-allocating during a drag** (2026-10-11): a step of an 80-step drag went from 32.9–38.1
+  to 5.6–8.2 ms median (probe window, Aperture Home and Reel; JIT and AOT; GL Aperture 3.0–5.5),
+  swapchain builds from 80 to 5, plus 30–36 ms for the exact rebuild and its frame at the
+  release, and nothing for a title-bar move. Reel playing 1080p60 dropped 0–2 frames in a drag
+  instead of 35–36, and 1080p120 11–12 instead of 228–241.
+- **The fixed extent all the time**, in its own A/B (2026-09-27): 10 swapchain builds instead of
+  122, and resize CPU from 801 to 466 ms/s (GL 264). It costs 4K video 91–95 ms/s against 48–63,
+  which is why it is only used during a drag.
 - **Resize CPU under MAILBOX is driver-side.** Halving the frames drawn during a resize left it
   unchanged. Most of it, on the scRGB swapchain, was a 100 ms wait in the first present after
   each rebuild; destroying the old swapchain first (2026-10-08) took a 40-resize probe from
@@ -299,8 +310,9 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   cannot import Vulkan memory.
 - **Start-up's +127 ms.** It is pipeline compilation for the F16 target, and SkiaSharp exposes no
   persistent pipeline cache.
-- **A fixed extent only while dragging** would get both its resize saving and full video speed. It
-  needs a settled-size signal the renderer does not have.
+- **Over-allocating during a drag on AMD, Intel and Linux.** Measured on NVIDIA 610.62 only. Linux
+  has no modal size loop to frame a drag and keeps the extension off unless
+  `HULTUI_VULKAN_FIXED_EXTENT=1` asks.
 - **HDR10 swapchains and HDR metadata.** scRGB was chosen: HDR10 would halve bandwidth, but PQ is
   absolute luminance and Skia's colour management is relative.
 - **Video luminance under the scaled colour space** matches the offscreen path to 0.4% on average,
@@ -370,6 +382,11 @@ A check that reports the same thing whether the code works or not reads as evide
   scRGB offscreen dropped out of it (19.7 to 10.4 MB) while DXGI read the same 130.6 MB, and once
   disposed Skia budgeted it and pooled it all the same. `DumpMemoryStatistics` lists every
   resource, live or purgeable; read it, or DXGI, before calling a Skia change a saving.
+- **Where a one-off lands decides whether a benchmark sees it.** The first swapchain a window
+  replaces after it is first shown takes 190–290 ms to create on NVIDIA 610, on every path (a
+  start-up build takes 9 ms, a later rebuild about 21). A drag benchmark that places the window
+  first pays it before the drag. With `HULTUI_VULKAN_FIXED_EXTENT=1` the placement fitted the
+  start-up bucket, so the payment moved into the drag and read as a 200 ms outlier of the change.
 - **A capture taken after `SetWindowPos` returns cannot see the resize.** The window procedure draws
   the new size before it returns, so a stall inside that frame is over by the time anything looks.
   On the chained scRGB MAILBOX swapchain the old harness read 0 of 80 resizes stretched, while a
@@ -419,6 +436,17 @@ Anything holding a handle to something Skia or a driver also tracks goes stale, 
   only at device destruction, as a leaked `VkSwapchainKHR` (`VUID-vkDestroyDevice-device-05137`).
 
 ### 3. Defaults that are not neutral
+
+- **A swapchain larger than its window is SUBOPTIMAL on every present** (NVIDIA 610). Answered
+  with a rebuild, as an exact swapchain's SUBOPTIMAL is, the over-allocated swapchain was built
+  again after every frame, and `HULTUI_VULKAN_FIXED_EXTENT=1` made a drag step slower than no fixed
+  extent at all. A one-to-one swapchain the window still fits keeps going now.
+- **Only MAILBOX shows a one-to-one swapchain well.** Under FIFO it stalled for good: a few drags
+  in, an acquire's fence never signalled and the window hung, on both formats, with the validation
+  layer and without. Under IMMEDIATE the half-float window paid 172-196 ms for the first one-to-one
+  swapchain of every drag (its first present when handed over, its creation when destroyed first)
+  and showed the old image stretched meanwhile. MAILBOX ran 30 drags, 45 one-to-one swapchains,
+  with neither. The other modes rebuild for every size.
 
 - **An omitted `MPV_RENDER_PARAM_DEPTH` means 8 bits and dithering**; mpv does not infer it from
   the format. **`internal_format = 0`** means 8 bits too.

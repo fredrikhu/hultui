@@ -33,6 +33,11 @@ using HultUI.WebView.WebView2;
 // the median and longest time a resize took to be drawn (Windows). With --new-sizes every
 // resize is to a size the window has not had yet, as in a drag.
 //
+// --drag frames sixteen new sizes, then sixteen new places, in WM_ENTERSIZEMOVE and
+// WM_EXITSIZEMOVE, as Win32's modal loop does for an edge drag and a title-bar move, and prints the
+// swapchains built (from HULTUI_STARTUP=1's lines on its own stderr) and the frames drawn in each
+// part (Windows).
+//
 // --minimize minimizes the window without activating it, forces frames while it is minimized,
 // then runs the real loop: minimized with one change waiting, restored, and resized, counting
 // loop passes and the frames drawn in each part (Windows).
@@ -50,8 +55,9 @@ using HultUI.WebView.WebView2;
 // --frame-counter draws each frame's own number, as sixteen black or white cells, over a red,
 // green or blue background by the number mod 3. HULTUI_VULKAN_CAPTURE's file is looked for after
 // every frame, decoded and deleted: it must show the frame just drawn. Each swapchain captures
-// once, so the window is resized twice and minimized and restored to make new ones (Windows).
-// Prints one "probe: capture" line a capture.
+// once, so the window is resized twice and minimized and restored to make new ones, then dragged
+// (a swapchain kept across four sizes, and the exact one its end builds) (Windows). Prints one
+// "probe: capture" line a capture.
 //
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
@@ -75,6 +81,7 @@ internal static class Program
         if (args.Contains("--webviews")) return TwoPages(renderer);
         if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
             return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
+        if (args.Contains("--drag")) return DragAndMove(renderer);
         if (args.Contains("--page-and-video"))
             return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
                 ?? "av://lavfi:color=c=magenta:s=320x240");
@@ -226,6 +233,73 @@ internal static class Program
         Console.WriteLine($"probe: {inside} frames inside {count} resizes, {without} without one");
         Console.WriteLine("probe: done");
         return 0;
+    }
+
+    /// <summary>
+    /// A drag and then a move, each framed as Win32's modal loop frames one: WM_ENTERSIZEMOVE, the
+    /// window's new sizes (or places) by SetWindowPos, WM_EXITSIZEMOVE. Sent here, on the window's
+    /// own thread, which is where Win32 sends them; the drag cannot be made without the mouse.
+    /// Counts the swapchains built in each part from HULTUI_STARTUP=1's lines, which this process
+    /// reads off its own stderr, and the frames drawn (Windows).
+    /// </summary>
+    private static int DragAndMove(RendererKind renderer)
+    {
+        var trace = new SwapchainLines(Console.Error);
+        Console.SetError(trace);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer));
+        int frames = 0;
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
+            Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF")),
+            Canvas.New(_ => frames++).Width(1f).Height(1f)));
+        for (int i = 0; i < 12; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        const int steps = 16;
+        int builds = trace.Builds, oneToOne = trace.OneToOne, before = frames;
+        SendMessageW(hwnd, EnterSizeMove, 0, 0);
+        for (int i = 0; i < steps; i++)
+            SetWindowPos(hwnd, 0, 0, 0, 1000 + 24 * (i + 1), 700 + 16 * (i + 1), NoMove | NoZOrder | NoActivate);
+        Console.WriteLine($"probe: drag {steps} steps, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one), " +
+            $"{frames - before} frames");
+        builds = trace.Builds; oneToOne = trace.OneToOne; before = frames;
+        SendMessageW(hwnd, ExitSizeMove, 0, 0);
+        GetClientRect(hwnd, out var client);
+        Console.WriteLine($"probe: drag ended, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one, " +
+            $"last {trace.Last}), {frames - before} frames, client {client.Right}x{client.Bottom}");
+        for (int i = 0; i < 2; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        builds = trace.Builds; before = frames;
+        SendMessageW(hwnd, EnterSizeMove, 0, 0);
+        for (int i = 0; i < steps; i++)
+            SetWindowPos(hwnd, 0, 100 + 10 * (i + 1), 100, 0, 0, NoSize | NoZOrder | NoActivate);
+        SendMessageW(hwnd, ExitSizeMove, 0, 0);
+        Console.WriteLine($"probe: move {steps} steps, {trace.Builds - builds} builds, {frames - before} frames");
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>stderr, counting the swapchain builds HULTUI_STARTUP=1 reports.</summary>
+    private sealed class SwapchainLines(TextWriter inner) : TextWriter
+    {
+        private static readonly System.Text.RegularExpressions.Regex Build = new(@"vulkan swapchain (\d+x\d+) x\d+");
+        public int Builds, OneToOne;
+        public string Last = "";
+        public override System.Text.Encoding Encoding => inner.Encoding;
+        public override void Write(char value) => inner.Write(value);
+        public override void WriteLine(string? value)
+        {
+            if (value is not null && Build.Match(value) is { Success: true } m)
+            {
+                Builds++;
+                bool scaled = value.Contains("one-to-one", StringComparison.Ordinal);
+                if (scaled) OneToOne++;
+                Last = m.Groups[1].Value + (scaled ? " one-to-one" : " exact");
+            }
+            inner.WriteLine(value);
+        }
     }
 
     /// <summary>
@@ -480,6 +554,20 @@ internal static class Program
                 app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
             ShowWindow(hwnd, ShowNoActivate);
             Draw(perSwapchain);
+
+            // A drag: the first size builds an over-allocated swapchain, the next ones keep it and
+            // draw into the same images at a new size, so its capture is of a reused image drawn
+            // after a kept resize; the end of the drag builds an exact one, which captures again.
+            SendMessageW(hwnd, EnterSizeMove, 0, 0);
+            foreach (var (width, height) in new[] { (720, 480), (730, 486), (740, 492), (750, 498) })
+            {
+                SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
+                Look();
+                Draw(perSwapchain / 4);
+            }
+            SendMessageW(hwnd, ExitSizeMove, 0, 0);
+            Look();
+            Draw(perSwapchain);
         }
         Console.WriteLine($"probe: done after {drawn} frames");
         return 0;
@@ -561,8 +649,18 @@ internal static class Program
         public void Dispose() => inner.Dispose();
     }
 
-    private const uint NoMove = 0x0002, NoZOrder = 0x0004, NoActivate = 0x0010;
+    private const uint NoSize = 0x0001, NoMove = 0x0002, NoZOrder = 0x0004, NoActivate = 0x0010;
     private const int ShowMinNoActive = 7, ShowNoActivate = 4;
+    private const uint EnterSizeMove = 0x0231, ExitSizeMove = 0x0232;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint SendMessageW(nint hwnd, uint message, nint wParam, nint lParam);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Rect32 { public int Left, Top, Right, Bottom; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetClientRect(nint hwnd, out Rect32 rect);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hwnd, int command);
