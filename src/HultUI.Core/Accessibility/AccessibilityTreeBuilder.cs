@@ -311,6 +311,43 @@ public static class AccessibilityTreeBuilder
         listNode.SetChildren(items);
     }
 
+    /// <summary>
+    /// What a move of a list's selection changes in an applied tree's node of the list, without
+    /// building the tree again: an <see cref="AccessibilityProperties.IsSelected"/> change for each
+    /// item node whose state is not the list's now, in item order, as the differ would report
+    /// them, added to <paramref name="changes"/>. The nodes are not touched. False, adding nothing,
+    /// when the node's items cannot be patched and the tree has to be built again: the list does
+    /// not publish item nodes (its rows are composite), or its items are not the node's (their
+    /// number changed, or crossed <see cref="MaxEagerVirtualItems"/>). A list whose items are
+    /// served on demand has no item nodes and tells no selection: true, adding nothing.
+    /// </summary>
+    /// <remarks>Only the selected state: an item whose label changed with the move is told by the
+    /// next rebuild, when the list's layout refresh comes due, as a change of items always was.</remarks>
+    internal static bool ItemSelectionChanges(AccessibilityNode listNode, IAccessibleItemSource source,
+        List<PropertyChange> changes)
+    {
+        if (!source.PublishesItemNodes) return false;
+        int count = source.ItemCount;
+        if (count > MaxEagerVirtualItems) return listNode.IsVirtualItemContainer;
+        if (listNode.IsVirtualItemContainer) return false;
+        var items = listNode.Children;
+        if (items.Count != count) return false;
+        int start = changes.Count;
+        for (int i = 0; i < count; i++)
+        {
+            var item = items[i];
+            if (item.IsSelected is not { } selected)
+            {
+                // Not an item node: the list's children are something else since the tree was built.
+                changes.RemoveRange(start, changes.Count - start);
+                return false;
+            }
+            if (selected != source.IsItemSelected(i))
+                changes.Add(new PropertyChange(item, AccessibilityProperties.IsSelected));
+        }
+        return true;
+    }
+
 
     /// <summary>
     /// Determines whether an element is semantically meaningful in the accessibility tree.

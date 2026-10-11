@@ -239,7 +239,72 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
-    public void VirtualList_SelectionChanges_AskForARebuild_OncePerChange()
+    public void ItemSelectionChanges_AreTheDiffsIsSelectedChanges_WithoutABuild()
+    {
+        // What the window marks on the applied tree for a move, in place of a rebuild: exactly
+        // what the differ reports between the tree before the move and one built after it.
+        var list = MakeList(10);
+        list.SelectedIndex = 6;
+        var before = BuildLaidOut(list);
+        list.SelectedIndex = 2;
+        var changes = new List<PropertyChange>();
+
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes));
+
+        var diff = AccessibilityTreeDiffer.Diff(before, BuildLaidOut(list));
+        Assert.Equal(
+            diff.PropertyChanged.Select(c => (c.Node.ElementId, c.PropertyName)),
+            changes.Select(c => (c.Node.ElementId, c.PropertyName)));
+        Assert.Equal([before.Children[2], before.Children[6]], changes.Select(c => c.Node));
+        // The nodes are left as they were: the window marks them once every list checked out.
+        Assert.False(before.Children[2].IsSelected);
+        Assert.True(before.Children[6].IsSelected);
+    }
+
+    [Fact]
+    public void ItemSelectionChanges_NeedARebuild_WhenTheItemsAreNotTheNodes()
+    {
+        var changes = new List<PropertyChange>();
+
+        // An item added since the tree was built.
+        var list = MakeList(10);
+        var tree = BuildLaidOut(list);
+        list.Items = Enumerable.Range(0, 11).Select(i => $"row {i}").ToArray();
+        list.SelectedIndex = 10;
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes));
+
+        // Rows that are their own controls publish no item nodes.
+        var composite = MakeList(10);
+        var compositeTree = BuildLaidOut(composite);
+        composite.RowsAreComposite = true;
+        composite.SelectedIndex = 1;
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(compositeTree, composite, changes));
+
+        // Grown past the items built eagerly.
+        var grown = MakeList(10);
+        var grownTree = BuildLaidOut(grown);
+        grown.Items = Enumerable.Range(0, AccessibilityTreeBuilder.MaxEagerVirtualItems + 1).Select(i => $"row {i}").ToArray();
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(grownTree, grown, changes));
+        Assert.Empty(changes);
+    }
+
+    [Fact]
+    public void ItemSelectionChanges_OfAListServedOnDemand_AreNone()
+    {
+        // Its items have no nodes, and a move there is told to no reader (a later step); the
+        // tree need not be built again for it.
+        var list = MakeList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1);
+        var tree = BuildLaidOut(list);
+        Assert.True(tree.IsVirtualItemContainer);
+        list.SelectedIndex = 4;
+        var changes = new List<PropertyChange>();
+
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes));
+        Assert.Empty(changes);
+    }
+
+    [Fact]
+    public void VirtualList_SelectionChanges_TellTheWindow_OncePerChange()
     {
         var list = MakeList(10);
         var observer = new RecordingObserver();

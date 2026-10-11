@@ -185,6 +185,14 @@ AT-SPI snapshot's objects take it and send state-changed:focused. The next
 rebuild's diff then has nothing to say about the move. Before, both kept the
 state of the last rebuild until the next one, which reported the move late.
 
+A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
+`IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
+those changes (`ApplyPatchedProperties`): the UIA wrappers take the new state and raise
+SelectionItem.IsSelected, the AT-SPI objects take it and send state-changed:selected,
+as a diff would have. A frame that rebuilds anyway tells the move in its diff; a list
+whose node is not there yet, or whose items changed in number, is rebuilt. What else
+the move changed (a scroll) is told by the coalesced layout refresh, as before.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
@@ -319,9 +327,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   takes AT-SPI's `password text` role (40) and the same bullets, and masking or revealing a
   field sends a `property-change:accessible-role` signal.
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
-  Each item node carries its selected state (2026-10-10), and setting `SelectedIndex` asks for
-  a rebuild, so a move is an IsSelected change on the item that had the selection and the one
-  that has it (UIA property events, AT-SPI `state-changed:selected`). Before, a move that
+  Each item node carries its selected state (2026-10-10), and setting `SelectedIndex` tells the
+  window, so a move is an IsSelected change on the item that had the selection and the one
+  that has it (UIA property events, AT-SPI `state-changed:selected`), marked on the applied
+  tree without a rebuild (2026-10-11, see the focus move above). Before, a move that
   scrolled nothing changed no node and no reader was told.
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
   Expand/Collapse reuse the element's click-to-toggle. A change raises the

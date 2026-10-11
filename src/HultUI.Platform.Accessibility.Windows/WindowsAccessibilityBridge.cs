@@ -457,7 +457,33 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             RefreshParent(reorderedParent.ElementId);
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
         }
-        foreach (var change in diff.PropertyChanged)
+        RaisePropertyChanges(diff.PropertyChanged);
+    }
+
+    /// <summary>
+    /// Properties the window marked on the applied tree in place — a list's selection move: the
+    /// item that had the selection and the one that has it. Their wrappers already point at those
+    /// nodes; they take the new state and raise what a diff would have (SelectionItem.IsSelected
+    /// property events), with no walk of the tree. Anything but property changes is applied as a
+    /// diff.
+    /// </summary>
+    public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
+    {
+        if (patch.Added.Count > 0 || patch.Removed.Count > 0 || patch.Reordered.Count > 0)
+        {
+            ApplyChanges(patch, root);
+            return;
+        }
+        foreach (var change in patch.PropertyChanged)
+            if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
+                wrapper.UpdateFrom(change.Node);
+        RaisePropertyChanges(patch.PropertyChanged);
+    }
+
+    /// <summary>Raises the UIA events of property changes whose wrappers are up to date.</summary>
+    private void RaisePropertyChanges(List<PropertyChange> changes)
+    {
+        foreach (var change in changes)
         {
             if (!_wrappers.TryGetValue(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)

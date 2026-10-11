@@ -32,9 +32,10 @@ public sealed class AccessibilityNode
     public bool IsFocusable => (_flags & FocusableBit) != 0;
 
     /// <summary>
-    /// Whether the node's element has the keyboard focus. The one property that changes after
-    /// the tree is built: a focus move rebuilds no tree, so the window marks the move on the
-    /// applied tree's two nodes in place (UI thread), and the next diff does not report it again.
+    /// Whether the node's element has the keyboard focus. One of the two properties that change
+    /// after the tree is built (with a list item's <see cref="IsSelected"/>): a focus move
+    /// rebuilds no tree, so the window marks the move on the applied tree's two nodes in place
+    /// (UI thread), and the next diff does not report it again.
     /// </summary>
     public bool IsFocused
     {
@@ -84,8 +85,15 @@ public sealed class AccessibilityNode
 
     /// <summary>Selected state for one of a set — a radio button, a tab, an item of a list —
     /// or null for a node that is not selectable that way. A list's item nodes take it from
-    /// their list (<see cref="IAccessibleItemSource.IsItemSelected"/>).</summary>
-    public bool? IsSelected => GetTriState(SelectedShift);
+    /// their list (<see cref="IAccessibleItemSource.IsItemSelected"/>), and a move of the list's
+    /// selection rebuilds no tree: the window marks it on the applied tree's item nodes in place
+    /// (UI thread), as it marks a focus move, and the next diff does not report it again.</summary>
+    public bool? IsSelected
+    {
+        get => GetTriState(SelectedShift);
+        // One store of both bits: a reader on another thread sees the old state or the new.
+        internal set => _flags = (ushort)((_flags & ~(3 << SelectedShift)) | TriState(value, SelectedShift));
+    }
 
     /// <summary>True when the node is scrolled/clipped out of the visible viewport.</summary>
     public bool IsOffscreen
@@ -208,9 +216,9 @@ public sealed class AccessibilityNode
 
     // The node's states in one field, for the same reason: six bools and three nullable bools
     // were 12 bytes of every node, and ScrollOffset took their place. A nullable state is two
-    // bits, whether it has a value and the value. Written on the UI thread only; IsFocused is
-    // the one written once the tree is out, and a reader on another thread sees every other
-    // bit unchanged either side of that write.
+    // bits, whether it has a value and the value. Written on the UI thread only; IsFocused and
+    // a list item's IsSelected are the ones written once the tree is out, and a reader on another
+    // thread sees every other bit unchanged either side of such a write.
     private ushort _flags;
     private const int FocusableBit = 1 << 0, FocusedBit = 1 << 1, EnabledBit = 1 << 2, PasswordBit = 1 << 3,
         OffscreenBit = 1 << 4, VirtualItemsBit = 1 << 5;

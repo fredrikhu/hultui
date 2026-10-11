@@ -16,7 +16,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// rebuild. The D-Bus method handlers run on the bus receive thread and read
 /// that snapshot lock-free; <see cref="ApplyChanges"/> swaps it, and a focus move
 /// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
-/// focused state of its two objects in it, both on the UI thread. The
+/// focused state of its two objects in it, and a list's selection move
+/// (<see cref="ApplyPatchedProperties"/>) the selected state of its two items, all on the UI
+/// thread. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
@@ -358,6 +360,33 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         _focusedPath = newPath;
     }
 
+    /// <summary>
+    /// Properties the window marked on the applied tree in place — a list's selection move: the
+    /// item that had the selection and the one that has it. Their objects in the published
+    /// snapshot take the new state and the bridge sends what a diff would have
+    /// (state-changed:selected), with no new snapshot. Anything else is applied as a diff.
+    /// </summary>
+    public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
+    {
+        if (!_registered || _signals is null) return;
+        var snapshot = _snapshot;
+        bool inPlace = _hasBuilt && patch.Added.Count == 0 && patch.Removed.Count == 0 && patch.Reordered.Count == 0;
+        foreach (var change in patch.PropertyChanged)
+            inPlace &= change.PropertyName == AccessibilityProperties.IsSelected
+                && snapshot.ByPath.ContainsKey(PathOf(change.Node));
+        if (!inPlace)
+        {
+            ApplyChanges(patch, root);
+            return;
+        }
+        foreach (var change in patch.PropertyChanged)
+        {
+            string path = PathOf(change.Node);
+            snapshot.ByPath[path].Selected = change.Node.IsSelected == true;
+            if (EmitPropertyChange(change, path)) DebugSignalsEmitted++;
+        }
+    }
+
     /// <summary>Sets an object's focused state in the published snapshot; true when it changed.</summary>
     private bool SetFocused(string path, bool focused)
     {
@@ -368,9 +397,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     // ───────────────────────────────────────────────────────────── helpers
 
-    private bool EmitPropertyChange(PropertyChange change)
+    private bool EmitPropertyChange(PropertyChange change) => EmitPropertyChange(change, PathOf(change.Node));
+
+    private bool EmitPropertyChange(PropertyChange change, string path)
     {
-        string path = PathOf(change.Node);
         switch (change.PropertyName)
         {
             case AccessibilityProperties.Name:

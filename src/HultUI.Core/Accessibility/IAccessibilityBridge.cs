@@ -41,6 +41,17 @@ public interface IAccessibilityBridge
     void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => NotifyFocusChanged(focused);
 
     /// <summary>
+    /// Properties changed with no rebuild: the window has marked them in place on the most
+    /// recently applied tree, <paramref name="root"/>, and the next diff will not report them.
+    /// Today a move of a list's selection: <see cref="AccessibilityNode.IsSelected"/> on the item
+    /// that had the selection and the one that has it. <paramref name="patch"/> holds property
+    /// changes only, of nodes of that tree, in the order a diff would list them. A bridge that
+    /// holds a node's state brings those nodes up to date and tells assistive technology as a diff
+    /// would have. By default, applies the patch as a diff of that same tree.
+    /// </summary>
+    void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) => ApplyChanges(patch, root);
+
+    /// <summary>
     /// Has assistive technology speak <paramref name="text"/> (<see cref="Elements.Element.Announce"/>):
     /// a UIA notification on Windows, an AT-SPI announcement on Linux. <paramref name="source"/>
     /// is the announcing element's node in the most recently applied tree, or null when it has
