@@ -123,6 +123,17 @@ button, and the button tests never saw it because they called `ApplyTheme` direc
 read the button, not the label. Test what the child resolves.) `ApplyTheme` must not read
 `ResolvedInherited` — it is not this pass's yet.
 
+**Marking layout from the theme.** `ApplyTheme` runs on every style pass that reaches the
+element: each theme switch, and each rebuild that patches it. Mark layout there only when a
+size the element measures with changed — compare the new value with the one it had, as
+`CheckboxElement`, `NumericUpDownElement` and `CalendarElement` do — or a light/dark switch
+lays out every such control and everything up to the root (the perf suite's
+`theme/light-dark switch` laid out 78 elements and allocated 8.7 KB a switch for this; it
+lays out none and allocates nothing since plan 17 round 3). A size written into a
+*part's* box or flex style (`Box.Padding`, `MinHeight`, `Flex.Gap`) marks nothing by itself:
+mark that part's layout, not only the control's, or the part keeps its old box (an
+expander's header did).
+
 ## Adding a scheme
 
 Add a `NamedTheme` to `ThemeCatalog` and put it in `All`. Transcribe the scheme's published

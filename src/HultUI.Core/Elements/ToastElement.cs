@@ -118,32 +118,46 @@ public class ToastElement : BoxElement
     // children themselves, since the gap differs on the two sides of the message.
     private void Arrange()
     {
+        StyleParts();
         var children = new List<Element>(3);
+        if (AccentColor is not null) children.Add(_accent);
+        children.Add(_text);
+        if (_actionLabel is not null) children.Add(_action);
+        ReplaceChildren([.. children]);
+    }
+
+    // The bar's and the verb's look; which of them are in the row is Arrange's.
+    private void StyleParts()
+    {
         if (AccentColor is { } accent)
         {
             _accent.Box.Width = Dimension.Px(_accentWidth);
             _accent.CornerRadius(_accentWidth / 2);
             _accent.Background(accent);
             _accent.Box.Margin = new Thickness(0, _accentGap, 0, 0);
-            children.Add(_accent);
         }
-        children.Add(_text);
         if (_actionLabel is not null)
         {
             _action.Box.Margin = new Thickness(0, 0, 0, _actionGap);
             _action.Inherited.TextColor = _actionColor;
             _action.Inherited.FontWeight = FontWeight.SemiBold;
-            children.Add(_action);
         }
-        ReplaceChildren([.. children]);
     }
 
     protected internal override void ApplyTheme(Theme theme)
     {
         var t = theme.Toast;
+        var border = new Thickness(t.BorderWidth);
+        // What the row is laid out with: its border and padding, the bar's width and gap, the
+        // verb's gap (the text sizes go through the style pass). A theme that keeps them (a
+        // light/dark switch) lays nothing out; and which parts are in the row is not the theme's
+        // to change, so the row is not put together again either, which also told the
+        // accessibility tree that its children had changed.
+        bool resized = BoxRead.BorderWidth != border || BoxRead.Padding != t.Padding
+            || t.AccentWidth != _accentWidth || t.AccentGap != _accentGap || t.ActionGap != _actionGap;
         this.Background(t.Background ?? theme.Surface);
         this.BorderColor(t.Border ?? theme.Border);
-        Box.BorderWidth = new Thickness(t.BorderWidth);
+        Box.BorderWidth = border;
         this.CornerRadius(t.CornerRadius);
         Box.Padding = t.Padding;
         _text.Inherited.FontSize = t.FontSize;
@@ -156,13 +170,14 @@ public class ToastElement : BoxElement
         _accentWidth = t.AccentWidth;
         _accentGap = t.AccentGap;
         _actionGap = t.ActionGap;
-        Arrange();
+        StyleParts();
         // The children resolve after this element in the same style pass, but only if
         // they are flagged; their inherited style was just written.
         _accent.MarkStyleDirty();
         _text.MarkStyleDirty();
         _action.MarkStyleDirty();
-        MarkLayoutDirty();
+        // The bar's width and the gaps are read from the parts' styles as the row lays them out.
+        if (resized) MarkLayoutDirty();
     }
 
     internal override void PatchFrom(Element source)

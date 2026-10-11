@@ -332,14 +332,27 @@ public class ExpanderElement : BoxElement
 
     protected internal override void ApplyTheme(Theme theme)
     {
-        bool chevronMoved = theme.Expander.Chevron != _theme.Chevron;
-        _theme = theme.Expander;
+        var t = theme.Expander;
+        bool chevronMoved = t.Chevron != _theme.Chevron;
+        // StyleParts writes the parts' own box and flex styles, which mark nothing: a theme that
+        // changes them lays out each part they size, and one that keeps them (a light/dark
+        // switch) lays out nothing. The title's font goes through the style pass.
+        bool resized = chevronMoved || !SameLayout(_theme, t);
+        _theme = t;
         _chevronColor = _theme.ChevronColor ?? theme.Secondary;
         _hover = _theme.HoverBackground ?? theme.SurfaceVariant;
         StyleParts();
         if (chevronMoved) ArrangeHeader();
         Corners(BodyShown);
-        SizeBody();
+        if (resized)
+        {
+            SizeBody(); // a body part-way open counts its border
+            _header.MarkLayoutDirty();
+            _actions.MarkLayoutDirty();
+            _chevron.MarkLayoutDirty();
+            _inner.MarkLayoutDirty();
+            MarkLayoutDirty();
+        }
         // The parts resolve after this element in the same style pass, but only if flagged;
         // their style was just written.
         _header.MarkStyleDirty();
@@ -347,8 +360,15 @@ public class ExpanderElement : BoxElement
         _actions.MarkStyleDirty();
         _body.MarkStyleDirty();
         _inner.MarkStyleDirty();
-        MarkLayoutDirty();
     }
+
+    /// <summary>Whether two themes size the parts alike: what <see cref="StyleParts"/> writes into
+    /// their box and flex styles and the chevron's size.</summary>
+    private static bool SameLayout(ExpanderTheme a, ExpanderTheme b) =>
+        a.HeaderPadding == b.HeaderPadding && a.HeaderMinHeight == b.HeaderMinHeight
+        && a.HeaderGap == b.HeaderGap && a.ChevronSize == b.ChevronSize
+        && (a.Border is null) == (b.Border is null) && a.BorderWidth == b.BorderWidth
+        && a.BodyPadding == b.BodyPadding;
 
     private void StyleParts()
     {

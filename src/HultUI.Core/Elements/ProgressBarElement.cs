@@ -95,11 +95,13 @@ public class ProgressBarElement : Element, IRangeValueElement
     protected internal override void ApplyTheme(Theme theme)
     {
         var t = theme.ProgressBar;
+        // The height is all it measures from the theme; a theme that keeps it repaints the bar.
+        bool resized = t.Height != _themeHeight;
         _themeHeight = t.Height;
         _themeCornerRadius = t.CornerRadius;
         _themeTrack = t.Track ?? theme.Border;
         _themeFill = t.Fill ?? theme.Primary;
-        MarkLayoutDirty();
+        if (resized) MarkLayoutDirty();
         IndeterminateSeconds = t.IndeterminateSeconds;
         IndeterminateFraction = t.IndeterminateFraction;
     }
