@@ -18,5 +18,6 @@ static partial class Scenarios
             .Concat(WindowScenarios())
             .Concat(Controls())
             .Concat(Paint())
-            .Concat(Accessibility());
+            .Concat(Accessibility())
+            .Concat(MediaScenarios());
 }

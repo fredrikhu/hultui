@@ -284,8 +284,13 @@ public sealed class VideoPlayer : Component
         return false;
     }
 
+    /// <summary>How many times <see cref="Build"/> has run: what the tests and the perf suite
+    /// count when they check what a position report or a fade frame costs.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         var theme = _theme.Value;
         var player = Player;
         bool playing = player.IsPlaying;

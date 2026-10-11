@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Media.Tests" />
+    <!-- The perf suite's media rows count the player's rebuilds (VideoPlayer.Builds). -->
+    <InternalsVisibleTo Include="HultUI.Samples.PerfSuite" />
   </ItemGroup>
 
   <ItemGroup>

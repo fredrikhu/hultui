@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Themes\HultUI.Themes.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
     <ProjectReference Include="..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
