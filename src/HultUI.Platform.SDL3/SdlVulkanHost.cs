@@ -27,10 +27,17 @@ namespace HultUI.Platform.SDL3;
 /// to the GPU. The residual cost against the GL path is about 0.15 to 0.25 ms a frame, which
 /// shows only on operations small enough for it to matter — <c>select row</c> 0.43 against
 /// 0.59 ms, <c>clear</c> 0.27 against 0.41 — and is invisible on anything layout-bound
-/// (<c>create 10,000</c>: 316.6 against 319.8). That is consistent with the two things this
-/// backend does that GL does not: one extra command-buffer submit per frame, and a render
-/// target Skia makes it rebuild every frame because there is no way to tell Skia an image's
-/// layout. Both are the same binding limitation as the semaphore, and neither is a stall.</para>
+/// (<c>create 10,000</c>: 316.6 against 319.8). That is consistent with the things this
+/// backend does that GL does not: command-buffer submits of its own around Skia's, because
+/// there is no way to tell Skia an image's layout. The same binding limitation as the
+/// semaphore, and not a stall.</para>
+///
+/// <para><b>Layouts at both ends of a frame.</b> The present transition moves the image to
+/// PRESENT_SRC_KHR behind Skia's back, and when the renderer asks, a barrier moves the acquired
+/// image back to COLOR_ATTACHMENT_OPTIMAL (<see cref="TransitionAcquiredImage"/>), the layout Skia
+/// left it in. That is what lets the renderer keep one render target per image for the
+/// swapchain's life rather than wrap every frame (2,048 bytes, an image view and a framebuffer a
+/// frame): see <see cref="SetSwapchainReleasing"/>.</para>
 /// </summary>
 internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDisposable
 {
@@ -170,6 +177,15 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// frame. Kept rather than allocated and freed per frame: freeing a command buffer that
     /// may still be executing is undefined, and without the queue drain it often is.</summary>
     private VkCommandBuffer[] _presentCmd = [];
+
+    /// <summary>The acquire barrier's command buffer for each image (<see cref="RecordAcquireBarrier"/>),
+    /// kept for the same reason as <see cref="_presentCmd"/>.</summary>
+    private VkCommandBuffer[] _acquireCmd = [];
+
+    /// <summary>Called before the swapchain's images are destroyed; see
+    /// <see cref="SetSwapchainReleasing"/>.</summary>
+    private Action? _swapchainReleasing;
+
     private VkFormat _format = VkFormat.B8G8R8A8Unorm;
     private VkColorSpaceKHR _colorSpace = VkColorSpaceKHR.SrgbNonLinear;
     private VkPresentModeKHR _presentMode = VkPresentModeKHR.Fifo;
@@ -737,6 +753,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         int count = _images.Length;
         _renderFinished = new VkSemaphore[count];
         _presentCmd = new VkCommandBuffer[count];
+        _acquireCmd = new VkCommandBuffer[count];
 
         var semaphoreInfo = new VkSemaphoreCreateInfo();
         var allocate = new VkCommandBufferAllocateInfo
@@ -755,6 +772,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             VkCommandBuffer cmd;
             Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
             _presentCmd[i] = cmd;
+            Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
+            _acquireCmd[i] = cmd;
         }
     }
 
@@ -807,6 +826,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!cmd.IsNull) _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
         }
         _presentCmd = [];
+        for (int i = 0; i < _acquireCmd.Length; i++)
+        {
+            var cmd = _acquireCmd[i];
+            if (!cmd.IsNull) _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
+        }
+        _acquireCmd = [];
     }
 
     /// <summary>Everything per-image, retired or current, for a host being disposed after its
@@ -1004,7 +1029,70 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         _acquiredIndex = index;
         _haveAcquired = true;
+        _acquiredTransitioned = false;
         return Current();
+    }
+
+    /// <summary>Whether <see cref="TransitionAcquiredImage"/> has run for the image acquired now.</summary>
+    private bool _acquiredTransitioned;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>The present transition moved the image to PRESENT_SRC_KHR behind Skia's back, and a
+    /// render target kept over it believes COLOR_ATTACHMENT_OPTIMAL, where Skia left it. A target
+    /// kept without this once drew three frames and then black for ever (2026-09-25); on NVIDIA
+    /// 610 every frame now comes out right without it, and only the validation layer says what
+    /// is wrong (<c>VUID-vkCmdDraw-None-09600</c>) — undefined behaviour either way, which another
+    /// driver need not forgive.</para>
+    ///
+    /// <para>From UNDEFINED, which is true of an image never presented and of one that was, and
+    /// discards the contents — free, since every frame clears and overwrites the whole image. No
+    /// semaphore: the acquire's fence has been waited, so the presentation engine is done with the
+    /// image. A submit of its own, because SkiaSharp offers nothing to record into. Once per
+    /// acquire: asked again for the same image it does nothing.</para>
+    /// </remarks>
+    public bool TransitionAcquiredImage()
+    {
+        if (!_haveAcquired || _swapchain.IsNull) return false;
+        if (_acquiredTransitioned) return true;
+        _acquiredTransitioned = true;
+        RecordAcquireBarrier(_acquiredIndex);
+        return true;
+    }
+
+    private void RecordAcquireBarrier(uint imageIndex)
+    {
+        var cmd = _acquireCmd[imageIndex];
+        var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
+        Check(_vk.BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+
+        var barrier = new VkImageMemoryBarrier
+        {
+            sType = VkStructureType.ImageMemoryBarrier,
+            srcAccessMask = VkAccessFlags.None,
+            dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite,
+            oldLayout = VkImageLayout.Undefined,
+            newLayout = VkImageLayout.ColorAttachmentOptimal,
+            srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            image = _images[imageIndex],
+            subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
+        };
+        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
+            VkPipelineStageFlags.ColorAttachmentOutput, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
+
+        Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
+        var submit = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &cmd };
+        Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
+    }
+
+    /// <inheritdoc />
+    /// <remarks>This host does both: <see cref="TransitionAcquiredImage"/>, and the call at the top
+    /// of every rebuild and of <see cref="Dispose"/>.</remarks>
+    public bool SetSwapchainReleasing(Action? beforeImagesGo)
+    {
+        _swapchainReleasing = beforeImagesGo;
+        return true;
     }
 
     /// <summary>
@@ -1035,8 +1123,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private VulkanFrameTarget Current() => new(
         _images[_acquiredIndex].Handle,
         (uint)_format,
-        // Undefined every frame: the contents are about to be overwritten, and claiming the
-        // present layout would have Skia skip a transition it still needs to make.
+        // Undefined: the contents are about to be overwritten, and claiming the present layout
+        // would have Skia skip a transition it still needs to make. A renderer that keeps a
+        // render target over the image asks for TransitionAcquiredImage instead.
         Layout: 0,
         _widthPx, _heightPx, (int)_acquiredIndex, _usage, (uint)_colorSpace);
 
@@ -1173,6 +1262,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             return;
         }
 
+        // Every way the images go passes here (or through Dispose): the renderer's render
+        // targets over them go first.
+        _swapchainReleasing?.Invoke();
         Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);
@@ -1200,6 +1292,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public void Dispose()
     {
         if (_disposed) return;
+        // A renderer still holding targets over the images lets them go first. The window
+        // disposes its surface before this host, which unsubscribes, so this is a backstop.
+        _swapchainReleasing?.Invoke();
+        _swapchainReleasing = null;
         _disposed = true;
 
         // The pointer checks matter only after an Init that threw inside LoadDevice; everything

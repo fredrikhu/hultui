@@ -1241,7 +1241,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // A renderer-owned frame is re-wrapped every time, never cached. The wrapper holds
         // the image's layout, and Skia moves that layout as it draws — the same lesson the
         // swapchain render target taught, where caching one drew three good frames and then
-        // black for ever. A source-owned GL texture has no layout and caches fine.
+        // black for ever (it is kept now only because the host restores the layout Skia left
+        // it in). A source-owned GL texture has no layout and caches fine.
         bool haveWrapper = _wrappedTextures.TryGetValue(source, out var wrapped);
         if (frame.RendererOwned || !haveWrapper || wrapped.Frame != frame)
         {

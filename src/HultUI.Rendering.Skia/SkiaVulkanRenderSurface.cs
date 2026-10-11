@@ -16,8 +16,8 @@ namespace HultUI.Rendering.Skia;
 /// <para><b>How it differs from the GL surface.</b> A GL frame has no beginning: Skia draws
 /// into framebuffer 0 whenever it likes and the platform swaps buffers afterwards. A Vulkan
 /// frame has to acquire an image from the swapchain first, and that image is one of several
-/// that rotate. So each frame wraps the acquired image in a fresh render target and surface,
-/// dropped at the end of the frame.</para>
+/// that rotate. So each image gets a render target and surface of its own, kept for as long as
+/// the swapchain lives (see <see cref="_kept"/>).</para>
 ///
 /// <para>This assembly knows nothing about Vulkan beyond what SkiaSharp needs, which is
 /// handles and integers. <see cref="IVulkanSurfaceHost"/> is the whole of the contract.</para>
@@ -32,20 +32,73 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private readonly SkiaTextServices _text;
     private readonly bool _ownsText;
 
+    /// <summary>A render target and surface over one swapchain image, and the canvas Skia keeps
+    /// for the surface.</summary>
+    private sealed class WrappedImage : IDisposable
+    {
+        private GRBackendRenderTarget? _target;
+        public SKSurface Surface { get; private set; } = null!;
+        public SKCanvas Canvas { get; private set; } = null!;
+
+        public void Hold(GRBackendRenderTarget target, SKSurface surface)
+        {
+            _target = target;
+            Surface = surface;
+            Canvas = surface.Canvas;
+        }
+
+        /// <summary>Disposes what it holds; the holder itself can hold again.</summary>
+        public void Dispose()
+        {
+            Surface?.Dispose();
+            _target?.Dispose();
+            Surface = null!;
+            Canvas = null!;
+            _target = null;
+        }
+    }
+
     /// <summary>
-    /// This frame's wrapped image, thrown away at the end of it.
+    /// A render target per swapchain image, kept for as long as the swapchain lives.
     ///
-    /// <para>Caching one per swapchain image is the obvious optimisation and it is wrong.
-    /// Skia tracks a render target's image layout inside the target, and this class
-    /// transitions the image to PRESENT_SRC_KHR behind Skia's back on the way to the screen
-    /// — SkiaSharp exposes no <c>setVkImageLayout</c> to tell it so. The next time that
-    /// image came round Skia would transition it from a layout it no longer had, which makes
-    /// the contents undefined: with three images, the first three frames drew and every
-    /// frame after was black. Building the target fresh each frame, declaring UNDEFINED,
-    /// costs a validation and is always right.</para>
+    /// <para><b>Kept only because the host puts the layout back.</b> Skia tracks an image's
+    /// layout inside the render target, and the host moves the image to PRESENT_SRC_KHR behind
+    /// Skia's back on the way to the screen — SkiaSharp 3.119.2 can neither tell Skia so nor ask
+    /// it. Kept without anything more, the next time an image came round Skia drew into it from a
+    /// layout it no longer had: with three images, the first three frames drew and every frame
+    /// after was black (2026-09-25; NVIDIA 610 now draws them right, and only the validation layer
+    /// objects). So before any of Skia's work on a kept target's image is submitted, the host
+    /// moves the image back to COLOR_ATTACHMENT_OPTIMAL, the layout Skia left it in
+    /// (<see cref="IVulkanSurfaceHost.TransitionAcquiredImage"/>; when, see
+    /// <see cref="SwapchainTargetUses"/>); and it calls <see cref="DropSwapchainTargets"/> before it
+    /// destroys the images, so no target outlives its image
+    /// (<see cref="IVulkanSurfaceHost.SetSwapchainReleasing"/>).</para>
+    ///
+    /// <para><b>Why keep them.</b> Built every frame, the target and surface cost 2,048 bytes of
+    /// managed allocation a frame — all of an idle-animating window's, and of Aperture's quiet
+    /// frames — and Skia made and destroyed an image view and a framebuffer over the image every
+    /// frame. A host that cannot do both, and a frame drawn straight onto the swapchain after one
+    /// that drew a video, get a target for that frame only, declared in the layout the frame
+    /// says, as before (<see cref="_once"/>).</para>
     /// </summary>
-    private GRBackendRenderTarget? _target;
-    private SKSurface? _surface;
+    private readonly SwapchainTargets<WrappedImage> _kept = new();
+
+    /// <summary>Whether the host restores an image's layout when asked and says before it
+    /// destroys the images; see <see cref="_kept"/>.</summary>
+    private readonly bool _keepTargets;
+
+    /// <summary>This frame's wrapped image: one of <see cref="_kept"/>, or <see cref="_once"/>.</summary>
+    private WrappedImage? _frame;
+
+    /// <summary>A wrapped image made for one frame, where it cannot be kept; dropped when the
+    /// next frame begins.</summary>
+    private WrappedImage? _once;
+
+    /// <summary>What <see cref="_once"/> is when there is one: a frame that cannot keep its target
+    /// still makes a render target and surface, as every frame did before, but no holder.</summary>
+    private readonly WrappedImage _onceHolder = new();
+
+    private bool _disposed;
 
     /// <summary>
     /// Where the frame is drawn when the swapchain needs values past 1 — see
@@ -54,6 +107,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// multiplied once on the way to the swapchain.
     /// </summary>
     private SKSurface? _offscreen;
+    private SKCanvas? _offscreenCanvas;
     private SKPaint? _blit;
 
     /// <summary>
@@ -134,6 +188,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // SupportsExternalGL, which is the only thing that knows whether this host can
         // actually share an image with a GL context.
         _renderContext.SetGLSurface(this);
+
+        _keepTargets = host.SetSwapchainReleasing(DropSwapchainTargets);
     }
 
     // ──── Foreign GL inside the frame: phase 4 of docs/design/HDR.md ────
@@ -252,9 +308,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     ///
     /// <para>The layout declared here is the one the host's barrier left it in, and it is
     /// declared afresh every frame — the render context never caches a renderer-owned
-    /// wrapper, for the same reason this class never caches a render target: Skia tracks
-    /// layout inside the wrapper and moves it as it draws, so a reused one describes an image
-    /// that no longer exists in that state.</para>
+    /// wrapper: Skia tracks layout inside the wrapper and moves it as it draws, so a reused one
+    /// describes an image that no longer exists in that state. A swapchain image's render
+    /// target is kept only because the host puts the image back in the layout Skia left it in
+    /// (<see cref="_kept"/>); nothing does that for this image.</para>
     ///
     /// <para>The colour space is sRGB rather than the swapchain's. mpv writes ordinary
     /// sRGB-encoded values into the half-float target; saying so is what lets Skia convert
@@ -340,16 +397,31 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (_frameOpen) return true;
         if (_host.AcquireNextImage() is not { } frame) return false;
 
-        var surface = SurfaceFor(frame);
-        if (surface is null) return false;
+        var path = PathFor(frame);
+        // Before the target: a new offscreen may wait for the GPU and submit, which is harmless
+        // while nothing of this frame is recorded against the swapchain image yet.
+        bool throughOffscreen = OffscreenFor(frame, path) is not null;
+        var use = SwapchainTargetUses.Choose(_keepTargets, throughOffscreen, gpuSourceLastFrame: _lent.Count > 0);
+        var target = TargetFor(frame, path, use);
+        if (target is null) return false;
+
+        // Straight onto the swapchain, the image has to be in the kept target's layout before
+        // anything is drawn: Skia may submit its work on the image whenever it likes. Through the
+        // offscreen, it waits for the blit, after any GL work in the frame (SwapchainTargetUses).
+        if (use == SwapchainTargetUse.KeptTransitionNow) _host.TransitionAcquiredImage();
+        _transitionBeforeBlit = use == SwapchainTargetUse.KeptTransitionBeforeBlit;
 
         _frameColorSpace = frame.ColorSpace;
-        _renderContext.SetCanvas((OffscreenFor(frame) ?? surface).Canvas);
+        _renderContext.SetCanvas(throughOffscreen ? _offscreenCanvas! : target.Canvas);
         _frameOpen = true;
         _lentThisFrame.Clear();
         _lent.Clear();
         return true;
     }
+
+    /// <summary>The kept target is used through the offscreen this frame, and the host's barrier
+    /// is still to be submitted, just before the blit; see <see cref="SwapchainTargetUses"/>.</summary>
+    private bool _transitionBeforeBlit;
 
     /// <summary>
     /// Flushes Skia's work, submits it, and hands the image to the presentation engine.
@@ -363,13 +435,22 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (!_frameOpen) return;
 
         // The frame was drawn at 0..1; this is where it gets the display's SDR white level,
-        // once, as an image rather than as a property of every paint.
-        if (_offscreen is { } offscreen && _surface is { } swapchainSurface)
+        // once, as an image rather than as a property of every paint. Drawn as a surface rather
+        // than through Snapshot: the same draw of the same texture, without a managed SKImage
+        // made and disposed every frame.
+        if (_offscreen is { } offscreen && _frame is { } target)
         {
             offscreen.Flush();
-            using var image = offscreen.Snapshot();
-            swapchainSurface.Canvas.DrawImage(image, 0, 0, _blit);
+            // Nothing of Skia's on the swapchain image is recorded before the blit below, so
+            // nothing of it can have been submitted before this.
+            if (_transitionBeforeBlit) _host.TransitionAcquiredImage();
+            target.Canvas.DrawSurface(offscreen, 0, 0, _blit);
         }
+        else if (_transitionBeforeBlit)
+        {
+            _host.TransitionAcquiredImage();
+        }
+        _transitionBeforeBlit = false;
 
         _grContext.Flush();
         _grContext.Submit();
@@ -424,10 +505,34 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         }
     }
 
-    private SKSurface? SurfaceFor(in VulkanFrameTarget frame)
+    /// <summary>
+    /// The render target over this frame's image: the one kept for it if it was made for this
+    /// image, size and colour space, otherwise a new one, kept when the host allows
+    /// (<see cref="_kept"/>) and this frame's only when it does not.
+    /// </summary>
+    private WrappedImage? TargetFor(in VulkanFrameTarget frame, ScRgbFramePath path, SwapchainTargetUse use)
     {
-        ReleaseFrameSurface();
+        ReleaseOnce();
 
+        var key = new SwapchainTargetKey(frame.Image, frame.WidthPx, frame.HeightPx, frame.Format,
+            frame.Usage, frame.ColorSpace, path,
+            path == ScRgbFramePath.ScaledSpace ? _host.SdrWhiteScale : 0f);
+        bool keep = use != SwapchainTargetUse.ThisFrameOnly;
+        if (keep && _kept.TryGet(frame.Index, key, out var kept)) return _frame = kept;
+
+        // A kept target is declared in the layout Skia leaves it in, which is where the host's
+        // barrier puts the image before any of Skia's work on it runs; one for this frame only,
+        // in the layout the image has.
+        var made = keep ? new WrappedImage() : _onceHolder;
+        if (!Wrap(frame, path, keep ? VkImageLayoutColorAttachmentOptimal : frame.Layout, made))
+            return _frame = null;
+        if (keep) _kept.Put(frame.Index, key, made);
+        else _once = made;
+        return _frame = made;
+    }
+
+    private bool Wrap(in VulkanFrameTarget frame, ScRgbFramePath path, uint layout, WrappedImage into)
+    {
         var imageInfo = new GRVkImageInfo
         {
             Image = frame.Image,
@@ -435,10 +540,11 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             // allocation to describe — this is the documented shape for wrapping one.
             Alloc = new GRVkAlloc { Memory = 0, Offset = 0, Size = 0, Flags = 0 },
             ImageTiling = VkImageTilingOptimal,
-            // Undefined, always: the whole frame is about to be overwritten, so discarding
-            // is free, and it is the one layout that is true whatever happened to the image
-            // between presents.
-            ImageLayout = VkImageLayoutUndefined,
+            // For a target made for this frame only, what the host says the image is in:
+            // UNDEFINED, which is true whatever happened to the image between presents, and free,
+            // since the whole frame is overwritten. For a kept one, COLOR_ATTACHMENT_OPTIMAL (see
+            // TargetFor).
+            ImageLayout = layout,
             Format = frame.Format,
             ImageUsageFlags = frame.Usage,
             SampleCount = 1,
@@ -451,7 +557,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (!target.IsValid)
         {
             target.Dispose();
-            return null;
+            return false;
         }
 
         // The colour type has to match the swapchain's format or SKSurface.Create quietly
@@ -459,7 +565,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // is not that. Most Windows surfaces offer BGRA first.
         // With an encoded offscreen the swapchain is tagged the same as it, so the blit reaches
         // the swapchain unconverted and the shader's own decoding is the only one applied.
-        var space = PathFor(frame) switch
+        var space = path switch
         {
             ScRgbFramePath.EncodedOffscreen => SKColorSpace.CreateSrgb(),
             ScRgbFramePath.ScaledSpace => ScaledLinear(_host.SdrWhiteScale),
@@ -470,12 +576,27 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (surface is null)
         {
             target.Dispose();
-            return null;
+            return false;
         }
+        into.Hold(target, surface);
+        return true;
+    }
 
-        _target = target;
-        _surface = surface;
-        return surface;
+    /// <summary>
+    /// The host is about to destroy the swapchain's images — a rebuild for any reason, a
+    /// minimized window's swapchain, or its own disposal — and calls this first, so no render
+    /// target outlives its image. Everything Skia has in flight against them finishes first.
+    /// </summary>
+    private void DropSwapchainTargets()
+    {
+        if (_disposed || (_kept.Count == 0 && _once is null)) return;
+        _grContext.Flush();
+        _grContext.Submit(synchronous: true);
+        _kept.Clear();
+        ReleaseOnce();
+        _frame = null;
+        _transitionBeforeBlit = false;
+        _frameOpen = false;
     }
 
     /// <summary>
@@ -559,12 +680,11 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// directly. Needed only when white has to exceed 1, which is scRGB's case and not an
     /// ordinary sRGB swapchain's.
     /// </summary>
-    private SKSurface? OffscreenFor(in VulkanFrameTarget frame)
+    private SKSurface? OffscreenFor(in VulkanFrameTarget frame, ScRgbFramePath path)
     {
         // A 2.2 decode is needed even at a white scale of 1, and only the offscreen can do it.
         // The scaled destination colour space already applied the white scale as the frame was
         // drawn, so an offscreen as well would square it.
-        var path = PathFor(frame);
         if (path is not (ScRgbFramePath.Offscreen or ScRgbFramePath.EncodedOffscreen))
         {
             ReleaseOffscreen();
@@ -581,6 +701,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
                 SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
             _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
             if (_offscreen is null) return null;
+            _offscreenCanvas = _offscreen.Canvas;
 
             _offscreenWidth = frame.WidthPx;
             _offscreenHeight = frame.HeightPx;
@@ -650,6 +771,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             }
             offscreen.Dispose();
             _offscreen = null;
+            _offscreenCanvas = null;
             _purgeScratch = true;
         }
         _blit?.Dispose();
@@ -659,12 +781,13 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _offscreenEncoded = false;
     }
 
-    private void ReleaseFrameSurface()
+    /// <summary>Drops a target made for one frame only (<see cref="_once"/>).</summary>
+    private void ReleaseOnce()
     {
-        _surface?.Dispose();
-        _target?.Dispose();
-        _surface = null;
-        _target = null;
+        if (_once is null) return;
+        if (_frame == _once) _frame = null;
+        _once.Dispose();
+        _once = null;
     }
 
     /// <summary>
@@ -762,21 +885,28 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     private void DropWrappedSurfaces()
     {
-        if (_surface is null && _target is null) return;
+        if (_kept.Count == 0 && _once is null) return;
 
-        // Everything Skia has in flight against this image has to have finished before the
-        // swapchain that owns it is destroyed.
+        // Everything Skia has in flight against these images has to have finished before the
+        // swapchain that owns them is destroyed.
         _grContext.Flush();
         _grContext.Submit(synchronous: true);
 
-        ReleaseFrameSurface();
+        _kept.Clear();
+        ReleaseOnce();
+        _frame = null;
+        _transitionBeforeBlit = false;
         ReleaseOffscreen(gpuIdle: true);
         _frameOpen = false;
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
+        // The host may outlive this surface by a moment, and destroys its swapchain when it goes.
+        _host.SetSwapchainReleasing(null);
         DropWrappedSurfaces();
+        _disposed = true;
         ReleaseOffscreen();
         _frameScale?.Dispose();
         _frameScale = null;
@@ -793,7 +923,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private const uint VkSharingModeExclusive = 0;
     private const uint VkImageUsageTransferDst = 0x00000002;
     private const uint VkImageUsageColorAttachment = 0x00000010;
-    private const uint VkImageLayoutUndefined = 0;
+    private const uint VkImageLayoutColorAttachmentOptimal = 2;
     private const uint VkColorSpaceExtendedSrgbLinear = 1000104002;
     private const uint VkFormatR8G8B8A8Unorm = 37;
     private const uint VkFormatR8G8B8A8Srgb = 43;

@@ -272,6 +272,115 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// Every swapchain image is reused many times, and each capture shows the frame just drawn.
+    /// The renderer keeps one render target per swapchain image for the swapchain's life, which
+    /// is right only while the host hands every acquired image back in the layout Skia left it
+    /// in: kept without that, a three-image swapchain drew three frames and then black for ever.
+    /// The fortieth frame of each swapchain is captured, after resizes and a minimize, so every
+    /// image has been drawn into about a dozen times; a stale image would show an older number,
+    /// a target over the wrong image another frame's.
+    ///
+    /// <para><b>A wrong layout does not show here.</b> With the host's acquire barrier left out,
+    /// NVIDIA (610) drew every captured frame right, on both formats, while the validation layer
+    /// reported <c>VUID-vkCmdDraw-None-09600</c> (the image in UNDEFINED or PRESENT_SRC_KHR where
+    /// the render target expects COLOR_ATTACHMENT_OPTIMAL). So where the Khronos validation layer
+    /// is installed, the run loads it (core and synchronisation) and must leave its log empty;
+    /// the loader's line saying it forced the layer on is the proof it ran.</para>
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-offscreen")]
+    [InlineData("f16-scaled-space")]
+    [InlineData("8-bit")]
+    [InlineData("fifo")]
+    [InlineData("immediate")]
+    public void EveryCapture_OfAReusedImage_ShowsTheFrameJustDrawn(string variant)
+    {
+        string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-counter-{Guid.NewGuid():N}.ppm");
+        string validation = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-counter-{Guid.NewGuid():N}.log");
+        try
+        {
+            var environment = new Dictionary<string, string?>
+            {
+                ["HULTUI_VULKAN_CAPTURE"] = capture,
+                ["HULTUI_VULKAN_CAPTURE_FRAME"] = "40",
+                // Nothing happens here without the layer installed (the Vulkan SDK).
+                ["VK_LOADER_LAYERS_ENABLE"] = "*validation*",
+                ["VK_LAYER_VALIDATE_SYNC"] = "1",
+                ["VK_LAYER_LOG_FILENAME"] = validation,
+                ["VK_LOADER_DEBUG"] = "warn",
+                ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+                ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+                ["HULTUI_VULKAN_F16"] = null,
+                ["HULTUI_VULKAN_WHITE_SCALE"] = null,
+            };
+            // A white scale above 1 sends the half-float frame through the offscreen (or the
+            // scaled colour space) on any display.
+            switch (variant)
+            {
+                case "f16-offscreen": environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_WHITE_SCALE"] = "2"; break;
+                case "f16-scaled-space":
+                    environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_WHITE_SCALE"] = "2";
+                    environment["HULTUI_VULKAN_SCALED_SPACE"] = "1";
+                    break;
+                case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
+                case "fifo": environment["HULTUI_VULKAN_PRESENT"] = "fifo"; break;
+                case "immediate": environment["HULTUI_VULKAN_PRESENT"] = "immediate"; break;
+            }
+
+            var run = RunProbe(environment, "--frame-counter");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            Assert.Contains(" vulkan device=", run.Output);
+            var captures = System.Text.RegularExpressions.Regex.Matches(run.Output, @"probe: capture (right|WRONG)");
+            // One a swapchain: the first, two resizes, and the restore after a minimize.
+            int expected = OperatingSystem.IsWindows() ? 4 : 1;
+            Assert.True(captures.Count >= expected, $"{captures.Count} captures, expected {expected}:\n{run.Output}");
+            Assert.DoesNotContain("probe: capture WRONG", run.Output);
+
+            if (run.Output.Contains("\"VK_LAYER_KHRONOS_validation\" forced enabled"))
+            {
+                string reported = File.Exists(validation) ? File.ReadAllText(validation) : "";
+                Assert.True(reported.Length == 0, "the validation layer reported:\n" +
+                    (reported.Length > 4000 ? reported[..4000] : reported));
+            }
+        }
+        finally
+        {
+            File.Delete(capture);
+            File.Delete(validation);
+        }
+    }
+
+    /// <summary>
+    /// A steady Vulkan frame allocates nothing, as a GL one does. Wrapping the swapchain image in
+    /// a new render target and surface every frame cost 2,048 bytes a frame (1,819 on an 8-bit
+    /// swapchain): an SKSurface, its SKCanvas and their handle-table entries, and on the
+    /// half-float swapchain a snapshot SKImage of the offscreen.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-offscreen")]
+    [InlineData("8-bit")]
+    public void ASteadyFrame_AllocatesNothing(string variant)
+    {
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = variant == "8-bit" ? "0" : "1",
+            ["HULTUI_VULKAN_WHITE_SCALE"] = variant == "8-bit" ? null : "2",
+            ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+            ["HULTUI_A11Y"] = "0",
+        }, "--frame-bytes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains(" vulkan device=", run.Output);
+        var bytes = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: ([\d.]+) bytes a frame");
+        Assert.True(bytes.Success, run.Output);
+        double perFrame = double.Parse(bytes.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(perFrame < 100, $"a steady frame allocated {perFrame:0.0} bytes:\n{run.Output}");
+    }
+
+    /// <summary>
     /// Disposed images leave no textures behind. A GPU context keeps the texture it uploaded for
     /// an image after the image is gone, as a spare for a later texture of exactly that size,
     /// until its 256 MB budget pushes it out: eight 3840×2400 photos drawn and disposed held

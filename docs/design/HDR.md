@@ -66,6 +66,13 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   swapchain takes 150–220 ms to create (9 ms at start-up, 23 on a resize; 8-bit 1, scRGB FIFO 24).
 - **Synchronisation:** a semaphore per image orders the present after the frame. The acquire waits
   on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
+- **Layouts:** the present transition moves the image to `PRESENT_SRC_KHR` behind Skia's back.
+  When the renderer keeps a render target over the image, it asks the host to move the image back
+  to `COLOR_ATTACHMENT_OPTIMAL`, the layout Skia left it in, in a small submit of its own, from
+  `UNDEFINED`, discarding what every frame overwrites anyway (`TransitionAcquiredImage`).
+- **Before the images go** — any rebuild, a minimized window's swapchain, the host's disposal —
+  the host calls the renderer, which drops its render targets over them first
+  (`IVulkanSurfaceHost.SetSwapchainReleasing`).
 - **Per window:** each host has its own instance, device and command table. Device-level function
   pointers are never shared between windows.
 
@@ -73,8 +80,29 @@ The choices themselves are `VulkanSwapchainChoice`, unit-tested without a GPU.
 
 ### Drawing the UI (`SkiaVulkanRenderSurface`)
 
-The render target over a swapchain image is **built fresh every frame**: Skia tracks the image's
-layout inside it, and the host moves the layout behind Skia's back.
+**One render target per swapchain image, kept for the swapchain's life** (2026-10-11). Skia
+tracks the image's layout inside it and the host moves the layout behind Skia's back, so the host
+moves it back (above) before any of Skia's work on the image is submitted. Built every frame, the
+target cost 2,048 bytes of managed allocation, an image view and a framebuffer a frame, all of an
+idle-animating window's allocation; kept, a steady frame allocates nothing. A target is made again
+when the image, its size, format or colour space changes, which is how the scaled colour space
+follows the white scale. **When the barrier is submitted matters**, and `SwapchainTargetUses`
+decides it:
+
+| Frame | Target | Host barrier |
+|---|---|---|
+| through the offscreen | kept | just before the blit, after any GL draw in the frame |
+| straight onto the swapchain | kept | at once, before anything is drawn |
+| straight onto the swapchain, after a frame that drew a GPU source | this frame's only, declared `UNDEFINED` | none |
+
+A submit of the host's on the Vulkan queue just before mpv's GL draw of a video frame made that
+draw slower on NVIDIA (610): Reel at 1080p24, Render averaged 1.25–1.47 ms a frame against
+0.97–1.14 without the submit, on both formats. After the GL draw it costs nothing, but that is
+safe only where nothing of Skia's on the swapchain image can be submitted earlier: the offscreen
+path. Drawing straight onto the swapchain, Skia may submit its work on the image at any point, so
+the barrier goes first, and a frame with a video wraps its own target instead, as every frame did
+before. So a video on an 8-bit swapchain still allocates the 2 KB a frame; on an scRGB one with a
+white scale above 1 (Windows HDR, where Reel and Aperture play HDR video) it does not.
 
 On scRGB, 1.0 is 80 nits, and the UI's white has to land at the display's SDR white instead: the
 **white scale**, SDR white over 80 (3.0 for 240 nits). **Skia cannot put a glyph past 1.0**, with
@@ -201,8 +229,11 @@ once the size arrives.
 
 The rules the design depends on. Each one was broken once, and most failed silently.
 
-- **Never cache** a render target over a swapchain image, or a wrapped renderer-owned image. Skia
-  tracks the layout inside them.
+- **A render target kept over a swapchain image needs the image back in the layout Skia left it
+  in** before any of Skia's work on it is submitted, and has to go before its image does: the
+  host's `TransitionAcquiredImage` and its call before the images go, both promised through
+  `SetSwapchainReleasing`. Without them, wrap the image every frame. **Never cache** a wrapped
+  renderer-owned image (the shared video image): nothing restores its layout.
 - **Swapchain images need `TRANSFER_SRC`.** Without it Skia returns a null surface and says
   nothing.
 - **scRGB only with `VK_EXT_swapchain_colorspace` enabled.** Drivers list the colour space either
@@ -359,14 +390,24 @@ A check that reports the same thing whether the code works or not reads as evide
 
 Anything holding a handle to something Skia or a driver also tracks goes stale, silently.
 
-- **Never cache a render target over a swapchain image.** Three images meant three good frames and
-  then black for ever. **Never cache a renderer-owned `SKImage`** either.
+- **A render target kept over a swapchain image goes stale unless its layout is put back.** Kept
+  with nothing more, three images meant three good frames and then black for ever. It is kept now
+  only because the host's barrier hands the image back in `COLOR_ATTACHMENT_OPTIMAL` first
+  (2026-10-11), proven by captures of images reused a dozen times each, across resizes, a
+  minimize, both formats and all three present modes, each showing the frame just drawn, with
+  the validation layer loaded and silent (`VulkanProbeTests`). **The captures alone could not have
+  failed**: with the barrier left out, NVIDIA 610 drew every captured frame right, and only the
+  layer said what was wrong (`VUID-vkCmdDraw-None-09600`, an image in `UNDEFINED` or
+  `PRESENT_SRC_KHR` where the target expects `COLOR_ATTACHMENT_OPTIMAL`). **Never cache a
+  renderer-owned `SKImage`**: nothing restores its layout.
 - **Do not read the shared image through Vulkan.** Guessing its layout returned 0.000 from an image
   with a picture in it. Read it through GL, as `HULTUI_VIDEO_HDR_PROBE` does.
 - **Layouts Skia owns are assumed, not known.** The present barrier assumes
-  `COLOR_ATTACHMENT_OPTIMAL`, and the hand-back barrier assumes `SHADER_READ_ONLY_OPTIMAL`, because
-  SkiaSharp cannot report or be told a layout. That holds for today's drawing (linear sampling, no
-  mipmaps). A Skia update that draws differently would break it with no error.
+  `COLOR_ATTACHMENT_OPTIMAL`, the host's other barrier restores it for a render target that
+  believes it, and the hand-back barrier assumes `SHADER_READ_ONLY_OPTIMAL`, because SkiaSharp cannot
+  report or be told a layout. That holds for today's drawing (linear sampling, no mipmaps, no
+  read of the swapchain image). A Skia update that draws differently would break it with no
+  error; the validation layer names a wrong layout at once.
 - **Handle ownership is asymmetric.** GL does not take ownership of a Win32 handle;
   `glImportMemoryFdEXT` consumes the fd. Backwards leaks on one platform and double-frees on the
   other.

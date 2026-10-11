@@ -47,6 +47,15 @@ using HultUI.WebView.WebView2;
 // disposes them, then draws a few more frames: with HULTUI_STARTUP=1 the purge after them says
 // how much Skia still holds.
 //
+// --frame-counter draws each frame's own number, as sixteen black or white cells, over a red,
+// green or blue background by the number mod 3. HULTUI_VULKAN_CAPTURE's file is looked for after
+// every frame, decoded and deleted: it must show the frame just drawn. Each swapchain captures
+// once, so the window is resized twice and minimized and restored to make new ones (Windows).
+// Prints one "probe: capture" line a capture.
+//
+// --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
+// least of five rounds of 120 frames.
+//
 // No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
@@ -58,6 +67,8 @@ internal static class Program
         Foreground.Keep();
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
         if (args.Contains("--disposed-images")) return DisposedImages(renderer);
+        if (args.Contains("--frame-counter")) return FrameCounter(renderer);
+        if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--minimized-video"))
             return MinimizedVideo(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
@@ -389,6 +400,143 @@ internal static class Program
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
         Console.WriteLine("probe: done");
         return 0;
+    }
+
+    /// <summary>
+    /// Captures of reused swapchain images, each checked against the frame just drawn. The
+    /// renderer keeps a render target per swapchain image, which is right only while the host
+    /// hands every image back in the layout Skia left it in: kept without that, three images drew
+    /// three frames and every frame after was black. A stale image shows an older number, and a
+    /// target over the wrong image another frame's.
+    /// </summary>
+    private static int FrameCounter(RendererKind renderer)
+    {
+        string? capture = Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE");
+        if (capture is null) { Console.WriteLine("probe: HULTUI_VULKAN_CAPTURE is not set"); return 2; }
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 300, renderer: renderer));
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        int drawn = 0;
+
+        void Look()
+        {
+            if (!File.Exists(capture)) return;
+            var (width, height, pixels) = ReadPpm(capture);
+            File.Delete(capture);
+            int shown = 0;
+            var bits = new System.Text.StringBuilder(16);
+            for (int bit = 0; bit < 16; bit++)
+            {
+                int i = (10 * width + bit * (width / 16) + width / 32) * 3;
+                bool white = pixels[i] > 200 && pixels[i + 1] > 200 && pixels[i + 2] > 200;
+                bool black = pixels[i] < 40 && pixels[i + 1] < 40 && pixels[i + 2] < 40;
+                bits.Append(white ? '1' : black ? '0' : '?');
+                if (white) shown |= 1 << bit;
+            }
+            int b = ((height * 3 / 4) * width + width / 2) * 3;
+            var background = (pixels[b], pixels[b + 1], pixels[b + 2]);
+            int colour = background is ( > 200, < 60, < 60) ? 0 : background is ( < 60, > 200, < 60) ? 1
+                : background is ( < 60, < 60, > 200) ? 2 : -1;
+            bool right = !bits.ToString().Contains('?') && shown == (drawn & 0xFFFF) && colour == drawn % 3;
+            Console.WriteLine($"probe: capture {(right ? "right" : "WRONG")}: drew {drawn}, showed {shown} " +
+                $"(cells {bits}, background {background}) at {width}x{height}");
+        }
+
+        void Draw(int frames)
+        {
+            for (int f = 0; f < frames; f++)
+            {
+                drawn++;
+                var cells = new HultUI.Core.Elements.Element[16];
+                for (int bit = 0; bit < 16; bit++)
+                    cells[bit] = Box.New().FlexGrow(1).FlexBasis(0).Height(24f)
+                        .Background(((drawn >> bit) & 1) != 0 ? Color.White : Color.Black);
+                var background = (drawn % 3) switch
+                {
+                    0 => Color.FromHex("#FF0000"),
+                    1 => Color.FromHex("#00FF00"),
+                    _ => Color.FromHex("#0000FF"),
+                };
+                app.SetRoot(Flex.Column().FlexGrow(1).Background(background)
+                    .Children(Flex.Row().Height(24f).Children(cells)));
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+                Look();
+            }
+        }
+
+        // HULTUI_VULKAN_CAPTURE_FRAME counts from each swapchain's build, frames drawn inside a
+        // resize included; 60 frames after each change is past any sensible setting.
+        int perSwapchain = int.Parse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE_FRAME") ?? "4") + 20;
+        Draw(perSwapchain);
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var (width, height) in new[] { (560, 340), (420, 280) })
+            {
+                SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
+                Look();
+                Draw(perSwapchain);
+            }
+            ShowWindow(hwnd, ShowMinNoActive);
+            for (int i = 0; i < 3; i++)
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+            ShowWindow(hwnd, ShowNoActivate);
+            Draw(perSwapchain);
+        }
+        Console.WriteLine($"probe: done after {drawn} frames");
+        return 0;
+    }
+
+    /// <summary>
+    /// What a steady frame allocates: one box repainted, nothing else changing. The display's
+    /// colour comes by events, as in Reel and Aperture, so its poll (about 1.1 KB every 100 ms)
+    /// is not counted. Least of five rounds: a round can catch a one-off, such as a buffer
+    /// reaching its high-water mark.
+    /// </summary>
+    private static int FrameBytes(RendererKind renderer)
+    {
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 300, renderer: renderer,
+            displayColorEvents: true));
+        var changing = Box.New().Width(40f).Height(20f).Background(Color.FromHex("#FF8800"));
+        app.SetRoot(Flex.Column().FlexGrow(1).Padding(16f).Gap(8f).Background(Color.FromHex("#141418")).Children(
+            Text.New("Steady frames").TextColor(Color.White).FontSize(20f),
+            changing,
+            Box.New().Width(200f).Height(80f).CornerRadius(8f).Background(Color.FromHex("#2B2F3A"))
+                .BoxShadow(0f, 6f, 18f, new Color(0, 0, 0, 120))));
+
+        void Frame()
+        {
+            changing.MarkPaintDirty();
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+        }
+
+        for (int i = 0; i < 120; i++) Frame();
+        double least = double.MaxValue;
+        for (int round = 0; round < 5; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 120; i++) Frame();
+            least = Math.Min(least, (GC.GetAllocatedBytesForCurrentThread() - before) / 120.0);
+        }
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: {least:0.0} bytes a frame"));
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private static (int Width, int Height, byte[] Pixels) ReadPpm(string path)
+    {
+        byte[] file = File.ReadAllBytes(path);
+        int at = 0;
+        string Token()
+        {
+            while (char.IsWhiteSpace((char)file[at])) at++;
+            int from = at;
+            while (!char.IsWhiteSpace((char)file[at])) at++;
+            return System.Text.Encoding.ASCII.GetString(file, from, at - from);
+        }
+        Token();
+        int width = int.Parse(Token()), height = int.Parse(Token());
+        Token();
+        return (width, height, file[(at + 1)..]);
     }
 
     /// <summary>The SDL platform, counting the loop's passes.</summary>
