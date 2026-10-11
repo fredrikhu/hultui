@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–3 landed, step 4 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–4 landed, step 4b in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; 13 questions wait in Needs the user (14
   and 15 answered). Steps marked **(user)** wait for an answer; the others go ahead, skipping
   only their (user) parts. To resume after a pause, run in this worktree:
@@ -72,7 +72,7 @@ Round 2 regressions first, then value per cost.
    Junction's diff, Vesper's diff, viewer and thumbnail lists (from **a11y-item-label-fallback**:
    readers hear `DiffRow { Type = Unified, … }` or "0", "1"; −700 KB per keystroke). The framework
    fallback stays `ToString()` (a guideline item). Suite row **apps-scenario-type-beside-diff**.
-4. **VideoPlayer rebuilds** (6/3/1): **reactivity-videoplayer-position-in-place** (an Effect writes
+4. ~~**VideoPlayer rebuilds**~~ LANDED 0efc402, aad602a, 91893ba, 7016de4, 1e3edff (6/3/1): **reactivity-videoplayer-position-in-place** (an Effect writes
    the elapsed label and slider; 41.2 KB per position tick, 10/s → 248 B, −99 %),
    **media-videoplayer-fade-rebuild** (bar fade writes the live element's opacity; Reel 12 s: 166
    rebuilds = 74 % of UI-thread bytes; fade frames 41 → ~3 KB), opt CanvasElement, SliderElement,
@@ -80,6 +80,15 @@ Round 2 regressions first, then value per cost.
    and Aperture's chapter panels read `Position` untracked (ReelApp.Chapters.cs:126,
    ApertureApp.Chapters.cs:149: whole-app rebuild 10×/s while open). Expert 3 reviews. Suite row
    **apps-scenario-video-bar-fade**.
+4b. **apps-playback-pump-out-of-build** (6/8, app correctness; found in step 4) — Aperture's
+   `PumpPlayback` (ApertureApp.Player.cs:~255-292: resume seek, track preference, Ended → stop
+   report and up next, the 10 s progress heartbeat) and Reel's pump (ReelApp.cs:~240-265: tracks,
+   chapter marks, the 15 s resume save, Ended → next file) run inside the app's Build, whose
+   comment says it runs every frame because the transport bar reads Position. It does not:
+   VideoPlayer is its own component, so during quiet playback the app rebuilds rarely (Reel 4
+   builds in 13 s after step 4). Find since when (before plan 17, or a plan 17 change), make the
+   time-based work run on a timer or an effect, and pin every pump duty with tests over a long
+   virtual playback (heartbeat every 10 s, save every 15 s, Ended handled, resume seek applied).
 5. **text-prefix-table-scratch** (5) — BuildPrefixWidths reuses one kept segment list and font-run
    list: long-document open −60 % (3,418 → 1,377 KB/op), wrap resize −11 %, wrapped typing −10 %,
    20,000-line wrapped log 207.7 → 75.2 MB. Also the span-based prefix measure that
@@ -159,6 +168,8 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **componenthost-patch-keeps-layout** (1, lead from step 4) — ComponentHost is not opted into
+  PatchMarksOwnLayout, so every parent rebuild marks a persistent child component's host for layout.
 - **junction-review-rows-shape** (8, app, from step 3) — Junction's review mode still remakes every
   diff row each build (the woven list is new each build); give it its own shape key. Vesper's diff
   and viewer lists are still one-argument templates (with adopt-item-rows, step 14).
@@ -297,6 +308,11 @@ Re-ranked by the round 4 survey.
 | 3 | 83050a6 | junction-diff-item-labels | App, a11y correctness: diff rows named for readers ("added, line 12: …", hunk headers, split pairs, threads) instead of a `DiffRow { … }` dump, made on first ask and kept with the rows. Changes typing, a11y on: a11y 744.4 → 31.5 KB per keystroke (−96 %), total 978.7 → 265.4 KB, a11y share 27 → 4–5 %. Step net with a reader: 1,962.8 → 265.4 KB (−86 %), frame −31 %. |
 | 3 | df6441c | vesper-item-labels | App, a11y correctness: Vesper's comparison (removed/added/changed/"12 unchanged lines"), viewer ("line N: text") and thumbnail rows (the row's file names) named for readers, cached. One a11y tree of a 400-line comparison 1,093.5 → 40.5 KB (−96 %, headless JIT). ItemLabelTests (5 mutations caught). |
 | 3 | 6902403 | apps-scenario-type-beside-diff | Suite rows `input/type beside a 150-line diff, rows {made in Build, kept}` and `a11y/…, bridge on`: made in Build 381 KB/op, 37 rows per key (JIT 0.635 ms) vs kept 19 KB/op (0.519 ms); bridge on 579–653 vs 33–34 KB/op labelled. 108 scenarios; `--verify` passes; full compare 0 slower/faster JIT and AOT. |
+| 3 | 0efc402 | apps-scenario-video-bar-fade | Suite rows `media/video player playing, position 10/s, real loop` and `media/video player bar fade, real loop` (FakeMediaBackend, `RunLoop`, internal `VideoPlayer.Builds`): baseline 1.0 build per report at 409 KB/op, 31 builds per fade at 1,235 KB/op (AOT 395 / 1,191). They run last: placed before `a11y/`, three a11y rows read 20–25 % slower on JIT only (JIT state, README note). |
+| 3 | aad602a | reactivity-videoplayer-position-in-place | An OnMount Effect writes the elapsed label and scrubber value through Refs; Build reads Position untracked. Per report 41,095 → 420 B, 1 → 0 builds; suite row 408.8 → 12.4 KB/op (−97 %), min −14 %. RangeValue (≤ 250 ms) and seek announcements, drag and hover preview unchanged. REACTIVITY.md "A value that changes ten times a second", MEDIA.md: read Position untracked in Build. |
+| 3 | 91893ba | media-videoplayer-fade-rebuild | The fade level is a plain field; the tween writes it and the live bar's Opacity through a Ref (hidden 0, paused 1, else the level). `_controlsVisible` flips at the same moments. Per fade frame 40,872 → 927 B; suite fade row 31 → 2 builds, 1,238 → 88 KB/op (−93 %). Reel AOT, Vulkan, 10 s 1080p24 with pointer sweep and seeks, step net: VideoPlayer rebuilds 287–291 → 5, UI-thread 12.1 → 1.42 MB a11y off (−88 %), 12.4 → 1.55 MB on (−87 %), quiet frame 13.7 → 2.9 KB, mpv drops 0 → 0. |
+| 3 | 7016de4 | media-patch-keeps-layout | Canvas, Slider (marks layout when ThumbRadius changes), VideoElement and the player root opt into PatchMarksOwnLayout: a player rebuild that moves nothing costs layout 6 → 0 µs per scrubber-hover move and no empty a11y rebuild 100 ms later. DECISIONS.md updated. Perf compare flat. |
+| 3 | 1e3edff | apps-chapters-computed | App: Reel's and Aperture's chapter panels read the playhead through a `Computed<int>` chapter index; the app rebuilds only when a mark is crossed. Panel open, per report: Reel 66,591 → 591 B, Aperture 179,530 → 1,752 B, 1 → 0 builds. REACTIVITY.md shows the pattern. |
 
 ## Examined, not worth it
 
@@ -517,3 +533,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   never derive list rows in Build (memoize by input identity, item rows + shape key, mutation-test
   every shape input); label every record/index list (ToString() dumps cost 744 KB per keystroke);
   removing allocations can move a gen-0 GC into a frame — compare frames without a GC.
+- 2026-10-11: step 4 landed (0efc402..1e3edff): Reel playback session −87…−88 % UI-thread bytes,
+  VideoPlayer rebuilds 290 → 5 per 10 s. Found: Aperture's and Reel's periodic playback duties
+  (heartbeat, resume save) run in the app Build, which rarely runs during quiet playback; queued
+  as step 4b (correctness) ahead of step 5. Guideline notes: read fast signals untracked in Build
+  and write live elements from an OnMount Effect; read coarse facts through a Computed; keep an
+  animation level in a plain field; new suite rows can shift other rows' JIT timings.
