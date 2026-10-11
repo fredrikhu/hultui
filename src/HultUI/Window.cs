@@ -1030,7 +1030,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(_root, theme);
-                ClearFlags(_root, DirtyFlags.Style);
+                ClearFlags(_root, DirtyFlags.Style | DirtyFlags.StyleSubtree);
                 ReapplyHoverCursor();
             }
         }

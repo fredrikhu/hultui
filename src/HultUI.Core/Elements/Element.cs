@@ -1031,12 +1031,34 @@ public abstract class Element
         }
     }
 
+    // Once per subtree until the style pass. A rebuild patches top-down and every patch marks
+    // style, so each level walked everything below it again: O(n × depth) a rebuild, 383,482
+    // calls here for one key in Junction's 2,300-file search, now 60,731 (one per mark, and one
+    // per element). StyleSubtree says the walk has been here and nothing unmarked has joined
+    // since (see NoteChildJoined).
     private void MarkStyleDirtyDown()
     {
-        DirtyFlags |= DirtyFlags.Style;
+        if ((DirtyFlags & DirtyFlags.StyleSubtree) != 0) return;
+        DirtyFlags |= DirtyFlags.Style | DirtyFlags.StyleSubtree;
         if (_children is null) return;
         foreach (var child in _children)
-            child.MarkStyleDirtyDown();
+            if ((child.DirtyFlags & DirtyFlags.StyleSubtree) == 0)
+                child.MarkStyleDirtyDown();
+    }
+
+    /// <summary>
+    /// <paramref name="child"/> has just been added here, and mounted if it was new. A new child
+    /// comes out of mounting marked for style; one that was moved here keeps what it had, as it
+    /// always has. If it has unmarked elements, this element no longer has a marked subtree, and
+    /// neither has any ancestor that said so — they form one chain up from here.
+    /// </summary>
+    private void NoteChildJoined(Element child)
+    {
+        if ((DirtyFlags & DirtyFlags.StyleSubtree) == 0
+            || (child.DirtyFlags & DirtyFlags.StyleSubtree) != 0)
+            return;
+        for (var e = this; e is not null && (e.DirtyFlags & DirtyFlags.StyleSubtree) != 0; e = e.Parent)
+            e.DirtyFlags &= ~DirtyFlags.StyleSubtree;
     }
 
     // ──── Lifecycle ────
@@ -1123,6 +1145,7 @@ public abstract class Element
 
         if (!child._mounted)
             child.Mount();
+        NoteChildJoined(child);
     }
 
     public void InsertChild(int index, Element child)
@@ -1139,6 +1162,7 @@ public abstract class Element
 
         if (!child._mounted)
             child.Mount();
+        NoteChildJoined(child);
     }
 
     public void RemoveChild(Element child)
@@ -1201,6 +1225,7 @@ public abstract class Element
 
             if (!child._mounted)
                 child.Mount();
+            NoteChildJoined(child);
         }
         // After the adds: mounting a child can run a component's code, which may ask for the order.
         list.ZOrder = null;
