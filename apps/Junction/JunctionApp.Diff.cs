@@ -38,8 +38,8 @@ public partial class JunctionApp
 
     // Find in the diff. Two lanes in split mode, one in unified — see BindDiffSearch.
     private readonly FindBar _diffFind;
-    // What the diff search was last bound to: Build reflattens the rows every repaint, and
-    // rebinding unguarded would rescan the whole file every frame.
+    // What the diff search was last bound to: Build runs on every repaint, and rebinding
+    // unguarded would rescan the whole file every frame.
     private object? _diffFindKey;
 
     private Element BuildDiffPane(string path, GitFileDiff? diff, DiffInteract? interact = null)
@@ -476,9 +476,14 @@ public partial class JunctionApp
         // Reviewing is unified only: GitLab's positions are one column of lines, and the
         // cards need a row to follow.
         var review = ReviewRowsActive ? _review : null;
-        var rows = _diffSplit && review is null ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
-        if (review is not null) rows = WithReviewRows(diff, rows, review);
-        for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
+        var rows = FlattenedRows(diff, _diffSplit && review is null, hl);
+        if (review is not null)
+        {
+            // The review weaves its cards in and gives each line its position, into a list of
+            // its own: the flattened rows are kept as they are for the next build.
+            rows = WithReviewRows(diff, new List<DiffRow>(rows), review);
+            for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
+        }
         BindDiffSelection(diff, rows);
         BindDiffSearch(diff, rows);
 
@@ -514,19 +519,41 @@ public partial class JunctionApp
             _diffHeightShape = shape;
         }
 
+        // Key by file so each file gets its own scroll position instead of one shared
+        // offset — switching files reconciles to a fresh list that starts at the top.
+        var listKey = "diff:" + diff.Path;
+
+        // The list keeps a realized row while its item is the same row (the flattened rows are
+        // the same objects from build to build until what they were flattened from changes), so
+        // a keystroke elsewhere in the window makes no row again. Everything else a row shows is
+        // gathered here, and when any of it moves the rows on screen are made again: the staging
+        // marks, find's tints, wrapping, the sideways offset baked into the code cells, the code
+        // face, size and tab width, the colour scheme. The review's rows read its caret, range,
+        // composer and threads, so while reviewing they are made again on every build, as all
+        // rows were before.
+        var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
+            Nocturne.Theme, DiffFindShape());
+        // `|`, not `||`: the staging snapshot is brought up to date either way.
+        if (DiffStageSelectionChanged() | rowShape != _diffRowShape || review is not null)
+        {
+            // Only the list this build patches: another file's list is replaced, rows and all.
+            if (_diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } mounted && k == listKey)
+                mounted.InvalidateRows();
+            _diffRowShape = rowShape;
+        }
+
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
             .Items(rows)
-            .RenderWith(r => RenderDiffRow(r, interact))
+            // No list selection: `selected` is always false, and a row is its item alone.
+            .RenderWith((r, _) => RenderDiffRow(r, interact))
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Unwrapped every row is the same height and the list does its own arithmetic; only
         // wrapping, and the review's cards, need the measured index.
         if (perRow)
             list.RowHeights((_, i) => i < _diffHeights.Length ? _diffHeights[i] : DiffRowHeight);
-        // Key by file so each file gets its own scroll position instead of one shared
-        // offset — switching files reconciles to a fresh list that starts at the top.
-        list.Key = "diff:" + diff.Path;
+        list.Key = listKey;
         // Focusable so clicking the diff lets arrow / page / home / end scroll it.
         // KeyboardScroll handles those (and leaves chorded keys to the app, so
         // Ctrl+↑/↓ commit stepping still works while the diff has focus). Not while
@@ -696,16 +723,88 @@ public partial class JunctionApp
     }
 
 
+    // ── The flattened rows, kept between builds ──────────────────────────
+    //
+    // Flattening a diff makes a record per line, a word diff per changed pair and the merged
+    // spans of both: about 600 KB for a 180-line file. Every build used to do it again — every
+    // keystroke in the commit summary beside the diff, every toast and spinner frame — and the
+    // list then made every row on screen again from the new records. The rows depend on the
+    // diff, the layout, the colours of its syntax and the scheme's word-diff tint, and on
+    // nothing else; they are flattened again when one of those is a different object.
+
+    /// <summary>The rows last flattened and what they were flattened from.</summary>
+    private sealed record DiffRowsMemo(GitFileDiff Diff, bool Split, FileHighlight? Highlight, object Theme,
+        List<DiffRow> Rows);
+
+    private DiffRowsMemo? _diffRows;
+
+    /// <summary>Flattenings of a diff into rows so far, for tests.</summary>
+    internal int DiffFlattens { get; private set; }
+
+    /// <summary>Diff rows the list's template has made so far, for tests.</summary>
+    internal int DiffRowsMade { get; private set; }
+
+    /// <summary>
+    /// The diff's rows in the given layout, each knowing its position. The same list, holding
+    /// the same rows, as the last build's when the diff, the layout, the highlight and the
+    /// scheme are the same objects. Callers must not change it; the review weaves its cards
+    /// into a copy.
+    /// </summary>
+    private List<DiffRow> FlattenedRows(GitFileDiff diff, bool split, FileHighlight? hl)
+    {
+        var theme = Nocturne.Theme;   // the word diff's tint is baked into the spans
+        if (_diffRows is { } m && ReferenceEquals(m.Diff, diff) && m.Split == split
+            && ReferenceEquals(m.Highlight, hl) && ReferenceEquals(m.Theme, theme))
+            return m.Rows;
+        var rows = split ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
+        DiffFlattens++;
+        _diffRows = new DiffRowsMemo(diff, split, hl, theme, rows);
+        return rows;
+    }
+
+    /// <summary>
+    /// What a diff row shows besides its item — the one thing its list compares. The rows are
+    /// compared by identity (the flattened list is new when anything they were made from is);
+    /// the rest are the settings and state the row builders read.
+    /// </summary>
+    private readonly record struct DiffRowShape(
+        List<DiffRow> Rows, DiffInteract? Interact, bool Wrap, float PanOffset, string CodeFont, float CodeSize,
+        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find);
+
+    private DiffRowShape _diffRowShape;
+
+    /// <summary>What find tints: the query and its options, the current match and how many
+    /// there are (the matches themselves only move with a new query, option or binding, and a
+    /// new binding comes with new rows).</summary>
+    private (string, bool, bool, int, int) DiffFindShape()
+    {
+        var s = _diffFind.Search;
+        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
+    }
+
+    // The staged-line picks as the rows on screen last drew them.
+    private readonly HashSet<GitDiffLine> _diffRowStageSel = new();
+
+    /// <summary>Whether the lines picked for staging changed since the rows on screen were
+    /// made: a picked line draws its checkbox ticked and its row tinted.</summary>
+    private bool DiffStageSelectionChanged()
+    {
+        if (_diffRowStageSel.SetEquals(_stageSel)) return false;
+        _diffRowStageSel.Clear();
+        _diffRowStageSel.UnionWith(_stageSel);
+        return true;
+    }
+
     private static List<DiffRow> FlattenUnified(GitFileDiff diff, FileHighlight? hl)
     {
         var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
         {
-            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header, HunkRef = hunk });
+            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Index = rows.Count, Hunk = hunk.Header, HunkRef = hunk });
             var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
             var intra = IntralineByLine(lines);
             foreach (var line in lines)
-                rows.Add(new DiffRow { Type = DiffRowType.Unified, Line = line, Spans = DiffSpans(hl, line, intra) });
+                rows.Add(new DiffRow { Type = DiffRowType.Unified, Index = rows.Count, Line = line, Spans = DiffSpans(hl, line, intra) });
         }
         return rows;
     }
@@ -715,13 +814,13 @@ public partial class JunctionApp
         var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
         {
-            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header, HunkRef = hunk });
+            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Index = rows.Count, Hunk = hunk.Header, HunkRef = hunk });
             var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
             var intra = IntralineByLine(lines);
             foreach (var (left, right) in SplitPairs(lines))
                 rows.Add(new DiffRow
                 {
-                    Type = DiffRowType.Split, Left = left, Right = right,
+                    Type = DiffRowType.Split, Index = rows.Count, Left = left, Right = right,
                     LeftSpans = left == null ? null : DiffSpans(hl, left, intra),
                     RightSpans = right == null ? null : DiffSpans(hl, right, intra),
                 });
@@ -808,17 +907,21 @@ public partial class JunctionApp
         return false;
     }
 
-    private Element RenderDiffRow(DiffRow r, DiffInteract? interact) => r.Type switch
+    private Element RenderDiffRow(DiffRow r, DiffInteract? interact)
     {
-        DiffRowType.Hunk => HunkHeaderRow(r.Hunk, r.HunkRef, interact),
-        DiffRowType.Split => SplitRow(r.Left, r.Right,
-            FoundIn(r.LeftSpans, r.Index, 0, r.Left?.Content),
-            FoundIn(r.RightSpans, r.Index, 1, r.Right?.Content), r.Index),
-        DiffRowType.Thread => ThreadCardRow(_review!, r),
-        DiffRowType.Composer => ComposerRow(_review!, r),
-        DiffRowType.Section => OutdatedSectionRow(),
-        _ => UnifiedRow(r.Line!, FoundIn(r.Spans, r.Index, 0, r.Line?.Content), interact, r.Index, r),
-    };
+        DiffRowsMade++;
+        return r.Type switch
+        {
+            DiffRowType.Hunk => HunkHeaderRow(r.Hunk, r.HunkRef, interact),
+            DiffRowType.Split => SplitRow(r.Left, r.Right,
+                FoundIn(r.LeftSpans, r.Index, 0, r.Left?.Content),
+                FoundIn(r.RightSpans, r.Index, 1, r.Right?.Content), r.Index),
+            DiffRowType.Thread => ThreadCardRow(_review!, r),
+            DiffRowType.Composer => ComposerRow(_review!, r),
+            DiffRowType.Section => OutdatedSectionRow(),
+            _ => UnifiedRow(r.Line!, FoundIn(r.Spans, r.Index, 0, r.Line?.Content), interact, r.Index, r),
+        };
+    }
 
     /// <summary>A code cell's syntax spans with any search matches tinted over them. A match
     /// takes a background and never a foreground, so it stacks on the add/delete tint and the
@@ -830,8 +933,8 @@ public partial class JunctionApp
 
     /// <summary>
     /// Points the search at the rows on display. Guarded by a key because this runs inside
-    /// Build, which reflattens the diff on every repaint — rebinding unguarded would rescan
-    /// the whole file every frame.
+    /// Build, which runs on every repaint — rebinding unguarded would rescan the whole file
+    /// every frame.
     /// <para>Split mode is two lanes over one set of row numbers, so a match knows which
     /// column it is in; unified is one. Rows carrying no text of that lane — a hunk header, or
     /// the blank half opposite an add — return null and are skipped.</para>
