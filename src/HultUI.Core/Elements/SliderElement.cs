@@ -274,6 +274,10 @@ public class SliderElement : Element, IRangeValueElement
     bool IRangeValueElement.IsReadOnly => false;
     void IRangeValueElement.SetAccessibleValue(double value) => ApplyUserValue(value);
 
+    // Its measure reads ThumbRadius and nothing else it copies; the patch marks the layout
+    // when that changes.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(SliderElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);
@@ -285,7 +289,11 @@ public class SliderElement : Element, IRangeValueElement
             _step = s._step;
             if (range) RangeChanged();
             TrackHeight = s.TrackHeight;
-            ThumbRadius = s.ThumbRadius;
+            if (ThumbRadius != s.ThumbRadius)
+            {
+                ThumbRadius = s.ThumbRadius;
+                MarkLayoutDirty();
+            }
             OnChanged = s.OnChanged;
             OnHoverValue = s.OnHoverValue;
             Segments = s.Segments;

@@ -747,6 +747,10 @@ internal sealed class VideoPlayerRootElement : BoxElement
 
     public VideoPlayerRootElement(VideoPlayer owner) => _owner = owner;
 
+    // A box that copies nothing more than a box does, so a patch that moves nothing leaves its
+    // layout standing, as a box's.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(VideoPlayerRootElement);
+
     protected internal override void ApplyTheme(Theme theme)
     {
         base.ApplyTheme(theme);
