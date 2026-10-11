@@ -102,6 +102,14 @@ static partial class Scenarios
                     reset: bridge.ClearDiffs);
             });
 
+        yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
+            "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index));
+            });
+
         yield return new Scenario("a11y/progress bar ticks over 1,000 rows, bridge on",
             "A progress bar above 1,000 rows moves on every frame while an accessibility client listens, as a download's or a playing video's does",
             ctx =>
@@ -132,6 +140,67 @@ static partial class Scenarios
         Run = step => bar.Value = (step % 1_000 + 1) / 1_000.0,
         Check = step => bar.Value == (step % 1_000 + 1) / 1_000.0 ? null : $"the bar reads {bar.Value}",
     };
+
+    /// <summary>
+    /// The selection walk as a person walks a History list, in the application's own loop
+    /// (<c>HeadlessSession.RunLoop</c>, on the virtual clock): Down every 60 ms through 1,000
+    /// commits on item rows, beside a details pane the same Build makes again, unchanged, on
+    /// every move, as an app's whole-window Build does. A step is one key and the loop's frames
+    /// until the next. The figure is the accessibility trees a key builds: the tree asks each
+    /// item's label once a build and for nothing else, so the labels made over the 1,000 items
+    /// count the builds. A scroll's refresh of the tree waits 100 ms, so keys 60 ms apart need
+    /// a build at most every other key for what moved; a selection move itself needs none.
+    /// <paramref name="told"/> checks the bridge was told the selected item.
+    /// </summary>
+    private static Op RealLoopWalk(Ctx ctx, Func<int, string?> told)
+    {
+        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows: true, details: true);
+        var host = pane.Mount();
+        host.On<HultUI.Core.Events.KeyDownEvent>(e =>
+        {
+            if (e.Key == HultUI.Core.Events.KeyCode.Down) { pane.Move(1); e.StopPropagation = true; }
+        });
+        ctx.Mount(host);
+        pane.Select(pane.LastWholeRow());
+        pane.Open(pane.Selected);
+        ctx.Session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        int first = pane.Selected;
+        int labelsBefore = 0;
+        bool nextKey = false;
+        var keyEvery = TimeSpan.FromMilliseconds(60);
+        return new Op
+        {
+            Run = _ =>
+            {
+                labelsBefore = pane.LabelsMade;
+                ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+                nextKey = false;
+                ctx.Session.RunLoop(() => nextKey, eventEvery: keyEvery, onEvent: () => nextKey = true);
+            },
+            Frames = 0,
+            Figure = () => (pane.LabelsMade - labelsBefore) / (double)pane.ItemCount,
+            FigureUnit = "a11y trees/key",
+            Check = step => pane.Verify(first + step + 1) ?? told(first + step + 1),
+        };
+    }
+
+    /// <summary>Null when the bridge's tree has item <paramref name="index"/> of the 1,000-item
+    /// list selected, or what it has instead.</summary>
+    private static string? ToldSelected(AccessibilityNode? tree, int index)
+    {
+        if (FindItems(tree, 1_000) is not { } list) return "the bridge's tree holds no list of 1,000 items";
+        return list.Children[index].IsSelected == true ? null : $"the bridge's tree does not have item {index} selected";
+    }
+
+    private static AccessibilityNode? FindItems(AccessibilityNode? node, int count)
+    {
+        if (node is null) return null;
+        if (node.Role == AccessibilityRole.List && node.Children.Count == count) return node;
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (FindItems(children[i], count) is { } found) return found;
+        return null;
+    }
 
     /// <summary>
     /// Whether a node of <paramref name="node"/>'s tree publishes a list of
@@ -270,6 +339,15 @@ static partial class Scenarios
             {
                 var rig = UiaRig.Install(ctx.Window);
                 return SelectionWalk(ctx, Applied(rig));
+            });
+
+        yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, UIA",
+            "The real-loop walk with the UIA bridge: the trees a key builds, the bridge's upkeep and the IsSelected events (all under build)",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var applied = Applied(rig);
+                return RealLoopWalk(ctx, applied);
             });
 
         yield return new Scenario("a11y/type in rich text, UIA",
