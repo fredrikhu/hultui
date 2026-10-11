@@ -1,3 +1,5 @@
+using HultUI.Core.Threading;
+
 namespace HultUI.Core.Animation;
 
 public static class AnimationManager
@@ -14,6 +16,9 @@ public static class AnimationManager
             _pendingAdd.Add(tween);
         else
             _active.Add(tween);
+        // A tween started inside the frame loop's wait (an OLE drop, a WebView2 event) has its
+        // first step due now, and nothing else may wake the loop for it.
+        UIThread.WakeIfParked();
     }
 
     internal static void Remove(ITween tween)

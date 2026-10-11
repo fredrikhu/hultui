@@ -22,6 +22,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The tests drive the platform's waits directly: wakes counted, and events that run inside
+         a wait without ending it, as a message SDL makes no event of does. -->
+    <InternalsVisibleTo Include="HultUI.Headless.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
   </ItemGroup>

@@ -733,6 +733,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
                 IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
                 IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
                 Marshal.Release(root); // UIA took its own reference
+                self._host.RootRequested();
                 return lresult;
             }
 

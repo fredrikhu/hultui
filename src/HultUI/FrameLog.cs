@@ -11,14 +11,32 @@ internal enum WakeSource
     Post,
     /// <summary>An <c>await</c> continuation, through the UI thread's synchronization context.</summary>
     Await,
+    /// <summary>Work done on the UI thread inside the loop's wait (<c>UIThread.Park</c>).</summary>
+    Parked,
+    /// <summary>An action from assistive technology, queued from its thread.</summary>
+    A11yAction,
+    /// <summary>A bridge's client attached, left, or switched assistive technology on or off.</summary>
+    A11yClient,
     Count,
 }
 
 /// <summary>What an idle wait of the frame loop waited for (<see cref="FrameLog"/>).</summary>
 internal enum IdleDeadline
 {
-    /// <summary>The fixed 16 ms the idle loop parks for.</summary>
-    Poll16,
+    /// <summary>Nothing: an event or a wake. For a paced wait, the display's interval.</summary>
+    None,
+    /// <summary>An animation's next step.</summary>
+    Animation,
+    /// <summary>The trailing refresh of a coalesced layout change's accessibility bounds.</summary>
+    A11yLayout,
+    /// <summary>The trailing refresh of a range value told to accessibility.</summary>
+    A11yRange,
+    /// <summary>A resize the throttle held back.</summary>
+    Resize,
+    /// <summary>The DevTools inspector's throttled refresh.</summary>
+    Inspector,
+    /// <summary>A display-colour poll of a Vulkan window without display-colour events.</summary>
+    DisplayColor,
     Count,
 }
 
@@ -203,15 +221,24 @@ internal static class FrameLog
 
     private static string Name(IdleDeadline d) => d switch
     {
-        IdleDeadline.Poll16 => "poll16",
-        _ => d.ToString().ToLowerInvariant(),
+        IdleDeadline.None => "none",
+        IdleDeadline.Animation => "animation",
+        IdleDeadline.A11yLayout => "a11y-layout",
+        IdleDeadline.A11yRange => "a11y-range",
+        IdleDeadline.Resize => "resize",
+        IdleDeadline.Inspector => "inspector",
+        IdleDeadline.DisplayColor => "display-colour",
+        _ => "?",
     };
 
     private static string Name(WakeSource s) => s switch
     {
         WakeSource.Post => "post",
         WakeSource.Await => "await",
-        _ => s.ToString().ToLowerInvariant(),
+        WakeSource.Parked => "parked",
+        WakeSource.A11yAction => "a11y-action",
+        WakeSource.A11yClient => "a11y-client",
+        _ => "?",
     };
 
     private static void Write(string line)

@@ -10,6 +10,7 @@ using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 
 namespace HultUI;
 
@@ -116,6 +117,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // focus went nowhere; it is told where once the next rebuild has the node.
     private ElementId? _a11yPendingFocusId;
     private bool _a11yWasActive;
+
+    /// <summary>Whether the last frame found the bridge active and built (or kept) a tree for it.
+    /// UI thread.</summary>
+    internal bool AccessibilityTreeBuilt => _a11yWasActive;
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
     // force the next frame to rebuild+diff the tree — that regenerates the node
@@ -859,7 +864,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// content is actually painted.
     /// </summary>
     public void RequestPostFrameCallback(Action callback)
-        => _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
+    {
+        _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
+        // From a callback the loop's wait dispatched, nothing else would end the wait for it.
+        UIThread.WakeIfParked();
+    }
 
     /// <summary>DevTools' continuous-redraw mode (F12 twice): render every iteration, unpaced.</summary>
     internal bool ContinuousRedraw => _devTools.ContinuousRedraw;
@@ -913,6 +922,38 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         || (_a11yRangeRefreshPending && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs))
         // Asked last: on Windows it asks UI Automation whether a client listens.
         && _accessibilityBridge.IsActive;
+
+    /// <summary>
+    /// Folds into <paramref name="at"/> the earliest moment, on the platform's clock, this window
+    /// owes a frame while it needs none now: the trailing edge of a coalesced accessibility
+    /// refresh (layout bounds, a range's value), and a resize the throttle held back. The frame
+    /// loop waits until then (<c>Application.RunUntil</c>), so each must be named here; it no
+    /// longer comes round every 16 ms to find them due.
+    /// </summary>
+    internal void NextDeadline(ref long at, ref IdleDeadline deadline)
+    {
+        var clock = Application.Platform.TimeProvider;
+        long frequency = clock.TimestampFrequency;
+        // Only while a client listens: otherwise the frame that clears them never comes, and
+        // the loop would wake for nothing.
+        if ((_a11yLayoutRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
+        {
+            if (_a11yLayoutRefreshPending)
+                Application.Earliest(ref at, ref deadline, (_lastA11yRebuildMs + A11yCoalesceMs) * frequency / 1000,
+                    IdleDeadline.A11yLayout);
+            if (_a11yRangeRefreshPending)
+                Application.Earliest(ref at, ref deadline, (_lastA11yRangeMs + A11yRangeCoalesceMs) * frequency / 1000,
+                    IdleDeadline.A11yRange);
+        }
+        // Throttled on Environment.TickCount64 (ProcessPendingResizes): how long is left, from now.
+        // Only reaches here for a minimized window; a shown one is dirty until the resize runs.
+        if (PlatformWindow.ResizePending)
+        {
+            long leftMs = Math.Max(0, PlatformWindow.LastResizeRenderTick + ResizeThrottleMs - Environment.TickCount64);
+            Application.Earliest(ref at, ref deadline, clock.GetTimestamp() + leftMs * frequency / 1000,
+                IdleDeadline.Resize);
+        }
+    }
 
     private bool AnyOverlayContentDirty()
     {

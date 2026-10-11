@@ -65,6 +65,14 @@ public interface IUiaHostBridge
     // RangeValue pattern for a slider.
     bool TryGetRangeValue(ElementId id, out RangeValueInfo info);
     void SetRangeValue(ElementId id, double value);
+
+    /// <summary>
+    /// A client asked the window for its root (<c>WM_GETOBJECT</c>), on the UI thread, possibly
+    /// inside the frame loop's wait, which does not end for a message SDL makes no event of. A
+    /// client that has just attached gets the root before any tree is built; the host wakes the
+    /// loop so its next frame builds one.
+    /// </summary>
+    void RootRequested() { }
 }
 
 /// <summary>UIA ScrollPattern state for a scroll view. Percents are 0..100, or -1 (no scroll).</summary>

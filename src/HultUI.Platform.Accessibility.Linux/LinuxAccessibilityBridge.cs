@@ -134,6 +134,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         {
             _statusOn = on;
             AccessibilityClients.Report(on);
+            // On a thread-pool thread (AtSpiStatusReader): the window's loop, which reads
+            // IsActive in its frames, is waiting for a deadline or a wake, and turning on is
+            // what builds and publishes the whole tree.
+            _actionHost?.ActiveChanged();
         });
     }
 

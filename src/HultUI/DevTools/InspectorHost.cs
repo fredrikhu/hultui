@@ -154,6 +154,12 @@ internal sealed class InspectorHost
         _view?.Refresh();
     }
 
+    /// <summary>When the refresh the interval throttle deferred is due, on the platform's clock, or
+    /// null with none: the frame loop waits for it (<see cref="Tick"/>).</summary>
+    public long? NextRefreshAt => _refreshPending
+        ? _lastRefreshTimestamp + (long)(RefreshInterval.TotalSeconds * Clock.TimestampFrequency)
+        : null;
+
     /// <summary>Runs any refresh that the interval throttle deferred. Called once per application frame.</summary>
     public void Tick()
     {

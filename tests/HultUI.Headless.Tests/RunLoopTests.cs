@@ -63,23 +63,26 @@ public class RunLoopTests
         run.Session.RunLoop(() => drained >= 100, eventEvery: TimeSpan.FromMilliseconds(1),
             onEvent: () => { posted++; Application.InvokeOnMainThread(() => drained++); });
 
-        // An idle loop waits 16 ms at a time; an event every millisecond ends each wait after
-        // one, and the next pass drains what it posted.
+        // An idle loop waits for its next deadline, here none; an event every millisecond ends
+        // each wait after one, and the next pass drains what it posted.
         Assert.InRange(run.MillisecondsSince(start), 100, 102);
         Assert.InRange(posted, 100, 101);
     }
 
     [Fact]
-    public void WithoutEvents_AnIdleLoopWaitsItsWholeTimeout()
+    public void WithoutEvents_AnIdleLoopParksForTheRestOfTheRun()
     {
         using var run = new Counted();
         int passes = 0;
         long start = run.Session.Time.GetTimestamp();
 
-        run.Session.RunLoop(() => ++passes > 10);
+        // An idle loop owns no deadline and parks until something arrives; nothing can, so its
+        // wait runs past the run's limit and the condition, asked once more, fails the run. It
+        // used to park 16 ms at a time: ten passes in 160 ms.
+        Assert.Throws<TimeoutException>(() => run.Session.RunLoop(() => ++passes > 10, limit: TimeSpan.FromSeconds(1)));
 
-        // Ten idle passes, each parked for the loop's 16 ms.
-        Assert.Equal(160, run.MillisecondsSince(start), 3);
+        Assert.Equal(2, passes);
+        Assert.InRange(run.MillisecondsSince(start), 1000, 1001);
     }
 
     [Fact]
@@ -89,7 +92,7 @@ public class RunLoopTests
         long start = run.Session.Time.GetTimestamp();
 
         Assert.Throws<TimeoutException>(() => run.Session.RunLoop(() => false, limit: TimeSpan.FromSeconds(1)));
-        Assert.InRange(run.MillisecondsSince(start), 1000, 1017);
+        Assert.InRange(run.MillisecondsSince(start), 1000, 1001);
     }
 
     [Fact]
