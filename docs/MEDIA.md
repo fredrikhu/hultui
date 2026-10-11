@@ -201,7 +201,11 @@ publishes every frame that falls due and ends at `Duration` — **nothing happen
 playing**. `Raise(BackendEvent)` injects any event; `Calls` lists every command in order
 (`Open(file:x.mp4)`, `Play`, `Seek(00:00:05, precise)`…); `FailNextOpenWith` scripts a
 failure; `Duration = null` plays as a live stream. Frames are solid, byte `n` for frame
-`n`, so a test can tell which frame the sink holds.
+`n`, so a test can tell which frame the sink holds. `HoldOpening = true` stops each `Open`
+at `Opening` until `FinishOpening()`, as mpv loads a file after the open (a seek or stop
+before then does nothing, and the load starts at zero). Test what an app does "once loaded"
+— a resume seek, a first report — against that: with the synchronous open the file has
+loaded before `Open` returns, so "once loaded" and "at once" look the same.
 
 For the real backend, `TestClip.WriteTempY4m(width, height, fps, frames)` writes a
 YUV4MPEG2 clip that needs no encoder to produce; the caller deletes it. The backend
