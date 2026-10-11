@@ -10,6 +10,18 @@ namespace HultUI.Platform.SDL3;
 /// </summary>
 internal static class VulkanSwapchainChoice
 {
+    /// <summary>Whether Win32's modal size/move loop is running for the window, and what started
+    /// it (see <see cref="OverAllocate"/>).</summary>
+    internal enum SizeMoveLoop
+    {
+        /// <summary>No loop: snap, maximize, a program's SetWindowPos.</summary>
+        None,
+        /// <summary>A title-bar move (SC_MOVE).</summary>
+        Moving,
+        /// <summary>An edge or corner drag (SC_SIZE), or a loop whose kind is not known.</summary>
+        Sizing,
+    }
+
     /// <summary>What became of a request for the scRGB swapchain.</summary>
     internal enum WideColor
     {
@@ -81,14 +93,65 @@ internal static class VulkanSwapchainChoice
 
     /// <summary>
     /// Whether a resize can keep the swapchain it has and present a smaller region of it. Only
-    /// with a fixed extent available: without ONE_TO_ONE the presented extent must equal the
-    /// window's, and keeping a larger swapchain gets it scaled, which is the resize artefact.
-    /// The caller also checks that the format would not change.
+    /// a swapchain built to be shown one-to-one, and only while over-allocating is still wanted:
+    /// without ONE_TO_ONE the presented extent must equal the window's, and keeping a larger
+    /// swapchain gets it scaled, which is the resize artefact. The caller also checks that the
+    /// format would not change.
     /// </summary>
     /// <param name="force">The driver said the swapchain is out of date, which no fit overrides.</param>
-    internal static bool CanKeepSwapchain(bool force, bool fixedExtentAvailable, bool haveSwapchain,
+    /// <param name="oneToOne">The swapchain was built with ONE_TO_ONE scaling and over-allocating
+    /// is still wanted (<see cref="OverAllocate"/>).</param>
+    internal static bool CanKeepSwapchain(bool force, bool oneToOne, bool haveSwapchain,
         int widthPx, int heightPx, int allocatedWidthPx, int allocatedHeightPx) =>
-        !force && fixedExtentAvailable && haveSwapchain
+        !force && oneToOne && haveSwapchain
+        && widthPx > 0 && heightPx > 0
+        && widthPx <= allocatedWidthPx && heightPx <= allocatedHeightPx;
+
+    /// <summary>
+    /// Whether a swapchain built now may be allocated larger than the window, to a bucket, and
+    /// presented one-to-one. Never without the surface's ONE_TO_ONE (<paramref name="available"/>),
+    /// never with <c>HULTUI_VULKAN_FIXED_EXTENT=0</c>, always with <c>=1</c>; otherwise only while
+    /// the window is being sized by Win32's modal loop.
+    ///
+    /// <para><b>Sized, not moved.</b> A title-bar move runs the same loop, and a move can change
+    /// the size too — dragged onto a monitor of another scale, or out of the maximized state — which
+    /// would cost an over-allocated build there and an exact one when the move ends: two rebuilds
+    /// where one was paid before. A loop whose kind is not known (WM_ENTERSIZEMOVE without the
+    /// WM_SYSCOMMAND that starts it) counts as a sizing one.</para>
+    /// </summary>
+    internal static bool OverAllocate(bool available, bool? fixedExtentOverride, SizeMoveLoop loop) =>
+        available && fixedExtentOverride switch
+        {
+            true => true,
+            false => false,
+            null => loop == SizeMoveLoop.Sizing,
+        };
+
+    /// <summary>
+    /// Whether a swapchain may be shown one-to-one in this mode: MAILBOX, the default, only. The
+    /// others were measured on NVIDIA (610.62) and both went wrong. Under FIFO (and FIFO_RELAXED)
+    /// a one-to-one swapchain stalled for good: a few drags in, an acquire's fence never signalled
+    /// and the window hung, on both formats, with the validation layer and without. Under
+    /// IMMEDIATE the first one-to-one swapchain of a drag cost the half-float window 172-196 ms
+    /// (its first present when handed over, its creation when not), and the old image was shown
+    /// stretched meanwhile. MAILBOX ran 30 drags, 45 one-to-one swapchains, with neither. FIFO and
+    /// IMMEDIATE come only from <c>HULTUI_VULKAN_PRESENT</c> or a surface without MAILBOX, and
+    /// rebuild for every size, as before.
+    /// </summary>
+    internal static bool PresentModeAllowsOneToOne(VkPresentModeKHR mode) =>
+        mode == VkPresentModeKHR.Mailbox;
+
+    /// <summary>
+    /// Whether a present that returned SUBOPTIMAL may keep its swapchain. A swapchain larger than
+    /// the window is suboptimal by definition, and NVIDIA (610) says so on every present, so
+    /// rebuilding on it made <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> rebuild every frame (57 ms a step
+    /// of a drag against 37 without it). Kept only while it was built one-to-one, over-allocating
+    /// is still wanted and the window fits: once a drag ends, SUBOPTIMAL rebuilds at the exact
+    /// size as before.
+    /// </summary>
+    internal static bool KeepSuboptimal(bool builtOneToOne, bool overAllocating,
+        int widthPx, int heightPx, int allocatedWidthPx, int allocatedHeightPx) =>
+        builtOneToOne && overAllocating
         && widthPx > 0 && heightPx > 0
         && widthPx <= allocatedWidthPx && heightPx <= allocatedHeightPx;
 

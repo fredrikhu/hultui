@@ -106,7 +106,7 @@ public class VulkanSwapchainChoiceTests
     public void AResize_KeepsTheSwapchain_OnlyWhenItFitsAndIsShownUnscaled()
     {
         // Allocated 2048x1280 for a window of 1650x1050.
-        Assert.True(CanKeepSwapchain(false, fixedExtentAvailable: true, haveSwapchain: true, 1600, 1000, 2048, 1280));
+        Assert.True(CanKeepSwapchain(false, oneToOne: true, haveSwapchain: true, 1600, 1000, 2048, 1280));
         Assert.True(CanKeepSwapchain(false, true, true, 2048, 1280, 2048, 1280));
         Assert.False(CanKeepSwapchain(false, true, true, 2049, 1000, 2048, 1280));   // grew past it
         Assert.False(CanKeepSwapchain(false, true, true, 1600, 1281, 2048, 1280));
@@ -118,7 +118,47 @@ public class VulkanSwapchainChoiceTests
         // The HULTUI_VULKAN_FIXED_EXTENT=0 regression: skipping the rebuild on a shrink without
         // ONE_TO_ONE leaves a larger swapchain being scaled into the window, which is the very
         // artefact the fixed extent exists to remove.
-        Assert.False(CanKeepSwapchain(false, fixedExtentAvailable: false, haveSwapchain: true, 800, 600, 2048, 1280));
+        Assert.False(CanKeepSwapchain(false, oneToOne: false, haveSwapchain: true, 800, 600, 2048, 1280));
+    }
+
+    [Fact]
+    public void OnlyMailbox_ShowsASwapchainOneToOne()
+    {
+        // Under FIFO a one-to-one swapchain stalled for good a few drags in; under IMMEDIATE the
+        // first one of a drag cost 172-196 ms and the old image showed stretched (NVIDIA 610.62).
+        Assert.True(PresentModeAllowsOneToOne(VkPresentModeKHR.Mailbox));
+        Assert.False(PresentModeAllowsOneToOne(VkPresentModeKHR.Immediate));
+        Assert.False(PresentModeAllowsOneToOne(VkPresentModeKHR.Fifo));
+        Assert.False(PresentModeAllowsOneToOne(VkPresentModeKHR.FifoRelaxed));
+    }
+
+    [Fact]
+    public void ASuboptimalPresent_KeepsAOneToOneSwapchain_WhileTheWindowFits()
+    {
+        // A swapchain larger than its window is SUBOPTIMAL on every present (NVIDIA 610). Rebuilt
+        // for it, HULTUI_VULKAN_FIXED_EXTENT=1 built the swapchain again every frame of a drag.
+        Assert.True(KeepSuboptimal(builtOneToOne: true, overAllocating: true, 1600, 1000, 2048, 1280));
+        Assert.True(KeepSuboptimal(true, true, 2048, 1280, 2048, 1280));
+        // Grown past it: the images are too small.
+        Assert.False(KeepSuboptimal(true, true, 2049, 1000, 2048, 1280));
+        Assert.False(KeepSuboptimal(true, true, 1600, 1281, 2048, 1280));
+        // An exact swapchain's SUBOPTIMAL means what it always meant: rebuild.
+        Assert.False(KeepSuboptimal(builtOneToOne: false, overAllocating: true, 1600, 1000, 2048, 1280));
+        // Built one-to-one, but no longer wanted (a drag that ended): rebuild at the exact size.
+        Assert.False(KeepSuboptimal(builtOneToOne: true, overAllocating: false, 1600, 1000, 2048, 1280));
+        Assert.False(KeepSuboptimal(true, true, 0, 1000, 2048, 1280));
+    }
+
+    [Fact]
+    public void TheFixedExtentOverride_DecidesAlone_AndOnlyWhereOneToOneIsOffered()
+    {
+        foreach (var loop in new[] { SizeMoveLoop.None, SizeMoveLoop.Moving, SizeMoveLoop.Sizing })
+        {
+            Assert.True(OverAllocate(available: true, fixedExtentOverride: true, loop));
+            Assert.False(OverAllocate(available: true, fixedExtentOverride: false, loop));
+            Assert.False(OverAllocate(available: false, fixedExtentOverride: true, loop));
+            Assert.False(OverAllocate(available: false, fixedExtentOverride: null, loop));
+        }
     }
 
     [Fact]
@@ -150,4 +190,5 @@ public class VulkanSwapchainChoiceTests
         Assert.False(DestroyBeforeReplacing(isWindows: true, VkFormat.R8G8B8A8Unorm, VkPresentModeKHR.Mailbox));
         Assert.False(DestroyBeforeReplacing(isWindows: false, VkFormat.R16G16B16A16Sfloat, VkPresentModeKHR.Mailbox));
     }
+
 }

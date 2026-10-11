@@ -205,6 +205,39 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> keeps its over-allocated swapchain through a resize that
+    /// stays inside the allocation. A swapchain larger than its window is SUBOPTIMAL on every
+    /// present (NVIDIA 610), and answering that with a rebuild built the swapchain again after
+    /// every frame: 57 ms a step of a drag, slower than no fixed extent at all. Here the window
+    /// grows by 24×16 px a step through about two 256-px buckets in each direction. A surface
+    /// without ONE_TO_ONE rebuilds for every size, as it should, and is not what this checks.
+    /// </summary>
+    [VulkanUiFact]
+    public void AFixedExtentSwapchain_IsNotRebuiltAfterEveryFrame()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through SetWindowPos
+        const int resizes = 16;
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = "1",
+            ["HULTUI_VULKAN_F16"] = null,
+            ["HULTUI_VULKAN_PRESENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, $"--resizes={resizes} --new-sizes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        if (!run.Output.Contains("fixed extent available")) return;
+        int builds = System.Text.RegularExpressions.Regex.Matches(run.Output, @"vulkan swapchain \d+x\d+ x\d+").Count;
+        int oneToOne = System.Text.RegularExpressions.Regex.Matches(run.Output,
+            @"vulkan swapchain \d+x\d+ x\d+ \S+ \(allocated \d+x\d+, one-to-one\)").Count;
+        Assert.True(oneToOne == builds, $"{builds - oneToOne} of {builds} swapchains were not one-to-one:\n{run.Output}");
+        // The start-up swapchain and one for each bucket crossed: four (2026-10-11). Rebuilt for
+        // every SUBOPTIMAL, eighteen.
+        Assert.True(builds < resizes / 2, $"{builds} swapchain builds for {resizes} resizes:\n{run.Output}");
+    }
+
+    /// <summary>
     /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
     /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
     /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217

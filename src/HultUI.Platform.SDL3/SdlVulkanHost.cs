@@ -99,6 +99,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     ///
     /// <para>Turning this on only <i>during</i> a drag would get both, and is the obvious next
     /// step; it needs a settled-size signal the renderer does not have today.</para>
+    ///
+    /// <para><b>A swapchain larger than its window is SUBOPTIMAL</b>, and NVIDIA (610) says so on
+    /// every present. Answered with a rebuild, as an exact swapchain's SUBOPTIMAL is, this built
+    /// the over-allocated swapchain again every frame: 57 ms a step of a drag against 37 without
+    /// it. A one-to-one swapchain the window still fits now keeps going
+    /// (<see cref="VulkanSwapchainChoice.KeepSuboptimal"/>).</para>
     /// </summary>
     private static readonly bool? FixedExtentOverride =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_FIXED_EXTENT") switch
@@ -114,7 +120,20 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     /// <summary>Whether the device got <c>swapchain_maintenance1</c> and the surface really
     /// offers ONE_TO_ONE with MIN gravity. Only then may the swapchain outsize the window.</summary>
-    private bool _fixedExtentAvailable;
+    private bool _oneToOneAvailable;
+
+    /// <summary>Whether the swapchain in use was built with ONE_TO_ONE scaling, and so may be
+    /// larger than the window. Only such a swapchain may be kept by a resize or a SUBOPTIMAL.</summary>
+    private bool _builtOneToOne;
+
+    /// <summary>Win32's modal size/move loop, as the window reports it (Windows only; always
+    /// <see cref="VulkanSwapchainChoice.SizeMoveLoop.None"/> elsewhere).</summary>
+    private VulkanSwapchainChoice.SizeMoveLoop _sizeMoveLoop;
+
+    /// <summary>Whether a swapchain built now is over-allocated and shown one-to-one; see
+    /// <see cref="VulkanSwapchainChoice.OverAllocate"/>.</summary>
+    private bool OverAllocating =>
+        VulkanSwapchainChoice.OverAllocate(_oneToOneAvailable, FixedExtentOverride, _sizeMoveLoop);
 
     /// <summary>The extent the swapchain images were actually allocated at, which is at least
     /// the window's and may be larger. The window size is <see cref="_widthPx"/>.</summary>
@@ -507,7 +526,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             : null;
         // Opt-in, not opt-out: see FixedExtentOverride for why the default favours video.
         bool wantMaintenance = _surfaceMaintenanceEnabled && maintenanceExtension is not null
-            && FixedExtentOverride == true;
+            && FixedExtentOverride == true
+            && OneToOnePresentMode();
         if (wantMaintenance) wanted.Add(maintenanceExtension!);
         EnabledDeviceExtensions = [.. wanted];
 
@@ -536,7 +556,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         // Asked once, after the device: the answer cannot change for this surface, and the
         // swapchain build needs it every time.
-        _fixedExtentAvailable = wantMaintenance && SurfaceOffersOneToOne();
+        _oneToOneAvailable = wantMaintenance && SurfaceOffersOneToOne();
 
         // Skia reads this to build its caps. Queried after the device exists and kept in
         // unmanaged memory because Skia holds the pointer rather than copying.
@@ -609,6 +629,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!_swapchain.IsNull) _vk.DestroySwapchain(_device, _swapchain, 0);
             _swapchain = VkSwapchainKHR.Null;
             _images = [];
+            _builtOneToOne = false;
             if (widthPx > 0 && heightPx > 0)
             {
                 _widthPx = widthPx;
@@ -626,7 +647,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // reallocating three half-float images for every size it passes through. Rounding up
         // costs at most one bucket in each dimension — about 12 MB at this size — and buys
         // roughly 5 GB of allocation churn back over a drag.
-        if (_fixedExtentAvailable)
+        bool oneToOne = OverAllocating;
+        if (oneToOne)
         {
             uint bucketW = RoundUpToBucket(extent.width);
             uint bucketH = RoundUpToBucket(extent.height);
@@ -695,7 +717,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         var info = new VkSwapchainCreateInfoKHR
         {
-            pNext = _fixedExtentAvailable ? &scalingInfo : null,
+            pNext = oneToOne ? &scalingInfo : null,
             surface = _surface,
             minImageCount = imageCount,
             imageFormat = _format,
@@ -734,10 +756,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _heightPx = windowHeight;
         _allocWidthPx = (int)extent.width;
         _allocHeightPx = (int)extent.height;
+        _builtOneToOne = oneToOne;
         StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length} " +
             $"{_format}/{_colorSpace}" +
-            (_allocWidthPx != _widthPx || _allocHeightPx != _heightPx
-                ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : ""));
+            (oneToOne ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : ""));
         ResetCapture();
     }
 
@@ -789,7 +811,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// a full round of its own images; each of those presents was acquired behind a fence wait,
     /// which is as late as the engine could still be using anything older.
     /// <c>swapchain_maintenance1</c>'s present fences would make that exact rather than
-    /// conservative, but the extension is only enabled for the fixed-extent path.</para>
+    /// conservative, but the extension is not there everywhere, and only its scaling is used.</para>
     /// </summary>
     private void RetirePerImageObjects()
     {
@@ -951,6 +973,17 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             $"..{_maxScaledWidth}x{_maxScaledHeight}" +
             (oneToOne && gravity ? " — fixed extent available" : " — rebuilding per resize"));
         return oneToOne && gravity;
+    }
+
+    /// <summary>Whether the present mode this surface will get may show a swapchain one-to-one
+    /// (<see cref="VulkanSwapchainChoice.PresentModeAllowsOneToOne"/>). Under any other mode the
+    /// extension is not even enabled, so the swapchain is exactly what it was before it existed.</summary>
+    private bool OneToOnePresentMode()
+    {
+        var mode = ChoosePresentMode(trace: false);
+        if (VulkanSwapchainChoice.PresentModeAllowsOneToOne(mode)) return true;
+        StartupTrace.Mark($"vulkan present scaling: not under {mode} — rebuilding per resize");
+        return false;
     }
 
     /// <summary>The largest extent this surface will present un-scaled. A swapchain may not be
@@ -1170,7 +1203,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _haveAcquired = false;
         if (result is VkResult.Success or VkResult.SuboptimalKHR) CountPresentForRetired();
 
-        if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
+        // SUBOPTIMAL is what a swapchain larger than its window is, so one built for that and
+        // still wanted keeps going while the window fits; see FixedExtentOverride.
+        if (result is VkResult.ErrorOutOfDateKHR
+            || (result is VkResult.SuboptimalKHR && !VulkanSwapchainChoice.KeepSuboptimal(_builtOneToOne,
+                OverAllocating, _widthPx, _heightPx, _allocWidthPx, _allocHeightPx)))
             Rebuild(_widthPx, _heightPx, force: true);
 
         // A source that went away gives its image back here, where no frame is recording.
@@ -1248,12 +1285,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         if (_disposed) return;
 
-        // _fixedExtentAvailable is not optional here. Without ONE_TO_ONE the presented extent
-        // must equal the window's, so skipping a rebuild because the window merely got SMALLER
-        // would leave an oversized swapchain being scaled — the artefact, reintroduced. Leaving
-        // this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it kept
-        // the skipping and lost only the scaling that justifies it.
-        if (VulkanSwapchainChoice.CanKeepSwapchain(force, _fixedExtentAvailable, !_swapchain.IsNull,
+        // A swapchain built one-to-one is not optional here. Without ONE_TO_ONE the presented
+        // extent must equal the window's, so skipping a rebuild because the window merely got
+        // SMALLER would leave an oversized swapchain being scaled — the artefact, reintroduced.
+        // Leaving this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it
+        // kept the skipping and lost only the scaling that justifies it.
+        if (VulkanSwapchainChoice.CanKeepSwapchain(force, _builtOneToOne && OverAllocating, !_swapchain.IsNull,
                 widthPx, heightPx, _allocWidthPx, _allocHeightPx)
             && ChooseFormat(out _, trace: false) == _format)
         {
