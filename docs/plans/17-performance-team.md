@@ -326,6 +326,11 @@ round, with CI waited for.
   `SetWindowLongPtr(GWL_EXSTYLE)` as soon as it exists), and runs a guard that hands the
   foreground straight back and stops the run if it is ever taken (probes in the scratchpad
   `r3b8/gpu8`, `r3b9/probe`; the Vulkan UiTests since b0ed204).
+- **Disturb the desktop as little as possible.** When step 9a's probe hit its guard and stopped
+  mid-frame, the user's browser videos paused for a while. Close real windows gracefully
+  (WM_CLOSE, then wait), never kill one mid-frame unless it hangs; batch measurements per
+  launch; log a timeline of window creates, destroys, swapchain builds and stalls over 100 ms;
+  stop and report a device-lost, a TDR or a stall over 1 s instead of repeating it.
 - **One build at a time per worktree** (memory `concurrent-dotnet-test-trap`).
 - **Create files with the Write tool**, not shell heredocs (they hang).
 - **Commit on this branch only.** Agents never push, merge or tag. The orchestrator merges
