@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–5 landed, step 6 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–6 landed, step 7 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -97,7 +97,7 @@ Round 2 regressions first, then value per cost.
    list: long-document open −60 % (3,418 → 1,377 KB/op), wrap resize −11 %, wrapped typing −10 %,
    20,000-line wrapped log 207.7 → 75.2 MB. Also the span-based prefix measure that
    paint-cluster-line-measurer needs (TextTypes.cs:272). Small.
-6. **layout-style-mark-once + layout-applytheme-layout-on-change** (1) — every PatchFrom walks its
+6. ~~**layout-style-mark-once + layout-applytheme-layout-on-change**~~ LANDED dc4800d, 51f3126 (1) — every PatchFrom walks its
    whole subtree to mark style, once per ancestor level (O(n × depth)): a "subtree marked" bit cuts
    mark visits −73…−90 % (Junction Files search 383,482 → 37,432 per key; every other counter
    identical on 102 rows); ApplyTheme marks layout only when a measured value changed (theme rows
@@ -323,6 +323,8 @@ Re-ranked by the round 4 survey.
 | 3 | 133bd8a, 7bfc1e7, 5e28b9a, 58fe439 | apps-playback-pump-out-of-build | App correctness, **broken since each app's first commit** (not plan 17; releases aperture-v1.19.0/reel-v1.4.0 and the previous ones affected): the time-based playback duties ran in the app Build, which barely runs during quiet playback (Aperture 1 build, Reel 0). Aperture's 10 s progress heartbeat and Reel's 15 s resume save never went out: 0 in 25/33 s at 01e5bd7/1093bfa, 4aa5653, 64ba531, 0951288 and 1569c9d → 2 after the fix. State-driven duties (resume seek, tracks, chapters, volume, Ended) worked. Fix: two Effects per player made when the stream opens — state (State, Duration, tracks; Position untracked) and clock (Position + `Application.Time`); nothing left in Build. App builds per 60 s quiet playback 0 → 0. `FakeMediaBackend.HoldOpening/FinishOpening` for load-order tests; 17 mutations caught. REACTIVITY.md "Build is not a clock", MEDIA.md trap. |
 | 3 | 7a8f516 | text-prefix-table-scratch | `BuildPrefixWidths` builds in two kept lists (runs cleared after each build; segments capped at 4,096 kept) and copies exact arrays out. Bit-identical over 500,000 random strings in 15 scripts × 5 styles. KB/op JIT (AOT within 0.2 %): text/open long document 3,418 → 1,442 (−58 %), richtext/open 11,248 → 10,027 (−11 %), richtext/resize −10 %, text/wrap resize −11 %, wrapped 900-line typing −10 %; time flat on min, medians −6…−22 %; 0 slower. 20,000-line wrapped log open 202.7 → 73.3 MB allocated (−64 %), later opens 125 → 102 ms. TextBench ellipsis-2lines −36 % B/call. |
 | 3 | 7754fe7 | text-prefix-measure-span | New public `TextPrefixMeasurer(string text, int length)` and `TextLine` overloads (CaretXAt, OffsetAtX, VisualRanges, TryMoveCaretVisually) so merged-cluster lines measure prefixes without cutting substrings; old `Func<string,float>` overloads kept (a literal `null` measurer is now ambiguous; no caller). `MeasureWidth` now caches BiDi-path widths keyed by paragraph direction (TextArea BiDi lines hit the cache too; DECISIONS.md updated). Hover frame with two merged-cluster lines −192 B (JIT 1,464 → 1,272, AOT 1,336 → 1,144); the rest (closures) is expert 2's step 7. Bit-equal prefix widths; 10 mutations caught. Not run on WSL: run the Linux tests in the release phase. |
+| 3 | dc4800d | layout-style-mark-once | `DirtyFlags.StyleSubtree` claim: the style mark walk stops at an element whose subtree is already marked; cleared with Style; a mounted unmarked child joining a claimed parent drops the claim up the chain (`NoteChildJoined` in the three add paths), so marked sets are unchanged. Mark visits: component/edit 44,004 → 18,004, tabs −76 %, a11y/create −54 %, palette −71 %, Junction History −75 %, Branches −64 %, Tags −76 %, Files search 383,482 → 60,731 per key. Every other counter and allocation identical on 110 rows. Time: component/edit keyed 1.458 → 1.246 ms JIT (−15 %), −6 % AOT; unkeyed −9/−10 %; reverse −10/−8 %; 0 slower. Shadow audit: 0 differences over ~4.3 M elements in 10 suites (positive control 2,548). 18 tests, 7 mutations caught. |
+| 3 | 51f3126 | layout-applytheme-layout-on-change | Five leaf controls mark layout in ApplyTheme only when a measured value changed; Expander marks the parts whose written sizes changed (fixes a header keeping 32 px on a 48 px theme); Toast's ApplyTheme no longer calls ReplaceChildren (no Children/a11y rebuild per restyle). Theme rows: layouts 78 → 0, MeasureContent 100 → 0; light/dark 8.7 → 0.0 KB/op, −6 % JIT / −7 % AOT; named scheme 10.9 → 2.2 KB/op, −6 %. THEMES.md control-author paragraph. 14 tests, 17 of 18 mutations caught (the 18th's code removed). |
 
 ## Examined, not worth it
 
@@ -564,3 +566,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-11: the user answered questions 1–13: recommendations on 1, 3–10, 12, 13; (a) on 2 (every
   pointer-move handler once per frame); yes on 11 as long as headless still works.
 - 2026-10-11: the user changed question 2 to (b): only splitter, pan, slider and scrubber coalesce.
+- 2026-10-11: step 6 landed (dc4800d, 51f3126): style marking once per subtree (component edit
+  −15 % JIT), theme switches lay out only what changed size. Guideline note (THEMES.md): ApplyTheme
+  runs every style pass — mark layout only when a measured size changed, and mark a part whose box
+  you wrote. For reconcile-restyle-on-change: `NoteChildJoined` must stay in the three add paths.
