@@ -260,7 +260,7 @@ public class SpannedLineSubBlobTests
     [InlineData(1f)]
     [InlineData(1.5f)]
     [InlineData(2f)]
-    public void SpannedLines_DrawTheSamePixelsFromSubBlobs_WithFarFewerGlyphs(float scale)
+    public void SpannedLines_DrawTheSamePixelsFromSubBlobs_WithFewerGlyphs(float scale)
     {
         var whole = Draw(scale, subBlobs: false);
         var parts = Draw(scale, subBlobs: true);
@@ -268,9 +268,63 @@ public class SpannedLineSubBlobTests
         Assert.Equal(0, whole.SubBlobs);
         Assert.True(parts.SubBlobs > 100, $"{parts.SubBlobs} sub-blobs");
         Assert.True(whole.Pixels.AsSpan().SequenceEqual(parts.Pixels), DescribeDifference(whole.Pixels, parts.Pixels, scale));
-        // A stretch every one to three characters: whole runs went to Skia once a stretch, the
-        // parts about a glyph's width either side of each (52,306 -> ~15,500 at every scale).
-        Assert.True(parts.Glyphs * 3 < whole.Glyphs, $"{whole.Glyphs} -> {parts.Glyphs} glyphs handed to Skia");
+        // How many fewer depends on the machine's faces: 52,306 -> ~15,500 on Windows; on Fedora
+        // the variable Noto Sans, whose box Skia does not trust, draws its runs whole (51,261 ->
+        // ~44,800). The win on a line of code is held below, in faces both have.
+        Assert.True(parts.Glyphs < whole.Glyphs, $"{whole.Glyphs} -> {parts.Glyphs} glyphs handed to Skia");
+    }
+
+    /// <summary>
+    /// A generic family whose face here has a box Skia trusts. A variable font's box is the
+    /// default instance's, so Skia marks it untrusted and its runs are drawn whole: Cascadia Mono
+    /// (Windows' monospace) and Noto Sans (Fedora's sans-serif) are variable; Segoe UI, Consolas
+    /// and the DejaVu faces are not.
+    /// </summary>
+    private static string FamilyWithAnExtent(SkiaRenderContext ctx)
+    {
+        foreach (var family in new[] { "monospace", "sans-serif", "serif" })
+        {
+            var paragraph = (PipelineTextParagraph)ctx.LayoutParagraph("var x = 1;", Style(12f, family: family), 400);
+            if (paragraph.TextLines.SelectMany(l => l.Runs).All(r => ctx.InkExtentOf(r.Font) is not null))
+                return family;
+        }
+        throw new InvalidOperationException("no generic family here has a face with a box Skia trusts");
+    }
+
+    /// <summary>
+    /// The win: a line of code coloured in six stretches handed Skia its glyphs once a stretch;
+    /// now each stretch's own and its neighbours' within the face's box.
+    /// </summary>
+    [Fact]
+    public void ALineOfCodeInSixStretches_HandsSkiaAFractionOfTheGlyphs()
+    {
+        const string Code = "        var result = Compute(items[index], \"value\", 42); // keep the totals";
+        var spans = new TextSpan[]
+        {
+            new(8, 3, new Color(86, 156, 214, 255)),
+            new(19, 7, new Color(220, 220, 170, 255)),
+            new(27, 5, new Color(156, 220, 254, 255)),
+            new(41, 7, new Color(206, 145, 120, 255)),
+            new(50, 2, new Color(181, 206, 168, 255)),
+            new(55, Code.Length - 55, new Color(106, 153, 85, 255)),
+        };
+        string family;
+        using (var probe = new SkiaRasterRenderSurface()) family = FamilyWithAnExtent((SkiaRenderContext)probe.RenderContext);
+        var style = Style(13f, family: family);
+        long Glyphs(bool subBlobs)
+        {
+            using var surface = new SkiaRasterRenderSurface();
+            surface.Resize(800, 60, 1f);
+            var ctx = (SkiaRenderContext)surface.RenderContext;
+            ctx.DrawsStretchesFromSubBlobs = subBlobs;
+            ctx.BeginFrame(800, 60, 1f, Color.White);
+            ctx.DrawText(Code, new Rect(4, 4, 790, 30), style, TextOverflow.Clip, null, spans);
+            ctx.EndFrame();
+            return ctx.GlyphsDrawn;
+        }
+
+        long whole = Glyphs(false), parts = Glyphs(true);
+        Assert.True(parts * 2 < whole, $"{whole} -> {parts} glyphs handed to Skia");
     }
 
     /// <summary>The pixel corpus takes both ways to a stretch's glyphs: runs in X order (the
@@ -342,7 +396,7 @@ public class SpannedLineSubBlobTests
         using var surface = new SkiaRasterRenderSurface();
         surface.Resize(800, 100, 1f);
         var ctx = (SkiaRenderContext)surface.RenderContext;
-        var style = Style(12f);
+        var style = Style(12f, family: FamilyWithAnExtent(ctx));
         const int Round = 200;
         var rows = new TextParagraph[SkiaRenderContext.RunBlobCacheMaxSize + Allocations.MaxRounds * Round];
         for (int i = 0; i < rows.Length; i++)
@@ -385,15 +439,18 @@ public class SpannedLineSubBlobTests
         var surface = new SkiaRasterRenderSurface();
         surface.Resize(800, 100, 1f);
         var ctx = (SkiaRenderContext)surface.RenderContext;
-        var style = Style(12f);
+        var style = Style(12f, family: FamilyWithAnExtent(ctx));
+        bool sawSubBlobs = false;
         ctx.BeginFrame(800, 100, 1f, Color.White);
         for (int i = 0; i < 3 * SkiaRenderContext.RunBlobCacheMaxSize; i++)
         {
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
             ctx.DrawText(text, new Rect(4, 4, 780, 30), style, TextOverflow.Clip, null, Thirds(text));
             Assert.Equal(ctx.CachedBlobCount + ctx.CachedSubBlobCount, ctx.BlobsMade - ctx.BlobsReleased);
+            sawSubBlobs |= ctx.CachedSubBlobCount > 0;
         }
         ctx.EndFrame();
+        Assert.True(sawSubBlobs, "no sub-blob was made");
         Assert.True(ctx.BlobsReleased > SkiaRenderContext.RunBlobCacheMaxSize, $"{ctx.BlobsReleased} released");
 
         surface.Dispose();
