@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–8 landed, step 9 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–8 and 9a landed, step 9b in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -112,12 +112,12 @@ Round 2 regressions first, then value per cost.
    check, an empty-bounds fallback (colour emoji). Managed sub-blobs cost bytes (selectable viewer
    wheel 3.3 → 14.2 KB/op), so it lands with **paint-native-blob-handles** (approved 2026-10-11 as long as headless still works; scroll/jump
    −62 % JIT / −74 % AOT) or with presized maps if that is declined.
-9. **vk-purge-disposed-image-textures + vk-swapchain-target-per-frame** (3) — purge Skia's unlocked
+9. ~~**vk-purge-disposed-image-textures + vk-swapchain-target-per-frame**~~ LANDED b0ed204, 58f78dd, 68424c2 (9a) (3) — purge Skia's unlocked
    resources after image sources are disposed (8 photos: DXGI 391.5 → 213.2 MB); one render target
    per swapchain image (2,048 B per Vulkan frame → ≤0.1 KB; Aperture's quiet frames are all of it).
    The second changes HDR.md's "never cache a wrapped swapchain target": barrier each acquired image
    back to COLOR_ATTACHMENT_OPTIMAL, reused-frame capture, validation with a positive control.
-   With **vk-drag-swapchain-overallocate** (approved 2026-10-10; user report, `17-reports/r3-aperture-resize.md`):
+   **9b, in progress:** **vk-drag-swapchain-overallocate** (approved 2026-10-10; user report, `17-reports/r3-aperture-resize.md`):
    every live-resize step rebuilds the F16 swapchain, 92 % of the step (Aperture and Reel ~37 ms
    per step vs GL apps ~4.6); between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE build to a 256-px bucket
    with maintenance1 ONE_TO_ONE and rebuild exact at release (prototype 37–39 → ~9 ms JIT and AOT,
@@ -172,6 +172,9 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **gl-uitests-focus-hardening** (3, test harness, from step 9a) — the in-process GL UiTests
+  (GpuFrameSinkGL, MpvGL, GpuImageSourceGL, PixelFrameGL) make activating windows without the
+  in-process hint; give them b0ed204's hardening (hint, WS_EX_NOACTIVATE, foreground watcher).
 - **subblob-variable-fonts** (2, from step 8) — Skia flags every variable font's box as untrusted, so
   those faces draw whole runs per colour stretch (no sub-blob win): Cascadia Mono
   (`FontFamilies.Monospace` on Windows) and Fedora's Noto Sans. Per-glyph ink extents for flagged
@@ -339,6 +342,9 @@ Re-ranked by the round 4 survey.
 | 3 | 4e85cdd | paint-cluster-line-measurer | One `TextPrefixMeasurer` per style, cached by style value (≤ 64) on SkiaRenderContext and on TextPipeline (`PrefixMeasurer(style)`, used by PipelineTextParagraph). Hover frame with two merged-cluster lines: JIT 1,272 → 312 B, AOT 1,144 → 312 B (= the ASCII baseline: the lines now cost 0 B); with selection 1,400/1,240 → 312. 0 slower. |
 | 3 | 27024f6 | paint-native-blob-handles | Approved (question 11, "as long as headless still works"). Text blobs are native handles through SkiaSharp's C API: `sk_textblob_builder_make`, `sk_canvas_draw_text_blob`, `sk_textblob_unref` **and `sk_textblob_get_bounds`** (a fourth, for TextPaintBounds), resolved from the library SkiaSharp loaded; a missing export throws by name. Released once (cache empty, Dispose, finalizer). KB/op JIT = AOT: scroll/jump 6.3 → 2.4 (−62 %), nested −45 %, sticky −37 %, wheel −33 %, selectable viewer wheel −33 %, richtext wheel 0.6 → 0.2; new blob 80 → 0 B; 0 slower. Condition met: Headless 767, Rendering.Skia 250, 17 golden scenes byte-identical, 27/27 non-outline headless frames identical, GL and Vulkan readback identical, WSL Fedora 10,012 passed / 0 failed. Leak test: 100k blobs < 32 MB (81.9 MB with unref removed). DECISIONS.md records the pin. |
 | 3 | 5cc9892, b183aa0 | paint-spanned-line-sub-blobs | Each colour stretch draws a kept native sub-blob of only the glyphs whose ink (face box + 1/8 em, 3/8 slanted, + 2 device px) reaches its clip; colour/bitmap/untrusted-box faces draw whole runs. Glyphs per frame −73…−91 % (Junction diff hover 10,650 → 2,763; spans recolor 99,167 → 8,734). Time: Junction diff hover −15/−17 %, wheel −19/−21 %, Vesper reader hover −19/−21 %, wheel −25/−27 %, spans recolor −70/−71 %, spans bold −53/−55 % (JIT/AOT); suite spans recolor −65/−67 %, bold −24/−41 %, rich text rows −9…−14 %; richtext/wheel 0.2 → 1.3 KB/op from a one-time map growth (not presized: ~57 KB per window). Pixels byte-identical (in-process A/B over 8 scripts × 3 scales × 5 transforms, 17 goldens, 27 frames, GPU readback). WSL 10,030 passed / 0 failed. No win yet on variable fonts (Cascadia Mono). |
+| 3 | b0ed204 | vk-uitests-no-foreground | Test harness: the Vulkan probe UiTests' windows get the in-process SDL hint, `WS_EX_NOACTIVATE` and a foreground watcher that fails the test (exit 5) if one is ever taken. |
+| 3 | 58f78dd | vk-purge-disposed-image-textures | Sources disposed after a draw are counted (any thread); the Vulkan surface runs its scratch purge after a frame once the count moved, at most once a second, no GPU wait (0.02–0.2 ms). 8 × 3840×2400 photos drawn then disposed: DXGI 391.5 → 213.2 MB (−45 %), Skia purgeable 176 → 0 MB, nvidia-smi +355 → +175 MiB, private 538–586 → 401 MB. Poster-grid churn (27 disposals/s): uploads 25.8/s unchanged (no re-uploads), frame time no slower. GL untouched (driver keeps the memory). |
+| 3 | 68424c2 | vk-swapchain-target-per-frame | One GRBackendRenderTarget + SKSurface per swapchain image for the swapchain's life (`SwapchainTargets`); F16 blit with DrawSurface; host contract `SetSwapchainReleasing` (targets dropped before images go) and `TransitionAcquiredImage` (barrier to COLOR_ATTACHMENT_OPTIMAL: just before the blit on the offscreen path, at once on the direct path; a frame after a GPU source draw wraps per frame as before — a barrier at every acquire slowed mpv's GL draw, 1.25–1.47 vs 0.97–1.14 ms). Idle-animating window: 2,046–2,048 B/frame → 0 (F16 and 8-bit, JIT and AOT), frame min −10…−16 %, median −7…−15 %; vkCreateImageView/Framebuffer per frame 1 → 0. Reel HDR playback 2,580 → 530–552 B/frame (8-bit video unchanged by design), mpv drops 0. Validation (SDK 1.4.357, core + sync) clean on reused-frame captures (40th frame, 3 resizes + minimize, F16/offscreen/scaled/8-bit/FIFO/IMMEDIATE/fixed extent); positive control (no barrier) `VUID-vkCmdDraw-None-09600` ×10 — NVIDIA drew correctly anyway, so the capture UiTest runs under the layer. HDR.md invariant rewritten. |
 
 ## Examined, not worth it
 
@@ -595,3 +601,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   window (Borderless, env var only) took the foreground four times, ~1 s each, while the user was in
   their browser; the brief's focus rule now requires the default frame, the in-process SDL hint and
   a foreground guard.
+- 2026-10-11: step 9a landed (b0ed204, 58f78dd, 68424c2): Vulkan frees disposed-image textures
+  (−178 MB DXGI on 8 photos) and keeps swapchain render targets (2 KB/frame → 0, frame −10…−16 %).
+  **Focus, again:** an early 9a probe window (default frame, in-process hint) took the foreground
+  twice; its guard handed it straight back and stopped the run. `WS_EX_NOACTIVATE` fixed it over
+  several hundred runs; the brief's focus rule now requires it too.

@@ -320,8 +320,12 @@ round, with CI waited for.
   is **not enough**: on 2026-10-11 a probe's Borderless window took the foreground four times
   with only that set. Every real window an agent opens uses the default frame unless the
   frame is what is measured, sets `SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0` in-process before
-  the window is made, and runs a guard that hands the foreground straight back if it is ever
-  taken (step 8's probe in the scratchpad `r3b8/gpu8` has one).
+  the window is made, has `WS_EX_NOACTIVATE` (step 9a: a default-frame window with the hint
+  still took the foreground twice, likely Windows' fallback activation when the user's window
+  closed or minimized; a real app's window can be given it from the driver process with
+  `SetWindowLongPtr(GWL_EXSTYLE)` as soon as it exists), and runs a guard that hands the
+  foreground straight back and stops the run if it is ever taken (probes in the scratchpad
+  `r3b8/gpu8`, `r3b9/probe`; the Vulkan UiTests since b0ed204).
 - **One build at a time per worktree** (memory `concurrent-dotnet-test-trap`).
 - **Create files with the Write tool**, not shell heredocs (they hang).
 - **Commit on this branch only.** Agents never push, merge or tag. The orchestrator merges
