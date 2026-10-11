@@ -158,7 +158,9 @@ It is **not** reasonable when it:
 - adds complexity out of proportion to the win, or a new native dependency;
 - re-opens a decision in `docs/DECISIONS.md` or memory without new evidence. Declined so
   far: damage rects, handler bitmask and TreeDiffer/LRU pools (P4/P5), Vulkan as the
-  default renderer, the net481 port, splitting Junction into components.
+  default renderer, the net481 port. Splitting Junction into components was declined on
+  2026-10-06 and re-opened by the user on 2026-10-11 with round 3's evidence: Junction's
+  chrome first, one app at a time.
 
 App code (`apps/*`) is in scope only where an app misuses the framework in a way the
 guidelines should warn about. Fix the framework first.
