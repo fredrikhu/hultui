@@ -57,14 +57,23 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // copy when the same run is drawn repeatedly (same frame, or across frames).
     // Keyed by what the run draws, not by the run: a paragraph laid out again after
     // an edit makes new runs for every line, the ones that did not change too.
-    private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new(SameGlyphs.Instance);
+    // The blobs are native handles (NativeTextBlob), each holding the one reference this
+    // context gives up when the cache empties or the context is disposed: an SKTextBlob
+    // wrapper was 80 B per new blob.
+    private readonly Dictionary<ShapedRun, nint> _runBlobCache = new(SameGlyphs.Instance);
     internal const int RunBlobCacheMaxSize = 2048;
     internal int CachedBlobCount => _runBlobCache.Count;
 
-    // Every new blob is built in this one builder: Build hands the blob over and leaves the
+    // Every native blob this context made and gave up, for the tests that hold the two equal.
+    internal long BlobsMade { get; private set; }
+    internal long BlobsReleased { get; private set; }
+
+    // Every new blob is built in this one builder: making the blob hands it over and leaves the
     // builder empty for the next. A builder per blob was 80 B more per new blob (216 -> 136),
     // and a scrolled list draws dozens of new rows a step.
     private readonly SKTextBlobBuilder _blobBuilder = new();
+
+    public SkiaRenderContext() => NativeTextBlob.EnsureAvailable();
 
     // The same runs as glyph outlines, for TextAsOutlines.
     private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new(SameGlyphs.Instance);
@@ -797,8 +806,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                 }
                 else
                 {
-                    if (BuildShapedBlob(run) is not { } blob) continue;
-                    r = blob.Bounds;
+                    nint blob = BuildShapedBlob(run);
+                    if (blob == 0) continue;
+                    r = NativeTextBlob.Bounds(blob);
                 }
                 if (r.IsEmpty) continue;
                 float x = baseX + run.OffsetX;
@@ -1476,9 +1486,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             Canvas.Restore();
             return;
         }
-        var blob = BuildShapedBlob(run);
-        if (blob is not null)
-            Canvas.DrawText(blob, x, y, _pooledPaint);
+        nint blob = BuildShapedBlob(run);
+        if (blob != 0)
+            NativeTextBlob.Draw(Canvas, blob, x, y, _pooledPaint);
+        // The cache, and so the blob, stays alive until the draw has returned.
+        GC.KeepAlive(this);
     }
 
     private SKPath? BuildShapedPath(ShapedRun run)
@@ -1511,13 +1523,16 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _runPathCache.Clear();
     }
 
-    private SKTextBlob? BuildShapedBlob(ShapedRun run)
+    internal nint BlobOf(ShapedRun run) => BuildShapedBlob(run);
+
+    // The cached blob of a run, made on its first draw; 0 for a run with no glyphs.
+    private nint BuildShapedBlob(ShapedRun run)
     {
         if (_runBlobCache.TryGetValue(run, out var cached))
             return cached;
 
         if (run.Glyphs.Length == 0)
-            return null;
+            return 0;
 
         var typeface = (SKTypeface)run.Font.NativeHandle;
         _pooledFont.Typeface = typeface;
@@ -1536,7 +1551,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
         }
 
-        var blob = _blobBuilder.Build();
+        nint blob = NativeTextBlob.Make(_blobBuilder);
+        if (blob != 0) BlobsMade++;
 
         if (_runBlobCache.Count >= RunBlobCacheMaxSize)
             ClearRunBlobCache();
@@ -1545,11 +1561,20 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return blob;
     }
 
+    // Gives up this context's reference to every cached blob: each was made once and is
+    // released once, here, whether the cache filled up or the context is going away.
     private void ClearRunBlobCache()
     {
         foreach (var blob in _runBlobCache.Values)
-            blob?.Dispose();
+            Release(blob);
         _runBlobCache.Clear();
+    }
+
+    private void Release(nint blob)
+    {
+        if (blob == 0) return;
+        NativeTextBlob.Unref(blob);
+        BlobsReleased++;
     }
 
     // ── Conversion helpers ──
@@ -1585,10 +1610,16 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _ => SKFontStyleWeight.Normal
     };
 
+    // A context nobody disposed still gives its blobs back, as the SKTextBlob wrappers' own
+    // finalizers did: nothing can draw with an unreachable context, and Skia's unref is safe on
+    // any thread. Everything else it holds is a SkiaSharp object with a finalizer of its own.
+    ~SkiaRenderContext() => ClearRunBlobCache();
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        GC.SuppressFinalize(this);
         ReleaseHeldFrames();
         foreach (var wrapped in _wrappedTextures.Values) wrapped.Image.Dispose();
         _wrappedTextures.Clear();

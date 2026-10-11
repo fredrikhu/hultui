@@ -179,12 +179,15 @@ public class TextDrawAllocationTests
 
     /// <summary>
     /// A run drawn for the first time becomes a text blob, built in one builder the context
-    /// keeps: <c>Build</c> hands the blob over and leaves the builder empty for the next. A new
+    /// keeps: making the blob hands it over and leaves the builder empty for the next. A new
     /// <c>SKTextBlobBuilder</c> per blob was 80 B more per new blob (216 → 136 B; plan 17, round
     /// 2), ~4 KB a step when a scrolled list draws ~50 new rows. The glyphs go in through the raw
     /// run buffer, a struct: <c>AllocatePositionedRun</c>'s buffer is a class, 56 B more per new
     /// blob (136 → 80 B; plan 17, round 3) wherever the compiler does not keep it on the stack —
-    /// here, and in the NativeAOT build of the perf suite (scroll/jump 9.1 → 6.3 KB a step).
+    /// here, and in the NativeAOT build of the perf suite (scroll/jump 9.1 → 6.3 KB a step). The
+    /// blob is a native handle, not an <c>SKTextBlob</c>: the wrapper and its registration in
+    /// SkiaSharp's handle table were the last 80 B (plan 17, round 3), so a new blob allocates
+    /// nothing.
     /// </summary>
     [Fact]
     public void ANewBlob_IsBuiltInTheKeptBuilder()
@@ -192,7 +195,8 @@ public class TextDrawAllocationTests
         using var surface = Surface();
         var ctx = (SkiaRenderContext)surface.RenderContext;
         var style = Style();
-        var paragraphs = new TextParagraph[SkiaRenderContext.RunBlobCacheMaxSize + 1_000];
+        const int Round = 500;
+        var paragraphs = new TextParagraph[SkiaRenderContext.RunBlobCacheMaxSize + 1_000 + Allocations.MaxRounds * Round];
         for (int i = 0; i < paragraphs.Length; i++)
             paragraphs[i] = ctx.LayoutParagraph($"Row {i:D5} of the list", style, 400);
 
@@ -205,21 +209,25 @@ public class TextDrawAllocationTests
             lastCount = ctx.CachedBlobCount;
             ctx.DrawParagraph(paragraphs[next++], new Point(10, 10));
         }
-        Assert.True(next < paragraphs.Length - 500, "the blob cache never reached its bound");
+        Assert.True(next < SkiaRenderContext.RunBlobCacheMaxSize + 1_000, "the blob cache never reached its bound");
 
-        int countBefore = ctx.CachedBlobCount;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = next; i < next + 500; i++)
-            ctx.DrawParagraph(paragraphs[i], new Point(10, 10));
-        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-        int misses = ctx.CachedBlobCount - countBefore;
+        // Rows never drawn before (each its own glyphs, so each a new blob), a round of them at
+        // a time: the least of a few rounds.
+        int start = next, missesBefore = ctx.CachedBlobCount;
+        long bytes = Allocations.Least(() =>
+        {
+            for (int i = next; i < next + Round; i++)
+                ctx.DrawParagraph(paragraphs[i], new Point(10, 10));
+            next += Round;
+        });
         ctx.EndFrame();
 
-        Assert.True(misses >= 500, $"only {misses} new blobs over 500 new rows");
-        double perBlob = bytes / (double)misses;
-        // 80 B is the blob's own wrapper and its handle registration; a run buffer object adds
+        Assert.True(next - start >= Round, "no round was drawn");
+        Assert.NotEqual(missesBefore, ctx.CachedBlobCount);
+        double perBlob = bytes / (double)Round;
+        // An SKTextBlob wrapper and its handle registration were 80 B; a run buffer object adds
         // 56, a builder 80.
-        Assert.True(perBlob < 112, $"a new blob allocated {perBlob:0.#} B");
+        Assert.True(perBlob < 1, $"a new blob allocated {perBlob:0.#} B");
     }
 
     /// <summary>The kept builder starts each blob empty: text drawn after other new text looks
