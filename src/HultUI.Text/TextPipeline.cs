@@ -1617,9 +1617,10 @@ public sealed class TextPipeline
     private PrefixWidths? BuildPrefixWidths(string text, ResolvedInheritedStyle style)
     {
         if (text.Length == 0) return null;
-        var fontRuns = Itemize(text, style);
+        var fontRuns = Itemize(text, style, _prefixRuns);
         var runs = new PrefixRun[fontRuns.Count];
-        var segments = new List<PrefixSegment>();
+        var segments = _prefixSegments;
+        segments.Clear();
         float before = 0;
         int runStart = 0;
         for (int r = 0; r < fontRuns.Count; r++)
@@ -1644,8 +1645,31 @@ public sealed class TextPipeline
             before += style.LetterSpacing == 0f || glyphs == 0 ? x : x + style.LetterSpacing * glyphs;
             runStart = runEnd;
         }
-        return new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs, segments.ToArray());
+        fontRuns.Clear();   // the runs' text and faces are not kept alive by the scratch list
+        var table = new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs, segments.ToArray());
+        // A whole document's single line can have a hundred thousand segments: its list is not kept.
+        if (segments.Capacity > KeptPrefixSegments)
+        {
+            segments.Clear();
+            segments.TrimExcess();
+        }
+        return table;
     }
+
+    // BuildPrefixWidths' font runs and segments while it builds a table, which gets exact arrays
+    // copied out of them: lists grown anew for every table were most of what wrapping and
+    // truncating allocated (a list doubles its way up: a line of 60 segments went through five
+    // arrays before its own was copied out). Nothing BuildPrefixWidths calls builds a table, and a
+    // pipeline is used from one thread, as MeasureString's run list is.
+    private readonly List<FontRun> _prefixRuns = new();
+    private readonly List<PrefixSegment> _prefixSegments = new();
+
+    // The most segments the kept list holds room for between tables (20 bytes each): a line of
+    // ~12,000 characters of prose.
+    internal const int KeptPrefixSegments = 4096;
+
+    // The room the kept segment list holds, for the test that holds it to KeptPrefixSegments.
+    internal int PrefixScratchCapacity => _prefixSegments.Capacity;
 
     /// <summary>
     /// <c>MeasureString(p.Text[..length])</c>, to the bit: the same run and segment widths,
