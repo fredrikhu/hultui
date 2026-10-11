@@ -19,8 +19,15 @@ file after every step and commits it with the step's work. Full survey reports a
   handle prototypes), `r3-gl/`, `r3rt/` (per-loop log probe, heap dumps), `probes/reactivity/r3/`,
   `r3a11y/` (probe-src, live WSL AT-SPI driver), `r3apps/` (app probe with per-Build marks).
 
-**App releases:** round 2's were cut at the user's request (2026-10-10). Cut them again only
-when the user asks; follow memory `release-tagging` (≤3 tags per push).
+**App releases:** round 2's were cut at the user's request (2026-10-10). **The user asked
+(2026-10-11) for new releases of the apps after round 3 merges:** once the round 3 merge is on
+main and CI is green, cut all five (junction, vesper, meridian, aperture, reel). Check the latest
+tags first (`git tag --list '<app>-v*' --sort=-creatordate` and `ls-remote`; on 2026-10-10 they
+were junction-v1.20.0, vesper-v1.20.0, meridian-v1.3.0, aperture-v1.19.0, reel-v1.4.0, all on
+0951288); minor bumps; annotated tags written with `git tag -F <file>`; at most 3 tags per push;
+wait for each installer run and confirm each release has its installer ("not acquired by Runner"
+→ rerun). Aperture's and Reel's notes should mention the playback heartbeat / resume-save fix
+(step 4b). Otherwise cut releases only when the user asks.
 
 ## Verdicts
 
