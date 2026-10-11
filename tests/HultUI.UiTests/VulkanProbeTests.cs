@@ -272,6 +272,29 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// Disposed images leave no textures behind. A GPU context keeps the texture it uploaded for
+    /// an image after the image is gone, as a spare for a later texture of exactly that size,
+    /// until its 256 MB budget pushes it out: eight 3840×2400 photos drawn and disposed held
+    /// 176 MB that way. The surface purges the spares after the next frame. Four 2048×2048
+    /// images are 64 MB of textures here; the purge must leave Skia less than one of them.
+    /// </summary>
+    [VulkanUiFact]
+    public void DisposedImages_LeaveNoTexturesBehind()
+    {
+        var run = RunProbe(new() { ["HULTUI_STARTUP"] = "1" }, "--disposed-images");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        var purge = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"vulkan scratch purged in [\d.]+ ms with a \d+x\d+ offscreen: skia cache ([\d.]+) MB in \d+ resources \(images were disposed\)");
+        Assert.True(purge.Success, "no purge after the images were disposed:\n" + run.Output);
+        double held = double.Parse(purge.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(held < 16, $"Skia held {held:0.0} MB after the purge; one image is 16 MB:\n{run.Output}");
+        // Once: the frames after it disposed nothing more.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(run.Output, @"\(images were disposed\)"));
+    }
+
+    /// <summary>
     /// A window that draws while minimized, then is restored and resized. On Windows a minimized
     /// Vulkan surface has no area, so the frame's swapchain went out of date and none could be
     /// built; the old one was dropped without being destroyed. Restored at the same size, the

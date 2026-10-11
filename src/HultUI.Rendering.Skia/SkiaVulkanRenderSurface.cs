@@ -375,14 +375,24 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _grContext.Submit();
         _host.PresentAcquiredImage();
         _frameOpen = false;
-        if (_purgeScratch) PurgeScratch();
+
+        int disposals = SkiaImageSource.DrawnDisposals;
+        bool images = _imagePurge.HasNew(disposals)
+            && _imagePurge.IsDue(disposals, System.Diagnostics.Stopwatch.GetTimestamp());
+        if (_purgeScratch || images) PurgeScratch(images);
+        if (images) _imagePurge.Purged(disposals, System.Diagnostics.Stopwatch.GetTimestamp());
     }
 
     /// <summary>An offscreen was let go since the last purge; see <see cref="ReleaseOffscreen"/>.</summary>
     private bool _purgeScratch;
 
+    /// <summary>Whether images drawn here have been disposed since the last purge, and whether
+    /// it is time for another; see <see cref="DisposedImagePurge"/>.</summary>
+    private readonly DisposedImagePurge _imagePurge = new(SkiaImageSource.DrawnDisposals);
+
     /// <summary>
-    /// Frees the scratch resources nothing uses, the offscreen let go among them. Run after a
+    /// Frees the scratch resources nothing uses: the offscreen let go among them, and the
+    /// textures of disposed images (<see cref="DisposedImagePurge"/>). Run after a
     /// frame has been submitted rather than when the offscreen goes: what that frame drew with —
     /// an opacity layer's texture, vertex and uniform buffers — is still in flight, so Skia
     /// keeps it for the next frame. The rest of the pool goes and is made again as frames need
@@ -391,7 +401,13 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// four sizes, each of which used to find its old offscreen in the pool, it takes about
     /// 1 ms longer.
     /// </summary>
-    private void PurgeScratch()
+    /// <param name="afterDisposedImages">Images were disposed: only for the trace. Not waiting
+    /// for the GPU, unlike <see cref="ReleaseOffscreen"/>: a texture still in submitted work is
+    /// kept and goes at a later purge, and the wait cost a scrolling poster grid up to 12 ms on
+    /// the frame that purged, against 0.02 to 0.2 ms without. Eight photos disposed right after
+    /// the frame that last drew them were all freed by the first purge anyway: the GPU had
+    /// finished that frame by the next one.</param>
+    private void PurgeScratch(bool afterDisposedImages = false)
     {
         _purgeScratch = false;
         long start = StartupTrace.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
@@ -404,7 +420,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             _grContext.GetResourceCacheUsage(out int resources, out long bytes);
             StartupTrace.Mark(string.Create(System.Globalization.CultureInfo.InvariantCulture,
                 $"vulkan scratch purged in {ms:0.00} ms with a {_offscreenWidth}x{_offscreenHeight} offscreen: " +
-                $"skia cache {bytes / 1048576.0:0.0} MB in {resources} resources"));
+                $"skia cache {bytes / 1048576.0:0.0} MB in {resources} resources{(afterDisposedImages ? " (images were disposed)" : "")}"));
         }
     }
 

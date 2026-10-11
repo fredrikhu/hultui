@@ -43,6 +43,10 @@ using HultUI.WebView.WebView2;
 // while minimized, how far the second player got, and the frames drawn in the second after the
 // restore (Windows). Exits 4 when there is no libmpv.
 //
+// --disposed-images draws four 2048x2048 images (64 MB of textures), takes them off screen and
+// disposes them, then draws a few more frames: with HULTUI_STARTUP=1 the purge after them says
+// how much Skia still holds.
+//
 // No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
@@ -53,6 +57,7 @@ internal static class Program
     {
         Foreground.Keep();
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
+        if (args.Contains("--disposed-images")) return DisposedImages(renderer);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--minimized-video"))
             return MinimizedVideo(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
@@ -351,6 +356,37 @@ internal static class Program
         }) { IsBackground = true }.Start();
         app.Run();
         second?.Dispose();
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>
+    /// Images drawn, then disposed. A GPU context keeps the texture it uploaded for an image
+    /// after the image is gone, as a spare for a later texture of exactly that size; the Vulkan
+    /// surface purges those spares after the next frame. Each image here is 16 MB of texture.
+    /// </summary>
+    private static int DisposedImages(RendererKind renderer)
+    {
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 300, renderer: renderer));
+        var sources = new HultUI.Rendering.Skia.SkiaImageSource[4];
+        string[] colours = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00"];
+        for (int i = 0; i < sources.Length; i++)
+        {
+            var bitmap = new SkiaSharp.SKBitmap(2048, 2048, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Premul);
+            bitmap.Erase(SkiaSharp.SKColor.Parse(colours[i]));
+            sources[i] = new HultUI.Rendering.Skia.SkiaImageSource(bitmap);
+        }
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            sources.Select(s => (HultUI.Core.Elements.Element)Image.New(s).FlexGrow(1)).ToArray()));
+        for (int i = 0; i < 6; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Console.WriteLine("probe: drew the images");
+
+        app.SetRoot(Box.New().FlexGrow(1).Background(Color.FromHex("#202020")));
+        foreach (var source in sources) source.Dispose();
+        Console.WriteLine("probe: disposed the images");
+        for (int i = 0; i < 6; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
         Console.WriteLine("probe: done");
         return 0;
     }

@@ -101,6 +101,13 @@ GPU memory, width × height × 8 bytes each, until the context's 256 MB budget p
 read 458 MB after a 40-step drag, 243 now. So the pool's unused scratch is purged after the next
 frame is submitted (2026-10-08), which keeps what that frame drew with.
 
+**So are the textures of disposed images** (2026-10-11). A disposed image's upload loses its key
+and stays in the same pool as a spare: eight 3840×2400 photos drawn and disposed held 176 MB, and
+DXGI read 391.5 MB against 213.2 after the purge. The surface purges after a frame once
+`SkiaImageSource`s that were drawn have been disposed, at most once a second. Only spares go, so
+a live image scrolled out of view keeps its texture and is not uploaded again. GL does not purge:
+there Skia freed 211 MB and DXGI read 303.7 MB before and 312.0 after, the driver keeping it.
+
 ### Display colour: HDR state, SDR white, peak
 
 | | HDR state | SDR white | peak |
