@@ -72,16 +72,18 @@ internal sealed class WordShapeKeyComparer
 }
 
 /// <summary>Key for a string's width on one unbounded line (<see cref="TextPipeline.MeasureWidth"/>):
-/// the string and what of the style a width depends on. <see cref="Hash"/> is worked out once,
-/// from the span the string was cut from (<see cref="WidthKeyComparer.HashOf"/>): a line can be a
-/// hundred characters, and hashing it again to put it in the cache cost as much as the lookup.</summary>
+/// the string and what of the style a width depends on — the direction only for text on the BiDi
+/// path, Ltr for any other. <see cref="Hash"/> is worked out once, from the span the string was cut
+/// from (<see cref="WidthKeyComparer.HashOf"/>): a line can be a hundred characters, and hashing it
+/// again to put it in the cache cost as much as the lookup.</summary>
 internal readonly record struct WidthKey(
     string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant, float LetterSpacing,
-    int Hash);
+    TextDirection Direction, int Hash);
 
 /// <summary><see cref="WidthKey"/> for a string still inside a longer text — a line of a
 /// document — so a lookup makes no string; only a miss copies it out, to keep it as the key.</summary>
-internal readonly ref struct WidthSpanKey(ReadOnlySpan<char> text, in ResolvedInheritedStyle style, int hash)
+internal readonly ref struct WidthSpanKey(ReadOnlySpan<char> text, in ResolvedInheritedStyle style,
+    TextDirection direction, int hash)
 {
     public readonly ReadOnlySpan<char> Text = text;
     public readonly string FontFamily = style.FontFamily;
@@ -89,6 +91,7 @@ internal readonly ref struct WidthSpanKey(ReadOnlySpan<char> text, in ResolvedIn
     public readonly FontWeight FontWeight = style.FontWeight;
     public readonly FontSlant FontSlant = style.FontSlant;
     public readonly float LetterSpacing = style.LetterSpacing;
+    public readonly TextDirection Direction = direction;
     public readonly int Hash = hash;
 }
 
@@ -102,8 +105,10 @@ internal sealed class WidthKeyComparer : IEqualityComparer<WidthKey>, IAlternate
     public static int StyleHash(in ResolvedInheritedStyle style) =>
         HashCode.Combine(style.FontFamily, style.FontSize, style.FontWeight, style.FontSlant, style.LetterSpacing);
 
-    /// <summary>A key's hash: the text's, as <see cref="string.GetHashCode()"/> has it, and the style's.</summary>
-    public static int HashOf(ReadOnlySpan<char> text, int styleHash) => string.GetHashCode(text) ^ styleHash;
+    /// <summary>A key's hash: the text's, as <see cref="string.GetHashCode()"/> has it, the style's,
+    /// and the direction's in the top bits (none for Ltr).</summary>
+    public static int HashOf(ReadOnlySpan<char> text, int styleHash, TextDirection direction) =>
+        string.GetHashCode(text) ^ styleHash ^ ((int)direction << 30);
 
     public bool Equals(WidthKey x, WidthKey y) => x == y;
 
@@ -112,14 +117,14 @@ internal sealed class WidthKeyComparer : IEqualityComparer<WidthKey>, IAlternate
     public bool Equals(WidthSpanKey alternate, WidthKey other) =>
         alternate.Hash == other.Hash && alternate.FontSize.Equals(other.FontSize)
         && alternate.FontWeight == other.FontWeight && alternate.FontSlant == other.FontSlant
-        && alternate.LetterSpacing.Equals(other.LetterSpacing) && string.Equals(alternate.FontFamily, other.FontFamily)
-        && alternate.Text.SequenceEqual(other.Text);
+        && alternate.LetterSpacing.Equals(other.LetterSpacing) && alternate.Direction == other.Direction
+        && string.Equals(alternate.FontFamily, other.FontFamily) && alternate.Text.SequenceEqual(other.Text);
 
     public int GetHashCode(WidthSpanKey alternate) => alternate.Hash;
 
     public WidthKey Create(WidthSpanKey alternate) =>
         new(alternate.Text.ToString(), alternate.FontFamily, alternate.FontSize, alternate.FontWeight,
-            alternate.FontSlant, alternate.LetterSpacing, alternate.Hash);
+            alternate.FontSlant, alternate.LetterSpacing, alternate.Direction, alternate.Hash);
 }
 
 /// <summary>

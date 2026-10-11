@@ -1282,7 +1282,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Only lines whose shaping merged clusters (ligatures, marks, emoji) need a
     // prefix measurer; for the 1:1 case the glyph array answers exactly and this
     // stays null, so the common path allocates no closure.
-    private Func<string, float>? PrefixMeasurer(TextLine line, ResolvedInheritedStyle style)
+    private TextPrefixMeasurer? PrefixMeasurer(TextLine line, ResolvedInheritedStyle style)
     {
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
@@ -1292,8 +1292,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     }
 
     // Its own method because a lambda capturing a parameter makes C# allocate the closure on
-    // entry to the method that declares it — on every call, the 1:1 ones included.
-    private Func<string, float> MeasurerFor(ResolvedInheritedStyle style) => s => MeasureText(s, style).Width;
+    // entry to the method that declares it — on every call, the 1:1 ones included. A prefix is
+    // measured where it stands in the run's text (MeasureTextWidth, the width MeasureText gives
+    // it, to the bit), not cut out as a string for every boundary asked about.
+    private TextPrefixMeasurer MeasurerFor(ResolvedInheritedStyle style) =>
+        (text, length) => MeasureTextWidth(text.AsSpan(0, length), style);
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
     {

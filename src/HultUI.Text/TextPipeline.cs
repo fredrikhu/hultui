@@ -1884,25 +1884,37 @@ public sealed class TextPipeline
     /// its words' widths added up in the order the shaping adds them (<see cref="MeasureString"/>),
     /// and kept as one number (the width cache). Laying it out would shape it whole and keep that
     /// in the shape cache, which a text area's every line, measured once each when a document
-    /// opens to see whether it fits, filled with lines nobody draws. Text on the BiDi path or
-    /// with a newline in it is laid out.
+    /// opens to see whether it fits, filled with lines nobody draws. Text on the BiDi path is laid
+    /// out, and its width kept in the same cache, under its direction: a caret or a selection on a
+    /// line of emoji or marks asks for the widths of the same prefixes every frame
+    /// (<see cref="TextPrefixMeasurer"/>), and finds them without a string. Text with a newline in
+    /// it is laid out.
     /// </summary>
     public float MeasureWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
     {
         if (text.IsEmpty)
             return 0f;
-        if (text.Contains('\n') || NeedsBidi(text, style, PlainPathForLtr))
+        if (text.Contains('\n'))
             return Layout(text.ToString(), style, float.PositiveInfinity, maxLines: 1).Size.Width;
+        // The plain path's width does not depend on the direction; the BiDi path's can.
+        bool bidi = NeedsBidi(text, style, PlainPathForLtr);
 
         FollowCulture();  // before the lookup: a width is of the culture's Han faces
         var widths = _widths ??= new Widths();
-        var key = widths.KeyOf(text, style);
+        var key = widths.KeyOf(text, style, bidi ? style.TextDirection : TextDirection.Ltr);
         if (widths.InPlace.TryGet(key, out float width))
             return width;
 
         var entry = WidthKeyComparer.Instance.Create(key);
-        BeginParagraph(entry.Text);
-        width = MeasureString(entry.Text, style);
+        if (bidi)
+        {
+            width = Layout(entry.Text, style, float.PositiveInfinity, maxLines: 1).Size.Width;
+        }
+        else
+        {
+            BeginParagraph(entry.Text);
+            width = MeasureString(entry.Text, style);
+        }
         widths.Keep(entry, width);
         return width;
     }
@@ -1932,7 +1944,7 @@ public sealed class TextPipeline
 
         public Widths() => InPlace = Cache.LookedUpBy<WidthSpanKey>();
 
-        public WidthSpanKey KeyOf(ReadOnlySpan<char> text, in ResolvedInheritedStyle style)
+        public WidthSpanKey KeyOf(ReadOnlySpan<char> text, in ResolvedInheritedStyle style, TextDirection direction)
         {
             if (!ReferenceEquals(style.FontFamily, _style.FontFamily) || style.FontSize != _style.FontSize
                 || style.FontWeight != _style.FontWeight || style.FontSlant != _style.FontSlant
@@ -1941,7 +1953,7 @@ public sealed class TextPipeline
                 _style = style;
                 _styleHash = WidthKeyComparer.StyleHash(style);
             }
-            return new WidthSpanKey(text, style, WidthKeyComparer.HashOf(text, _styleHash));
+            return new WidthSpanKey(text, style, direction, WidthKeyComparer.HashOf(text, _styleHash, direction));
         }
 
         // Kept while there is room. Once the cache is full, only a line measured lately is: most

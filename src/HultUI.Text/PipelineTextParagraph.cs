@@ -99,15 +99,17 @@ public sealed class PipelineTextParagraph : TextParagraph
     /// <summary>
     /// For a line whose shaping merged clusters (ligatures, marks, emoji), so glyphs no longer
     /// map one to one onto characters: measures a prefix of a run's text the way the renderer's
-    /// own caret methods do, in the paragraph's style. Null — no closure — for the common case.
+    /// own caret methods do, in the paragraph's style, where it stands in the run's text
+    /// (<see cref="TextPipeline.MeasureWidth"/>: the width its own line has, to the bit). Null —
+    /// no closure — for the common case.
     /// </summary>
-    internal Func<string, float>? PrefixMeasurer(TextLine line)
+    internal TextPrefixMeasurer? PrefixMeasurer(TextLine line)
     {
         // Indexed: Runs is an interface, and a foreach over it boxes an enumerator per call.
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
             if (runs[i].Glyphs.Length != runs[i].Text.Length)
-                return s => _pipeline.Layout(s, Style, float.PositiveInfinity, maxLines: 1).Size.Width;
+                return (text, length) => _pipeline.MeasureWidth(text.AsSpan(0, length), Style);
         return null;
     }
 }
