@@ -320,6 +320,75 @@ public class VideoPlayerTests
     }
 
     [Fact]
+    public void APositionReport_RebuildsNothing_ButMovesTheTimeAndTheThumb()
+    {
+        // mpv reports the position ten times a second while playing. Each report rebuilt the
+        // whole player (about 22 elements, 41 KB); it now rewrites the elapsed time and the
+        // scrubber's value on the elements already on screen.
+        using var f = new Fixture();
+        f.Player.Play();
+        f.Session.PumpFrame();
+        int builds = f.VideoPlayer.Builds;
+
+        for (int i = 1; i <= 20; i++)
+        {
+            f.Backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromSeconds(i * 0.4)));
+            f.Session.PumpFrame();
+        }
+
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+        Assert.NotNull(f.Session.Window.FindByText("0:08"));
+        var seek = (HultUI.Core.Elements.SliderElement)f.Session.Window.FindByAutomationId("video-seek")!.Element;
+        Assert.Equal(8.0, seek.Value);
+    }
+
+    [Fact]
+    public void ASeek_IsToldToAReader()
+    {
+        // The scrubber's value is written in place now rather than by a rebuild; a reader is
+        // still told where a seek landed, once the 250 ms a range waits have passed.
+        using var f = new Fixture();
+        var bridge = f.Session.Window.InstallAccessibilityBridge();
+        f.Session.PumpFrames(3);
+        f.FocusPlayer();
+        f.Session.PumpFrames(30);
+        bridge.ClearDiffs();
+
+        f.Session.Window.PressKey(KeyCode.Right);   // +5 s, paused
+        f.Session.PumpFrames(20);
+
+        var seek = f.Session.Window.FindByAutomationId("video-seek")!;
+        var told = bridge.Diffs.SelectMany(d => d.PropertyChanged)
+            .Where(c => c.PropertyName == AccessibilityProperties.RangeValue && c.Node.ElementId == seek.Element.Id)
+            .Select(c => c.Node.Range!.Value.Value).ToList();
+        Assert.Equal(5.0, Assert.Single(told));
+    }
+
+    [Fact]
+    public void FocusPicture_BeforeMounting_LandsWhilePlaying()
+    {
+        // An app opens a file, asks for the keyboard and mounts the player in its next build. The
+        // focus waits for a build of the mounted player; a playing film's position reports no
+        // longer supply one, and the build the root asks for with the theme still does.
+        using var session = HeadlessSession.Create(640, 400);
+        var backend = new FakeMediaBackend();
+        using var player = new MediaPlayer(backend);
+        var video = new VideoPlayer(player);
+        player.Open(Clip, autoPlay: true);
+        video.FocusPicture();
+        session.Application.SetRoot(Box.New().Children(video.Mount().Width(640f).Height(400f)));
+
+        for (int i = 0; i < 6; i++)
+        {
+            backend.Advance(session.DefaultFrameDelta);
+            session.PumpFrame();
+        }
+
+        Assert.True(player.IsPlaying);
+        Assert.True(session.Window.FindByAutomationId("video-player")!.IsFocused);
+    }
+
+    [Fact]
     public void TheMuteButton_TogglesMute_AndTheVolumeSliderShowsIt()
     {
         using var f = new Fixture();

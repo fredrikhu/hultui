@@ -43,6 +43,13 @@ backend does not echo — `Rate`, `Volume`, `Muted` — and `Position` on a `See
 moves at once so a scrubber lands where it was dropped. Every setter and command must be
 called on the UI thread.
 
+**`Position` changes ten times a second while playing**, so a `Build()` that reads it
+rebuilds that often. Read it untracked there (`ReactiveScope.Untracked(() =>
+player.Position)`) and keep what shows it current from an `Effect`, as `VideoPlayer` does
+for its elapsed time and scrubber; see
+[A value that changes ten times a second](REACTIVITY.md#a-value-that-changes-ten-times-a-second).
+A position report used to rebuild the whole player (41 KB); it now rewrites two elements.
+
 **Scrubber previews.** `VideoPlayer.PreviewFrame` is a `Func<TimeSpan, VideoPreviewFrame?>`
 the app supplies; the player asks it for the position under the pointer while the scrubber
 is hovered or dragged and floats the still above the bar, with the frame's own time under

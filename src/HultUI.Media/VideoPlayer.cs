@@ -50,9 +50,12 @@ public sealed class VideoPlayer : Component
     /// <summary>The scrubber itself, so the preview can be placed over the point being
     /// hovered rather than over the middle of the bar.</summary>
     private readonly Ref<SliderElement> _scrubber = new();
+    /// <summary>The elapsed time, which a position report rewrites in place.</summary>
+    private readonly Ref<TextElement> _elapsed = new();
     private TweenHandle _hideTimer;
     private TweenHandle _fade;
     private Effect? _playingWatch;
+    private Effect? _positionWatch;
 
     public VideoPlayer(MediaPlayer player)
     {
@@ -124,8 +127,8 @@ public sealed class VideoPlayer : Component
         set
         {
             _chapterMarks = value ?? [];
-            // Converted once per change rather than once per frame: the player rebuilds on
-            // every position tick, and this list only moves when the film does.
+            // Converted once per change rather than once per build: the player rebuilds on
+            // every show, hide and hover of the bar, and this list only moves when the film does.
             _chapterSeconds = _chapterMarks.Count > 0
                 ? _chapterMarks.Select(c => c.TotalSeconds).ToArray()
                 : [];
@@ -159,6 +162,25 @@ public sealed class VideoPlayer : Component
             if (Player.IsPlaying) ScheduleHide();
             else Show();
         });
+        // A position report, ten a second from mpv while playing, moves the elapsed time and the
+        // scrubber's thumb and nothing else, so it writes those two on the mounted elements and
+        // Build reads the position untracked. It used to rebuild the whole player, about 22
+        // elements and 41 KB a report, with the bar shown or hidden.
+        _positionWatch = new Effect(ShowPosition);
+    }
+
+    /// <summary>
+    /// The position, on the elements that show it: the elapsed time and the scrubber. Reads
+    /// <see cref="MediaPlayer.Position"/> and <see cref="MediaPlayer.Duration"/>, so it runs
+    /// again when either moves. The scrubber's value tells a reader where it is, at most every
+    /// 250 ms (<see cref="AccessibilityProperties.RangeValue"/>), as the rebuilt one did.
+    /// </summary>
+    private void ShowPosition()
+    {
+        var position = Player.Position;
+        var duration = Player.Duration;
+        if (_elapsed.Current is { } elapsed) elapsed.Content = FormatTime(position, duration);
+        if (_scrubber.Current is { } scrubber) scrubber.Value = position.TotalSeconds;
     }
 
     protected internal override void OnUnmount()
@@ -167,6 +189,8 @@ public sealed class VideoPlayer : Component
         _fade.Cancel();
         _playingWatch?.Dispose();
         _playingWatch = null;
+        _positionWatch?.Dispose();
+        _positionWatch = null;
         base.OnUnmount();
     }
 
@@ -247,8 +271,8 @@ public sealed class VideoPlayer : Component
 
     /// <summary>
     /// How many builds a pending focus waits for the tree to be ready. Generous because
-    /// these are frames, not seconds: the player rebuilds on every position change while
-    /// it plays, so the wait is over in one or two.
+    /// these are builds, not seconds: the player rebuilds for its theme once mounted, as its
+    /// file opens, plays and pauses, and as the bar shows and hides.
     /// </summary>
     private const int FocusAttempts = 60;
     private int _focusAttemptsLeft;
@@ -259,9 +283,9 @@ public sealed class VideoPlayer : Component
     /// <para>A component's first build runs eagerly in its constructor, before anything has
     /// mounted it — and an element that is not in a window yet has no focus manager to ask,
     /// so focusing it there does nothing at all. Retrying on each later build costs nothing
-    /// (the player rebuilds as it plays) and lands the moment the tree is real. It is not
-    /// retried by marking the component dirty, which would just run the same unmounted
-    /// build again in the same breath.</para>
+    /// (the first comes a frame after mounting, when the root hands the player its theme) and
+    /// lands the moment the tree is real. It is not retried by marking the component dirty,
+    /// which would just run the same unmounted build again in the same breath.</para>
     /// </summary>
     protected internal override void OnAfterBuild()
     {
@@ -422,7 +446,9 @@ public sealed class VideoPlayer : Component
     private Element Bar(VideoPlayerTheme theme, MediaPlayer player, bool playing, float opacity)
     {
         var duration = player.Duration;
-        var position = player.Position;
+        // Untracked: a position report rewrites the two elements that show it (ShowPosition)
+        // instead of rebuilding the player.
+        var position = ReactiveScope.Untracked(() => player.Position);
 
         var bar = Flex.Row(gap: 4)
             .Height(theme.BarHeight).Padding(6f)
@@ -452,7 +478,7 @@ public sealed class VideoPlayer : Component
         items.Add(IconButton(theme, $"Forward {jump}", "video-jump-forward", ChevronsGlyph(theme.Foreground, back: false),
             () => player.SeekBy(JumpStep)));
 
-        items.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed"));
+        items.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed").WithRef(_elapsed));
 
         if (duration is { } total && total > TimeSpan.Zero)
         {

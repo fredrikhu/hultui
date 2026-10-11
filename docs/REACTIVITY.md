@@ -200,6 +200,49 @@ A rebuild per frame is still a rebuild per frame: a `ToastHost` handed the app's
 app sixty times a second while it runs. Animate the element instead (`Animate.Opacity`, a
 `Transform`, `SpinnerElement`), or keep the animated part in a small component of its own.
 
+### A value that changes ten times a second
+
+Some signals move on their own, many times a second: `MediaPlayer.Position` while a film
+plays (mpv reports it ten times a second), a download's progress, a clock. A `Build()` that
+reads one rebuilds that often, however little of what it makes depends on it. Until plan 17
+the `VideoPlayer` read the position for its elapsed time and its scrubber, so every report
+rebuilt the whole player: about 22 elements and 41 KB, ten times a second, with the bar
+shown or hidden.
+
+Write the elements that show the value instead, and read it untracked in `Build()`:
+
+```csharp
+private readonly Ref<TextElement> _elapsed = new();
+private Effect? _positionWatch;
+
+protected override void OnMount()
+{
+    base.OnMount();
+    // Runs now and whenever Position changes: rewrites the one label, rebuilds nothing.
+    _positionWatch = new Effect(() =>
+    {
+        if (_elapsed.Current is { } label) label.Content = Format(_player.Position);
+    });
+}
+
+protected override void OnUnmount()
+{
+    _positionWatch?.Dispose();
+    base.OnUnmount();
+}
+
+public override Element Build()
+{
+    // Untracked: the build shows the value it was built with; the effect keeps it current.
+    var position = ReactiveScope.Untracked(() => _player.Position);
+    return Text.New(Format(position)).WithRef(_elapsed);
+}
+```
+
+The `Ref` follows the element on screen across rebuilds, so the effect always writes the live
+one, and the build's own value is never stale because it reads the current one. The player's
+position report now costs 420 B instead of 41 KB (headless, JIT).
+
 ---
 
 ## Component Model
