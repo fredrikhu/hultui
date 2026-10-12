@@ -83,6 +83,14 @@ These propagate to child elements unless overridden.
   in that one's font, as does a character after a joiner that the font has. A sequence split across
   fonts is never shaped into its one glyph: the joiners in 👨‍👩‍👧 are in most text faces, and used to
   break the family into three people.
+- **A character that asks to be an emoji is drawn from the colour emoji face** (Segoe UI Emoji,
+  Apple Color Emoji, fontconfig's emoji face — Noto Color Emoji on most Linux desktops), before
+  the face's own glyph is used, as Unicode's emoji presentation rules say: a character that is an
+  emoji by default (😀 ⭐ ☕), one followed by U+FE0F (❤️ ™️ ©️ #️⃣ 1️⃣), and the first of a skin-tone
+  or joined sequence (☝🏽 👁‍🗨). Everything else stays text: a plain ™ © # 1, ❤ or ↔ without the
+  selector, and any character followed by U+FE0E, which asks for text. Text faces have many emoji
+  in black and white — DejaVu Sans has 😀 and ❤, Segoe UI has # © ™ — and used to win. A machine
+  without a colour emoji face, and a pinned collection (golden images), fall back as before.
 - **Measure contexts that cannot read a font** (test stubs, the headless fixed-metrics context)
   answer with estimates from a measured `"0"`, and say every glyph is there.
 

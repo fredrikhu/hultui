@@ -9,6 +9,8 @@ public sealed class SkiaFontCollection : IFontCollection
     private readonly SKFontManager _fontManager = SKFontManager.Default;
     private readonly Dictionary<FontKey, SkiaResolvedFont> _fontCache = new();
     private readonly Dictionary<FallbackKey, SkiaResolvedFont?> _fallbackCache = new();
+    private readonly Dictionary<FallbackKey, SkiaResolvedFont?> _emojiCache = new();
+    private readonly Dictionary<SKTypeface, bool> _colourFaces = new(ReferenceEqualityComparer.Instance);
 
     // One wrapper per fallback typeface, not per codepoint. FontItemizer splits runs on
     // font identity, so a wrapper per character made every fallback letter its own run —
@@ -49,6 +51,7 @@ public sealed class SkiaFontCollection : IFontCollection
         _registered.Add(typeface);
         _fontCache.Clear();
         _fallbackCache.Clear();
+        _emojiCache.Clear();
     }
 
     /// <summary>Adds a face read from <paramref name="stream"/> (a .ttf or .otf).</summary>
@@ -191,15 +194,75 @@ public sealed class SkiaFontCollection : IFontCollection
         using var style = new SKFontStyle(ToSkWeight(weight), SKFontStyleWidth.Normal, ToSkSlant(slant));
         var typeface = _fontManager.MatchCharacter(null, style, language is null ? null : [language], codepoint);
 
-        SkiaResolvedFont? resolved = null;
-        if (typeface is not null && !_fallbackFonts.TryGetValue(typeface, out resolved))
+        var resolved = typeface is null ? null : FallbackFont(typeface);
+        _fallbackCache[key] = resolved;
+        return resolved;
+    }
+
+    private SkiaResolvedFont FallbackFont(SKTypeface typeface)
+    {
+        if (!_fallbackFonts.TryGetValue(typeface, out var resolved))
         {
             resolved = new SkiaResolvedFont(typeface);
             _fallbackFonts[typeface] = resolved;
         }
-
-        _fallbackCache[key] = resolved;
         return resolved;
+    }
+
+    /// <summary>
+    /// The colour emoji face for a character that asks to be drawn as an emoji. Fontconfig is asked
+    /// for the character in the emoji "language", <c>und-Zsye</c>, which its emoji faces cover, and
+    /// answers Noto Color Emoji where a bare question got DejaVu Sans for 😀 and ❤. DirectWrite does
+    /// not know the tag and answers Segoe UI for # © ™, so then the platform's emoji family is
+    /// asked by name. Only a colour face (COLR, CBDT, sbix, SVG) is taken: on a machine without one,
+    /// the character falls back as any other does. Pinned, there is none.
+    /// </summary>
+    public IResolvedFont? MatchEmoji(int codepoint, FontWeight weight, FontSlant slant)
+    {
+        if (_pinned) return null;
+
+        var key = new FallbackKey(codepoint, weight, slant, Language: null);
+        if (_emojiCache.TryGetValue(key, out var cached))
+            return cached;
+
+        using var style = new SKFontStyle(ToSkWeight(weight), SKFontStyleWidth.Normal, ToSkSlant(slant));
+        var typeface = _fontManager.MatchCharacter(null, style, EmojiLanguage, codepoint);
+        if (typeface is null || !IsColour(typeface))
+        {
+            typeface = null;
+            foreach (var name in EmojiFamilies)
+            {
+                if (_fontManager.MatchFamily(name, style) is { } face && IsColour(face) && face.GetGlyph(codepoint) != 0)
+                {
+                    typeface = face;
+                    break;
+                }
+            }
+        }
+
+        var resolved = typeface is null ? null : FallbackFont(typeface);
+        _emojiCache[key] = resolved;
+        return resolved;
+    }
+
+    private static readonly string[] EmojiLanguage = ["und-Zsye"];
+
+    /// <summary>The colour emoji faces each platform ships, asked for by name.</summary>
+    private static readonly string[] EmojiFamilies =
+        OperatingSystem.IsWindows() ? ["Segoe UI Emoji"]
+        : OperatingSystem.IsMacOS() ? ["Apple Color Emoji"]
+        : ["Noto Color Emoji", "Twemoji", "JoyPixels"];
+
+    /// <summary>Whether a face draws its glyphs in colour: it has a COLR, CBDT, sbix or SVG table.</summary>
+    private bool IsColour(SKTypeface typeface)
+    {
+        if (_colourFaces.TryGetValue(typeface, out bool colour)) return colour;
+        colour = typeface.GetTableSize(Tag('C', 'O', 'L', 'R')) > 0 || typeface.GetTableSize(Tag('C', 'B', 'D', 'T')) > 0
+            || typeface.GetTableSize(Tag('s', 'b', 'i', 'x')) > 0 || typeface.GetTableSize(Tag('S', 'V', 'G', ' ')) > 0;
+        _colourFaces[typeface] = colour;
+        return colour;
+
+        static uint Tag(char a, char b, char c, char d) => (uint)(a << 24 | b << 16 | c << 8 | d);
     }
 
     private static SKFontStyleWeight ToSkWeight(FontWeight weight) => weight switch

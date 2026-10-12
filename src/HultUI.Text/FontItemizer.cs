@@ -21,6 +21,7 @@ internal static class FontItemizer
         IResolvedFont? currentFont = null;
         int runStart = 0;
         bool afterJoiner = false;
+        int emojiFrom = FirstThatMayAskForEmoji(text);
 
         int i = 0;
         while (i < text.Length)
@@ -45,10 +46,20 @@ internal static class FontItemizer
             // that one's font: a sequence split across fonts is never shaped into its one glyph.
             // The joiners in 👨‍👩‍👧 are in most text faces, so each broke the family into three
             // people from the emoji font.
+            // Then a character that asks to be an emoji (EmojiPresentation) goes to the colour emoji
+            // face before the primary face is asked: text faces have many of them in black and white
+            // — DejaVu Sans has 😀 and ❤, Segoe UI has # © ™ — so ❤️ and #️⃣ came out as text, and a
+            // keycap split from its base into two fonts never became one glyph.
             IResolvedFont resolvedFont;
             if (currentFont is not null && (Extends(codepoint, currentFont) || afterJoiner && currentFont.HasGlyph(codepoint)))
             {
                 resolvedFont = currentFont;
+            }
+            else if (i >= emojiFrom && AsksForEmoji(text, i, codepoint)
+                     && fonts.MatchEmoji(codepoint, weight, slant) is { } emoji)
+            {
+                // A primary face that is itself the emoji face keeps one run with its spaces.
+                resolvedFont = ReferenceEquals(emoji.NativeHandle, primaryFont.NativeHandle) ? primaryFont : emoji;
             }
             else if (primaryFont.HasGlyph(codepoint))
             {
@@ -79,6 +90,42 @@ internal static class FontItemizer
     }
 
     private const int ZeroWidthJoiner = 0x200D;
+
+    // Every character of every text itemized is asked whether it wants the emoji face, and text is
+    // mostly letters: a call per character to EmojiPresentation cost itemizing 12 % a character
+    // (ASCII 2.95 → 3.33 ns, box drawing 10.5 → 12.4) and a long document's open 6 % (JIT) and
+    // 11 % (NativeAOT). So the common answers are worked out here, inline.
+
+    /// <summary>
+    /// Where in <paramref name="text"/> the first character that may ask for the emoji face can
+    /// be, or <see cref="int.MaxValue"/> when none can. Below ‼ (U+203C) only a keycap base, © and
+    /// ® can, and only before U+FE0F, which is above it: so a text with nothing from ‼ up asks
+    /// nowhere — Latin, Greek, Cyrillic, Hebrew, Arabic, the Indic scripts, Thai, with their dashes
+    /// and quotes — and in any text, nothing before the character just ahead of the first such
+    /// one does. One vectorized pass.
+    /// </summary>
+    internal static int FirstThatMayAskForEmoji(string text)
+    {
+        // As NeedsBidi: the ushort search, because the char one boxes its bounds.
+        int first = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(text.AsSpan())
+            .IndexOfAnyExceptInRange((ushort)0, (ushort)0x203B);
+        return first < 0 ? int.MaxValue : Math.Max(0, first - 1);
+    }
+
+    /// <summary>
+    /// <see cref="EmojiPresentation.AsksForEmoji"/>, the same answer, with the common ones worked
+    /// out inline: below ‼ only a keycap base, © and ® ask, and only before U+FE0F; from ‼ to U+32FF
+    /// only a pictograph does (and all that ask for emoji by default there are pictographs), one bit
+    /// test; nothing from U+3300 (past ㊙) to U+1F000 (the Mahjong tiles) does.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    internal static bool AsksForEmoji(string text, int i, int codepoint) =>
+        codepoint < 0x203C
+            ? i + 1 < text.Length && text[i + 1] == (char)EmojiPresentation.VariationSelector16
+              && codepoint is '#' or '*' or (>= '0' and <= '9') or 0xA9 or 0xAE
+            : codepoint < 0x3300
+                ? EmojiPresentation.IsSymbolPictographic(codepoint) && EmojiPresentation.AsksForEmoji(text, i, codepoint, 1)
+                : codepoint >= 0x1F000 && EmojiPresentation.AsksForEmoji(text, i, codepoint, codepoint > 0xFFFF ? 2 : 1);
 
     /// <summary>
     /// Whether <paramref name="codepoint"/> only extends the character before it, in
