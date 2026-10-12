@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -27,32 +28,36 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     // the style's metrics, the render context and the UI culture (which picks Han faces). Every
     // rebuild of a parent hands the area its text again, and wrapping a large document again
     // for that was most of a keystroke elsewhere in the app.
+    //
+    // An edit patches the list in place (ComputeLineStarts): the rows of the hard lines it did
+    // not touch are kept — those before it as they are, those after it moved by the characters
+    // it added or took away — and only the lines it touched are wrapped again. _linesVersion
+    // counts the times the list was worked out, and what was cut from it (ShowLines) is of one
+    // version. _lineStarts stays when it is no longer valid, for the next pass to patch.
     private List<int>? _lineStarts;
+    private bool _linesValid;
+    private int _linesVersion;
     private float _lastWrapWidth;
     private ResolvedInheritedStyle _linesStyle;
     private IRenderContext? _linesContext;
     private System.Globalization.CultureInfo? _linesCulture;
 
+    // The rows of the lines an edit touched, worked out before they go into _lineStarts; and
+    // where each user-perceived character of a line being wrapped ends (ClusterEnds). Kept
+    // between passes, unless a pass left either large.
+    private List<int>? _touchedStarts;
+    private List<int>? _clusterEnds;
+
     // The height of a row, for the style metrics it was measured in.
     private float _lineHeight;
     private ResolvedInheritedStyle _lineHeightStyle;
 
-    // Where each hard line too long to fit broke the last time line starts were worked out, by
-    // its text: an edit changes a line or two, and the rest come back from here instead of
-    // being searched again. Kept only for the same width, style, render context and UI culture
-    // (which picks Han faces), and only for the lines there were then.
-    private Dictionary<string, int[]>? _wrapMemo;
-    private float _wrapMemoWidth;
-    private ResolvedInheritedStyle _wrapMemoStyle;
-    private IRenderContext? _wrapMemoContext;
-    private System.Globalization.CultureInfo? _wrapMemoCulture;
-    private readonly List<int> _breaks = [];
-
     // The width of each hard line by its number, NaN where it was not measured, for the text in
-    // _widthsText. Line starts are worked out again on every edit and every resize, and a line
-    // that fits is the width of it; this keeps that width for each line the edit did not touch —
-    // those before it at the same number, those after it shifted by the lines it added or took
-    // away (CarryLineWidths) — so neither measures a line again. Measured in one style's metrics,
+    // _widthsText. Line starts are worked out again for every line on a resize, and for the lines
+    // an edit touched on an edit, and a line that fits is the width of it; this keeps that width
+    // for each line the edit did not touch — those before it at the same number, those after it
+    // shifted by the lines it added or took away (CarryLineWidths) — so neither measures a line
+    // again; the same comparison says which lines' rows an edit keeps. Measured in one style's metrics,
     // one render context and one UI culture (which picks Han faces); another starts over.
     // 4 bytes a line, where the pipeline's shape cache held each line's whole shaping for this.
     private float[] _lineWidths = [];
@@ -72,13 +77,13 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private int[] _spanReach = [];
     private readonly List<TextSpan> _lineSpans = [];
 
-    // The text of each line drawn last frame, from line _shownFrom on, cut by the line starts in
-    // _shownStarts: a frame that draws the same lines — a caret blink, a selection drag, a wheel
-    // step that moves most of them — draws the same strings instead of cutting each anew.
-    // _shownNext is the other array, which the next frame fills.
+    // The text of each line drawn last frame, from line _shownFrom on, cut by version
+    // _shownVersion of the line starts: a frame that draws the same lines — a caret blink, a
+    // selection drag, a wheel step that moves most of them — draws the same strings instead of
+    // cutting each anew. _shownNext is the other array, which the next frame fills.
     private string?[] _shown = [];
     private string?[] _shownNext = [];
-    private List<int>? _shownStarts;
+    private int _shownVersion;
     private int _shownFrom;
     private int _shownCount;
 
@@ -370,96 +375,308 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
     // ──── Line Wrapping ────
 
-    private void InvalidateLines() => _lineStarts = null;
+    private void InvalidateLines() => _linesValid = false;
+
+    /// <summary>How many times the line starts were worked out, for the tests that hold the
+    /// area to working them out only when something that moves a break changed.</summary>
+    internal int LineStartPasses => _linesVersion;
 
     /// <summary>
     /// Computes line starts using word wrapping for the given width.
     /// Each entry is the character index where a wrapped line begins.
+    /// <para>The list is the area's own, patched in place when the text changes: read it
+    /// before the next edit, or copy it.</para>
     /// </summary>
     internal List<int> GetLineStarts(float wrapWidth, ResolvedInheritedStyle style)
     {
         var culture = System.Globalization.CultureInfo.CurrentUICulture;
-        if (_lineStarts is not null && Math.Abs(_lastWrapWidth - wrapWidth) < 0.5f
+        if (_linesValid && Math.Abs(_lastWrapWidth - wrapWidth) < 0.5f
             && ReferenceEquals(_linesContext, _renderCtx) && ReferenceEquals(_linesCulture, culture)
             && StyleResolver.SameMetrics(_linesStyle, style))
-            return _lineStarts;
+            return _lineStarts!;
 
+        var starts = ComputeLineStarts(wrapWidth, style, culture);
+        _linesValid = true;
+        _linesVersion++;
         _lastWrapWidth = wrapWidth;
         _linesStyle = style;
         _linesContext = _renderCtx;
         _linesCulture = culture;
-        _lineStarts = ComputeLineStarts(wrapWidth, style);
-        return _lineStarts;
-    }
-
-    private List<int> ComputeLineStarts(float wrapWidth, ResolvedInheritedStyle style)
-    {
-        var culture = System.Globalization.CultureInfo.CurrentUICulture;
-        CarryLineWidths(style, culture);
-
-        var starts = new List<int> { 0 };
-        if (string.IsNullOrEmpty(_text))
-            return starts;
-
-        // A guess at a character's width, for where to start looking for each break; the
-        // measurements correct it as they go (see FindLineBreak).
-        float charWidth = style.FontSize * 0.55f;
-        var clusterEnds = new List<int>();
-
-        // The long lines' breaks from the last time, if they were found the same way.
-        var previous = _wrapMemo is not null && _wrapMemoWidth == wrapWidth && _wrapMemoStyle.Equals(style)
-            && ReferenceEquals(_wrapMemoContext, _renderCtx) && ReferenceEquals(_wrapMemoCulture, culture)
-                ? _wrapMemo
-                : null;
-        var remembered = previous?.GetAlternateLookup<ReadOnlySpan<char>>();
-        Dictionary<string, int[]>? memo = null;
-
-        int pos = 0;
-        for (int hardLine = 0; pos < _text.Length; hardLine++)
-        {
-            // Find the end of the current hard line (up to next \n or end)
-            int hardEnd = _text.IndexOf('\n', pos);
-            if (hardEnd < 0) hardEnd = _text.Length;
-
-            // Wrap the segment [pos..hardEnd) within wrapWidth. A line that fits is one
-            // width, kept for the next time (_lineWidths), and only one that does not is
-            // cut into clusters and searched, unless its text was searched last time.
-            if (!FitsWhole(hardLine, pos, hardEnd, wrapWidth, style, ref charWidth))
-            {
-                var line = _text.AsSpan(pos, hardEnd - pos);
-                memo ??= new Dictionary<string, int[]>(StringComparer.Ordinal);
-                if (remembered is { } lookup && lookup.TryGetValue(line, out var key, out var breaks))
-                    memo.TryAdd(key, breaks);
-                else
-                    memo.TryAdd(new string(line), breaks = WrapLine(pos, hardEnd, wrapWidth, style, clusterEnds, ref charWidth));
-                foreach (int b in breaks)
-                    starts.Add(pos + b);
-            }
-
-            // Move past the \n
-            pos = hardEnd + 1;
-            if (pos <= _text.Length)
-                starts.Add(pos);
-        }
-
-        _wrapMemo = memo;
-        _wrapMemoWidth = wrapWidth;
-        _wrapMemoStyle = style;
-        _wrapMemoContext = _renderCtx;
-        _wrapMemoCulture = culture;
-
-        // If text ends with \n, we already added the final empty line above.
-        // If text doesn't end with \n, the last line is already covered.
         return starts;
     }
 
-    // Where [start..hardEnd), too long to fit whole, breaks into lines: each wrapped line's
-    // start after the first, relative to start.
-    private int[] WrapLine(int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
-        List<int> clusterEnds, ref float charWidth)
+    /// <summary>
+    /// Works the line starts out for the text now, in place in <see cref="_lineStarts"/>.
+    /// Where the list there is was found at this very width, only the hard lines the edit
+    /// touched are wrapped again: the rows of those before it are kept as they are, and those
+    /// of the lines after it are moved by the characters the edit added or took away.
+    /// <see cref="CarryLineWidths"/> says which lines those are, and keeps none when the
+    /// style's metrics, the render context or the UI culture changed. A line's breaks depend
+    /// on nothing but its own text, the width and those three (see WrapLines for why that
+    /// holds), so the list is the one wrapping every line would give. A new width wraps every
+    /// line, still measuring only those whose width is not kept.
+    /// <para>A new text that differs from the last at both ends — a response sent again with a
+    /// time at its top and its bottom, a file read again — touches every line between, most of
+    /// them the same as before. Where the lines replaced are many, a wrapped line among them is
+    /// found again by its text (<see cref="ReplacedLines"/>), and its rows are moved instead of
+    /// searched: wrapping a 20,000-line log again took 91 ms where its old breaks take ~6.</para>
+    /// </summary>
+    private List<int> ComputeLineStarts(float wrapWidth, ResolvedInheritedStyle style,
+        System.Globalization.CultureInfo culture)
     {
-        var ends = ClusterEnds(start, hardEnd, clusterEnds);
-        _breaks.Clear();
+        var starts = _lineStarts ??= [];
+        bool sameWidth = starts.Count > 0 && _lastWrapWidth == wrapWidth;
+        string? oldText = _widthsText;
+        int oldLength = oldText?.Length ?? 0;
+        var kept = CarryLineWidths(style, culture);
+
+        // The rows of the lines before the edit are the entries before the first line it
+        // touched, and those of the lines after it the entries from the first of them on: a
+        // hard line's own start is one of its rows, and its others are inside it.
+        int count = starts.Count;
+        int front = 0, from = 0, back = 0, head = 0, tail = count;
+        if (sameWidth)
+        {
+            (front, from, back) = (kept.Front, kept.FrontEnd, kept.Back);
+            head = LowerBound(starts, kept.FrontEnd);
+            if (back > 0) tail = LowerBound(starts, kept.OldBackStart);
+        }
+
+        // Many rows replaced: their wrapped lines, by their text, for the lines that replace
+        // them to find. An edit typed replaces a row or a few, and searches them.
+        bool lookUp = sameWidth && kept.Same && tail - head >= ReplacedLines.ManyRows && oldText is not null;
+        if (lookUp)
+            (_replaced ??= new()).Begin(starts, head, tail, oldText!);
+
+        if (tail == count && !lookUp)
+        {
+            // Nothing after the edit: the lines it touched go on the end (every line, when
+            // nothing is kept).
+            CollectionsMarshal.SetCount(starts, head);
+            if (head == 0 && starts.Capacity < kept.Count) starts.Capacity = kept.Count;
+            WrapLines(starts, front, from, kept.Count - back, wrapWidth, style);
+        }
+        else
+        {
+            var touched = _touchedStarts ??= [];
+            touched.Clear();
+            try
+            {
+                WrapLines(touched, front, from, kept.Count - back, wrapWidth, style);
+            }
+            finally
+            {
+                _replaced?.End();
+            }
+            Splice(starts, head, tail, touched, _text.Length - oldLength);
+            if (touched.Capacity > 4096) _touchedStarts = null;
+        }
+
+        // A document much shorter than the last does not keep the last one's room.
+        if (starts.Capacity > 4 * starts.Count + 1024)
+            starts.Capacity = starts.Count + starts.Count / 4 + 16;
+        return starts;
+    }
+
+    // Appends the rows of hard lines [line..endLine) to `into`, the first of them starting at
+    // `pos`: each line's start, then where it breaks if it does not fit whole.
+    private void WrapLines(List<int> into, int line, int pos, int endLine, float wrapWidth,
+        ResolvedInheritedStyle style)
+    {
+        for (; line < endLine; line++)
+        {
+            into.Add(pos);
+            int hardEnd = _text.IndexOf('\n', pos);
+            if (hardEnd < 0) hardEnd = _text.Length;
+
+            // A guess at a character's width, for where to start looking for each break; the
+            // line's own measurements correct it as they go (see FindLineBreak). The same guess
+            // for every line: the search is the longest run that fits only while a longer
+            // prefix never measures narrower, which shaping does not promise (Arabic joining
+            // forms, kerning), and where it is not, where the search starts can move a break.
+            // Started from the lines above, a line wrapped again after an edit could break
+            // where the same line wrapped with the rest of the text does not.
+            float charWidth = style.FontSize * 0.55f;
+
+            // A line that fits is one width, kept for the next time (_lineWidths), and only one
+            // that does not is cut into clusters and searched, unless it was wrapped before.
+            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, ref charWidth)
+                && _replaced?.TryMove(_text, pos, hardEnd, into) != true)
+                WrapLine(into, pos, hardEnd, wrapWidth, style, ref charWidth);
+            pos = hardEnd + 1;
+        }
+        if (_clusterEnds is { Capacity: > 4096 }) _clusterEnds = null;
+    }
+
+    // `starts` with entries [head..tail) replaced by `touched` and the entries from tail on moved
+    // by `shift` characters, in place.
+    private static void Splice(List<int> starts, int head, int tail, List<int> touched, int shift)
+    {
+        int count = starts.Count, after = count - tail, newCount = head + touched.Count + after;
+        if (newCount > count)
+        {
+            starts.EnsureCapacity(newCount);
+            CollectionsMarshal.SetCount(starts, newCount);
+        }
+        var all = CollectionsMarshal.AsSpan(starts);
+        all.Slice(tail, after).CopyTo(all.Slice(head + touched.Count));   // overlapping is fine
+        if (newCount < count)
+            CollectionsMarshal.SetCount(starts, newCount);
+        all = CollectionsMarshal.AsSpan(starts);
+        Shift(all.Slice(head + touched.Count, after), shift);
+        CollectionsMarshal.AsSpan(touched).CopyTo(all.Slice(head));
+    }
+
+    private static void Shift(Span<int> values, int by)
+    {
+        if (by == 0) return;
+        int i = 0;
+        if (System.Numerics.Vector.IsHardwareAccelerated)
+        {
+            var vectors = MemoryMarshal.Cast<int, System.Numerics.Vector<int>>(values);
+            var add = new System.Numerics.Vector<int>(by);
+            for (int v = 0; v < vectors.Length; v++) vectors[v] += add;
+            i = vectors.Length * System.Numerics.Vector<int>.Count;
+        }
+        for (; i < values.Length; i++) values[i] += by;
+    }
+
+    // The first index of the sorted `list` whose entry is at least `value`.
+    private static int LowerBound(List<int> list, int value)
+    {
+        int lo = 0, hi = list.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            if (list[mid] < value) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    private ReplacedLines? _replaced;
+
+    /// <summary>
+    /// The lines among the rows an edit replaced, while the lines that replace them are wrapped
+    /// (between <see cref="Begin"/> and <see cref="End"/>): a line found here, with the same
+    /// text, breaks where it did, and its rows are moved instead of searched. Nothing is copied:
+    /// the old text and the old list are still there to read a line and its rows from. The lines
+    /// that replace them mostly come in the same order — a new first and last line around the
+    /// old ones — so each is first compared with the next old line that wrapped after the last
+    /// one found, and the two after that; only when that keeps failing are the old lines that
+    /// wrapped looked up by the hash of their text, worked out then, once (hashing every line
+    /// of a 20,000-line log first cost 1.5 ms of a 6 ms pass).
+    /// </summary>
+    private sealed class ReplacedLines
+    {
+        // Fewer replaced rows than this are searched again: an edit typed replaces a few.
+        public const int ManyRows = 64;
+
+        // Lines not found in order before the old ones are hashed.
+        private const int MissesBeforeHashing = 8;
+
+        private readonly Dictionary<int, int> _firstRow = [];
+        private bool _hashed;
+        private List<int>? _rows;
+        private string _old = "";
+        private int _head, _tail, _next, _misses;
+
+        /// <summary>The lines of rows [head..tail) of <paramref name="rows"/>, the list found
+        /// for <paramref name="old"/>; the first of those rows starts a line.</summary>
+        public void Begin(List<int> rows, int head, int tail, string old)
+        {
+            (_rows, _old, _head, _tail, _next, _misses, _hashed) = (rows, old, head, tail, head, 0, false);
+        }
+
+        /// <summary>Appends the rows after the first of line [start..end) of
+        /// <paramref name="text"/> to <paramref name="into"/>, if a replaced line had its text;
+        /// false if none did.</summary>
+        public bool TryMove(string text, int start, int end, List<int> into)
+        {
+            if (_rows is not { } rows) return false;
+            var line = text.AsSpan(start, end - start);
+            int row = WrappedFrom(rows, _next);
+            for (int k = 0; k < 3 && row < _tail; k++, row = WrappedFrom(rows, LineAfter(rows, row)))
+                if (Same(rows, row, line))
+                    return Move(rows, row, line.Length, start, into);
+
+            if (++_misses < MissesBeforeHashing) return false;
+            if (!_hashed) Hash(rows);
+            return _firstRow.TryGetValue(string.GetHashCode(line), out row) && Same(rows, row, line)
+                && Move(rows, row, line.Length, start, into);
+        }
+
+        // Whether the old line whose first row is `row` has the text of `line`.
+        private bool Same(List<int> rows, int row, ReadOnlySpan<char> line)
+        {
+            int oldStart = rows[row], oldEnd = oldStart + line.Length;
+            return oldEnd <= _old.Length && (oldEnd == _old.Length || _old[oldEnd] == '\n')
+                && line.SequenceEqual(_old.AsSpan(oldStart, line.Length));
+        }
+
+        private bool Move(List<int> rows, int row, int length, int start, List<int> into)
+        {
+            int oldStart = rows[row], oldEnd = oldStart + length, r = row + 1;
+            for (; r < _tail && rows[r] < oldEnd; r++)
+                into.Add(rows[r] - oldStart + start);
+            _next = r;
+            return true;
+        }
+
+        // The first row of the old line after the one whose first row is `row`.
+        private int LineAfter(List<int> rows, int row)
+        {
+            int next = row + 1;
+            while (next < _tail && _old[rows[next] - 1] != '\n') next++;
+            return next;
+        }
+
+        // The first row of the first old line from the one whose first row is `row` that wrapped:
+        // a line that does not fit is one that wrapped, or one the search finds fits after all,
+        // which it does again.
+        private int WrappedFrom(List<int> rows, int row)
+        {
+            while (row < _tail)
+            {
+                int next = LineAfter(rows, row);
+                if (next - row > 1) return row;
+                row = next;
+            }
+            return _tail;
+        }
+
+        // The old lines that wrapped, by the hash of their text.
+        private void Hash(List<int> rows)
+        {
+            _hashed = true;
+            for (int row = _head; row < _tail;)
+            {
+                int next = LineAfter(rows, row);
+                if (next - row > 1)
+                {
+                    int start = rows[row], end = _old.IndexOf('\n', start);
+                    if (end < 0) end = _old.Length;
+                    _firstRow.TryAdd(string.GetHashCode(_old.AsSpan(start, end - start)), row);
+                }
+                row = next;
+            }
+        }
+
+        public void End()
+        {
+            (_rows, _old) = (null, "");
+            bool large = _firstRow.Count > 1024;
+            _firstRow.Clear();
+            if (large) _firstRow.TrimExcess();
+        }
+    }
+
+    // Where [start..hardEnd), too long to fit whole, breaks into lines: each wrapped line's
+    // start after the first, appended to `into`.
+    private void WrapLine(List<int> into, int start, int hardEnd, float wrapWidth, ResolvedInheritedStyle style,
+        ref float charWidth)
+    {
+        var ends = ClusterEnds(start, hardEnd);
         int segStart = start;
         while (segStart < hardEnd)
         {
@@ -467,10 +684,9 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             int lineEnd = FindLineBreak(segStart, hardEnd, wrapWidth, style, ends, ref charWidth);
             if (lineEnd >= hardEnd)
                 break;
-            _breaks.Add(lineEnd - start);
+            into.Add(lineEnd);
             segStart = lineEnd;
         }
-        return _breaks.ToArray();
     }
 
     // Whether hard line number `line`, [start..end), fits whole. Measured only when it is no
@@ -500,25 +716,37 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// Those keep their widths; the lines between, which the edit touched, are not known. Any
     /// change to what a width depends on — the style's metrics, the render context, the UI
     /// culture — forgets them all.
+    /// <para>Says which lines those were, and where they are in both texts, for the line starts
+    /// (<see cref="ComputeLineStarts"/>).</para>
     /// </summary>
-    private void CarryLineWidths(ResolvedInheritedStyle style, System.Globalization.CultureInfo culture)
+    private KeptLines CarryLineWidths(ResolvedInheritedStyle style, System.Globalization.CultureInfo culture)
     {
         string text = _text;
         string? old = _widthsText;
         int oldCount = _lineWidthCount;
+        int oldLength = old?.Length ?? 0;
         int front = 0, back = 0, count;
+        // Where line `front` starts — the same place in both texts, or just past the end of
+        // either that has no such line — and where the last `back` lines start in the text now
+        // and the old one, past the end when there are none.
+        int frontEnd = 0, backStart = text.Length + 1, oldBackStart = oldLength + 1;
         bool same = old is not null && ReferenceEquals(_widthsContext, _renderCtx)
             && ReferenceEquals(_widthsCulture, culture) && StyleResolver.SameMetrics(_widthsStyle, style);
         if (same && ReferenceEquals(old, text))
+        {
             front = count = oldCount;  // a resize: every line as it was
+            frontEnd = text.Length + 1;
+        }
         else if (same && old is not null)
         {
             int p = old.AsSpan().CommonPrefixLength(text);
             int s = CommonSuffixLength(old, text, Math.Min(old.Length, text.Length) - p);
             int q = text.Length - s;  // the common end is text[q..], old[q + shift..]
             int shift = old.Length - text.Length;
-            front = text.AsSpan(0, p).Count('\n');
-            back = text.AsSpan(q).Count('\n');
+            int beforeP = text.AsSpan(0, p).Count('\n');
+            int afterQ = text.AsSpan(q).Count('\n');
+            front = beforeP;
+            back = afterQ;
             count = front + text.AsSpan(p, q - p).Count('\n') + back + 1;
             // The line that ends at p ends there in both texts (they differ at p, so at most one
             // has a newline there; the other must end).
@@ -531,6 +759,13 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             // wrong must not reach past either text's lines.
             front = Math.Min(front, Math.Min(count, oldCount));
             back = Math.Max(0, Math.Min(back, Math.Min(count, oldCount) - front));
+
+            frontEnd = StartOfLine(text, p, beforeP, front);
+            if (back > 0)
+            {
+                backStart = StartOfLineFromEnd(text, q, afterQ, back);
+                oldBackStart = backStart + shift;
+            }
         }
         else
             count = text.AsSpan().Count('\n') + 1;
@@ -554,6 +789,40 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _widthsStyle = style;
         _widthsContext = _renderCtx;
         _widthsCulture = culture;
+        return new KeptLines(same, front, back, count, frontEnd, backStart, oldBackStart);
+    }
+
+    /// <summary>What <see cref="CarryLineWidths"/> kept: hard lines [0, Front) and the last Back
+    /// of the Count there are now; Same, whether the widths were measured as the text now would
+    /// be (one style's metrics, render context and UI culture). Line Front starts at FrontEnd in both texts (one past the end
+    /// of one that has no such line); the first of the last Back at BackStart in the text now and
+    /// OldBackStart in the old one, each one past its text's end when Back is 0.</summary>
+    private readonly record struct KeptLines(bool Same, int Front, int Back, int Count,
+        int FrontEnd, int BackStart, int OldBackStart);
+
+    // Where hard line `line` starts in a text whose first p chars it shares with the other text,
+    // given that text[..p) holds `newlines` newlines and `line` is at most one more: after the
+    // last of those or one before it, or, one more, after p — where this text has its newline or
+    // ends, so both texts agree.
+    private static int StartOfLine(string text, int p, int newlines, int line)
+    {
+        if (line == 0) return 0;
+        if (line > newlines) return p + 1;
+        int at = p;
+        for (int n = newlines; n >= line; n--)
+            at = text.LastIndexOf('\n', at - 1);
+        return at + 1;
+    }
+
+    // Where the `fromEnd`-th hard line from the end of `text` starts, given that text[q..] holds
+    // `newlines` newlines and `fromEnd` is at most one more: after one of those, or at q.
+    private static int StartOfLineFromEnd(string text, int q, int newlines, int fromEnd)
+    {
+        if (fromEnd > newlines) return q;
+        int at = q - 1;
+        for (int n = newlines - fromEnd + 1; n > 0; n--)
+            at = text.IndexOf('\n', at + 1);
+        return at + 1;
     }
 
     // How many chars a and b end with alike, at most max: whole blocks compared at once, then
@@ -576,7 +845,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// one cluster (the joiners, marks, extenders and surrogates are all outside), so most
     /// lines skip the walk.
     /// </summary>
-    private List<int>? ClusterEnds(int start, int end, List<int> into)
+    private List<int>? ClusterEnds(int start, int end)
     {
         // The common answer — nothing above U+02FF — comes from a vectorized scan, and the
         // char-by-char test only runs from the first char past it.
@@ -589,6 +858,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         while (i < end && StandsAlone(_text[i])) i++;
         if (i == end) return null;
 
+        var into = _clusterEnds ??= [];
         into.Clear();
         for (i = start; i < end;)
         {
@@ -1666,12 +1936,12 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     }
 
     // Fills _shown with the text of visual lines [first..last] (null for an empty one): last
-    // frame's string for each line it showed, if it was cut by the same line starts — a new list
-    // whenever the text or the wrap changes — and a new one for the rest.
+    // frame's string for each line it showed, if it was cut by the same line starts — a new
+    // version whenever the text or the wrap changes — and a new one for the rest.
     private void ShowLines(List<int> starts, int first, int last)
     {
         int keptFrom = 0, keptCount = 0;
-        if (ReferenceEquals(_shownStarts, starts))
+        if (_shownVersion == _linesVersion)
             (keptFrom, keptCount) = (_shownFrom, _shownCount);
         int count = Math.Max(0, last - first + 1);
         if (_shownNext.Length < count)
@@ -1685,16 +1955,16 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         }
         (_shown, _shownNext) = (_shownNext, _shown);
         Array.Clear(_shownNext);  // last frame's lines: the new array keeps those still shown
-        (_shownStarts, _shownFrom, _shownCount) = (starts, first, count);
+        (_shownVersion, _shownFrom, _shownCount) = (_linesVersion, first, count);
     }
 
     // The text of [lineStart..lineEnd): the shown string of visual line `line` when that is the
     // line on screen, cut anew otherwise.
     private string LineText(int line, int lineStart, int lineEnd)
     {
-        if (line >= _shownFrom && line < _shownFrom + _shownCount && ReferenceEquals(_shownStarts, _lineStarts)
+        if (line >= _shownFrom && line < _shownFrom + _shownCount && _shownVersion == _linesVersion && _linesValid
             && _shown[line - _shownFrom] is { } shown && shown.Length == lineEnd - lineStart
-            && _shownStarts![line] == lineStart)
+            && _lineStarts![line] == lineStart)
             return shown;
         return _text[lineStart..lineEnd];
     }

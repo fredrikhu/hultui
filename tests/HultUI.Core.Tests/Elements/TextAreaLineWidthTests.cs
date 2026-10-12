@@ -6,6 +6,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -295,5 +296,199 @@ public class TextAreaLineWidthTests
         }
         // An edit touches a line or three: far fewer than measuring all of them each time.
         Assert.True(measured < 600 * 6, $"{measured} lines measured over 600 edits");
+    }
+
+    // Lines of 20 to 40 words: each wraps to a few rows at 260 px.
+    private static string WideLines(Random rng, int count)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            if (i > 0) sb.Append('\n');
+            int words = rng.Next(20, 40);
+            for (int w = 0; w < words; w++)
+                sb.Append(w > 0 ? " " : "").Append((char)('a' + rng.Next(26)), rng.Next(1, 7));
+        }
+        return sb.ToString();
+    }
+
+    // Every string the area measured, whole lines and the prefixes its line-break search tries.
+    private sealed class Probing : NullRenderContext, IRenderContext
+    {
+        public readonly List<string> Measured = [];
+
+        public override Size MeasureText(string text, ResolvedInheritedStyle style)
+        {
+            Measured.Add(text);
+            return new(Counting.Width(text, style), style.FontSize);
+        }
+
+        public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
+        {
+            Measured.Add(text.ToString());
+            return Counting.Width(text, style);
+        }
+    }
+
+    /// <summary>
+    /// An edit wraps again only the hard lines it touched: every string measured after it is a
+    /// piece of one of those lines. The rows of the others are kept — those before it as they
+    /// were, those after it moved by what the edit added or took away — and the list is still
+    /// the one wrapping every line gives.
+    /// </summary>
+    [Fact]
+    public void AnEdit_WrapsOnlyTheLinesItTouched()
+    {
+        var ctx = new Probing();
+        var (area, _) = Mount(WideLines(new Random(8), 300), width: 260);
+        area.Render(ctx);
+        float wrapWidth = area.Layout.AbsoluteContentBox.Width;
+        Assert.True(area.GetLineStarts(wrapWidth, area.ResolvedInherited).Count > 3 * 300, "the lines do not wrap");
+        ctx.Measured.Clear();
+
+        int Start(int line) => area.Text.Split('\n').Take(line).Sum(l => l.Length + 1);
+
+        void AssertOnlyLines(int from, int to, string when)
+        {
+            var lines = HardLines(area.Text)[from..to];
+            Assert.True(ctx.Measured.Count > 0, $"{when}: nothing measured");
+            foreach (var measured in ctx.Measured)
+                Assert.True(lines.Any(l => l.Contains(measured, StringComparison.Ordinal)),
+                    $"{when}: measured \"{measured}\", which is no piece of lines {from}..{to - 1}");
+            ctx.Measured.Clear();
+
+            var fresh = TextAreaElement.New(area.Text);
+            typeof(TextAreaElement).GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(fresh, new Probing());
+            Assert.Equal(fresh.GetLineStarts(wrapWidth, area.ResolvedInherited), area.GetLineStarts(wrapWidth, area.ResolvedInherited));
+        }
+
+        Type(area, Start(150) + 7, "typed ");
+        area.Render(ctx);
+        AssertOnlyLines(150, 151, "typing");
+
+        area.CursorPosition = Start(40) + 30;
+        Key(area, KeyCode.Enter);
+        area.Render(ctx);
+        AssertOnlyLines(40, 42, "a line split");
+
+        area.CursorPosition = Start(270);
+        Key(area, KeyCode.Backspace);
+        area.Render(ctx);
+        AssertOnlyLines(269, 270, "two lines joined");
+
+        Type(area, Start(0) + 3, "at the top ");
+        area.Render(ctx);
+        AssertOnlyLines(0, 1, "the first line");
+
+        Type(area, area.Text.Length, " at the end");
+        area.Render(ctx);
+        AssertOnlyLines(HardLines(area.Text).Length - 1, HardLines(area.Text).Length, "the last line");
+
+        Key(area, KeyCode.Z, KeyModifiers.Ctrl);
+        area.Render(ctx);
+        AssertOnlyLines(HardLines(area.Text).Length - 1, HardLines(area.Text).Length, "undo");
+    }
+
+    /// <summary>
+    /// A new text that differs from the last only at its two ends — a response sent again with
+    /// a time at its top and its bottom — touches every line between, but those are the lines
+    /// there were, at other places: their rows are moved, and only the two new lines are
+    /// measured. (Searched again, a 20,000-line log took 91 ms to show again instead of ~6.)
+    /// </summary>
+    [Fact]
+    public void ANewTextThatDiffersAtItsEnds_MeasuresOnlyTheLinesThatAreNew()
+    {
+        var ctx = new Probing();
+        var (area, _) = Mount(WideLines(new Random(12), 300), width: 260);
+        area.Render(ctx);
+        float wrapWidth = area.Layout.AbsoluteContentBox.Width;
+        ctx.Measured.Clear();
+
+        var lines = HardLines(area.Text);
+        lines[0] = "a new first line of words that wraps at this width, being longer than a row";
+        lines[^1] = "and a new last line of words that wraps at this width, longer than a row too";
+        area.Text = string.Join('\n', lines);
+        area.Render(ctx);
+        Assert.NotEmpty(ctx.Measured);
+        foreach (var measured in ctx.Measured)
+            Assert.True(lines[0].Contains(measured, StringComparison.Ordinal) || lines[^1].Contains(measured, StringComparison.Ordinal),
+                $"measured \"{measured}\", which is no piece of the two new lines");
+
+        var fresh = TextAreaElement.New(area.Text);
+        typeof(TextAreaElement).GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(fresh, new Probing());
+        Assert.Equal(fresh.GetLineStarts(wrapWidth, area.ResolvedInherited), area.GetLineStarts(wrapWidth, area.ResolvedInherited));
+    }
+
+    /// <summary>
+    /// The same lines in another order — the halves of the text swapped — are found where they
+    /// went, by their text: only the first few, before the area looks them up by their hashes,
+    /// are measured again.
+    /// </summary>
+    [Fact]
+    public void LinesInAnotherOrder_AreFoundWhereTheyWent()
+    {
+        var ctx = new Probing();
+        var (area, _) = Mount(WideLines(new Random(13), 300), width: 260);
+        area.Render(ctx);
+        float wrapWidth = area.Layout.AbsoluteContentBox.Width;
+        ctx.Measured.Clear();
+
+        var lines = HardLines(area.Text);
+        area.Text = string.Join('\n', lines[150..].Concat(lines[..150]));
+        area.Render(ctx);
+
+        // What wrapping all 300 lines measures, against what the area did.
+        var everything = new Probing();
+        var fresh = TextAreaElement.New(area.Text);
+        typeof(TextAreaElement).GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(fresh, everything);
+        Assert.Equal(fresh.GetLineStarts(wrapWidth, area.ResolvedInherited), area.GetLineStarts(wrapWidth, area.ResolvedInherited));
+        Assert.True(ctx.Measured.Count * 20 < everything.Measured.Count,
+            $"{ctx.Measured.Count} measurements, where wrapping every line takes {everything.Measured.Count}");
+    }
+
+    // Counting's widths, recording nothing.
+    private sealed class Quiet : NullRenderContext, IRenderContext
+    {
+        public override Size MeasureText(string text, ResolvedInheritedStyle style) =>
+            new(Counting.Width(text, style), style.FontSize);
+
+        public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style) => Counting.Width(text, style);
+    }
+
+    /// <summary>
+    /// Working the line starts out after a keystroke costs what the line typed in costs, not what
+    /// the document does: a list of every row and a table of every long line's breaks, made anew
+    /// on every keystroke, grew with the document (2.4 MB a keystroke in a wrapped 20,000-line log).
+    /// </summary>
+    [Fact]
+    public void AKeystrokesLineStarts_AllocateNoMoreInADocumentTwentyTimesLonger()
+    {
+        long PerKeystroke(int lines)
+        {
+            // The same line typed into, in the middle of either document.
+            var ctx = new Quiet();
+            string typedInto = WideLines(new Random(11), 1);
+            var (area, _) = Mount(WideLines(new Random(9), lines / 2) + "\n" + typedInto + "\n" + WideLines(new Random(10), lines / 2),
+                width: 260);
+            area.Render(ctx);
+            float wrapWidth = area.Layout.AbsoluteContentBox.Width;
+            var style = area.ResolvedInherited;
+            int at = area.Text.IndexOf(typedInto, StringComparison.Ordinal) + 5;
+            long least = long.MaxValue;
+            for (int round = 0; round < Allocations.MaxRounds; round++)
+            {
+                Type(area, at, round % 2 == 0 ? "x" : "y");   // the edit itself is not counted
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                area.GetLineStarts(wrapWidth, style);
+                least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+            }
+            return least;
+        }
+
+        long small = PerKeystroke(200), large = PerKeystroke(4_000);
+        Assert.True(large <= small + 64, $"{small} B a keystroke in 200 lines, {large} B in 4,000");
     }
 }

@@ -24,9 +24,9 @@ using Text = HultUI.Core.Builders.Text;
 /// <para>Every rebuild of the area's parent patches it, and the patch hands it its text again.
 /// The Text setter used to forget the line starts even when that text was the one it had, so a
 /// keystroke in Meridian's URL field, which rebuilds the whole app, wrapped the open 19,000-line
-/// response again: 1.4 MB and every line measured, per keystroke. A list kept is the same
-/// <see cref="List{T}"/> instance; one worked out again is a new one, which is what these
-/// compare.</para>
+/// response again: 1.4 MB and every line measured, per keystroke. The area counts the times it
+/// works its line starts out (<see cref="TextAreaElement.LineStartPasses"/>), which is what these
+/// compare: the list is one the area keeps and patches in place either way.</para>
 /// </summary>
 public class TextAreaPatchTests
 {
@@ -38,6 +38,7 @@ public class TextAreaPatchTests
         var area = viewer.Area.Current!;
         var starts = Starts(area);
         Assert.True(starts.Count > Lines + 20, "the document did not wrap: it is no test of wrapped line starts");
+        int passes = area.LineStartPasses;
 
         // An equal string, not the same one: a rebuild that formats its text anew hands over a
         // copy of what the area holds.
@@ -47,7 +48,8 @@ public class TextAreaPatchTests
         session.PumpFrames(2);
 
         Assert.Same(area, viewer.Area.Current);
-        Assert.Same(starts, Starts(area));
+        Starts(area);
+        Assert.Equal(passes, area.LineStartPasses);
     }
 
     [Fact]
@@ -56,7 +58,8 @@ public class TextAreaPatchTests
         using var session = HeadlessSession.Create(500, 400);
         var viewer = Mount(session);
         var area = viewer.Area.Current!;
-        var starts = Starts(area);
+        Starts(area);
+        int passes = area.LineStartPasses;
 
         viewer.Body = "one\ntwo\nthree";
         viewer.Rebuild();
@@ -64,7 +67,7 @@ public class TextAreaPatchTests
 
         Assert.Same(area, viewer.Area.Current);
         Assert.Equal([0, 4, 8], Starts(area));
-        Assert.NotSame(starts, Starts(area));
+        Assert.Equal(passes + 1, area.LineStartPasses);
     }
 
     /// <summary>A colour is paint only: no break moves, so nothing is measured again.</summary>
@@ -74,14 +77,16 @@ public class TextAreaPatchTests
         using var session = HeadlessSession.Create(500, 400);
         var viewer = Mount(session);
         var area = viewer.Area.Current!;
-        var starts = Starts(area);
+        Starts(area);
+        int passes = area.LineStartPasses;
 
         viewer.Ink = new Color(200, 40, 40, 255);
         viewer.Rebuild();
         session.PumpFrames(2);
 
         Assert.Equal(viewer.Ink, area.ResolvedInherited.TextColor);
-        Assert.Same(starts, Starts(area));
+        Starts(area);
+        Assert.Equal(passes, area.LineStartPasses);
     }
 
     /// <summary>
@@ -95,9 +100,10 @@ public class TextAreaPatchTests
         using var session = HeadlessSession.Create(500, 400);
         var viewer = Mount(session);
         var area = viewer.Area.Current!;
-        var starts = Starts(area);
+        int rows = Starts(area).Count;
+        int passes = area.LineStartPasses;
         float small = RowHeight(area);
-        Assert.Equal(starts.Count * small, ContentHeight(area), 0.01f);
+        Assert.Equal(rows * small, ContentHeight(area), 0.01f);
 
         viewer.Size = 24f;
         viewer.Rebuild();
@@ -105,8 +111,8 @@ public class TextAreaPatchTests
 
         Assert.Equal(24f, area.ResolvedInherited.FontSize);
         var wider = Starts(area);
-        Assert.NotSame(starts, wider);
-        Assert.True(wider.Count > starts.Count, $"{starts.Count} rows at 12 px and {wider.Count} at 24 px: it did not wrap again");
+        Assert.True(area.LineStartPasses > passes, "a font size change did not work the line starts out again");
+        Assert.True(wider.Count > rows, $"{rows} rows at 12 px and {wider.Count} at 24 px: it did not wrap again");
         float large = RowHeight(area);
         Assert.True(large > small * 1.5f, $"a 24 px row measures {large} against {small} at 12 px");
         Assert.Equal(wider.Count * large, ContentHeight(area), 0.01f);
@@ -120,13 +126,14 @@ public class TextAreaPatchTests
         using var session = HeadlessSession.Create(500, 400);
         var viewer = Mount(session);
         var area = viewer.Area.Current!;
-        var starts = Starts(area);
+        var starts = Starts(area).ToList();
+        int passes = area.LineStartPasses;
 
         var field = typeof(TextAreaElement).GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!;
         field.SetValue(area, new RecordingRenderContext((IRenderContext)field.GetValue(area)!));
 
         var again = Starts(area);
-        Assert.NotSame(starts, again);
+        Assert.Equal(passes + 1, area.LineStartPasses);
         Assert.Equal(starts, again);   // the wrapper measures as the context it wraps
     }
 
@@ -138,13 +145,15 @@ public class TextAreaPatchTests
         using var session = HeadlessSession.Create(500, 400);
         var viewer = Mount(session);
         var area = viewer.Area.Current!;
-        var starts = Starts(area);
+        Starts(area);
+        int passes = area.LineStartPasses;
 
         var was = CultureInfo.CurrentUICulture;
         try
         {
             CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ja-JP");
-            Assert.NotSame(starts, Starts(area));
+            Starts(area);
+            Assert.Equal(passes + 1, area.LineStartPasses);
         }
         finally
         {
@@ -158,13 +167,16 @@ public class TextAreaPatchTests
         using var session = HeadlessSession.Create(500, 400);
         var viewer = Mount(session);
         var area = viewer.Area.Current!;
-        var starts = Starts(area);
+        Starts(area);
+        int passes = area.LineStartPasses;
 
         area.Text = new StringBuilder(area.Text).ToString();
-        Assert.Same(starts, Starts(area));
+        Starts(area);
+        Assert.Equal(passes, area.LineStartPasses);
 
         area.Text += "\nmore";
-        Assert.NotSame(starts, Starts(area));
+        Starts(area);
+        Assert.Equal(passes + 1, area.LineStartPasses);
     }
 
     // ── Harness ──────────────────────────────────────────────────────────
