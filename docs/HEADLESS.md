@@ -73,6 +73,14 @@ session.RunLoop(() => done, eventEvery: TimeSpan.FromMilliseconds(1),
 Assert.True(rebuilds <= frames + 1);             // a tween's writes: once per frame drawn
 ```
 
+An idle loop waits for its next deadline — an animation's next step, a delay that ends, a
+coalesced accessibility refresh — and, owning none, for an event or a wake: with no event
+source nothing can arrive, so that wait runs to just past `limit`, the condition is asked once
+more, and the run throws if it still does not hold. A condition that waits for something only
+time brings (a toast going) therefore needs that something to be a deadline — a delayed tween,
+as a timer is — and not a value a pass would happen to notice. Work queued by `AsyncLoader`
+wakes the loop, as a real producer's post does.
+
 A run past `limit` (default 60 s of virtual time) throws `TimeoutException`. Two window
 settings shape it: `window.RefreshRate = 120` paces it as on a 120 Hz display (0, the
 default, is taken as 60), and `window.Minimized = true` stands in for the OS minimizing the
