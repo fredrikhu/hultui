@@ -1,7 +1,9 @@
+using System.Reflection;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Media;
 using HultUI.Media.Testing;
 
@@ -12,8 +14,8 @@ static partial class Scenarios
     /// <summary>
     /// Reel's and Aperture's player, the <see cref="VideoPlayer"/> overlay, on a fake backend in
     /// <c>Application.Run</c>'s own loop (<c>HeadlessSession.RunLoop</c>, on the virtual clock):
-    /// what a playing film costs between the frames that show it. Both rows report how often the
-    /// player was built again.
+    /// what a playing film costs between the frames that show it, and the pointer running along
+    /// its scrubber. Each row reports how often the player was built again.
     /// </summary>
     private static IEnumerable<Scenario> MediaScenarios()
     {
@@ -100,6 +102,44 @@ static partial class Scenarios
                         : brightest < 0.99f ? $"the bar came back only to {brightest:0.00}"
                         : bar.Opacity != 0f ? $"the bar went at {bar.Opacity:0.00}, not 0"
                         : null,
+                };
+            }) { Width = 640, Height = 360 };
+
+        yield return new Scenario("media/scrubber hover, 1 kHz mouse, real loop",
+            "The pointer runs along a playing VideoPlayer's scrubber, moving every millisecond as a 1,000 Hz mouse does, and the player previews the time under it: Application.Run's own loop on the virtual clock for 10 frames, then one more (all under build); reports the player's builds per frame drawn",
+            ctx =>
+            {
+                var rig = new PlayerRig(ctx, autoHide: false);
+                // The time the player previews (what its Build reads), for the check.
+                var previewAt = (Signal<double?>)typeof(VideoPlayer)
+                    .GetField("_previewAt", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rig.Video)!;
+                int builds = 0, drawn = 0;
+                double expected = 0;
+                return new Op
+                {
+                    Run = step =>
+                    {
+                        var seek = (SliderElement)ctx.Window.FindByAutomationId("video-seek")!.Element;
+                        var track = seek.WindowContentBox;
+                        float y = track.Y + track.Height / 2;
+                        float x = step % 2 == 0 ? track.X + 40 : track.X + track.Width - 40;
+                        float dx = step % 2 == 0 ? 0.5f : -0.5f;
+                        int b0 = rig.Video.Builds, f0 = rig.Frames;
+                        Action move = () => { x += dx; ctx.Window.MoveMouse(x, y); };
+                        ctx.Session.RunLoop(() => rig.Frames - f0 >= 10, eventEvery: TimeSpan.FromMilliseconds(1),
+                            onEvent: () => HultUI.Application.InvokeOnMainThread(move));
+                        builds = rig.Video.Builds - b0;
+                        drawn = rig.Frames - f0;
+                        // The frame the last move is shown in.
+                        ctx.Pump();
+                        float travel = track.Width - 2 * seek.ThumbRadius;
+                        expected = seek.Minimum + Math.Clamp((x - track.X - seek.ThumbRadius) / travel, 0, 1) * (seek.Maximum - seek.Minimum);
+                    },
+                    Frames = 0,
+                    Figure = () => builds / (double)Math.Max(1, drawn),
+                    FigureUnit = "builds/frame",
+                    Check = _ => previewAt.Peek() is { } at && Math.Abs(at - expected) < 0.01 ? null
+                        : $"the player previews {previewAt.Peek():0.00} s, not {expected:0.00} s",
                 };
             }) { Width = 640, Height = 360 };
     }
