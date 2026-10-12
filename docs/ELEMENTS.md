@@ -1160,7 +1160,12 @@ component always shows current data with no reference tricks. A row with a `Key`
 patched instead of replaced, which is what keeps focus, a caret or a scroll offset alive
 inside it; key rows that hold state. Rows are force-sized to their height and
 `FlexShrink(0)`, so a template that wants a different height must say so through
-`RowHeights`.
+`RowHeights`. A row inherits text style from the list like any other child: a `.FontSize()`,
+`.TextColor()` or `.Cursor()` set above the list reaches every row that does not set its own.
+(Until 2026-10-12 a row from the one-argument template was resolved under the theme's
+defaults while it was made, and the next style pass resolved it again under the list,
+which changed its font size and laid out every box and icon of every row a second time:
+Junction's Branches walk laid out 255 elements a key, now 34.)
 
 **Rows that show only their item.** Making every visible row again on every rebuild is
 what lets a row show anything, and it is most of what a key walk costs: in a list whose

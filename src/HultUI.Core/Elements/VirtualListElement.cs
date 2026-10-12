@@ -525,14 +525,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             var child = Children[i];
             if ((child.DirtyFlags & DirtyFlags.Style) != 0)
             {
-                // A kept row is resolved again by the style pass, under this list; a new one
-                // beside it is resolved the same way here, or the two could inherit differently.
-                if (_itemRowTemplate is not null)
-                    StyleResolver.ResolveUnder(child, ResolvedInherited, _activeTheme);
-                else if (_activeTheme is not null)
-                    StyleResolver.Resolve(child, _activeTheme);
-                else
-                    StyleResolver.Resolve(child);
+                // Under this list, as the style pass resolves a row whenever it next passes
+                // through, and as it resolves any other child. Resolved under the theme's
+                // defaults instead, a row inherited nothing set above the list, and the next
+                // style pass changed its font size (the theme's 16 px to the 12–13 px apps set
+                // above their lists) and marked every box and icon of every row for layout.
+                StyleResolver.ResolveUnder(child, ResolvedInherited, _activeTheme);
             }
 
             // Children[0] is the spacer; item k sits at Children[1 + k].
