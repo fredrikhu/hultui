@@ -81,12 +81,15 @@ public sealed class ToastHost
         Severity = severity;
         Action = action;
 
-        // A replacement while one is up does not blink: it keeps the opacity it has.
-        if (!wasShowing)
+        // A replacement while one is up does not blink: it goes on to whole from the level it
+        // has, at the fade-in's pace. It used to keep that level, so one that came while the
+        // first was fading in or out stayed half drawn for its whole hold (the fade it met was
+        // cancelled above and nothing raised it again).
+        if (!wasShowing) _opacity = 0f;
+        if (_opacity < 1f)
         {
-            _opacity = 0f;
-            _fade = Animate.Value(0f, 1f, _fadeStep)
-                .Duration(FadeInSeconds).Ease(Easing.EaseOutQuad).Start();
+            _fade = Animate.Value(_opacity, 1f, _fadeStep)
+                .Duration(FadeInSeconds * (1f - _opacity)).Ease(Easing.EaseOutQuad).Start();
         }
 
         float hold = seconds ?? (action is null ? Seconds : ActionSeconds);

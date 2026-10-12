@@ -259,6 +259,90 @@ public class ToastTests
         Assert.Equal(AccessibilityRole.Alert, announced.Source?.Role);
     }
 
+    // ── A second Flash in the middle of a fade (plan 17, round 3, step 17) ──
+
+    /// <summary>A second Flash cancelled the fade it met and kept its level, so a replacement
+    /// that came while the first was fading in or out stayed half drawn for its whole hold, then
+    /// faded out from there. It goes on from that level to whole (no blink), holds there for its
+    /// own time, and fades out like any toast — on the toast on screen, not only the level.</summary>
+    [Theory]
+    [InlineData(false)]   // while the first fades in
+    [InlineData(true)]    // while the first fades out
+    public void ASecondFlash_MidFade_IsWholeForItsHold_ThenFadesOut(bool whileFadingOut)
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        page.Toasts.Flash("First");
+        session.PumpFrame();
+        if (whileFadingOut)
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(200));
+            Assert.Equal(1f, page.Toasts.Opacity);
+            session.PumpFrame(TimeSpan.FromMilliseconds(1400));
+            session.PumpFrame(TimeSpan.FromMilliseconds(200));    // the hold ran out, the fade began
+            session.PumpFrame(TimeSpan.FromMilliseconds(100));    // mid-fade
+        }
+        else session.PumpFrame();                                 // mid-fade in
+        float level = page.Toasts.Opacity;
+        Assert.InRange(level, 0.05f, 0.95f);
+
+        page.Toasts.Flash("Second");
+        session.PumpFrame();
+        Assert.Null(session.Window.FindByRole(AccessibilityRole.Alert, "First"));
+        Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Alert, "Second"));
+        Assert.True(page.Shown()!.Opacity >= level, $"dipped from {level} to {page.Shown()!.Opacity}");
+
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        Assert.Equal(1f, page.Toasts.Opacity);
+        Assert.Equal(1f, page.Shown()!.Opacity);
+        session.PumpFrame(TimeSpan.FromMilliseconds(1300));   // ≈1.5 s into its 1.7 s hold
+        Assert.True(page.Toasts.IsShowing);
+        Assert.Equal(1f, page.Shown()!.Opacity);
+
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));    // its hold ran out, the fade began
+        session.PumpFrame(TimeSpan.FromMilliseconds(90));     // mid-fade
+        Assert.True(page.Toasts.IsShowing);
+        Assert.InRange(page.Shown()!.Opacity, 0.01f, 0.99f);
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));    // gone
+        session.PumpFrame();
+        Assert.False(page.Toasts.IsShowing);
+        Assert.Null(session.Window.FindByRole(AccessibilityRole.Alert, "Second"));
+    }
+
+    /// <summary>The same in the real loop, frame by frame: from the level the second Flash met
+    /// in the first one's fade out, the toast on screen rises to whole without a dip, is drawn
+    /// whole until its hold ends, then falls to nothing; the owner rebuilds only when it changes
+    /// and when it goes.</summary>
+    [Fact]
+    public void ASecondFlash_WhileTheFirstFadesOut_RisesToWhole_ThenFadesOut_FrameByFrame()
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        page.Toasts.Flash("First");
+        session.RunLoop(() => page.Toasts.Opacity == 1f, limit: TimeSpan.FromSeconds(1));
+        session.RunLoop(() => page.Toasts.Opacity < 0.7f, limit: TimeSpan.FromSeconds(3));
+        float level = page.Toasts.Opacity;
+        Assert.InRange(level, 0.05f, 0.7f);
+        int from = page.Drawn.Count, changes = page.Changes;
+
+        page.Toasts.Flash("Second");
+        session.RunLoop(() => !page.Toasts.IsShowing, limit: TimeSpan.FromSeconds(5));
+
+        var drawn = page.Drawn.Skip(from).ToList();
+        string all = $"from {level}: {string.Join(" ", drawn)}";
+        int top = drawn.IndexOf(1f);
+        Assert.True(top >= 1, all);
+        Assert.True(drawn[0] >= level, all);
+        for (int i = 1; i <= top; i++)
+            Assert.True(drawn[i] > drawn[i - 1], $"rising, frame {i}: {all}");
+        int falling = drawn.FindIndex(top, o => o < 1f);
+        Assert.True(drawn.Count - falling >= 8, $"fading out: {all}");
+        for (int i = falling + 1; i < drawn.Count; i++)
+            Assert.True(drawn[i] < drawn[i - 1], $"fading out, frame {i}: {all}");
+        Assert.True(drawn[^1] < 0.01f, all);
+        Assert.Equal(changes + 2, page.Changes);
+    }
+
     private static string Told(TreeDiff diff) => string.Join(" ",
         diff.Added.Select(a => $"+{a.Node.Role}:{a.Node.Name}")
             .Concat(diff.Removed.Select(r => $"-{r.Node.Role}:{r.Node.Name}"))
