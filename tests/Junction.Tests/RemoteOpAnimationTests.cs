@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using HultUI.Core.Animation;
 using HultUI.Core.Elements;
@@ -146,9 +147,9 @@ public class RemoteOpAnimationTests
         Hosted((session, app) =>
         {
             Invoke(app, "BeginRemoteOp", RemoteOp(op));
-            session.PumpFrames(3);
+            Settle(session, app);
             var icon = Button(app, key).Children[0];
-            int builds = app.Builds;
+            int builds = app.Builds, gen = DataGeneration(app);
             var poses = new HashSet<(Transform2D?, float)>();
             long start = session.Time.GetTimestamp();
 
@@ -158,7 +159,8 @@ public class RemoteOpAnimationTests
                 return session.Time.GetElapsedTime(start) >= TimeSpan.FromSeconds(0.5);
             }, limit: TimeSpan.FromSeconds(5));
 
-            Assert.Equal(builds, app.Builds);
+            Assert.True(builds == app.Builds, $"{app.Builds - builds} build(s) in the half second "
+                + $"(the repository's data generation moved by {DataGeneration(app) - gen})");
             Assert.Same(icon, Button(app, key).Children[0]);
             Assert.True(poses.Count >= 25, $"the icon took {poses.Count} poses in 0.5 s");
             Invoke(app, "EndRemoteOp");
@@ -201,12 +203,12 @@ public class RemoteOpAnimationTests
             app.OpenTodos();
             busy.SetValue(app, "Marking all…");
             Invoke(app, "Rerender");
-            session.PumpFrames(3);
+            Settle(session, app);
             // The busy button: the spinner, then its label.
             var label = Descendants(app.Mount()).OfType<TextElement>().First(t => t.Content == "Marking all…");
             var spinner = label.Parent!.Children[0];
             Assert.NotNull(spinner.Transform);
-            int builds = app.Builds;
+            int builds = app.Builds, gen = DataGeneration(app);
             var turns = new HashSet<float>();
             long start = session.Time.GetTimestamp();
 
@@ -216,7 +218,8 @@ public class RemoteOpAnimationTests
                 return session.Time.GetElapsedTime(start) >= TimeSpan.FromSeconds(0.5);
             }, limit: TimeSpan.FromSeconds(5));
 
-            Assert.Equal(builds, app.Builds);
+            Assert.True(builds == app.Builds, $"{app.Builds - builds} build(s) in the half second "
+                + $"(the repository's data generation moved by {DataGeneration(app) - gen})");
             Assert.True(turns.Count >= 25, $"the spinner took {turns.Count} turns in 0.5 s");
 
             busy.SetValue(app, null);
@@ -226,6 +229,36 @@ public class RemoteOpAnimationTests
             Assert.True(phase.IsComplete, "the spinner's phase still runs with no spinner up");
         });
     }
+
+    /// <summary>
+    /// Pumps frames until the window has gone 700 ms of the real clock without a build, so the
+    /// half second these tests measure counts only what the motion does. The repository's watcher
+    /// works on the real clock, not the session's: the app's own git calls as it opens (a
+    /// <c>git status</c> refreshing the index of a fixture copied with new file times, an object
+    /// written) change files under <c>.git</c>, and in 2 of 40 starts measured the watcher took
+    /// one for an outside change, 300 ms later: a new data generation and a reload, 4 builds,
+    /// 35 ms after the point these tests used to start measuring (3 frames after the command).
+    /// A loaded full run moves that point about, and twice it fell inside the half second
+    /// (round 3, steps 14a and 14b: the Push row, passing alone). Gives up after 3 s: a window
+    /// that never goes quiet is what the measurement after it reports.
+    /// </summary>
+    private static void Settle(HeadlessSession session, JunctionApp app)
+    {
+        var quiet = Stopwatch.StartNew();
+        var limit = Stopwatch.StartNew();
+        int builds = app.Builds;
+        while (quiet.ElapsedMilliseconds < 700 && limit.ElapsedMilliseconds < 3000)
+        {
+            session.PumpFrame();
+            Thread.Sleep(5);
+            if (app.Builds != builds) { builds = app.Builds; quiet.Restart(); }
+        }
+    }
+
+    /// <summary>The data generations of the app's repositories, summed: a watcher's reload bumps it.</summary>
+    private static int DataGeneration(JunctionApp app) =>
+        ((Dictionary<string, int>)typeof(JunctionApp).GetField("_dataGen", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!).Values.Sum();
 
     private static void Hosted(Action<HeadlessSession, JunctionApp> body)
     {
