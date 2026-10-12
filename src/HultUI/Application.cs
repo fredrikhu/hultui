@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Components;
 using HultUI.Core.DevTools;
@@ -78,19 +79,37 @@ public sealed class Application : IDisposable
         var app = _current;
         if (app is null) return;
         app._mainThreadQueue.Enqueue(action);
-        app.WakeIfParked();
+        if (FrameLog.On) FrameLog.Post();
+        app.WakeIfParked(WakeSource.Post);
     }
 
     /// <summary>
-    /// Unparks the frame loop after queued work, unless this is the UI thread — which
-    /// cannot be parked while it runs this, and whose wake would only queue a spurious
-    /// event that makes the next idle wait return at once.
+    /// Unparks the frame loop after queued work. Not from the UI thread while the loop runs:
+    /// the loop drains the work in this pass, or, posted after the drain, names it as due now
+    /// before it waits (NextDeadline); a wake would only queue a spurious event. From the UI thread while the loop is parked,
+    /// yes: that is a callback the wait itself dispatched (a WebView2 event, a DispatcherQueue
+    /// item), and the wait, which may have no deadline, would not end for it.
     /// </summary>
-    private void WakeIfParked()
+    private void WakeIfParked(WakeSource source)
     {
-        if (Environment.CurrentManagedThreadId == UIThread.BoundThreadId) return;
+        if (Environment.CurrentManagedThreadId == UIThread.BoundThreadId && !_parked) return;
+        WakeLoop(source);
+    }
+
+    /// <summary>Unparks the frame loop, or makes its next wait return at once. Any thread.</summary>
+    internal void WakeLoop(WakeSource source)
+    {
+        if (FrameLog.On) FrameLog.Wake(source);
         _platform.Wake();
     }
+
+    // Whether the loop is in the platform's wait (RunUntil). UI thread only.
+    private bool _parked;
+
+    // The parked loop's wake for UI-thread work done inside the wait (UIThread.Park), made once.
+    private Action? _wakeFromParked;
+
+    private Action? _wakeForAwait;
 
     public Theme Theme
     {
@@ -273,8 +292,14 @@ public sealed class Application : IDisposable
             throw;
         }
 
+        // Assistive technology switched on or off, or forced, on whichever thread: the windows
+        // read it in their frames (Linux bridges also say so through their action host).
+        AccessibilityClients.ActiveChanged += _onAccessibilityClients = _ => WakeIfParked(WakeSource.A11yClient);
+
         StartupTrace.Mark("application ready");
     }
+
+    private Action<bool>? _onAccessibilityClients;
 
     /// <summary>
     /// Sets the root element of the primary window.
@@ -320,20 +345,41 @@ public sealed class Application : IDisposable
     /// </summary>
     private void RenderLiveResizeFrame(Window window)
     {
-        var platform = window.PlatformWindow;
-        if (platform.ResizePending)
+        // This can run inside the loop's own wait (the modal loop was entered from a message the
+        // wait dispatched), where the frame's own changes would count as work done while parked
+        // and wake the loop (UIThread.Park): an SDL_PushEvent from inside SDL's event watcher, for
+        // nothing, since the end of the drag delivers the window's own events anyway.
+        bool parked = _parked;
+        if (parked)
         {
-            long now = Environment.TickCount64;
-            platform.MakeCurrent();
-            window.OnWindowResized();
-            window.RenderFrame();
-            platform.LastResizeRenderTick = now;
-            platform.ResizePending = false;
+            _parked = false;
+            UIThread.Unpark();
         }
-        else if (window.NeedsRender || !_mainThreadQueue.IsEmpty)
+        try
         {
-            platform.MakeCurrent();
-            window.RenderFrame();
+            var platform = window.PlatformWindow;
+            if (platform.ResizePending)
+            {
+                long now = Environment.TickCount64;
+                platform.MakeCurrent();
+                window.OnWindowResized();
+                window.RenderFrame();
+                platform.LastResizeRenderTick = now;
+                platform.ResizePending = false;
+            }
+            else if (window.NeedsRender || !_mainThreadQueue.IsEmpty)
+            {
+                platform.MakeCurrent();
+                window.RenderFrame(drawClean: !_mainThreadQueue.IsEmpty);
+            }
+        }
+        finally
+        {
+            if (parked)
+            {
+                _parked = true;
+                UIThread.Park(_wakeFromParked!);
+            }
         }
     }
 
@@ -364,8 +410,9 @@ public sealed class Application : IDisposable
     ///
     /// <para>Nothing here waits: an idle frame returns immediately having rendered
     /// nothing, and parking the thread until the next event is the caller's policy.
-    /// <see cref="Run"/> parks for ~16 ms; a host with its own timer or idle handler
-    /// does whatever suits it.</para>
+    /// <see cref="Run"/> parks until the next deadline it owns (an animation's step, a
+    /// coalesced accessibility refresh) or until something wakes it; a host with its own
+    /// timer or idle handler does whatever suits it.</para>
     ///
     /// <para>Dirty tracking is respected, so an idle UI costs a walk and no drawing.
     /// Pass <paramref name="forceRender"/> to render regardless — a host that must
@@ -385,10 +432,24 @@ public sealed class Application : IDisposable
     /// which is how <see cref="Run"/> holds a dirty window back until the display's next
     /// interval; the dirt stays, so the next allowed frame draws it.</param>
     /// <param name="tick">Whether to step animations, by <paramref name="delta"/>.</param>
-    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true)
+    /// <param name="boundFirstStep">Whether a tween's first step is <paramref name="delta"/> but
+    /// at most one display interval, and 0 for one that starts with a delay (<see cref="Run"/>, whose
+    /// waits can be minutes long).</param>
+    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true,
+        bool boundFirstStep = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
 
+        FrameLog.PassStart(this, _platform.TimeProvider);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool rendered = RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
+        FrameLog.PassEnd(rendered, tick, GC.GetAllocatedBytesForCurrentThread() - before);
+        return rendered;
+    }
+
+    private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick, bool boundFirstStep)
+    {
         // Poll and route all native events. A platform asking to quit ends the frame
         // here, before anything touches a tree the platform may already have torn down.
         // The callback is created once: a method group passed as an argument is a new
@@ -407,7 +468,14 @@ public sealed class Application : IDisposable
 
         // Tick animations (marks elements dirty as needed). Run asks for it once per frame
         // it may draw, not once per pass (see RunUntil).
-        if (tick) AnimationManager.Tick((float)delta.TotalSeconds);
+        if (tick)
+        {
+            float seconds = (float)delta.TotalSeconds;
+            if (boundFirstStep)
+                AnimationManager.Tick(seconds, 1f / DisplayHz());
+            else
+                AnimationManager.Tick(seconds);
+        }
 
         // Run any inspector refresh its rate limit deferred, so the panel still
         // catches up after the inspected window goes idle mid-interval.
@@ -459,6 +527,10 @@ public sealed class Application : IDisposable
         // Whether the last step was drawn: a tween is moving on screen, and its next step
         // is due with the next frame.
         bool stepDrawn = false;
+        // Idle waits in a row that asked for nothing (a deadline already due): a third is held
+        // to a millisecond, so a deadline nothing consumes cannot spin the loop.
+        int zeroWaits = 0;
+        _wakeFromParked ??= () => WakeLoop(WakeSource.Parked);
 
         while (IsRunning && done?.Invoke() != true)
         {
@@ -482,7 +554,12 @@ public sealed class Application : IDisposable
             // millisecond, 2.2 in Reel while its bar faded. A step that draws nothing (a pure
             // delay, a minimized window, which is not drawn) puts the next one an interval on,
             // so events arriving in between do not step them either.
-            bool tick = due && (unpaced || now >= nextTickAt - slack);
+            // A tween that has not had its first step takes it with this frame, whatever the
+            // others wait for: a hover transition started while a toast holds is not left
+            // behind the hold's deadline. That step is the time since the last one but at most an
+            // interval (AnimationManager.Tick), so one started after minutes of idle does not jump
+            // to its end, and its first frame is not its start value drawn again.
+            bool tick = due && (unpaced || now >= nextTickAt - slack || AnimationManager.HasFreshTweens);
             var elapsed = TimeSpan.Zero;
             if (tick)
             {
@@ -490,7 +567,7 @@ public sealed class Application : IDisposable
                 lastTick = now;
             }
 
-            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick))
+            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick, boundFirstStep: true))
             {
                 if (tick) stepDrawn = true;
                 // The next deadline follows the schedule, not this render: a frame that
@@ -510,8 +587,18 @@ public sealed class Application : IDisposable
             if (tick)
             {
                 stepDrawn = false;
+                // A step that drew nothing. Tweens that all wait out a delay (a toast's hold, a
+                // tooltip's show delay, a player's auto-hide) are stepped when the first delay
+                // is out, once, where they were stepped every interval of it: 118 steps for a
+                // 2 s toast's 20 frames. A running tween nothing shows (a minimized window's) an
+                // interval on, and not sooner than the 16 ms an idle pass used to take.
                 if (AnimationManager.HasActiveAnimations)
-                    nextTickAt = now + (long)(frequency / DisplayHz());
+                {
+                    float changeIn = AnimationManager.NextChangeIn;
+                    nextTickAt = changeIn > 0f
+                        ? now + (long)Math.Ceiling(Math.Min(changeIn, 86_400f) * frequency)
+                        : now + Math.Max((long)(frequency / DisplayHz()), frequency * IdleStepMs / 1000);
+                }
             }
 
             // Dirty, but too soon: wait out what is left of the interval. An event ends the
@@ -522,16 +609,154 @@ public sealed class Application : IDisposable
             if (AnyWindowNeedsRender() || (stepDrawn && AnimationManager.HasActiveAnimations))
             {
                 long remainingMs = (nextRenderAt - clock.GetTimestamp()) * 1000 / frequency;
-                _platform.WaitForEvents((int)Math.Max(1, remainingMs));
+                Wait(clock, idle: false, IdleDeadline.None, (int)Math.Max(1, remainingMs));
             }
             else
             {
-                // Nothing to draw. An animation that changed nothing visible (a pure
-                // delay, e.g. the tooltip show timer) only needs a step an interval, so
-                // wait instead of busy-spinning until it fires; a post or an event wakes
-                // this.
-                _platform.WaitForEvents(16);
+                // Nothing to draw: wait for the next deadline the loop owns — an animation's next
+                // step, a coalesced accessibility refresh, a throttled resize, the inspector's
+                // refresh, a display-colour poll — or, with none, until an event or a wake. This
+                // waited 16 ms at a time, ~60 passes a second in every idle window, so that
+                // anything set aside for later was looked at again soon enough; whatever is
+                // set aside now names when it is due, and whatever arrives wakes the loop.
+                long at = NextDeadline(nextRenderAt, nextTickAt, out var deadline);
+                int timeoutMs = Timeout.Infinite;
+                if (at != long.MaxValue)
+                {
+                    long ticks = at - clock.GetTimestamp();
+                    // Rounded up: a wait that ends a fraction short of the deadline finds it not
+                    // yet due and has to wait again. In doubles: ticks × 1000 overflows a long
+                    // for a deadline days away.
+                    double ms = Math.Ceiling(ticks * 1000.0 / frequency);
+                    timeoutMs = ticks <= 0 ? 0 : ms >= int.MaxValue - 1 ? int.MaxValue - 1 : (int)ms;
+                    zeroWaits = timeoutMs == 0 ? zeroWaits + 1 : 0;
+                    if (zeroWaits > 2) timeoutMs = 1;
+                }
+                Wait(clock, idle: true, deadline, timeoutMs);
             }
+        }
+        if (FrameLog.On) FrameLog.LoopEnded(this);
+    }
+
+    /// <summary>What an idle pass of the loop took when it parked 16 ms at a time: the shortest
+    /// step of a running tween whose last step drew nothing.</summary>
+    private const int IdleStepMs = 16;
+
+    /// <summary>
+    /// The earliest moment, on the platform's clock, at which the loop owes something while
+    /// nothing needs a frame now, and what it is; <see cref="long.MaxValue"/> and
+    /// <see cref="IdleDeadline.None"/> when it owes nothing until an event or a wake.
+    /// </summary>
+    private long NextDeadline(long nextRenderAt, long nextTickAt, out IdleDeadline deadline)
+    {
+        long at = long.MaxValue;
+        deadline = IdleDeadline.None;
+        // An animation steps with the next frame it may draw: a new tween's first step, or one
+        // after a step that drew nothing, an interval on, or when the first delay is out.
+        if (AnimationManager.HasActiveAnimations)
+            Earliest(ref at, ref deadline,
+                AnimationManager.HasFreshTweens ? nextRenderAt : Math.Max(nextTickAt, nextRenderAt),
+                IdleDeadline.Animation);
+        foreach (var w in _windows)
+            if (w.IsOpen) w.NextDeadline(ref at, ref deadline);
+        if (_inspectorHost?.NextRefreshAt is { } inspector)
+            Earliest(ref at, ref deadline, inspector, IdleDeadline.Inspector);
+        // Work posted on the UI thread after this pass drained the queue — by a frame (a menu's
+        // close callback), by an await its code resumed, by a terminal's resize — is due now: a
+        // post from the UI thread while the loop runs does not wake it.
+        if (!_mainThreadQueue.IsEmpty)
+            Earliest(ref at, ref deadline, _platform.TimeProvider.GetTimestamp(), IdleDeadline.Posted);
+        // A Vulkan window without display-colour events re-reads the display every 100 ms
+        // (SDL3Window.PollDisplayColor): the slider for SDR content brightness sends no message.
+        if (_platform is SdlWindowingPlatform && SDL3Window.NextDisplayColorPoll is { } poll)
+            Earliest(ref at, ref deadline, poll, IdleDeadline.DisplayColor);
+        return at;
+    }
+
+    // ──── A host's own loop (HultUI.WinForms): what Run does between frames, for a pump that is
+    //      a timer in someone else's message loop.
+
+    /// <summary><see cref="RunFrame"/> for a host that waits for the loop's deadlines, which can be
+    /// minutes apart: a new tween's first step is at most one display interval, as in <see cref="Run"/>.</summary>
+    internal bool HostRunFrame(TimeSpan delta, bool forceRender = false) =>
+        RunFrameCore(delta, forceRender, allowRender: true, tick: true, boundFirstStep: true);
+
+    /// <summary>
+    /// How long a host may wait after a frame before its next <see cref="HostRunFrame"/>:
+    /// <paramref name="frameInterval"/> while a window needs a frame or a tween moves, the time to
+    /// the next deadline the loop owns (a delay, a coalesced accessibility refresh, the inspector),
+    /// or null with none — then the platform's <c>Wake</c>, or a change made on the UI thread
+    /// while the host is parked (<see cref="HostPark"/>), says when.
+    /// </summary>
+    internal TimeSpan? HostNextFrameIn(TimeSpan frameInterval)
+    {
+        if (AnyWindowNeedsRender() || AnimationManager.HasFreshTweens) return frameInterval;
+        // Posted on the UI thread after the frame drained the queue (see NextDeadline).
+        if (!_mainThreadQueue.IsEmpty) return TimeSpan.Zero;
+        var clock = _platform.TimeProvider;
+        long frequency = clock.TimestampFrequency;
+        long now = clock.GetTimestamp();
+        long at = long.MaxValue;
+        var deadline = IdleDeadline.None;
+        if (AnimationManager.HasActiveAnimations)
+        {
+            float changeIn = AnimationManager.NextChangeIn;
+            if (changeIn <= 0f) return frameInterval;
+            Earliest(ref at, ref deadline, now + (long)Math.Ceiling(Math.Min(changeIn, 86_400f) * frequency),
+                IdleDeadline.Animation);
+        }
+        foreach (var w in _windows)
+            if (w.IsOpen) w.NextDeadline(ref at, ref deadline);
+        if (_inspectorHost?.NextRefreshAt is { } inspector)
+            Earliest(ref at, ref deadline, inspector, IdleDeadline.Inspector);
+        if (at == long.MaxValue) return null;
+        return TimeSpan.FromSeconds(Math.Max(0, at - now) / (double)frequency);
+    }
+
+    /// <summary>The host waits for its next tick: work posted or done on the UI thread meanwhile
+    /// wakes it through <paramref name="wake"/>, as it ends Run's wait.</summary>
+    internal void HostPark(Action wake)
+    {
+        _parked = true;
+        UIThread.Park(wake);
+    }
+
+    /// <summary>The host is about to run a frame.</summary>
+    internal void HostUnpark()
+    {
+        UIThread.Unpark();
+        _parked = false;
+    }
+
+    internal static void Earliest(ref long at, ref IdleDeadline deadline, long candidate, IdleDeadline kind)
+    {
+        if (candidate >= at) return;
+        at = candidate;
+        deadline = kind;
+    }
+
+    /// <summary>Parks the loop in the platform's wait, timed for <see cref="FrameLog"/>. Work the
+    /// wait itself runs on this thread (a callback a message dispatches) and leaves for the loop
+    /// wakes it (<see cref="UIThread.Park"/>).</summary>
+    private void Wait(TimeProvider clock, bool idle, IdleDeadline deadline, int timeoutMs)
+    {
+        _parked = true;
+        UIThread.Park(_wakeFromParked!);
+        try
+        {
+            if (!FrameLog.On)
+            {
+                _platform.WaitForEvents(timeoutMs);
+                return;
+            }
+            long start = clock.GetTimestamp();
+            _platform.WaitForEvents(timeoutMs);
+            FrameLog.Waited(idle, deadline, timeoutMs, clock.GetTimestamp() - start);
+        }
+        finally
+        {
+            UIThread.Unpark();
+            _parked = false;
         }
     }
 
@@ -582,7 +807,8 @@ public sealed class Application : IDisposable
     {
         var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(
-            new UIThreadSynchronizationContext(_mainThreadQueue, WakeIfParked));
+            new UIThreadSynchronizationContext(_mainThreadQueue,
+                _wakeForAwait ??= () => WakeIfParked(WakeSource.Await)));
         return previous;
     }
 
@@ -640,7 +866,9 @@ public sealed class Application : IDisposable
             // neither timed nor counted as rendered, so a dirty one leaves Run waiting as if
             // idle instead of pacing frames nobody would see: on Vulkan they could not be drawn
             // at all, and the loop retried one every display interval until the restore.
-            if (!force && window.PlatformWindow.IsMinimized)
+            // A frame only accessibility asked for (Window.NeedsDraw false) stops there too: it
+            // builds and tells the tree and draws nothing, so it is not a frame either.
+            if (!force && (window.PlatformWindow.IsMinimized || !window.NeedsDraw))
             {
                 window.RenderFrame();
                 continue;
@@ -651,6 +879,7 @@ public sealed class Application : IDisposable
             window.Performance.BeginFrame();
             window.RenderFrame(evenIfMinimized: force);
             window.Performance.EndFrame();
+            if (FrameLog.On) FrameLog.Frame();
             // The window is created hidden; reveal it only now that its first
             // frame has been presented, so the OS never composites the blank
             // GL surface. No-op after the first frame.
@@ -723,6 +952,9 @@ public sealed class Application : IDisposable
             UIThread.Unbind();
         }
 
+        if (_onAccessibilityClients is not null)
+            AccessibilityClients.ActiveChanged -= _onAccessibilityClients;
+
         foreach (var window in _windows)
             window.Dispose();
         _windows.Clear();
@@ -748,6 +980,7 @@ internal sealed class UIThreadSynchronizationContext : SynchronizationContext
     public override void Post(SendOrPostCallback d, object? state)
     {
         _queue.Enqueue(() => d(state));
+        if (FrameLog.On) FrameLog.Post();
         _wake();
     }
 

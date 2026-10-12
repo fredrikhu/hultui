@@ -4,8 +4,9 @@ namespace HultUI.Media.Testing;
 
 /// <summary>
 /// A scripted backend for tests: no decoder, no threads, no clock. Opening succeeds at
-/// once with the configured duration, size and tracks and publishes a first frame;
-/// <see cref="Advance"/> moves time by hand, publishing the frames that fall due and
+/// once with the configured duration, size and tracks and publishes a first frame (or,
+/// with <see cref="HoldOpening"/>, when the test says so, as mpv loads a file after the
+/// open); <see cref="Advance"/> moves time by hand, publishing the frames that fall due and
 /// ending playback at the duration. Every command is recorded in <see cref="Calls"/>,
 /// and <see cref="Raise"/> injects any event — from any thread, to test marshalling.
 /// </summary>
@@ -38,6 +39,18 @@ public sealed class FakeMediaBackend : IMediaBackend
     public List<MediaTrack> SubtitleTracks { get; } = [];
     /// <summary>Makes the next <see cref="Open"/> fail with this message, then clears itself.</summary>
     public string? FailNextOpenWith { get; set; }
+
+    /// <summary>
+    /// Leaves each <see cref="Open"/> at <see cref="PlaybackState.Opening"/> until
+    /// <see cref="FinishOpening"/>, as mpv does while it loads a file: what an app does once the
+    /// file has loaded (a resume seek, a first report to a server) then happens after the open
+    /// rather than inside it. Until then commands are recorded but, as with mpv, a seek or a
+    /// stop does nothing; the load starts at zero.
+    /// </summary>
+    public bool HoldOpening { get; set; }
+
+    /// <summary>An <see cref="Open"/> held by <see cref="HoldOpening"/> is waiting for <see cref="FinishOpening"/>.</summary>
+    private bool _held;
     /// <summary>
     /// Registered with the sink on <see cref="Attach"/> when set, so a test can drive the
     /// GPU path — the fake still publishes pixel frames, which is what a surface without
@@ -79,6 +92,7 @@ public sealed class FakeMediaBackend : IMediaBackend
         Source = source;
         Position = TimeSpan.Zero;
         _frameIndex = 0;
+        _held = false;
 
         if (FailNextOpenWith is { } message)
         {
@@ -89,6 +103,29 @@ public sealed class FakeMediaBackend : IMediaBackend
         }
 
         SetState(PlaybackState.Opening);
+        if (HoldOpening)
+        {
+            _held = true;
+            return;
+        }
+        Load();
+    }
+
+    /// <summary>
+    /// Loads the file an <see cref="Open"/> left at <see cref="PlaybackState.Opening"/> under
+    /// <see cref="HoldOpening"/>: the position (zero), then everything an unheld open reports.
+    /// Does nothing when no open is waiting.
+    /// </summary>
+    public void FinishOpening()
+    {
+        if (!_held) return;
+        _held = false;
+        Raise(new BackendEvent.PositionChanged(Position));
+        Load();
+    }
+
+    private void Load()
+    {
         Raise(new BackendEvent.DurationChanged(Duration));
         Raise(new BackendEvent.VideoGeometry(VideoWidth, VideoHeight, SampleAspect));
         SelectedAudio = AudioTracks.Count > 0 ? AudioTracks[0].Id : null;
@@ -119,7 +156,7 @@ public sealed class FakeMediaBackend : IMediaBackend
     public void Stop()
     {
         Calls.Add("Stop");
-        if (State is PlaybackState.NoMedia or PlaybackState.Failed) return;
+        if (_held || State is PlaybackState.NoMedia or PlaybackState.Failed) return;
         Position = TimeSpan.Zero;
         Raise(new BackendEvent.PositionChanged(Position));
         SetState(PlaybackState.Paused);
@@ -128,7 +165,7 @@ public sealed class FakeMediaBackend : IMediaBackend
     public void Seek(TimeSpan position, bool precise)
     {
         Calls.Add($"Seek({position:hh\\:mm\\:ss\\.fff}, {(precise ? "precise" : "keyframe")})");
-        if (State is PlaybackState.NoMedia or PlaybackState.Failed) return;
+        if (_held || State is PlaybackState.NoMedia or PlaybackState.Failed) return;
         Position = Clamp(position);
         _frameIndex = (long)Math.Floor(Position.TotalSeconds * FrameRate);
         Raise(new BackendEvent.PositionChanged(Position));

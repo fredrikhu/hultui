@@ -24,6 +24,10 @@ public class CanvasElement : BoxElement
         Draw(drawCtx);
     }
 
+    // What it copies below is paint: the callback runs when the canvas is drawn, and it
+    // measures as the box it is.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(CanvasElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

@@ -41,8 +41,9 @@ public sealed class VideoPlayer : Component
 
     private readonly Signal<bool> _controlsVisible = new(true);
     private readonly Signal<TimeSpan> _jumpStep = new(TimeSpan.FromSeconds(10));   // the buttons carry it in their names
-    // The bar's opacity while it fades; driven by a tween, read by Build.
-    private readonly Signal<float> _barOpacity = new(1f);
+    // The bar's level while it fades. A tween writes it and the bar on screen (SetBarOpacity);
+    // Build reads it as a plain field, so a fade frame rebuilds nothing.
+    private float _barOpacity = 1f;
     private readonly Signal<bool> _fullscreen = new(false);
     private readonly Signal<VideoPlayerTheme> _theme = new(VideoPlayerTheme.CreateDefault(Theme.Light));
     /// <summary>Where the pointer is on the scrubber, in seconds, while it is over it.</summary>
@@ -50,9 +51,14 @@ public sealed class VideoPlayer : Component
     /// <summary>The scrubber itself, so the preview can be placed over the point being
     /// hovered rather than over the middle of the bar.</summary>
     private readonly Ref<SliderElement> _scrubber = new();
+    /// <summary>The elapsed time, which a position report rewrites in place.</summary>
+    private readonly Ref<TextElement> _elapsed = new();
+    /// <summary>The transport bar, whose opacity a fade writes in place.</summary>
+    private readonly Ref<BoxElement> _bar = new();
     private TweenHandle _hideTimer;
     private TweenHandle _fade;
     private Effect? _playingWatch;
+    private Effect? _positionWatch;
 
     public VideoPlayer(MediaPlayer player)
     {
@@ -124,8 +130,8 @@ public sealed class VideoPlayer : Component
         set
         {
             _chapterMarks = value ?? [];
-            // Converted once per change rather than once per frame: the player rebuilds on
-            // every position tick, and this list only moves when the film does.
+            // Converted once per change rather than once per build: the player rebuilds on
+            // every show, hide and hover of the bar, and this list only moves when the film does.
             _chapterSeconds = _chapterMarks.Count > 0
                 ? _chapterMarks.Select(c => c.TotalSeconds).ToArray()
                 : [];
@@ -159,6 +165,25 @@ public sealed class VideoPlayer : Component
             if (Player.IsPlaying) ScheduleHide();
             else Show();
         });
+        // A position report, ten a second from mpv while playing, moves the elapsed time and the
+        // scrubber's thumb and nothing else, so it writes those two on the mounted elements and
+        // Build reads the position untracked. It used to rebuild the whole player, about 22
+        // elements and 41 KB a report, with the bar shown or hidden.
+        _positionWatch = new Effect(ShowPosition);
+    }
+
+    /// <summary>
+    /// The position, on the elements that show it: the elapsed time and the scrubber. Reads
+    /// <see cref="MediaPlayer.Position"/> and <see cref="MediaPlayer.Duration"/>, so it runs
+    /// again when either moves. The scrubber's value tells a reader where it is, at most every
+    /// 250 ms (<see cref="AccessibilityProperties.RangeValue"/>), as the rebuilt one did.
+    /// </summary>
+    private void ShowPosition()
+    {
+        var position = Player.Position;
+        var duration = Player.Duration;
+        if (_elapsed.Current is { } elapsed) elapsed.Content = FormatTime(position, duration);
+        if (_scrubber.Current is { } scrubber) scrubber.Value = position.TotalSeconds;
     }
 
     protected internal override void OnUnmount()
@@ -167,6 +192,8 @@ public sealed class VideoPlayer : Component
         _fade.Cancel();
         _playingWatch?.Dispose();
         _playingWatch = null;
+        _positionWatch?.Dispose();
+        _positionWatch = null;
         base.OnUnmount();
     }
 
@@ -189,10 +216,10 @@ public sealed class VideoPlayer : Component
         _hideTimer.Cancel();
         _fade.Cancel();
         _controlsVisible.Value = true;
-        float from = _barOpacity.Peek();
+        float from = _barOpacity;
         if (from >= 1f) return;
         // Coming back is quick — half the fade-out — so the pointer never waits on it.
-        _fade = Animate.Value(from, 1f, v => _barOpacity.Value = v)
+        _fade = Animate.Value(from, 1f, SetBarOpacity)
             .Duration((float)FadeDuration.TotalSeconds * 0.5f)
             .Start();
     }
@@ -201,24 +228,40 @@ public sealed class VideoPlayer : Component
     {
         _hideTimer.Cancel();
         if (!AutoHideControls) return;
-        // A delayed tween is the framework's timer: it ticks with the frame loop, which
-        // keeps ticking through a pure delay, and cancels cleanly.
-        _hideTimer = Animate.Value(0f, 1f, _ => { })
-            .Delay((float)AutoHideDelay.TotalSeconds)
-            .Duration(0.01f)
-            .OnComplete(FadeOut)
-            .Start();
+        // A delayed tween is the framework's timer: it runs on the frame loop's clock, which
+        // wakes once for it when the delay is out, and cancels cleanly.
+        _hideTimer = Animate.After((float)AutoHideDelay.TotalSeconds, FadeOut);
     }
 
     private void FadeOut()
     {
         if (!Player.IsPlaying) return;
         _fade.Cancel();
-        _fade = Animate.Value(_barOpacity.Peek(), 0f, v => _barOpacity.Value = v)
+        _fade = Animate.Value(_barOpacity, 0f, SetBarOpacity)
             .Duration((float)FadeDuration.TotalSeconds)
             .OnComplete(() => _controlsVisible.Value = false)
             .Start();
     }
+
+    /// <summary>
+    /// A step of a fade: the level, and the bar on screen at it — a repaint, nothing more. The
+    /// level was a signal Build read, so every frame of a fade rebuilt the player (Reel: 166
+    /// rebuilds in 12 s, 38 KB each, three quarters of what its UI thread allocated). Where the
+    /// fade starts and ends, <see cref="_controlsVisible"/> still rebuilds the player, which
+    /// takes the level from here.
+    /// </summary>
+    private void SetBarOpacity(float level)
+    {
+        _barOpacity = level;
+        // Read outside any effect: the tween steps from the frame loop.
+        if (_bar.Current is { } bar)
+            bar.Opacity = BarOpacity(_controlsVisible.Peek(), Player.IsPlaying);
+    }
+
+    /// <summary>The bar's opacity: gone while hidden, whole while paused (the fade runs only
+    /// while playing), otherwise the fade's level.</summary>
+    private float BarOpacity(bool controlsVisible, bool playing) =>
+        controlsVisible || !playing ? (playing ? _barOpacity : 1f) : 0f;
 
     // ──── Build ────
 
@@ -247,8 +290,8 @@ public sealed class VideoPlayer : Component
 
     /// <summary>
     /// How many builds a pending focus waits for the tree to be ready. Generous because
-    /// these are frames, not seconds: the player rebuilds on every position change while
-    /// it plays, so the wait is over in one or two.
+    /// these are builds, not seconds: the player rebuilds for its theme once mounted, as its
+    /// file opens, plays and pauses, and as the bar shows and hides.
     /// </summary>
     private const int FocusAttempts = 60;
     private int _focusAttemptsLeft;
@@ -259,9 +302,9 @@ public sealed class VideoPlayer : Component
     /// <para>A component's first build runs eagerly in its constructor, before anything has
     /// mounted it — and an element that is not in a window yet has no focus manager to ask,
     /// so focusing it there does nothing at all. Retrying on each later build costs nothing
-    /// (the player rebuilds as it plays) and lands the moment the tree is real. It is not
-    /// retried by marking the component dirty, which would just run the same unmounted
-    /// build again in the same breath.</para>
+    /// (the first comes a frame after mounting, when the root hands the player its theme) and
+    /// lands the moment the tree is real. It is not retried by marking the component dirty,
+    /// which would just run the same unmounted build again in the same breath.</para>
     /// </summary>
     protected internal override void OnAfterBuild()
     {
@@ -284,13 +327,18 @@ public sealed class VideoPlayer : Component
         return false;
     }
 
+    /// <summary>How many times <see cref="Build"/> has run: what the tests and the perf suite
+    /// count when they check what a position report or a fade frame costs.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         var theme = _theme.Value;
         var player = Player;
         bool playing = player.IsPlaying;
         bool controls = _controlsVisible.Value || !playing;
-        float opacity = controls ? (playing ? _barOpacity.Value : 1f) : 0f;
+        float opacity = BarOpacity(controls, playing);
 
         // Read before building: WithRef points a ref at the element just created, whose
         // layout has not been computed yet, so the scrubber's geometry has to be taken
@@ -417,7 +465,9 @@ public sealed class VideoPlayer : Component
     private Element Bar(VideoPlayerTheme theme, MediaPlayer player, bool playing, float opacity)
     {
         var duration = player.Duration;
-        var position = player.Position;
+        // Untracked: a position report rewrites the two elements that show it (ShowPosition)
+        // instead of rebuilding the player.
+        var position = ReactiveScope.Untracked(() => player.Position);
 
         var bar = Flex.Row(gap: 4)
             .Height(theme.BarHeight).Padding(6f)
@@ -433,6 +483,7 @@ public sealed class VideoPlayer : Component
         bar.Position.Bottom = Dimension.Px(0);
         bar.Width(Dimension.Percent(100));
         bar.Role = AccessibilityRole.Group;
+        bar.WithRef(_bar);
 
         // Children(...) replaces, so the bar is assembled first and set once.
         var items = new List<Element>();
@@ -447,7 +498,7 @@ public sealed class VideoPlayer : Component
         items.Add(IconButton(theme, $"Forward {jump}", "video-jump-forward", ChevronsGlyph(theme.Foreground, back: false),
             () => player.SeekBy(JumpStep)));
 
-        items.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed"));
+        items.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed").WithRef(_elapsed));
 
         if (duration is { } total && total > TimeSpan.Zero)
         {
@@ -691,6 +742,10 @@ internal sealed class VideoPlayerRootElement : BoxElement
     private readonly VideoPlayer _owner;
 
     public VideoPlayerRootElement(VideoPlayer owner) => _owner = owner;
+
+    // A box that copies nothing more than a box does, so a patch that moves nothing leaves its
+    // layout standing, as a box's.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(VideoPlayerRootElement);
 
     protected internal override void ApplyTheme(Theme theme)
     {

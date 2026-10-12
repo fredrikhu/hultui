@@ -61,6 +61,7 @@ public partial class JunctionApp
     private void ToggleFolder<T>(string kind, TreeNode<T> node)
     {
         RefExpandedSet(kind)[node.Path] = !IsFolderExpanded(kind, node);
+        _refExpandGen++;
         MarkDirty();
     }
 
@@ -68,7 +69,56 @@ public partial class JunctionApp
     {
         var set = RefExpandedSet(kind);
         foreach (var folder in Tree.Folders(node)) set[folder.Path] = open;
+        _refExpandGen++;
         MarkDirty();
+    }
+
+    /// <summary>Bumped by every change to which folders are open, so the tables' kept rows
+    /// (<see cref="RefRowsMemo{T}"/>) are made again.</summary>
+    private int _refExpandGen;
+
+    /// <summary>
+    /// A ref table's rows, kept between builds while what they come from is unchanged: the
+    /// loaded refs (by identity: a reload is a new list, and another repository's are another
+    /// list), the query, the flat/tree choice and the open folders. The nodes are the table's items, which its list
+    /// compares by identity, so a key that only moves the caret finds the same node at every
+    /// index and the list keeps those rows. Made again on every build, every node was new and
+    /// every row on screen was made again (Branches: 19 rows, 435 KB a key).
+    /// </summary>
+    private sealed class RefRowsMemo<T>
+    {
+        private object? _source;
+        private string? _query;
+        private bool _tree;
+        private int _expandGen;
+        private List<TreeNode<T>> _rows = [];
+        private Dictionary<TreeNode<T>, int>? _indexOf;
+
+        public List<TreeNode<T>> Get(JunctionApp app, IReadOnlyList<T> source, string query,
+            Func<JunctionApp, IReadOnlyList<T>, string, List<TreeNode<T>>> build)
+        {
+            if (ReferenceEquals(_source, source) && _query == query && _tree == app._refTreeView
+                && _expandGen == app._refExpandGen)
+                return _rows;
+            _rows = build(app, source, query);
+            _indexOf = null;
+            _source = source;
+            _query = query;
+            _tree = app._refTreeView;
+            _expandGen = app._refExpandGen;
+            return _rows;
+        }
+
+        /// <summary>Where a node of the current rows stands, or -1.</summary>
+        public int IndexOf(TreeNode<T> node)
+        {
+            if (_indexOf is null)
+            {
+                _indexOf = new Dictionary<TreeNode<T>, int>(_rows.Count, ReferenceEqualityComparer.Instance);
+                for (var i = 0; i < _rows.Count; i++) _indexOf[_rows[i]] = i;
+            }
+            return _indexOf.TryGetValue(node, out var index) ? index : -1;
+        }
     }
 
     /// <summary>The rows a ref table shows: the flattened expanded tree, or the same refs as

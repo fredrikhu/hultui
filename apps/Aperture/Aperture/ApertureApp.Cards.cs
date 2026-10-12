@@ -241,6 +241,20 @@ public sealed partial class ApertureApp
     /// <summary>The display scale artwork is fetched for; see <see cref="ArtworkScaleFor"/>.</summary>
     private float _artworkScale = 1f;
 
+    /// <summary>Pictures that have landed in the cache, counted on the UI thread: a card made
+    /// before its picture landed shows a placeholder (or an old size's stand-in) until it is
+    /// made again, so the grid's kept rows go with this. (A kept card does not ask the cache
+    /// again, so it does not refresh its picture's place in the LRU; the cache only drops a
+    /// picture when one lands, every landing makes the rows on screen again, and the cap is
+    /// many screenfuls, so a picture on screen is never the oldest.)</summary>
+    private int _artworkLanded;
+
+    private void OnArtworkLanded()
+    {
+        _artworkLanded++;
+        Rerender();
+    }
+
     /// <summary>The scale before the last change, while the cache may still hold pictures
     /// fetched for it — the stand-ins a tile draws until its new picture lands.</summary>
     private float? _standInScale;

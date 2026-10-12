@@ -723,31 +723,99 @@ public partial class CommanderApp
 
     private Element BuildList(char side, IReadOnlyList<FileEntry> list, bool active)
     {
-        // Cursor is tracked by index; compare by full path so it survives row recycling and
-        // still names one row in a fed-in result set (where names repeat across folders).
-        // Only the active pane renders a cursor (design: the caret follows focus).
+        // The cursor is the list's selection, so a key that only moves it makes the two rows it
+        // moved between rather than every row on screen in both panes. Only the active pane
+        // renders a cursor (design: the caret follows focus).
         int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, list.Count - 1));
-        string? cursorPath = active && list.Count > 0 && cur < list.Count ? list[cur].FullPath : null;
         var marks = Marks(side);
 
         // The row F3 would compare the active pane's cursor against. Only in the inactive
         // pane — the active one already draws a cursor, and the answer is always over here.
+        // Kept only when it names a row here: with nothing to pair, F3's answer is a same-named
+        // path that does not exist, which rings nothing, and which changes with every key.
         string? partnerPath = active ? null : DiffTargetPath();
+        if (partnerPath is not null && IndexOfPath(list, partnerPath) < 0) partnerPath = null;
 
-        // VirtualListElement re-realizes its ~viewport rows on every rebuild now, so a
-        // mark/cursor/search change repaints against current state even when the cached
-        // listing keeps the same reference. (It used to only re-realize on an Items
-        // reference change, which needed a fresh snapshot wrapper here each build.)
+        // A kept row shows what it showed when it was made; everything it shows besides its
+        // entry and the cursor is in the shape, and a change makes the rows again. The mounted
+        // list is told before this build patches it.
+        if (PaneRows(side).Changed(this, side, partnerPath, marks) && VList(side).Current is { } mounted)
+            mounted.InvalidateRows();
+
         return VirtualListElement<FileEntry>.New()
             .ItemHeight((int)RowHeight)
             .Items(list)
-            .RenderWith(e => FileRow(side, e, cursorPath, marks.Contains(MarkKey(e)), partnerPath))
+            .SelectedIndex(active && list.Count > 0 ? cur : -1)
+            .RenderWith((e, cursor) => FileRow(side, e, cursor, marks.Contains(MarkKey(e)), partnerPath))
             // The list names its rows to assistive tech by this alone, off-screen ones included.
-            // Without it each row was read out as the FileEntry record's ToString().
-            .AccessibleItemLabel(e => FileLabel(e, marks.Contains(MarkKey(e))))
+            // Without it each row was read out as the FileEntry record's ToString(). One delegate
+            // per pane, reading the marks as they are: the list keeps each entry's label while the
+            // entry and the delegate are unchanged, and a change of marks makes them again.
+            .AccessibleItemLabel(FileLabelFn(side))
             .WithRef(VList(side))
             .FlexGrow(1);
     }
+
+    private Func<FileEntry, string?>? _fileLabelL, _fileLabelR;
+
+    private Func<FileEntry, string?> FileLabelFn(char side) => side == 'L'
+        ? _fileLabelL ??= e => FileLabel(e, Marks('L').Contains(MarkKey(e)))
+        : _fileLabelR ??= e => FileLabel(e, Marks('R').Contains(MarkKey(e)));
+
+    private readonly PaneRowState _paneRowsL = new(), _paneRowsR = new();
+    private PaneRowState PaneRows(char side) => side == 'L' ? _paneRowsL : _paneRowsR;
+
+    /// <summary>
+    /// What a pane's Detail rows show besides their entry and whether the cursor is on it, as
+    /// the rows on screen were made with it: the F3 partner, the Size and Date columns, the
+    /// zebra tint, a fed-in result set's source folders, the scale the icons are cut at, a
+    /// folder a drag hovers, and the sets a row looks itself up in — the marks, the files cut
+    /// for a move, the folders measured with Space (whose totals count up while they walk).
+    /// <para>The rest comes with something the list already handles: another folder, an
+    /// archive (and its ratio column) or a filter are other entries; the density is another
+    /// row height, which makes every row again; another colour scheme is another Theme object,
+    /// which does too.</para>
+    /// </summary>
+    private sealed class PaneRowState
+    {
+        private PaneRowShape _shape;
+        private readonly HashSet<string> _marks = PathSet();
+        private readonly HashSet<string> _cut = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, (long Bytes, bool Done)> _sizes = new(StringComparer.Ordinal);
+        private bool _made;
+
+        /// <summary>Whether anything the rows show changed since the last build asked; takes
+        /// the new state either way.</summary>
+        public bool Changed(CommanderApp app, char side, string? partnerPath, HashSet<string> marks)
+        {
+            var shape = new PaneRowShape(partnerPath, app._settings.ShowSize, app._settings.ShowDate,
+                app._settings.Zebra, app.ResultsOf(side), Icons.DisplayScale, app._dropTarget);
+            bool changed = !_made || shape != _shape;
+            _made = true;
+            _shape = shape;
+            if (!_marks.SetEquals(marks)) { changed = true; _marks.Clear(); _marks.UnionWith(marks); }
+            if (!_cut.SetEquals(app._cutPending)) { changed = true; _cut.Clear(); _cut.UnionWith(app._cutPending); }
+            if (!SameSizes(app._dirSizes))
+            {
+                changed = true;
+                _sizes.Clear();
+                foreach (var (path, ds) in app._dirSizes) _sizes[path] = (ds.Bytes, ds.Done);
+            }
+            return changed;
+        }
+
+        private bool SameSizes(Dictionary<string, DirSize> sizes)
+        {
+            if (sizes.Count != _sizes.Count) return false;
+            foreach (var (path, ds) in sizes)
+                if (!_sizes.TryGetValue(path, out var kept) || kept != (ds.Bytes, ds.Done)) return false;
+            return true;
+        }
+    }
+
+    private readonly record struct PaneRowShape(
+        string? PartnerPath, bool ShowSize, bool ShowDate, bool Zebra, ResultListing? Results,
+        float IconScale, (char Side, string Dir)? DropTarget);
 
     /// <summary>A row as a screen reader says it: the name, what it is, its size and date, and
     /// whether it is marked.</summary>
@@ -760,10 +828,9 @@ public partial class CommanderApp
         return marked ? label + ", marked" : label;
     }
 
-    private Element FileRow(char side, FileEntry e, string? cursorPath, bool marked,
+    private Element FileRow(char side, FileEntry e, bool cursor, bool marked,
         string? partnerPath = null)
     {
-        bool cursor = cursorPath != null && PathEquals(e.FullPath, cursorPath);
         // The other pane's F3 operand. Matched on the full path rather than the name, because
         // this one comes from DiffPartner as a path and a name could collide with a row in a
         // folder the answer isn't about.

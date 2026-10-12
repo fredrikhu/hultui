@@ -33,6 +33,11 @@ using HultUI.WebView.WebView2;
 // the median and longest time a resize took to be drawn (Windows). With --new-sizes every
 // resize is to a size the window has not had yet, as in a drag.
 //
+// --drag frames sixteen new sizes, then sixteen new places, in WM_ENTERSIZEMOVE and
+// WM_EXITSIZEMOVE, as Win32's modal loop does for an edge drag and a title-bar move, and prints the
+// swapchains built (from HULTUI_STARTUP=1's lines on its own stderr) and the frames drawn in each
+// part (Windows).
+//
 // --minimize minimizes the window without activating it, forces frames while it is minimized,
 // then runs the real loop: minimized with one change waiting, restored, and resized, counting
 // loop passes and the frames drawn in each part (Windows).
@@ -42,6 +47,22 @@ using HultUI.WebView.WebView2;
 // opens the next file in a folder, 1.5 s more, then restored. It prints the frames mpv dropped
 // while minimized, how far the second player got, and the frames drawn in the second after the
 // restore (Windows). Exits 4 when there is no libmpv.
+//
+// --disposed-images draws four 2048x2048 images (64 MB of textures), takes them off screen and
+// disposes them, then draws a few more frames: with HULTUI_STARTUP=1 the purge after them says
+// how much Skia still holds.
+//
+// --frame-counter draws each frame's own number, as sixteen black or white cells, over a red,
+// green or blue background by the number mod 3. HULTUI_VULKAN_CAPTURE's file is looked for after
+// every frame, decoded and deleted: it must show the frame just drawn. Each swapchain captures
+// once, so the window is resized twice and minimized and restored to make new ones, then dragged
+// (a swapchain kept across four sizes, and the exact one its end builds) (Windows). Prints one
+// "probe: capture" line a capture.
+//
+// --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
+// least of five rounds of 120 frames.
+//
+// No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
 {
@@ -49,20 +70,25 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        Foreground.Keep();
         var renderer = args.Contains("--renderer=default") ? RendererKind.Default : RendererKind.Vulkan;
+        if (args.Contains("--disposed-images")) return DisposedImages(renderer);
+        if (args.Contains("--frame-counter")) return FrameCounter(renderer);
+        if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--minimized-video"))
             return MinimizedVideo(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
         if (args.Contains("--webviews")) return TwoPages(renderer);
         if (args.FirstOrDefault(a => a.StartsWith("--resizes=")) is { } resizes)
             return Resizes(renderer, int.Parse(resizes["--resizes=".Length..]), args.Contains("--new-sizes"));
+        if (args.Contains("--drag")) return DragAndMove(renderer);
         if (args.Contains("--page-and-video"))
             return PageAndVideo(renderer, args.FirstOrDefault(a => a.StartsWith("--clip="))?["--clip=".Length..]
                 ?? "av://lavfi:color=c=magenta:s=320x240");
 
         int frames = args.FirstOrDefault(a => a.StartsWith("--frames=")) is { } f ? int.Parse(f["--frames=".Length..]) : 12;
 
-        using var app = new Application("vulkan-probe", 320, 200, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 320, 200, renderer: renderer));
         app.SetRoot(Flex.Row().Width(320f).Height(200f).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
             Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
@@ -76,7 +102,7 @@ internal static class Program
 
     private static int TwoPages(RendererKind renderer)
     {
-        using var app = new Application("vulkan-probe", 480, 240, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 240, renderer: renderer));
         using IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
         if (!engine.Availability.IsAvailable) { Console.WriteLine("probe: no engine: " + engine.Availability.Reason); return 3; }
         var options = OperatingSystem.IsWindows()
@@ -124,7 +150,7 @@ internal static class Program
     private static int PageAndVideo(RendererKind renderer, string clip)
     {
         if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
-        using var app = new Application("vulkan-probe", 480, 240, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 240, renderer: renderer));
         using IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
         if (!engine.Availability.IsAvailable) { Console.WriteLine("probe: no engine: " + engine.Availability.Reason); return 3; }
         var options = OperatingSystem.IsWindows()
@@ -174,7 +200,7 @@ internal static class Program
     /// </summary>
     private static int Resizes(RendererKind renderer, int count, bool newSizes)
     {
-        using var app = new Application("vulkan-probe", 640, 400, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer));
         int frames = 0;
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
@@ -210,6 +236,73 @@ internal static class Program
     }
 
     /// <summary>
+    /// A drag and then a move, each framed as Win32's modal loop frames one: WM_ENTERSIZEMOVE, the
+    /// window's new sizes (or places) by SetWindowPos, WM_EXITSIZEMOVE. Sent here, on the window's
+    /// own thread, which is where Win32 sends them; the drag cannot be made without the mouse.
+    /// Counts the swapchains built in each part from HULTUI_STARTUP=1's lines, which this process
+    /// reads off its own stderr, and the frames drawn (Windows).
+    /// </summary>
+    private static int DragAndMove(RendererKind renderer)
+    {
+        var trace = new SwapchainLines(Console.Error);
+        Console.SetError(trace);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer));
+        int frames = 0;
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
+            Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF")),
+            Canvas.New(_ => frames++).Width(1f).Height(1f)));
+        for (int i = 0; i < 12; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        const int steps = 16;
+        int builds = trace.Builds, oneToOne = trace.OneToOne, before = frames;
+        SendMessageW(hwnd, EnterSizeMove, 0, 0);
+        for (int i = 0; i < steps; i++)
+            SetWindowPos(hwnd, 0, 0, 0, 1000 + 24 * (i + 1), 700 + 16 * (i + 1), NoMove | NoZOrder | NoActivate);
+        Console.WriteLine($"probe: drag {steps} steps, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one), " +
+            $"{frames - before} frames");
+        builds = trace.Builds; oneToOne = trace.OneToOne; before = frames;
+        SendMessageW(hwnd, ExitSizeMove, 0, 0);
+        GetClientRect(hwnd, out var client);
+        Console.WriteLine($"probe: drag ended, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one, " +
+            $"last {trace.Last}), {frames - before} frames, client {client.Right}x{client.Bottom}");
+        for (int i = 0; i < 2; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        builds = trace.Builds; before = frames;
+        SendMessageW(hwnd, EnterSizeMove, 0, 0);
+        for (int i = 0; i < steps; i++)
+            SetWindowPos(hwnd, 0, 100 + 10 * (i + 1), 100, 0, 0, NoSize | NoZOrder | NoActivate);
+        SendMessageW(hwnd, ExitSizeMove, 0, 0);
+        Console.WriteLine($"probe: move {steps} steps, {trace.Builds - builds} builds, {frames - before} frames");
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>stderr, counting the swapchain builds HULTUI_STARTUP=1 reports.</summary>
+    private sealed class SwapchainLines(TextWriter inner) : TextWriter
+    {
+        private static readonly System.Text.RegularExpressions.Regex Build = new(@"vulkan swapchain (\d+x\d+) x\d+");
+        public int Builds, OneToOne;
+        public string Last = "";
+        public override System.Text.Encoding Encoding => inner.Encoding;
+        public override void Write(char value) => inner.Write(value);
+        public override void WriteLine(string? value)
+        {
+            if (value is not null && Build.Match(value) is { Success: true } m)
+            {
+                Builds++;
+                bool scaled = value.Contains("one-to-one", StringComparison.Ordinal);
+                if (scaled) OneToOne++;
+                Last = m.Groups[1].Value + (scaled ? " one-to-one" : " exact");
+            }
+            inner.WriteLine(value);
+        }
+    }
+
+    /// <summary>
     /// A window that draws while minimized, in the real loop. On Windows a minimized Vulkan
     /// surface has no area: a frame drawn then found its swapchain out of date, the rebuild could
     /// make none, and the old one was dropped without being destroyed. The window never drew
@@ -221,7 +314,7 @@ internal static class Program
     private static int MinimizeAndRestore(RendererKind renderer)
     {
         var platform = new CountingPlatform(new HultUI.Platform.SDL3.SdlWindowingPlatform(renderer));
-        using var app = new Application(platform, "vulkan-probe", 640, 400);
+        using var app = Foreground.NoActivate(new Application(platform, "vulkan-probe", 640, 400));
         int frames = 0;
         var changing = Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"));
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
@@ -252,11 +345,25 @@ internal static class Program
         int stage = 0, stageFrames = frames;
         long stageStart = 0;
         platform.Passes = 0;
-        platform.OnPass = () =>
+        // Each stage ends on a post from a timer thread. It ended on the first loop pass past its
+        // time, which an idle loop used to make every 16 ms; it now waits for its next deadline or
+        // a wake, and a minimized window with a change waiting owns none (plan 17,
+        // runtime-idle-wakeups), so the stage never ended.
+        int[] ends = [1500, 2500, 3000];
+        new Thread(() =>
+        {
+            foreach (int end in ends)
+            {
+                int wait = end - (int)clock.ElapsedMilliseconds;
+                if (wait > 0) Thread.Sleep(wait);
+                Application.InvokeOnMainThread(EndStage);
+            }
+        }) { IsBackground = true }.Start();
+
+        void EndStage()
         {
             long ms = clock.ElapsedMilliseconds;
-            int[] ends = [1500, 2500, 3000];
-            if (stage >= ends.Length || ms < ends[stage]) return;
+            if (stage >= ends.Length) return;
             double seconds = (ms - stageStart) / 1000.0;
             string what = stage switch { 0 => "minimized", 1 => "restored", _ => "resized" };
             Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
@@ -279,7 +386,7 @@ internal static class Program
             stageStart = ms;
             stageFrames = frames;
             platform.Passes = 0;
-        };
+        }
         app.Run();
         Console.WriteLine("probe: done");
         return 0;
@@ -295,7 +402,7 @@ internal static class Program
     private static int MinimizedVideo(RendererKind renderer, string clip)
     {
         if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
-        using var app = new Application("vulkan-probe", 480, 270, renderer: renderer);
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 270, renderer: renderer));
         int frames = 0;
         HultUI.Core.Elements.Element Show(MediaPlayer player) => Flex.Row().FlexGrow(1).Children(
             VideoElement.New(player).FlexGrow(1),
@@ -352,6 +459,188 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Images drawn, then disposed. A GPU context keeps the texture it uploaded for an image
+    /// after the image is gone, as a spare for a later texture of exactly that size; the Vulkan
+    /// surface purges those spares after the next frame. Each image here is 16 MB of texture.
+    /// </summary>
+    private static int DisposedImages(RendererKind renderer)
+    {
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 300, renderer: renderer));
+        var sources = new HultUI.Rendering.Skia.SkiaImageSource[4];
+        string[] colours = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00"];
+        for (int i = 0; i < sources.Length; i++)
+        {
+            var bitmap = new SkiaSharp.SKBitmap(2048, 2048, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Premul);
+            bitmap.Erase(SkiaSharp.SKColor.Parse(colours[i]));
+            sources[i] = new HultUI.Rendering.Skia.SkiaImageSource(bitmap);
+        }
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            sources.Select(s => (HultUI.Core.Elements.Element)Image.New(s).FlexGrow(1)).ToArray()));
+        for (int i = 0; i < 6; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Console.WriteLine("probe: drew the images");
+
+        app.SetRoot(Box.New().FlexGrow(1).Background(Color.FromHex("#202020")));
+        foreach (var source in sources) source.Dispose();
+        Console.WriteLine("probe: disposed the images");
+        for (int i = 0; i < 6; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>
+    /// Captures of reused swapchain images, each checked against the frame just drawn. The
+    /// renderer keeps a render target per swapchain image, which is right only while the host
+    /// hands every image back in the layout Skia left it in: kept without that, three images drew
+    /// three frames and every frame after was black. A stale image shows an older number, and a
+    /// target over the wrong image another frame's.
+    /// </summary>
+    private static int FrameCounter(RendererKind renderer)
+    {
+        string? capture = Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE");
+        if (capture is null) { Console.WriteLine("probe: HULTUI_VULKAN_CAPTURE is not set"); return 2; }
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 300, renderer: renderer));
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        int drawn = 0;
+
+        void Look()
+        {
+            if (!File.Exists(capture)) return;
+            var (width, height, pixels) = ReadPpm(capture);
+            File.Delete(capture);
+            int shown = 0;
+            var bits = new System.Text.StringBuilder(16);
+            for (int bit = 0; bit < 16; bit++)
+            {
+                int i = (10 * width + bit * (width / 16) + width / 32) * 3;
+                bool white = pixels[i] > 200 && pixels[i + 1] > 200 && pixels[i + 2] > 200;
+                bool black = pixels[i] < 40 && pixels[i + 1] < 40 && pixels[i + 2] < 40;
+                bits.Append(white ? '1' : black ? '0' : '?');
+                if (white) shown |= 1 << bit;
+            }
+            int b = ((height * 3 / 4) * width + width / 2) * 3;
+            var background = (pixels[b], pixels[b + 1], pixels[b + 2]);
+            int colour = background is ( > 200, < 60, < 60) ? 0 : background is ( < 60, > 200, < 60) ? 1
+                : background is ( < 60, < 60, > 200) ? 2 : -1;
+            bool right = !bits.ToString().Contains('?') && shown == (drawn & 0xFFFF) && colour == drawn % 3;
+            Console.WriteLine($"probe: capture {(right ? "right" : "WRONG")}: drew {drawn}, showed {shown} " +
+                $"(cells {bits}, background {background}) at {width}x{height}");
+        }
+
+        void Draw(int frames)
+        {
+            for (int f = 0; f < frames; f++)
+            {
+                drawn++;
+                var cells = new HultUI.Core.Elements.Element[16];
+                for (int bit = 0; bit < 16; bit++)
+                    cells[bit] = Box.New().FlexGrow(1).FlexBasis(0).Height(24f)
+                        .Background(((drawn >> bit) & 1) != 0 ? Color.White : Color.Black);
+                var background = (drawn % 3) switch
+                {
+                    0 => Color.FromHex("#FF0000"),
+                    1 => Color.FromHex("#00FF00"),
+                    _ => Color.FromHex("#0000FF"),
+                };
+                app.SetRoot(Flex.Column().FlexGrow(1).Background(background)
+                    .Children(Flex.Row().Height(24f).Children(cells)));
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+                Look();
+            }
+        }
+
+        // HULTUI_VULKAN_CAPTURE_FRAME counts from each swapchain's build, frames drawn inside a
+        // resize included; 60 frames after each change is past any sensible setting.
+        int perSwapchain = int.Parse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE_FRAME") ?? "4") + 20;
+        Draw(perSwapchain);
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var (width, height) in new[] { (560, 340), (420, 280) })
+            {
+                SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
+                Look();
+                Draw(perSwapchain);
+            }
+            ShowWindow(hwnd, ShowMinNoActive);
+            for (int i = 0; i < 3; i++)
+                app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+            ShowWindow(hwnd, ShowNoActivate);
+            Draw(perSwapchain);
+
+            // A drag: the first size builds an over-allocated swapchain, the next ones keep it and
+            // draw into the same images at a new size, so its capture is of a reused image drawn
+            // after a kept resize; the end of the drag builds an exact one, which captures again.
+            SendMessageW(hwnd, EnterSizeMove, 0, 0);
+            foreach (var (width, height) in new[] { (720, 480), (730, 486), (740, 492), (750, 498) })
+            {
+                SetWindowPos(hwnd, 0, 0, 0, width, height, NoMove | NoZOrder | NoActivate);
+                Look();
+                Draw(perSwapchain / 4);
+            }
+            SendMessageW(hwnd, ExitSizeMove, 0, 0);
+            Look();
+            Draw(perSwapchain);
+        }
+        Console.WriteLine($"probe: done after {drawn} frames");
+        return 0;
+    }
+
+    /// <summary>
+    /// What a steady frame allocates: one box repainted, nothing else changing. The display's
+    /// colour comes by events, as in Reel and Aperture, so its poll (about 1.1 KB every 100 ms)
+    /// is not counted. Least of five rounds: a round can catch a one-off, such as a buffer
+    /// reaching its high-water mark.
+    /// </summary>
+    private static int FrameBytes(RendererKind renderer)
+    {
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 300, renderer: renderer,
+            displayColorEvents: true));
+        var changing = Box.New().Width(40f).Height(20f).Background(Color.FromHex("#FF8800"));
+        app.SetRoot(Flex.Column().FlexGrow(1).Padding(16f).Gap(8f).Background(Color.FromHex("#141418")).Children(
+            Text.New("Steady frames").TextColor(Color.White).FontSize(20f),
+            changing,
+            Box.New().Width(200f).Height(80f).CornerRadius(8f).Background(Color.FromHex("#2B2F3A"))
+                .BoxShadow(0f, 6f, 18f, new Color(0, 0, 0, 120))));
+
+        void Frame()
+        {
+            changing.MarkPaintDirty();
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+        }
+
+        for (int i = 0; i < 120; i++) Frame();
+        double least = double.MaxValue;
+        for (int round = 0; round < 5; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 120; i++) Frame();
+            least = Math.Min(least, (GC.GetAllocatedBytesForCurrentThread() - before) / 120.0);
+        }
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: {least:0.0} bytes a frame"));
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private static (int Width, int Height, byte[] Pixels) ReadPpm(string path)
+    {
+        byte[] file = File.ReadAllBytes(path);
+        int at = 0;
+        string Token()
+        {
+            while (char.IsWhiteSpace((char)file[at])) at++;
+            int from = at;
+            while (!char.IsWhiteSpace((char)file[at])) at++;
+            return System.Text.Encoding.ASCII.GetString(file, from, at - from);
+        }
+        Token();
+        int width = int.Parse(Token()), height = int.Parse(Token());
+        Token();
+        return (width, height, file[(at + 1)..]);
+    }
+
     /// <summary>The SDL platform, counting the loop's passes.</summary>
     private sealed class CountingPlatform(IWindowingPlatform inner) : IWindowingPlatform
     {
@@ -374,8 +663,18 @@ internal static class Program
         public void Dispose() => inner.Dispose();
     }
 
-    private const uint NoMove = 0x0002, NoZOrder = 0x0004, NoActivate = 0x0010;
+    private const uint NoSize = 0x0001, NoMove = 0x0002, NoZOrder = 0x0004, NoActivate = 0x0010;
     private const int ShowMinNoActive = 7, ShowNoActivate = 4;
+    private const uint EnterSizeMove = 0x0231, ExitSizeMove = 0x0232;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint SendMessageW(nint hwnd, uint message, nint wParam, nint lParam);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Rect32 { public int Left, Top, Right, Bottom; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetClientRect(nint hwnd, out Rect32 rect);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hwnd, int command);
@@ -388,4 +687,74 @@ internal static class Program
 
     private static string Page(string colour) =>
         $"<html><body style='margin:0;background:{colour}'><script>chrome.webview.postMessage('ready');</script></body></html>";
+}
+
+/// <summary>
+/// No window this probe makes may become the foreground: the tests run on a desktop someone is
+/// using. <c>SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0</c> in the environment was not enough on its own
+/// (2026-10-11, plan 17: a probe window took the foreground four times). So SDL is told in
+/// process before any window exists; every window is <c>WS_EX_NOACTIVATE</c>, which neither a
+/// click nor Windows' choice of a window to activate when the foreground one closes can
+/// override; and a watcher hands the foreground straight back and ends the run with exit code 5
+/// if this process ever holds it, which fails the test that started it.
+/// </summary>
+internal static class Foreground
+{
+    private static nint _previous;
+
+    public static void Keep()
+    {
+        SDL.SDL3.SDL_SetHint(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+        if (!OperatingSystem.IsWindows()) return;
+        _previous = GetForegroundWindow();
+        new Thread(() =>
+        {
+            uint self = (uint)Environment.ProcessId;
+            while (true)
+            {
+                nint foreground = GetForegroundWindow();
+                if (foreground != 0)
+                {
+                    GetWindowThreadProcessId(foreground, out uint owner);
+                    if (owner != self) _previous = foreground;
+                    else
+                    {
+                        if (_previous != 0) SetForegroundWindow(_previous);
+                        Console.WriteLine("probe: took the foreground; handed it back");
+                        Console.Out.Flush();
+                        Environment.Exit(5);
+                    }
+                }
+                Thread.Sleep(5);
+            }
+        }) { IsBackground = true, Name = "foreground watcher" }.Start();
+    }
+
+    public static Application NoActivate(Application app)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            nint hwnd = app.PrimaryWindow.NativeHandle;
+            SetWindowLongPtrW(hwnd, ExStyle, GetWindowLongPtrW(hwnd, ExStyle) | ExNoActivate);
+        }
+        return app;
+    }
+
+    private const int ExStyle = -20;           // GWL_EXSTYLE
+    private const nint ExNoActivate = 0x08000000;   // WS_EX_NOACTIVATE
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hwnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetWindowLongPtrW(nint hwnd, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint SetWindowLongPtrW(nint hwnd, int index, nint value);
 }

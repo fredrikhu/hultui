@@ -98,6 +98,8 @@ public class SliderElement : Element, IRangeValueElement
         OnOwn<PointerDownEvent>(e =>
         {
             if (e.Button != PointerEvent.LeftButton) return;
+            // What the moves before the press were to show comes first.
+            _follow?.Flush();
             e.CapturePointer();
             _dragging = true;
             Focus();
@@ -105,20 +107,36 @@ public class SliderElement : Element, IRangeValueElement
         });
         OnOwn<PointerMoveEvent>(e =>
         {
-            double at = ValueFromLocalX(e.LocalPosition.X);
-            if (_dragging) ApplyUserValue(at);
-            SetHover(at);
-            // Reported while dragging too: the thumb is under the pointer either way, and
-            // a preview that vanished the moment you pressed would be the wrong way round.
-            OnHoverValue?.Invoke(at);
+            // Recorded, and applied once per frame that may be drawn (FollowPointer): a drag's
+            // OnChanged and the hover's OnHoverValue rebuild their owner, a video player for the
+            // scrubber's preview, and a 1,000 Hz mouse rebuilt it about sixteen times a frame
+            // drawn. A hover nothing shows or hears needs no frame at all.
+            _pointerAt = ValueFromLocalX(e.LocalPosition.X);
+            if (_dragging || OnHoverValue is not null || ShowHoverFill)
+                (_follow ??= new PointerFollow(FollowPointer)).Request(this);
+            else
+                SetHover(_pointerAt);
         });
-        OnOwn<PointerLeaveEvent>(_ => { SetHover(null); OnHoverValue?.Invoke(null); });
-        OnOwn<PointerUpEvent>(_ => _dragging = false);
+        OnOwn<PointerLeaveEvent>(_ =>
+        {
+            // A drag's value still lands; a hover the next frame was to show goes with the pointer.
+            if (_dragging) _follow?.Flush();
+            else _follow?.Cancel();
+            SetHover(null);
+            OnHoverValue?.Invoke(null);
+        });
+        OnOwn<PointerUpEvent>(_ =>
+        {
+            // The drag ends exactly where the pointer did, whether or not a frame came between.
+            _follow?.Flush();
+            _dragging = false;
+        });
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
         OnOwn<KeyDownEvent>(e =>
         {
             if (!_focused) return;
+            _follow?.Flush();
             switch (e.Key)
             {
                 case KeyCode.Left or KeyCode.Down: ApplyUserValue(_value - _step); break;
@@ -145,6 +163,20 @@ public class SliderElement : Element, IRangeValueElement
         // Paler than the played part by default, so "where you would land" never reads as
         // "where you are".
         _hoverFillColor = st.HoverFillColor ?? new Color(_fillColor.R, _fillColor.G, _fillColor.B, 120);
+    }
+
+    /// <summary>The pointer's latest place on the track, as a value, applied once per frame.</summary>
+    private double _pointerAt;
+    private PointerFollow? _follow;
+
+    private void FollowPointer()
+    {
+        double at = _pointerAt;
+        if (_dragging) ApplyUserValue(at);
+        SetHover(at);
+        // Reported while dragging too: the thumb is under the pointer either way, and
+        // a preview that vanished the moment you pressed would be the wrong way round.
+        OnHoverValue?.Invoke(at);
     }
 
     private void SetHover(double? at)
@@ -272,7 +304,15 @@ public class SliderElement : Element, IRangeValueElement
     double IRangeValueElement.SmallChange => _step;
     double IRangeValueElement.LargeChange => _step * 10;
     bool IRangeValueElement.IsReadOnly => false;
-    void IRangeValueElement.SetAccessibleValue(double value) => ApplyUserValue(value);
+    void IRangeValueElement.SetAccessibleValue(double value)
+    {
+        _follow?.Flush();
+        ApplyUserValue(value);
+    }
+
+    // Its measure reads ThumbRadius and nothing else it copies; the patch marks the layout
+    // when that changes.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(SliderElement);
 
     internal override void PatchFrom(Element source)
     {
@@ -285,7 +325,11 @@ public class SliderElement : Element, IRangeValueElement
             _step = s._step;
             if (range) RangeChanged();
             TrackHeight = s.TrackHeight;
-            ThumbRadius = s.ThumbRadius;
+            if (ThumbRadius != s.ThumbRadius)
+            {
+                ThumbRadius = s.ThumbRadius;
+                MarkLayoutDirty();
+            }
             OnChanged = s.OnChanged;
             OnHoverValue = s.OnHoverValue;
             Segments = s.Segments;

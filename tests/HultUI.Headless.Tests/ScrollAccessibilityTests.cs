@@ -85,12 +85,15 @@ public class ScrollAccessibilityTests
         Assert.NotEqual(settled, RowTop(bridge.CurrentTree!, "row 20"));
 
         // Nothing is dirty and nothing happens, yet the window asks for the frame that
-        // delivers the position the scroll stopped at.
+        // delivers the position the scroll stopped at: one rebuild, and nothing drawn, since
+        // nothing on screen changed.
+        int diffs = bridge.Diffs.Count;
         int rendered = 0;
         for (int i = 0; i < 10; i++)
             if (session.PumpFrame()) rendered++;
 
-        Assert.Equal(1, rendered);
+        Assert.Equal(0, rendered);
+        Assert.Equal(diffs + 1, bridge.Diffs.Count);
         Assert.Equal(settled, RowTop(bridge.CurrentTree!, "row 20"));
         Assert.Equal(4 * 40, list.ScrollOffsetY);
     }

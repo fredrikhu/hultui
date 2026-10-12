@@ -25,6 +25,30 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     {
         _pixels = pixels;
         _renderer = renderer;
+        Interlocked.Increment(ref s_live);
+    }
+
+    // In the whole process: sinks made and not yet disposed, and image elements holding a GPU
+    // source of another kind, which have no Dispose to count by.
+    private static int s_live, s_otherKind;
+
+    /// <summary>
+    /// Whether any image can hold a GPU source to serve while its window is not drawn
+    /// (<see cref="IGpuImageSource.ServiceUndrawn"/>): a sink is alive, or an image element
+    /// holds a GPU source of another kind. A minimized window that is dirty looks for them
+    /// through its whole tree on every pass of the loop, and asks this first. A sink nobody
+    /// disposes, or an element dropped still holding a source, keeps it true, which costs that
+    /// walk and nothing else.
+    /// </summary>
+    internal static bool MayNeedUndrawnService =>
+        Volatile.Read(ref s_live) > 0 || Volatile.Read(ref s_otherKind) > 0;
+
+    /// <summary>An image element's source went from <paramref name="from"/> to
+    /// <paramref name="to"/>; see <see cref="MayNeedUndrawnService"/>.</summary>
+    internal static void ImageSourceChanged(IImageSource? from, IImageSource? to)
+    {
+        if (from is IGpuImageSource and not GpuFrameSink) Interlocked.Decrement(ref s_otherKind);
+        if (to is IGpuImageSource and not GpuFrameSink) Interlocked.Increment(ref s_otherKind);
     }
 
     public GpuSinkMode Mode => _mode;
@@ -201,6 +225,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     {
         if (_disposed) return;
         _disposed = true;
+        Interlocked.Decrement(ref s_live);
         if (_mode == GpuSinkMode.Gpu) _renderer.ReleaseGL();
         // The surface's image for this sink: on Vulkan an allocation of its own, which would
         // otherwise live as long as the window.

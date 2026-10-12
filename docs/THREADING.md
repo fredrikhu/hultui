@@ -41,11 +41,38 @@ frame, for callbacks that never had a UI-thread context to return to: a
 filesystem watcher, a native callback, a `Task.Run` continuation, a timer from
 another library.
 
-Both wake the loop. Between frames the application parks in the platform's idle
-wait (16 ms at a time); posting from another thread cuts that wait short through
-`IWindowingPlatform.Wake`, so the work runs within a frame of being posted rather
-than after the wait times out. Posting from the UI thread itself does not wake
-anything — the loop is running that code, not parked.
+Both wake the loop. Between frames the application parks in the platform's wait
+until the next deadline the loop owns — an animation's next step, the trailing
+edge of a coalesced accessibility refresh, a throttled resize, the DevTools
+inspector's refresh, a display-colour poll of a Vulkan window without
+display-colour events — or, with none, until something arrives. Posting from
+another thread ends that wait through `IWindowingPlatform.Wake`, so the work runs
+within a frame of being posted. Posting from the UI thread itself does not wake
+anything while the loop runs that code: it is drained in the same pass.
+
+The loop used to park 16 ms at a time: about 60 passes a second in every idle
+window (37–38 minimized), each looking again at whatever had been set aside for
+later. An idle window now passes once and waits (measured in plan 17, round 3).
+What that changes for an application:
+
+- **A flag set off the UI thread is not seen until the next wake.** Hand results
+  to the UI thread with `InvokeOnMainThread` or an `await`, not by writing a field
+  that a `Build` or a frame reads; the loop no longer comes round to read it.
+- **Something set aside for later must name when it is due.** A timer is a tween
+  with a delay (`Animate.Value(0f, 1f, _ => { }).Delay(s).Duration(0f).OnComplete(…)`):
+  the loop wakes once for it. A tween with a `Duration` and a setter that changes
+  nothing steps every frame interval until it ends (see
+  [ANIMATIONS.md](ANIMATIONS.md#when-a-tween-steps)).
+- **A callback the wait itself runs on the UI thread** — a WebView2 event, an OLE
+  drop, a WinRT `DispatcherQueue` item, a `WM_GETOBJECT` from a screen reader — comes
+  with no event of SDL's to end the wait. What it changes wakes the loop anyway:
+  every element and signal mutation, a tween started, a post-frame callback and a
+  post made while the loop is parked wake it (`UIThread` sees the loop parked). A
+  native callback that only sets a flag of its own must call
+  `Application.InvokeOnMainThread`, which then wakes it too.
+
+`HULTUI_FRAMELOG` (see [ENVIRONMENT.md](ENVIRONMENT.md)) prints, among the rest,
+what each idle wait waited for and what woke the loop.
 
 Rendering is paced to the display (`Window.RefreshRate`, from the platform; 60 Hz
 when unknown). The swap interval is 0, because a vsync'd swap blocks the modal
@@ -70,7 +97,8 @@ the driver's vsync.
 from assistive technology, style, layout and the accessibility tree stay current
 — and stops there with the paint dirt kept, so the first frame after the restore
 draws what changed; the restore's own event wakes the loop. Meanwhile the loop
-parks as an idle one does, about 60 passes a second. Before, GL drew every frame
+parks as an idle one does, and does not come round for the window at all until the
+restore or until something else arrives. Before, GL drew every frame
 of an animation or a video nobody could see, and a Vulkan window, whose minimized
 surface on Windows has no area, retried a frame every display interval (220 to
 400 passes a second at 200 Hz). So a `Window.RequestPostFrameCallback` made

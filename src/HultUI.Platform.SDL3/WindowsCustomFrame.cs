@@ -95,8 +95,13 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_NOOWNERZORDER = 0x0200;
     private const uint SWP_FRAMECHANGED = 0x0020;
+
+    /// <summary>The install's frame-changed nudge: nothing moved, sized, reordered or activated.</summary>
+    private const uint InstallFlags =
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED;
 
     private const uint TME_LEAVE = 0x0002;
     private const uint TME_NONCLIENT = 0x0010;
@@ -182,9 +187,12 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
         frame.ExtendFrame();
 
-        // Force a WM_NCCALCSIZE so the title bar is dropped immediately.
-        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        // Force a WM_NCCALCSIZE so the title bar is dropped immediately. Without
+        // SWP_NOACTIVATE this also activated the window — hidden, inside the Application
+        // constructor — so an app told not to (SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0: a probe,
+        // a test) took the foreground all the same. Activating is for the show, which SDL does
+        // as the hint says.
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, InstallFlags);
 
         return frame;
     }

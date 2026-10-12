@@ -67,6 +67,14 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("input/type beside a 150-line diff, rows made in Build",
+            "Type into a summary field beside a 150-line diff in a list, one component rebuilt per keystroke, whose Build flattens the diff anew (a record and word-diff spans per line) and whose one-argument template makes every row on screen again",
+            ctx => TypeBesideDiffOp(ctx, kept: false));
+
+        yield return new Scenario("input/type beside a 150-line diff, rows kept",
+            "The same keystroke with the diff flattened once and the list on item rows (two-argument RenderWith): the rebuild makes no row",
+            ctx => TypeBesideDiffOp(ctx, kept: true));
+
         yield return new Scenario("input/type in 2,000-line TextArea",
             "Type one character in the middle of a 2,000-line TextArea",
             ctx =>
@@ -189,5 +197,143 @@ static partial class Scenarios
                     },
                 };
             });
+
+        yield return new Scenario("input/splitter drag, 1 kHz mouse, real loop",
+            "Drag a PaneSplitter between two lists of 40 rows its owner rebuilds at the new size, the pointer moving every millisecond as a 1,000 Hz mouse does: Application.Run's own loop on the virtual clock for 10 frames, press to release (all under build); reports the owner's rebuilds per frame drawn",
+            ctx =>
+            {
+                var screen = new SplitScreen(ctx.Rng);
+                var host = screen.Mount();
+                screen.Split.AttachDrag(host);
+                int frames = 0;
+                ctx.Mount(Flex.Column().FlexGrow(1).Children(
+                    host.FlexGrow(1),
+                    Canvas.New(_ => frames++).Width(Dimension.Px(1)).Height(Dimension.Px(1))));
+                int builds = 0, drawn = 0;
+                float expected = 0;
+                return new Op
+                {
+                    Run = step =>
+                    {
+                        // Away and back on alternate steps, so the pane stays inside its range.
+                        var handle = host.Children[0].Children[1].WindowBorderBox;
+                        float x = handle.X + handle.Width / 2, y = handle.Y + handle.Height / 2, start = x;
+                        float dx = step % 2 == 0 ? 0.75f : -0.75f;
+                        ctx.Window.MouseDown(x, y);
+                        int b0 = screen.Builds, f0 = frames;
+                        float size0 = screen.Split.Size;
+                        Action move = () => { x += dx; ctx.Window.MoveMouse(x, y); };
+                        ctx.Session.RunLoop(() => frames - f0 >= 10, eventEvery: TimeSpan.FromMilliseconds(1),
+                            onEvent: () => HultUI.Application.InvokeOnMainThread(move));
+                        builds = screen.Builds - b0;
+                        drawn = frames - f0;
+                        ctx.Window.MouseUp(x, y);
+                        expected = size0 + (x - start);
+                    },
+                    Frames = 0,
+                    Figure = () => builds / (double)Math.Max(1, drawn),
+                    FigureUnit = "rebuilds/frame",
+                    Check = _ => Math.Abs(screen.Split.Size - expected) > 0.5f
+                        ? $"the drag left the pane at {screen.Split.Size:0.0}, not {expected:0.0}"
+                        : screen.Split.IsDragging ? "the release did not end the drag" : null,
+                };
+            });
+
+        yield return new Scenario("input/slider drag, 1 kHz mouse, real loop",
+            "Drag a slider whose owner rebuilds itself and 40 rows from the value, the pointer moving every millisecond as a 1,000 Hz mouse does: Application.Run's own loop on the virtual clock for 10 frames, press to release (all under build); reports the owner's rebuilds per frame drawn",
+            ctx =>
+            {
+                var screen = new SliderScreen(ctx.Rng);
+                int frames = 0;
+                ctx.Mount(Flex.Column().FlexGrow(1).Children(
+                    screen.Mount().FlexGrow(1),
+                    Canvas.New(_ => frames++).Width(Dimension.Px(1)).Height(Dimension.Px(1))));
+                int builds = 0, drawn = 0;
+                double expected = 0;
+                return new Op
+                {
+                    Run = step =>
+                    {
+                        var slider = (SliderElement)ctx.Root!.Children[0].Children[0].Children[0].Children[0];
+                        var track = slider.WindowContentBox;
+                        float y = track.Y + track.Height / 2;
+                        float x = step % 2 == 0 ? track.X + 100 : track.X + track.Width - 100;
+                        float dx = step % 2 == 0 ? 0.75f : -0.75f;
+                        ctx.Window.MouseDown(x, y);
+                        int b0 = screen.Builds, f0 = frames;
+                        Action move = () => { x += dx; ctx.Window.MoveMouse(x, y); };
+                        ctx.Session.RunLoop(() => frames - f0 >= 10, eventEvery: TimeSpan.FromMilliseconds(1),
+                            onEvent: () => HultUI.Application.InvokeOnMainThread(move));
+                        builds = screen.Builds - b0;
+                        drawn = frames - f0;
+                        ctx.Window.MouseUp(x, y);
+                        float travel = track.Width - 2 * slider.ThumbRadius;
+                        expected = Math.Round(Math.Clamp((x - track.X - slider.ThumbRadius) / travel, 0, 1) * 1000);
+                    },
+                    Frames = 0,
+                    Figure = () => builds / (double)Math.Max(1, drawn),
+                    FigureUnit = "rebuilds/frame",
+                    Check = _ => screen.Value != expected ? $"the owner holds {screen.Value:0}, not {expected:0}" : null,
+                };
+            });
+    }
+
+    /// <summary>Two lists of rows either side of a <see cref="PaneSplitter"/>, rebuilt at the
+    /// pane's size whenever it moves — the owner's <c>MarkDirty</c> is the splitter's
+    /// <c>onChanged</c>, as Junction's and every app's is.</summary>
+    private sealed class SplitScreen : HultUI.Core.Components.Component
+    {
+        private readonly string[] _labels;
+        public readonly PaneSplitter Split;
+        public int Builds;
+
+        public SplitScreen(Random rng)
+        {
+            _labels = new string[80];
+            for (int i = 0; i < _labels.Length; i++) _labels[i] = Ui.Label(rng);
+            Split = new PaneSplitter(MarkDirty, null, 100, 800, 300);
+        }
+
+        public override Element Build()
+        {
+            Builds++;
+            var left = new Element[40];
+            var right = new Element[40];
+            for (int i = 0; i < 40; i++)
+            {
+                left[i] = Ui.Row(i, _labels[i]);
+                right[i] = Ui.Row(40 + i, _labels[40 + i]);
+            }
+            return Flex.Row().FlexGrow(1).AlignItems(AlignItems.Stretch).Children(
+                Flex.Column().Width(Dimension.Px(Split.Size)).FlexShrink(0).Children(left),
+                Split.Handle(),
+                Flex.Column().FlexGrow(1).Children(right));
+        }
+    }
+
+    /// <summary>A slider whose value its owner keeps and rebuilds from, with 40 rows beside it.</summary>
+    private sealed class SliderScreen : HultUI.Core.Components.Component
+    {
+        private readonly string[] _labels;
+        public double Value = 500;
+        public int Builds;
+
+        public SliderScreen(Random rng)
+        {
+            _labels = new string[40];
+            for (int i = 0; i < _labels.Length; i++) _labels[i] = Ui.Label(rng);
+        }
+
+        public override Element Build()
+        {
+            Builds++;
+            var rows = new Element[40];
+            for (int i = 0; i < rows.Length; i++) rows[i] = Ui.Row(i, _labels[i]);
+            return Flex.Column().FlexGrow(1).Children(
+                Flex.Row(gap: 12).FlexShrink(0).Padding(10).AlignItems(AlignItems.Center).Children(
+                    Slider.New(Value, 0, 1000).Width(Dimension.Px(800)).OnValueChanged(v => { Value = v; MarkDirty(); }),
+                    Text.New($"{Value:0}").FontSize(13f)),
+                Flex.Column().FlexGrow(1).Children(rows));
+        }
     }
 }

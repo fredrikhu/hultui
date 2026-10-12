@@ -29,6 +29,9 @@ public sealed class HeadlessSession : IDisposable
     private readonly ConcurrentQueue<Func<Action?>> _deferredWork = new();
     private bool _disposed;
 
+    /// <summary>The display-free platform this session runs on (tests of the loop's waits).</summary>
+    internal HeadlessWindowingPlatform Platform => _platform;
+
     /// <summary>The application under test. All normal app APIs (theme, InvokeOnMainThread, multi-window) work.</summary>
     public Application Application { get; }
 
@@ -58,7 +61,13 @@ public sealed class HeadlessSession : IDisposable
         // at the start of frame N+1 and its completion is applied by that same frame's
         // main-thread drain — the value arrives exactly one frame later, every run,
         // instead of whenever the pool got to it.
-        AsyncWork.SetScheduler(_deferredWork.Enqueue);
+        // The queued load is work the loop's next pass must see (RunLoop drains it there), as a
+        // real producer's post is: it wakes the loop.
+        AsyncWork.SetScheduler(work =>
+        {
+            _deferredWork.Enqueue(work);
+            platform.Wake();
+        });
 
         Window = Wrap(application.PrimaryWindow);
     }
@@ -145,7 +154,9 @@ public sealed class HeadlessSession : IDisposable
     /// <param name="until">Asked once per pass of the loop, before the pass.</param>
     /// <param name="eventEvery">Ends every wait after this much virtual time, as arriving
     /// events do: a 1,000 Hz mouse, a worker posting to the UI thread, a video's frames. Null:
-    /// nothing arrives, and every wait runs its whole timeout.</param>
+    /// nothing arrives, and every wait runs to its deadline; an idle loop that owns none parks
+    /// for good, as it does on a display, so its wait runs past <paramref name="limit"/>, the
+    /// condition is asked once more, and the run fails if it is still unmet.</param>
     /// <param name="onEvent">Runs at each of those events, on this thread, inside the wait —
     /// where a real platform would take the event in. Post from it with
     /// <see cref="Application.InvokeOnMainThread"/>, as a worker does, and the next pass
@@ -154,12 +165,22 @@ public sealed class HeadlessSession : IDisposable
     /// <see cref="TimeoutException"/>; default 60 seconds.</param>
     public void RunLoop(Func<bool> until, TimeSpan? eventEvery = null, Action? onEvent = null,
         TimeSpan? limit = null)
+        => RunLoop(until, eventEvery, onEvent, limit, eventsEndWaits: true);
+
+    /// <summary><see cref="RunLoop(Func{bool}, TimeSpan?, Action?, TimeSpan?)"/>, where with
+    /// <paramref name="eventsEndWaits"/> false the events run inside the loop's waits without
+    /// ending them, as a message SDL makes no event of does (a WM_GETOBJECT, a DispatcherQueue
+    /// item): only a wake one makes, or the wait's own deadline, ends it.</summary>
+    internal void RunLoop(Func<bool> until, TimeSpan? eventEvery, Action? onEvent, TimeSpan? limit, bool eventsEndWaits)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(until);
         long deadline = _time.GetTimestamp() + (limit ?? TimeSpan.FromSeconds(60)).Ticks;
         bool timedOut = false;
-        _platform.SetEventSource(eventEvery, onEvent);
+        _platform.SetEventSource(eventEvery, onEvent, eventsEndWaits);
+        // An idle loop with no deadline parks for good on a real display; here its wait runs past
+        // this, where nothing more can happen.
+        _platform.Horizon = deadline;
         try
         {
             Application.RunUntil(() =>
@@ -174,6 +195,7 @@ public sealed class HeadlessSession : IDisposable
         finally
         {
             _platform.SetEventSource(null, null);
+            _platform.Horizon = null;
         }
         if (timedOut)
             throw new TimeoutException(

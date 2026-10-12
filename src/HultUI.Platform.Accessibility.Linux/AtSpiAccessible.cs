@@ -42,8 +42,9 @@ internal sealed class AtSpiAccessible
 
     public bool Focusable { get; init; }
 
-    /// <summary>The one state that changes after the snapshot is built: a focus move rebuilds
-    /// none, so the bridge sets it on the UI thread while the bus thread may read it.</summary>
+    /// <summary>Changes after the snapshot is built (with a list item's <see cref="Selected"/>): a
+    /// focus move rebuilds none, so the bridge sets it on the UI thread while the bus thread may
+    /// read it.</summary>
     public bool Focused
     {
         get => Volatile.Read(ref _focused);
@@ -53,7 +54,16 @@ internal sealed class AtSpiAccessible
     public bool Enabled { get; init; } = true;
     public bool Offscreen { get; init; }
     public bool Selectable { get; init; }
-    public bool Selected { get; init; }
+
+    /// <summary>Changes after the snapshot is built too, for a list's items: a move of the list's
+    /// selection rebuilds none, so the bridge sets it on the UI thread while the bus thread may
+    /// read it.</summary>
+    public bool Selected
+    {
+        get => Volatile.Read(ref _selected);
+        set => Volatile.Write(ref _selected, value);
+    }
+    private bool _selected;
     public bool? Toggled { get; init; }
     /// <summary>Open or closed, for an object that can be either; null for one that cannot.</summary>
     public bool? Expanded { get; init; }

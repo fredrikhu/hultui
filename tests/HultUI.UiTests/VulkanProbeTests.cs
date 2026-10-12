@@ -205,6 +205,101 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> keeps its over-allocated swapchain through a resize that
+    /// stays inside the allocation. A swapchain larger than its window is SUBOPTIMAL on every
+    /// present (NVIDIA 610), and answering that with a rebuild built the swapchain again after
+    /// every frame: 57 ms a step of a drag, slower than no fixed extent at all. Here the window
+    /// grows by 24×16 px a step through about two 256-px buckets in each direction. A surface
+    /// without ONE_TO_ONE rebuilds for every size, as it should, and is not what this checks.
+    /// </summary>
+    [VulkanUiFact]
+    public void AFixedExtentSwapchain_IsNotRebuiltAfterEveryFrame()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the probe resizes through SetWindowPos
+        const int resizes = 16;
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = "1",
+            ["HULTUI_VULKAN_F16"] = null,
+            ["HULTUI_VULKAN_PRESENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, $"--resizes={resizes} --new-sizes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        if (!run.Output.Contains("fixed extent available")) return;
+        int builds = System.Text.RegularExpressions.Regex.Matches(run.Output, @"vulkan swapchain \d+x\d+ x\d+").Count;
+        int oneToOne = System.Text.RegularExpressions.Regex.Matches(run.Output,
+            @"vulkan swapchain \d+x\d+ x\d+ \S+ \(allocated \d+x\d+, one-to-one\)").Count;
+        Assert.True(oneToOne == builds, $"{builds - oneToOne} of {builds} swapchains were not one-to-one:\n{run.Output}");
+        // The start-up swapchain and one for each bucket crossed: four (2026-10-11). Rebuilt for
+        // every SUBOPTIMAL, eighteen.
+        Assert.True(builds < resizes / 2, $"{builds} swapchain builds for {resizes} resizes:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// A drag keeps an over-allocated swapchain, and its end rebuilds it at the window's size; a
+    /// title-bar move builds nothing. Rebuilt for every size, the half-float swapchain was 32 ms of
+    /// a 37 ms step in Aperture and Reel; kept, a drag rebuilds only when it crosses a 256-px
+    /// bucket, and the end of the loop goes back to an exact swapchain, which keeps the
+    /// compositor's direct path that video needs. A move runs the same loop and must not pay a
+    /// rebuild at either end. Where the surface offers no ONE_TO_ONE, and in any present mode but
+    /// MAILBOX, every size rebuilds and the end of the loop does nothing.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    [InlineData("fifo")]
+    [InlineData("immediate")]
+    public void ADrag_OverAllocatesTheSwapchain_AndItsEndRebuildsItExact(string variant)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // Win32's size/move loop
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = variant == "8-bit" ? "0" : "1",
+            // Only MAILBOX shows a swapchain one-to-one: under FIFO it stalled for good, under
+            // IMMEDIATE a drag's first one cost 172-196 ms (NVIDIA 610.62).
+            ["HULTUI_VULKAN_PRESENT"] = variant switch { "8-bit" => null, "fifo" => "fifo", "immediate" => "immediate", _ => "mailbox" },
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, "--drag");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        var drag = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"probe: drag (\d+) steps, (\d+) builds \((\d+) one-to-one\), (\d+) frames");
+        var ended = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"probe: drag ended, (\d+) builds \((\d+) one-to-one, last (\d+x\d+) (\w+)\), (\d+) frames, client (\d+x\d+)");
+        var move = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: move (\d+) steps, (\d+) builds, (\d+) frames");
+        Assert.True(drag.Success && ended.Success && move.Success, run.Output);
+        int N(System.Text.RegularExpressions.Match m, int group) => int.Parse(m.Groups[group].Value);
+        int steps = N(drag, 1), builds = N(drag, 2), oneToOne = N(drag, 3), frames = N(drag, 4);
+
+        // Every step is drawn inside the loop, as ever: nothing else comes round there.
+        Assert.True(frames >= steps, $"{frames} frames for {steps} steps of the drag:\n{run.Output}");
+        // A move changes no size: no swapchain at either end of it.
+        Assert.True(N(move, 2) == 0, $"a move built {N(move, 2)} swapchains:\n{run.Output}");
+
+        if (variant == "fifo") Assert.Contains("vulkan present scaling: not under Fifo", run.Output);
+        if (variant == "immediate") Assert.Contains("vulkan present scaling: not under Immediate", run.Output);
+        if (!run.Output.Contains("fixed extent available"))
+        {
+            Assert.True(builds == steps && oneToOne == 0, $"{builds} builds ({oneToOne} one-to-one) for {steps} steps:\n{run.Output}");
+            Assert.True(N(ended, 1) == 0, $"the end of a drag built {N(ended, 1)} swapchains:\n{run.Output}");
+            return;
+        }
+        // The first step and each bucket crossed after it: three here, all one-to-one. Rebuilt for
+        // every size, sixteen.
+        Assert.True(builds >= 1 && builds == oneToOne, $"{builds} builds ({oneToOne} one-to-one) during the drag:\n{run.Output}");
+        Assert.True(builds <= 4, $"{builds} swapchain builds for {steps} steps of a drag:\n{run.Output}");
+        // One exact swapchain at the end, at the window's size, and its frame drawn at once.
+        Assert.True(N(ended, 1) == 1 && N(ended, 2) == 0 && ended.Groups[4].Value == "exact",
+            $"the end of the drag: {ended.Value}\n{run.Output}");
+        Assert.Equal(ended.Groups[6].Value, ended.Groups[3].Value);
+        Assert.True(N(ended, 5) >= 1, $"no frame was drawn when the drag ended:\n{run.Output}");
+    }
+
+    /// <summary>
     /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
     /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
     /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217
@@ -269,6 +364,142 @@ public sealed class VulkanProbeTests
         Assert.True(besides.Max() - besides[0] < smallest,
             $"Skia held {besides.Max() - besides[0]:0.0} MB more besides its offscreen after {resizes} new " +
             $"sizes than after the first, against {smallest:0.0} MB for one offscreen:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// Every swapchain image is reused many times, and each capture shows the frame just drawn.
+    /// The renderer keeps one render target per swapchain image for the swapchain's life, which
+    /// is right only while the host hands every acquired image back in the layout Skia left it
+    /// in: kept without that, a three-image swapchain drew three frames and then black for ever.
+    /// The fortieth frame of each swapchain is captured, after resizes and a minimize, so every
+    /// image has been drawn into about a dozen times; a stale image would show an older number,
+    /// a target over the wrong image another frame's.
+    ///
+    /// <para><b>A wrong layout does not show here.</b> With the host's acquire barrier left out,
+    /// NVIDIA (610) drew every captured frame right, on both formats, while the validation layer
+    /// reported <c>VUID-vkCmdDraw-None-09600</c> (the image in UNDEFINED or PRESENT_SRC_KHR where
+    /// the render target expects COLOR_ATTACHMENT_OPTIMAL). So where the Khronos validation layer
+    /// is installed, the run loads it (core and synchronisation) and must leave its log empty;
+    /// the loader's line saying it forced the layer on is the proof it ran.</para>
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-offscreen")]
+    [InlineData("f16-scaled-space")]
+    [InlineData("8-bit")]
+    [InlineData("fifo")]
+    [InlineData("immediate")]
+    public void EveryCapture_OfAReusedImage_ShowsTheFrameJustDrawn(string variant)
+    {
+        string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-counter-{Guid.NewGuid():N}.ppm");
+        string validation = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-counter-{Guid.NewGuid():N}.log");
+        try
+        {
+            var environment = new Dictionary<string, string?>
+            {
+                ["HULTUI_VULKAN_CAPTURE"] = capture,
+                ["HULTUI_VULKAN_CAPTURE_FRAME"] = "40",
+                // Says whether the surface offers ONE_TO_ONE ("fixed extent available").
+                ["HULTUI_STARTUP"] = "1",
+                // Nothing happens here without the layer installed (the Vulkan SDK).
+                ["VK_LOADER_LAYERS_ENABLE"] = "*validation*",
+                ["VK_LAYER_VALIDATE_SYNC"] = "1",
+                ["VK_LAYER_LOG_FILENAME"] = validation,
+                ["VK_LOADER_DEBUG"] = "warn",
+                ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+                ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+                ["HULTUI_VULKAN_F16"] = null,
+                ["HULTUI_VULKAN_WHITE_SCALE"] = null,
+            };
+            // A white scale above 1 sends the half-float frame through the offscreen (or the
+            // scaled colour space) on any display.
+            switch (variant)
+            {
+                case "f16-offscreen": environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_WHITE_SCALE"] = "2"; break;
+                case "f16-scaled-space":
+                    environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_WHITE_SCALE"] = "2";
+                    environment["HULTUI_VULKAN_SCALED_SPACE"] = "1";
+                    break;
+                case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
+                case "fifo": environment["HULTUI_VULKAN_PRESENT"] = "fifo"; break;
+                case "immediate": environment["HULTUI_VULKAN_PRESENT"] = "immediate"; break;
+            }
+
+            var run = RunProbe(environment, "--frame-counter");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            Assert.Contains(" vulkan device=", run.Output);
+            var captures = System.Text.RegularExpressions.Regex.Matches(run.Output, @"probe: capture (right|WRONG)");
+            // One a swapchain: the first, two resizes, the restore after a minimize, and where the
+            // surface shows a swapchain one-to-one, a drag's (drawn into at four sizes) and the
+            // exact one its end builds.
+            int expected = !OperatingSystem.IsWindows() ? 1 : run.Output.Contains("fixed extent available") ? 6 : 4;
+            Assert.True(captures.Count >= expected, $"{captures.Count} captures, expected {expected}:\n{run.Output}");
+            Assert.DoesNotContain("probe: capture WRONG", run.Output);
+
+            if (run.Output.Contains("\"VK_LAYER_KHRONOS_validation\" forced enabled"))
+            {
+                string reported = File.Exists(validation) ? File.ReadAllText(validation) : "";
+                Assert.True(reported.Length == 0, "the validation layer reported:\n" +
+                    (reported.Length > 4000 ? reported[..4000] : reported));
+            }
+        }
+        finally
+        {
+            File.Delete(capture);
+            File.Delete(validation);
+        }
+    }
+
+    /// <summary>
+    /// A steady Vulkan frame allocates nothing, as a GL one does. Wrapping the swapchain image in
+    /// a new render target and surface every frame cost 2,048 bytes a frame (1,819 on an 8-bit
+    /// swapchain): an SKSurface, its SKCanvas and their handle-table entries, and on the
+    /// half-float swapchain a snapshot SKImage of the offscreen.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-offscreen")]
+    [InlineData("8-bit")]
+    public void ASteadyFrame_AllocatesNothing(string variant)
+    {
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = variant == "8-bit" ? "0" : "1",
+            ["HULTUI_VULKAN_WHITE_SCALE"] = variant == "8-bit" ? null : "2",
+            ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+            ["HULTUI_A11Y"] = "0",
+        }, "--frame-bytes");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains(" vulkan device=", run.Output);
+        var bytes = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: ([\d.]+) bytes a frame");
+        Assert.True(bytes.Success, run.Output);
+        double perFrame = double.Parse(bytes.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(perFrame < 100, $"a steady frame allocated {perFrame:0.0} bytes:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// Disposed images leave no textures behind. A GPU context keeps the texture it uploaded for
+    /// an image after the image is gone, as a spare for a later texture of exactly that size,
+    /// until its 256 MB budget pushes it out: eight 3840×2400 photos drawn and disposed held
+    /// 176 MB that way. The surface purges the spares after the next frame. Four 2048×2048
+    /// images are 64 MB of textures here; the purge must leave Skia less than one of them.
+    /// </summary>
+    [VulkanUiFact]
+    public void DisposedImages_LeaveNoTexturesBehind()
+    {
+        var run = RunProbe(new() { ["HULTUI_STARTUP"] = "1" }, "--disposed-images");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        var purge = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"vulkan scratch purged in [\d.]+ ms with a \d+x\d+ offscreen: skia cache ([\d.]+) MB in \d+ resources \(images were disposed\)");
+        Assert.True(purge.Success, "no purge after the images were disposed:\n" + run.Output);
+        double held = double.Parse(purge.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(held < 16, $"Skia held {held:0.0} MB after the purge; one image is 16 MB:\n{run.Output}");
+        // Once: the frames after it disposed nothing more.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(run.Output, @"\(images were disposed\)"));
     }
 
     /// <summary>

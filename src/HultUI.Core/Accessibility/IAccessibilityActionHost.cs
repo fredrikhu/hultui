@@ -31,4 +31,13 @@ public interface IAccessibilityActionHost
     /// <summary>Sets a range's value (a slider's, a number field's: <see cref="IRangeValueElement"/>),
     /// clamped to its range; nothing for a read-only one.</summary>
     void SetRangeValue(ElementId id, double value) { }
+
+    /// <summary>
+    /// The bridge's <see cref="IAccessibilityBridge.IsActive"/> may have changed, on any thread:
+    /// assistive technology was switched on or off, or a client attached. The window reads
+    /// <c>IsActive</c> in its frame loop, which waits for its next deadline or a wake rather
+    /// than coming round every 16 ms, so a change it is not told of is not seen until something
+    /// else wakes it.
+    /// </summary>
+    void ActiveChanged() { }
 }

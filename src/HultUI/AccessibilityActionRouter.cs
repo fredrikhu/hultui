@@ -42,8 +42,31 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         }
     }
 
-    /// <summary>Queues an arbitrary action for UI-thread execution (for bridge-specific writes).</summary>
-    public void Enqueue(Action action) => _pendingActions.Enqueue(action);
+    /// <summary>
+    /// Queues an action for UI-thread execution (every action, and bridge-specific writes), and
+    /// wakes the frame loop: the action is drained by the next frame (<see cref="HasPendingActions"/>
+    /// asks for one), and an idle loop waits for a wake, or its next deadline, before it looks.
+    /// </summary>
+    public void Enqueue(Action action)
+    {
+        _pendingActions.Enqueue(action);
+        Wake(WakeSource.A11yAction);
+    }
+
+    /// <summary>A bridge's <c>IsActive</c> may have changed off the UI thread (assistive technology
+    /// switched on or off, a client attached): the loop wakes so the window looks again — the
+    /// first frame of an attach builds the whole tree.</summary>
+    public void ActiveChanged() => Wake(WakeSource.A11yClient);
+
+    /// <summary>
+    /// Wakes the loop through the thread pool, never from the calling thread: these calls come on
+    /// assistive technology's threads, and a wake is an <c>SDL_PushEvent</c>, which waits for SDL's
+    /// event-watcher lock; a frame drawn inside the watcher during a live resize holds it, and a
+    /// frame must never wait for a thread that posts (docs/THREADING.md).
+    /// </summary>
+    private void Wake(WakeSource source) =>
+        ThreadPool.UnsafeQueueUserWorkItem(static s => s.App.WakeLoop(s.Source), (App: _window.Application, Source: source),
+            preferLocal: false);
 
     public Element? FindElement(ElementId id) => _window.FindElement(id);
 
@@ -57,7 +80,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         return true;
     }
 
-    public void InvokeElement(ElementId id) => _pendingActions.Enqueue(() =>
+    public void InvokeElement(ElementId id) => Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.Invoke)) return;
         // A virtualized-list item has no element of its own; route its activation
@@ -72,7 +95,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, element);
     });
 
-    public void ToggleElement(ElementId id) => _pendingActions.Enqueue(() =>
+    public void ToggleElement(ElementId id) => Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.Toggle)) return;
         // Toggling a virtualized item is its activation: a menu choice is turned on by
@@ -94,7 +117,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
             EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, target);
     });
 
-    public void SelectElement(ElementId id) => _pendingActions.Enqueue(() =>
+    public void SelectElement(ElementId id) => Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.Select)) return;
         // Selecting a virtualized-list item is its activation (single-select).
@@ -121,13 +144,13 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     /// <summary>A range's value from assistive technology (AT-SPI's Value.CurrentValue): set
     /// through the element, which clamps it and tells its own change; nothing for a read-only one.</summary>
-    public void SetRangeValue(ElementId id, double value) => _pendingActions.Enqueue(() =>
+    public void SetRangeValue(ElementId id, double value) => Enqueue(() =>
     {
         if (FindElement(id) is IRangeValueElement range && !range.IsReadOnly)
             range.SetAccessibleValue(value);
     });
 
-    public void SetValue(ElementId id, string value) => _pendingActions.Enqueue(() =>
+    public void SetValue(ElementId id, string value) => Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.SetValue, value)) return;
         switch (FindElement(id))
@@ -140,7 +163,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     public void FocusElement(ElementId id) => RequestFocus(id);
 
-    public void RequestFocus(ElementId id) => _pendingActions.Enqueue(() =>
+    public void RequestFocus(ElementId id) => Enqueue(() =>
     {
         if (ToContent(id, AccessibleContentAction.Focus)) return;
         FindElement(id)?.Focus();

@@ -172,12 +172,15 @@ sealed record WalkItem(int Index, string Icon, string Subject, string Hash, stri
 /// The shape of Junction's History view: a header, then a <see cref="VirtualListElement{T}"/>
 /// of two-line rows (an icon, the subject, a line of detail), no keys on the rows, the
 /// selection drawn by the template from the index the pane's Build read, the list told the
-/// selected index for assistive technology, and its rows named for it by a label made on
-/// each call. A selection move writes a signal; the rebuild scrolls the row into view after
+/// selected index for assistive technology, and its rows named for it by a label made from
+/// the item alone. A selection move writes a signal; the rebuild scrolls the row into view after
 /// the build, as Junction's <c>OnAfterBuild</c> does. With <paramref name="itemRows"/> the
 /// template is the two-argument one, whose rows the list keeps while they are unchanged.
+/// With <paramref name="details"/> the same Build makes a details pane beside the list, for
+/// the commit the walk started on (<see cref="DetailsPane"/>): what an app's whole-window
+/// Build makes again, unchanged, on every move.
 /// </summary>
-sealed class WalkPane(List<WalkItem> items, bool itemRows = false) : Component
+sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details = false) : Component
 {
     public const float RowHeight = 46f;
 
@@ -185,11 +188,24 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false) : Component
     private readonly Ref<VirtualListElement<WalkItem>> _list = new();
     private int _built;
     private bool _reveal;
+    private int _opened = -1;
 
     /// <summary>Rows the template has made.</summary>
     public int RowsMade { get; private set; }
 
+    // Made once, as an app keeps a label that reads only its item: one delegate every build.
+    private Func<WalkItem, string?>? _label;
+
+    private static string Label(WalkItem item) => $"{item.Subject}, {item.Author}, {item.Hash}";
+
     public int Selected => _selected.Value;
+
+    /// <summary>Shows <paramref name="index"/> in the details pane, as opening a commit does.</summary>
+    public void Open(int index)
+    {
+        _opened = index;
+        MarkDirty();
+    }
 
     public void Select(int index)
     {
@@ -209,12 +225,12 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false) : Component
         var list = VirtualListElement<WalkItem>.New()
             .ItemHeight(RowHeight)
             .Items(items)
-            .AccessibleItemLabel(item => $"{item.Subject}, {item.Author}, {item.Hash}")
+            .AccessibleItemLabel(_label ??= Label)
             .SelectedIndex(selected)
             .FlexGrow(1);
         if (itemRows) list.RenderWith((item, isSelected) => Row(item, isSelected));
         else list.RenderWith(item => Row(item, item.Index == selected));
-        return Flex.Column(gap: 0).FlexGrow(1).Children(
+        var pane = Flex.Column(gap: 0).FlexGrow(1).Children(
             Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(9, 16))
                 .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))
                 .Children(
@@ -222,6 +238,35 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false) : Component
                     Text.New("History").FontSize(13f).FontWeight(FontWeight.SemiBold),
                     Text.New($"{items.Count:N0} commits").FontSize(12f).TextColor(Ui.Muted)),
             list.WithRef(_list));
+        if (!details) return pane;
+        return Flex.Row(gap: 0).FlexGrow(1).Children(pane, DetailsPane(items[Math.Max(0, _opened)]));
+    }
+
+    /// <summary>
+    /// A commit's details, as an app shows the one that was opened: its subject, who and when,
+    /// a message, the files it changed and two actions. About sixty nodes for assistive
+    /// technology, none of which a selection move changes.
+    /// </summary>
+    private static Element DetailsPane(WalkItem item)
+    {
+        var files = new Element[24];
+        for (int i = 0; i < files.Length; i++)
+            files[i] = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(3, 0))
+                .Children(
+                    Phosphor.Draw(i % 5 == 0 ? "file-image" : "file-code", 14f, Ui.Muted),
+                    Text.New($"src/{item.Author.Split(' ')[0].ToLowerInvariant()}/part{i}/File{item.Index + i}.cs")
+                        .FontSize(12f).FlexGrow(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                    Text.New($"+{(item.Index * 7 + i * 13) % 90} −{(item.Index * 3 + i * 5) % 40}").FontSize(11f).TextColor(Ui.Muted));
+        return Flex.Column(gap: 8).Width(Dimension.Px(380)).FlexShrink(0).Padding(16)
+            .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 0, 1))
+            .Children(
+                Text.New("Commit").FontSize(12f).TextColor(Ui.Muted),
+                Text.New(item.Subject).FontSize(15f).FontWeight(FontWeight.SemiBold),
+                Text.New(item.Meta).FontSize(12f).TextColor(Ui.Muted),
+                Text.New($"{item.Subject}. {item.Subject}.").FontSize(13f),
+                Flex.Row(gap: 8).Children(Button.New("Checkout"), Button.New("Copy hash", ButtonVariant.Secondary)),
+                Text.New($"{files.Length} files changed").FontSize(12f).FontWeight(FontWeight.SemiBold),
+                ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(files)));
     }
 
     protected override void OnAfterBuild()

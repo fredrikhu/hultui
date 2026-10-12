@@ -17,6 +17,8 @@
     <!-- VideoElement overrides MeasureContent and PatchFrom, which are internal;
          a first-party element package gets the same access the framework has. -->
     <InternalsVisibleTo Include="HultUI.Media" />
+    <!-- Its tests check which elements a rebuild of the player marks for layout (DirtyFlags). -->
+    <InternalsVisibleTo Include="HultUI.Media.Tests" />
     <!-- WebViewElement registers element-owned handlers (OnOwn), keeps its controller
          across rebuilds (PatchFrom) and asks for text input when its engine takes
          forwarded keys (WantsTextInput). -->

@@ -5,6 +5,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 using SkiaSharp;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
@@ -263,6 +264,170 @@ public class VirtualListItemRowTests
         pane.Rebuild();
         session.PumpFrames(2);
         Assert.Equal(0, pane.Made);
+    }
+
+    // ── A display scale change (plan 17, round 3, step 17) ──
+
+    /// <summary>Glyphs cut at the display scale, the way an app's icon cache cuts them (Junction's
+    /// Phosphor): a raster per scale; a scale change retires the rasters handed out, and the next
+    /// change frees them.</summary>
+    private sealed class ScaledGlyphs : IDisposable
+    {
+        private readonly Dictionary<int, SkiaImageSource> _cache = [];
+        private readonly List<SkiaImageSource> _retired = [];
+        public float Scale { get; private set; } = 1f;
+
+        public void ScaleTo(float scale)
+        {
+            if (scale == Scale) return;
+            Scale = scale;
+            foreach (var retired in _retired) retired.Dispose();
+            _retired.Clear();
+            _retired.AddRange(_cache.Values);
+            _cache.Clear();
+        }
+
+        public SkiaImageSource Glyph(float size)
+        {
+            int px = (int)MathF.Ceiling(size * Scale);
+            if (_cache.TryGetValue(px, out var cached)) return cached;
+            var bitmap = new SKBitmap(px, px, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using (var canvas = new SKCanvas(bitmap))
+            using (var paint = new SKPaint { IsAntialias = true, Color = new SKColor(30, 120, 60) })
+            {
+                canvas.Clear(SKColors.Transparent);
+                canvas.DrawCircle(px / 2f, px / 2f, px * 0.4f, paint);
+            }
+            return _cache[px] = new SkiaImageSource(bitmap);
+        }
+
+        public void Dispose()
+        {
+            foreach (var source in _cache.Values) source.Dispose();
+            foreach (var source in _retired) source.Dispose();
+        }
+    }
+
+    /// <summary>A list whose rows draw such a glyph, and whose owner follows the window's scale as
+    /// Junction does (the cache to the new scale, then a rebuild) but has no scale in anything it
+    /// tells the rows with: what Junction History shipped in junction-v1.20.0.</summary>
+    private sealed class GlyphPane : Component
+    {
+        public const float GlyphSize = 12f;
+        public readonly ScaledGlyphs Glyphs = new();
+        public int Made;
+        public readonly Ref<VirtualListElement<Entry>> List = new();
+
+        public GlyphPane(Window window) =>
+            window.Resized += () => { Glyphs.ScaleTo(window.DisplayScale); MarkDirty(); };
+
+        public override Element Build()
+        {
+            var list = VirtualListElement<Entry>.New()
+                .ItemHeight(RowHeight)
+                .Items(Entries(200))
+                .RenderWith((e, selected) =>
+                {
+                    Made++;
+                    return Flex.Row(gap: 6).Padding(new Thickness(2, 8)).Children(
+                        Image.New(Glyphs.Glyph(GlyphSize)).Width(GlyphSize).Height(GlyphSize).FlexShrink(0),
+                        TextB.New(e.Name).FontSize(12f));
+                })
+                .FlexGrow(1);
+            return Flex.Column().FlexGrow(1).Children(list.WithRef(List));
+        }
+
+        public void Rebuild() => MarkDirty();
+    }
+
+    /// <summary>
+    /// Kept rows were not made again on a display scale change, so an owner that left the scale out
+    /// of what it invalidates the rows on kept rasters cut for the old scale, and after a second
+    /// change freed ones: Junction's icons vanished after a move to 150 % and back (11ced00 fixed
+    /// it there by putting the scale in its shapes). A scale change makes every row again, as a
+    /// theme switch does, and a round trip draws exactly what a fresh list draws.
+    /// </summary>
+    [Fact]
+    public void ADisplayScaleChange_MakesEveryRowAgain_AndARoundTripDrawsAsAFreshList()
+    {
+        // One application per process: the fresh list first.
+        byte[] fresh;
+        using (var first = HeadlessSession.Create(400, 300))
+        {
+            var freshPane = new GlyphPane(first.Window.Window);
+            first.Application.SetRoot(freshPane.Mount());
+            first.PumpFrames(3);
+            fresh = Pixels(first);
+            freshPane.Glyphs.Dispose();
+        }
+
+        using var session = HeadlessSession.Create(400, 300);
+        var pane = new GlyphPane(session.Window.Window);
+        session.Application.SetRoot(pane.Mount());
+        session.PumpFrames(3);
+        var list = pane.List.Current!;
+        int onScreen = list.Children.Count - 1;
+        Assert.True(onScreen > 10);
+
+        foreach (float scale in new[] { 1.5f, 1f })
+        {
+            pane.Made = 0;
+            session.Window.SetScale(scale);
+            session.PumpFrames(2);
+            Assert.True(onScreen == pane.Made, $"at {scale}: {pane.Made} of {onScreen} rows made again");
+            int px = (int)MathF.Ceiling(GlyphPane.GlyphSize * scale);
+            for (int i = 1; i < list.Children.Count; i++)
+            {
+                var glyph = (ImageElement)list.Children[i].Children[0];
+                Assert.True(glyph.Source is { IsLoaded: true } source && source.IntrinsicSize.Width == px,
+                    $"at {scale}, row {i}: its glyph is not the {px} px raster");
+            }
+        }
+
+        var after = Pixels(session);
+        int differ = 0;
+        for (int i = 0; i < after.Length; i += 4)
+            if (!after.AsSpan(i, 4).SequenceEqual(fresh.AsSpan(i, 4))) differ++;
+        Assert.True(differ == 0, $"{differ} pixels differ from a fresh list after 1 → 1.5 → 1");
+
+        // The same scale makes nothing: a rebuild keeps every row, as before.
+        pane.Made = 0;
+        pane.Rebuild();
+        session.PumpFrames(2);
+        Assert.Equal(0, pane.Made);
+        pane.Glyphs.Dispose();
+    }
+
+    /// <summary>A list on item rows in an overlay (a popover, a palette) is in no build of the
+    /// window's root: the window tells its overlays of the scale too.</summary>
+    [Fact]
+    public void AListInAnOverlay_IsMadeAgainOnADisplayScaleChange()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        session.Application.SetRoot(Box.New().FlexGrow(1));
+        int made = 0;
+        var list = VirtualListElement<Entry>.New()
+            .ItemHeight(RowHeight)
+            .Items(Entries(50))
+            .RenderWith((e, selected) => { made++; return Flex.Row().Children(TextB.New(e.Name).FontSize(12f)); })
+            .Width(200).Height(150);
+        session.Window.Window.ShowOverlay(list, 20, 20);
+        session.PumpFrames(3);
+        int onScreen = list.Children.Count - 1;
+        Assert.True(onScreen > 3);
+        made = 0;
+
+        session.Window.SetScale(1.5f);
+        session.PumpFrames(2);
+
+        Assert.Equal(onScreen, made);
+    }
+
+    private static byte[] Pixels(HeadlessSession session)
+    {
+        using var image = session.Window.CapturePixels();
+        using var bitmap = SKBitmap.FromImage(image);
+        return bitmap.Bytes;
     }
 
     /// <summary>Row heights from a function are worked out again on every rebuild, as they always

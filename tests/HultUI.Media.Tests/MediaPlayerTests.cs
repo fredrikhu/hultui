@@ -153,6 +153,42 @@ public class MediaPlayerTests
         }
     }
 
+    /// <summary>
+    /// A held open is mpv's order: Opening with nothing known, a seek that goes nowhere, then
+    /// the load, which starts at zero and plays. What an app does "once loaded" is tested
+    /// against this, not against the synchronous open.
+    /// </summary>
+    [Fact]
+    public void AHeldOpen_LoadsWhenTold_AndASeekBeforeThatGoesNowhere()
+    {
+        var (player, backend) = NewPlayer();
+        using (player)
+        {
+            backend.HoldOpening = true;
+            backend.Duration = TimeSpan.FromMinutes(24);
+            backend.AudioTracks.Add(new MediaTrack(1, "English", "en"));
+
+            player.Open(Clip, autoPlay: true);
+            Assert.Equal(PlaybackState.Opening, player.State);
+            Assert.Null(player.Duration);
+            Assert.Empty(player.AudioTracks);
+            Assert.False(player.Frames.IsLoaded);
+
+            player.Seek(TimeSpan.FromMinutes(12));
+            Assert.Contains("Seek(00:12:00.000, precise)", backend.Calls);
+
+            backend.FinishOpening();
+            Assert.True(player.IsPlaying);
+            Assert.Equal(TimeSpan.FromMinutes(24), player.Duration);
+            Assert.Single(player.AudioTracks);
+            Assert.Equal(TimeSpan.Zero, player.Position);   // the early seek was not kept
+            Assert.True(player.Frames.IsLoaded);
+
+            backend.FinishOpening();                        // nothing left to load
+            Assert.Equal(1, backend.Calls.Count(c => c == "Play"));
+        }
+    }
+
     [Fact]
     public void PlayPause_AreTheBackendsWord()
     {

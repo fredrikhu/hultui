@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.RichText;
 using HultUI.Testing;
 using Xunit;
 
@@ -172,6 +173,49 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"repainting 43 selectable and linked labels allocated {perFrame:0.#} B per frame");
     }
 
+    /// <summary>Selectable, span-coloured lines as above, two of whose shaping merged clusters —
+    /// emoji, combining marks — under a selection. Such a line maps offsets to x through a prefix
+    /// measurer, and a new closure for each pass over it was ~1 KB a frame over two such lines
+    /// (plan 17, round 3).</summary>
+    [Fact]
+    public void ASteadyRepaintOfSelectableLinesThatMergedClusters_AllocatesNothing()
+    {
+        string[] lines =
+        [
+            "    var greeting = \"hello\"; // a plain line",
+            "  Emoji:     \U0001F600 \U0001F389 \U0001F44D\U0001F3FD \U0001F468\u200D\U0001F469\u200D\U0001F467 \U0001F1F8\U0001F1EA",
+            "  Combining: e\u0301 a\u0308 o\u0302 n\u0303 and so on",
+            "    var farewell = \"goodbye\"; // another plain line",
+        ];
+        var group = new TextSelectionGroup();
+        var rows = new Element[lines.Length];
+        for (int i = 0; i < lines.Length; i++)
+        {
+            int third = lines[i].Length / 3;
+            Core.Rendering.TextSpan[] spans =
+            [
+                new(0, third, Color.FromHex("#569CD6")),
+                new(third, third, Color.FromHex("#9CDCFE")),
+                new(2 * third, lines[i].Length - 2 * third, Color.FromHex("#CE9178")),
+            ];
+            rows[i] = TextElement.New(lines[i]).Selectable().SelectionGroup(group, i).Spans(spans);
+        }
+        group.Bind(lines, lines.Length, i => lines[i]);
+        group.Anchor(0, 6);
+        group.ExtendTo(3, 9);
+        var root = Flex.Column().FlexGrow(1).Children(rows);
+        using var session = Session(root);
+        for (int i = 1; i <= 2; i++)
+        {
+            var paragraph = Assert.IsType<HultUI.Text.PipelineTextParagraph>(((TextElement)rows[i]).DrawnParagraph);
+            Assert.Contains(paragraph.TextLines, line => line.Runs.Any(run => run.Glyphs.Length != run.Text.Length));
+        }
+
+        double perFrame = PerFrame(session.Application, () => root.MarkPaintDirty());
+
+        Assert.True(perFrame < 1, $"repainting selectable lines that merged clusters allocated {perFrame:0.#} B per frame");
+    }
+
     /// <summary>A TextArea of syntax-coloured code, read-only as a viewer is and editable with the
     /// caret on a line, repainted, as a caret blink or a search tint repaints it. It cut each
     /// line it drew out of its text again every frame, and the caret's line too: ~3 KB a frame
@@ -204,6 +248,28 @@ public class FrameAllocationTests
         double perFrame = PerFrame(session.Application, () => area.MarkPaintDirty());
 
         Assert.True(perFrame < 1, $"repainting a TextArea allocated {perFrame:0.#} B per frame");
+    }
+
+    /// <summary>A rich text editor's ticked tasks, repainted, allocate no more than the same tasks
+    /// unticked. Each tick is a polyline, and each polyline was a new <c>SKPath</c>: ~80 B a tick a
+    /// frame, 3.1 KB a frame over a screen of 40 ticked tasks (plan 17, round 3). (The editor
+    /// allocates 24 B a frame either way: the record it notes where it was drawn in.)</summary>
+    [Fact]
+    public void ASteadyRepaintOfTickedTasks_AllocatesNoMoreThanOfOpenTasks()
+    {
+        double ticked = Repaint(done: true), open = Repaint(done: false);
+
+        Assert.True(ticked <= open, $"repainting ticked tasks allocated {ticked:0.#} B per frame; open ones, {open:0.#} B");
+
+        static double Repaint(bool done)
+        {
+            var blocks = new List<RichBlock>();
+            for (int i = 0; i < 30; i++)
+                blocks.Add(RichBlock.Of(BlockKind.TaskItem, $"Task number {i}") with { Checked = done });
+            var editor = RichTextEditor.New(new RichDocument(blocks)).FlexGrow(1);
+            using var session = Session(Flex.Column().FlexGrow(1).Children(editor));
+            return PerFrame(session.Application, () => editor.MarkPaintDirty());
+        }
     }
 
     /// <summary>Tab through a form of 300 fields, a frame after each: what is left is the key
@@ -276,15 +342,12 @@ public class FrameAllocationTests
         double repaint = PerFrame(app, () => root.MarkPaintDirty());
         double scrolled = PerFrame(app, () => scroll.ScrollOffsetY = y = y == 130 ? 150 : 130);
         // The pointer over a row of the second section, moving within it: the platform's input
-        // and the move event are all a move should allocate.
+        // is all a move should allocate (nothing listens for moves, so no move event is made).
         for (int i = 0; i < 10; i++) { window.MoveMouse(300 + i % 2, 200); app.RunFrame(Frame); }
         long events = Allocations.Least(() =>
         {
             for (int i = 0; i < 100; i++)
-            {
                 _sink = new InputEvent.MouseMoveInput(300, 200, 1, 0, KeyModifiers.None);
-                _sink = new PointerMoveEvent { Position = new Point(300, 200), Delta = new Point(1, 0) };
-            }
         });
         long moves = Allocations.Least(() =>
         {
@@ -297,7 +360,7 @@ public class FrameAllocationTests
 
         Assert.True(repaint < 1, $"a repaint allocated {repaint:0.#} B per frame");
         Assert.True(scrolled < 1, $"a scrolled frame allocated {scrolled:0.#} B");
-        Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
+        Assert.True(moves <= events, $"100 moves allocated {moves} B; the platform's input alone is {events} B");
         Assert.Same(rootOrder, ZOrderHelper.GetChildrenInZOrder(root));
         Assert.Same(sectionOrder, ZOrderHelper.GetChildrenInZOrder(sections[0]));
         Assert.Same(panel, HitTester.HitTest(root, new Point(60, 60)));
@@ -322,11 +385,12 @@ public class FrameAllocationTests
 
     private static object? _sink;
 
-    /// <summary>The pointer moving within one element allocates the platform's input and the
-    /// move event, nothing else. Looking for a tooltip to show allocated a closure for the
-    /// tooltip's delayed show on every move, whether there was a tooltip or not.</summary>
+    /// <summary>The pointer moving within one element allocates the platform's input, nothing
+    /// else. Looking for a tooltip to show allocated a closure for the tooltip's delayed show on
+    /// every move, whether there was a tooltip or not; and a move event was made on every move,
+    /// though nothing on the path listened for one (plan 17 round 3: 104 → 40 B a move).</summary>
     [Fact]
-    public void APointerMoveWithinOneElement_AllocatesOnlyItsEvents()
+    public void APointerMoveWithinOneElement_AllocatesOnlyThePlatformsInput()
     {
         var (root, _) = Screen();
         using var session = Session(root);
@@ -336,10 +400,7 @@ public class FrameAllocationTests
         long events = Allocations.Least(() =>
         {
             for (int i = 0; i < 100; i++)
-            {
                 _sink = new InputEvent.MouseMoveInput(480, 100, 1, 0, KeyModifiers.None);
-                _sink = new PointerMoveEvent { Position = new Point(480, 100), Delta = new Point(1, 0) };
-            }
         });
 
         long moves = Allocations.Least(() =>
@@ -351,7 +412,7 @@ public class FrameAllocationTests
             }
         }, goal: events);
 
-        Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
+        Assert.True(moves <= events, $"100 moves allocated {moves} B; the platform's input alone is {events} B");
     }
 
     /// <summary>Bytes this thread allocated per rendered frame, <paramref name="change"/>

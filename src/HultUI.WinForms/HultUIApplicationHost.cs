@@ -32,6 +32,10 @@ public static class HultUIApplicationHost
     private static Application? _application;
     private static WinFormsTimer? _pump;
     private static int _intervalMilliseconds = 8;
+    // WinForms' own context, for a wake from any thread to reach the UI thread's message loop.
+    private static SynchronizationContext? _context;
+    private static int _kickPending;
+    private static Action? _kick;
 
     /// <summary>
     /// The running application, or null until the first <see cref="HultUIControl"/>
@@ -72,13 +76,16 @@ public static class HultUIApplicationHost
     public static void BeginGraphicsPreload() => GraphicsPreload.Begin();
 
     /// <summary>
-    /// How often the frame pump ticks, in milliseconds. Default 8.
+    /// The shortest time between two frames of the pump, in milliseconds. Default 8.
     /// </summary>
     /// <remarks>
-    /// A tick is not a frame: HultUI renders only what is dirty, so an idle control
-    /// costs a tree walk and no drawing. Raising this trades input-to-pixel latency for
-    /// fewer walks, and there is little to gain — an idle form was measured rendering
-    /// two frames across a whole run.
+    /// The pump ticks only when something is due, as <c>Application.Run</c> does: every
+    /// interval while a control needs a frame or a tween moves, once when a delay or a
+    /// coalesced accessibility refresh comes due, and not at all while nothing does — then
+    /// a post from another thread, or a change made on the UI thread (input, a WinForms
+    /// handler writing a signal), brings the next tick forward. It ticked every 8 ms whatever
+    /// happened, about 60 times a second in an idle form (WinForms timers round up to the
+    /// system's 15.6 ms tick).
     ///
     /// <para>A timer rather than <c>Application.Idle</c>, which fires when the message
     /// queue drains and is not a frame clock: measured at 19 idle events against 234
@@ -145,10 +152,13 @@ public static class HultUIApplicationHost
     private static void StartPump()
     {
         if (_pump is not null) return;
+        // WinForms installs its context on the UI thread with the first control, which this is.
+        _context = SynchronizationContext.Current;
         _pump = new WinFormsTimer { Interval = _intervalMilliseconds };
         _pump.Tick += (_, _) => Tick();
-        _pump.Start();
+        Platform.Woken = _kick ??= Kick;
         Clock.Restart();
+        _pump.Start();
     }
 
     private static void StopPump()
@@ -156,17 +166,68 @@ public static class HultUIApplicationHost
         _pump?.Stop();
         _pump?.Dispose();
         _pump = null;
+        Platform.Woken = null;
+        _application?.HostUnpark();
         Clock.Stop();
     }
 
     private static void Tick()
     {
         var application = _application;
+        _pump?.Stop();
         if (application is null || !application.IsRunning) return;
 
+        application.HostUnpark();
         var delta = Clock.Elapsed;
         Clock.Restart();
-        application.RunFrame(delta);
+        application.HostRunFrame(delta);
+        Schedule(application);
+    }
+
+    /// <summary>After a frame: the next tick when the loop has one due, none until a wake
+    /// when it has nothing. Parks the loop meanwhile, so work arriving on the UI thread
+    /// (input, a handler posting or writing a signal) wakes it as it ends Run's wait.</summary>
+    private static void Schedule(Application application)
+    {
+        if (_pump is null) return;
+        if (application.HostNextFrameIn(TimeSpan.FromMilliseconds(_intervalMilliseconds)) is { } due)
+        {
+            _pump.Interval = Math.Max(1, (int)Math.Ceiling(due.TotalMilliseconds));
+            _pump.Start();
+        }
+        application.HostPark(_kick!);
+    }
+
+    /// <summary>The loop's wake, from any thread: a tick, posted to the message loop, at most
+    /// one outstanding.</summary>
+    private static void Kick()
+    {
+        if (Interlocked.Exchange(ref _kickPending, 1) == 1) return;
+        if (_context is not { } context)
+        {
+            Volatile.Write(ref _kickPending, 0);
+            return;
+        }
+        context.Post(static _ =>
+        {
+            Volatile.Write(ref _kickPending, 0);
+            KickNow();
+        }, null);
+    }
+
+    private static void KickNow()
+    {
+        if (_pump is null) return;
+        // Frames no closer than the interval: a wake soon after a tick waits out the rest of it.
+        double since = Clock.Elapsed.TotalMilliseconds;
+        if (since >= _intervalMilliseconds)
+        {
+            Tick();
+            return;
+        }
+        _pump.Stop();
+        _pump.Interval = Math.Max(1, (int)Math.Ceiling(_intervalMilliseconds - since));
+        _pump.Start();
     }
 
     /// <summary>
@@ -184,7 +245,9 @@ public static class HultUIApplicationHost
     {
         var application = _application;
         if (application is null || !application.IsRunning) return;
-        application.RunFrame(TimeSpan.Zero, forceRender: true);
+        application.HostUnpark();
+        application.HostRunFrame(TimeSpan.Zero, forceRender: true);
+        Schedule(application);
     }
 
     private static Application Require()

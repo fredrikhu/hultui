@@ -57,14 +57,52 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // copy when the same run is drawn repeatedly (same frame, or across frames).
     // Keyed by what the run draws, not by the run: a paragraph laid out again after
     // an edit makes new runs for every line, the ones that did not change too.
-    private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new(SameGlyphs.Instance);
+    // The blobs are native handles (NativeTextBlob), each holding the one reference this
+    // context gives up when the cache empties or the context is disposed: an SKTextBlob
+    // wrapper was 80 B per new blob.
+    private readonly Dictionary<ShapedRun, nint> _runBlobCache = new(SameGlyphs.Instance);
     internal const int RunBlobCacheMaxSize = 2048;
     internal int CachedBlobCount => _runBlobCache.Count;
 
-    // Every new blob is built in this one builder: Build hands the blob over and leaves the
+    // Every native blob this context made and gave up, for the tests that hold the two equal.
+    internal long BlobsMade { get; private set; }
+    internal long BlobsReleased { get; private set; }
+
+    // Every new blob is built in this one builder: making the blob hands it over and leaves the
     // builder empty for the next. A builder per blob was 80 B more per new blob (216 -> 136),
     // and a scrolled list draws dozens of new rows a step.
     private readonly SKTextBlobBuilder _blobBuilder = new();
+
+    public SkiaRenderContext() => NativeTextBlob.EnsureAvailable();
+
+    // Sub-blobs: the glyphs of one run that can ink one colour stretch of a spanned line (see
+    // DrawRunPart). Keyed by the run itself, not its glyphs, so a lookup hashes nothing: a run
+    // laid out again makes new ones, released with the rest when the cache empties. The map is
+    // made at its bound's capacity with the first sub-blob (~74 KB, once per context that draws
+    // a spanned line), so filling it allocates nothing more.
+    private readonly record struct SubRun(ShapedRun Run, int Start, int End);
+    private Dictionary<SubRun, nint>? _subBlobCache;
+    internal int CachedSubBlobCount => _subBlobCache?.Count ?? 0;
+
+    /// <summary>Whether a colour stretch draws only the glyphs that can reach it. Off, each
+    /// stretch draws its runs whole, as before: the reference the pixel tests hold it to.</summary>
+    internal bool DrawsStretchesFromSubBlobs { get; set; } = true;
+
+    /// <summary>Glyphs handed to Skia in text blobs and outlines, for the tests and probes that
+    /// count them.</summary>
+    internal long GlyphsDrawn { get; private set; }
+
+    // How far each face's glyphs ink left and right of their origin, per unit of size: its
+    // bounding box and a slack (InkExtentOf). Null where the box cannot be trusted.
+    private readonly Dictionary<IResolvedFont, InkExtent?> _inkExtents = new(ReferenceEqualityComparer.Instance);
+    internal readonly record struct InkExtent(float Left, float Right);
+    private readonly SKFont _boundsFont = new() { LinearMetrics = true };
+
+    // Per spanned line: whether each run's glyphs are in X order (0 not asked yet, 1 yes, 2 no),
+    // and the margin in layout units that covers two device pixels under the canvas matrix
+    // (NaN: stretches draw whole runs).
+    private byte[] _runXOrder = new byte[16];
+    private float _stretchMargin;
 
     // The same runs as glyph outlines, for TextAsOutlines.
     private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new(SameGlyphs.Instance);
@@ -797,8 +835,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                 }
                 else
                 {
-                    if (BuildShapedBlob(run) is not { } blob) continue;
-                    r = blob.Bounds;
+                    nint blob = BuildShapedBlob(run);
+                    if (blob == 0) continue;
+                    r = NativeTextBlob.Bounds(blob);
                 }
                 if (r.IsEmpty) continue;
                 float x = baseX + run.OffsetX;
@@ -810,8 +849,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     // Draws one laid-out line as constant-color segments split at span boundaries.
     // Glyphs are never re-shaped or moved: each segment clips to its x-range and
-    // draws the same cached blobs, so kerning and ligatures render exactly as the
-    // plain path does (a boundary inside a ligature splits its color mid-glyph).
+    // draws the same glyphs at the same places, so kerning and ligatures render exactly
+    // as the plain path does (a boundary inside a ligature splits its color mid-glyph).
     private void DrawSpannedLine(TextLine line, IReadOnlyList<TextSpan> spans, ResolvedInheritedStyle style,
         float baseX, float baselineY, float lineTop)
     {
@@ -855,6 +894,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // Glyphs, one stretch of one colour at a time. Spans that meet in the same colour — a bold
         // word in the line's own colour, a code span — are one stretch under one clip: a clip and
         // a redraw of the runs under it for every span edge was most of a styled line's cost.
+        // Each stretch draws only the glyphs that can reach it (DrawRunPart).
+        PrepareStretches(runs.Count);
         int stretch = 0, at = 0;
         var colour = style.TextColor;
         for (int k = first; k < stop && at < drawnLength; k++)
@@ -933,10 +974,145 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             {
                 var run = runs[ri];
                 if (run.OffsetX >= r.X1 || run.OffsetX + run.Width <= r.X0) continue;
-                DrawRun(run, baseX + run.OffsetX, baselineY);
+                DrawRunPart(run, ri, baseX + run.OffsetX, baselineY, r.X0 - run.OffsetX, r.X1 - run.OffsetX);
             }
             Canvas.RestoreToCount(save);
         }
+    }
+
+    // Before a spanned line's stretches: no run's glyph order known yet, and the margin that
+    // covers two device pixels in layout units, from the canvas matrix. A glyph's coverage
+    // reaches at most a pixel past its outline, and the hard-edged clip takes in pixels whose
+    // centre is inside it, half a pixel past its edge; a device pixel is 1/σ layout units at
+    // most, σ the matrix's smaller singular value (a rotation leaves it 1, a scale-down makes it
+    // small). Under perspective, or a matrix that collapses x, stretches draw whole runs.
+    private void PrepareStretches(int runCount)
+    {
+        if (_runXOrder.Length < runCount) _runXOrder = new byte[Math.Max(runCount, 2 * _runXOrder.Length)];
+        else Array.Clear(_runXOrder, 0, runCount);
+
+        _stretchMargin = float.NaN;
+        if (TextAsOutlines || !DrawsStretchesFromSubBlobs) return;
+        var m = Canvas.TotalMatrix;
+        if (m.Persp0 != 0f || m.Persp1 != 0f || m.Persp2 != 1f) return;
+        float a = m.ScaleX, b = m.SkewY, c = m.SkewX, d = m.ScaleY;
+        float sum = a * a + b * b + c * c + d * d, det = a * d - b * c;
+        float sigma = MathF.Sqrt(MathF.Max(0f, (sum - MathF.Sqrt(MathF.Max(0f, sum * sum - 4f * det * det))) / 2f));
+        if (sigma < 1e-3f || !float.IsFinite(sigma)) return;
+        _stretchMargin = 2f / sigma;
+    }
+
+    /// <summary>
+    /// One run under one colour stretch's clip, <paramref name="x0"/>..<paramref name="x1"/>
+    /// run-relative: drawn from a kept sub-blob of only the glyphs whose ink can reach the clip.
+    /// The rest would be clipped away whole, so leaving them out changes no pixel; drawing every
+    /// run whole under every stretch handed Skia its glyphs once per stretch (plan 17, round 3:
+    /// Junction's diff, 24,527 glyphs a hover frame). A glyph at X inks inside its face's extent
+    /// around X (<see cref="InkExtentOf"/>) and the margin; a face without a trustworthy extent
+    /// (colour emoji, bitmap strikes) draws the run whole, as does a part that is the whole run.
+    /// </summary>
+    private void DrawRunPart(ShapedRun run, int runIndex, float x, float y, float x0, float x1)
+    {
+        if (float.IsNaN(_stretchMargin) || InkExtentOf(run.Font) is not { } ink)
+        {
+            DrawRun(run, x, y);
+            return;
+        }
+        var glyphs = run.Glyphs;
+        if (_runXOrder[runIndex] == 0) _runXOrder[runIndex] = GlyphRange.XOrdered(glyphs) ? (byte)1 : (byte)2;
+        float left = ink.Left * run.FontSize - _stretchMargin, right = ink.Right * run.FontSize + _stretchMargin;
+        var (start, end) = GlyphRange.Reaching(glyphs, _runXOrder[runIndex] == 1, left, right, x0, x1);
+        if (end <= start) return;   // no glyph inks this stretch: the whole run would draw nothing here
+        if (end - start == glyphs.Length)
+        {
+            DrawRun(run, x, y);
+            return;
+        }
+        nint blob = SubBlob(run, start, end);
+        if (blob != 0)
+        {
+            NativeTextBlob.Draw(Canvas, blob, x, y, _pooledPaint);
+            GlyphsDrawn += end - start;
+        }
+        GC.KeepAlive(this);
+    }
+
+    // The kept sub-blob of glyphs [start, end) of a run, at their places in the run.
+    private nint SubBlob(ShapedRun run, int start, int end)
+    {
+        var cache = _subBlobCache ??= new Dictionary<SubRun, nint>(RunBlobCacheMaxSize);
+        var key = new SubRun(run, start, end);
+        if (cache.TryGetValue(key, out nint blob))
+            return blob;
+
+        _pooledFont.Typeface = (SKTypeface)run.Font.NativeHandle;
+        _pooledFont.Size = run.FontSize;
+        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, end - start);
+        var glyphSpan = buffer.Glyphs;
+        var positionSpan = buffer.Positions;
+        var glyphs = run.Glyphs;
+        for (int i = start; i < end; i++)
+        {
+            glyphSpan[i - start] = (ushort)glyphs[i].GlyphId;
+            positionSpan[i - start] = new SKPoint(glyphs[i].X, glyphs[i].Y);
+        }
+        blob = NativeTextBlob.Make(_blobBuilder);
+        if (blob != 0) BlobsMade++;
+
+        if (cache.Count >= RunBlobCacheMaxSize)
+            ClearSubBlobCache();
+        cache[key] = blob;
+        return blob;
+    }
+
+    private void ClearSubBlobCache()
+    {
+        if (_subBlobCache is not { } cache) return;
+        foreach (var blob in cache.Values)
+            Release(blob);
+        cache.Clear();
+    }
+
+    /// <summary>
+    /// How far left and right of its origin any glyph of <paramref name="font"/> can ink, per
+    /// unit of font size: the face's bounding box — what Skia itself culls whole blobs by — plus
+    /// a slack for what the box leaves out (an eighth of the size; a quarter more for a slanted
+    /// face, whose synthetic slant the box may not include). Null for a face whose box Skia marks
+    /// untrustworthy or that is empty, and for colour and bitmap faces (COLR, CBDT, sbix, SVG,
+    /// EBDT): their glyphs are images whose bounds are their own.
+    /// </summary>
+    internal InkExtent? InkExtentOf(IResolvedFont font)
+    {
+        if (_inkExtents.TryGetValue(font, out var known)) return known;
+        InkExtent? extent = null;
+        var typeface = (SKTypeface)font.NativeHandle;
+        bool outlines = typeface.GetTableSize(Tag('g', 'l', 'y', 'f')) > 0
+            || typeface.GetTableSize(Tag('C', 'F', 'F', ' ')) > 0 || typeface.GetTableSize(Tag('C', 'F', 'F', '2')) > 0;
+        bool images = typeface.GetTableSize(Tag('C', 'O', 'L', 'R')) > 0 || typeface.GetTableSize(Tag('C', 'B', 'D', 'T')) > 0
+            || typeface.GetTableSize(Tag('s', 'b', 'i', 'x')) > 0 || typeface.GetTableSize(Tag('S', 'V', 'G', ' ')) > 0
+            || typeface.GetTableSize(Tag('E', 'B', 'D', 'T')) > 0;
+        if (outlines && !images)
+        {
+            // As SkTypeface computes its bounds: the metrics at 2048 with linear metrics, scaled
+            // to one unit. SkFontMetrics' first field is its flags (NativeTextBlobTests holds the
+            // layout), and kBoundsInvalid_Flag says the box is a guess.
+            const float Size = 2048f;
+            const uint BoundsInvalid = 1u << 4;
+            _boundsFont.Typeface = typeface;
+            _boundsFont.Size = Size;
+            _boundsFont.GetFontMetrics(out var metrics);
+            uint flags = System.Runtime.CompilerServices.Unsafe.As<SKFontMetrics, uint>(ref metrics);
+            float xMin = metrics.XMin / Size, xMax = metrics.XMax / Size;
+            if ((flags & BoundsInvalid) == 0 && float.IsFinite(xMin) && float.IsFinite(xMax) && xMax > xMin)
+            {
+                float slack = typeface.FontSlant == SKFontStyleSlant.Upright ? 0.125f : 0.375f;
+                extent = new InkExtent(MathF.Min(xMin, 0f) - slack, MathF.Max(xMax, 0f) + slack);
+            }
+        }
+        _inkExtents[font] = extent;
+        return extent;
+
+        static uint Tag(char a, char b, char c, char d) => (uint)(a << 24 | b << 16 | c << 8 | d);
     }
 
     // Draws underline and/or strike-through for a line. The paint is already set
@@ -1065,7 +1241,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // A renderer-owned frame is re-wrapped every time, never cached. The wrapper holds
         // the image's layout, and Skia moves that layout as it draws — the same lesson the
         // swapchain render target taught, where caching one drew three good frames and then
-        // black for ever. A source-owned GL texture has no layout and caches fine.
+        // black for ever (it is kept now only because the host restores the layout Skia left
+        // it in). A source-owned GL texture has no layout and caches fine.
         bool haveWrapper = _wrappedTextures.TryGetValue(source, out var wrapped);
         if (frame.RendererOwned || !haveWrapper || wrapped.Frame != frame)
         {
@@ -1282,7 +1459,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Only lines whose shaping merged clusters (ligatures, marks, emoji) need a
     // prefix measurer; for the 1:1 case the glyph array answers exactly and this
     // stays null, so the common path allocates no closure.
-    private Func<string, float>? PrefixMeasurer(TextLine line, ResolvedInheritedStyle style)
+    private TextPrefixMeasurer? PrefixMeasurer(TextLine line, ResolvedInheritedStyle style)
     {
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
@@ -1291,9 +1468,29 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return null;
     }
 
+    // One measurer per style, kept. A line that merged clusters asks for one every time it is
+    // drawn with spans or a selection (for its backgrounds and decorations, and again for each
+    // colour stretch), and a caret or a click on it asks again: a new closure each time was
+    // ~120 B, ~1 KB a frame over two such lines in a viewer. Keyed by the style's value, which is
+    // a struct: a key by reference would never find the one made before.
+    private readonly Dictionary<ResolvedInheritedStyle, TextPrefixMeasurer> _prefixMeasurers = new();
+    private const int PrefixMeasurerCacheMaxSize = 64;
+
+    private TextPrefixMeasurer MeasurerFor(ResolvedInheritedStyle style)
+    {
+        if (_prefixMeasurers.TryGetValue(style, out var measurer))
+            return measurer;
+        if (_prefixMeasurers.Count >= PrefixMeasurerCacheMaxSize)
+            _prefixMeasurers.Clear();
+        return _prefixMeasurers[style] = NewMeasurer(style);
+    }
+
     // Its own method because a lambda capturing a parameter makes C# allocate the closure on
-    // entry to the method that declares it — on every call, the 1:1 ones included.
-    private Func<string, float> MeasurerFor(ResolvedInheritedStyle style) => s => MeasureText(s, style).Width;
+    // entry to the method that declares it, so MeasurerFor would make one on a hit too. A prefix
+    // is measured where it stands in the run's text (MeasureTextWidth, the width MeasureText
+    // gives it, to the bit), not cut out as a string for every boundary asked about.
+    private TextPrefixMeasurer NewMeasurer(ResolvedInheritedStyle style) =>
+        (text, length) => MeasureTextWidth(text.AsSpan(0, length), style);
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
     {
@@ -1335,7 +1532,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void FillPolygon(ReadOnlySpan<Point> points, Color fill)
     {
         if (points.Length < 3 || fill.A == 0) return;
-        using var path = PathThrough(points);
+        var path = PathThrough(points);
         path.Close();
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(fill);
@@ -1346,7 +1543,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
     {
         if (points.Length < 2 || color.A == 0 || strokeWidth <= 0) return;
-        using var path = PathThrough(points);
+        var path = PathThrough(points);
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(color);
         _pooledPaint.IsAntialias = true;
@@ -1357,9 +1554,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         Canvas.DrawPath(path, _pooledPaint);
     }
 
-    private static SKPath PathThrough(ReadOnlySpan<Point> points)
+    // The pooled path, emptied, through the points. The draw copies the geometry, so the path is
+    // free again once it returns. A new SKPath per shape was ~80 B, and the shapes are drawn
+    // again every frame: a terminal's Powerline separators (5.6 KB a frame over six prompt
+    // lines), a rich text editor's ticks.
+    private SKPath PathThrough(ReadOnlySpan<Point> points)
     {
-        var path = new SKPath();
+        var path = _pooledPath;
+        path.Rewind();
         path.MoveTo(points[0].X, points[0].Y);
         for (int i = 1; i < points.Length; i++) path.LineTo(points[i].X, points[i].Y);
         return path;
@@ -1449,11 +1651,17 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             _pooledPaint.Style = SKPaintStyle.Fill;
             Canvas.DrawPath(path, _pooledPaint);
             Canvas.Restore();
+            GlyphsDrawn += run.Glyphs.Length;
             return;
         }
-        var blob = BuildShapedBlob(run);
-        if (blob is not null)
-            Canvas.DrawText(blob, x, y, _pooledPaint);
+        nint blob = BuildShapedBlob(run);
+        if (blob != 0)
+        {
+            NativeTextBlob.Draw(Canvas, blob, x, y, _pooledPaint);
+            GlyphsDrawn += run.Glyphs.Length;
+        }
+        // The cache, and so the blob, stays alive until the draw has returned.
+        GC.KeepAlive(this);
     }
 
     private SKPath? BuildShapedPath(ShapedRun run)
@@ -1486,19 +1694,25 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _runPathCache.Clear();
     }
 
-    private SKTextBlob? BuildShapedBlob(ShapedRun run)
+    internal nint BlobOf(ShapedRun run) => BuildShapedBlob(run);
+
+    // The cached blob of a run, made on its first draw; 0 for a run with no glyphs.
+    private nint BuildShapedBlob(ShapedRun run)
     {
         if (_runBlobCache.TryGetValue(run, out var cached))
             return cached;
 
         if (run.Glyphs.Length == 0)
-            return null;
+            return 0;
 
         var typeface = (SKTypeface)run.Font.NativeHandle;
         _pooledFont.Typeface = typeface;
         _pooledFont.Size = run.FontSize;
 
-        var buffer = _blobBuilder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
+        // The raw buffer is a struct. AllocatePositionedRun hands out the same two spans in a
+        // class, 56 B more per new blob wherever the compiler does not keep it on the stack:
+        // NativeAOT's build of the perf suite heap-allocated it (scroll/jump 9.1 -> 6.3 KB/op).
+        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, run.Glyphs.Length);
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 
@@ -1508,7 +1722,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
         }
 
-        var blob = _blobBuilder.Build();
+        nint blob = NativeTextBlob.Make(_blobBuilder);
+        if (blob != 0) BlobsMade++;
 
         if (_runBlobCache.Count >= RunBlobCacheMaxSize)
             ClearRunBlobCache();
@@ -1517,11 +1732,20 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return blob;
     }
 
+    // Gives up this context's reference to every cached blob: each was made once and is
+    // released once, here, whether the cache filled up or the context is going away.
     private void ClearRunBlobCache()
     {
         foreach (var blob in _runBlobCache.Values)
-            blob?.Dispose();
+            Release(blob);
         _runBlobCache.Clear();
+    }
+
+    private void Release(nint blob)
+    {
+        if (blob == 0) return;
+        NativeTextBlob.Unref(blob);
+        BlobsReleased++;
     }
 
     // ── Conversion helpers ──
@@ -1557,19 +1781,31 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _ => SKFontStyleWeight.Normal
     };
 
+    // A context nobody disposed still gives its blobs back, as the SKTextBlob wrappers' own
+    // finalizers did: nothing can draw with an unreachable context, and Skia's unref is safe on
+    // any thread. Everything else it holds is a SkiaSharp object with a finalizer of its own.
+    ~SkiaRenderContext()
+    {
+        ClearRunBlobCache();
+        ClearSubBlobCache();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        GC.SuppressFinalize(this);
         ReleaseHeldFrames();
         foreach (var wrapped in _wrappedTextures.Values) wrapped.Image.Dispose();
         _wrappedTextures.Clear();
         ClearRunBlobCache();
+        ClearSubBlobCache();
         ClearRunPathCache();
         ClearBlurFilters();
         ClearGradientShaders();
         _blobBuilder.Dispose();
         _outlineFont.Dispose();
+        _boundsFont.Dispose();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
         _pooledRoundRect.Dispose();

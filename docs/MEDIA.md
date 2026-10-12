@@ -43,6 +43,13 @@ backend does not echo — `Rate`, `Volume`, `Muted` — and `Position` on a `See
 moves at once so a scrubber lands where it was dropped. Every setter and command must be
 called on the UI thread.
 
+**`Position` changes ten times a second while playing**, so a `Build()` that reads it
+rebuilds that often. Read it untracked there (`ReactiveScope.Untracked(() =>
+player.Position)`) and keep what shows it current from an `Effect`, as `VideoPlayer` does
+for its elapsed time and scrubber; see
+[A value that changes ten times a second](REACTIVITY.md#a-value-that-changes-ten-times-a-second).
+A position report used to rebuild the whole player (41 KB); it now rewrites two elements.
+
 **Scrubber previews.** `VideoPlayer.PreviewFrame` is a `Func<TimeSpan, VideoPreviewFrame?>`
 the app supplies; the player asks it for the position under the pointer while the scrubber
 is hovered or dragged and floats the still above the bar, with the frame's own time under
@@ -86,6 +93,15 @@ the load and then plays. `FakeMediaBackend` loads synchronously, so a test that 
 cannot start without a render context, and the kind of context is only known at the
 first draw. `VideoElement` renders even before the first frame for exactly this reason;
 a player whose element is never mounted stays in `Opening`.
+
+**Your `Build()` is not a playback clock.** A playing film rebuilds the `VideoPlayer`, which
+is a component of its own, not the app around it: during quiet playback the app's `Build()`
+hardly runs. Work that a film drives belongs in an `Effect` made with the player and disposed
+with it: a progress report or a resume save in one that reads `Position` and checks
+`Application.Time`, a resume seek (once `Duration` is known), track memory and the end of a
+file in one that reads `State`, `Duration` and the track lists. Aperture's ten-second report
+and Reel's fifteen-second save waited in `Build()` and never ran while a film simply played;
+see [`Build()` is not a clock](REACTIVITY.md#build-is-not-a-clock).
 
 **A plain property on a component does not rebuild.** `VideoPlayer.JumpStep` is
 signal-backed because the transport buttons carry it in their accessible names
@@ -194,7 +210,11 @@ publishes every frame that falls due and ends at `Duration` — **nothing happen
 playing**. `Raise(BackendEvent)` injects any event; `Calls` lists every command in order
 (`Open(file:x.mp4)`, `Play`, `Seek(00:00:05, precise)`…); `FailNextOpenWith` scripts a
 failure; `Duration = null` plays as a live stream. Frames are solid, byte `n` for frame
-`n`, so a test can tell which frame the sink holds.
+`n`, so a test can tell which frame the sink holds. `HoldOpening = true` stops each `Open`
+at `Opening` until `FinishOpening()`, as mpv loads a file after the open (a seek or stop
+before then does nothing, and the load starts at zero). Test what an app does "once loaded"
+— a resume seek, a first report — against that: with the synchronous open the file has
+loaded before `Open` returns, so "once loaded" and "at once" look the same.
 
 For the real backend, `TestClip.WriteTempY4m(width, height, fps, frames)` writes a
 YUV4MPEG2 clip that needs no encoder to produce; the caller deletes it. The backend

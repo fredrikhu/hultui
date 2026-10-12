@@ -81,12 +81,14 @@ public class SplitterHandleElement : Element
     protected internal override void ApplyTheme(Theme theme)
     {
         var t = theme.Splitter;
+        // The thickness is all it measures; a theme that keeps it repaints the handle.
+        bool resized = t.Thickness != _thickness;
         _thickness = t.Thickness;
         _keyStep = t.KeyStep;
         _hoverColor = t.Hover ?? WithAlpha(theme.Primary, 46);
         _grabbedColor = t.Grabbed ?? WithAlpha(theme.Primary, 102);
         _focusRingColor = theme.FocusRing;
-        MarkLayoutDirty();
+        if (resized) MarkLayoutDirty();
     }
 
     private static Color WithAlpha(Color c, byte a) => new(c.R, c.G, c.B, a);

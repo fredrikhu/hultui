@@ -158,7 +158,9 @@ It is **not** reasonable when it:
 - adds complexity out of proportion to the win, or a new native dependency;
 - re-opens a decision in `docs/DECISIONS.md` or memory without new evidence. Declined so
   far: damage rects, handler bitmask and TreeDiffer/LRU pools (P4/P5), Vulkan as the
-  default renderer, the net481 port, splitting Junction into components.
+  default renderer, the net481 port. Splitting Junction into components was declined on
+  2026-10-06 and re-opened by the user on 2026-10-11 with round 3's evidence: Junction's
+  chrome first, one app at a time.
 
 App code (`apps/*`) is in scope only where an app misuses the framework in a way the
 guidelines should warn about. Fix the framework first.
@@ -314,7 +316,27 @@ round, with CI waited for.
   when the change is in the a11y path.
 - **Never take focus** from the user's desktop: no `SendKeys`, no foreground windows,
   no clicks in Junction; drive apps headlessly or through `JUNCTION_BENCH`
-  (branch `claude/render-probe`).
+  (branch `claude/render-probe`). The `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0` environment variable
+  is **not enough**: on 2026-10-11 a probe's Borderless window took the foreground four times
+  with only that set. Every real window an agent opens uses the default frame unless the
+  frame is what is measured, sets `SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0` in-process before
+  the window is made, has `WS_EX_NOACTIVATE` (step 9a: a default-frame window with the hint
+  still took the foreground twice, likely Windows' fallback activation when the user's window
+  closed or minimized; a real app's window can be given it from the driver process with
+  `SetWindowLongPtr(GWL_EXSTYLE)` as soon as it exists), and runs a guard that hands the
+  foreground straight back and stops the run if it is ever taken (probes in the scratchpad
+  `r3b8/gpu8`, `r3b9/probe`; the Vulkan UiTests since b0ed204).
+- **Disturb the desktop as little as possible.** When step 9a's probe hit its guard and stopped
+  mid-frame, the user's browser videos paused for a while. Close real windows gracefully
+  (WM_CLOSE, then wait), never kill one mid-frame unless it hangs; batch measurements per
+  launch; log a timeline of window creates, destroys, swapchain builds and stalls over 100 ms;
+  stop and report a device-lost, a TDR or a stall over 1 s instead of repeating it.
+- **Never capture the screen; capture the app's own frame.** On 2026-10-11 two "mid-drag
+  captures" read the desktop and got the user's browser because the probe window was not on
+  top. Read pixels in-process (the swapchain or surface the app drew, `HULTUI_VULKAN_CAPTURE`,
+  `glReadPixels`, headless frames). A test that truly needs the composed screen (the stretch
+  harness) samples only the probe window's rectangle, checks the probe's own marker is there
+  before keeping anything, and never saves or views a sample without it.
 - **One build at a time per worktree** (memory `concurrent-dotnet-test-trap`).
 - **Create files with the Write tool**, not shell heredocs (they hang).
 - **Commit on this branch only.** Agents never push, merge or tag. The orchestrator merges

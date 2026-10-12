@@ -4,6 +4,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 
 namespace HultUI.Core.Elements;
 
@@ -33,8 +34,33 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// Optional accessible label for an item, used by assistive tech to name each
     /// row. Should read cheaply from item data — it may be called for every item.
     /// Falls back to <c>item?.ToString()</c> when unset.
+    /// <para>On item rows (<see cref="ItemRowTemplate"/>) the list keeps each item's label
+    /// while the item at its index is equal to the one it was made from and this is the same
+    /// delegate: the accessibility tree asks for every item's label each time it is built, and
+    /// a label made on every ask is a string per item per tree. The label is held to the rows'
+    /// contract — it reads its item and nothing else, or the list is told with
+    /// <see cref="InvalidateRows"/> — so a label that reads other state either goes with a
+    /// shape the app invalidates on, or is a new delegate each build (a lambda that captures
+    /// that state is), which keeps nothing.</para>
     /// </summary>
-    public Func<T, string?>? AccessibleLabel { get; set; }
+    public Func<T, string?>? AccessibleLabel
+    {
+        get => _accessibleLabel;
+        set
+        {
+            if (ReferenceEquals(_accessibleLabel, value)) return;
+            _accessibleLabel = value;
+            _labels = null;
+        }
+    }
+    private Func<T, string?>? _accessibleLabel;
+
+    // Item rows only: the label each index was named with and the item it was made from. Kept
+    // while that item stays equal (EqualityComparer<T>.Default) and the delegate is the same;
+    // InvalidateRows, new Items and another delegate let them all go.
+    private ItemLabel[]? _labels;
+
+    private readonly record struct ItemLabel(T Item, string? Label, bool Made);
 
     /// <summary>
     /// Set when one item is a <i>row of controls</i> rather than one thing — a wrap grid
@@ -146,8 +172,26 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         if (index < 0 || index >= _items.Count) return null;
         var item = _items[index];
-        return AccessibleLabel is not null ? AccessibleLabel(item) : item?.ToString();
+        // Kept on item rows, and only on the UI thread: a UI Automation client reads a long
+        // list's labels on its own threads, while the UI thread may be changing what is kept.
+        if (_itemRowTemplate is null || !UIThread.IsCurrent) return LabelOf(item);
+
+        var labels = _labels;
+        if (labels is null || labels.Length != _items.Count)
+        {
+            // The entries kept stay where they are: each is checked against its item anyway.
+            Array.Resize(ref labels, _items.Count);
+            _labels = labels;
+        }
+        ref var kept = ref labels[index];
+        if (kept.Made && EqualityComparer<T>.Default.Equals(kept.Item, item))
+            return kept.Label;
+        var label = LabelOf(item);
+        kept = new ItemLabel(item, label, true);
+        return label;
     }
+
+    private string? LabelOf(T item) => _accessibleLabel is { } label ? label(item) : item?.ToString();
 
     void IAccessibleItemSource.ActivateItem(int index)
     {
@@ -251,6 +295,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _activeTheme = theme;
     }
 
+    /// <summary>Kept rows were made at the display scale in force then: a glyph an app cuts at the
+    /// scale (Junction's icons) is a raster for that scale, which the app's cache retires when the
+    /// scale changes and frees at the next change. Another scale makes them again, as another theme
+    /// does, so a row whose shape forgot the scale cannot keep a freed raster (Junction History,
+    /// junction-v1.20.0: every icon gone after a move to 150 % and back).</summary>
+    internal override void OnDisplayScaleChanged()
+    {
+        if (_itemRowTemplate is not null) InvalidateItems();
+    }
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
         _childLayoutEngine ??= new LayoutEngine(ctx);
@@ -312,9 +366,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// with <see cref="InvalidateRows"/> on the mounted list (before the owner's rebuild, through
     /// its ref, or after it). Otherwise the kept rows go on showing what they showed when they
     /// were made, until they scroll out and back in. A switch to another <see cref="Theme"/>
-    /// object makes the rows again by itself; a theme changed in place does not. Handlers in a
+    /// object makes the rows again by itself, and so does a change of the window's display scale
+    /// (<see cref="Element.OnDisplayScaleChanged"/>); a theme changed in place does not. Handlers in a
     /// kept row are the ones it was made with, so they should read live state rather than
     /// capture what the build saw.
+    /// </para>
+    /// <para>
+    /// The contract covers the items' accessible labels too (<see cref="AccessibleLabel"/>):
+    /// the list keeps each item's label while the item is equal and the label is the same
+    /// delegate, and lets them all go with the rows on <see cref="InvalidateRows"/> or new
+    /// <see cref="Items"/>.
     /// </para>
     /// </summary>
     public Func<T, bool, Element>? ItemRowTemplate
@@ -364,13 +425,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// it when the rows' <i>appearance</i> depends on state the list cannot see — a shared
     /// horizontal offset, say — since a recycled row is otherwise reused as-is. The scroll
     /// position is kept. With <see cref="ItemRowTemplate"/> this is how anything a row shows
-    /// beyond its item and its selected state reaches the rows the list keeps.
+    /// beyond its item and its selected state reaches the rows the list keeps, and the items'
+    /// accessible labels, which it keeps the same way.
     /// </summary>
     public void InvalidateRows() => InvalidateItems();
 
     private void InvalidateItems()
     {
         _offsets = null;
+        _labels = null;
         _visibleStart = -1;
         _visibleEnd = -1;
         foreach (var row in _activeElements.Values)
@@ -525,14 +588,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             var child = Children[i];
             if ((child.DirtyFlags & DirtyFlags.Style) != 0)
             {
-                // A kept row is resolved again by the style pass, under this list; a new one
-                // beside it is resolved the same way here, or the two could inherit differently.
-                if (_itemRowTemplate is not null)
-                    StyleResolver.ResolveUnder(child, ResolvedInherited, _activeTheme);
-                else if (_activeTheme is not null)
-                    StyleResolver.Resolve(child, _activeTheme);
-                else
-                    StyleResolver.Resolve(child);
+                // Under this list, as the style pass resolves a row whenever it next passes
+                // through, and as it resolves any other child. Resolved under the theme's
+                // defaults instead, a row inherited nothing set above the list, and the next
+                // style pass changed its font size (the theme's 16 px to the 12–13 px apps set
+                // above their lists) and marked every box and icon of every row for layout.
+                StyleResolver.ResolveUnder(child, ResolvedInherited, _activeTheme);
             }
 
             // Children[0] is the spacer; item k sits at Children[1 + k].

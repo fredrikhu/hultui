@@ -297,12 +297,18 @@ public class NumericUpDownElement : Element, IRangeValueElement
 
     protected internal override void ApplyTheme(Theme theme)
     {
-        _boxTheme = theme.Dropdown.Resolve(_style);
-        _theme = theme.NumericUpDown;
+        var box = theme.Dropdown.Resolve(_style);
+        var own = theme.NumericUpDown;
+        // Laid out again only when what it measures with changed: a light/dark switch keeps every
+        // size, and laid out each field of a settings screen again, and everything up to the root.
+        bool resized = box.FontSize != _boxTheme.FontSize || box.Padding != _boxTheme.Padding
+            || box.ChevronGap != _boxTheme.ChevronGap || own.ButtonWidth != _theme.ButtonWidth;
+        _boxTheme = box;
+        _theme = own;
         _chevronColor = _theme.ChevronColor ?? theme.Secondary;
         _pressedBackground = _theme.PressedBackground ?? theme.SurfaceVariant;
         _focusRingColor = theme.FocusRing;
-        MarkLayoutDirty();
+        if (resized) MarkLayoutDirty();
     }
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)

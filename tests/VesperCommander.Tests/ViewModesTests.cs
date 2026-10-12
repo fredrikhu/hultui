@@ -1,3 +1,6 @@
+using HultUI.Core.Elements;
+using HultUI.Core.Events;
+using HultUI.Core.Reactivity;
 using VesperCommander;
 using Xunit;
 
@@ -43,6 +46,47 @@ public class ViewModesTests
     [InlineData(50, 100, 8, 1)]   // never zero
     public void ThumbPerRow_MatchesDesign(float availW, float tileW, float gap, int expected) =>
         Assert.Equal(expected, CommanderApp.ThumbPerRow(availW, tileW, gap));
+
+    // ── Resizing the window re-lays the grids ────────────────────────────
+    // Both grids are sized in the build from the window, and a resize alone did not rebuild,
+    // so the tiles kept the old window's width until a key press happened to rebuild.
+
+    [Fact]
+    public void ThumbnailGridFollowsTheWindowWidth()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 40; i++) t.WriteLeft($"f{i:00}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        t.Session.PumpFrames(2);
+
+        var list = t.Field<Ref<VirtualListElement<int>>>("_thumbVListL");
+        float before = list.Current!.Layout.AbsoluteBorderBox.Width;
+        int perRowBefore = t.Field<int[]>("_thumbCols")[0];
+
+        t.Session.Window.SetClientSize(1800, 820);
+        t.Session.PumpFrames(2);
+
+        float after = list.Current!.Layout.AbsoluteBorderBox.Width;
+        Assert.True(after > before + 200, $"grid {before:0} → {after:0} px after widening by 560 px");
+        Assert.True(t.Field<int[]>("_thumbCols")[0] > perRowBefore, "no more tiles per row");
+    }
+
+    [Fact]
+    public void BriefColumnsFollowTheWindowHeight()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 80; i++) t.WriteLeft($"f{i:00}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // view: Brief
+        t.Session.PumpFrames(2);
+        int rowsBefore = t.Field<int[]>("_briefRows")[0];
+
+        t.Session.Window.SetClientSize(1240, 500);
+        t.Session.PumpFrames(2);
+
+        Assert.True(t.Field<int[]>("_briefRows")[0] < rowsBefore, "rows per column kept the taller window's count");
+    }
 
     // ── ThumbnailCache ───────────────────────────────────────────────────
     [Fact]

@@ -195,10 +195,153 @@ an event every millisecond; a video player's bar fading over a playing film, 2.2
 setter and `OnComplete` run at most once per display interval, and a delay ends up to one
 interval late.
 
-A rebuild per frame is still a rebuild per frame: a `ToastHost` handed the app's
-`MarkDirty`, or a spinner that marks the whole app dirty on every step, rebuilds the whole
-app sixty times a second while it runs. Animate the element instead (`Animate.Opacity`, a
+A rebuild per frame is still a rebuild per frame: a spinner that marks the whole app dirty
+on every step rebuilds the whole app sixty times a second while it runs. Junction's busy
+buttons and its toolbar's fetch, pull and push did, until plan 17: 191–215 KB a frame, about
+12 MB a second (History, headless, JIT). Animate the element instead (`Animate.Opacity`, a
 `Transform`, `SpinnerElement`), or keep the animated part in a small component of its own.
+Junction's spinners now keep one `Ref<Element>` per spinner a build makes, and the step turns
+each one on screen; a frame of a fetch costs nothing.
+
+When a rebuild in the middle of the animation must not undo it, keep the animated value in a
+plain field as well: the tween's setter writes the field and the live element (through a
+`Ref<T>`), and `Build()` reads the field, which is not a signal and so rebuilds nothing. The
+`VideoPlayer`'s bar fades this way. Its level was a signal its `Build()` read, so every frame
+of a fade rebuilt the player (Reel: 166 rebuilds in 12 s, three quarters of what its UI
+thread allocated); a fade frame now costs about 0.9 KB instead of 41 KB (headless, JIT), and
+the player rebuilds only where the bar appears and where it goes.
+
+`ToastHost` fades the same way. The `onChanged` you hand it (the apps hand it their window's
+`MarkDirty`) runs when the toast appears, changes or goes, and not on the frames of its fades,
+which write the toast on screen. It ran on every step until plan 17: one toast rebuilt Junction
+23 times, 4.5 MB of garbage (Meridian 1.5 MB, Aperture 3.1 MB); now twice, 0.39 MB (0.13,
+0.27; headless, JIT, the real loop).
+
+### A drag rebuilds once per frame
+
+A pointer moves far more often than a window draws: a 1,000 Hz mouse sends about sixteen
+moves for each frame of a 60 Hz display. The controls whose drag rebuilds their owner follow
+the pointer once per frame that may be drawn, at its latest position: `PaneSplitter`'s
+`onChanged`, `HorizontalPan`'s, and a `Slider`'s `OnValueChanged` while it is dragged and its
+`OnHoverValue` while it is pointed at (the video scrubber's preview). The moves between two
+frames only record where the pointer is; the window applies the last of them at the start of
+its next frame, before style and layout, so that frame shows it. The release applies the last
+position at once, so a drag ends exactly where the pointer did, frame or no frame. A splitter
+between two lists of 60 rows, dragged with such a mouse, rebuilt its owner 16 times a frame
+(10.5 MB a frame, headless) and now does once (0.66 MB).
+
+Every other pointer-move handler still hears every move, an app's own on the same element
+included. A handler of yours that calls `MarkDirty()` from a `PointerMoveEvent` rebuilds on
+every move: build a drag on these controls where you can, or keep it out of `Build()` (write
+the live element through a `Ref<T>`).
+
+### A value that changes ten times a second
+
+Some signals move on their own, many times a second: `MediaPlayer.Position` while a film
+plays (mpv reports it ten times a second), a download's progress, a clock. A `Build()` that
+reads one rebuilds that often, however little of what it makes depends on it. Until plan 17
+the `VideoPlayer` read the position for its elapsed time and its scrubber, so every report
+rebuilt the whole player: about 22 elements and 41 KB, ten times a second, with the bar
+shown or hidden.
+
+Write the elements that show the value instead, and read it untracked in `Build()`:
+
+```csharp
+private readonly Ref<TextElement> _elapsed = new();
+private Effect? _positionWatch;
+
+protected override void OnMount()
+{
+    base.OnMount();
+    // Runs now and whenever Position changes: rewrites the one label, rebuilds nothing.
+    _positionWatch = new Effect(() =>
+    {
+        if (_elapsed.Current is { } label) label.Content = Format(_player.Position);
+    });
+}
+
+protected override void OnUnmount()
+{
+    _positionWatch?.Dispose();
+    base.OnUnmount();
+}
+
+public override Element Build()
+{
+    // Untracked: the build shows the value it was built with; the effect keeps it current.
+    var position = ReactiveScope.Untracked(() => _player.Position);
+    return Text.New(Format(position)).WithRef(_elapsed);
+}
+```
+
+The `Ref` follows the element on screen across rebuilds, so the effect always writes the live
+one, and the build's own value is never stale because it reads the current one. The player's
+position report now costs 420 B instead of 41 KB (headless, JIT).
+
+A timer that only refreshes a readout is the same case. Meridian's elapsed time while a request
+is in flight ticked every 150 ms by rebuilding the whole window; its tick now writes the label
+through a `Ref` (1.5 MB → 1.4 KB a second of waiting, headless, JIT). Stop such a tick with the
+thing it was started for (here the send's own cancellation source, not "any send in flight"):
+Meridian's kept going when the next send started within one tick of the last one ending, so
+sends in a row stacked ticks.
+
+When the build needs only something coarse derived from the value, read that through a
+`Computed<T>` instead. An effect that read a computed value runs again only when the value it
+computes changes, so a build reading it reruns a few times a film, not ten times a second.
+Reel's and Aperture's chapter panels mark the chapter playing now; they read the position in
+the app's `Build()`, so with the panel open every report rebuilt the whole app (Reel 66.6 KB,
+Aperture 179.5 KB a report, headless). They now read the chapter's index:
+
+```csharp
+// Made once per player; a build that reads it reruns when the playhead crosses a mark.
+_chapterHere = new Computed<int>(() => CurrentChapterIndex(player.Position));
+
+// in Build():
+int current = _chapterHere.Value;
+```
+
+A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture).
+
+### `Build()` is not a clock
+
+`Build()` runs when something it read changes, and at no other time. Work that has to happen
+every so often, or when a signal changes, does not belong in it. Aperture's progress report
+to the server (every ten seconds) and Reel's resume save (every fifteen) ran from the app's
+`Build()`, whose comment said it ran on every frame of a playing film. It did not: the
+transport bar is a component of its own and rebuilds alone, so a film playing with nobody
+touching anything built the app once at most (Aperture, when the bar hid), and from each app's
+first version until 2026-10-11 neither the report nor the save ran during quiet playback.
+
+Put such work in an `Effect` made with the thing it watches and disposed with it:
+
+```csharp
+// Made with each player; disposed when the player goes.
+_saveClock = new Effect(() =>
+{
+    _ = player.Position;                      // every position report runs this…
+    if (!player.IsPlaying) return;
+    if (_app.Time.GetElapsedTime(_lastSave) < SaveInterval) return;   // …and checks the clock
+    _lastSave = _app.Time.GetTimestamp();
+    SaveResumePoint();
+});
+```
+
+- **Something that follows the clock** rides a signal that ticks (a playing film's `Position`,
+  ten times a second) and checks `Application.Time`, or is a delayed tween, the framework's
+  timer (see [ANIMATIONS.md](ANIMATIONS.md)). Read the time from `Application.Time`, which a
+  headless test moves by hand, not `Environment.TickCount64`.
+- **Something that follows state** (a seek once the length is known, the next file when one
+  ends) is an effect that reads that state. Read the signals it waits for before any early
+  return: an effect depends on what its last run read, and one that returned first hears
+  nothing again.
+- **Read the rest untracked** (`ReactiveScope.Untracked`), or the effect runs again for every
+  value it happens to touch; Aperture's state watch reads the position for its reports that
+  way, so it runs a few times a film, not ten times a second.
+
+Neither effect rebuilds anything. A minute of quiet playback once the bar has gone (headless,
+the real loop, a position report every 100 ms) still builds each app 0 times; the UI thread
+allocates 22,130 → 22,158 B/s in Aperture (six reports) and 22,115 → 22,472 B/s in Reel (four
+settings writes), so a check that is not due costs nothing measurable.
 
 ---
 

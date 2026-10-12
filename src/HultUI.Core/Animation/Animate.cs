@@ -56,6 +56,17 @@ public static class Animate
         new TweenBuilder<float>(from, to, Lerp.Float, v => el.Opacity = v)
             .MarkDirty(el.MarkPaintDirty);
 
+    // ── Timers ──
+
+    /// <summary>
+    /// Runs <paramref name="then"/> after <paramref name="seconds"/> on the frame loop's clock: a
+    /// tween that waits out a delay and ends at once. The loop wakes once for it. A tween with a
+    /// <see cref="TweenBuilder{T}.Duration"/> and a setter that changes nothing does the same
+    /// job stepping every frame interval until it ends: a 2 s toast hold was 118 steps.
+    /// </summary>
+    internal static TweenHandle After(float seconds, Action then) =>
+        Value(0f, 1f, static _ => { }).Delay(seconds).Duration(0f).OnComplete(then).Start();
+
     /// <summary>
     /// Cancels all active animations targeting the given element.
     /// Note: only works for animations started via the element-aware methods.

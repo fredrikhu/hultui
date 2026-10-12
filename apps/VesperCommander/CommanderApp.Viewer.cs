@@ -529,21 +529,35 @@ public partial class CommanderApp
         // to be thrown away and rebuilt — and the heights remeasured, since two of the three
         // change how tall a row is.
         var shape = (ViewerWrap, _viewerPan.Offset, ViewerCodeWidth());
+        // And what else a row shows: the syntax colouring once it lands, and find's query,
+        // options and current match. The rows are on item rows, so a rebuild keeps every row on
+        // screen unless one of these changed. An item is only a line's index; the lines come
+        // with something already handled: another text (a file, or the same file re-indented) is
+        // another list (keyed by it), new lines and the text face reset the heights above, and
+        // another colour scheme is another Theme object, which makes a list's rows again by itself.
+        var look = new ViewerRowLook(_viewerHl, ViewerFindShape());
+        bool remake = look != _viewerRowLook;
+        _viewerRowLook = look;
         if (_viewerTops.Length != _viewerLines.Length + 1 || _viewerRowShape != shape)
         {
             if (_viewerRowShape.Item1 != shape.Item1 || _viewerHeightsWidth != shape.Item3
                 || _viewerTops.Length != _viewerLines.Length + 1)
                 RebuildViewerHeights();
-            if (_viewerScrollRef.Current is VirtualListElement<int> mounted)
-                mounted.InvalidateRows();
+            remake = true;
             _viewerRowShape = shape;
         }
+        if (remake && _viewerScrollRef.Current is VirtualListElement<int> mounted)
+            mounted.InvalidateRows();
 
         var list = VirtualListElement<int>.New()
             .ItemHeight(DiffLineH)
             .RowHeights((_, row) => row + 1 < _viewerTops.Length ? _viewerTops[row + 1] - _viewerTops[row] : DiffLineH)
             .Items(_viewerItems)
-            .RenderWith(BuildViewerRow)
+            // No list selection: a row is its line and the look above.
+            .RenderWith((index, _) => BuildViewerRow(index))
+            // Named for assistive technology by the line it shows. Unset, each item was read
+            // out as its index: "0", "1", "2".
+            .AccessibleItemLabel(_viewerLabelFn ??= ViewerLineLabel)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Keyed by file so opening another one starts at the top instead of inheriting the
@@ -560,6 +574,32 @@ public partial class CommanderApp
         // Shift+wheel) and the middle-click autoscroll's both go to the pan.
         list.ScrollSidewaysWith(_viewerPan);
         return list;
+    }
+
+    // The lines' labels, made the first time assistive technology asks for each and kept with
+    // the file's lines (the tree asks for every item's label each time it is built).
+    private (string[]? Lines, string?[] Labels) _viewerLabels = (null, []);
+    private Func<int, string?>? _viewerLabelFn;
+
+    private string ViewerLineLabel(int index)
+    {
+        if (!ReferenceEquals(_viewerLabels.Lines, _viewerLines)) _viewerLabels = (_viewerLines, new string?[_viewerLines.Length]);
+        var labels = _viewerLabels.Labels;
+        if ((uint)index >= (uint)labels.Length) return "";
+        return labels[index] ??= $"line {index + 1}: {Spoken(_viewerLines[index])}";
+    }
+
+    /// <summary>What the viewer's rows show besides their line index, as the rows on screen were
+    /// made with it (see <see cref="BuildViewerBody"/>).</summary>
+    private readonly record struct ViewerRowLook(
+        IReadOnlyList<TextSpan>[]? Highlight, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find);
+
+    private ViewerRowLook _viewerRowLook;
+
+    private (string, bool, bool, int, int) ViewerFindShape()
+    {
+        var s = _viewerFind.Search;
+        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
     }
 
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>

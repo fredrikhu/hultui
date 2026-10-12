@@ -108,6 +108,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _hasText = node.TextSource is not null || node.Text is not null;
     }
 
+    /// <summary>Whether the node offers text (UIA's text pattern): its value is then the node's,
+    /// read on request (<see cref="GetPropertyValue"/>).</summary>
+    public bool OffersText => _hasText;
+
     /// <summary>The text now, for the text pattern: the node's source, read on this thread.</summary>
     public AccessibleText? Text => Node.CurrentText;
 
@@ -199,10 +203,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             return 0;
         }
 
-        // The value of a node that offers text, read on request: the element's as it is now.
+        // The value of a node that offers text, read on request: the node's, as the tree was built
+        // with it — the version of the text its text events describe, which a long document makes
+        // on the first ask, on any thread (AccessibilityNode.Value). It was read from the element
+        // through the window: a walk of the live tree on this thread while the UI thread may be
+        // changing it, then the document as it is now rather than as last told.
         if (propertyId == UiaInterop.UIA_ValueValuePropertyId && _value is null && _hasText)
         {
-            pRetVal = _bridge.GetValue(ElementId) is { } now ? UiaVariant.FromBStr(now) : UiaVariant.Empty;
+            pRetVal = node.Value is { } value ? UiaVariant.FromBStr(value) : UiaVariant.Empty;
             return 0;
         }
 

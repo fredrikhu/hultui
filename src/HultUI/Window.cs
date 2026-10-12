@@ -8,12 +8,14 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 
 namespace HultUI;
 
-public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
+public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -82,6 +84,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // measure end-to-end update latency (mutation → painted) and to react once a
     // frame is on screen. Registering one guarantees a frame renders.
     private readonly List<Action> _postFrameCallbacks = [];
+    // Work run at the start of the next frame, before style and layout (IPreFrameHost): the
+    // drags and hovers that follow the pointer once a frame. Two lists, swapped for the run, so
+    // a frame allocates nothing for them and one asked for during the run waits for the next.
+    private List<Action> _preFrameCallbacks = [], _preFrameRunning = [];
     /// <summary>The button whose release is dropped: its press only closed an anchored overlay
     /// from that overlay's own anchor. -1 for none.</summary>
     private int _swallowedRelease = -1;
@@ -116,11 +122,27 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // focus went nowhere; it is told where once the next rebuild has the node.
     private ElementId? _a11yPendingFocusId;
     private bool _a11yWasActive;
+
+    /// <summary>Whether the last frame found the bridge active and built (or kept) a tree for it.
+    /// UI thread.</summary>
+    internal bool AccessibilityTreeBuilt => _a11yWasActive;
+
+    /// <summary>How many accessibility trees this window's frames have built for a listening
+    /// bridge (a patched selection move builds none). UI thread.</summary>
+    internal int AccessibilityTreesBuilt { get; private set; }
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
     // force the next frame to rebuild+diff the tree — that regenerates the node
     // snapshots (Name, bounds, …) and emits precise property-changed events.
     private bool _a11yPropertyDirty;
+    // Lists whose selection moved since the last frame, while a client listened. A move changes
+    // the selected state of two item nodes, which the frame marks on the applied tree in place
+    // and tells the bridge, as a focus move does (TryPatchA11ySelection), unless the frame
+    // rebuilds the tree anyway; it no longer forces a rebuild of the whole tree on its own.
+    private readonly List<Element> _a11ySelectionMoved = [];
+    // Kept for the patch: the moved lists' nodes in the applied tree, and the changes found.
+    private readonly List<(AccessibilityNode Node, IAccessibleItemSource Source)> _a11ySelectionLists = [];
+    private readonly List<PropertyChange> _a11ySelectionChanges = [];
     /// <summary>Announcements made since the last frame, handed to the bridge once the tree
     /// holding their elements is applied (<see cref="Element.Announce"/>).</summary>
     private readonly List<(Element Source, string Text, AnnouncementPoliteness Politeness)> _announcements = [];
@@ -437,6 +459,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         Application = application;
         PlatformWindow = platformWindow;
         _chrome = platformWindow as IWindowChrome;
+        _displayScale = platformWindow.DisplayScale;
         _pointerState = new PointerState(application.Platform.TimeProvider);
         if (!string.IsNullOrEmpty(_envTracePath))
             _tracer.StartRecording();
@@ -449,7 +472,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         TextInputHost = platformWindow.TextInputHost;
         _devTools = new DevToolsOverlay(_perf);
         _a11yObserver = new AccessibilityObserverAdapter(this);
-        PlatformWindow.InputReceived += HandleInputEvent;
+        PlatformWindow.InputReceived += FrameLog.On ? HandleInputEventLogged : HandleInputEvent;
 
         if (platformWindow.Style == WindowStyle.Borderless && _chrome is { } chrome)
         {
@@ -711,6 +734,64 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             _accessibilityBridge.NotifyFocusChanged(node, previous: null);
     }
 
+    /// <summary>
+    /// A move of a list's selection, told without a rebuild: marks the selected state of the item
+    /// nodes it changed on the applied tree in place, and hands the bridge those changes, which
+    /// are what the next rebuild's diff would have reported (0912a5e made every move force that
+    /// rebuild: a whole tree built and diffed for two states, on every key of a walk). The next
+    /// diff compares against the marked tree, so it does not report them again. Whatever else the
+    /// move changed is told on its own schedule: a scroll by the coalesced layout refresh, as it
+    /// always was. False when a list cannot be patched, and the tree must be rebuilt: no applied
+    /// tree, a list with no node in it (mounted since), or a list whose items are not its node's
+    /// (<see cref="AccessibilityTreeBuilder.ItemSelectionChanges"/>). Nothing is marked then.
+    /// </summary>
+    private bool TryPatchA11ySelection()
+    {
+        if (_previousA11yTree is not { } tree) return false;
+        var lists = _a11ySelectionLists;
+        var changes = _a11ySelectionChanges;
+        try
+        {
+            // In tree order, as a diff lists them.
+            FindMovedLists(tree);
+            if (lists.Count < _a11ySelectionMoved.Count) return false;
+            foreach (var (node, source) in lists)
+                if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, source, changes)) return false;
+            if (changes.Count == 0) return true;   // moved back, or served on demand: nothing to tell
+            var patch = new TreeDiff();
+            foreach (var change in changes)
+            {
+                change.Node.IsSelected = change.Node.IsSelected != true;
+                patch.PropertyChanged.Add(change);
+            }
+            _accessibilityBridge.ApplyPatchedProperties(patch, tree);
+            return true;
+        }
+        finally
+        {
+            lists.Clear();
+            changes.Clear();
+        }
+    }
+
+    /// <summary>Adds the nodes of the lists whose selection moved to <see cref="_a11ySelectionLists"/>,
+    /// in tree order. Stops once it has them all, and does not walk into a list's items.</summary>
+    private bool FindMovedLists(AccessibilityNode node)
+    {
+        var moved = _a11ySelectionMoved;
+        for (int i = 0; i < moved.Count; i++)
+        {
+            if (moved[i].Id != node.ElementId) continue;
+            _a11ySelectionLists.Add((node, (IAccessibleItemSource)moved[i]));
+            return _a11ySelectionLists.Count == moved.Count;
+        }
+        // By index: foreach over the interface boxes an enumerator per node.
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (FindMovedLists(children[i])) return true;
+        return false;
+    }
+
     /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
     private static bool FindNodes(AccessibilityNode node, ElementId? a, ElementId? b,
         ref AccessibilityNode? foundA, ref AccessibilityNode? foundB)
@@ -793,12 +874,57 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// content is actually painted.
     /// </summary>
     public void RequestPostFrameCallback(Action callback)
-        => _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
+    {
+        _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
+        // From a callback the loop's wait dispatched, nothing else would end the wait for it.
+        UIThread.WakeIfParked();
+    }
+
+    /// <summary>
+    /// Runs <paramref name="callback"/> at the start of the next frame, before style and layout,
+    /// and asks for that frame. A callback already waiting is not added twice: a drag asks on every
+    /// pointer move and is applied once per frame (<see cref="PointerFollow"/>).
+    /// </summary>
+    void IPreFrameHost.RunBeforeNextFrame(Action callback)
+    {
+        foreach (var waiting in _preFrameCallbacks)
+            if (ReferenceEquals(waiting, callback)) return;
+        _preFrameCallbacks.Add(callback);
+        // From a callback the loop's wait dispatched, nothing else would end the wait for it.
+        UIThread.WakeIfParked();
+    }
+
+    /// <summary>The <see cref="IPreFrameHost.RunBeforeNextFrame"/> work, in one batch, as an
+    /// event's handlers run: what it writes rebuilds once when it is done.</summary>
+    private void RunPreFrameCallbacks()
+    {
+        if (_preFrameCallbacks.Count == 0) return;
+        (_preFrameCallbacks, _preFrameRunning) = (_preFrameRunning, _preFrameCallbacks);
+        bool batch = ReactiveRuntime.AutoBatch;
+        if (batch) ReactiveRuntime.BeginBatch();
+        try
+        {
+            for (int i = 0; i < _preFrameRunning.Count; i++)
+                _preFrameRunning[i]();
+        }
+        finally
+        {
+            _preFrameRunning.Clear();
+            if (batch) ReactiveRuntime.EndBatch();
+        }
+    }
 
     /// <summary>DevTools' continuous-redraw mode (F12 twice): render every iteration, unpaced.</summary>
     internal bool ContinuousRedraw => _devTools.ContinuousRedraw;
 
-    internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
+    internal bool NeedsRender => NeedsDraw || NeedsAccessibilityFrame;
+
+    /// <summary>
+    /// Whether the window has something to draw: what <see cref="NeedsRender"/> asks a frame for,
+    /// less what only accessibility asks one for (<see cref="NeedsAccessibilityFrame"/>), which
+    /// needs the frame's accessibility phase and nothing it draws.
+    /// </summary>
+    internal bool NeedsDraw => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
         // DevTools continuous-redraw mode (F12 second press): render every
         // iteration so the HUD shows raw render throughput.
         || _devTools.ContinuousRedraw
@@ -808,29 +934,72 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // A static overlay (a tooltip) costs nothing once painted.
         || AnyOverlayContentDirty()
         || _postFrameCallbacks.Count > 0
+        // A drag or a hover that follows the pointer once a frame has a position to apply.
+        || _preFrameCallbacks.Count > 0
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
         // the frames itself — otherwise holding the pointer still would stop the scroll.
         || _autoScrollTarget is not null
-        // Render once when an assistive tech attaches, so the accessibility tree
-        // gets built even if the app is otherwise idle (the build runs in the
-        // render pass). After that frame _a11yWasActive is set and this clears.
-        || (!_a11yWasActive && _accessibilityBridge.IsActive)
-        // An a11y-visible property changed (e.g. a label's text) with no visual
-        // change of its own; the tree refresh happens in the render pass.
-        || (_a11yPropertyDirty && _accessibilityBridge.IsActive)
-        // A coalesced layout-driven a11y refresh is due — force the trailing frame
-        // so the last resize/scroll position reaches the tree once the drag stops
-        // (during the drag, layout dirty already keeps frames coming).
-        || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
-            && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
-        // The same for a range value's trailing edge: the value it came to rest at.
-        || (_a11yRangeRefreshPending && _accessibilityBridge.IsActive
-            && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs)
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
         // AT thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame. Platform-neutral: the
-        // router is set on any platform with an active bridge.
+        // router is set on any platform with an active bridge. What it changes is drawn.
         || (_actionRouter?.HasPendingActions ?? false);
+
+    /// <summary>
+    /// A frame that only accessibility asks for: a tree to build when a client attaches, a change
+    /// a reader must hear that draws nothing, a coalesced refresh coming due. Such a frame runs
+    /// the accessibility phase and draws nothing (<see cref="RenderFrame"/>).
+    /// </summary>
+    private bool NeedsAccessibilityFrame => (
+        // Build once when an assistive tech attaches, so the accessibility tree
+        // gets built even if the app is otherwise idle (the build runs in the
+        // frame). After that frame _a11yWasActive is set and this clears.
+        !_a11yWasActive
+        // An a11y-visible property changed (e.g. a label's text) with no visual
+        // change of its own; the tree refresh happens in the frame.
+        || _a11yPropertyDirty
+        // A list's selection moved: the frame tells it (the list has paint dirt of its own anyway).
+        || _a11ySelectionMoved.Count > 0
+        // A coalesced layout-driven a11y refresh is due — force the trailing frame
+        // so the last resize/scroll position reaches the tree once the drag stops
+        // (during the drag, layout dirty already keeps frames coming).
+        || (_a11yLayoutRefreshPending && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        // The same for a range value's trailing edge: the value it came to rest at.
+        || (_a11yRangeRefreshPending && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs))
+        // Asked last: on Windows it asks UI Automation whether a client listens.
+        && _accessibilityBridge.IsActive;
+
+    /// <summary>
+    /// Folds into <paramref name="at"/> the earliest moment, on the platform's clock, this window
+    /// owes a frame while it needs none now: the trailing edge of a coalesced accessibility
+    /// refresh (layout bounds, a range's value), and a resize the throttle held back. The frame
+    /// loop waits until then (<c>Application.RunUntil</c>), so each must be named here; it no
+    /// longer comes round every 16 ms to find them due.
+    /// </summary>
+    internal void NextDeadline(ref long at, ref IdleDeadline deadline)
+    {
+        var clock = Application.Platform.TimeProvider;
+        long frequency = clock.TimestampFrequency;
+        // Only while a client listens: otherwise the frame that clears them never comes, and
+        // the loop would wake for nothing.
+        if ((_a11yLayoutRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
+        {
+            if (_a11yLayoutRefreshPending)
+                Application.Earliest(ref at, ref deadline, (_lastA11yRebuildMs + A11yCoalesceMs) * frequency / 1000,
+                    IdleDeadline.A11yLayout);
+            if (_a11yRangeRefreshPending)
+                Application.Earliest(ref at, ref deadline, (_lastA11yRangeMs + A11yRangeCoalesceMs) * frequency / 1000,
+                    IdleDeadline.A11yRange);
+        }
+        // Throttled on Environment.TickCount64 (ProcessPendingResizes): how long is left, from now.
+        // Only reaches here for a minimized window; a shown one is dirty until the resize runs.
+        if (PlatformWindow.ResizePending)
+        {
+            long leftMs = Math.Max(0, PlatformWindow.LastResizeRenderTick + ResizeThrottleMs - Environment.TickCount64);
+            Application.Earliest(ref at, ref deadline, clock.GetTimestamp() + leftMs * frequency / 1000,
+                IdleDeadline.Resize);
+        }
+    }
 
     private bool AnyOverlayContentDirty()
     {
@@ -841,13 +1010,37 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
 
     internal void OnWindowResized()
     {
+        // A move to a monitor at another scale arrives as a resize. Told before Resized, so what
+        // an app's handler builds is made at the new scale either way.
+        float scale = PlatformWindow.DisplayScale;
+        bool scaleChanged = scale != _displayScale;
+        _displayScale = scale;
         if (_root is null) return;
+        if (scaleChanged)
+        {
+            TellDisplayScaleChanged(_root);
+            for (int i = 0; i < _overlays.Count; i++) TellDisplayScaleChanged(_overlays[i].Content);
+        }
         _root.MarkLayoutDirty();
         _root.MarkPaintDirty();
         Resized?.Invoke();
     }
 
+    /// <summary>The display scale the tree was last told of (<see cref="Element.OnDisplayScaleChanged"/>).</summary>
+    private float _displayScale;
+
+    private static void TellDisplayScaleChanged(Element element)
+    {
+        element.OnDisplayScaleChanged();
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++) TellDisplayScaleChanged(children[i]);
+    }
+
     private readonly List<IGpuImageSource> _undrawnSources = [];
+
+    /// <summary>How many times this window has looked through its tree for GPU sources to serve
+    /// while it was not drawn. Tests read it: the walk is what a window with none is spared.</summary>
+    internal int UndrawnSourceWalks { get; private set; }
 
     /// <summary>
     /// Serves the GPU image sources of a window that is not being drawn (minimized), through
@@ -859,6 +1052,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// </summary>
     private void ServiceUndrawnSources()
     {
+        // The walk visits every element, on every pass a minimized window is dirty, and most
+        // windows have no GPU source for it to find: a looping tween over 2,015 elements was
+        // 123,000 visits a second. Only a live sink, or an image holding a source of another
+        // kind, can be found.
+        if (!GpuFrameSink.MayNeedUndrawnService) return;
+        UndrawnSourceWalks++;
         CollectGpuSources(_root!, _undrawnSources);
         for (int i = 0; i < _overlays.Count; i++)
             CollectGpuSources(_overlays[i].Content, _undrawnSources);
@@ -887,8 +1086,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     }
 
     /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
+    /// <param name="drawClean">Draw even with nothing dirty: a live resize holds the loop, and a
+    /// video's next frame, posted and not yet run, is taken from its decoder by the draw.</param>
     /// <returns>Whether a frame was drawn and presented.</returns>
-    internal bool RenderFrame(bool evenIfMinimized = false)
+    internal bool RenderFrame(bool evenIfMinimized = false, bool drawClean = false)
     {
         if (_root is null) return false;
 
@@ -904,12 +1105,22 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // rather than a frame behind it.
         TickAutoScroll();
 
+        // The same for a splitter, a pan or a slider following the pointer: the moves since the
+        // last frame recorded where it is, and this applies the latest, once (PointerFollow).
+        RunPreFrameCallbacks();
+
         // Safety net: run any rebuild that was deferred because it was requested during
         // a reconcile (e.g. MarkDirty from a BlurEvent when a focused element was
         // removed). A rebuild triggered via ForceRebuild drains itself, but one whose
         // outer reconcile was signal-driven has no such caller — this catches it before
         // style/layout so its effect is visible this frame.
         TreeDiffer.DrainDeferred();
+
+        // Whether this frame has anything to draw. A frame only accessibility asked for (a
+        // coalesced refresh coming due between keys of a walk, a client attaching) runs the
+        // accessibility phase and stops there, as a minimized window's does: drawing it painted
+        // the whole window again for nothing.
+        bool draws = evenIfMinimized || drawClean || NeedsDraw;
 
         var theme = Application.Theme;
 
@@ -930,7 +1141,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             if ((_root.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(_root, theme);
-                ClearFlags(_root, DirtyFlags.Style);
+                ClearFlags(_root, DirtyFlags.Style | DirtyFlags.StyleSubtree);
                 ReapplyHoverCursor();
             }
         }
@@ -972,8 +1183,16 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
         bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
+        bool a11yRebuild = a11yImmediate || a11yLayoutDue || a11yRangeDue;
+        // A list's selection moved and nothing else asks for a rebuild: the two items are marked
+        // on the applied tree and told from it. A rebuild in this frame tells them in its diff.
+        if (a11yActive && !a11yRebuild && _a11ySelectionMoved.Count > 0)
+        {
+            using (_tracer.Begin("Phase", "A11y"))
+                a11yRebuild = !TryPatchA11ySelection();
+        }
 
-        if (a11yImmediate || a11yLayoutDue || a11yRangeDue)
+        if (a11yRebuild)
         {
             // Whatever the rebuild was for, it tells a range's value as it is now.
             if (_a11yRangeRefreshPending)
@@ -984,6 +1203,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             using (_tracer.Begin("Phase", "A11y"))
             {
                 var newTree = BuildAccessibilityTreeWithOverlays(_root);
+                AccessibilityTreesBuilt++;
                 var diff = AccessibilityTreeDiffer.Diff(_previousA11yTree, newTree);
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);
@@ -1011,9 +1231,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             _announcements.Clear();
         }
         _a11yPropertyDirty = false;
+        _a11ySelectionMoved.Clear();
         _a11yWasActive = a11yActive;
-        // Note: the Children flag is cleared with everything else by
-        // ClearAllFlags at the end of the frame, below.
+        // Note: the Children flag is cleared with everything else by ClearAllFlags at the end
+        // of the frame, below, or where a minimized window stops.
+
+        // Nothing to draw: the tree is built and told, and the window shows what it showed.
+        // Junction's History walked a key every 60 ms: a refresh came due between keys on every
+        // other key, and each drew the window again, 0.5 frames a key on top of the keys' own.
+        if (!draws) return false;
 
         // Keep the maximize button's non-client hover highlight alive across rebuilds.
         ReassertMaximizeButtonHover();
@@ -1038,6 +1264,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // after the restore draws it. A video still has to be served (ServiceUndrawnSources).
         if (!evenIfMinimized && PlatformWindow.IsMinimized)
         {
+            // A change that was only structure, style or layout has no paint dirt of its own,
+            // and none of it is on screen: the root takes some for the restore. The structural
+            // flag goes, as at the end of a drawn frame. Its one reader, the accessibility check
+            // above, has had its answer; left set, it rebuilt the whole tree on every pass of the
+            // loop until the restore — one element added to 2,016 while minimized, a UIA client
+            // listening: a rebuild on each of 61 passes a second, 10.8 MB/s.
+            if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0)
+                _root.MarkPaintDirty();
+            ClearFlags(_root, DirtyFlags.Children);
             ServiceUndrawnSources();
             return false;
         }
@@ -1215,6 +1450,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         Text = key.Text,
     };
 
+    /// <summary><see cref="HandleInputEvent"/>, counted with its bytes for <see cref="FrameLog"/>.</summary>
+    private void HandleInputEventLogged(InputEvent evt)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        HandleInputEvent(evt);
+        FrameLog.Input(GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
     private void HandleInputEvent(InputEvent evt)
     {
         if (_root is null) return;
@@ -1245,12 +1488,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     }
                     else
                     {
-                        EventDispatcher.Dispatch(new PointerMoveEvent
-                        {
-                            Position = new Point(pos.X - _pointerCaptureOffset.X, pos.Y - _pointerCaptureOffset.Y),
-                            Delta = new Point(move.DeltaX, move.DeltaY),
-                            Modifiers = move.Modifiers,
-                        }, captured);
+                        EventDispatcher.DispatchPointerMove(captured,
+                            new Point(pos.X - _pointerCaptureOffset.X, pos.Y - _pointerCaptureOffset.Y),
+                            new Point(move.DeltaX, move.DeltaY), move.Modifiers);
                         break;
                     }
                 }
@@ -1354,12 +1594,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 if (_devTools.IsEnabled)
                     _devTools.HoveredElement = target;
 
+                // The event is made only when something on the path listens for moves.
                 if (target is not null)
-                {
-                    EventDispatcher.Dispatch(
-                        new PointerMoveEvent { Position = effectivePos, Delta = new Point(move.DeltaX, move.DeltaY), Modifiers = move.Modifiers },
-                        target);
-                }
+                    EventDispatcher.DispatchPointerMove(target, effectivePos, new Point(move.DeltaX, move.DeltaY), move.Modifiers);
                 break;
             }
 
@@ -2849,10 +3086,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         _tooltipOwner = owner;
         var theme = Application.Theme;
         float delay = theme.Tooltip.ShowDelay;
-        _tooltipDelayTween = Animate.Value(0f, 1f, _ => { })
-            .Duration(delay)
-            .OnComplete(() => ShowTooltipOverlay(owner, text))
-            .Start();
+        // A timer: the loop wakes once for it, not every frame interval of the delay.
+        _tooltipDelayTween = Animate.After(delay, () => ShowTooltipOverlay(owner, text));
     }
 
     private void ShowTooltipOverlay(Element owner, string text)
@@ -3273,7 +3508,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     /// a rebuild+diff next frame rather than patching a single node: the rebuild
     /// regenerates every snapshot from current state (so derived values like a
     /// button's name-from-content stay correct) and the diff emits exactly the
-    /// property-changed events that platforms forward to assistive tech.
+    /// property-changed events that platforms forward to assistive tech. A list's selection move
+    /// is the exception: its two items' selected state is marked on the applied tree in place
+    /// (<see cref="TryPatchA11ySelection"/>), as a focus move's is.
     /// </summary>
     void IAccessibilityAnnouncer.Announce(Element source, string text, AnnouncementPoliteness politeness)
     {
@@ -3297,6 +3534,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
             // A range's value can move every frame (a drag, a playback): on its own schedule.
             else if (propertyName == AccessibilityProperties.RangeValue)
                 window._a11yRangeRefreshPending = true;
+            // A list's selection moved: two items' selected state, which the frame marks on the
+            // applied tree and tells without a rebuild (TryPatchA11ySelection). A rebuild for it
+            // built and diffed the whole tree on every key of a walk: Junction's History list, a
+            // key every 60 ms, 25 rebuilds per 40 keys became 41, its a11y share 7 % became 30 %.
+            else if (propertyName == AccessibilityProperties.IsSelected
+                && element is IAccessibleItemSource { PublishesItemNodes: true })
+            {
+                if (!window._a11ySelectionMoved.Contains(element)) window._a11ySelectionMoved.Add(element);
+            }
             else
                 window._a11yPropertyDirty = true;
         }

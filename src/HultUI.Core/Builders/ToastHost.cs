@@ -2,6 +2,7 @@ using HultUI.Core.Animation;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 
 namespace HultUI.Core.Builders;
 
@@ -10,7 +11,8 @@ namespace HultUI.Core.Builders;
 /// that fades in, stays a moment and fades out, or stays longer and offers one verb when
 /// it is asking for a decision rather than reporting one. App state, like
 /// <see cref="PaneSplitter"/>: the owner adds <see cref="Build"/> to its root on every
-/// build, and the host calls back to rebuild when anything changes.
+/// build, and the host calls back to rebuild when the toast appears, changes or goes.
+/// The fades in between are written to the toast on screen, a repaint, not a rebuild.
 /// </summary>
 /// <remarks>
 /// Two apps had grown the same forty lines: a message field, a cancellation token, a
@@ -23,14 +25,25 @@ namespace HultUI.Core.Builders;
 public sealed class ToastHost
 {
     private readonly Action _onChanged;
+    private readonly Action<float> _fadeStep;
+    /// <summary>The toast on screen, whose opacity a fade step writes (a Ref follows it across
+    /// the owner's rebuilds).</summary>
+    private readonly Ref<ToastElement> _shown = new();
     private TweenHandle _hold;
     private TweenHandle _fade;
     private float _opacity;
     private int _serial;
 
-    /// <param name="onChanged">Runs whenever the toast appears, changes, fades or goes —
-    /// normally the owner's <c>MarkDirty</c>.</param>
-    public ToastHost(Action onChanged) => _onChanged = onChanged;
+    /// <param name="onChanged">Runs when the toast appears, changes or goes — normally the
+    /// owner's <c>MarkDirty</c>. Not on the frames of a fade: those write the opacity of the
+    /// toast on screen. They called it on every step, and the apps hand it the
+    /// <c>MarkDirty</c> of their whole window, so a toast rebuilt the app on every frame of
+    /// its fades (Junction: 23 builds and 4.5 MB for one toast).</param>
+    public ToastHost(Action onChanged)
+    {
+        _onChanged = onChanged;
+        _fadeStep = SetOpacity;
+    }
 
     /// <summary>The message on screen, or null.</summary>
     public string? Message { get; private set; }
@@ -68,19 +81,21 @@ public sealed class ToastHost
         Severity = severity;
         Action = action;
 
-        // A replacement while one is up does not blink: it keeps the opacity it has.
-        if (!wasShowing)
+        // A replacement while one is up does not blink: it goes on to whole from the level it
+        // has, at the fade-in's pace. It used to keep that level, so one that came while the
+        // first was fading in or out stayed half drawn for its whole hold (the fade it met was
+        // cancelled above and nothing raised it again).
+        if (!wasShowing) _opacity = 0f;
+        if (_opacity < 1f)
         {
-            _opacity = 0f;
-            _fade = Animate.Value(0f, 1f, v => { _opacity = v; _onChanged(); })
-                .Duration(FadeInSeconds).Ease(Easing.EaseOutQuad).Start();
+            _fade = Animate.Value(_opacity, 1f, _fadeStep)
+                .Duration(FadeInSeconds * (1f - _opacity)).Ease(Easing.EaseOutQuad).Start();
         }
 
         float hold = seconds ?? (action is null ? Seconds : ActionSeconds);
-        _hold = Animate.Value(0f, 1f, static _ => { })
-            .Duration(hold)
-            .OnComplete(() => { if (serial == _serial) FadeOut(serial); })
-            .Start();
+        // A timer: the loop wakes once, when it ends. A tween with this Duration and a setter
+        // that changed nothing stepped every frame interval: 118 steps for a 2 s toast.
+        _hold = Animate.After(hold, () => { if (serial == _serial) FadeOut(serial); });
         _onChanged();
     }
 
@@ -97,10 +112,18 @@ public sealed class ToastHost
 
     private void FadeOut(int serial)
     {
-        _fade = Animate.Value(_opacity, 0f, v => { _opacity = v; _onChanged(); })
+        _fade = Animate.Value(_opacity, 0f, _fadeStep)
             .Duration(FadeOutSeconds)
             .OnComplete(() => { if (serial == _serial) { Clear(); _onChanged(); } })
             .Start();
+    }
+
+    /// <summary>A step of a fade: the level, and the toast on screen at it. A rebuild in the
+    /// middle of a fade (the owner's, for anything) builds the toast at the level too.</summary>
+    private void SetOpacity(float opacity)
+    {
+        _opacity = opacity;
+        if (_shown.Current is { } toast) toast.Opacity = opacity;
     }
 
     private void Clear()
@@ -118,10 +141,15 @@ public sealed class ToastHost
     /// </summary>
     public Element? Build()
     {
-        if (Message is null) return null;
+        if (Message is null)
+        {
+            _shown.Current = null;
+            return null;
+        }
 
         var toast = ToastElement.New(Message, Severity);
         toast.Opacity = _opacity;
+        toast.WithRef(_shown);
         if (Action is { } action)
         {
             toast.ActionLabel = action.Label;

@@ -347,6 +347,18 @@ fires when the queue drains, which is not a frame clock. HultUI's own dirty
 tracking decides whether a frame is actually produced — a static UI rendered 2–4
 frames across a whole run — so the host needs no throttle of its own.
 
+**The pump ticks only when something is due** (plan 17, round 3), as
+`Application.Run` waits: after each tick the host asks the application for its next
+deadline (`HostNextFrameIn`): the next frame interval while a control needs a frame
+or a tween moves, once when a delay or a coalesced accessibility refresh comes due,
+none while nothing does. Between ticks the loop is parked: a post from another thread
+(the platform's `Wake`) or a change made on the UI thread (input, a WinForms handler
+writing a signal) posts a tick to WinForms' synchronization context, no sooner than
+the interval after the last. It ticked every 8 ms whatever happened: an idle form
+62.9 passes a second (WinForms rounds the timer up to the system's 15.6 ms tick),
+now none after start-up; a 1 s toast every 3 s 64.0 → 8.1 passes a second; a post
+from a worker to its frame, median 16.2 → 0.6 ms (it waited for the next tick).
+
 **`HultUIControl`** is the mount point. It creates its GL context in
 `OnHandleCreated`, tears it down in `OnHandleDestroyed`, calls
 `wglSwapIntervalEXT(0)` once current, resizes the surface from `OnResize`, and

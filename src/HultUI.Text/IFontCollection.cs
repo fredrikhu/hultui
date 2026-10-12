@@ -26,6 +26,16 @@ public interface IFontCollection
     /// </summary>
     IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant, string? hanContext)
         => MatchCharacter(codepoint, weight, slant);
+
+    /// <summary>
+    /// The colour emoji face that has <paramref name="codepoint"/>, for a character that asks to be
+    /// drawn as an emoji rather than as text (Unicode Technical Standard #51): one whose default is
+    /// emoji (😀 ⭐), or one followed by U+FE0F (❤️ ™️ #️⃣), a skin tone or a joiner and another
+    /// pictograph. It is asked before the primary face, which may have the character in black and
+    /// white. Null when the collection knows no such face, and the character then falls back as any
+    /// other does; the default knows none.
+    /// </summary>
+    IResolvedFont? MatchEmoji(int codepoint, FontWeight weight, FontSlant slant) => null;
 }
 
 public interface IResolvedFont : IDisposable

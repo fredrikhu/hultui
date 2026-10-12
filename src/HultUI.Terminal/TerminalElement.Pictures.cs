@@ -145,7 +145,15 @@ public sealed partial class TerminalElement
     private sealed class PictureClock(TerminalElement owner) : ITween
     {
         public bool IsComplete { get; private set; }
-        public void Tick(float deltaSeconds) { if (!IsComplete) owner.OnPictureTick(deltaSeconds); }
+        public bool Started { get; private set; }
+        // Every step can show a new frame: the engine knows its frames' times, not this.
+        public float NextChangeIn => 0f;
+        public float Delay => 0f;
+        public void Tick(float deltaSeconds)
+        {
+            Started = true;
+            if (!IsComplete) owner.OnPictureTick(deltaSeconds);
+        }
         public void Cancel() => IsComplete = true;
     }
 

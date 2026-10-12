@@ -132,6 +132,11 @@ public class VideoElement : ImageElement
         ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }
 
+    // Its measure reads the source's size. Image's setters mark the layout when what they copy
+    // changes it, Player's does through Source, and a frame of another size marks it as it
+    // arrives (OnFrameArrived).
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(VideoElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

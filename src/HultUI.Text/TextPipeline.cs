@@ -39,6 +39,11 @@ public sealed class TextPipeline
     // the first width asked for: a pipeline that measures none — no TextArea — has none.
     private Widths? _widths;
 
+    // The prefix measurer of each style its paragraphs asked for (PrefixMeasurer, below). Made at
+    // the first: only a line that merged clusters asks.
+    private Dictionary<ResolvedInheritedStyle, TextPrefixMeasurer>? _prefixMeasurers;
+    private const int PrefixMeasurerCacheMaxSize = 64;
+
     // ── How much the caches above may hold ──
     //
     // An application keeps one pipeline for its whole life, so what these caches hold stays
@@ -302,6 +307,7 @@ public sealed class TextPipeline
         var layout = needsBidi
             ? ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow, memo, spans)
             : ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow, memo);
+        (_laidOutMemo, _laidOutKey) = (null, default);
         _cache.Put(key, layout, LayoutBytes(text, layout));
         return layout;
     }
@@ -341,6 +347,7 @@ public sealed class TextPipeline
                 return cachedBidi;
             var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow,
                 MemoOf(text, style, spans: null, spanDigest: 0, bidi: true));
+            (_laidOutMemo, _laidOutKey) = (null, default);
             _cache.Put(bidiKey, bidiLayout, LayoutBytes(text, bidiLayout));
             return bidiLayout;
         }
@@ -929,11 +936,59 @@ public sealed class TextPipeline
     // layout only notes its key's hash in _seen. The note can be wrong both ways — a slot
     // taken by another string, two keys with one hash — which moves when reuse starts, never
     // what a layout returns. An entry, once made, is used whatever the note says.
+    //
+    // Like the caches above, the entries and the remembered lines are bounded by the bytes they
+    // keep alive as well as by their counts (MemoBytes, LineBytes): by count alone, 4,096
+    // paragraphs of 2,000 characters, Hebrew mixed with Latin, kept ~58 MB. And a range's key
+    // used to hold its string's entry, so an entry the cache had let go stayed alive — levels,
+    // breaks, widths, its whole line — as long as any of its widths or lines did. A range now
+    // names its entry by a number (TextMemo.Id) that no other entry has, and keeps nothing of
+    // it. A width is a fixed ~100 bytes with its key, ~1.6 MB at the count bound, no more.
+    //
+    // The bounds sit above what the largest real use fills, because what is kept is used again,
+    // across widths and across opens of the same document: the perf suite's 5,000-block rich text
+    // document, opened twice and resized, fills the entries' count (4,096, 7.0 MB as weighed)
+    // and the lines' (4,096, 8.4 MB), and `richtext/open` finds most of it again; at 8 MB the
+    // lines' bound already let 337 of them go. Long paragraphs weigh more and stop short of the
+    // counts: the worst case is now the bounds, 22 MB, where it was ~58.
 
-    private readonly LruCache<MemoKey, TextMemo> _memos = new(capacity: 4096);
+    private readonly LruCache<MemoKey, TextMemo> _memos = new(capacity: 4096, maxWeight: MemoCacheBytes);
     private readonly LruCache<MemoRange, float> _memoWidths = new(capacity: 16384);
-    private readonly LruCache<MemoRange, TextLine> _memoLines = new(capacity: 4096);
+    private readonly LruCache<MemoRange, TextLine> _memoLines = new(capacity: 4096, maxWeight: MemoLineCacheBytes);
     private readonly int[] _seen = new int[16384];
+
+    internal const long MemoCacheBytes = 10L << 20;
+    internal const long MemoLineCacheBytes = 12L << 20;
+
+    // What each holds now, for the tests that hold them to their bounds.
+    internal (int Entries, long Bytes) MemoCacheUse => (_memos.Count, _memos.Weight);
+    internal (int Entries, long Bytes) MemoLineCacheUse => (_memoLines.Count, _memoLines.Weight);
+
+    // What an entry keeps alive: its key's string, the levels (one byte a character, BiDi only),
+    // the break offsets (a list, room and all) and segment widths, the metric spans, the line of
+    // the whole text once it has one (LineBytes), and the objects and cache bookkeeping around
+    // them. Measured with full collections, emptying the cache: within 3 % for paragraphs of 400
+    // and 2,000 characters, BiDi or styled, and labels of 60 or 80.
+    private static int MemoBytes(TextMemo memo, int textLength)
+    {
+        int bytes = 300 + 2 * textLength + 4 * memo.Breaks.Capacity + 4 * memo.SegmentWidths.Length;
+        if (memo.Levels is { } levels) bytes += levels.Length;
+        if (memo.Spans is { } spans) bytes += 48 * spans.Length;
+        if (memo.WholeLine is { } line) bytes += LineBytes(line);
+        return bytes;
+    }
+
+    // A remembered line: each run's object, text and 16 bytes a glyph, and the line's entry.
+    // Within 5 % of what full collections measure for lines of one run to thirty (a line of
+    // Hebrew mixed with Latin is a run a word or two), ellipsized or not.
+    private static int LineBytes(TextLine line)
+    {
+        int bytes = 180;
+        var runs = line.Runs;
+        for (int i = 0; i < runs.Count; i++)
+            bytes += 104 + 2 * runs[i].Text.Length + 16 * runs[i].Glyphs.Length;
+        return bytes;
+    }
 
     // Whether a key with this hash has been laid out before; notes it if not. Two slots per
     // hash, and a note goes where it displaces nothing: with one, two strings on the same
@@ -955,10 +1010,11 @@ public sealed class TextPipeline
     private readonly record struct MemoKey(string Text, string FontFamily, float FontSize, FontWeight FontWeight,
         FontSlant FontSlant, float LineHeight, float LetterSpacing, TextDirection Direction, int SpanDigest);
 
-    // A range of one string's text; Owner compares by reference, so a string laid out again
-    // after its entry was evicted starts with nothing remembered. Ellipsis tells a line
-    // with the mark from the same range without it, and is false for widths.
-    private readonly record struct MemoRange(TextMemo Owner, int From, int To, bool Ellipsis);
+    // A range of one string's text; Owner is its entry's Id, a number no other entry has, so a
+    // string laid out again after its entry was evicted starts with nothing remembered, and the
+    // key keeps nothing of the entry alive. Ellipsis tells a line with the mark from the same
+    // range without it, and is false for widths.
+    private readonly record struct MemoRange(int Owner, int From, int To, bool Ellipsis);
 
     // A metric span as layout sees it: what EffectiveStyleAt and NextStyleBoundary read.
     private readonly record struct MetricSpan(int Start, int Length, FontWeight? Weight, FontSlant? Slant, float? FontSize,
@@ -966,6 +1022,8 @@ public sealed class TextPipeline
 
     private sealed class TextMemo
     {
+        // What its ranges are keyed by (MemoRange.Owner).
+        public readonly int Id;
         // Null on the styled path, which is left-to-right only.
         public readonly byte[]? Levels;
         public readonly bool RtlParagraph;
@@ -977,8 +1035,9 @@ public sealed class TextPipeline
         // The line of the whole text: the one line of every width it fits.
         public TextLine? WholeLine;
 
-        public TextMemo(byte[]? levels, bool rtlParagraph, List<int> breaks, MetricSpan[]? spans)
+        public TextMemo(int id, byte[]? levels, bool rtlParagraph, List<int> breaks, MetricSpan[]? spans)
         {
+            Id = id;
             Levels = levels;
             RtlParagraph = rtlParagraph;
             Breaks = breaks;
@@ -1026,23 +1085,50 @@ public sealed class TextPipeline
             style.LineHeight, style.LetterSpacing, style.TextDirection, spanDigest);
         if (_memos.TryGet(key, out var memo))
         {
-            if (SameMetricSpans(memo.Spans, spans)) return memo;
-            // Other spans with the same digest: this layout's entry takes the key over.
-            memo = NewMemo(text, style, spans, bidi);
-            _memos.Put(key, memo);
-            return memo;
+            if (!SameMetricSpans(memo.Spans, spans))
+            {
+                // Other spans with the same digest: this layout's entry takes the key over.
+                memo = NewMemo(text, style, spans, bidi);
+                _memos.Put(key, memo, MemoBytes(memo, text.Length));
+            }
         }
-        if (!SeenBefore(key.GetHashCode())) return null;
-        memo = NewMemo(text, style, spans, bidi);
-        _memos.Add(key, memo);
+        else
+        {
+            if (!SeenBefore(key.GetHashCode())) return null;
+            memo = NewMemo(text, style, spans, bidi);
+            _memos.Add(key, memo, MemoBytes(memo, text.Length));
+        }
+        (_laidOutMemo, _laidOutKey) = (memo, key);
         return memo;
     }
 
-    private static TextMemo NewMemo(string text, ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan>? spans, bool bidi)
+    // The entry the layout running now was handed, and its key, until it ends: a line of the
+    // whole text, built later in that layout, makes the entry keep more (Remember).
+    private TextMemo? _laidOutMemo;
+    private MemoKey _laidOutKey;
+
+    private TextMemo NewMemo(string text, ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan>? spans, bool bidi)
     {
-        if (!bidi) return new TextMemo(null, false, BreakOffsets(text), MetricSpansOf(spans));
+        if (!bidi) return new TextMemo(NextMemoId(), null, false, BreakOffsets(text), MetricSpansOf(spans));
         var (levels, rtlParagraph) = BidiAnalyzer.Levels(text, style.TextDirection);
-        return new TextMemo(levels, rtlParagraph, BreakOffsets(text), MetricSpansOf(spans));
+        return new TextMemo(NextMemoId(), levels, rtlParagraph, BreakOffsets(text), MetricSpansOf(spans));
+    }
+
+    // The number of the next entry. No number is used twice while anything of the entry that
+    // had it may be cached: after the last one, every entry, width and line goes, and the
+    // numbers start over. (An int keeps an entry the size it was, which a long did not.)
+    private int _lastMemoId;
+
+    private int NextMemoId()
+    {
+        if (_lastMemoId == int.MaxValue)
+        {
+            _memos.Clear();
+            _memoWidths.Clear();
+            _memoLines.Clear();
+            _lastMemoId = 0;
+        }
+        return ++_lastMemoId;
     }
 
     // Each layout gets a line of its own — a layout sets its lines' OffsetY — over the same
@@ -1058,14 +1144,19 @@ public sealed class TextPipeline
     {
         if (from == 0 && to == text.Length && !appendEllipsis)
             return memo.WholeLine is { } whole ? CopyOf(whole) : null;
-        return _memoLines.TryGet(new MemoRange(memo, from, to, appendEllipsis), out var line) ? CopyOf(line) : null;
+        return _memoLines.TryGet(new MemoRange(memo.Id, from, to, appendEllipsis), out var line) ? CopyOf(line) : null;
     }
 
     // Remembers a line RememberedLine did not have, and hands it to the layout that built it.
     private TextLine Remember(TextMemo memo, string text, int from, int to, bool appendEllipsis, TextLine line)
     {
-        if (from == 0 && to == text.Length && !appendEllipsis) memo.WholeLine = line;
-        else _memoLines.Add(new MemoRange(memo, from, to, appendEllipsis), line);
+        if (from == 0 && to == text.Length && !appendEllipsis)
+        {
+            // The entry keeps more now: it counts for it.
+            memo.WholeLine = line;
+            if (ReferenceEquals(memo, _laidOutMemo)) _memos.Reweigh(_laidOutKey, MemoBytes(memo, text.Length));
+        }
+        else _memoLines.Add(new MemoRange(memo.Id, from, to, appendEllipsis), line, LineBytes(line));
         return line;
     }
 
@@ -1084,7 +1175,7 @@ public sealed class TextPipeline
         IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         if (memo is null) return MeasureBidi(text, from, to, style, levels, spans);
-        var key = new MemoRange(memo, from, to, Ellipsis: false);
+        var key = new MemoRange(memo.Id, from, to, Ellipsis: false);
         if (!_memoWidths.TryGet(key, out float width))
         {
             width = MeasureBidi(text, from, to, style, levels, spans);
@@ -1117,7 +1208,7 @@ public sealed class TextPipeline
         IReadOnlyList<Core.Rendering.TextSpan> spans, TextMemo? memo)
     {
         if (memo is null) return MeasureStyled(text, from, to, style, spans);
-        var key = new MemoRange(memo, from, to, Ellipsis: false);
+        var key = new MemoRange(memo.Id, from, to, Ellipsis: false);
         if (!_memoWidths.TryGet(key, out float width))
         {
             width = MeasureStyled(text, from, to, style, spans);
@@ -1617,9 +1708,10 @@ public sealed class TextPipeline
     private PrefixWidths? BuildPrefixWidths(string text, ResolvedInheritedStyle style)
     {
         if (text.Length == 0) return null;
-        var fontRuns = Itemize(text, style);
+        var fontRuns = Itemize(text, style, _prefixRuns);
         var runs = new PrefixRun[fontRuns.Count];
-        var segments = new List<PrefixSegment>();
+        var segments = _prefixSegments;
+        segments.Clear();
         float before = 0;
         int runStart = 0;
         for (int r = 0; r < fontRuns.Count; r++)
@@ -1644,8 +1736,31 @@ public sealed class TextPipeline
             before += style.LetterSpacing == 0f || glyphs == 0 ? x : x + style.LetterSpacing * glyphs;
             runStart = runEnd;
         }
-        return new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs, segments.ToArray());
+        fontRuns.Clear();   // the runs' text and faces are not kept alive by the scratch list
+        var table = new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs, segments.ToArray());
+        // A whole document's single line can have a hundred thousand segments: its list is not kept.
+        if (segments.Capacity > KeptPrefixSegments)
+        {
+            segments.Clear();
+            segments.TrimExcess();
+        }
+        return table;
     }
+
+    // BuildPrefixWidths' font runs and segments while it builds a table, which gets exact arrays
+    // copied out of them: lists grown anew for every table were most of what wrapping and
+    // truncating allocated (a list doubles its way up: a line of 60 segments went through five
+    // arrays before its own was copied out). Nothing BuildPrefixWidths calls builds a table, and a
+    // pipeline is used from one thread, as MeasureString's run list is.
+    private readonly List<FontRun> _prefixRuns = new();
+    private readonly List<PrefixSegment> _prefixSegments = new();
+
+    // The most segments the kept list holds room for between tables (20 bytes each): a line of
+    // ~12,000 characters of prose.
+    internal const int KeptPrefixSegments = 4096;
+
+    // The room the kept segment list holds, for the test that holds it to KeptPrefixSegments.
+    internal int PrefixScratchCapacity => _prefixSegments.Capacity;
 
     /// <summary>
     /// <c>MeasureString(p.Text[..length])</c>, to the bit: the same run and segment widths,
@@ -1855,30 +1970,64 @@ public sealed class TextPipeline
     }
 
     /// <summary>
+    /// <see cref="MeasureWidth"/> of a prefix of a run's text in <paramref name="style"/>, as a
+    /// <see cref="TextPrefixMeasurer"/>: one per style, kept. A paragraph's selection drawn over a
+    /// line that merged clusters asks for it every frame; a new one each time was 64 B, and one
+    /// kept on each paragraph would be 8 B more on every paragraph laid out. Keyed by the style's
+    /// value: it is a struct.
+    /// </summary>
+    internal TextPrefixMeasurer PrefixMeasurer(ResolvedInheritedStyle style)
+    {
+        var measurers = _prefixMeasurers ??= new();
+        if (measurers.TryGetValue(style, out var measurer))
+            return measurer;
+        if (measurers.Count >= PrefixMeasurerCacheMaxSize)
+            measurers.Clear();
+        return measurers[style] = NewPrefixMeasurer(style);
+    }
+
+    // Its own method: a lambda capturing a parameter makes its closure on entry to the method
+    // that declares it, so PrefixMeasurer would make one on a hit too.
+    private TextPrefixMeasurer NewPrefixMeasurer(ResolvedInheritedStyle style) =>
+        (text, length) => MeasureWidth(text.AsSpan(0, length), style);
+
+    /// <summary>
     /// The width <see cref="Layout(string, ResolvedInheritedStyle, float, int?, TextOverflow)"/>
     /// gives <paramref name="text"/> on one unbounded line, to the bit, without laying it out:
     /// its words' widths added up in the order the shaping adds them (<see cref="MeasureString"/>),
     /// and kept as one number (the width cache). Laying it out would shape it whole and keep that
     /// in the shape cache, which a text area's every line, measured once each when a document
-    /// opens to see whether it fits, filled with lines nobody draws. Text on the BiDi path or
-    /// with a newline in it is laid out.
+    /// opens to see whether it fits, filled with lines nobody draws. Text on the BiDi path is laid
+    /// out, and its width kept in the same cache, under its direction: a caret or a selection on a
+    /// line of emoji or marks asks for the widths of the same prefixes every frame
+    /// (<see cref="TextPrefixMeasurer"/>), and finds them without a string. Text with a newline in
+    /// it is laid out.
     /// </summary>
     public float MeasureWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
     {
         if (text.IsEmpty)
             return 0f;
-        if (text.Contains('\n') || NeedsBidi(text, style, PlainPathForLtr))
+        if (text.Contains('\n'))
             return Layout(text.ToString(), style, float.PositiveInfinity, maxLines: 1).Size.Width;
+        // The plain path's width does not depend on the direction; the BiDi path's can.
+        bool bidi = NeedsBidi(text, style, PlainPathForLtr);
 
         FollowCulture();  // before the lookup: a width is of the culture's Han faces
         var widths = _widths ??= new Widths();
-        var key = widths.KeyOf(text, style);
+        var key = widths.KeyOf(text, style, bidi ? style.TextDirection : TextDirection.Ltr);
         if (widths.InPlace.TryGet(key, out float width))
             return width;
 
         var entry = WidthKeyComparer.Instance.Create(key);
-        BeginParagraph(entry.Text);
-        width = MeasureString(entry.Text, style);
+        if (bidi)
+        {
+            width = Layout(entry.Text, style, float.PositiveInfinity, maxLines: 1).Size.Width;
+        }
+        else
+        {
+            BeginParagraph(entry.Text);
+            width = MeasureString(entry.Text, style);
+        }
         widths.Keep(entry, width);
         return width;
     }
@@ -1908,7 +2057,7 @@ public sealed class TextPipeline
 
         public Widths() => InPlace = Cache.LookedUpBy<WidthSpanKey>();
 
-        public WidthSpanKey KeyOf(ReadOnlySpan<char> text, in ResolvedInheritedStyle style)
+        public WidthSpanKey KeyOf(ReadOnlySpan<char> text, in ResolvedInheritedStyle style, TextDirection direction)
         {
             if (!ReferenceEquals(style.FontFamily, _style.FontFamily) || style.FontSize != _style.FontSize
                 || style.FontWeight != _style.FontWeight || style.FontSlant != _style.FontSlant
@@ -1917,7 +2066,7 @@ public sealed class TextPipeline
                 _style = style;
                 _styleHash = WidthKeyComparer.StyleHash(style);
             }
-            return new WidthSpanKey(text, style, WidthKeyComparer.HashOf(text, _styleHash));
+            return new WidthSpanKey(text, style, direction, WidthKeyComparer.HashOf(text, _styleHash, direction));
         }
 
         // Kept while there is room. Once the cache is full, only a line measured lately is: most

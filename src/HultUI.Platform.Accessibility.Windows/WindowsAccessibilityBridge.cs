@@ -457,7 +457,33 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             RefreshParent(reorderedParent.ElementId);
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
         }
-        foreach (var change in diff.PropertyChanged)
+        RaisePropertyChanges(diff.PropertyChanged);
+    }
+
+    /// <summary>
+    /// Properties the window marked on the applied tree in place — a list's selection move: the
+    /// item that had the selection and the one that has it. Their wrappers already point at those
+    /// nodes; they take the new state and raise what a diff would have (SelectionItem.IsSelected
+    /// property events), with no walk of the tree. Anything but property changes is applied as a
+    /// diff.
+    /// </summary>
+    public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
+    {
+        if (patch.Added.Count > 0 || patch.Removed.Count > 0 || patch.Reordered.Count > 0)
+        {
+            ApplyChanges(patch, root);
+            return;
+        }
+        foreach (var change in patch.PropertyChanged)
+            if (_wrappers.TryGetValue(change.Node.ElementId, out var wrapper))
+                wrapper.UpdateFrom(change.Node);
+        RaisePropertyChanges(patch.PropertyChanged);
+    }
+
+    /// <summary>Raises the UIA events of property changes whose wrappers are up to date.</summary>
+    private void RaisePropertyChanges(List<PropertyChange> changes)
+    {
+        foreach (var change in changes)
         {
             if (!_wrappers.TryGetValue(change.Node.ElementId, out var wrapper)) continue;
             if (change.PropertyName == AccessibilityProperties.ScrollPosition)
@@ -606,6 +632,16 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             finally { Marshal.Release(source); }
             return;
         }
+        if (propertyName == AccessibilityProperties.Role)
+        {
+            // A role change, as Chromium tells one: the control type, and its localized name with
+            // it. This provider gives no localized name (UI Automation makes it from the control
+            // type), so that one goes with no value, as an old value goes, and a client reads it.
+            wrapper.GetPropertyValue(UiaInterop.UIA_ControlTypePropertyId, out var controlType);
+            RaiseProperty(wrapper, UiaInterop.UIA_ControlTypePropertyId, controlType);
+            RaiseProperty(wrapper, UiaInterop.UIA_LocalizedControlTypePropertyId, UiaVariant.Empty);
+            return;
+        }
         if (propertyName == AccessibilityProperties.NativeContent)
         {
             // A foreign tree came or went. Its window moves between the window root and the
@@ -707,6 +743,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
                 IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
                 IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
                 Marshal.Release(root); // UIA took its own reference
+                self._host.RootRequested();
                 return lresult;
             }
 
@@ -758,9 +795,33 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal void ToggleElement(ElementId id) => _host.ToggleElement(id);
     internal void SelectElement(ElementId id) => _host.SelectElement(id);
     internal void SetValue(ElementId id, string value) => _host.SetValue(id, value);
-    internal string? GetValue(ElementId id) => _host.GetValue(id);
+    /// <summary>
+    /// A node's value for the Value pattern. A node that offers text answers from its node, as its
+    /// ValueValue property does (<see cref="UiaFragment.GetPropertyValue"/>): the version its text
+    /// events describe, on any thread. Anything else is read from its element, as it is now.
+    /// </summary>
+    internal string? GetValue(ElementId id) =>
+        _wrappers.TryGetValue(id, out var wrapper) && wrapper.OffersText ? wrapper.Node.Value : _host.GetValue(id);
     internal bool? GetToggleState(ElementId id) => _host.GetToggleState(id);
     internal void RequestFocus(ElementId id) => _host.RequestFocus(id);
+
+    /// <summary>For tests: told of the window when the bridge tells UI Automation its providers
+    /// are gone (<see cref="ReleaseProviders"/>).</summary>
+    internal Action<IntPtr>? ProvidersReleased;
+
+    /// <summary>
+    /// Tells UI Automation the window's providers are gone, as a window being destroyed must:
+    /// UiaReturnRawElementProvider with no provider releases every reference UI Automation holds to
+    /// providers of the window. A client that ever asked for the window's tree keeps a reference to
+    /// its root provider until then, and through it this bridge, its host and the closed window's
+    /// whole element and accessibility trees: with this machine's UIA client listening, each closed
+    /// 60-row window kept ~357 KB, up to about 100 windows at a time.
+    /// </summary>
+    private void ReleaseProviders()
+    {
+        UiaInterop.UiaReturnRawElementProvider(_hwnd, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        ProvidersReleased?.Invoke(_hwnd);
+    }
 
     public void Dispose()
     {
@@ -770,6 +831,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (_originalWndProc != IntPtr.Zero)
             UiaInterop.SetWindowLongPtr(_hwnd, UiaInterop.GWLP_WNDPROC, _originalWndProc);
         _byHwnd.TryRemove(_hwnd, out _);
+
+        // After the window procedure is restored, so no WM_GETOBJECT hands out a provider being
+        // torn down; the window itself is destroyed after its bridge, so it still exists here.
+        ReleaseProviders();
 
         _wrappers.Clear();
 

@@ -105,8 +105,21 @@ public sealed class SkiaImageSource : IImageSource, IDisposable
         return new SkiaImageSource(bitmap, alternateText);
     }
 
+    /// <summary>
+    /// How many sources have been disposed after being drawn, in this process. The Vulkan
+    /// surface reads it after each frame: a GPU context keeps the texture it uploaded for an
+    /// image after the image is gone, as a spare for a later texture of exactly that size, and
+    /// the surface frees those spares when this has moved (see
+    /// <see cref="SkiaVulkanRenderSurface"/>). A source never drawn uploaded nothing.
+    /// </summary>
+    internal static int DrawnDisposals => Volatile.Read(ref s_drawnDisposals);
+    private static int s_drawnDisposals;
+
     public void Dispose()
     {
+        // The image is made on first draw, so it says whether anything was uploaded. Any
+        // thread may dispose a source, hence the interlocked count.
+        if (_image is not null) Interlocked.Increment(ref s_drawnDisposals);
         _image?.Dispose();
         _image = null;
         _bitmap?.Dispose();

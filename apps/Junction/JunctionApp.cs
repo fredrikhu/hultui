@@ -234,7 +234,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
-    private readonly Ref<VirtualListElement<TreeNode<GitBranch>>> _branchScrollRef = new();
+    private readonly Ref<VirtualListElement<BranchRowItem>> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
     // Tags state, shaped like the branches state above.
@@ -432,7 +432,8 @@ public partial class JunctionApp : Component, IDisposable
         // Blame replaces the file's text with a gutter view the search cannot bind to, and its
         // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.
         _filesFind.Opening = () => _filesBlame = false;
-        _filesTree = new TreeView<string>(MarkDirty);
+        // Every change to which folders are open comes through here: the kept rows go with it.
+        _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkDirty(); });
         _commitFilesTree = NewChangeTree();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
@@ -773,6 +774,10 @@ public partial class JunctionApp : Component, IDisposable
 
     // ── Build ────────────────────────────────────────────────────────────
 
+    /// <summary>Whole-window builds so far, for tests: each one makes every view element again,
+    /// so a stray one (a background result nothing on screen reads) is a cost worth pinning.</summary>
+    internal int Builds { get; private set; }
+
     /// <summary>Keep the OS window title on the repository in front of you. Junction draws
     /// its own chrome, so this is not the caption — it is what the task bar and Alt+Tab show,
     /// and two Junction windows over two repos are otherwise indistinguishable there.</summary>
@@ -788,8 +793,10 @@ public partial class JunctionApp : Component, IDisposable
     public override Element Build()
     {
         SyncWindowTitle();
-        _spinnerWanted = false;   // set again by any Spinner() built below
+        ResetSpinners();   // asked for again by any Spinner() built below
         _issueRulesLooked = false;   // the rules file is looked at again, once (see IssueRules)
+        _highlightShown = null;   // set again by the diff pane built below (see HighlightForCurrent)
+        Builds++;
 
         // Track the revision signal so a Rerender() re-runs Build through the
         // Effect (re-subscribing to the active repo's loaders — see _revision).

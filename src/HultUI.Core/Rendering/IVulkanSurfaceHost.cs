@@ -9,9 +9,8 @@ namespace HultUI.Core.Rendering;
 /// <param name="Layout">Its current <c>VkImageLayout</c>, as the raw enum value.</param>
 /// <param name="WidthPx">Width in device pixels.</param>
 /// <param name="HeightPx">Height in device pixels.</param>
-/// <param name="Index">Which image of the swapchain this is. The renderer wraps the image
-/// afresh every frame whichever it is: a cached wrapper keeps a layout the image no longer
-/// has.</param>
+/// <param name="Index">Which image of the swapchain this is: what a render target kept per
+/// image is found by.</param>
 /// <param name="Usage">The <c>VkImageUsageFlags</c> the swapchain was created with. Skia
 /// validates the render target against them, so guessing here fails in a way that looks
 /// like the driver refusing the image.</param>
@@ -128,10 +127,37 @@ public interface IVulkanSurfaceHost
     void PresentAcquiredImage();
 
     /// <summary>
-    /// Rebuilds the swapchain for a new size. The renderer drops every wrapped surface
-    /// first, because they name images that are about to be destroyed.
+    /// Resizes the swapchain for a new size: rebuilt, or kept when it was allocated large enough
+    /// and is shown one-to-one. A renderer whose host calls <see cref="SetSwapchainReleasing"/>
+    /// leaves its wrapped surfaces to that call, which comes only when the images go; any other
+    /// drops them first, because they may name images about to be destroyed.
     /// </summary>
     void RecreateSwapchain(int widthPx, int heightPx);
+
+    /// <summary>
+    /// Asks the host to call <paramref name="beforeImagesGo"/> just before it destroys a
+    /// swapchain's images, for any reason — a rebuild it starts itself (out of date, suboptimal,
+    /// a new display format, a minimized window), or its own disposal — and returns whether it
+    /// will. Null stops the calls.
+    ///
+    /// <para>A host that returns true promises two things, and a renderer may then keep a render
+    /// target per image for the swapchain's life instead of wrapping each image every frame:
+    /// that no image goes before the call, so no render target outlives its image; and that
+    /// <see cref="TransitionAcquiredImage"/> works. The default, false, leaves the renderer
+    /// wrapping every frame.</para>
+    /// </summary>
+    bool SetSwapchainReleasing(Action? beforeImagesGo) => false;
+
+    /// <summary>
+    /// Moves the acquired image to <c>COLOR_ATTACHMENT_OPTIMAL</c>, the layout Skia leaves a
+    /// render target in, in a submit of its own; false when there is no acquired image or the host
+    /// cannot. The host moves the image to <c>PRESENT_SRC_KHR</c> behind Skia's back on the way to
+    /// the screen, so a render target kept over it believes a layout the image no longer has
+    /// until this runs. It must be submitted before any of the renderer's work on the image is:
+    /// before Skia draws on it, or at least before Skia submits. Once per acquire; asked again for
+    /// the same image it does nothing.
+    /// </summary>
+    bool TransitionAcquiredImage() => false;
 }
 
 /// <summary>

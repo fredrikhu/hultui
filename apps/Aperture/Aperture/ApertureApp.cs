@@ -104,7 +104,7 @@ public sealed partial class ApertureApp : Component, IDisposable
 
         _settings = settings ?? new ApertureSettings(CredentialStore.Default);
         _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
-        _posters = new PosterCache(() => Application.InvokeOnMainThread(Rerender), http: posterHttp);
+        _posters = new PosterCache(() => Application.InvokeOnMainThread(OnArtworkLanded), http: posterHttp);
 
         if (library is not null)
         {
@@ -168,8 +168,12 @@ public sealed partial class ApertureApp : Component, IDisposable
         FocusPendingSearchField();
     }
 
+    /// <summary>How many times <see cref="Build"/> has run, for the tests.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         // Track the revision signal so Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
 

@@ -291,6 +291,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// fullscreen the custom frame does, for apps that did not ask for custom chrome.</summary>
     private WindowsPlainFullscreen? _plainFullscreen;
 
+    /// <summary>Tells the Vulkan host when Win32's modal size/move loop starts and ends, with
+    /// either frame (<see cref="WindowsSizeMoveWatch"/>). Vulkan windows on Windows only.</summary>
+    private IDisposable? _sizeMoveWatch;
+
     /// <summary>
     /// True when this window uses the native Windows custom frame (borderless on
     /// Windows) rather than SDL's borderless + hit-test path. In that mode Windows
@@ -528,6 +532,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // drop (see WindowsDropTarget). Not on a thread that cannot host OLE: SDL's stays.
         if (OperatingSystem.IsWindows())
             _dropTarget = WindowsDropTarget.Install(GetWin32Hwnd(), e => InputReceived?.Invoke(e), () => DisplayScale);
+        // A drag over-allocates the swapchain and its end rebuilds it exact (SdlVulkanHost.
+        // FixedExtentOverride). After the custom frame, so it sees the messages first.
+        if (_vulkanHost is not null && OperatingSystem.IsWindows())
+            _sizeMoveWatch = WindowsSizeMoveWatch.Install(GetWin32Hwnd(), OnSizeMoveStarted, OnSizeMoveEnded);
 
         // The DIP-to-pixel correction already happened, before the renderer was built. This
         // re-sync stays because installing a custom frame changes the non-client area, and so
@@ -592,8 +600,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
             {
                 if (UseDisplayColorEvents)
-                    _displayInformation = WindowsDisplayInformation.TryCreate(GetWin32Hwnd(),
-                        () => _displayColorDirty = true);
+                    _displayInformation = WindowsDisplayInformation.TryCreate(GetWin32Hwnd(), () =>
+                    {
+                        _displayColorDirty = true;
+                        // The event is a DispatcherQueue item the loop's wait runs on this thread,
+                        // which SDL does not end its wait for (PollDisplayColor applies the flag).
+                        HultUI.Core.Threading.UIThread.WakeIfParked();
+                    });
                 else
                     StartupTrace.Mark("display colour polled; HULTUI_DISPLAY_INFORMATION=1 or the app turns on events");
             }
@@ -716,6 +729,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         return true;
+    }
+
+    /// <summary>Win32's modal size/move loop started: the Vulkan host over-allocates from the
+    /// first size change inside it, if it is a sizing loop.</summary>
+    private void OnSizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop) => _vulkanHost?.SizeMoveStarted(loop);
+
+    /// <summary>
+    /// The loop ended. When the drag left the swapchain over-allocated, the host has just rebuilt
+    /// it at the window's size, and its first frame is drawn now, from the window procedure, as a
+    /// step of the drag is: the old swapchain is gone, and nothing else comes round until the
+    /// loop that sent this returns. A move rebuilt nothing and draws nothing.
+    /// </summary>
+    private void OnSizeMoveEnded()
+    {
+        if (_vulkanHost is not { } host || !host.SizeMoveEnded()) return;
+        ResizePending = true;
+        if (!_shown) return;
+        long presented = _presents;
+        LiveResizeFrame?.Invoke();
+        if (_presents != presented && OperatingSystem.IsWindows())
+            ValidateRect(GetWin32Hwnd(), 0);
     }
 
     /// <summary>
@@ -1249,9 +1283,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// events (Windows 11 22H2 and later), the trigger is WinRT's
     /// <c>AdvancedColorInfoChanged</c>, which fires within milliseconds of each step of a drag —
     /// see <see cref="WindowsDisplayInformation"/>. Otherwise the display configuration is
-    /// polled every 100 ms: a poll costs about 12 µs (median of
-    /// 300; 69 µs at worst), and the loop wakes every 16 ms when idle anyway. A poll a second
-    /// trailed a dragged slider visibly; 100 ms still did, a little.</para>
+    /// polled every 100 ms: a poll costs about 12 µs (median of 300; 69 µs at worst). An idle
+    /// loop that waits for its next deadline wakes for it (<see cref="NextDisplayColorPoll"/>),
+    /// ten times a second, and only for such a window. A poll a second trailed a dragged slider
+    /// visibly; 100 ms still did, a little.</para>
     /// </summary>
     internal void RefreshDisplayColor()
     {
@@ -1268,8 +1303,28 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         ResizePending = true;
     }
 
+    // On the Stopwatch, the clock the frame loop waits on: Environment.TickCount64 moves in
+    // 15.6 ms steps, and a loop woken at the deadline could still read it as not yet due.
     private static long _nextDisplayColorPoll;
-    private const int DisplayColorPollMs = 100;
+    private static readonly long DisplayColorPollTicks = System.Diagnostics.Stopwatch.Frequency / 10; // 100 ms
+
+    /// <summary>When the next display-colour poll is due, on the <see cref="System.Diagnostics.Stopwatch"/>
+    /// (the system <see cref="TimeProvider"/>'s timestamps), or null when no window polls: one
+    /// polls only with a Vulkan host and no display-colour event, and not while minimized. The
+    /// idle frame loop waits for it; a GL window, which has no format to change, an event-driven
+    /// one and a minimized one cost nothing. A minimized window is polled again by the pass its
+    /// restore wakes, which pumps (and so polls, the poll being long due) before it draws.</summary>
+    internal static long? NextDisplayColorPoll
+    {
+        get
+        {
+            if (!OperatingSystem.IsWindows()) return null;
+            foreach (var window in _registry.Values)
+                if (window._vulkanHost is not null && window._displayInformation is null && !window.IsMinimized)
+                    return _nextDisplayColorPoll;
+            return null;
+        }
+    }
 
     /// <summary>Applies what the <c>DisplayInformation</c> event flagged, and polls the windows
     /// that have no such event — see <see cref="RefreshDisplayColor"/>. Windows only: Wayland's
@@ -1285,9 +1340,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             window.RefreshDisplayColor();
         }
 
-        long now = Environment.TickCount64;
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
         if (now < _nextDisplayColorPoll) return;
-        _nextDisplayColorPoll = now + DisplayColorPollMs;
+        _nextDisplayColorPoll = now + DisplayColorPollTicks;
         foreach (var window in _registry.Values)
             if (window._displayInformation is null)
                 window.RefreshDisplayColor();
@@ -1922,7 +1977,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         _registry.Remove(WindowId);
 
-        // Restore SDL's window procedure before the window is destroyed.
+        // Restore SDL's window procedure before the window is destroyed. The size/move watch was
+        // hooked after the custom frame, so it goes before it.
+        _sizeMoveWatch?.Dispose();
+        _sizeMoveWatch = null;
         if (OperatingSystem.IsWindows())
         {
             _customFrame?.Dispose();

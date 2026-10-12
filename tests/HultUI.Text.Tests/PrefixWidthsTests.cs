@@ -1,4 +1,5 @@
 using HultUI.Core.Styling;
+using HultUI.Testing;
 using HultUI.Text;
 using Xunit;
 
@@ -62,6 +63,64 @@ public class PrefixWidthsTests
         Assert.Throws<ArgumentOutOfRangeException>(() => prefixes.Width(4));
         Assert.Throws<ArgumentOutOfRangeException>(() => prefixes.Width(-1));
     }
+
+    /// <summary>
+    /// A table is an array of exactly its segments, one of its runs and the two objects that hold
+    /// them: it is built in scratch lists the pipeline keeps from one table to the next. In lists
+    /// of its own, a table of 100 segments cost three times its arrays (every array a list doubles
+    /// through on its way up, then the lists), and wrapping or truncating a line builds one.
+    /// </summary>
+    [Fact]
+    public void ATable_AllocatesItsArraysAndNothingElse()
+    {
+        var pipeline = Create();
+        var style = Style();
+        string shorter = Words(100), longer = Words(300);
+        pipeline.MeasurePrefixes(shorter, style);   // the words into the word cache
+        pipeline.MeasurePrefixes(longer, style);
+
+        long a = Allocations.Least(() => pipeline.MeasurePrefixes(shorter, style));
+        long b = Allocations.Least(() => pipeline.MeasurePrefixes(longer, style));
+        Assert.Equal(20L * 200, b - a);              // 20 bytes a segment, and nothing else grows
+        Assert.InRange(a - 20L * 100, 0, 256);       // the rest (200 B): one run, the table, its answerer
+    }
+
+    /// <summary>The scratch list keeps room for a long line's segments between tables, but not
+    /// for a whole document's on one line.</summary>
+    [Fact]
+    public void AHugeTable_LeavesNoHugeScratchBehind()
+    {
+        var pipeline = Create();
+        pipeline.MeasurePrefixes(Words(1_000), Style());
+        Assert.InRange(pipeline.PrefixScratchCapacity, 1_000, TextPipeline.KeptPrefixSegments);
+        Assert.NotNull(pipeline.MeasurePrefixes(Words(40_000), Style()));
+        Assert.InRange(pipeline.PrefixScratchCapacity, 0, TextPipeline.KeptPrefixSegments);
+    }
+
+    /// <summary>The scratch run list lets go of the text once its table is built: a run of a
+    /// one-run text is the text itself.</summary>
+    [Fact]
+    public void ATable_KeepsNoTextAliveOnceBuilt()
+    {
+        var pipeline = Create();
+        var text = TableOfANewText(pipeline);
+        pipeline.Layout("the next paragraph", Style(), float.PositiveInfinity, maxLines: 1);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.False(text.IsAlive);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference TableOfANewText(TextPipeline pipeline)
+    {
+        string text = string.Concat("a text ", Words(20));
+        Assert.NotNull(pipeline.MeasurePrefixes(text, Style()));
+        return new WeakReference(text);
+    }
+
+    // A word and a space for every two segments.
+    private static string Words(int segments) => string.Concat(Enumerable.Repeat("ab ", segments / 2));
 
     private static TextPipeline Create() => new(new Fonts(), new FontAdvanceShaper());
 

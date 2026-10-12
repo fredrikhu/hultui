@@ -47,6 +47,13 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
     public void SetValue(ElementId id, string value) => _router.SetValue(id, value);
     public void RequestFocus(ElementId id) => _router.RequestFocus(id);
 
+    /// <summary>A client asked for the root. If the window has not built a tree for a listening
+    /// client yet (one has just attached), the loop wakes and its next frame builds it.</summary>
+    public void RootRequested()
+    {
+        if (!_window.AccessibilityTreeBuilt) _router.ActiveChanged();
+    }
+
     // ──── Reads — safe to run on the calling thread since we only touch
     //      simple CLR properties that don't mutate collections.
 

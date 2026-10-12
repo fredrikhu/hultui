@@ -38,6 +38,44 @@ public sealed class SdlWindowingPlatformTests : IDisposable
 
         Assert.Equal(0, allocated);
     }
+
+    /// <summary>
+    /// An idle <c>Application.Run</c> waits with no timeout when it owns no deadline (plan 17,
+    /// runtime-idle-wakeups): SDL's wait must then end on a wake from another thread, on every
+    /// platform this suite runs on (Windows, and Linux under WSL). On the dummy driver SDL waits by
+    /// polling its queue, which a wake fills.
+    /// </summary>
+    [Fact]
+    public void AWaitWithNoTimeout_EndsOnAWakeFromAnotherThread()
+    {
+        using var platform = new SdlWindowingPlatform();
+        platform.PumpEvents(null);
+        var waker = new Thread(() =>
+        {
+            Thread.Sleep(200);
+            platform.Wake();
+        });
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        waker.Start();
+
+        platform.WaitForEvents(Timeout.Infinite);
+
+        waker.Join();
+        Assert.InRange(waited.ElapsedMilliseconds, 150, 5000);
+    }
+
+    /// <summary>A wait of 0 polls: the loop's deadline already due.</summary>
+    [Fact]
+    public void AWaitOfZero_ReturnsAtOnce()
+    {
+        using var platform = new SdlWindowingPlatform();
+        platform.PumpEvents(null);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+
+        platform.WaitForEvents(0);
+
+        Assert.True(waited.ElapsedMilliseconds < 100, $"a wait of 0 took {waited.ElapsedMilliseconds} ms");
+    }
 }
 
 /// <summary>SDL is process-global: the classes that start it on the dummy driver run one at a

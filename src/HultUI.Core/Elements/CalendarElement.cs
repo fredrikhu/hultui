@@ -376,8 +376,13 @@ public class CalendarElement : Element
 
     protected internal override void ApplyTheme(Theme theme)
     {
-        _theme = theme.Get<CalendarTheme>();
-        MarkLayoutDirty();
+        var t = theme.Get<CalendarTheme>();
+        // Laid out again only when a size it measures with changed; colours repaint.
+        bool resized = t.Padding != _theme.Padding || t.CellWidth != _theme.CellWidth
+            || t.CellHeight != _theme.CellHeight || t.HeaderHeight != _theme.HeaderHeight
+            || t.WeekdayHeight != _theme.WeekdayHeight;
+        _theme = t;
+        if (resized) MarkLayoutDirty();
     }
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)

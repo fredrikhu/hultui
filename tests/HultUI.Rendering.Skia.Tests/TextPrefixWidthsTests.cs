@@ -63,4 +63,67 @@ public class TextPrefixWidthsTests
             }
         Assert.True(compared > 2_000, $"only {compared} prefixes");
     }
+
+    /// <summary>
+    /// Tables built one after another in one pipeline are built in the same scratch lists: what
+    /// one table leaves there must never reach the next. Random strings, long after short and short
+    /// after long, in one face and in several (Han and kana fall back to faces of their own), and
+    /// strings with what sends text to the BiDi path in them — a surrogate pair, a joiner, a mark,
+    /// Hebrew, Arabic — which get no table. Every prefix of every table measures what its own line
+    /// does, to the bit.
+    /// </summary>
+    [Fact]
+    public void TablesBuiltOneAfterAnother_EachMeasureWhatTheirPrefixesDo()
+    {
+        var fonts = new SkiaFontCollection();
+        var shaper = new SkiaTextShaper();
+        var tables = new TextPipeline(fonts, shaper);
+        var reference = new TextPipeline(fonts, shaper);
+        string[] plain =
+        [
+            "a", "word", "office", "fi", "AVAWAY", "To.", " ", "  ", "1234", "3.14", "v2.0", "-",
+            C(0x2014), C(0x2192), C(0x00AD), C(0x00E9), "東京", "に", "漢字", "한국어", "Ελληνικά", "кот",
+        ];
+        string[] bidi =
+        [
+            C(0x1F600), C(0x1F44D) + C(0x1F3FD), C(0x1F468) + C(0x200D) + C(0x1F469), C(0x200D),
+            "e" + C(0x0301), C(0x05E9) + C(0x05DC) + C(0x05D5) + C(0x05DD), C(0x0645) + C(0x0631) + C(0x062D) + C(0x0628) + C(0x0627),
+        ];
+        var rng = new Random(17);
+        int compared = 0, withTables = 0, withoutTables = 0, withFallback = 0;
+        for (int i = 0; i < 600; i++)
+        {
+            var text = new System.Text.StringBuilder();
+            int pieces = i % 3 == 0 ? 1 + rng.Next(3) : 4 + rng.Next(i % 5 == 0 ? 60 : 16);
+            int bidiAt = rng.Next(6) == 0 ? rng.Next(pieces) : -1;
+            for (int p = 0; p < pieces; p++)
+                text.Append(p == bidiAt ? bidi[rng.Next(bidi.Length)] : plain[rng.Next(plain.Length)]);
+            string s = text.ToString();
+            var style = Styles[rng.Next(Styles.Length)];
+            var prefixes = tables.MeasurePrefixes(s, style);
+            if (s.Any(TextPipeline.MayNeedBidi))
+            {
+                Assert.Null(prefixes);
+                withoutTables++;
+                continue;
+            }
+            Assert.True(prefixes is not null, $"no table for \"{s}\"");
+            withTables++;
+            if (s.Any(c => c >= 0x3000)) withFallback++;
+            for (int n = 0; n <= s.Length; n++)
+            {
+                float expected = reference.Layout(s[..n], style, float.PositiveInfinity, maxLines: 1).Size.Width;
+                float actual = prefixes.Width(n);
+                Assert.True(BitConverter.SingleToInt32Bits(expected) == BitConverter.SingleToInt32Bits(actual),
+                    $"table {i}, \"{s[..n]}\" of \"{s}\" in {style.FontFamily} {style.FontSize} spaced "
+                    + $"{style.LetterSpacing}: laid out {expected}, from the table {actual}");
+                compared++;
+            }
+        }
+        Assert.True(withTables > 400 && withoutTables > 60 && withFallback > 200,
+            $"{withTables} tables, {withoutTables} BiDi strings, {withFallback} with fallback faces");
+        Assert.True(compared > 10_000, $"only {compared} prefixes");
+    }
+
+    private static string C(int codePoint) => char.ConvertFromUtf32(codePoint);
 }

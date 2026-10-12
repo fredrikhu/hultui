@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
+using HultUI.Core.Elements;
 
 namespace HultUI.Platform.Accessibility.Linux;
 
@@ -16,7 +17,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// rebuild. The D-Bus method handlers run on the bus receive thread and read
 /// that snapshot lock-free; <see cref="ApplyChanges"/> swaps it, and a focus move
 /// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
-/// focused state of its two objects in it, both on the UI thread. The
+/// focused state of its two objects in it, and a list's selection move
+/// (<see cref="ApplyPatchedProperties"/>) the selected state of its two items, all on the UI
+/// thread. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
@@ -132,6 +135,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         {
             _statusOn = on;
             AccessibilityClients.Report(on);
+            // On a thread-pool thread (AtSpiStatusReader): the window's loop, which reads
+            // IsActive in its frames, is waiting for a deadline or a wake, and turning on is
+            // what builds and publishes the whole tree.
+            _actionHost?.ActiveChanged();
         });
     }
 
@@ -226,25 +233,22 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             _focusedPath = null;
         }
 
-        // Cache-add is genuinely per-node: it populates the AT client's object
-        // cache (the first build's diff carries the whole tree) so navigation is
-        // instant and libatspi never treats a later-signalled node as transient
-        // and marks it defunct. AT-SPI's Cache interface adds one item at a time —
-        // unlike UIA, which the client pulls on demand — so every added node is
-        // cached. That work stays; only the redundant structural signals below go.
-        foreach (var added in diff.Added)
-        {
-            string childPath = PathOf(added.Node);
-            if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
-            _signals.EmitCacheAdd(this, acc);
-            DebugSignalsEmitted++;
-        }
+        // What a caching client (libatspi, which Orca runs on) does with these signals, seen live
+        // in WSL with a pyatspi client in Atspi.event_main (plan 17, round 3, step 15): a cache-add
+        // puts its object at its index in the parent's cached children, in place of whatever is
+        // there, and grows the list when the index is past its end; a children-changed:add takes
+        // the child out of the list and puts it back at the index it names; a children-changed:remove
+        // takes it out; a cache-remove disposes the object, which leaves its parent's list. So the
+        // order matters. The cache-adds came first and one children-changed:add per parent after
+        // them, and an object added anywhere but at the end took a sibling's place: [A, B, C] with
+        // X inserted after A read [A, X, C]; with X and Y, [A, X, Y]. Now the gone objects go
+        // first, then each added object is put in its place, then the cache-adds fill those places.
 
         // Gone objects only. One the new snapshot still has moved to another parent (a box
         // that gained a name takes its children): the diff removes it from the old parent and
-        // adds it under the new, and its cache-add above already told the client where it is.
-        // Removing it after that made libatspi dispose the object it had just been given — the
-        // client lost it, and saw it go defunct. Its old parent learns of the move below.
+        // adds it under the new, and its cache-add below tells the client where it is. Removing
+        // it made libatspi dispose an object it still holds — the client lost it, and saw it go
+        // defunct. Its old parent learns of the move from a children-changed:remove.
         foreach (var removed in diff.Removed)
         {
             string path = PathOf(removed.Node);
@@ -253,54 +257,66 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             DebugSignalsEmitted++;
         }
 
-        // children-changed is a structural re-query hint on a *parent*, not a
-        // per-child record: the per-node Cache.Add/RemoveAccessible signals above
-        // already carry the exact node set to the client's cache, so one nudge per
-        // affected parent is enough — the client re-reads that parent's children
-        // (served lock-free from the fresh snapshot; verified with a live pyatspi
-        // client, which even observes reorders with no signal at all). So we
-        // coalesce two ways:
-        //   • interior nodes (parent is itself in the diff) carry no information —
-        //     the client discovers them by walking their freshly added/removed
-        //     parent — so BoundaryAdded/Removed drops them; and
-        //   • the remaining boundary children under one surviving parent collapse
-        //     to a single signal on that parent (naming the first affected child).
-        // Together these turn a bulk insert/clear of N rows under one container
-        // from N children-changed signals into one. (Skipped on the first build:
-        // the client has no prior tree to diff, and the cache-add burst conveys
-        // the whole initial tree.)
+        // Interior nodes (a parent that is itself in the diff) carry no structural signal: a
+        // client learns of them from their parent's cache-add and child count. Skipped on the first
+        // build: the client has no tree yet, and the cache-adds convey the whole initial tree.
         if (!firstBuild)
         {
-            EmitAddedChildNudges(diff.BoundaryAdded());
             EmitRemovedChildNudges(diff.BoundaryRemoved());
+            EmitAddedChildNudges(diff.BoundaryAdded());
         }
 
-        // diff.Reordered (same children, new order) needs no signal: every
-        // Accessible/Cache query is served from the freshly rebuilt snapshot, so
-        // GetChildren / GetChildAtIndex already return the new order. Verified —
-        // a persistent pyatspi client observes each reorder with no reorder signal
-        // emitted at all. A high-level AT that caches child order and only
-        // refreshes on events (Orca) would want an object:children-changed here;
-        // add it when an Orca test shows it's needed and confirms the exact form.
+        // Cache-add is genuinely per-node: it populates the AT client's object cache (the first
+        // build's diff carries the whole tree) so navigation is instant and libatspi never treats a
+        // later-signalled node as transient and marks it defunct. AT-SPI's Cache interface adds one
+        // item at a time — unlike UIA, which the client pulls on demand — so every added node is
+        // cached. Each lands in the place its children-changed:add made, or one past the end.
+        foreach (var added in diff.Added)
+        {
+            string childPath = PathOf(added.Node);
+            if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
+            _signals.EmitCacheAdd(this, acc);
+            DebugSignalsEmitted++;
+        }
+
+        // diff.Reordered (same children, new order) sends nothing: a client that reads the
+        // children from the bus gets the new order, but a caching one keeps the old order until
+        // something else changes the list (seen live, plan 17 round 3 step 15; not approved as an
+        // added signal yet).
 
         if (!firstBuild)
             foreach (var change in diff.PropertyChanged)
                 if (EmitPropertyChange(change)) DebugSignalsEmitted++;
     }
 
-    // One children-changed:add per surviving parent. The boundary list has already
-    // dropped interior nodes; here we keep only the first added child under each
-    // distinct parent, since the signal is a re-query nudge and the per-node
-    // cache-adds already conveyed the full set.
+    // One children-changed:add per added child, in the order of its parent's children: each puts
+    // the child at its index in a caching client's list, before its cache-add (which would put it
+    // there in place of a sibling) comes. Except the run of added children that ends the parent's
+    // children: one signal, for its first, and the cache-adds of the rest each land one past the
+    // end, where the client grows the list. A bulk append stays one signal; a run inserted at the
+    // front or in the middle is one signal per child. The gone children have left the client's
+    // list already (above), so each index is the child's place among those there before it.
     private void EmitAddedChildNudges(List<AddedNode> boundary)
     {
-        var seenParents = new HashSet<string>();
-        foreach (var added in boundary)
+        if (boundary.Count == 0) return;
+        var added = new HashSet<ElementId>(boundary.Count);
+        foreach (var entry in boundary) added.Add(entry.Node.ElementId);
+        // Per parent: the index where the run of added children that ends its children starts.
+        Dictionary<ElementId, int>? runStarts = null;
+        foreach (var entry in boundary)
         {
-            if (added.Parent is null) continue;
-            string childPath = PathOf(added.Node);
+            if (entry.Parent is not { } parent) continue;
+            string childPath = PathOf(entry.Node);
             if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
-            if (!seenParents.Add(acc.ParentPath)) continue;
+            runStarts ??= [];
+            if (!runStarts.TryGetValue(parent.ElementId, out int runStart))
+            {
+                var siblings = parent.Children;
+                runStart = siblings.Count;
+                while (runStart > 0 && added.Contains(siblings[runStart - 1].ElementId)) runStart--;
+                runStarts[parent.ElementId] = runStart;
+            }
+            if (acc.IndexInParent > runStart) continue;
             _signals!.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
             DebugSignalsEmitted++;
         }
@@ -358,6 +374,33 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         _focusedPath = newPath;
     }
 
+    /// <summary>
+    /// Properties the window marked on the applied tree in place — a list's selection move: the
+    /// item that had the selection and the one that has it. Their objects in the published
+    /// snapshot take the new state and the bridge sends what a diff would have
+    /// (state-changed:selected), with no new snapshot. Anything else is applied as a diff.
+    /// </summary>
+    public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
+    {
+        if (!_registered || _signals is null) return;
+        var snapshot = _snapshot;
+        bool inPlace = _hasBuilt && patch.Added.Count == 0 && patch.Removed.Count == 0 && patch.Reordered.Count == 0;
+        foreach (var change in patch.PropertyChanged)
+            inPlace &= change.PropertyName == AccessibilityProperties.IsSelected
+                && snapshot.ByPath.ContainsKey(PathOf(change.Node));
+        if (!inPlace)
+        {
+            ApplyChanges(patch, root);
+            return;
+        }
+        foreach (var change in patch.PropertyChanged)
+        {
+            string path = PathOf(change.Node);
+            snapshot.ByPath[path].Selected = change.Node.IsSelected == true;
+            if (EmitPropertyChange(change, path)) DebugSignalsEmitted++;
+        }
+    }
+
     /// <summary>Sets an object's focused state in the published snapshot; true when it changed.</summary>
     private bool SetFocused(string path, bool focused)
     {
@@ -368,9 +411,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     // ───────────────────────────────────────────────────────────── helpers
 
-    private bool EmitPropertyChange(PropertyChange change)
+    private bool EmitPropertyChange(PropertyChange change) => EmitPropertyChange(change, PathOf(change.Node));
+
+    private bool EmitPropertyChange(PropertyChange change, string path)
     {
-        string path = PathOf(change.Node);
         switch (change.PropertyName)
         {
             case AccessibilityProperties.Name:
@@ -388,6 +432,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 // The value; a change of the bounds or steps alone is read from the Value interface.
                 if (change.Node.Range is not { } range || change.Previous?.Range?.Value == range.Value) return false;
                 _signals!.EmitValueChanged(path, range.Value);
+                return true;
+            case AccessibilityProperties.Role:
+                // A client caches the role from the cache-add: a group that became a dialog went on
+                // reading "panel" in Orca's cache (seen live in WSL). The application's own object
+                // keeps its role, whatever its element's.
+                if (path == AtSpiConstants.RootPath) return false;
+                _signals!.EmitRoleChange(path, AtSpiAccessible.RoleOf(change.Node));
                 return true;
             case AccessibilityProperties.IsPassword:
                 // A client caches the role from the cache-add, so a field masked or revealed

@@ -87,13 +87,21 @@ public sealed class TextLine
     // measured. Callers that cannot measure pass null and get a proportional
     // split of the run's width, which never moves a glyph but may sit a hair off
     // inside a cluster.
+    //
+    // Each method takes it in two forms. A TextPrefixMeasurer is handed the run's text and the
+    // prefix's length, and can measure the prefix where it stands; a Func<string, float> is
+    // handed the prefix as a string of its own, cut out for every boundary asked about.
 
     /// <summary>
     /// Visual x (line-relative) of the caret at line-relative logical
     /// <paramref name="offset"/>. At a boundary between two direction runs the
     /// caret is placed on the leading edge of the run that *contains* the offset.
     /// </summary>
-    public float CaretXAt(int offset, Func<string, float>? measurePrefix = null)
+    public float CaretXAt(int offset, Func<string, float>? measurePrefix = null) =>
+        CaretXAt(offset, Cutting(measurePrefix));
+
+    /// <inheritdoc cref="CaretXAt(int, Func{string, float})"/>
+    public float CaretXAt(int offset, TextPrefixMeasurer? measurePrefix)
     {
         if (Runs.Count == 0) return 0f;
 
@@ -112,9 +120,13 @@ public sealed class TextLine
 
     /// <summary>
     /// The line-relative logical offset whose caret sits nearest visual x
-    /// <paramref name="x"/> — the hit-test half of <see cref="CaretXAt"/>.
+    /// <paramref name="x"/> — the hit-test half of <see cref="CaretXAt(int, Func{string, float})"/>.
     /// </summary>
-    public int OffsetAtX(float x, Func<string, float>? measurePrefix = null)
+    public int OffsetAtX(float x, Func<string, float>? measurePrefix = null) =>
+        OffsetAtX(x, Cutting(measurePrefix));
+
+    /// <inheritdoc cref="OffsetAtX(float, Func{string, float})"/>
+    public int OffsetAtX(float x, TextPrefixMeasurer? measurePrefix)
     {
         if (Runs.Count == 0) return 0;
 
@@ -144,7 +156,11 @@ public sealed class TextLine
     /// crosses a direction boundary is visually discontiguous, so this returns one
     /// entry per contiguous piece (always exactly one for text with no RTL in it).
     /// </summary>
-    public IReadOnlyList<VisualRange> VisualRanges(int from, int to, Func<string, float>? measurePrefix = null)
+    public IReadOnlyList<VisualRange> VisualRanges(int from, int to, Func<string, float>? measurePrefix = null) =>
+        VisualRanges(from, to, Cutting(measurePrefix));
+
+    /// <inheritdoc cref="VisualRanges(int, int, Func{string, float})"/>
+    public IReadOnlyList<VisualRange> VisualRanges(int from, int to, TextPrefixMeasurer? measurePrefix)
     {
         var ranges = new List<VisualRange>();
         VisualRanges(from, to, ranges, measurePrefix);
@@ -156,7 +172,11 @@ public sealed class TextLine
     /// buffer, which it clears first. Paint paths call this per span per line, so
     /// they reuse one list instead of allocating one each time.
     /// </summary>
-    public void VisualRanges(int from, int to, List<VisualRange> into, Func<string, float>? measurePrefix = null)
+    public void VisualRanges(int from, int to, List<VisualRange> into, Func<string, float>? measurePrefix = null) =>
+        VisualRanges(from, to, into, Cutting(measurePrefix));
+
+    /// <inheritdoc cref="VisualRanges(int, int, List{VisualRange}, Func{string, float})"/>
+    public void VisualRanges(int from, int to, List<VisualRange> into, TextPrefixMeasurer? measurePrefix)
     {
         into.Clear();
         if (Runs.Count == 0 || to <= from) return;
@@ -208,7 +228,11 @@ public sealed class TextLine
     /// this does not).
     /// </returns>
     public bool TryMoveCaretVisually(int offset, bool right, out int result,
-        Func<string, float>? measurePrefix = null)
+        Func<string, float>? measurePrefix = null) =>
+        TryMoveCaretVisually(offset, right, out result, Cutting(measurePrefix));
+
+    /// <inheritdoc cref="TryMoveCaretVisually(int, bool, out int, Func{string, float})"/>
+    public bool TryMoveCaretVisually(int offset, bool right, out int result, TextPrefixMeasurer? measurePrefix)
     {
         result = offset;
         bool anyRtl = false;
@@ -243,8 +267,17 @@ public sealed class TextLine
         return found;
     }
 
+    // A measurer that cuts each prefix out and hands it to measure; null for null. Its own method,
+    // so the closure is made only when there is something to close over (C# makes a captured
+    // parameter's closure on entry to the method that declares the lambda).
+    private static TextPrefixMeasurer? Cutting(Func<string, float>? measure) =>
+        measure is null ? null : CuttingFor(measure);
+
+    private static TextPrefixMeasurer CuttingFor(Func<string, float> measure) =>
+        (text, length) => measure(text[..length]);
+
     // Line-relative x of the boundary before the run-relative logical index rel.
-    private static float RunX(ShapedRun run, int rel, Func<string, float>? measurePrefix)
+    private static float RunX(ShapedRun run, int rel, TextPrefixMeasurer? measurePrefix)
     {
         int len = run.Text.Length;
         rel = Math.Clamp(rel, 0, len);
@@ -267,16 +300,16 @@ public sealed class TextLine
             : run.OffsetX + run.Width - Prefix(run, rel, measurePrefix);
     }
 
-    private static float Prefix(ShapedRun run, int rel, Func<string, float>? measurePrefix)
+    private static float Prefix(ShapedRun run, int rel, TextPrefixMeasurer? measurePrefix)
         => measurePrefix is not null
-            ? measurePrefix(run.Text[..rel])
+            ? measurePrefix(run.Text, rel)
             : run.Width * rel / run.Text.Length;
 
     // RunX is monotonic in rel — increasing for an LTR run, decreasing for an RTL
     // one — so the nearest boundary is a binary search, not a scan. That matters
     // for a long line hit-tested on every pointer move during a drag-select.
     private static (int Rel, float Distance) NearestInRun(
-        ShapedRun run, float x, Func<string, float>? measurePrefix)
+        ShapedRun run, float x, TextPrefixMeasurer? measurePrefix)
     {
         int len = run.Text.Length;
         int lo = 0, hi = len;
@@ -297,6 +330,16 @@ public sealed class TextLine
 
 /// <summary>A visual x-range on one line, in line-relative coordinates.</summary>
 public readonly record struct VisualRange(float X0, float X1);
+
+/// <summary>
+/// The width of <c>text[..length]</c> laid out on a line of its own, in the style of the line
+/// whose run <paramref name="text"/> is: what <see cref="TextLine"/>'s caret, hit-test and
+/// selection mapping asks for inside a run whose shaping merged clusters (ligatures, marks,
+/// emoji), where glyphs no longer map one to one onto characters. Handed the run's whole text and
+/// the prefix's length, it can measure the prefix where it stands, without cutting it out as a
+/// string: <see cref="TextPipeline.MeasureWidth"/> takes a span.
+/// </summary>
+public delegate float TextPrefixMeasurer(string text, int length);
 
 /// <summary>
 /// A run of shaped text — a contiguous segment rendered with a single font.

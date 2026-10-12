@@ -27,10 +27,17 @@ namespace HultUI.Platform.SDL3;
 /// to the GPU. The residual cost against the GL path is about 0.15 to 0.25 ms a frame, which
 /// shows only on operations small enough for it to matter — <c>select row</c> 0.43 against
 /// 0.59 ms, <c>clear</c> 0.27 against 0.41 — and is invisible on anything layout-bound
-/// (<c>create 10,000</c>: 316.6 against 319.8). That is consistent with the two things this
-/// backend does that GL does not: one extra command-buffer submit per frame, and a render
-/// target Skia makes it rebuild every frame because there is no way to tell Skia an image's
-/// layout. Both are the same binding limitation as the semaphore, and neither is a stall.</para>
+/// (<c>create 10,000</c>: 316.6 against 319.8). That is consistent with the things this
+/// backend does that GL does not: command-buffer submits of its own around Skia's, because
+/// there is no way to tell Skia an image's layout. The same binding limitation as the
+/// semaphore, and not a stall.</para>
+///
+/// <para><b>Layouts at both ends of a frame.</b> The present transition moves the image to
+/// PRESENT_SRC_KHR behind Skia's back, and when the renderer asks, a barrier moves the acquired
+/// image back to COLOR_ATTACHMENT_OPTIMAL (<see cref="TransitionAcquiredImage"/>), the layout Skia
+/// left it in. That is what lets the renderer keep one render target per image for the
+/// swapchain's life rather than wrap every frame (2,048 bytes, an image view and a framebuffer a
+/// frame): see <see cref="SetSwapchainReleasing"/>.</para>
 /// </summary>
 internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDisposable
 {
@@ -71,27 +78,32 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         };
 
     /// <summary>
-    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> allocates the swapchain larger than the window and
-    /// presents it un-scaled, through <c>VK_KHR_swapchain_maintenance1</c>. <b>Off by default,
-    /// and the reason is video.</b>
+    /// Whether the swapchain is allocated larger than the window and presented un-scaled, through
+    /// <c>VK_KHR_swapchain_maintenance1</c>. <b>By default only while the window is being sized by
+    /// a drag</b> (Windows); <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> always, <c>=0</c> never.
     ///
     /// <para>It does what it was built for. Rebuilding three half-float images for every size a
-    /// dragged window passes through is what a resize costs — 122 rebuilds and roughly 5 GB of
-    /// allocation churn across one drag — and over-allocating to a 256-pixel bucket takes that
-    /// to 10 rebuilds and resize CPU from 801 to 466 ms/s. It also removes the resize stretch
-    /// <i>structurally</i> rather than by racing: with ONE_TO_ONE the compositor has nothing to
-    /// scale, and even IMMEDIATE, which stretched 18 frames in 150 with an exact-size swapchain,
-    /// stretched 0 in 150 with this on.</para>
+    /// dragged window passes through is what a resize costs — 32 of a 37 ms step in Aperture and
+    /// Reel (GL apps take 4.6), 122 rebuilds and roughly 5 GB of allocation churn across one drag
+    /// — and over-allocating to a 256-pixel bucket rebuilds only when a bucket is crossed. It also
+    /// removes the resize stretch <i>structurally</i> rather than by racing: with ONE_TO_ONE the
+    /// compositor has nothing to scale, and even IMMEDIATE, which stretched 18 frames in 150 with
+    /// an exact-size swapchain, stretched 0 in 150 with this on.</para>
     ///
     /// <para><b>And it costs 4K HDR playback about 70% more CPU: 91–95 ms/s against 48–63</b>,
     /// measured three times against GL as a drift reference. A swapchain whose extent matches
     /// the window can be handed to the compositor directly; one that does not appears to lose
     /// that path and be copied instead. Video runs for hours and a drag lasts a second, so the
-    /// default is the one that favours video — the same reasoning that chose MAILBOX over FIFO,
-    /// pointing the other way.</para>
+    /// swapchain is over-allocated only between the first size change inside Win32's modal
+    /// size/move loop and the end of the loop, which rebuilds it at the window's exact size
+    /// (<see cref="SizeMoveStarted"/>, <see cref="SizeMoveEnded"/>). A title-bar move runs the same
+    /// loop and over-allocates nothing; snap and maximize do not run it and rebuild exact.</para>
     ///
-    /// <para>Turning this on only <i>during</i> a drag would get both, and is the obvious next
-    /// step; it needs a settled-size signal the renderer does not have today.</para>
+    /// <para><b>A swapchain larger than its window is SUBOPTIMAL</b>, and NVIDIA (610) says so on
+    /// every present. Answered with a rebuild, as an exact swapchain's SUBOPTIMAL is, this built
+    /// the over-allocated swapchain again every frame: 57 ms a step of a drag against 37 without
+    /// it. A one-to-one swapchain the window still fits now keeps going
+    /// (<see cref="VulkanSwapchainChoice.KeepSuboptimal"/>).</para>
     /// </summary>
     private static readonly bool? FixedExtentOverride =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_FIXED_EXTENT") switch
@@ -107,7 +119,42 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     /// <summary>Whether the device got <c>swapchain_maintenance1</c> and the surface really
     /// offers ONE_TO_ONE with MIN gravity. Only then may the swapchain outsize the window.</summary>
-    private bool _fixedExtentAvailable;
+    private bool _oneToOneAvailable;
+
+    /// <summary>Whether the swapchain in use was built with ONE_TO_ONE scaling, and so may be
+    /// larger than the window. Only such a swapchain may be kept by a resize or a SUBOPTIMAL.</summary>
+    private bool _builtOneToOne;
+
+    /// <summary>Win32's modal size/move loop, as the window reports it (Windows only; always
+    /// <see cref="VulkanSwapchainChoice.SizeMoveLoop.None"/> elsewhere).</summary>
+    private VulkanSwapchainChoice.SizeMoveLoop _sizeMoveLoop;
+
+    /// <summary>Whether a swapchain built now is over-allocated and shown one-to-one; see
+    /// <see cref="VulkanSwapchainChoice.OverAllocate"/>.</summary>
+    private bool OverAllocating =>
+        VulkanSwapchainChoice.OverAllocate(_oneToOneAvailable, FixedExtentOverride, _sizeMoveLoop);
+
+    /// <summary>
+    /// Win32's modal size/move loop started (<c>WM_ENTERSIZEMOVE</c>). Nothing is rebuilt here: the
+    /// first size change inside the loop builds the over-allocated swapchain, so a move, which
+    /// changes no size, costs nothing.
+    /// </summary>
+    public void SizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop) => _sizeMoveLoop = loop;
+
+    /// <summary>
+    /// The loop ended (<c>WM_EXITSIZEMOVE</c>). A swapchain the drag left over-allocated is rebuilt
+    /// at the window's exact size, so the window presents on the compositor's direct path again
+    /// (see <see cref="FixedExtentOverride"/>); the renderer's targets over its images go first, as
+    /// for any rebuild. Returns whether it rebuilt, and so whether a frame is owed.
+    /// </summary>
+    public bool SizeMoveEnded()
+    {
+        _sizeMoveLoop = VulkanSwapchainChoice.SizeMoveLoop.None;
+        if (_disposed || !VulkanSwapchainChoice.RebuildWhenSizeMoveEnds(!_swapchain.IsNull, _builtOneToOne, OverAllocating))
+            return false;
+        Rebuild(_widthPx, _heightPx, force: true);
+        return true;
+    }
 
     /// <summary>The extent the swapchain images were actually allocated at, which is at least
     /// the window's and may be larger. The window size is <see cref="_widthPx"/>.</summary>
@@ -170,7 +217,21 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// frame. Kept rather than allocated and freed per frame: freeing a command buffer that
     /// may still be executing is undefined, and without the queue drain it often is.</summary>
     private VkCommandBuffer[] _presentCmd = [];
+
+    /// <summary>The acquire barrier's command buffer for each image (<see cref="RecordAcquireBarrier"/>),
+    /// kept for the same reason as <see cref="_presentCmd"/>.</summary>
+    private VkCommandBuffer[] _acquireCmd = [];
+
+    /// <summary>Called before the swapchain's images are destroyed; see
+    /// <see cref="SetSwapchainReleasing"/>.</summary>
+    private Action? _swapchainReleasing;
+
     private VkFormat _format = VkFormat.B8G8R8A8Unorm;
+
+    /// <summary>The wide-colour wish <see cref="_format"/> was chosen for, so a resize that keeps the
+    /// swapchain need not ask the surface again; null after a display change (see
+    /// <see cref="VulkanSwapchainChoice.FormatStillChosen"/>).</summary>
+    private bool? _formatChosenForWide;
     private VkColorSpaceKHR _colorSpace = VkColorSpaceKHR.SrgbNonLinear;
     private VkPresentModeKHR _presentMode = VkPresentModeKHR.Fifo;
     private VkCommandPool _pool;
@@ -385,6 +446,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         DisplayIsHdr = isHdr;
         SdrWhiteScale = sdrWhiteScale;
+        // Another display may list other formats: the next resize that keeps the swapchain asks.
+        _formatChosenForWide = null;
 
         // Against what the choice would actually produce, not against what was wanted.
         //
@@ -489,9 +552,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             HasDeviceExtension("VK_KHR_swapchain_maintenance1") ? "VK_KHR_swapchain_maintenance1"
             : HasDeviceExtension("VK_EXT_swapchain_maintenance1") ? "VK_EXT_swapchain_maintenance1"
             : null;
-        // Opt-in, not opt-out: see FixedExtentOverride for why the default favours video.
+        // On Windows unless HULTUI_VULKAN_FIXED_EXTENT=0, for the drag (see FixedExtentOverride);
+        // elsewhere only when =1 asks, since nothing else there over-allocates. Enabled and not
+        // chained into a swapchain, it changes nothing.
         bool wantMaintenance = _surfaceMaintenanceEnabled && maintenanceExtension is not null
-            && FixedExtentOverride == true;
+            && (FixedExtentOverride ?? OperatingSystem.IsWindows())
+            && OneToOnePresentMode();
         if (wantMaintenance) wanted.Add(maintenanceExtension!);
         EnabledDeviceExtensions = [.. wanted];
 
@@ -520,7 +586,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         // Asked once, after the device: the answer cannot change for this surface, and the
         // swapchain build needs it every time.
-        _fixedExtentAvailable = wantMaintenance && SurfaceOffersOneToOne();
+        _oneToOneAvailable = wantMaintenance && SurfaceOffersOneToOne();
 
         // Skia reads this to build its caps. Queried after the device exists and kept in
         // unmanaged memory because Skia holds the pointer rather than copying.
@@ -593,6 +659,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!_swapchain.IsNull) _vk.DestroySwapchain(_device, _swapchain, 0);
             _swapchain = VkSwapchainKHR.Null;
             _images = [];
+            _builtOneToOne = false;
             if (widthPx > 0 && heightPx > 0)
             {
                 _widthPx = widthPx;
@@ -610,7 +677,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // reallocating three half-float images for every size it passes through. Rounding up
         // costs at most one bucket in each dimension — about 12 MB at this size — and buys
         // roughly 5 GB of allocation churn back over a drag.
-        if (_fixedExtentAvailable)
+        bool oneToOne = OverAllocating;
+        if (oneToOne)
         {
             uint bucketW = RoundUpToBucket(extent.width);
             uint bucketH = RoundUpToBucket(extent.height);
@@ -637,6 +705,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         var replacedPresentMode = _presentMode;
         _format = ChooseFormat(out var colorSpace);
         _colorSpace = colorSpace;
+        _formatChosenForWide = WantsWideColor;
 
         // A surface that cannot offer these is one this renderer cannot draw on, and saying
         // so here beats a null surface three call frames later.
@@ -679,7 +748,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         var info = new VkSwapchainCreateInfoKHR
         {
-            pNext = _fixedExtentAvailable ? &scalingInfo : null,
+            pNext = oneToOne ? &scalingInfo : null,
             surface = _surface,
             minImageCount = imageCount,
             imageFormat = _format,
@@ -718,10 +787,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _heightPx = windowHeight;
         _allocWidthPx = (int)extent.width;
         _allocHeightPx = (int)extent.height;
+        _builtOneToOne = oneToOne;
         StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length} " +
             $"{_format}/{_colorSpace}" +
-            (_allocWidthPx != _widthPx || _allocHeightPx != _heightPx
-                ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : ""));
+            (oneToOne ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : ""));
         ResetCapture();
     }
 
@@ -737,6 +806,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         int count = _images.Length;
         _renderFinished = new VkSemaphore[count];
         _presentCmd = new VkCommandBuffer[count];
+        _acquireCmd = new VkCommandBuffer[count];
 
         var semaphoreInfo = new VkSemaphoreCreateInfo();
         var allocate = new VkCommandBufferAllocateInfo
@@ -755,6 +825,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             VkCommandBuffer cmd;
             Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
             _presentCmd[i] = cmd;
+            Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
+            _acquireCmd[i] = cmd;
         }
     }
 
@@ -770,7 +842,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// a full round of its own images; each of those presents was acquired behind a fence wait,
     /// which is as late as the engine could still be using anything older.
     /// <c>swapchain_maintenance1</c>'s present fences would make that exact rather than
-    /// conservative, but the extension is only enabled for the fixed-extent path.</para>
+    /// conservative, but the extension is not there everywhere, and only its scaling is used.</para>
     /// </summary>
     private void RetirePerImageObjects()
     {
@@ -807,6 +879,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!cmd.IsNull) _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
         }
         _presentCmd = [];
+        for (int i = 0; i < _acquireCmd.Length; i++)
+        {
+            var cmd = _acquireCmd[i];
+            if (!cmd.IsNull) _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
+        }
+        _acquireCmd = [];
     }
 
     /// <summary>Everything per-image, retired or current, for a host being disposed after its
@@ -928,6 +1006,17 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         return oneToOne && gravity;
     }
 
+    /// <summary>Whether the present mode this surface will get may show a swapchain one-to-one
+    /// (<see cref="VulkanSwapchainChoice.PresentModeAllowsOneToOne"/>). Under any other mode the
+    /// extension is not even enabled, so the swapchain is exactly what it was before it existed.</summary>
+    private bool OneToOnePresentMode()
+    {
+        var mode = ChoosePresentMode(trace: false);
+        if (VulkanSwapchainChoice.PresentModeAllowsOneToOne(mode)) return true;
+        StartupTrace.Mark($"vulkan present scaling: not under {mode} — rebuilding per resize");
+        return false;
+    }
+
     /// <summary>The largest extent this surface will present un-scaled. A swapchain may not be
     /// over-allocated past it, however much slack would be convenient.</summary>
     private uint _maxScaledWidth;
@@ -1004,7 +1093,70 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         _acquiredIndex = index;
         _haveAcquired = true;
+        _acquiredTransitioned = false;
         return Current();
+    }
+
+    /// <summary>Whether <see cref="TransitionAcquiredImage"/> has run for the image acquired now.</summary>
+    private bool _acquiredTransitioned;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>The present transition moved the image to PRESENT_SRC_KHR behind Skia's back, and a
+    /// render target kept over it believes COLOR_ATTACHMENT_OPTIMAL, where Skia left it. A target
+    /// kept without this once drew three frames and then black for ever (2026-09-25); on NVIDIA
+    /// 610 every frame now comes out right without it, and only the validation layer says what
+    /// is wrong (<c>VUID-vkCmdDraw-None-09600</c>) — undefined behaviour either way, which another
+    /// driver need not forgive.</para>
+    ///
+    /// <para>From UNDEFINED, which is true of an image never presented and of one that was, and
+    /// discards the contents — free, since every frame clears and overwrites the whole image. No
+    /// semaphore: the acquire's fence has been waited, so the presentation engine is done with the
+    /// image. A submit of its own, because SkiaSharp offers nothing to record into. Once per
+    /// acquire: asked again for the same image it does nothing.</para>
+    /// </remarks>
+    public bool TransitionAcquiredImage()
+    {
+        if (!_haveAcquired || _swapchain.IsNull) return false;
+        if (_acquiredTransitioned) return true;
+        _acquiredTransitioned = true;
+        RecordAcquireBarrier(_acquiredIndex);
+        return true;
+    }
+
+    private void RecordAcquireBarrier(uint imageIndex)
+    {
+        var cmd = _acquireCmd[imageIndex];
+        var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
+        Check(_vk.BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+
+        var barrier = new VkImageMemoryBarrier
+        {
+            sType = VkStructureType.ImageMemoryBarrier,
+            srcAccessMask = VkAccessFlags.None,
+            dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite,
+            oldLayout = VkImageLayout.Undefined,
+            newLayout = VkImageLayout.ColorAttachmentOptimal,
+            srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            image = _images[imageIndex],
+            subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
+        };
+        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
+            VkPipelineStageFlags.ColorAttachmentOutput, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
+
+        Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
+        var submit = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &cmd };
+        Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
+    }
+
+    /// <inheritdoc />
+    /// <remarks>This host does both: <see cref="TransitionAcquiredImage"/>, and the call at the top
+    /// of every rebuild and of <see cref="Dispose"/>.</remarks>
+    public bool SetSwapchainReleasing(Action? beforeImagesGo)
+    {
+        _swapchainReleasing = beforeImagesGo;
+        return true;
     }
 
     /// <summary>
@@ -1035,8 +1187,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private VulkanFrameTarget Current() => new(
         _images[_acquiredIndex].Handle,
         (uint)_format,
-        // Undefined every frame: the contents are about to be overwritten, and claiming the
-        // present layout would have Skia skip a transition it still needs to make.
+        // Undefined: the contents are about to be overwritten, and claiming the present layout
+        // would have Skia skip a transition it still needs to make. A renderer that keeps a
+        // render target over the image asks for TransitionAcquiredImage instead.
         Layout: 0,
         _widthPx, _heightPx, (int)_acquiredIndex, _usage, (uint)_colorSpace);
 
@@ -1081,7 +1234,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _haveAcquired = false;
         if (result is VkResult.Success or VkResult.SuboptimalKHR) CountPresentForRetired();
 
-        if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
+        // SUBOPTIMAL is what a swapchain larger than its window is, so one built for that and
+        // still wanted keeps going while the window fits; see FixedExtentOverride.
+        if (result is VkResult.ErrorOutOfDateKHR
+            || (result is VkResult.SuboptimalKHR && !VulkanSwapchainChoice.KeepSuboptimal(_builtOneToOne,
+                OverAllocating, _widthPx, _heightPx, _allocWidthPx, _allocHeightPx)))
             Rebuild(_widthPx, _heightPx, force: true);
 
         // A source that went away gives its image back here, where no frame is recording.
@@ -1141,8 +1298,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// are already big enough for the new window size, nothing is reallocated: the window size is
     /// simply recorded, and the next frame draws into the same images and presents a smaller
     /// top-left region of them. A drag that only shrinks the window never rebuilds at all, and
-    /// one that grows rebuilds when it crosses a bucket. Only with
-    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c>: by default every new size rebuilds.</para>
+    /// one that grows rebuilds when it crosses a bucket. Only while the swapchain is built
+    /// one-to-one and still wanted so — during a drag, or always with
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c>: otherwise every new size rebuilds.</para>
     ///
     /// <para>No device wait either, because nothing is being destroyed — that wait was there to
     /// make it safe to throw the old images away.</para>
@@ -1159,23 +1317,36 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         if (_disposed) return;
 
-        // _fixedExtentAvailable is not optional here. Without ONE_TO_ONE the presented extent
-        // must equal the window's, so skipping a rebuild because the window merely got SMALLER
-        // would leave an oversized swapchain being scaled — the artefact, reintroduced. Leaving
-        // this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it kept
-        // the skipping and lost only the scaling that justifies it.
-        if (VulkanSwapchainChoice.CanKeepSwapchain(force, _fixedExtentAvailable, !_swapchain.IsNull,
+        // A swapchain built one-to-one is not optional here. Without ONE_TO_ONE the presented
+        // extent must equal the window's, so skipping a rebuild because the window merely got
+        // SMALLER would leave an oversized swapchain being scaled — the artefact, reintroduced.
+        // Leaving this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it
+        // kept the skipping and lost only the scaling that justifies it.
+        if (VulkanSwapchainChoice.CanKeepSwapchain(force, _builtOneToOne && OverAllocating, !_swapchain.IsNull,
                 widthPx, heightPx, _allocWidthPx, _allocHeightPx)
-            && ChooseFormat(out _, trace: false) == _format)
+            && FormatUnchanged())
         {
             _widthPx = widthPx;
             _heightPx = heightPx;
             return;
         }
 
+        // Every way the images go passes here (or through Dispose): the renderer's render
+        // targets over them go first.
+        _swapchainReleasing?.Invoke();
         Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);
+    }
+
+    /// <summary>Whether the format would be chosen again, asking the surface only when the answer
+    /// it gave last may no longer hold (<see cref="VulkanSwapchainChoice.FormatStillChosen"/>).</summary>
+    private bool FormatUnchanged()
+    {
+        if (VulkanSwapchainChoice.FormatStillChosen(_formatChosenForWide, WantsWideColor)) return true;
+        if (ChooseFormat(out _, trace: false) != _format) return false;
+        _formatChosenForWide = WantsWideColor;
+        return true;
     }
 
     /// <summary>
@@ -1200,6 +1371,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public void Dispose()
     {
         if (_disposed) return;
+        // A renderer still holding targets over the images lets them go first. The window
+        // disposes its surface before this host, which unsubscribes, so this is a backstop.
+        _swapchainReleasing?.Invoke();
+        _swapchainReleasing = null;
         _disposed = true;
 
         // The pointer checks matter only after an Init that threw inside LoadDevice; everything

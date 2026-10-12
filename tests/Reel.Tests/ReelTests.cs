@@ -185,6 +185,160 @@ public class ReelTests : IDisposable
         Assert.Equal(TimeSpan.Zero, app.Player!.Position);
     }
 
+    // ── While it plays ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Plays under the application's own loop (<see cref="HeadlessSession.RunLoop"/>) for
+    /// <paramref name="seconds"/> of virtual time with nothing touched: the backend posts its
+    /// position every 100 ms, as mpv does, with the frames that fall due. <paramref name="eachPass"/>
+    /// runs once per pass of the loop.
+    /// </summary>
+    private static void PlayQuietly(HeadlessSession session, FakeMediaBackend backend, double seconds,
+        Action? eachPass = null)
+    {
+        long end = session.Time.GetTimestamp() + TimeSpan.FromSeconds(seconds).Ticks;
+        session.RunLoop(() =>
+            {
+                eachPass?.Invoke();
+                return session.Time.GetTimestamp() >= end;
+            },
+            eventEvery: TimeSpan.FromMilliseconds(100),
+            onEvent: () => HultUI.Application.InvokeOnMainThread(() => backend.Advance(TimeSpan.FromMilliseconds(100))),
+            limit: TimeSpan.FromSeconds(seconds + 5));
+    }
+
+    /// <summary>
+    /// The resume point is written every fifteen seconds of playing, so a crash or a power cut
+    /// costs seconds rather than the evening. It was written from the app's build, which during
+    /// quiet playback hardly runs (the transport bar is a component of its own): from Reel's
+    /// first version until 2026-10-11 a film that simply played was saved only when it was
+    /// closed, changed or finished.
+    /// </summary>
+    [Fact]
+    public void WhilePlaying_TheResumePointIsWrittenEveryFifteenSeconds_WithoutRebuildingTheApp()
+    {
+        var path = File_("film.mkv");
+        var settings = new ReelSettings(Path.Combine(_folder, "settings.json"));
+        settings.Remember(path, TimeSpan.FromMinutes(12), TimeSpan.FromMinutes(24));
+
+        var (session, app, backend) = Host(settings);
+        using var _s = session;
+        app.Open(path);
+        session.PumpFrames(4);
+        PlayQuietly(session, backend, 4);                 // the bar has gone
+        int builds = app.Builds;
+
+        var saves = new List<(double At, double Position)>();
+        double? last = settings.Data.Resume.Single().Position;
+        long start = session.Time.GetTimestamp();
+        PlayQuietly(session, backend, 61, () =>
+        {
+            double now = settings.Data.Resume.Single().Position;
+            if (now == last) return;
+            last = now;
+            saves.Add((session.Time.GetElapsedTime(start).TotalSeconds, now));
+        });
+
+        // 4 s into the film when the minute began: saves at 15, 30, 45 and 60 s of playing.
+        Assert.Equal(4, saves.Count);
+        for (int i = 1; i < saves.Count; i++)
+        {
+            Assert.InRange(saves[i].At - saves[i - 1].At, 15.0, 15.2);
+            Assert.InRange(saves[i].Position - saves[i - 1].Position, 15.0, 15.2);
+        }
+        Assert.InRange(settings.ResumeFor(path)!.Value.TotalSeconds, 12 * 60 + 59, 12 * 60 + 61);
+        Assert.Equal(builds, app.Builds);
+    }
+
+    /// <summary>
+    /// mpv loads a file after it opens: the length, the tracks and the chapter marks arrive a
+    /// moment later, with nothing else happening. Everything that waits for them happens then —
+    /// the resume seek, the remembered audio language, the marks on the scrubber.
+    /// </summary>
+    [Fact]
+    public void WhatWaitsForTheLoadHappensWhenTheLoadComes()
+    {
+        var path = File_("film.mkv");
+        var settings = new ReelSettings(Path.Combine(_folder, "settings.json"));
+        settings.Remember(path, TimeSpan.FromMinutes(12), TimeSpan.FromMinutes(24));
+        settings.Data.PreferredAudioLanguage = "eng";
+
+        var (session, app, backend) = Host(settings);
+        using var _s = session;
+        backend.HoldOpening = true;
+        backend.AudioTracks.Add(new MediaTrack(1, "Japanese", "jpn"));
+        backend.AudioTracks.Add(new MediaTrack(2, "English", "eng"));
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(path);
+        session.PumpFrames(4);
+        Assert.Equal(PlaybackState.Opening, app.Player!.State);
+        Assert.DoesNotContain(backend.Calls, c => c.StartsWith("Seek(", StringComparison.Ordinal));
+
+        backend.FinishOpening();
+        session.PumpFrames(2);
+
+        Assert.Equal(PlaybackState.Playing, app.Player.State);
+        Assert.Equal(TimeSpan.FromMinutes(12), app.Player.Position);
+        Assert.Equal(2, app.Player.SelectedAudioTrack);
+        Assert.Equal(3, app.VideoPlayer!.ChapterMarks.Count);
+    }
+
+    /// <summary>The end of a file is saved as finished (no resume point: it would reopen in its
+    /// closing credits) and the folder rolls on to the next one, with nobody pressing anything.</summary>
+    [Fact]
+    public void AtTheEndOfAFileItIsForgottenAndTheNextOnePlays()
+    {
+        var first = File_("Show - 01.mkv");
+        File_("Show - 02.mkv");
+        var settings = new ReelSettings(Path.Combine(_folder, "settings.json"));
+        settings.Remember(first, TimeSpan.FromMinutes(12), TimeSpan.FromMinutes(24));
+
+        var (session, app, backend) = Host(settings);
+        using var _s = session;
+        app.Open(first);
+        session.PumpFrames(4);
+
+        backend.Advance(TimeSpan.FromMinutes(30));         // past the end
+        session.PumpFrames(4);
+
+        Assert.EndsWith("Show - 02.mkv", app.CurrentFile);
+        Assert.Null(settings.ResumeFor(first));
+        Assert.True(app.Player!.IsPlaying);
+        Assert.Contains(backend.Calls, c => c.StartsWith("Open(", StringComparison.Ordinal) && c.Contains("Show - 02.mkv", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The volume and mute the overlay's keys set are what the next file opens with, and the
+    /// window remembers them on close. Setting them costs the app no rebuild: the player
+    /// rebuilds itself, and the app only notes the value.
+    /// </summary>
+    [Fact]
+    public void TheVolumeYouLeaveIsTheOneTheNextFileOpensWith()
+    {
+        var first = File_("Show - 01.mkv");
+        File_("Show - 02.mkv");
+
+        var (session, app, _) = Host();
+        using var _s = session;
+        app.Open(first);
+        session.PumpFrames(4);
+        int builds = app.Builds;
+
+        app.Player!.Volume = 0.4f;
+        app.Player.Muted = true;
+        session.PumpFrames(2);
+
+        Assert.Equal(0.4f, app.Settings.Data.Volume);
+        Assert.True(app.Settings.Data.Muted);
+        Assert.Equal(builds, app.Builds);
+
+        Assert.True(app.Step(1));
+        session.PumpFrames(2);
+        Assert.Equal(0.4f, app.Player!.Volume);
+        Assert.True(app.Player.Muted);
+    }
+
     // ── The chapters the file carries ────────────────────────────────────
 
     [Fact]
@@ -486,6 +640,41 @@ public class ReelTests : IDisposable
         session.Window.PressKey(KeyCode.Escape);
         session.PumpFrames(2);
         Assert.False(app.ChaptersOpen);
+    }
+
+    /// <summary>
+    /// The panel marks the chapter playing now and follows the playhead, rebuilding the app
+    /// only when the playhead crosses into another chapter. It read the position in the app's
+    /// build, so while it was open every position report (ten a second) rebuilt the whole app.
+    /// </summary>
+    [Fact]
+    public void TheChapterPanelFollowsThePlayhead_RebuildingOnlyWhenTheChapterChanges()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(first);
+        session.PumpFrames(4);
+        session.Window.PressKey(KeyCode.C);
+        session.PumpFrames(2);
+        Assert.NotNull(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Button, "Opening, playing now"));
+        int builds = app.Builds;
+
+        // Eighteen reports inside the first chapter.
+        for (int s = 30; s < 600; s += 32)
+        {
+            backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromSeconds(s)));
+            session.PumpFrame();
+        }
+        Assert.Equal(builds, app.Builds);
+
+        backend.Raise(new BackendEvent.PositionChanged(TimeSpan.FromMinutes(10.5)));
+        session.PumpFrame();
+        Assert.Equal(builds + 1, app.Builds);
+        Assert.NotNull(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Button, "Chapter 2, playing now"));
+        Assert.Null(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Button, "Opening, playing now"));
     }
 
     /// <summary>Clicking a row seeks there and puts the panel away.</summary>

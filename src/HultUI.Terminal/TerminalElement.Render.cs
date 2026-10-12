@@ -175,14 +175,11 @@ public sealed partial class TerminalElement
             StopResizeHold();
             _heldGrid = (columns, rows);
             _resizeHolding = true;
-            _resizeHold = Animate.Value(0f, 1f, static _ => { })
-                .Duration((float)WideReflowSettle.TotalSeconds)
-                .OnComplete(() =>
-                {
-                    _resizeHolding = false;
-                    FlushGrid();
-                })
-                .Start();
+            _resizeHold = Animate.After((float)WideReflowSettle.TotalSeconds, () =>
+            {
+                _resizeHolding = false;
+                FlushGrid();
+            });
             return;
         }
 
@@ -219,10 +216,7 @@ public sealed partial class TerminalElement
             if (!_syncHolding)
             {
                 _syncHolding = true;
-                _syncHold = Animate.Value(0f, 1f, static _ => { })
-                    .Duration((float)SyncHoldLimit.TotalSeconds)
-                    .OnComplete(OnSyncLimit)
-                    .Start();
+                _syncHold = Animate.After((float)SyncHoldLimit.TotalSeconds, OnSyncLimit);
             }
             return;
         }

@@ -40,6 +40,41 @@ internal interface IAtSpiStatus
 }
 
 /// <summary>
+/// Reads <c>org.a11y.Status</c> again each time it says it changed, one read at a time. A read is
+/// two D-Bus round trips on a thread-pool thread; a read queued for each change ran alongside the
+/// others and told its answer when it finished, so a burst of changes faster than a round trip
+/// (on, off, on) could end on an older answer than the last: the bridge off while Orca runs. Now
+/// a change that comes while a read is out makes the reader read again once it is done, so the
+/// answers are told in the order they were read, and the last read begins after the last change.
+/// </summary>
+internal sealed class AtSpiStatusReader(Func<bool> read, Action<bool> changed)
+{
+    // Changes since the running read began, and whether a read is running (1) or not (0).
+    private int _changes;
+    private int _reading;
+
+    /// <summary>The status changed: read it, unless a read is out, which then reads again.</summary>
+    public void Changed()
+    {
+        Interlocked.Increment(ref _changes);
+        if (Interlocked.CompareExchange(ref _reading, 1, 0) == 0)
+            ThreadPool.QueueUserWorkItem(static state => ((AtSpiStatusReader)state!).ReadUntilQuiet(), this);
+    }
+
+    private void ReadUntilQuiet()
+    {
+        do
+        {
+            Interlocked.Exchange(ref _changes, 0);
+            changed(read());
+            Volatile.Write(ref _reading, 0);
+            // A change that came during the read, and found it running, left its read to this one.
+        }
+        while (Volatile.Read(ref _changes) != 0 && Interlocked.CompareExchange(ref _reading, 1, 0) == 0);
+    }
+}
+
+/// <summary>
 /// Owns the two D-Bus connections the AT-SPI protocol needs — the session bus
 /// (used only to discover the a11y bus address) and the a11y bus itself — plus
 /// the outgoing traffic the bridge produces: the <c>Socket.Embed</c>
@@ -155,7 +190,8 @@ internal sealed class AtSpiBus : IAtSpiSignals, IAtSpiStatus, IDisposable
     }
 
     /// <summary>Calls <paramref name="changed"/> with the status, on a thread-pool thread,
-    /// whenever <c>org.a11y.Status</c>'s properties change.</summary>
+    /// whenever <c>org.a11y.Status</c>'s properties change: one read at a time, the last one
+    /// begun after the last change (<see cref="AtSpiStatusReader"/>).</summary>
     public void WatchStatus(Action<bool> changed)
     {
         try
@@ -167,11 +203,12 @@ internal sealed class AtSpiBus : IAtSpiSignals, IAtSpiStatus, IDisposable
                 Member = "PropertiesChanged",
                 Path = AtSpiConstants.A11yBusPath,
             };
+            var reader = new AtSpiStatusReader(ReadStatus, changed);
             _session.AddMatchAsync(rule,
                 static (Message _, object? _) => true,
                 (Exception? ex, bool _, object? _, object? _) =>
                 {
-                    if (ex is null) ThreadPool.QueueUserWorkItem(_ => changed(ReadStatus()));
+                    if (ex is null) reader.Changed();
                 },
                 ObserverFlags.None, null, null, false).GetAwaiter().GetResult();
         }

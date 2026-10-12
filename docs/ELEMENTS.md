@@ -83,6 +83,14 @@ These propagate to child elements unless overridden.
   in that one's font, as does a character after a joiner that the font has. A sequence split across
   fonts is never shaped into its one glyph: the joiners in 👨‍👩‍👧 are in most text faces, and used to
   break the family into three people.
+- **A character that asks to be an emoji is drawn from the colour emoji face** (Segoe UI Emoji,
+  Apple Color Emoji, fontconfig's emoji face — Noto Color Emoji on most Linux desktops), before
+  the face's own glyph is used, as Unicode's emoji presentation rules say: a character that is an
+  emoji by default (😀 ⭐ ☕), one followed by U+FE0F (❤️ ™️ ©️ #️⃣ 1️⃣), and the first of a skin-tone
+  or joined sequence (☝🏽 👁‍🗨). Everything else stays text: a plain ™ © # 1, ❤ or ↔ without the
+  selector, and any character followed by U+FE0E, which asks for text. Text faces have many emoji
+  in black and white — DejaVu Sans has 😀 and ❤, Segoe UI has # © ™ — and used to win. A machine
+  without a colour emoji face, and a pinned collection (golden images), fall back as before.
 - **Measure contexts that cannot read a font** (test stubs, the headless fixed-metrics context)
   answer with estimates from a measured `"0"`, and say every glyph is there.
 
@@ -98,6 +106,13 @@ These propagate to child elements unless overridden.
 | `.OnScroll(handler)` | `Action<ScrollEvent>` |
 
 You can also call `el.On<TEvent>(handler)` directly for any event type.
+
+**A pointer event is made only for a listener.** A move, enter or leave event is created
+only when an element it would reach has a handler for it. Hover styles (`.OnHover`),
+cursors and tooltips need no event, so the pointer crossing a screen that only styles its
+hover allocates nothing beyond the platform's own input record. A `PointerMoveEvent`
+handler makes an event on every move over its element or anything inside it — on a root,
+every move in the window — so attach a move handler to the element that needs it.
 
 **Pointer capture.** A `PointerDownEvent` handler can call `e.CapturePointer()`.
 From then until the button comes up, every `PointerMoveEvent` and the
@@ -1023,7 +1038,7 @@ NumericUpDown.New(settings.FontSize, 6, 72)
 
 The draggable border between a fixed-size pane and whatever fills the rest of a row
 or column. It is a **model plus a handle**, not a container: `PaneSplitter` holds
-the pane's size as app state and reports every move (the way `HorizontalPan` holds
+the pane's size as app state and reports it as it moves (the way `HorizontalPan` holds
 its offset), and the owner rebuilds the pane at that size. A size written onto an
 element would be overwritten by the next build.
 
@@ -1043,12 +1058,14 @@ Flex.Row().AlignItems(AlignItems.Stretch).Children(
 |---|---|
 | `Size` | the pane's width (side by side) or height (stacked), always within `min..max` |
 | `Handle()` / `Handle(hover, grabbed)` | the grip, themed or with explicit tints |
-| `AttachDrag(root)` | hears the move and release on an ancestor; passive, so an idle window does not repaint per pointer move |
+| `AttachDrag(root)` | hears the move and release on an ancestor; passive, so an idle window does not repaint per pointer move, and asks for moves only while dragging, so an idle one makes no move event either |
 | `Restore(size)` | set from remembered settings; no callback |
 | `IsDragging` | true while grabbed |
 | `SplitterAxis.Vertical` (constructor) | stacked panes: the handle is a horizontal strip dragged up and down |
 
-`onChanged` runs on every move; `onCommitted` once per drag (and per key step), so a
+`onChanged` follows a drag once per frame that may be drawn, at the pointer's latest
+position, and the release applies the last one (see "A drag rebuilds once per frame" in
+REACTIVITY.md); `onCommitted` runs once per drag (and per key step), so a
 settings file is written once rather than sixty times a second. The grab is
 remembered as pointer-at-press plus size-at-press, so a splitter dragged past its
 minimum does not jump when the pointer comes back.
@@ -1151,7 +1168,12 @@ component always shows current data with no reference tricks. A row with a `Key`
 patched instead of replaced, which is what keeps focus, a caret or a scroll offset alive
 inside it; key rows that hold state. Rows are force-sized to their height and
 `FlexShrink(0)`, so a template that wants a different height must say so through
-`RowHeights`.
+`RowHeights`. A row inherits text style from the list like any other child: a `.FontSize()`,
+`.TextColor()` or `.Cursor()` set above the list reaches every row that does not set its own.
+(Until 2026-10-12 a row from the one-argument template was resolved under the theme's
+defaults while it was made, and the next style pass resolved it again under the list,
+which changed its font size and laid out every box and icon of every row a second time:
+Junction's Branches walk laid out 255 elements a key, now 34.)
 
 **Rows that show only their item.** Making every visible row again on every rebuild is
 what lets a row show anything, and it is most of what a key walk costs: in a list whose
@@ -1185,13 +1207,56 @@ var shape = (stats, compact, Nocturne.Theme);   // what the rows show besides th
 if (shape != _rowShape) { _listRef.Current?.InvalidateRows(); _rowShape = shape; }
 ```
 
-Switching `Application.Theme` to another `Theme` object makes the rows again by itself; a
-theme changed in place does not. Handlers in a kept row are the ones it was made with, so
+Switching `Application.Theme` to another `Theme` object makes the rows again by itself, and so
+does a change of the window's display scale (a move to a screen at another scale); a theme
+changed in place does not. The scale matters because a glyph cut for it
+(`Phosphor.Draw(…, scale)`, an app's own icon cache) is retired when the cache is invalidated
+for the new scale and freed at the next invalidation: a kept row holding one drew a freed
+raster, and Junction's branch rows lost every icon after a move to 150 % and back, until the
+list made its rows again on a scale change. The window tells the list before its `Resized`
+event, so an owner that moves its cache to the new scale there has the rows made with the new
+glyphs. Handlers in a kept row are the ones it was made with, so
 they should read live state (`SelectionContains(c.Hash)`) rather than a value the build
 captured. Rows are matched by index: an insertion above the viewport makes the rows it moves
 again, as before. The one-argument template keeps its behaviour exactly; nothing changes for
 a list that does not opt in. On the perf suite's selection walk the opt-in makes 3 rows per
 step instead of 19 and allocates 26 KB instead of 97.
+
+**State that only some rows show.** A second highlight beside the selection (the open file
+under a tree's cursor, the branches picked for a comparison), a folder's open state: these
+change one or two rows at a time, and in the shape every change would make every row on
+screen again. Put them in the item instead. The item can be a small record struct — the
+row's model and those flags — made per index by an `IReadOnlyList<T>` view over the rows,
+so the list compares the rows on screen and makes again exactly those whose flags moved,
+with nothing allocated per row and no list built per rebuild:
+
+```csharp
+internal readonly record struct FileRowItem(TreeNode<string> Node, bool Open, bool Cursor, bool Expanded);
+
+sealed class FileRowItems(App app, List<TreeNode<string>> rows) : IReadOnlyList<FileRowItem>
+{
+    public int Count => rows.Count;
+    public FileRowItem this[int i] => new(rows[i], rows[i].Path == app.OpenPath,
+        rows[i].Path == app.CursorPath, app.Tree.IsExpanded(rows[i]));
+    // GetEnumerator: yield this[i] for each i
+}
+```
+
+The model objects themselves have to be kept between rebuilds for the comparison to hold:
+nodes made again by every build (a tree flattened from a fresh filter) are new objects at
+every index, and every row is made again. Keep them while what they come from is the same.
+Junction's Files tree, moved from a scroll view of every row onto a virtual list this way,
+makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now).
+
+The items' accessible labels follow the same contract. The accessibility tree asks for every
+item's label each time it is built — with a reader listening, after every structural change
+and every scroll — so an item-rows list keeps each item's label while the item is equal to
+the one it was made from and `AccessibleItemLabel` is the same delegate; `InvalidateRows()`,
+new `Items` and another delegate let them all go. Pass a label that reads only its item as a
+lambda that captures nothing, or keep the delegate in a field: a lambda that captures the
+build's state is a new delegate every build and keeps nothing (which is right for a label
+that reads that state, unless the state is in the shape you invalidate on). On the walk with
+a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
 
 **No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
 is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
@@ -1241,7 +1306,10 @@ second value.
 **Pointing at a slider.** `SliderElement.OnHoverValue` reports the value under the pointer
 as it crosses the track, and null when it leaves — including while dragging, since the thumb
 is under the pointer either way. Hovering never changes the value; that still takes a press,
-a drag or a key. The video scrubber's preview is what this exists for.
+a drag or a key. The video scrubber's preview is what this exists for. `OnHoverValue`, and
+`OnValueChanged` during a drag, follow the pointer once per frame that may be drawn, at its
+latest position; the release applies the last value at once (see "A drag rebuilds once per
+frame" in REACTIVITY.md).
 
 **Marking the current choice.** Set `ContextMenuItem.IsChecked` rather than writing a mark
 into `Label`. `true` draws the theme's `CheckGlyph` in the icon column, `false` reserves the

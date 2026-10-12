@@ -185,6 +185,14 @@ AT-SPI snapshot's objects take it and send state-changed:focused. The next
 rebuild's diff then has nothing to say about the move. Before, both kept the
 state of the last rebuild until the next one, which reported the move late.
 
+A move of a list's selection rebuilds no tree either (2026-10-11). The frame marks
+`IsSelected` on the item nodes it changed, in the applied tree, and hands the bridge
+those changes (`ApplyPatchedProperties`): the UIA wrappers take the new state and raise
+SelectionItem.IsSelected, the AT-SPI objects take it and send state-changed:selected,
+as a diff would have. A frame that rebuilds anyway tells the move in its diff; a list
+whose node is not there yet, or whose items changed in number, is rebuilt. What else
+the move changed (a scroll) is told by the coalesced layout refresh, as before.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
@@ -234,6 +242,18 @@ Files:
     - Removed → unexport, emit `children-changed::remove`.
     - PropertyChanged → emit `PropertyChange` signal (AT-SPI marshals specific
       property-name strings like `"accessible-name"`, `"accessible-value"`).
+    - **Order (2026-10-12, plan 17).** A caching client (libatspi, under Orca) puts a cache-add's
+      object at its index in the parent's cached children *in place of* what is there (growing
+      the list past its end), and a `children-changed:add` takes the child out and puts it back at
+      its index. So a frame sends its cache-removes and `children-changed:remove` first, then one
+      `children-changed:add` per added object in the order of its parent's children, then the
+      cache-adds, which find each object in its place. A run of added objects that ends the
+      parent's children gets one signal, for its first (a bulk append stays one signal). Before,
+      the cache-adds came first with one signal per parent, and an object added anywhere but at
+      the end took a sibling's place: `[A, B, C]` with X after A read `[A, X, C]` in a live pyatspi
+      client; with X and Y, `[A, X, Y]`. `AtSpiClientCache` in the Linux bridge tests models those
+      rules. A reorder still sends nothing, and a caching client keeps the old order (seen live;
+      a signal for it is not approved yet).
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
@@ -298,7 +318,19 @@ Remaining refinements (nice-to-have): a UIA `ScrollPattern` / `ItemContainer`
 Elements expose these to UIA today (property/pattern → how to opt in):
 
 - **AutomationId** — `AutomationId("id")` (stable test selectors).
-- **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name.
+- **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name. `Role`,
+  `AccessibleName`, `AccessibleDescription`, `AccessibleExpanded`, `AutomationId`, `Name` (the
+  name's fallback) and a check box's, radio button's or switch's `Label` tell the window when they
+  change (2026-10-12, plan 17), as a toggle does, and the next frame tells the reader: UIA Name,
+  HelpText, ExpandCollapseState; AT-SPI accessible-name, accessible-description,
+  state-changed:expanded. A component's rebuild patches these onto the elements it keeps, and
+  patching a box, a text or a canvas marks no layout, so a rebuild that changed only one of them
+  was told nothing (Aperture's "Quality: …" box, VideoPlayer's Play/Pause). An `AutomationId`
+  change raises no event; the tree that carries it is applied, so UIA answers the new id.
+  A role change (a group that becomes a dialog) is a `Role` property change in the diff, first
+  among the node's: UIA raises ControlType and LocalizedControlType property changes, AT-SPI sends
+  `property-change:accessible-role` (not for the application's own object). The differ never
+  compared roles before, and a caching AT-SPI client kept reading "panel" (seen live in WSL).
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
 - **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
@@ -319,9 +351,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   takes AT-SPI's `password text` role (40) and the same bullets, and masking or revealing a
   field sends a `property-change:accessible-role` signal.
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
-  Each item node carries its selected state (2026-10-10), and setting `SelectedIndex` asks for
-  a rebuild, so a move is an IsSelected change on the item that had the selection and the one
-  that has it (UIA property events, AT-SPI `state-changed:selected`). Before, a move that
+  Each item node carries its selected state (2026-10-10), and setting `SelectedIndex` tells the
+  window, so a move is an IsSelected change on the item that had the selection and the one
+  that has it (UIA property events, AT-SPI `state-changed:selected`), marked on the applied
+  tree without a rebuild (2026-10-11, see the focus move above). Before, a move that
   scrolled nothing changed no node and no reader was told.
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
   Expand/Collapse reuse the element's click-to-toggle. A change raises the

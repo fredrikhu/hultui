@@ -36,9 +36,10 @@ public sealed partial class ApertureApp
     /// <summary>The episode the prompt is offering, or null when no prompt is up.</summary>
     private MediaItem? _upNext;
 
-    /// <summary>The item whose ending has already been dealt with. The backend keeps
-    /// reporting <see cref="PlaybackState.Ended"/> for as long as the file sits at its last
-    /// frame, so without this a dismissed prompt comes straight back on the next frame.</summary>
+    /// <summary>The item whose ending has already been dealt with. The player stays
+    /// <see cref="PlaybackState.Ended"/> for as long as the file sits at its last frame, so
+    /// without this a dismissed prompt would come back with the next change of state the
+    /// playback watch sees.</summary>
     private string? _endHandledFor;
 
     /// <summary>When the countdown expires. Null while the prompt is waiting for an answer
@@ -59,9 +60,9 @@ public sealed partial class ApertureApp
         : 0;
 
     /// <summary>
-    /// Called from the playback pump when the backend reports the file ended. Asks the
-    /// server what comes next and puts the prompt up; a film, or the last episode of a
-    /// series, simply stops.
+    /// Called from the playback watch (<see cref="OnPlaybackChanged"/>) when the backend
+    /// reports the file ended. Asks the server what comes next and puts the prompt up; a film,
+    /// or the last episode of a series, simply stops.
     /// </summary>
     private void OnPlaybackEnded()
     {
@@ -78,8 +79,9 @@ public sealed partial class ApertureApp
             return;
         }
 
-        // The server needs to know it was watched to the end before it is asked what
-        // follows, or next-up answers with the episode that just finished.
+        // Asked by place in the series (the episode list from this one on), not the server's
+        // next-up, so the answer does not wait on the server marking this one watched — which
+        // it does at the stop report, when the next one starts or the picture closes.
         _ = FindNextAsync(lib, finished);
     }
 

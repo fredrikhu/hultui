@@ -14,6 +14,9 @@ namespace Junction.Tests;
 /// else a row shows — the wider selection, the theme, the window width that drops the ref
 /// chips — is told to the list by making the rows again. These pin both halves.
 /// </summary>
+// Serial: the colour-scheme and display-scale tests change process-wide state (the palette and
+// the glyph caches) that other sessions draw with.
+[Collection("JunctionDiff")]
 public class HistoryRowKeepTests
 {
     [Fact]
@@ -108,6 +111,31 @@ public class HistoryRowKeepTests
 
             Assert.False(HasHeadChip(session), "the HEAD chip is still drawn in a narrow window");
         }, width: 1800);
+    }
+
+    /// <summary>A move to a screen of another scale retires the glyph rasters the chips hold
+    /// (and the next change frees them): the rows on screen are made again with new ones.</summary>
+    [Fact]
+    public void ADisplayScaleChange_MakesTheRowsAgain()
+    {
+        Hosted((session, app) =>
+        {
+            try
+            {
+                int onScreen = Rows(session).Count;
+                int made = app.HistoryRowsMade;
+
+                session.Window.SetScale(1.5f);
+                session.PumpFrames(3);
+
+                Assert.True(app.HistoryRowsMade - made >= onScreen, $"{app.HistoryRowsMade - made} rows made of {onScreen}");
+            }
+            finally
+            {
+                session.Window.SetScale(1f);
+                session.PumpFrames(2);
+            }
+        });
     }
 
     private static bool HasHeadChip(HeadlessSession session) =>

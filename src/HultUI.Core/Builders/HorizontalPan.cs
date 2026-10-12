@@ -41,9 +41,16 @@ public sealed class HorizontalPan : ISidewaysScroller
     private readonly Ref<BoxElement> _trackRef = new();
     private float _offset;
     private float _grab;
+    // Made once, not per AttachDrag (owners call it on every build).
+    private Func<bool>? _listening;
+    // Where the pointer is during a scrollbar drag, applied once per frame.
+    private float _pointerX;
+    private PointerFollow? _follow;
 
     /// <param name="onChanged">Runs whenever the offset actually moves — normally the
-    /// owner's <c>MarkDirty</c>, since the content has to be rebuilt to show it.</param>
+    /// owner's <c>MarkDirty</c>, since the content has to be rebuilt to show it. A scrollbar
+    /// drag runs it at most once per frame that may be drawn, at the pointer's latest position,
+    /// and the release applies the last position before the drag ends.</param>
     public HorizontalPan(Action onChanged) => _onChanged = onChanged;
 
     /// <summary>Width of the widest content to be panned. The owner measures and assigns
@@ -80,6 +87,8 @@ public sealed class HorizontalPan : ISidewaysScroller
     /// for "as far right as it goes". True when the offset changed.</summary>
     public bool PanTo(float offset)
     {
+        // A drag's position the next frame was to apply comes first: this acts after it.
+        _follow?.Flush();
         float next = Math.Clamp(offset, 0, MaxOffset);
         if (next == _offset) return false;
         _offset = next;
@@ -169,8 +178,22 @@ public sealed class HorizontalPan : ISidewaysScroller
         // onChanged. Registered as ordinary app handlers they would force a frame
         // per move over an idle window (the input safety net counts handlers that
         // ran), which is exactly the idle-rerender bug this wording exists to stop.
-        root.OnPassive<PointerMoveEvent>(ev => { if (IsDragging) DragTo(ev.Position.X); });
-        root.OnPassive<PointerUpEvent>(_ => IsDragging = false);
+        // And heard only while dragging, so a move over the surface makes no move event
+        // for it (the window makes one only when something wants it).
+        root.OnPassive<PointerMoveEvent>(ev =>
+        {
+            if (!IsDragging) return;
+            // Recorded, and applied once per frame that may be drawn: onChanged rebuilds the
+            // content, and a 1,000 Hz mouse rebuilt it about sixteen times a frame drawn.
+            _pointerX = ev.Position.X;
+            (_follow ??= new PointerFollow(() => DragTo(_pointerX))).Request(ev.CurrentTarget);
+        }, _listening ??= () => IsDragging);
+        root.OnPassive<PointerUpEvent>(_ =>
+        {
+            // The drag ends exactly where the pointer did, whether or not a frame came between.
+            _follow?.Flush();
+            IsDragging = false;
+        });
     }
 
     /// <summary>Maps a pointer x onto the offset, for a scrollbar drag.</summary>

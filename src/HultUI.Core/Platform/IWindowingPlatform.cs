@@ -22,10 +22,12 @@ public interface IWindowingPlatform : IDisposable
     /// <summary>
     /// Parks the loop until a native event arrives, <see cref="Wake"/> is called,
     /// or the timeout elapses. <c>Application.Run</c> calls it when no window rendered
-    /// in an iteration: when nothing needs a frame, and when a window does but its
-    /// display interval has not yet passed. A platform that runs that loop parks for
-    /// the whole timeout when nothing arrives, a timeout of 1 ms included: a wait that
-    /// returns at once makes the second case a busy loop.
+    /// in an iteration: when nothing needs a frame, until the next deadline the loop owns
+    /// (an animation's next step, a coalesced accessibility refresh, a poll), or with
+    /// <see cref="Timeout.Infinite"/> (-1) when it owns none; and when a window needs a
+    /// frame but its display interval has not yet passed. A platform that runs that loop
+    /// parks for the whole timeout when nothing arrives, a timeout of 1 ms included: a
+    /// wait that returns at once makes the second case a busy loop. A timeout of 0 polls.
     /// </summary>
     void WaitForEvents(int timeoutMs);
 
@@ -33,10 +35,12 @@ public interface IWindowingPlatform : IDisposable
     /// Unblocks a <see cref="WaitForEvents"/> in progress so the next frame starts
     /// now rather than when the timeout elapses. Thread-safe, and the only member of
     /// this interface that is: it exists for work arriving from other threads — a
-    /// posted continuation, a decoded video frame, a native callback — which would
-    /// otherwise wait out the idle interval before anything looked at it. A no-op
-    /// when nothing is waiting; a platform with no idle wait of its own (headless, a
-    /// host that drives <c>RunFrame</c> from its own loop) implements it as one.
+    /// posted continuation, a decoded video frame, a native callback — and for work a
+    /// callback the wait itself dispatched on the UI thread leaves behind, which would
+    /// otherwise wait out the idle wait — with no deadline, for good — before anything
+    /// looked at it. A wake that lands between waits ends the next one at once, as an
+    /// event queued then would. A platform with no idle wait of its own (a host that
+    /// drives <c>RunFrame</c> from its own loop) implements it as a no-op.
     /// </summary>
     void Wake();
 

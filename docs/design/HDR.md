@@ -52,8 +52,14 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   `B8G8R8A8_UNORM` or `R8G8B8A8_UNORM` in sRGB-nonlinear. Never the `_SRGB` formats.
 - **Present mode:** MAILBOX, then IMMEDIATE, then FIFO. IMMEDIATE let the compositor stretch the
   previous image into a resized window.
-- **Resize:** rebuilt for every size by default. `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates and
-  presents one-to-one through `swapchain_maintenance1` instead.
+- **Resize:** while a drag sizes the window (Win32's modal size/move loop, from its first size
+  change), the swapchain is allocated to a 256-pixel bucket and presented one-to-one through
+  `swapchain_maintenance1`, so the drag rebuilds only when it crosses a bucket; when the loop ends
+  it is rebuilt at the window's exact size, which video needs (a larger extent loses the
+  compositor's direct path). A title-bar move runs the same loop and builds nothing; snap,
+  maximize and a program's resize rebuild for every size. Only under MAILBOX: under FIFO a
+  one-to-one swapchain stalled for good, and under IMMEDIATE a drag's first one cost about 180 ms.
+  `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates always, `=0` never.
 - **Rebuild:** the old swapchain is handed to the new one as `oldSwapchain`, except the scRGB one
   under MAILBOX on Windows, which is destroyed first. Handed over, it made the next present wait
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
@@ -66,6 +72,13 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   swapchain takes 150–220 ms to create (9 ms at start-up, 23 on a resize; 8-bit 1, scRGB FIFO 24).
 - **Synchronisation:** a semaphore per image orders the present after the frame. The acquire waits
   on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
+- **Layouts:** the present transition moves the image to `PRESENT_SRC_KHR` behind Skia's back.
+  When the renderer keeps a render target over the image, it asks the host to move the image back
+  to `COLOR_ATTACHMENT_OPTIMAL`, the layout Skia left it in, in a small submit of its own, from
+  `UNDEFINED`, discarding what every frame overwrites anyway (`TransitionAcquiredImage`).
+- **Before the images go** — any rebuild, a minimized window's swapchain, the host's disposal —
+  the host calls the renderer, which drops its render targets over them first
+  (`IVulkanSurfaceHost.SetSwapchainReleasing`).
 - **Per window:** each host has its own instance, device and command table. Device-level function
   pointers are never shared between windows.
 
@@ -73,8 +86,29 @@ The choices themselves are `VulkanSwapchainChoice`, unit-tested without a GPU.
 
 ### Drawing the UI (`SkiaVulkanRenderSurface`)
 
-The render target over a swapchain image is **built fresh every frame**: Skia tracks the image's
-layout inside it, and the host moves the layout behind Skia's back.
+**One render target per swapchain image, kept for the swapchain's life** (2026-10-11). Skia
+tracks the image's layout inside it and the host moves the layout behind Skia's back, so the host
+moves it back (above) before any of Skia's work on the image is submitted. Built every frame, the
+target cost 2,048 bytes of managed allocation, an image view and a framebuffer a frame, all of an
+idle-animating window's allocation; kept, a steady frame allocates nothing. A target is made again
+when the image, its size, format or colour space changes, which is how the scaled colour space
+follows the white scale. **When the barrier is submitted matters**, and `SwapchainTargetUses`
+decides it:
+
+| Frame | Target | Host barrier |
+|---|---|---|
+| through the offscreen | kept | just before the blit, after any GL draw in the frame |
+| straight onto the swapchain | kept | at once, before anything is drawn |
+| straight onto the swapchain, after a frame that drew a GPU source | this frame's only, declared `UNDEFINED` | none |
+
+A submit of the host's on the Vulkan queue just before mpv's GL draw of a video frame made that
+draw slower on NVIDIA (610): Reel at 1080p24, Render averaged 1.25–1.47 ms a frame against
+0.97–1.14 without the submit, on both formats. After the GL draw it costs nothing, but that is
+safe only where nothing of Skia's on the swapchain image can be submitted earlier: the offscreen
+path. Drawing straight onto the swapchain, Skia may submit its work on the image at any point, so
+the barrier goes first, and a frame with a video wraps its own target instead, as every frame did
+before. So a video on an 8-bit swapchain still allocates the 2 KB a frame; on an scRGB one with a
+white scale above 1 (Windows HDR, where Reel and Aperture play HDR video) it does not.
 
 On scRGB, 1.0 is 80 nits, and the UI's white has to land at the display's SDR white instead: the
 **white scale**, SDR white over 80 (3.0 for 240 nits). **Skia cannot put a glyph past 1.0**, with
@@ -100,6 +134,13 @@ and a resized window never asks for that size again: every size a drag passed th
 GPU memory, width × height × 8 bytes each, until the context's 256 MB budget pushed it out: DXGI
 read 458 MB after a 40-step drag, 243 now. So the pool's unused scratch is purged after the next
 frame is submitted (2026-10-08), which keeps what that frame drew with.
+
+**So are the textures of disposed images** (2026-10-11). A disposed image's upload loses its key
+and stays in the same pool as a spare: eight 3840×2400 photos drawn and disposed held 176 MB, and
+DXGI read 391.5 MB against 213.2 after the purge. The surface purges after a frame once
+`SkiaImageSource`s that were drawn have been disposed, at most once a second. Only spares go, so
+a live image scrolled out of view keeps its texture and is not uploaded again. GL does not purge:
+there Skia freed 211 MB and DXGI read 303.7 MB before and 312.0 after, the driver keeping it.
 
 ### Display colour: HDR state, SDR white, peak
 
@@ -194,8 +235,11 @@ once the size arrives.
 
 The rules the design depends on. Each one was broken once, and most failed silently.
 
-- **Never cache** a render target over a swapchain image, or a wrapped renderer-owned image. Skia
-  tracks the layout inside them.
+- **A render target kept over a swapchain image needs the image back in the layout Skia left it
+  in** before any of Skia's work on it is submitted, and has to go before its image does: the
+  host's `TransitionAcquiredImage` and its call before the images go, both promised through
+  `SetSwapchainReleasing`. Without them, wrap the image every frame. **Never cache** a wrapped
+  renderer-owned image (the shared video image): nothing restores its layout.
 - **Swapchain images need `TRANSFER_SRC`.** Without it Skia returns a null surface and says
   nothing.
 - **scRGB only with `VK_EXT_swapchain_colorspace` enabled.** Drivers list the colour space either
@@ -217,7 +261,7 @@ Every switch is described in [ENVIRONMENT.md](../ENVIRONMENT.md).
 | Renderer | GL; Vulkan per app | Vulkan costs start-up, memory and resize CPU that apps without HDR video would pay for nothing | `renderer:`, `HULTUI_RENDERER` |
 | Swapchain format | follows the display | enumeration lists the same formats in HDR and out | `HULTUI_VULKAN_F16` |
 | Present mode | MAILBOX | no resize stretch, and video level with GL | `HULTUI_VULKAN_PRESENT` |
-| Fixed extent | off | halves resize CPU, costs 4K video about 70% | `HULTUI_VULKAN_FIXED_EXTENT` |
+| Fixed extent | during a drag (Windows, MAILBOX) | a drag step without a rebuild; outside a drag it would cost 4K video about 70% | `HULTUI_VULKAN_FIXED_EXTENT` |
 | Scaled colour space | off | 0.10 ms a frame and no memory saved, on a path off Skia's usual one | `HULTUI_VULKAN_SCALED_SPACE` |
 | Display-colour events | off, apps opt in | COM in the message loop, which apps without HDR do not need | `displayColorEvents:`, `HULTUI_DISPLAY_INFORMATION` |
 | HDR video | on | an HDR swapchain with a tone-mapped picture wastes the swapchain | `HULTUI_VIDEO_HDR` |
@@ -244,9 +288,14 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   of GL, resizes at GL's cost, and sits 5 MB above it.
 - **On NVIDIA Linux F16 is nearly free.** There the fixed costs are the API's: about +95 ms of
   start-up and +23 MB, with or without F16.
-- **The fixed extent**, in its own A/B: 10 swapchain builds instead of 122, and resize CPU from
-  801 to 466 ms/s (GL 264), which is 3.0x GL's down to 1.8x. It costs 4K video 91–95 ms/s against
-  48–63.
+- **Over-allocating during a drag** (2026-10-11): a step of an 80-step drag went from 32.9–38.1
+  to 5.6–8.2 ms median (probe window, Aperture Home and Reel; JIT and AOT; GL Aperture 3.0–5.5),
+  swapchain builds from 80 to 5, plus 30–36 ms for the exact rebuild and its frame at the
+  release, and nothing for a title-bar move. Reel playing 1080p60 dropped 0–2 frames in a drag
+  instead of 35–36, and 1080p120 11–12 instead of 228–241.
+- **The fixed extent all the time**, in its own A/B (2026-09-27): 10 swapchain builds instead of
+  122, and resize CPU from 801 to 466 ms/s (GL 264). It costs 4K video 91–95 ms/s against 48–63,
+  which is why it is only used during a drag.
 - **Resize CPU under MAILBOX is driver-side.** Halving the frames drawn during a resize left it
   unchanged. Most of it, on the scRGB swapchain, was a 100 ms wait in the first present after
   each rebuild; destroying the old swapchain first (2026-10-08) took a 40-resize probe from
@@ -261,8 +310,9 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   cannot import Vulkan memory.
 - **Start-up's +127 ms.** It is pipeline compilation for the F16 target, and SkiaSharp exposes no
   persistent pipeline cache.
-- **A fixed extent only while dragging** would get both its resize saving and full video speed. It
-  needs a settled-size signal the renderer does not have.
+- **Over-allocating during a drag on AMD, Intel and Linux.** Measured on NVIDIA 610.62 only. Linux
+  has no modal size loop to frame a drag and keeps the extension off unless
+  `HULTUI_VULKAN_FIXED_EXTENT=1` asks.
 - **HDR10 swapchains and HDR metadata.** scRGB was chosen: HDR10 would halve bandwidth, but PQ is
   absolute luminance and Skia's colour management is relative.
 - **Video luminance under the scaled colour space** matches the offscreen path to 0.4% on average,
@@ -332,6 +382,11 @@ A check that reports the same thing whether the code works or not reads as evide
   scRGB offscreen dropped out of it (19.7 to 10.4 MB) while DXGI read the same 130.6 MB, and once
   disposed Skia budgeted it and pooled it all the same. `DumpMemoryStatistics` lists every
   resource, live or purgeable; read it, or DXGI, before calling a Skia change a saving.
+- **Where a one-off lands decides whether a benchmark sees it.** The first swapchain a window
+  replaces after it is first shown takes 190–290 ms to create on NVIDIA 610, on every path (a
+  start-up build takes 9 ms, a later rebuild about 21). A drag benchmark that places the window
+  first pays it before the drag. With `HULTUI_VULKAN_FIXED_EXTENT=1` the placement fitted the
+  start-up bucket, so the payment moved into the drag and read as a 200 ms outlier of the change.
 - **A capture taken after `SetWindowPos` returns cannot see the resize.** The window procedure draws
   the new size before it returns, so a stall inside that frame is over by the time anything looks.
   On the chained scRGB MAILBOX swapchain the old harness read 0 of 80 resizes stretched, while a
@@ -352,14 +407,24 @@ A check that reports the same thing whether the code works or not reads as evide
 
 Anything holding a handle to something Skia or a driver also tracks goes stale, silently.
 
-- **Never cache a render target over a swapchain image.** Three images meant three good frames and
-  then black for ever. **Never cache a renderer-owned `SKImage`** either.
+- **A render target kept over a swapchain image goes stale unless its layout is put back.** Kept
+  with nothing more, three images meant three good frames and then black for ever. It is kept now
+  only because the host's barrier hands the image back in `COLOR_ATTACHMENT_OPTIMAL` first
+  (2026-10-11), proven by captures of images reused a dozen times each, across resizes, a
+  minimize, both formats and all three present modes, each showing the frame just drawn, with
+  the validation layer loaded and silent (`VulkanProbeTests`). **The captures alone could not have
+  failed**: with the barrier left out, NVIDIA 610 drew every captured frame right, and only the
+  layer said what was wrong (`VUID-vkCmdDraw-None-09600`, an image in `UNDEFINED` or
+  `PRESENT_SRC_KHR` where the target expects `COLOR_ATTACHMENT_OPTIMAL`). **Never cache a
+  renderer-owned `SKImage`**: nothing restores its layout.
 - **Do not read the shared image through Vulkan.** Guessing its layout returned 0.000 from an image
   with a picture in it. Read it through GL, as `HULTUI_VIDEO_HDR_PROBE` does.
 - **Layouts Skia owns are assumed, not known.** The present barrier assumes
-  `COLOR_ATTACHMENT_OPTIMAL`, and the hand-back barrier assumes `SHADER_READ_ONLY_OPTIMAL`, because
-  SkiaSharp cannot report or be told a layout. That holds for today's drawing (linear sampling, no
-  mipmaps). A Skia update that draws differently would break it with no error.
+  `COLOR_ATTACHMENT_OPTIMAL`, the host's other barrier restores it for a render target that
+  believes it, and the hand-back barrier assumes `SHADER_READ_ONLY_OPTIMAL`, because SkiaSharp cannot
+  report or be told a layout. That holds for today's drawing (linear sampling, no mipmaps, no
+  read of the swapchain image). A Skia update that draws differently would break it with no
+  error; the validation layer names a wrong layout at once.
 - **Handle ownership is asymmetric.** GL does not take ownership of a Win32 handle;
   `glImportMemoryFdEXT` consumes the fd. Backwards leaks on one platform and double-frees on the
   other.
@@ -371,6 +436,17 @@ Anything holding a handle to something Skia or a driver also tracks goes stale, 
   only at device destruction, as a leaked `VkSwapchainKHR` (`VUID-vkDestroyDevice-device-05137`).
 
 ### 3. Defaults that are not neutral
+
+- **A swapchain larger than its window is SUBOPTIMAL on every present** (NVIDIA 610). Answered
+  with a rebuild, as an exact swapchain's SUBOPTIMAL is, the over-allocated swapchain was built
+  again after every frame, and `HULTUI_VULKAN_FIXED_EXTENT=1` made a drag step slower than no fixed
+  extent at all. A one-to-one swapchain the window still fits keeps going now.
+- **Only MAILBOX shows a one-to-one swapchain well.** Under FIFO it stalled for good: a few drags
+  in, an acquire's fence never signalled and the window hung, on both formats, with the validation
+  layer and without. Under IMMEDIATE the half-float window paid 172-196 ms for the first one-to-one
+  swapchain of every drag (its first present when handed over, its creation when destroyed first)
+  and showed the old image stretched meanwhile. MAILBOX ran 30 drags, 45 one-to-one swapchains,
+  with neither. The other modes rebuild for every size.
 
 - **An omitted `MPV_RENDER_PARAM_DEPTH` means 8 bits and dithering**; mpv does not infer it from
   the format. **`internal_format = 0`** means 8 bits too.

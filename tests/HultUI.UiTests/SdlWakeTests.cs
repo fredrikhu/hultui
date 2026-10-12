@@ -16,6 +16,7 @@ public sealed class SdlWakeTests
     [UiFact]
     public void Wake_FromAnotherThread_ReturnsWaitForEventsAtOnce()
     {
+        using var guard = ForegroundGuard.Begin();
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "wake", 200, 100);
         app.RunFrame(TimeSpan.Zero, forceRender: true); // shown after its first frame

@@ -25,6 +25,7 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
     [UiFact]
     public void AnIdlePass_AllocatesNothing()
     {
+        using var guard = ForegroundGuard.Begin();
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "idle pass", 300, 200);
         app.SetRoot(Flex.Column().Padding(8).Children(TextElement.New("Nothing changes here"), Button.New("Button")));
@@ -56,6 +57,7 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
     [UiFact]
     public void AShortWait_ParksForItsWholeTimeout()
     {
+        using var guard = ForegroundGuard.Begin();
         // Run waits out the rest of a display interval with waits of a few milliseconds, the
         // last of them 1 ms. On Windows SDL rounded what was left of a wait down to whole
         // milliseconds after its own clock had started, so 4 ms parked for ~3 and 1 ms not at
@@ -90,6 +92,7 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
     [UiFact]
     public void ADirtyWindow_WaitsForItsFrame_RatherThanSpinning()
     {
+        using var guard = ForegroundGuard.Begin();
         // While a tween runs the loop renders once per display interval and parks in between:
         // a pass that renders, a pass that waits out the rest of the interval, and now and then
         // one more. With a wait that returned at once it spun through the last millisecond of
@@ -115,6 +118,37 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
         output.WriteLine($"{platform.Passes} loop passes for {frames} frames ({perFrame:F2} a frame) on a {hz} Hz display");
         Assert.True(frames > 0);
         Assert.True(perFrame <= 6, $"{platform.Passes} loop passes for {frames} frames ({perFrame:F1} a frame)");
+    }
+
+    [UiFact]
+    public void AnIdleWindow_DoesNotComeRound()
+    {
+        // The idle loop waits for its next deadline or a wake; it used to park 16 ms at a time,
+        // ~60 passes a second in every idle window (plan 17, runtime-idle-wakeups). A worker posts
+        // twice, a second apart, reading the count: two wakes, and nothing else in between.
+        using var guard = ForegroundGuard.Begin();
+        var platform = new CountingPlatform(new SdlWindowingPlatform());
+        using var app = new Application(platform, "idle", 300, 200);
+        app.SetRoot(Flex.Column().Padding(8).Children(TextElement.New("Nothing changes here")));
+        int first = -1, second = -1;
+        var worker = new Thread(() =>
+        {
+            Thread.Sleep(1000);   // the window shown and settled
+            Application.InvokeOnMainThread(() => first = platform.Passes);
+            Thread.Sleep(1000);
+            Application.InvokeOnMainThread(() =>
+            {
+                second = platform.Passes;
+                app.PrimaryWindow.Close();
+            });
+        }) { IsBackground = true };
+        worker.Start();
+        app.Run();
+        worker.Join();
+
+        output.WriteLine($"{second - first} loop passes in the idle second between two posts");
+        Assert.True(first >= 0 && second >= 0, "the posts did not run");
+        Assert.True(second - first <= 4, $"{second - first} loop passes in an idle second");
     }
 
     /// <summary>The SDL platform, counting the loop's passes.</summary>

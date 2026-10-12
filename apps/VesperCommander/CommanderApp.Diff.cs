@@ -725,21 +725,37 @@ public partial class CommanderApp
         // to be thrown away and rebuilt — and the heights remeasured, since two of the three
         // change how tall a row is.
         var shape = (DiffWrap, _diffPan.Offset, DiffCodeWidth());
+        // And what else a row shows: the change F8 last jumped to (ringed), find's query,
+        // options and current match (tinted), and the syntax colouring once it lands. The rows
+        // are on item rows, so a rebuild keeps every row whose DiffRow is unchanged; when any of
+        // these changes the rows are made again. The rest comes with something already handled:
+        // another comparison is another list (keyed by its generation), new rows and the text
+        // face reset the heights above, and another colour scheme is another Theme object,
+        // which makes a list's rows again by itself.
+        var look = new DiffRowLook(CurrentDiffChangeRow(), DiffFindShape(), _diffHlLeft, _diffHlRight);
+        bool remake = look != _diffRowLook;
+        _diffRowLook = look;
         if (_diffTops.Length != _diffRows.Count + 1 || _diffRowShape != shape)
         {
             if (_diffRowShape.Item1 != shape.Item1 || _diffHeightsWidth != shape.Item3
                 || _diffTops.Length != _diffRows.Count + 1)
                 RebuildDiffHeights();
-            if (_diffScrollRef.Current is VirtualListElement<DiffRow> mounted)
-                mounted.InvalidateRows();
+            remake = true;
             _diffRowShape = shape;
         }
+        if (remake && _diffScrollRef.Current is VirtualListElement<DiffRow> mounted)
+            mounted.InvalidateRows();
 
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffLineH)
             .RowHeights((_, row) => row + 1 < _diffTops.Length ? _diffTops[row + 1] - _diffTops[row] : DiffLineH)
             .Items(_diffRows)
-            .RenderWith(BuildDiffRow)
+            // No list selection: `selected` is always false, and a row is its DiffRow and the
+            // look above.
+            .RenderWith((r, _) => BuildDiffRow(r))
+            // Named for assistive technology by what the row says. Unset, each item was read out
+            // as the DiffRow record's ToString() — "DiffRow { Line = Line { Op = Change, … } }".
+            .AccessibleItemLabel(_diffLabelFn ??= DiffRowLabel)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Keyed by comparison so each file pair starts at the top instead of inheriting the
@@ -753,11 +769,65 @@ public partial class CommanderApp
         return list;
     }
 
+    // The rows' labels, made the first time assistive technology asks for each and kept with
+    // the comparison's rows: the tree asks for every item's label each time it is built, and
+    // a label made per ask would be a string per row per keystroke.
+    private (List<DiffRow>? Rows, string?[] Labels) _diffLabels = (null, []);
+    private Func<DiffRow, string?>? _diffLabelFn;
+
+    private string DiffRowLabel(DiffRow r)
+    {
+        if (!ReferenceEquals(_diffLabels.Rows, _diffRows)) _diffLabels = (_diffRows, new string?[_diffRows.Count]);
+        var labels = _diffLabels.Labels;
+        return (uint)r.Index < (uint)labels.Length ? labels[r.Index] ??= DiffRowText(r) : DiffRowText(r);
+    }
+
+    /// <summary>What a reader hears for a row: what happened to the line, where, and its text.</summary>
+    private static string DiffRowText(DiffRow r)
+    {
+        if (r.CollapseCount is int n) return $"{n} unchanged line{(n == 1 ? "" : "s")}";
+        if (r.Line is not { } l) return "";
+        return l.Op switch
+        {
+            DiffEngine.Op.Del => $"removed, line {l.LeftNo}: {Spoken(l.Left)}",
+            DiffEngine.Op.Add => $"added, line {l.RightNo}: {Spoken(l.Right)}",
+            DiffEngine.Op.Change => $"changed, left line {l.LeftNo}: {Spoken(l.Left)}; right line {l.RightNo}: {Spoken(l.Right)}",
+            _ => l.LeftNo == l.RightNo
+                ? $"line {l.LeftNo}: {Spoken(l.Right)}"
+                : $"line {l.LeftNo} left, {l.RightNo} right: {Spoken(l.Right)}",
+        };
+    }
+
+    /// <summary>A line's text as a reader says it: an empty or all-blank line is "blank".</summary>
+    internal static string Spoken(string? text) => string.IsNullOrWhiteSpace(text) ? "blank" : text;
+
+    /// <summary>What a comparison's rows show besides their own <see cref="DiffRow"/>, as the rows
+    /// on screen were made with it (see <see cref="BuildDiffBody"/>).</summary>
+    private readonly record struct DiffRowLook(
+        int CurrentChange, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find,
+        IReadOnlyList<TextSpan>[]? HighlightLeft, IReadOnlyList<TextSpan>[]? HighlightRight);
+
+    private DiffRowLook _diffRowLook;
+
+    /// <summary>The row F8 last jumped to, which is ringed, or -1. Only once the user has jumped:
+    /// on opening, the index already points at the first change.</summary>
+    private int CurrentDiffChangeRow() =>
+        _diffNavUsed && _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
+            ? _diffChangeRows[_diffChangeIdx] : -1;
+
+    /// <summary>What find tints: the query and its options, the current match and how many
+    /// there are (the matches themselves only move with a new query, option or binding, and a
+    /// new binding comes with new rows).</summary>
+    private (string, bool, bool, int, int) DiffFindShape()
+    {
+        var s = _diffFind.Search;
+        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
+    }
+
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>
     private Element BuildDiffRow(DiffRow r)
     {
-        bool current = _diffNavUsed && _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
-            && r.Index == _diffChangeRows[_diffChangeIdx];
+        bool current = r.Index == CurrentDiffChangeRow();
         var built = r.CollapseCount is int n ? DiffCollapseRow(n) : DiffLineRow(r.Line!, current, r.Index);
         if (current) built.WithRef(_diffChangeRowRef);
         return built;

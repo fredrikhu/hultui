@@ -486,10 +486,16 @@ public class TimePickerElement : Element
 
     protected internal override void ApplyTheme(Theme theme)
     {
-        _boxTheme = theme.Dropdown.Resolve(_style);
-        _theme = theme.Get<TimeFieldTheme>();
+        var box = theme.Dropdown.Resolve(_style);
+        var own = theme.Get<TimeFieldTheme>();
+        // Laid out again only when what it measures with changed: the box's font size and
+        // padding, the field's and the segments' side padding.
+        bool resized = box.FontSize != _boxTheme.FontSize || box.Padding != _boxTheme.Padding
+            || own.PaddingX != _theme.PaddingX || own.SegmentPaddingX != _theme.SegmentPaddingX;
+        _boxTheme = box;
+        _theme = own;
         _focusRingColor = theme.FocusRing;
-        MarkLayoutDirty();
+        if (resized) MarkLayoutDirty();
     }
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)

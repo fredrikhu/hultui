@@ -227,8 +227,8 @@ public class TweenStepTests
     [Fact]
     public void AToast_FadesInHoldsAndGoes_WhileTheWindowIsMinimized()
     {
-        // ToastHost hands every step of its fades to the owner's MarkDirty, as Aperture,
-        // Junction and Meridian wire it.
+        // The owner's MarkDirty, as Aperture, Junction and Meridian wire it: it rebuilds where the
+        // toast appears and where it goes, and the fades write the toast on screen.
         var owner = new Notifier();
         using var loop = new Loop(owner.Mount());
         loop.Session.Window.Minimized = true;
@@ -239,9 +239,9 @@ public class TweenStepTests
         loop.Storm(() => !owner.Toast.IsShowing);
 
         // Held 1.7 s from the flash (the 0.12 s fade-in runs inside it), then 0.18 s out: the
-        // hold and the fade each end on the first step at or past their time.
+        // hold and the fade each end on the first step at or past their time. Each fade's clock
+        // starts with a step at its start value, the loop's.
         Assert.InRange(loop.MillisecondsSince(start), 1880, 1880 + 2 * (1000.0 / 60) + 1);
-        Assert.True(owner.Builds - builds <= 2 + (int)(0.3 * 60) + 3,
-            $"{owner.Builds - builds} rebuilds for 0.3 s of fades");
+        Assert.Equal(2, owner.Builds - builds);
     }
 }

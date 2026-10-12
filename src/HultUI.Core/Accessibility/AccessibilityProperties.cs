@@ -9,6 +9,14 @@ public static class AccessibilityProperties
 {
     public const string Name = "Name";
     public const string Description = "Description";
+
+    /// <summary><see cref="AccessibilityNode.Role"/> changed: a group became a dialog. UIA's
+    /// ControlType, AT-SPI's role.</summary>
+    public const string Role = "Role";
+
+    /// <summary><see cref="AccessibilityNode.AutomationId"/> changed. Raises no event on either
+    /// platform: the bridge takes the new id, which UI Automation reads on request.</summary>
+    public const string AutomationId = "AutomationId";
     public const string Value = "Value";
     public const string IsToggled = "IsToggled";
     public const string IsSelected = "IsSelected";

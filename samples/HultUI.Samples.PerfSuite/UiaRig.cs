@@ -27,7 +27,8 @@ sealed class UiaRig : IAccessibilityBridge, IDisposable
         _bridge = new WindowsAccessibilityBridge(hwnd, new NoHost());
     }
 
-    /// <summary>Diffs the bridge has applied, for a scenario's check.</summary>
+    /// <summary>Changes the bridge has applied, diffs and in-place patches (a selection move), for a
+    /// scenario's check.</summary>
     public int Applies { get; private set; }
 
     /// <summary>Focus moves the bridge was told of, for a scenario's check.</summary>
@@ -47,6 +48,12 @@ sealed class UiaRig : IAccessibilityBridge, IDisposable
     public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
     {
         _bridge.ApplyChanges(diff, root);
+        Applies++;
+    }
+
+    public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
+    {
+        _bridge.ApplyPatchedProperties(patch, root);
         Applies++;
     }
 

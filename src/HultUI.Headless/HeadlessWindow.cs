@@ -83,6 +83,14 @@ public sealed partial class HeadlessWindow
     public IReadOnlyList<Element> OverlayContents => Window.OverlayContents.ToList();
 
     /// <summary>
+    /// How many accessibility trees the window's frames have built for a listening bridge. A
+    /// tree is built when the structure or a property changed, and at most every 100 ms for a
+    /// scroll or a layout change; a list's selection move is patched on the applied tree and
+    /// builds none. The count says how often that work ran, whatever the trees held.
+    /// </summary>
+    public int AccessibilityTreesBuilt => Window.AccessibilityTreesBuilt;
+
+    /// <summary>
     /// Installs a recording accessibility bridge, turning on the window's real
     /// per-frame a11y build/diff path (normally gated on an assistive
     /// technology being attached). Pump a frame afterwards to get the initial

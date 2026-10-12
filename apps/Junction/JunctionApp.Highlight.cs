@@ -26,6 +26,16 @@ public partial class JunctionApp
     private readonly HashSet<string> _highlightsPending = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The highlight the diff on screen asked for in the last build, or null when the build
+    /// showed no diff. A tokenize that lands for this key is what that build drew uncoloured,
+    /// and only then is a rebuild owed. Any other — the prefetch started from History, a file
+    /// the reader has already moved past, a working-tree version a refresh replaced — goes into
+    /// the cache without one, and the build that shows it later finds it there. Build clears
+    /// it; <see cref="HighlightForCurrent"/> sets it.
+    /// </summary>
+    private string? _highlightShown;
+
+    /// <summary>
     /// Throw away spans coloured by the previous theme. Spans are plain colours once handed
     /// out — nothing about one says which theme produced it — so a scheme change leaves every
     /// tokenized diff carrying the old palette until the cache is dropped and the next build
@@ -40,7 +50,9 @@ public partial class JunctionApp
 
     /// <summary>The highlight for the diff the active view is showing for
     /// <paramref name="path"/>, or null while none is available (unsupported
-    /// language, or still tokenizing — in which case a rebuild follows).</summary>
+    /// language, or still tokenizing — in which case a rebuild follows). Called from
+    /// the build that puts the diff on screen, and only from there: it is what marks the
+    /// result as one the screen is waiting for (see <see cref="_highlightShown"/>).</summary>
     private FileHighlight? HighlightForCurrent(string path)
     {
         if (path.Length == 0) return null;
@@ -49,17 +61,18 @@ public partial class JunctionApp
             // Multi-select compare: old side is the file at the oldest selected
             // commit, new side at the newest (matches GetRangeDiff's line numbers).
             if (_detailRange is { } r)
-                return HighlightFor(path, ExternalDiffMode.Commit, r.HeadHash, r.BaseHash);
+                return HighlightFor(path, ExternalDiffMode.Commit, r.HeadHash, r.BaseHash, onScreen: true);
             if (_detailHash is { } hash)
-                return HighlightFor(path, ExternalDiffMode.Commit, hash);
+                return HighlightFor(path, ExternalDiffMode.Commit, hash, onScreen: true);
         }
         if (View == JunctionView.Changes)
-            return HighlightFor(path, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null);
+            return HighlightFor(path, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null,
+                onScreen: true);
         return null;
     }
 
     private FileHighlight? HighlightFor(string path, ExternalDiffMode mode, string? commitHash,
-        string? baseHash = null)
+        string? baseHash = null, bool onScreen = false)
     {
         if (ActiveRepo is not { } repo) return null;
 
@@ -71,6 +84,7 @@ public partial class JunctionApp
             ? $"{repo.Path}|{baseHash ?? commitHash + "^"}..{commitHash}|{path}"
             : $"{repo.Path}|{DataGen(_activeRepoPath)}|{mode}|{path}";
 
+        if (onScreen) _highlightShown = key;
         if (_highlights.TryGetValue(key, out var hit)) return hit;
         if (!_highlightsPending.Add(key)) return null;   // already tokenizing
 
@@ -105,7 +119,11 @@ public partial class JunctionApp
                 _highlightsPending.Remove(key);
                 if (_highlights.Count >= 128) _highlights.Clear();   // crude cap; entries are per-file-version
                 _highlights[key] = result;
-                MarkDirty();   // re-render the diff rows with their colors
+                // Re-render the diff rows with their colours — when the diff on screen is the
+                // one waiting for them. The History prefetch lands while the log is on screen,
+                // and rebuilding the whole window for it doubled the cost of every move a
+                // reader made through the log (two builds a key instead of one).
+                if (key == _highlightShown) MarkDirty();
             });
         });
         return null;

@@ -7,6 +7,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using HultUI.Icons;
 using HultUI.Media;
@@ -55,15 +56,22 @@ public sealed partial class ReelApp : Component, IDisposable
     private Playlist? _playlist;
 
     /// <summary>Bumped to force a rebuild; every async hop lands through here.</summary>
-    private readonly HultUI.Core.Reactivity.Signal<int> _revision = new(0);
+    private readonly Signal<int> _revision = new(0);
 
     /// <summary>Where the open file should start, and whether that seek has happened yet.
     /// mpv cannot be told to open at a position, so the seek waits for the load.</summary>
     private TimeSpan _resumeTo;
     private bool _resumeApplied = true;
 
-    private long _lastSaveTicks;
+    /// <summary>When the resume point was last written, on the application's clock
+    /// (<see cref="Application.Time"/>, which a headless test moves by hand).</summary>
+    private long _lastSave;
     private int _chapterCount = -1;
+
+    /// <summary>The open file's housekeeping, made with its player: <see cref="OnPlayerChanged"/>
+    /// and <see cref="SaveWhilePlaying"/>. See <see cref="WatchPlayer"/>.</summary>
+    private Effect? _playerWatch;
+    private Effect? _saveClock;
 
     /// <summary>Whether the still run for the open file has been started.</summary>
     private bool _previewsStarted;
@@ -139,6 +147,7 @@ public sealed partial class ReelApp : Component, IDisposable
     /// that has ended is not a backend that plays again.</summary>
     private void OpenStream(string path)
     {
+        StopWatchingPlayer();
         _player?.Dispose();
         _player = new MediaPlayer(_backends!());
         _player.Volume = _settings.Data.Volume;
@@ -153,7 +162,8 @@ public sealed partial class ReelApp : Component, IDisposable
 
         _player.Open(MediaSource.FromFile(path), autoPlay: true);
         _videoPlayer.FocusPicture();
-        _lastSaveTicks = Environment.TickCount64;
+        _lastSave = _app.Time.GetTimestamp();
+        WatchPlayer(_player, _videoPlayer);
     }
 
     /// <summary>Asks for a file. The dialog starts where the last one came from, which for
@@ -211,18 +221,47 @@ public sealed partial class ReelApp : Component, IDisposable
         { return null; }
     }
 
-    // ── The frame's housekeeping ─────────────────────────────────────────
+    // ── The open file's housekeeping ─────────────────────────────────────
 
     /// <summary>
-    /// Runs on every build while something is open: applies the resume seek once the file
-    /// has loaded, hands the container's chapter marks to the transport bar, writes the
-    /// resume point periodically, and moves to the next file when this one ends.
+    /// Watches a new player: applies the resume seek once the file has loaded, hands the
+    /// container's chapter marks to the transport bar, keeps the volume for next time, writes
+    /// the resume point every <see cref="SaveInterval"/> while playing, and moves to the next
+    /// file when this one ends.
+    ///
+    /// <para>Two effects on the player's signals, not code in <see cref="Build"/>. This ran in
+    /// Build until 2026-10-11, as if Build ran on every frame of a playing film; it runs when
+    /// the app changes, and the transport bar is a component of its own, so during quiet
+    /// playback it did not run at all — and the periodic save, which waited for a build fifteen
+    /// seconds after the last save, never happened (a minute of playing with no input: no save,
+    /// so a crash lost the whole sitting). Build is not a clock.</para>
     /// </summary>
-    private void Pump()
+    private void WatchPlayer(MediaPlayer player, HultUI.Media.VideoPlayer video)
     {
-        if (_player is not { } player || _videoPlayer is not { } video) return;
+        StopWatchingPlayer();
+        _playerWatch = new Effect(() => OnPlayerChanged(player, video));
+        _saveClock = new Effect(() => SaveWhilePlaying(player));
+    }
 
-        if (!_resumeApplied && player.HasMedia && player.Duration is { } length && length > TimeSpan.Zero)
+    private void StopWatchingPlayer()
+    {
+        _playerWatch?.Dispose();
+        _playerWatch = null;
+        _saveClock?.Dispose();
+        _saveClock = null;
+    }
+
+    /// <summary>
+    /// Runs when the player's state, length, tracks, chapters or volume change — a few times a
+    /// file, never per position report: nothing here reads the position except through
+    /// <see cref="ReactiveScope.Untracked(Action)"/>.
+    /// </summary>
+    private void OnPlayerChanged(MediaPlayer player, HultUI.Media.VideoPlayer video)
+    {
+        var state = player.State;
+        var duration = player.Duration;
+
+        if (!_resumeApplied && player.HasMedia && duration is { } length && length > TimeSpan.Zero)
         {
             player.Seek(_resumeTo);
             _resumeApplied = true;
@@ -230,8 +269,7 @@ public sealed partial class ReelApp : Component, IDisposable
 
         // How long the file is is what says how far apart the stills go, and it arrives with
         // the file rather than with the request to open it.
-        if (!_previewsStarted && CurrentFile is { } open
-            && player.Duration is { } total && total > TimeSpan.Zero)
+        if (!_previewsStarted && CurrentFile is { } open && duration is { } total && total > TimeSpan.Zero)
         {
             _previewsStarted = true;
             StartPreviews(open, total);
@@ -250,24 +288,39 @@ public sealed partial class ReelApp : Component, IDisposable
         _settings.Data.Volume = player.Volume;
         _settings.Data.Muted = player.Muted;
 
-        long now = Environment.TickCount64;
-        if (player.IsPlaying && now - _lastSaveTicks >= (long)SaveInterval.TotalMilliseconds)
+        if (state == PlaybackState.Ended)
         {
-            _lastSaveTicks = now;
-            SaveResumePoint();
-        }
-
-        if (player.State == PlaybackState.Ended)
-        {
-            SaveResumePoint();
-            // Ended means finished: the point is cleared by Remember, and the folder rolls on.
-            if (!Step(1)) Rerender();
+            // Untracked: this effect is not to run again for the position the save reads, and
+            // the next file's player is watched by effects of its own (opening it disposes this
+            // one, which is why nothing follows).
+            ReactiveScope.Untracked(() =>
+            {
+                SaveResumePoint();
+                // Ended means finished: the point is cleared by Remember, and the folder rolls on.
+                if (!Step(1)) Rerender();
+            });
         }
     }
 
-    /// <summary>Writes where the open file has reached. Called on a timer while playing, on
-    /// every file change, and as the window closes — the last one is what makes a player
-    /// trustworthy.</summary>
+    /// <summary>
+    /// Writes the resume point every <see cref="SaveInterval"/> of playing. Runs on every
+    /// position report — ten a second while playing, none while paused — and checks the
+    /// application's clock; a save is a settings write, the check costs nothing and rebuilds
+    /// nothing.
+    /// </summary>
+    private void SaveWhilePlaying(MediaPlayer player)
+    {
+        _ = player.Position;
+        if (!player.IsPlaying) return;
+        long now = _app.Time.GetTimestamp();
+        if (_app.Time.GetElapsedTime(_lastSave, now) < SaveInterval) return;
+        _lastSave = now;
+        SaveResumePoint();
+    }
+
+    /// <summary>Writes where the open file has reached. Called every <see cref="SaveInterval"/>
+    /// while playing (<see cref="SaveWhilePlaying"/>), on every file change, at the end of a
+    /// file, and as the window closes — the last one is what makes a player trustworthy.</summary>
     internal void SaveResumePoint()
     {
         if (CurrentFile is not { } path || _player is not { } player) return;
@@ -321,10 +374,13 @@ public sealed partial class ReelApp : Component, IDisposable
 
     // ── The window ───────────────────────────────────────────────────────
 
+    /// <summary>How many times <see cref="Build"/> has run, for the tests.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         _ = _revision.Value;
-        Pump();
 
         var root = Flex.Column(gap: 0).FlexGrow(1)
             .Background(Emulsion.Bg)
@@ -438,6 +494,7 @@ public sealed partial class ReelApp : Component, IDisposable
     {
         SaveResumePoint();
         _settings.Save();
+        StopWatchingPlayer();
         // Before the player: the still source owns a second mpv handle and a temporary
         // folder, and both outlive the window otherwise.
         DisposePreviews();

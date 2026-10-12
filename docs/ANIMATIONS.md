@@ -122,19 +122,37 @@ What follows from it:
 - A tween's setter and `OnComplete` run at most once per display interval: 16.7 ms at
   60 Hz, 5 ms at 200 Hz.
 - A tween on screen is drawn at the display's rate, with or without events between frames:
-  between its frames the loop waits for the next one, not for its idle 16 ms. (A tween that
-  wrote a signal used to be drawn at ~60 frames a second on a faster display when nothing
-  else woke the loop: its zero-time step between frames changed nothing.)
-- A tween standing in for a timer — the tooltip's delay, a video player's auto-hide, a
-  toast's hold — ends on the first step at or past its time, up to one interval late.
-- A window with nothing to draw still steps its tweens, at most once an interval: an idle
-  window waiting out a delay, and a **minimized** window, which is not drawn at all. A
-  minimized player's bar still hides on time and a toast still comes and goes; the first
+  between its frames the loop waits for the next one. (A tween that wrote a signal used to
+  be drawn at ~60 frames a second on a faster display when nothing else woke the loop: its
+  zero-time step between frames changed nothing.)
+- **A tween's first step is at most one display interval.** The loop waits for its next
+  deadline, which can be minutes away when nothing moves, so a tween started between frames
+  (a hover transition, by a pointer event after a long idle) is not stepped by all the time
+  since the last step: its first step, with the next frame it may draw, is that time but at
+  most one interval, and its frames come at most one interval off its start. Its first frame
+  shows that much of it, not its start value: from plan 17's step 10 to step 12 the first step
+  was 0, which for a tween whose step marks something dirty drew one frame more, identical to
+  the one before, and put every frame after it an interval late (a 300 ms tween after idle:
+  20 frames and done 316 ms after its start, now 19 and 299 ms). A tween that starts with a
+  delay (a timer: a tooltip's show delay, a toast's hold) starts its clock at its first step:
+  nothing is drawn while it waits, and credited an interval it would end up to an interval
+  early. `Application.RunFrame` and `AnimationManager.Tick` step a new tween by the delta they
+  are given, as before: a host or a test that passes the time since its last call keeps its
+  meaning.
+- **A timer is a delay.** A tween that only waits — the tooltip's show delay, a video
+  player's auto-hide, a toast's hold, a terminal's cursor blink — is
+  `Animate.Value(0f, 1f, _ => { }).Delay(seconds).Duration(0f).OnComplete(…)`: while every
+  tween waits out a delay the loop sleeps until the first one is out and steps once, then.
+  The same wait written as a `Duration` with a setter that changes nothing steps every
+  frame interval until it ends: a 2 s toast's hold was 118 steps for its 20 frames.
+- A window with nothing to draw still steps a running tween, at most every 16 ms (no sooner
+  than the idle wait used to come round): a **minimized** window, which is not drawn at all.
+  A minimized player's bar still hides on time and a toast still comes and goes; the first
   frame after the restore draws where they ended.
-- A host that drives `Application.RunFrame` from its own loop (the WinForms host, a game
-  loop) steps them once per call, by the delta it passes: call it once per frame it means to
-  draw. A headless `PumpFrame()` is one such call; `HeadlessSession.RunLoop` runs the real
-  loop on the virtual clock, events between frames included.
+- A host that drives `Application.RunFrame` from its own loop (a game loop) steps them once
+  per call, by the delta it passes: call it once per frame it means to draw. A headless
+  `PumpFrame()` is one such call; `HeadlessSession.RunLoop` runs the real loop on the
+  virtual clock, events between frames included, and its deadlines.
 
 Once per frame is still a rebuild per frame. An animation that only moves, fades or turns
 something is cheaper on the element itself (`Animate.Opacity`, a `Transform`, a

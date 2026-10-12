@@ -6,6 +6,7 @@ using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Headless;
 using HultUI.Terminal.Rendering;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Terminal.Tests;
@@ -138,6 +139,68 @@ public class TerminalGlyphShapeTests
             Assert.True(Lit(bitmap, left + w - 1, box.Y + 1) < 64, $"cell {cell}: clear in the far corner");
         }
         Assert.True(Lit(bitmap, box.X + 2 * w - 1, cy) > 128, "the half-circle reaches the cell's far edge");
+    }
+
+    /// <summary>
+    /// Every Powerline separator on screen is drawn again on every frame the terminal draws, a
+    /// keystroke's echo included. Each was a new <c>SKPath</c>, and each half-circle a new array of
+    /// its 25 points as well. The shapes are built in the render context's one kept path, the
+    /// half-circle's points on the stack.
+    /// </summary>
+    [Fact]
+    public void PowerlineSeparators_AllocateNothingPerFrame()
+    {
+        using var surface = new HultUI.Rendering.Skia.SkiaRasterRenderSurface();
+        surface.Resize(200, 20, 1f);
+        var ctx = surface.RenderContext;
+        bool drawn = true;
+
+        void Frame()
+        {
+            ctx.BeginFrame(200, 20, 1f, Color.Black);
+            // Every separator: solid and thin, triangles, half-circles and diagonals.
+            for (int cp = 0xE0B0; cp <= 0xE0BF; cp++)
+                drawn &= BoxDrawing.TryDraw(ctx, cp, new Rect((cp - 0xE0B0) * 12, 1, 9, 18), Color.White, 1f);
+            ctx.EndFrame();
+        }
+
+        Frame();
+        Frame();
+        double perFrame = Allocations.PerCall(50, Frame);
+
+        Assert.True(drawn);
+        Assert.True(perFrame < 1, $"drawing the 16 Powerline separators allocated {perFrame:0.#} B per frame");
+    }
+
+    /// <summary>A terminal frame with six Powerline prompt lines on screen allocates no more than
+    /// the same lines with each separator a plain character. With the demo shell's boxes page on
+    /// screen six times, a frame was 12.6 KB; it is 1.7 KB, against 1.8 KB with the separators as
+    /// text (plan 17, round 3). What is left is the rows' text.</summary>
+    [Fact]
+    public void AFrameOfPowerlinePromptLines_AllocatesNoMoreThanTheSameLinesInText()
+    {
+        const string Prompt =
+            "\x1b[97;44m user \x1b[34;46m\uE0B0\x1b[30m ~/src \x1b[36;49m\uE0B0\x1b[0m \uE0B1 \uE0B3 " +
+            "\x1b[35m\uE0B6\x1b[97;45m 12:44 \x1b[35;49m\uE0B4\x1b[0m \x1b[32m\uE0BA\x1b[30;42m main \x1b[32;49m\uE0B8\x1b[0m " +
+            "\uE0B2 \uE0B5 \uE0B7 \uE0B9 \uE0BB \uE0BC \uE0BD \uE0BE \uE0BF\r\n";
+        string text = Prompt;
+        for (char separator = '\uE0B0'; separator <= '\uE0BF'; separator++)
+            text = text.Replace(separator, '>');
+
+        double powerline = PerFrame(Prompt), plain = PerFrame(text);
+
+        Assert.True(powerline <= plain + 64,
+            $"a frame of six Powerline prompt lines allocated {powerline:0.#} B; in text, {plain:0.#} B");
+
+        static double PerFrame(string line)
+        {
+            using var t = Term.Shown(width: 800);
+            t.Emit(string.Concat(Enumerable.Repeat(line, 6)));
+            Assert.Equal(6, t.Screen().Split('\n').Count(row => row.Contains("main", StringComparison.Ordinal)));
+            var frame = TimeSpan.FromMilliseconds(16);
+            for (int i = 0; i < 4; i++) t.Session.PumpFrame(frame, forceRender: true);
+            return Allocations.PerCall(50, () => t.Session.PumpFrame(frame, forceRender: true));
+        }
     }
 
     [Fact]

@@ -14,19 +14,42 @@ public class ToastTests
     {
         public readonly ToastHost Toasts;
         public int Saves;
-        public Page() => Toasts = new ToastHost(MarkDirty);
+        /// <summary>Builds of the page, and calls of the toast's <c>onChanged</c>.</summary>
+        public int Builds, Changes;
+        /// <summary>The opacity the toast was drawn at, frame by frame, while one was mounted.</summary>
+        public readonly List<float> Drawn = [];
+
+        public Page() => Toasts = new ToastHost(() => { Changes++; MarkDirty(); });
+
+        /// <summary>A rebuild for something else than the toast.</summary>
+        public void Rebuild() => MarkDirty();
 
         public override Element Build()
         {
+            Builds++;
             // A button pinned to the bottom edge, under where the strip will lie.
             var save = Box.New().Padding(new Thickness(8, 14)).OnClick(_ => Saves++)
                 .Children(TextElement.New("Save"));
             save.AccessibleName = "Save";
+            // Out of the flow, so the page lays out as it would without it.
+            var frames = Canvas.New(_ => { if (Shown() is { } toast) Drawn.Add(toast.Opacity); })
+                .Width(Dimension.Px(1)).Height(Dimension.Px(1));
+            frames.Position.Type = PositionType.Absolute;
             var root = Flex.Column().Children(
                 Box.New().FlexGrow(1),
-                Flex.Row().JustifyContent(JustifyContent.FlexEnd).Children(save));
+                Flex.Row().JustifyContent(JustifyContent.FlexEnd).Children(save),
+                frames);
             if (Toasts.Build() is { } strip) root.AddChild(strip);
             return root;
+        }
+
+        /// <summary>The toast mounted on the page, if any.</summary>
+        public ToastElement? Shown()
+        {
+            var children = Mount().Children[0].Children;
+            for (int i = 0; i < children.Count; i++)
+                if (children[i].Key == "toast" && children[i].Children[0] is ToastElement toast) return toast;
+            return null;
         }
     }
 
@@ -144,4 +167,185 @@ public class ToastTests
         save.Click();
         Assert.Equal(1, page.Saves);
     }
+
+    // ── The fades are drawn on the toast, not built (plan 17, round 3, step 12) ──
+
+    /// <summary>The fades called <c>onChanged</c> on every step, and every app hands it the
+    /// <c>MarkDirty</c> of its whole window: Junction rebuilt itself 23 times for one toast. Now
+    /// the owner hears of a toast twice, when it appears and when it goes, in the real loop.</summary>
+    [Fact]
+    public void AToast_RebuildsItsOwnerWhenItAppearsAndWhenItGoes_NotForItsFades()
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        int builds = page.Builds;
+
+        page.Toasts.Flash("Saved");
+        session.RunLoop(() => !page.Toasts.IsShowing, limit: TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, page.Changes);
+        Assert.Equal(2, page.Builds - builds);
+        // And the fades were drawn: a frame for each step of 0.12 s in and 0.18 s out, at 60 Hz.
+        Assert.InRange(page.Drawn.Count, 17, 22);
+    }
+
+    /// <summary>Each fade step writes the toast on screen: drawn rising to whole, held, then
+    /// falling to nothing, frame by frame, with no rebuild between.</summary>
+    [Fact]
+    public void TheToastOnScreen_FadesIn_AndOut_FrameByFrame()
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+
+        page.Toasts.Flash("Saved");
+        session.RunLoop(() => !page.Toasts.IsShowing, limit: TimeSpan.FromSeconds(5));
+
+        var drawn = page.Drawn;
+        int top = drawn.IndexOf(1f);
+        Assert.True(top > 2, $"drawn {string.Join(" ", drawn)}");
+        for (int i = 1; i <= top; i++)
+            Assert.True(drawn[i] > drawn[i - 1], $"fading in, frame {i}: {string.Join(" ", drawn)}");
+        int falling = drawn.FindIndex(top, o => o < 1f);
+        Assert.True(drawn.Count - falling >= 8, $"fading out: {string.Join(" ", drawn)}");
+        for (int i = falling + 1; i < drawn.Count; i++)
+            Assert.True(drawn[i] < drawn[i - 1], $"fading out, frame {i}: {string.Join(" ", drawn)}");
+        Assert.True(drawn[^1] < 0.01f, $"the last frame with the toast drew it at {drawn[^1]}");
+    }
+
+    /// <summary>A rebuild in the middle of a fade (the owner's, for anything else) builds the toast
+    /// at the fade's level, and the steps after it still reach the toast on screen.</summary>
+    [Fact]
+    public void ARebuildMidFade_KeepsTheLevel_AndTheFadeGoesOnOnScreen()
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        page.Toasts.Flash("Saved");
+        session.PumpFrame();
+        session.PumpFrame();
+        float level = page.Toasts.Opacity;
+        Assert.InRange(level, 0.05f, 0.95f);
+
+        int builds = page.Builds;
+        page.Rebuild();
+        Assert.Equal(builds + 1, page.Builds);
+        Assert.Equal(level, page.Shown()!.Opacity);
+
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        Assert.Equal(1f, page.Shown()!.Opacity);
+    }
+
+    /// <summary>What a screen reader is told is what it was told when every fade frame rebuilt:
+    /// the alert and its text added when the toast appears, its message announced once, both
+    /// removed when it goes, and nothing in between.</summary>
+    [Fact]
+    public void AScreenReader_HearsTheToastAppearOnceAndGoOnce()
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        var bridge = session.Window.InstallAccessibilityBridge();
+        session.PumpFrame();
+        bridge.ClearDiffs();
+        bridge.ClearAnnouncements();
+
+        page.Toasts.Flash("Saved");
+        session.RunLoop(() => !page.Toasts.IsShowing, limit: TimeSpan.FromSeconds(5));
+        for (int i = 0; i < 6; i++) session.PumpFrame(TimeSpan.FromMilliseconds(50));   // trailing refreshes
+
+        var told = bridge.Diffs.Where(d => !d.IsEmpty).Select(Told).ToList();
+        Assert.Equal(["+Alert:Saved +Label:Saved", "-Label:Saved -Alert:Saved"], told);
+        var announced = Assert.Single(bridge.Announcements);
+        Assert.Equal("Saved", announced.Text);
+        Assert.Equal(AnnouncementPoliteness.Polite, announced.Politeness);
+        Assert.Equal(AccessibilityRole.Alert, announced.Source?.Role);
+    }
+
+    // ── A second Flash in the middle of a fade (plan 17, round 3, step 17) ──
+
+    /// <summary>A second Flash cancelled the fade it met and kept its level, so a replacement
+    /// that came while the first was fading in or out stayed half drawn for its whole hold, then
+    /// faded out from there. It goes on from that level to whole (no blink), holds there for its
+    /// own time, and fades out like any toast — on the toast on screen, not only the level.</summary>
+    [Theory]
+    [InlineData(false)]   // while the first fades in
+    [InlineData(true)]    // while the first fades out
+    public void ASecondFlash_MidFade_IsWholeForItsHold_ThenFadesOut(bool whileFadingOut)
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        page.Toasts.Flash("First");
+        session.PumpFrame();
+        if (whileFadingOut)
+        {
+            session.PumpFrame(TimeSpan.FromMilliseconds(200));
+            Assert.Equal(1f, page.Toasts.Opacity);
+            session.PumpFrame(TimeSpan.FromMilliseconds(1400));
+            session.PumpFrame(TimeSpan.FromMilliseconds(200));    // the hold ran out, the fade began
+            session.PumpFrame(TimeSpan.FromMilliseconds(100));    // mid-fade
+        }
+        else session.PumpFrame();                                 // mid-fade in
+        float level = page.Toasts.Opacity;
+        Assert.InRange(level, 0.05f, 0.95f);
+
+        page.Toasts.Flash("Second");
+        session.PumpFrame();
+        Assert.Null(session.Window.FindByRole(AccessibilityRole.Alert, "First"));
+        Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Alert, "Second"));
+        Assert.True(page.Shown()!.Opacity >= level, $"dipped from {level} to {page.Shown()!.Opacity}");
+
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        Assert.Equal(1f, page.Toasts.Opacity);
+        Assert.Equal(1f, page.Shown()!.Opacity);
+        session.PumpFrame(TimeSpan.FromMilliseconds(1300));   // ≈1.5 s into its 1.7 s hold
+        Assert.True(page.Toasts.IsShowing);
+        Assert.Equal(1f, page.Shown()!.Opacity);
+
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));    // its hold ran out, the fade began
+        session.PumpFrame(TimeSpan.FromMilliseconds(90));     // mid-fade
+        Assert.True(page.Toasts.IsShowing);
+        Assert.InRange(page.Shown()!.Opacity, 0.01f, 0.99f);
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));    // gone
+        session.PumpFrame();
+        Assert.False(page.Toasts.IsShowing);
+        Assert.Null(session.Window.FindByRole(AccessibilityRole.Alert, "Second"));
+    }
+
+    /// <summary>The same in the real loop, frame by frame: from the level the second Flash met
+    /// in the first one's fade out, the toast on screen rises to whole without a dip, is drawn
+    /// whole until its hold ends, then falls to nothing; the owner rebuilds only when it changes
+    /// and when it goes.</summary>
+    [Fact]
+    public void ASecondFlash_WhileTheFirstFadesOut_RisesToWhole_ThenFadesOut_FrameByFrame()
+    {
+        var (session, page) = Mount();
+        using var _ = session;
+        page.Toasts.Flash("First");
+        session.RunLoop(() => page.Toasts.Opacity == 1f, limit: TimeSpan.FromSeconds(1));
+        session.RunLoop(() => page.Toasts.Opacity < 0.7f, limit: TimeSpan.FromSeconds(3));
+        float level = page.Toasts.Opacity;
+        Assert.InRange(level, 0.05f, 0.7f);
+        int from = page.Drawn.Count, changes = page.Changes;
+
+        page.Toasts.Flash("Second");
+        session.RunLoop(() => !page.Toasts.IsShowing, limit: TimeSpan.FromSeconds(5));
+
+        var drawn = page.Drawn.Skip(from).ToList();
+        string all = $"from {level}: {string.Join(" ", drawn)}";
+        int top = drawn.IndexOf(1f);
+        Assert.True(top >= 1, all);
+        Assert.True(drawn[0] >= level, all);
+        for (int i = 1; i <= top; i++)
+            Assert.True(drawn[i] > drawn[i - 1], $"rising, frame {i}: {all}");
+        int falling = drawn.FindIndex(top, o => o < 1f);
+        Assert.True(drawn.Count - falling >= 8, $"fading out: {all}");
+        for (int i = falling + 1; i < drawn.Count; i++)
+            Assert.True(drawn[i] < drawn[i - 1], $"fading out, frame {i}: {all}");
+        Assert.True(drawn[^1] < 0.01f, all);
+        Assert.Equal(changes + 2, page.Changes);
+    }
+
+    private static string Told(TreeDiff diff) => string.Join(" ",
+        diff.Added.Select(a => $"+{a.Node.Role}:{a.Node.Name}")
+            .Concat(diff.Removed.Select(r => $"-{r.Node.Role}:{r.Node.Name}"))
+            .Concat(diff.PropertyChanged.Select(p => $"~{p.Node.Role}:{p.Node.Name}.{p.PropertyName}"))
+            .Concat(diff.Reordered.Select(n => $"^{n.Role}:{n.Name}")));
 }

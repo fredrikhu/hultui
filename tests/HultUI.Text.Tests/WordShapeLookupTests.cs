@@ -378,6 +378,40 @@ public class LruCacheTests
     }
 
     [Fact]
+    public void AnEntryReweighed_CountsItsNewWeight_AndTheLeastRecentlyUsedOthersMakeRoom()
+    {
+        var cache = new LruCache<string, int>(capacity: 100, maxWeight: 100);
+        cache.Add("a", 1, weight: 20);
+        cache.Add("b", 2, weight: 20);
+        cache.Add("c", 3, weight: 20);
+        cache.Add("d", 4, weight: 20);           // order d, c, b, a
+
+        cache.Reweigh("b", 30);                  // 90: room for it, nothing goes, the order stays
+        Assert.Equal(90, cache.Weight);
+        Assert.Equal(4, cache.Count);
+        cache.Add("e", 5, weight: 10);           // the least recently used is still a
+        Assert.Equal(100, cache.Weight);
+
+        cache.Reweigh("d", 45);                  // 125: a, then b, go; d itself stays
+        Assert.False(cache.TryGet("a", out _) || cache.TryGet("b", out _));
+        Assert.True(cache.TryGet("c", out _) && cache.TryGet("d", out _) && cache.TryGet("e", out _));
+        Assert.Equal(75, cache.Weight);
+
+        cache.Reweigh("d", 1_000);               // counts for half the bound, as when it was put
+        Assert.Equal(80, cache.Weight);
+        cache.Reweigh("gone", 50);               // no such entry: nothing changes
+        Assert.Equal(80, cache.Weight);
+        Assert.Equal(3, cache.Count);
+
+        // The least recently used itself made heavier: the others go, newest last.
+        Assert.True(cache.TryGet("e", out _) && cache.TryGet("d", out _));   // order d, e, c
+        cache.Reweigh("c", 50);                  // 110: e goes, not c
+        Assert.False(cache.TryGet("e", out _));
+        Assert.True(cache.TryGet("c", out _) && cache.TryGet("d", out _));
+        Assert.Equal(100, cache.Weight);
+    }
+
+    [Fact]
     public void ACacheFullByWeight_InsertsWithoutAllocating()
     {
         // Weights in turn that make an entry evict none, one or several: the nodes of the

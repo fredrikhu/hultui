@@ -192,33 +192,21 @@ public partial class JunctionApp
         var shown = ShownFilePaths(paths, query);
         pane.AddChild(BuildFilesSearch(paths.Count, shown.Count, query));
 
-        var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(6, 6, 6, 6))
-            .WithRef(_filesTreeScrollRef);
-        _filesFlat.Clear();
         if (loading && paths.Count == 0)
-        {
-            scroll.AddChild(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center)
-                .Children(Text.New("Loading tree…").FontSize(12.5f).TextColor(Nocturne.On(0.45))));
-        }
+            pane.AddChild(FilesTreeMessage(Text.New("Loading tree…").FontSize(12.5f).TextColor(Nocturne.On(0.45))));
         else if (paths.Count == 0)
-        {
-            scroll.AddChild(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center)
-                .Children(Text.New("No files at this commit").FontSize(12.5f).TextColor(Nocturne.On(0.45))));
-        }
+            pane.AddChild(FilesTreeMessage(Text.New("No files at this commit").FontSize(12.5f).TextColor(Nocturne.On(0.45))));
         else if (shown.Count == 0)
-        {
-            scroll.AddChild(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center)
-                .Children(Text.New($"No files match \u201c{query}\u201d")
-                    .FontSize(12.5f).TextColor(Nocturne.On(0.45))
-                    .MaxLines(2).TextOverflow(TextOverflow.Ellipsis)));
-        }
+            pane.AddChild(FilesTreeMessage(Text.New($"No files match \u201c{query}\u201d")
+                .FontSize(12.5f).TextColor(Nocturne.On(0.45))
+                .MaxLines(2).TextOverflow(TextOverflow.Ellipsis)));
         else
         {
             _filesTree.Bind(shown, p => p, sort: FilesTreeSort);
             // A running search opens the tree outright — a match five folders down is no use
             // behind a collapsed folder. The collapsed set is untouched and comes back when
             // the query clears, which is what the Branches and Tags searches do too.
-            _filesFlat = _filesTree.Rows(expandAll: query.Length > 0);
+            SyncFilesRows(expandAll: query.Length > 0);
             // A query that has just changed puts the cursor on its first match, so Enter
             // opens what the search found without arrowing to it. Otherwise the cursor
             // only moves when the row it was on has gone.
@@ -227,13 +215,131 @@ public partial class JunctionApp
                 _filesCursorToFirstMatch = false;
                 _filesCursorPath = FirstFileRow() ?? _filesFlat.FirstOrDefault()?.Path;
             }
-            else if (_filesCursorPath == null || !_filesFlat.Any(r => r.Path == _filesCursorPath))
+            else if (_filesCursorPath == null || FilesRowIndex(_filesCursorPath) < 0)
                 _filesCursorPath = _filesSelPath ?? _filesFlat.FirstOrDefault()?.Path;
-            foreach (var node in _filesFlat)
-                scroll.AddChild(TreeRow(node));
+            pane.AddChild(BuildFilesTreeList());
         }
-        pane.AddChild(scroll);
         return pane;
+    }
+
+    /// <summary>The tree pane's word when there are no rows to show.</summary>
+    private Element FilesTreeMessage(Element message)
+    {
+        ResetFilesRows();
+        return ScrollView.New().FlexGrow(1).Padding(new Thickness(6, 6, 6, 6))
+            .WithRef(_filesTreeScrollRef)
+            .Children(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center).Children(message));
+    }
+
+    /// <summary>
+    /// The tree as a virtual list: only the rows on screen are elements. It was a scroll view
+    /// holding a row for every visible node — a search that opened 2,300 files was 14,128
+    /// elements built, resolved and diffed on every key (28 MB), 3,500 rows walked by every
+    /// pointer move's hit test and every frame's paint, and a 3,500-child extent scan a frame.
+    /// <para>The list keeps a row while its item is equal (<see cref="FileTreeRowItem"/>: the
+    /// node, and whether it is the open file, under the cursor, or an open folder), so a key
+    /// makes only the rows it changes. The rows are tree items with their own role and open
+    /// state (<see cref="VirtualListElement{T}.RowsAreComposite"/>), in a container that says it
+    /// is a scroll view, as it did. What a virtual list cannot give a reader is the rows off
+    /// screen: they are not elements.</para>
+    /// </summary>
+    private Element BuildFilesTreeList()
+    {
+        // Everything else a row shows is the colour scheme and the scale its glyphs are cut
+        // at (a display scale change retires the old rasters): a change makes them again.
+        var shape = new FileTreeRowShape(Nocturne.Theme, Ui.DisplayScale);
+        if (shape != _filesRowShape)
+        {
+            _filesRowShape = shape;
+            (_filesTreeScrollRef.Current as VirtualListElement<FileTreeRowItem>)?.InvalidateRows();
+        }
+        var list = VirtualListElement<FileTreeRowItem>.New()
+            .ItemHeight(FileTreeRowHeight)
+            .Items(new FileTreeRowItems(this, _filesFlat))
+            .RenderWith((r, _) => TreeRow(r))
+            .FlexGrow(1).Padding(new Thickness(6, 6, 6, 6));
+        list.RowsAreComposite = true;
+        list.Role = AccessibilityRole.ScrollView;
+        list.WithRef(_filesTreeScrollRef);
+        return list;
+    }
+
+    private readonly record struct FileTreeRowShape(object Theme, float Scale);
+
+    private FileTreeRowShape _filesRowShape;
+
+    /// <summary>
+    /// One row of the Files tree as its list sees it: the node, and what its look takes from the
+    /// rest of the view — whether it is the open file, whether the cursor is on it, and for a
+    /// folder whether it is open. A key that moves the cursor changes two items; one that opens
+    /// a file or a folder changes the items it touches (and an opened folder moves the rows below
+    /// it, which are other nodes at those places now).
+    /// </summary>
+    internal readonly record struct FileTreeRowItem(TreeNode<string> Node, bool Open, bool Cursor, bool Expanded);
+
+    /// <summary>The visible rows as the list's items, each made when the list asks for it — a
+    /// key compares the forty on screen, not the thousands in a search.</summary>
+    private sealed class FileTreeRowItems(JunctionApp app, List<TreeNode<string>> rows) : IReadOnlyList<FileTreeRowItem>
+    {
+        public int Count => rows.Count;
+
+        public FileTreeRowItem this[int index]
+        {
+            get
+            {
+                var node = rows[index];
+                return new FileTreeRowItem(node,
+                    Open: !node.IsFolder && node.Path == app._filesSelPath,
+                    Cursor: node.Path == app._filesCursorPath,
+                    Expanded: node.IsFolder && app._filesTree.IsExpanded(node));
+            }
+        }
+
+        public IEnumerator<FileTreeRowItem> GetEnumerator()
+        {
+            for (var i = 0; i < rows.Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // The visible rows, kept while the tree and its open folders are what they were: flattened
+    // again on every key, a search of 2,300 files was a 3,500-entry list and a walk over it per
+    // key. Indexed by path for the cursor's lookups. The tree is another object for another
+    // commit or another query (and a query is what opens everything), so the two say it all.
+    private (object? Roots, int Gen) _filesRowsKey;
+    private Dictionary<string, int>? _filesRowIndex;
+
+    /// <summary>Bumped by every change to which of the Files tree's folders are open (the
+    /// model's change callback).</summary>
+    private int _filesExpandGen;
+
+    private void SyncFilesRows(bool expandAll)
+    {
+        var key = ((object?)_filesTree.Roots, _filesExpandGen);
+        if (key == _filesRowsKey) return;
+        _filesRowsKey = key;
+        _filesFlat = _filesTree.Rows(expandAll);
+        _filesRowIndex = null;
+    }
+
+    private void ResetFilesRows()
+    {
+        _filesFlat = [];
+        _filesRowsKey = default;
+        _filesRowIndex = null;
+    }
+
+    /// <summary>Where a path is among the visible rows, or -1.</summary>
+    private int FilesRowIndex(string? path)
+    {
+        if (path is null) return -1;
+        if (_filesRowIndex is null)
+        {
+            _filesRowIndex = new Dictionary<string, int>(_filesFlat.Count, StringComparer.Ordinal);
+            for (var i = 0; i < _filesFlat.Count; i++) _filesRowIndex[_filesFlat[i].Path] = i;
+        }
+        return _filesRowIndex.TryGetValue(path, out var index) ? index : -1;
     }
 
     /// <summary>The first file (not folder) among the visible rows — where the cursor goes
@@ -357,11 +463,16 @@ public partial class JunctionApp
             e.StopPropagation = true;
     }
 
-    private Element TreeRow(TreeNode<string> node)
+    /// <summary>Rows the Files tree's template has made, for tests.</summary>
+    internal int FileTreeRowsMade { get; private set; }
+
+    private Element TreeRow(FileTreeRowItem item)
     {
-        bool selected = !node.IsFolder && node.Path == _filesSelPath;
-        bool expanded = node.IsFolder && _filesTree.IsExpanded(node);
-        bool cursor = node.Path == _filesCursorPath;
+        FileTreeRowsMade++;
+        var node = item.Node;
+        bool selected = item.Open;
+        bool expanded = item.Expanded;
+        bool cursor = item.Cursor;
         int depth = node.Depth;
 
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
@@ -459,13 +570,7 @@ public partial class JunctionApp
         }
     }
 
-    private int FilesCursorIndex()
-    {
-        string? target = _filesCursorPath ?? _filesSelPath;
-        for (int i = 0; i < _filesFlat.Count; i++)
-            if (_filesFlat[i].Path == target) return i;
-        return 0;
-    }
+    private int FilesCursorIndex() => Math.Max(0, FilesRowIndex(_filesCursorPath ?? _filesSelPath));
 
     private int FilesTreePage()
     {

@@ -636,4 +636,30 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
             session.PumpUntil(() => app.ActiveTab!.Sending == null, TimeSpan.FromSeconds(5));
         });
     }
+
+    /// <summary>The elapsed readout of a send in flight counts up on screen, rewritten in place:
+    /// its tick rebuilt the whole window every 150 ms, about seven times a second for as long as
+    /// a request took.</summary>
+    [Fact]
+    public void TheElapsedReadout_CountsUpWhileSending_WithoutRebuildingTheWindow()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-stall");
+            Click(session, "send");
+            session.PumpUntil(() => session.Window.FindByAutomationId("cancel") != null, TimeSpan.FromSeconds(5));
+            var readout = (TextElement)session.Window.FindByAutomationId("send-elapsed")!.Element;
+            int builds = app.Builds;
+            var shown = new HashSet<string> { readout.Content };
+
+            // Real time: the tick is a 150 ms Task.Delay that resumes on the UI thread.
+            session.PumpUntil(() => { shown.Add(readout.Content); return shown.Count >= 3; }, TimeSpan.FromSeconds(5));
+
+            Assert.Equal(builds, app.Builds);
+            Assert.Same(readout, session.Window.FindByAutomationId("send-elapsed")!.Element);
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpUntil(() => app.ActiveTab!.Sending == null, TimeSpan.FromSeconds(5));
+        });
+    }
 }

@@ -46,6 +46,31 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("text/create 2,000 unique emoji labels",
+            "text/create with emoji in every label: half with emoji alone in the BMP (the plain path), half with faces, "
+            + "a heart, a keycap and a trade mark asking for emoji presentation, a family, a skin tone and a flag (the BiDi path)",
+            ctx =>
+            {
+                var column = Flex.Column().FlexShrink(0);
+                ctx.Mount(ScrollView.New().FlexGrow(1).Children(column));
+                int next = 1_000_000;
+                return new Op
+                {
+                    Reset = _ => column.ReplaceChildren(),
+                    Run = _ =>
+                    {
+                        var labels = new Element[2_000];
+                        for (int i = 0; i < labels.Length; i++)
+                        {
+                            var set = i % 2 == 0 ? BmpEmoji : SequenceEmoji;
+                            labels[i] = Text.New($"{set[i % set.Length]} Item {next++} — {next * 7919 % 100_003} units {set[i / 2 % set.Length]}")
+                                .FontSize(13f);
+                        }
+                        column.ReplaceChildren(labels);
+                    },
+                };
+            });
+
         yield return new Scenario("text/ellipsis 1,000 labels resize",
             "1,000 one-line labels truncated with an ellipsis, resize drag: every truncation point found again",
             ctx =>
@@ -292,6 +317,22 @@ static partial class Scenarios
     }
 
     private const int ViewerLines = 400;
+
+    // Emoji of the Basic Multilingual Plane that ask for emoji presentation on their own:
+    // ⭐ ✅ ☕ ⚡ ❌ ⌛ ⛔ ⚽. Nothing in them sends a label to the BiDi path.
+    private static readonly string[] BmpEmoji =
+        [Cp(0x2B50), Cp(0x2705), Cp(0x2615), Cp(0x26A1), Cp(0x274C), Cp(0x231B), Cp(0x26D4), Cp(0x26BD)];
+
+    // 😀 👍🏽 ❤️ #️⃣ 👨‍👩‍👧 🇸🇪 ™️ 🎉 🚀 🙂 ©️ 1️⃣: surrogates, variation selectors, a keycap, joiners,
+    // a skin tone, a flag.
+    private static readonly string[] SequenceEmoji =
+    [
+        Cp(0x1F600), Cp(0x1F44D, 0x1F3FD), Cp(0x2764, 0xFE0F), Cp('#', 0xFE0F, 0x20E3),
+        Cp(0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467), Cp(0x1F1F8, 0x1F1EA), Cp(0x2122, 0xFE0F), Cp(0x1F389),
+        Cp(0x1F680), Cp(0x1F642), Cp(0xA9, 0xFE0F), Cp('1', 0xFE0F, 0x20E3),
+    ];
+
+    private static string Cp(params int[] codePoints) => string.Concat(codePoints.Select(char.ConvertFromUtf32));
 
     /// <summary>
     /// A file viewer as Junction's diff and Vesper's reader build one: a line number, then the

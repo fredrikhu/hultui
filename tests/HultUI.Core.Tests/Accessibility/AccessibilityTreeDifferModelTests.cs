@@ -395,10 +395,16 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
 
         private static void CompareProperties(TreeDiff diff, AccessibilityNode prev, AccessibilityNode curr)
         {
+            // Since plan 17 round 3 step 15: a role change is told, with the previous node.
+            if (prev.Role != curr.Role)
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Role, prev));
             if (prev.Name != curr.Name)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
             if (prev.Description != curr.Description)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
+            // Since plan 17 round 3 step 15: an id change alone has the tree applied.
+            if (prev.AutomationId != curr.AutomationId)
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.AutomationId));
             // A node with text on both sides tells a change of it as its text, not its value.
             if (!(prev.Text is not null && curr.Text is not null) && prev.Value != curr.Value)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));

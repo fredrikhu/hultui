@@ -162,8 +162,8 @@ internal static class BoxDrawing
         {
             case 0xE0B0: ctx.FillPolygon([new(x0, y0), new(x1, ym), new(x0, y1)], color); return;
             case 0xE0B2: ctx.FillPolygon([new(x1, y0), new(x0, ym), new(x1, y1)], color); return;
-            case 0xE0B4: ctx.FillPolygon(HalfEllipse(c, facingRight: true), color); return;
-            case 0xE0B6: ctx.FillPolygon(HalfEllipse(c, facingRight: false), color); return;
+            case 0xE0B4: ctx.FillPolygon(HalfEllipse(c, facingRight: true, stackalloc Point[HalfEllipsePoints]), color); return;
+            case 0xE0B6: ctx.FillPolygon(HalfEllipse(c, facingRight: false, stackalloc Point[HalfEllipsePoints]), color); return;
             case 0xE0B8: ctx.FillPolygon([new(x0, y0), new(x1, y1), new(x0, y1)], color); return;
             case 0xE0BA: ctx.FillPolygon([new(x1, y0), new(x1, y1), new(x0, y1)], color); return;
             case 0xE0BC: ctx.FillPolygon([new(x0, y0), new(x1, y0), new(x0, y1)], color); return;
@@ -175,26 +175,28 @@ internal static class BoxDrawing
         {
             case 0xE0B1: ctx.DrawPolyline([new(x0, y0), new(x1, ym), new(x0, y1)], color, thin); break;
             case 0xE0B3: ctx.DrawPolyline([new(x1, y0), new(x0, ym), new(x1, y1)], color, thin); break;
-            case 0xE0B5: ctx.DrawPolyline(HalfEllipse(c, facingRight: true, inset: thin / 2), color, thin); break;
-            case 0xE0B7: ctx.DrawPolyline(HalfEllipse(c, facingRight: false, inset: thin / 2), color, thin); break;
+            case 0xE0B5: ctx.DrawPolyline(HalfEllipse(c, facingRight: true, stackalloc Point[HalfEllipsePoints], inset: thin / 2), color, thin); break;
+            case 0xE0B7: ctx.DrawPolyline(HalfEllipse(c, facingRight: false, stackalloc Point[HalfEllipsePoints], inset: thin / 2), color, thin); break;
             case 0xE0B9 or 0xE0BF: ctx.DrawPolyline([new(x0, y0), new(x1, y1)], color, thin); break;
             case 0xE0BB or 0xE0BD: ctx.DrawPolyline([new(x0, y1), new(x1, y0)], color, thin); break;
         }
         ctx.Pop();
     }
 
+    private const int HalfEllipseSegments = 24, HalfEllipsePoints = HalfEllipseSegments + 1;
+
     /// <summary>The curve of a half-ellipse filling the cell, its flat side on the cell's left edge
-    /// (facing right) or right edge, top to bottom; <paramref name="inset"/> pulls it in for a
-    /// stroke.</summary>
-    private static Point[] HalfEllipse(Rect c, bool facingRight, float inset = 0)
+    /// (facing right) or right edge, top to bottom, written into <paramref name="points"/>
+    /// (<see cref="HalfEllipsePoints"/> long, on the caller's stack: every separator on screen is
+    /// drawn again every frame, and an array was 224 B a separator a frame); <paramref name="inset"/>
+    /// pulls it in for a stroke.</summary>
+    private static Span<Point> HalfEllipse(Rect c, bool facingRight, Span<Point> points, float inset = 0)
     {
-        const int Segments = 24;
         float flat = facingRight ? c.X : c.X + c.Width;
         float rx = c.Width - inset, ry = c.Height / 2f - inset, cy = c.Y + c.Height / 2f;
-        var points = new Point[Segments + 1];
-        for (int i = 0; i <= Segments; i++)
+        for (int i = 0; i <= HalfEllipseSegments; i++)
         {
-            double t = -Math.PI / 2 + Math.PI * i / Segments;
+            double t = -Math.PI / 2 + Math.PI * i / HalfEllipseSegments;
             float dx = (float)Math.Cos(t) * rx;
             points[i] = new Point(facingRight ? flat + dx : flat - dx, cy + (float)Math.Sin(t) * ry);
         }

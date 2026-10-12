@@ -14,14 +14,41 @@ public abstract class Element
     // ──── Identity ────
     public ElementId Id { get; } = ElementId.New();
     public string? Key { get; set; }
-    public string? Name { get; set; }
+
+    /// <summary>
+    /// A name for the element, for debugging and for finding it. A control with no
+    /// <see cref="AccessibleName"/> and no text of its own is named by it for screen readers, so a
+    /// change tells them, as a change of <see cref="AccessibleName"/> does.
+    /// </summary>
+    public string? Name
+    {
+        get => _name;
+        set
+        {
+            if (_name == value) return;
+            _name = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
+        }
+    }
+    private string? _name;
 
     /// <summary>
     /// Stable, non-localized identifier exposed to UI Automation as AutomationId.
     /// Unlike the accessible name, it's meant for test/automation selectors
     /// (e.g. FlaUI's <c>ByAutomationId</c>), so keep it constant across runs.
+    /// A change reaches UI Automation with the next frame; no event is raised for it.
     /// </summary>
-    public string? AutomationId { get; set; }
+    public string? AutomationId
+    {
+        get => _automationId;
+        set
+        {
+            if (_automationId == value) return;
+            _automationId = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.AutomationId);
+        }
+    }
+    private string? _automationId;
 
     // ──── Source origin (DevTools) ────
     // Storage is conditional, unlike the factory parameters that feed it: two extra
@@ -430,6 +457,14 @@ public abstract class Element
     /// </summary>
     protected internal virtual void ApplyTheme(Theme theme) { }
 
+    /// <summary>
+    /// The window this element is in now has another display scale (it moved to a monitor at
+    /// another scale, or the scale of its monitor changed). Called by the window on every
+    /// element of its tree and its overlays, before its <c>Resized</c> event. An element that
+    /// keeps what it made for the old scale lets it go here; most keep nothing.
+    /// </summary>
+    internal virtual void OnDisplayScaleChanged() { }
+
     // ──── Visual ────
     private float _opacity = 1f;
     public float Opacity
@@ -655,16 +690,58 @@ public abstract class Element
     }
 
     // ──── Accessibility ────
-    public AccessibilityRole Role { get; set; } = AccessibilityRole.None;
-    public string? AccessibleName { get; set; }
+    // The accessibility properties below tell the window when they change, as a checkbox's toggle
+    // does: a component's rebuild patches them onto its elements, and patching a box, a text or a
+    // canvas marks no layout, so a rebuild that changed only one of them was never told to a
+    // screen reader. A change made while no reader listens costs a comparison.
+
+    /// <summary>What the element is to a screen reader; <see cref="AccessibilityRole.None"/> (the
+    /// default) lets the framework infer it from the kind of element. A change is told: UIA's
+    /// ControlType, AT-SPI's role.</summary>
+    public AccessibilityRole Role
+    {
+        get => _role;
+        set
+        {
+            if (_role == value) return;
+            _role = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Role);
+        }
+    }
+    private AccessibilityRole _role = AccessibilityRole.None;
+
+    /// <summary>The name a screen reader says for the element, in place of one the framework
+    /// works out from its content. A change is told: UIA's Name, AT-SPI's accessible-name.</summary>
+    public string? AccessibleName
+    {
+        get => _accessibleName;
+        set
+        {
+            if (_accessibleName == value) return;
+            _accessibleName = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
+        }
+    }
+    private string? _accessibleName;
 
     /// <summary>
     /// Expanded state for an expandable node (e.g. a tree item), exposed as the
     /// UIA ExpandCollapse pattern: <c>null</c> = not expandable, <c>true</c> =
     /// expanded, <c>false</c> = collapsed. Expand/Collapse from assistive tech
     /// reuse the element's click handler, so wire the node to toggle on click.
+    /// A change is told: UIA's ExpandCollapseState, AT-SPI's expanded state.
     /// </summary>
-    public bool? AccessibleExpanded { get; set; }
+    public bool? AccessibleExpanded
+    {
+        get => _accessibleExpanded;
+        set
+        {
+            if (_accessibleExpanded == value) return;
+            _accessibleExpanded = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsExpanded);
+        }
+    }
+    private bool? _accessibleExpanded;
 
     /// <summary>
     /// Selected state for one of a set the user picks from — a tab: <c>null</c> = not
@@ -701,7 +778,19 @@ public abstract class Element
     }
     private bool? _accessibleToggled;
 
-    public string? AccessibleDescription { get; set; }
+    /// <summary>What a screen reader says after the name: UIA's HelpText, AT-SPI's description.
+    /// A change is told.</summary>
+    public string? AccessibleDescription
+    {
+        get => _accessibleDescription;
+        set
+        {
+            if (_accessibleDescription == value) return;
+            _accessibleDescription = value;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Description);
+        }
+    }
+    private string? _accessibleDescription;
 
     /// <summary>
     /// Set by <c>Window</c> on the root when a platform accessibility bridge is
@@ -807,6 +896,17 @@ public abstract class Element
     /// </summary>
     public void OnPassive<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent =>
         AddHandler(EventPhase.Bubble, handler, owned: false, passive: true);
+
+    /// <summary>
+    /// <see cref="OnPassive{TEvent}(Action{TEvent})"/> for a tracker that acts only while
+    /// <paramref name="listening"/> says so — a splitter's or a pan's drag, heard on a root. A
+    /// pointer move that nothing else on its way listens for is then not made at all: on a root,
+    /// such a tracker made one on every move in the window, 64 bytes each, to do nothing. A move
+    /// that is made still runs the handler, which decides for itself as before.
+    /// </summary>
+    internal void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
+        ListForMutation(typeof(TEvent)).Add(new EventHandlerEntry(EventPhase.Bubble,
+            new ListeningHandler<TEvent>(handler, listening).Invoke, Owned: false, Passive: true));
 
     private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent
     {
@@ -1031,12 +1131,34 @@ public abstract class Element
         }
     }
 
+    // Once per subtree until the style pass. A rebuild patches top-down and every patch marks
+    // style, so each level walked everything below it again: O(n × depth) a rebuild, 383,482
+    // calls here for one key in Junction's 2,300-file search, now 60,731 (one per mark, and one
+    // per element). StyleSubtree says the walk has been here and nothing unmarked has joined
+    // since (see NoteChildJoined).
     private void MarkStyleDirtyDown()
     {
-        DirtyFlags |= DirtyFlags.Style;
+        if ((DirtyFlags & DirtyFlags.StyleSubtree) != 0) return;
+        DirtyFlags |= DirtyFlags.Style | DirtyFlags.StyleSubtree;
         if (_children is null) return;
         foreach (var child in _children)
-            child.MarkStyleDirtyDown();
+            if ((child.DirtyFlags & DirtyFlags.StyleSubtree) == 0)
+                child.MarkStyleDirtyDown();
+    }
+
+    /// <summary>
+    /// <paramref name="child"/> has just been added here, and mounted if it was new. A new child
+    /// comes out of mounting marked for style; one that was moved here keeps what it had, as it
+    /// always has. If it has unmarked elements, this element no longer has a marked subtree, and
+    /// neither has any ancestor that said so — they form one chain up from here.
+    /// </summary>
+    private void NoteChildJoined(Element child)
+    {
+        if ((DirtyFlags & DirtyFlags.StyleSubtree) == 0
+            || (child.DirtyFlags & DirtyFlags.StyleSubtree) != 0)
+            return;
+        for (var e = this; e is not null && (e.DirtyFlags & DirtyFlags.StyleSubtree) != 0; e = e.Parent)
+            e.DirtyFlags &= ~DirtyFlags.StyleSubtree;
     }
 
     // ──── Lifecycle ────
@@ -1123,6 +1245,7 @@ public abstract class Element
 
         if (!child._mounted)
             child.Mount();
+        NoteChildJoined(child);
     }
 
     public void InsertChild(int index, Element child)
@@ -1139,6 +1262,7 @@ public abstract class Element
 
         if (!child._mounted)
             child.Mount();
+        NoteChildJoined(child);
     }
 
     public void RemoveChild(Element child)
@@ -1201,6 +1325,7 @@ public abstract class Element
 
             if (!child._mounted)
                 child.Mount();
+            NoteChildJoined(child);
         }
         // After the adds: mounting a child can run a component's code, which may ask for the order.
         list.ZOrder = null;
@@ -1502,3 +1627,26 @@ public abstract class Element
 
 internal readonly record struct EventHandlerEntry(
     EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false);
+
+/// <summary>Whether a handler wants events now: what a handler registered with a listening
+/// condition is the target of (<see cref="ListeningHandler{TEvent}"/>).</summary>
+internal interface IListeningHandler
+{
+    bool Listening { get; }
+}
+
+/// <summary>
+/// A passive handler that acts only some of the time — a drag tracker on a root — with the
+/// condition for it (<see cref="Element.OnPassive{TEvent}(Action{TEvent}, Func{bool})"/>). Only
+/// asked before a pointer move is made (<see cref="Events.EventDispatcher.DispatchPointerMove"/>),
+/// never to skip the handler: a move that is made still runs it. The entry's delegate points at
+/// this rather than the entry carrying the condition, which kept a field on every handler entry
+/// of every build: 8 bytes each, +3…5 % allocation on build-heavy perf-suite rows.
+/// </summary>
+internal sealed class ListeningHandler<TEvent>(Action<TEvent> handler, Func<bool> listening) : IListeningHandler
+    where TEvent : ElementEvent
+{
+    public bool Listening => listening();
+
+    public void Invoke(ElementEvent evt) => handler((TEvent)evt);
+}
