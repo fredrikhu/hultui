@@ -329,10 +329,16 @@ public static class ElementExtensions
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
 
     /// <summary>Rows made from their item and whether it is selected, and from nothing else: a
-    /// rebuild keeps every realized row whose item and selected state are unchanged. Anything
-    /// else a row shows needs <see cref="VirtualListElement{T}.InvalidateRows"/> when it changes;
-    /// see <see cref="VirtualListElement{T}.ItemRowTemplate"/>.</summary>
+    /// rebuild keeps every realized row whose item and selected state are unchanged, and each
+    /// unchanged item's accessible label. Anything else a row or a label shows needs
+    /// <see cref="VirtualListElement{T}.InvalidateRows"/> when it changes; see
+    /// <see cref="VirtualListElement{T}.ItemRowTemplate"/>.</summary>
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, bool, Element> template) { el.ItemRowTemplate = template; return el; }
+
+    /// <summary>Names each item for assistive technology, off-screen ones included. On item rows
+    /// (<c>.RenderWith((item, selected) => …)</c>) the list keeps each item's label while the
+    /// item is equal and this is the same delegate (a lambda that captures nothing, or one kept
+    /// in a field); see <see cref="VirtualListElement{T}.AccessibleLabel"/>.</summary>
     public static VirtualListElement<T> AccessibleItemLabel<T>(this VirtualListElement<T> el, Func<T, string?> label) { el.AccessibleLabel = label; return el; }
     public static VirtualListElement<T> OnActivateItem<T>(this VirtualListElement<T> el, Action<T> handler) { el.OnItemActivate = handler; return el; }
     public static VirtualListElement<T> SelectedIndex<T>(this VirtualListElement<T> el, int index) { el.SelectedIndex = index; return el; }

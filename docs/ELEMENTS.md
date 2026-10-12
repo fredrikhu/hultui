@@ -1207,6 +1207,16 @@ again, as before. The one-argument template keeps its behaviour exactly; nothing
 a list that does not opt in. On the perf suite's selection walk the opt-in makes 3 rows per
 step instead of 19 and allocates 26 KB instead of 97.
 
+The items' accessible labels follow the same contract. The accessibility tree asks for every
+item's label each time it is built — with a reader listening, after every structural change
+and every scroll — so an item-rows list keeps each item's label while the item is equal to
+the one it was made from and `AccessibleItemLabel` is the same delegate; `InvalidateRows()`,
+new `Items` and another delegate let them all go. Pass a label that reads only its item as a
+lambda that captures nothing, or keep the delegate in a field: a lambda that captures the
+build's state is a new delegate every build and keeps nothing (which is right for a label
+that reads that state, unless the state is in the shape you invalidate on). On the walk with
+a recording bridge listening, keeping the labels takes a step from 274 to 112 KB.
+
 **No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
 is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
 `HorizontalPan` and a negative-margin cell — see
