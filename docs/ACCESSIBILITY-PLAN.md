@@ -242,6 +242,18 @@ Files:
     - Removed → unexport, emit `children-changed::remove`.
     - PropertyChanged → emit `PropertyChange` signal (AT-SPI marshals specific
       property-name strings like `"accessible-name"`, `"accessible-value"`).
+    - **Order (2026-10-12, plan 17).** A caching client (libatspi, under Orca) puts a cache-add's
+      object at its index in the parent's cached children *in place of* what is there (growing
+      the list past its end), and a `children-changed:add` takes the child out and puts it back at
+      its index. So a frame sends its cache-removes and `children-changed:remove` first, then one
+      `children-changed:add` per added object in the order of its parent's children, then the
+      cache-adds, which find each object in its place. A run of added objects that ends the
+      parent's children gets one signal, for its first (a bulk append stays one signal). Before,
+      the cache-adds came first with one signal per parent, and an object added anywhere but at
+      the end took a sibling's place: `[A, B, C]` with X after A read `[A, X, C]` in a live pyatspi
+      client; with X and Y, `[A, X, Y]`. `AtSpiClientCache` in the Linux bridge tests models those
+      rules. A reorder still sends nothing, and a caching client keeps the old order (seen live;
+      a signal for it is not approved yet).
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
