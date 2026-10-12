@@ -1417,12 +1417,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                     }
                     else
                     {
-                        EventDispatcher.Dispatch(new PointerMoveEvent
-                        {
-                            Position = new Point(pos.X - _pointerCaptureOffset.X, pos.Y - _pointerCaptureOffset.Y),
-                            Delta = new Point(move.DeltaX, move.DeltaY),
-                            Modifiers = move.Modifiers,
-                        }, captured);
+                        EventDispatcher.DispatchPointerMove(captured,
+                            new Point(pos.X - _pointerCaptureOffset.X, pos.Y - _pointerCaptureOffset.Y),
+                            new Point(move.DeltaX, move.DeltaY), move.Modifiers);
                         break;
                     }
                 }
@@ -1526,12 +1523,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
                 if (_devTools.IsEnabled)
                     _devTools.HoveredElement = target;
 
+                // The event is made only when something on the path listens for moves.
                 if (target is not null)
-                {
-                    EventDispatcher.Dispatch(
-                        new PointerMoveEvent { Position = effectivePos, Delta = new Point(move.DeltaX, move.DeltaY), Modifiers = move.Modifiers },
-                        target);
-                }
+                    EventDispatcher.DispatchPointerMove(target, effectivePos, new Point(move.DeltaX, move.DeltaY), move.Modifiers);
                 break;
             }
 

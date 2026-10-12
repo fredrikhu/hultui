@@ -99,6 +99,13 @@ These propagate to child elements unless overridden.
 
 You can also call `el.On<TEvent>(handler)` directly for any event type.
 
+**A pointer event is made only for a listener.** A move, enter or leave event is created
+only when an element it would reach has a handler for it. Hover styles (`.OnHover`),
+cursors and tooltips need no event, so the pointer crossing a screen that only styles its
+hover allocates nothing beyond the platform's own input record. A `PointerMoveEvent`
+handler makes an event on every move over its element or anything inside it — on a root,
+every move in the window — so attach a move handler to the element that needs it.
+
 **Pointer capture.** A `PointerDownEvent` handler can call `e.CapturePointer()`.
 From then until the button comes up, every `PointerMoveEvent` and the
 `PointerUpEvent` go to that element wherever the pointer is, in that element's

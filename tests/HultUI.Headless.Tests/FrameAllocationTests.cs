@@ -342,15 +342,12 @@ public class FrameAllocationTests
         double repaint = PerFrame(app, () => root.MarkPaintDirty());
         double scrolled = PerFrame(app, () => scroll.ScrollOffsetY = y = y == 130 ? 150 : 130);
         // The pointer over a row of the second section, moving within it: the platform's input
-        // and the move event are all a move should allocate.
+        // is all a move should allocate (nothing listens for moves, so no move event is made).
         for (int i = 0; i < 10; i++) { window.MoveMouse(300 + i % 2, 200); app.RunFrame(Frame); }
         long events = Allocations.Least(() =>
         {
             for (int i = 0; i < 100; i++)
-            {
                 _sink = new InputEvent.MouseMoveInput(300, 200, 1, 0, KeyModifiers.None);
-                _sink = new PointerMoveEvent { Position = new Point(300, 200), Delta = new Point(1, 0) };
-            }
         });
         long moves = Allocations.Least(() =>
         {
@@ -363,7 +360,7 @@ public class FrameAllocationTests
 
         Assert.True(repaint < 1, $"a repaint allocated {repaint:0.#} B per frame");
         Assert.True(scrolled < 1, $"a scrolled frame allocated {scrolled:0.#} B");
-        Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
+        Assert.True(moves <= events, $"100 moves allocated {moves} B; the platform's input alone is {events} B");
         Assert.Same(rootOrder, ZOrderHelper.GetChildrenInZOrder(root));
         Assert.Same(sectionOrder, ZOrderHelper.GetChildrenInZOrder(sections[0]));
         Assert.Same(panel, HitTester.HitTest(root, new Point(60, 60)));
@@ -388,11 +385,12 @@ public class FrameAllocationTests
 
     private static object? _sink;
 
-    /// <summary>The pointer moving within one element allocates the platform's input and the
-    /// move event, nothing else. Looking for a tooltip to show allocated a closure for the
-    /// tooltip's delayed show on every move, whether there was a tooltip or not.</summary>
+    /// <summary>The pointer moving within one element allocates the platform's input, nothing
+    /// else. Looking for a tooltip to show allocated a closure for the tooltip's delayed show on
+    /// every move, whether there was a tooltip or not; and a move event was made on every move,
+    /// though nothing on the path listened for one (plan 17 round 3: 104 → 40 B a move).</summary>
     [Fact]
-    public void APointerMoveWithinOneElement_AllocatesOnlyItsEvents()
+    public void APointerMoveWithinOneElement_AllocatesOnlyThePlatformsInput()
     {
         var (root, _) = Screen();
         using var session = Session(root);
@@ -402,10 +400,7 @@ public class FrameAllocationTests
         long events = Allocations.Least(() =>
         {
             for (int i = 0; i < 100; i++)
-            {
                 _sink = new InputEvent.MouseMoveInput(480, 100, 1, 0, KeyModifiers.None);
-                _sink = new PointerMoveEvent { Position = new Point(480, 100), Delta = new Point(1, 0) };
-            }
         });
 
         long moves = Allocations.Least(() =>
@@ -417,7 +412,7 @@ public class FrameAllocationTests
             }
         }, goal: events);
 
-        Assert.True(moves <= events, $"100 moves allocated {moves} B; their events alone are {events} B");
+        Assert.True(moves <= events, $"100 moves allocated {moves} B; the platform's input alone is {events} B");
     }
 
     /// <summary>Bytes this thread allocated per rendered frame, <paramref name="change"/>

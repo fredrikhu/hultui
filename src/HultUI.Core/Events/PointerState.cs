@@ -46,20 +46,27 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         // Find the common ancestor to avoid firing leave/enter on shared ancestors
         var commonAncestor = FindCommonAncestor(oldHovered, newHovered);
 
-        // Fire PointerLeave on elements that lost the pointer (old → common ancestor, exclusive)
-        var leaveEvt = new PointerLeaveEvent { Position = position, Modifiers = modifiers };
+        // Fire PointerLeave on elements that lost the pointer (old → common ancestor, exclusive).
+        // Each event is made for the first element that listens and shared up the chain, as it
+        // always was; a chain with no listener makes none. Hover styles (SetInteractionHovered)
+        // need no event, and the pair was 112 bytes on every hover change, listened to or not.
+        // Whether an element listens is asked as the walk reaches it, which is when its
+        // handlers were looked up before: one a handler further down adds is still heard.
+        PointerLeaveEvent? leaveEvt = null;
         for (var el = oldHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
         {
             el.SetInteractionHovered(false);
-            EventDispatcher.DispatchDirect(leaveEvt, el);
+            if (el.HasEventHandler<PointerLeaveEvent>())
+                EventDispatcher.DispatchDirect(leaveEvt ??= new PointerLeaveEvent { Position = position, Modifiers = modifiers }, el);
         }
 
         // Fire PointerEnter on elements that gained the pointer (new → common ancestor, exclusive)
-        var enterEvt = new PointerEnterEvent { Position = position, Modifiers = modifiers };
+        PointerEnterEvent? enterEvt = null;
         for (var el = newHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
         {
             el.SetInteractionHovered(true);
-            EventDispatcher.DispatchDirect(enterEvt, el);
+            if (el.HasEventHandler<PointerEnterEvent>())
+                EventDispatcher.DispatchDirect(enterEvt ??= new PointerEnterEvent { Position = position, Modifiers = modifiers }, el);
         }
     }
 
