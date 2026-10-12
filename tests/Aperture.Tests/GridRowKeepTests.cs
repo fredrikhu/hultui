@@ -101,8 +101,8 @@ public class GridRowKeepTests
     /// <summary>
     /// A page that lands fills the last row the page before left part full, a row whose place
     /// and cursor did not change. The artwork never lands here, so no picture makes the rows
-    /// again; and a page's landing does not rebuild the view by itself (it waits for the next
-    /// build, which an arrow key gives it here), so the test looks after one.
+    /// again. The landing rebuilds the view by itself (it waited for the next build until plan
+    /// 17's step 17; see LibraryPagingTests), so no key is pressed.
     /// </summary>
     [Fact]
     public void APageThatLands_FillsTheKeptLastRow()
@@ -111,11 +111,7 @@ public class GridRowKeepTests
         {
             int across = Cards(Rows(session)[0]).Count;
             int partial = 100 / across;   // the row the first page left part full
-            Assert.Equal(100 % across, Cards(Rows(session)[partial]).Count);
             Assert.Equal(150, app.GridItems.Count);   // the second page has landed
-
-            Keys(session, KeyCode.Right);   // the first press lands on the first card: a build
-
             Assert.Equal(across, Cards(Rows(session)[partial]).Count);
         }, films: 150, width: 2400, height: 2400, artwork: new GatedArtwork());
     }

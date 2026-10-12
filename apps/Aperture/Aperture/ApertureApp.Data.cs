@@ -134,8 +134,10 @@ public sealed partial class ApertureApp
     internal bool GridHasMore => _gridItems.Count < _gridTotal;
 
     /// <summary>Asks for the page that would extend the grid, if one is needed. Called
-    /// from the grid's build with the number of items scrolled into view, so paging
-    /// follows the viewport rather than a button.</summary>
+    /// from the grid's build with how many items it wants loaded — a page beyond the rows
+    /// scrolled to or the cursor, all of them on the way to End — so paging follows the
+    /// viewport and the cursor rather than a button. A page is <see cref="GridPageSize"/>,
+    /// or up to ten of them at once when more than one is wanted (End in a large library).</summary>
     private void EnsureGridPage(string libraryId, int neededCount)
     {
         if (_library is not { } lib) return;
@@ -149,6 +151,8 @@ public sealed partial class ApertureApp
             _gridKey = key;
             _gridItems.Clear();
             _gridTotal = 0;
+            _gridAheadAsked = -1;
+            _gridReached = 0;
         }
         else if (_gridItems.Count >= neededCount && _gridItems.Count > 0)
         {
@@ -160,6 +164,9 @@ public sealed partial class ApertureApp
         }
 
         int start = _gridItems.Count;
+        // The first page is one page: the total is not known yet.
+        int limit = start == 0 ? GridPageSize
+            : (int)Math.Clamp((long)neededCount - start, GridPageSize, GridPageSize * 10);
         var sort = GridSort;
         bool desc = GridDescending;
         var played = GridPlayedFilter;
@@ -170,7 +177,7 @@ public sealed partial class ApertureApp
         {
             ParentId = libraryId,
             StartIndex = start,
-            Limit = GridPageSize,
+            Limit = limit,
             Sort = sort,
             Descending = desc,
             Played = played,

@@ -47,22 +47,48 @@ public sealed partial class ApertureApp
     /// <summary>The library item under the cursor, or null when it is on something else.</summary>
     internal MediaItem? CursorItem => CursorEntry as MediaItem;
 
+    /// <summary>How many the list under the cursor holds in all, when only the first of them
+    /// have loaded (the library grid pages them): at least the items it has.</summary>
+    private int _cursorTotal;
+
+    /// <summary>End was pressed in a list that is still loading the rest: each page that lands
+    /// moves the cursor on to the new last item, until the last of the list.</summary>
+    private bool _cursorToEnd;
+
+    /// <summary>Where the cursor is in the list <paramref name="key"/> names, or -1 when it is on
+    /// another list (a view asks before it registers its own).</summary>
+    private int CursorIndexIn(string key) => _cursorKey == key ? _cursorIndex : -1;
+
+    /// <summary>Whether End is on its way to the end of the list <paramref name="key"/> names,
+    /// whose rest is still loading: the view asks for all of it then.</summary>
+    private bool CursorGoingToEndIn(string key) => _cursorKey == key && _cursorToEnd;
+
     /// <summary>
     /// Called from a view's build: this is what the arrows are walking now. Changing the
     /// key resets the cursor, because "the third poster" means nothing in a different list.
+    /// <paramref name="total"/> is how many the list holds in all when only part has loaded.
     /// </summary>
-    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow)
+    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow, int total = 0)
     {
         _cursorItems = items;
         _cursorPerRow = Math.Max(1, perRow);
+        _cursorTotal = Math.Max(total, items.Count);
         if (_cursorKey == key)
         {
+            if (_cursorToEnd && items.Count > 0)
+            {
+                // A page landed on the way to the end: on to its last item.
+                if (_cursorIndex != items.Count - 1) _pendingCursorFocus = true;
+                _cursorIndex = items.Count - 1;
+                if (items.Count >= _cursorTotal) _cursorToEnd = false;
+            }
             // The list can shrink under the cursor as pages load or a filter changes.
-            if (_cursorIndex >= items.Count) _cursorIndex = items.Count - 1;
+            else if (_cursorIndex >= items.Count) _cursorIndex = items.Count - 1;
             return;
         }
         _cursorKey = key;
         _cursorIndex = -1;
+        _cursorToEnd = false;
     }
 
     /// <summary>True when this card is the one the arrows are on — the ring, and the
@@ -84,6 +110,7 @@ public sealed partial class ApertureApp
     private bool MoveCursor(int delta)
     {
         if (_cursorItems.Count == 0) return false;
+        _cursorToEnd = false;
         int next = _cursorIndex < 0
             ? (delta > 0 ? 0 : _cursorItems.Count - 1)
             : Math.Clamp(_cursorIndex + delta, 0, _cursorItems.Count - 1);
@@ -97,7 +124,22 @@ public sealed partial class ApertureApp
     private bool MoveCursorTo(int index)
     {
         if (_cursorItems.Count == 0) return false;
+        _cursorToEnd = false;
         _cursorIndex = Math.Clamp(index, 0, _cursorItems.Count - 1);
+        _pendingCursorFocus = true;
+        Rerender();
+        return true;
+    }
+
+    /// <summary>End: the last item of the list, not of what has loaded. While the rest is still
+    /// to come the cursor goes to the last loaded item and on with every page that lands, and
+    /// the view asks for the rest (it used to stop at the last loaded one, the 100th of a
+    /// 250-film library, for good).</summary>
+    private bool MoveCursorToEnd()
+    {
+        if (_cursorItems.Count == 0) return false;
+        _cursorIndex = _cursorItems.Count - 1;
+        _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
         _pendingCursorFocus = true;
         Rerender();
         return true;
@@ -118,7 +160,7 @@ public sealed partial class ApertureApp
             case KeyCode.Down: return MoveCursor(_cursorPerRow);
             case KeyCode.Up: return MoveCursor(-_cursorPerRow);
             case KeyCode.Home: return MoveCursorTo(0);
-            case KeyCode.End: return MoveCursorTo(_cursorItems.Count - 1);
+            case KeyCode.End: return MoveCursorToEnd();
             case KeyCode.PageDown: return MoveCursor(_cursorPerRow * 3);
             case KeyCode.PageUp: return MoveCursor(-_cursorPerRow * 3);
 
