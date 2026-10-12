@@ -8,13 +8,14 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Core.Threading;
 
 namespace HultUI;
 
-public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
+public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -83,6 +84,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
     // measure end-to-end update latency (mutation → painted) and to react once a
     // frame is on screen. Registering one guarantees a frame renders.
     private readonly List<Action> _postFrameCallbacks = [];
+    // Work run at the start of the next frame, before style and layout (IPreFrameHost): the
+    // drags and hovers that follow the pointer once a frame. Two lists, swapped for the run, so
+    // a frame allocates nothing for them and one asked for during the run waits for the next.
+    private List<Action> _preFrameCallbacks = [], _preFrameRunning = [];
     /// <summary>The button whose release is dropped: its press only closed an anchored overlay
     /// from that overlay's own anchor. -1 for none.</summary>
     private int _swallowedRelease = -1;
@@ -870,6 +875,40 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         UIThread.WakeIfParked();
     }
 
+    /// <summary>
+    /// Runs <paramref name="callback"/> at the start of the next frame, before style and layout,
+    /// and asks for that frame. A callback already waiting is not added twice: a drag asks on every
+    /// pointer move and is applied once per frame (<see cref="PointerFollow"/>).
+    /// </summary>
+    void IPreFrameHost.RunBeforeNextFrame(Action callback)
+    {
+        foreach (var waiting in _preFrameCallbacks)
+            if (ReferenceEquals(waiting, callback)) return;
+        _preFrameCallbacks.Add(callback);
+        // From a callback the loop's wait dispatched, nothing else would end the wait for it.
+        UIThread.WakeIfParked();
+    }
+
+    /// <summary>The <see cref="IPreFrameHost.RunBeforeNextFrame"/> work, in one batch, as an
+    /// event's handlers run: what it writes rebuilds once when it is done.</summary>
+    private void RunPreFrameCallbacks()
+    {
+        if (_preFrameCallbacks.Count == 0) return;
+        (_preFrameCallbacks, _preFrameRunning) = (_preFrameRunning, _preFrameCallbacks);
+        bool batch = ReactiveRuntime.AutoBatch;
+        if (batch) ReactiveRuntime.BeginBatch();
+        try
+        {
+            for (int i = 0; i < _preFrameRunning.Count; i++)
+                _preFrameRunning[i]();
+        }
+        finally
+        {
+            _preFrameRunning.Clear();
+            if (batch) ReactiveRuntime.EndBatch();
+        }
+    }
+
     /// <summary>DevTools' continuous-redraw mode (F12 twice): render every iteration, unpaced.</summary>
     internal bool ContinuousRedraw => _devTools.ContinuousRedraw;
 
@@ -890,6 +929,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // A static overlay (a tooltip) costs nothing once painted.
         || AnyOverlayContentDirty()
         || _postFrameCallbacks.Count > 0
+        // A drag or a hover that follows the pointer once a frame has a position to apply.
+        || _preFrameCallbacks.Count > 0
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
         // the frames itself — otherwise holding the pointer still would stop the scroll.
         || _autoScrollTarget is not null
@@ -1038,6 +1079,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         // Before style and layout, so this frame paints where the autoscroll has reached
         // rather than a frame behind it.
         TickAutoScroll();
+
+        // The same for a splitter, a pan or a slider following the pointer: the moves since the
+        // last frame recorded where it is, and this applies the latest, once (PointerFollow).
+        RunPreFrameCallbacks();
 
         // Safety net: run any rebuild that was deferred because it was requested during
         // a reconcile (e.g. MarkDirty from a BlurEvent when a focused element was

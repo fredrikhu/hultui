@@ -6,7 +6,7 @@ namespace HultUI.Core.Builders;
 
 /// <summary>
 /// The draggable border between a fixed-size pane and whatever fills the rest of the row
-/// (or column). Holds the pane's size as app state and reports every move, the way
+/// (or column). Holds the pane's size as app state and reports it as it moves, the way
 /// <see cref="HorizontalPan"/> holds its offset — a size pushed straight onto an element
 /// would be overwritten by the next build. Build the pane at <see cref="Size"/>, put
 /// <see cref="Handle()"/> beside it, and call <see cref="AttachDrag"/> once on an ancestor.
@@ -30,9 +30,15 @@ public sealed class PaneSplitter
     private bool _dragMoved;
     // Made once, not per AttachDrag (owners call it on every build).
     private Func<bool>? _listening;
+    // Where the pointer is along the axis, applied once per frame while dragging.
+    private float _pointer;
+    private PointerFollow? _follow;
 
     /// <param name="onChanged">Runs whenever the size moves — normally the owner's
-    /// <c>MarkDirty</c>, since the pane is rebuilt at the new size.</param>
+    /// <c>MarkDirty</c>, since the pane is rebuilt at the new size. A drag runs it at most
+    /// once per frame that may be drawn, at the pointer's latest position, however many
+    /// moves came in between (a 1,000 Hz mouse sends about sixteen a frame), and the release
+    /// applies the last position before the drag ends.</param>
     /// <param name="onCommitted">Runs once when a drag is let go or a key is released,
     /// rather than on every move: where the owner remembers the size.</param>
     /// <param name="min">Smallest the pane may be.</param>
@@ -87,12 +93,15 @@ public sealed class PaneSplitter
             handle.IsGrabbed = true;
             _onChanged();
         });
+        // A key acts after the moves before it, in order.
         handle.OnKeyStep = delta =>
         {
+            _follow?.Flush();
             if (Resize(Size + delta)) _onCommitted?.Invoke();
         };
         handle.OnKeyEnd = toEnd =>
         {
+            _follow?.Flush();
             if (Resize(toEnd ? _max : _min)) _onCommitted?.Invoke();
         };
         return handle;
@@ -108,11 +117,17 @@ public sealed class PaneSplitter
     {
         root.OnPassive<PointerMoveEvent>(e =>
         {
-            if (IsDragging) DragTo(Axis == SplitterAxis.Horizontal ? e.Position.X : e.Position.Y);
+            if (!IsDragging) return;
+            // Recorded, and applied once per frame that may be drawn: onChanged rebuilds the
+            // owner, and a 1,000 Hz mouse rebuilt it about sixteen times for every frame drawn.
+            _pointer = Axis == SplitterAxis.Horizontal ? e.Position.X : e.Position.Y;
+            (_follow ??= new PointerFollow(() => DragTo(_pointer))).Request(e.CurrentTarget);
         }, _listening ??= () => IsDragging);
         root.OnPassive<PointerUpEvent>(_ =>
         {
             if (!IsDragging) return;
+            // The drag ends exactly where the pointer did, whether or not a frame came between.
+            _follow?.Flush();
             IsDragging = false;
             _onChanged();
             // Remembered when the grab is let go rather than on every move, so one drag

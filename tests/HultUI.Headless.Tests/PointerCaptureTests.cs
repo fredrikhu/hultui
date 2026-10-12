@@ -82,13 +82,17 @@ public class PointerCaptureTests
         session.Window.MouseDown(trackLeft, midY);
         Assert.Equal(0, slider.Value);
 
+        // The value follows once per frame (PointerFollowTests), so each move gets one.
         session.Window.MoveMouse(trackLeft + 100, midY + 120);   // well below the track
+        session.PumpFrame();
         Assert.Equal(50, slider.Value);
         session.Window.MoveMouse(trackLeft + 150, box.Y - 90);   // well above it
+        session.PumpFrame();
         Assert.Equal(75, slider.Value);
 
         session.Window.MouseUp(trackLeft + 150, box.Y - 90);
         session.Window.MoveMouse(trackLeft + 20, box.Y - 90);    // released: a plain move changes nothing
+        session.PumpFrame();
         Assert.Equal(75, slider.Value);
     }
 }

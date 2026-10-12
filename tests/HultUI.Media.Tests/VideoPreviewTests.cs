@@ -125,6 +125,34 @@ public class VideoPreviewTests
         Assert.True(seek().ShowHoverFill);
     }
 
+    /// <summary>The scrubber reports the time under the pointer once per frame that may be drawn
+    /// (plan 17 round 3): the player is built again, and asked for a preview, once for all the
+    /// moves of a frame, at the last of them — a 1,000 Hz mouse built it about sixteen times a
+    /// frame.</summary>
+    [Fact]
+    public void PointingAlongTheScrubber_BuildsThePlayerOnceAFrame_AtTheLastPosition()
+    {
+        using var f = new Fixture(new VideoPreviewFrame(new StubImage(new Size(320, 180))));
+        f.HoverScrubber(0.2);
+        f.Asked.Clear();
+        int builds = f.VideoPlayer.Builds;
+        var seek = (Core.Elements.SliderElement)f.Session.Window.FindByAutomationId("video-seek")!.Element;
+        var box = seek.Layout.AbsoluteContentBox;
+        float y = box.Y + box.Height / 2f, x = 0;
+
+        for (int i = 1; i <= 8; i++)
+            f.Session.Window.MoveMouse(x = box.X + box.Width * (0.2f + 0.05f * i), y);
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+        Assert.Empty(f.Asked);
+
+        f.Session.PumpFrame();
+        Assert.Equal(builds + 1, f.VideoPlayer.Builds);
+        double expected = (x - box.X - seek.ThumbRadius) / (box.Width - 2 * seek.ThumbRadius)
+            * f.Backend.Duration!.Value.TotalSeconds;
+        var asked = Assert.Single(f.Asked);
+        Assert.Equal(expected, asked.TotalSeconds, 0);
+    }
+
     [Fact]
     public void LeavingTheTrackTakesThePreviewWithIt()
     {

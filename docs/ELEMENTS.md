@@ -1030,7 +1030,7 @@ NumericUpDown.New(settings.FontSize, 6, 72)
 
 The draggable border between a fixed-size pane and whatever fills the rest of a row
 or column. It is a **model plus a handle**, not a container: `PaneSplitter` holds
-the pane's size as app state and reports every move (the way `HorizontalPan` holds
+the pane's size as app state and reports it as it moves (the way `HorizontalPan` holds
 its offset), and the owner rebuilds the pane at that size. A size written onto an
 element would be overwritten by the next build.
 
@@ -1055,7 +1055,9 @@ Flex.Row().AlignItems(AlignItems.Stretch).Children(
 | `IsDragging` | true while grabbed |
 | `SplitterAxis.Vertical` (constructor) | stacked panes: the handle is a horizontal strip dragged up and down |
 
-`onChanged` runs on every move; `onCommitted` once per drag (and per key step), so a
+`onChanged` follows a drag once per frame that may be drawn, at the pointer's latest
+position, and the release applies the last one (see "A drag rebuilds once per frame" in
+REACTIVITY.md); `onCommitted` runs once per drag (and per key step), so a
 settings file is written once rather than sixty times a second. The grab is
 remembered as pointer-at-press plus size-at-press, so a splitter dragged past its
 minimum does not jump when the pointer comes back.
@@ -1248,7 +1250,10 @@ second value.
 **Pointing at a slider.** `SliderElement.OnHoverValue` reports the value under the pointer
 as it crosses the track, and null when it leaves — including while dragging, since the thumb
 is under the pointer either way. Hovering never changes the value; that still takes a press,
-a drag or a key. The video scrubber's preview is what this exists for.
+a drag or a key. The video scrubber's preview is what this exists for. `OnHoverValue`, and
+`OnValueChanged` during a drag, follow the pointer once per frame that may be drawn, at its
+latest position; the release applies the last value at once (see "A drag rebuilds once per
+frame" in REACTIVITY.md).
 
 **Marking the current choice.** Set `ContextMenuItem.IsChecked` rather than writing a mark
 into `Label`. `true` draws the theme's `CheckGlyph` in the icon column, `false` reserves the

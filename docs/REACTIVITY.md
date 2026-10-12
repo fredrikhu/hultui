@@ -208,6 +208,24 @@ of a fade rebuilt the player (Reel: 166 rebuilds in 12 s, three quarters of what
 thread allocated); a fade frame now costs about 0.9 KB instead of 41 KB (headless, JIT), and
 the player rebuilds only where the bar appears and where it goes.
 
+### A drag rebuilds once per frame
+
+A pointer moves far more often than a window draws: a 1,000 Hz mouse sends about sixteen
+moves for each frame of a 60 Hz display. The controls whose drag rebuilds their owner follow
+the pointer once per frame that may be drawn, at its latest position: `PaneSplitter`'s
+`onChanged`, `HorizontalPan`'s, and a `Slider`'s `OnValueChanged` while it is dragged and its
+`OnHoverValue` while it is pointed at (the video scrubber's preview). The moves between two
+frames only record where the pointer is; the window applies the last of them at the start of
+its next frame, before style and layout, so that frame shows it. The release applies the last
+position at once, so a drag ends exactly where the pointer did, frame or no frame. A splitter
+between two lists of 60 rows, dragged with such a mouse, rebuilt its owner 16 times a frame
+(10.5 MB a frame, headless) and now does once (0.66 MB).
+
+Every other pointer-move handler still hears every move, an app's own on the same element
+included. A handler of yours that calls `MarkDirty()` from a `PointerMoveEvent` rebuilds on
+every move: build a drag on these controls where you can, or keep it out of `Build()` (write
+the live element through a `Ref<T>`).
+
 ### A value that changes ten times a second
 
 Some signals move on their own, many times a second: `MediaPlayer.Position` while a film
