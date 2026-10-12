@@ -204,17 +204,11 @@ public sealed partial class TerminalElement
         if (!AccessibilityClients.Active) return;
         if (_settlePending) _settleTimer.Cancel();
         _settlePending = true;
-        _settleTimer = Animate.Value(0f, 1f, static _ => { })
-            .Duration((float)ScreenSettle.TotalSeconds)
-            .OnComplete(ScreenSettled)
-            .Start();
+        _settleTimer = Animate.After((float)ScreenSettle.TotalSeconds, ScreenSettled);
 
         if (_limitPending) return;
         _limitPending = true;
-        _limitTimer = Animate.Value(0f, 1f, static _ => { })
-            .Duration((float)ScreenSettleLimit.TotalSeconds)
-            .OnComplete(ScreenSettled)
-            .Start();
+        _limitTimer = Animate.After((float)ScreenSettleLimit.TotalSeconds, ScreenSettled);
     }
 
     private void ScreenSettled()

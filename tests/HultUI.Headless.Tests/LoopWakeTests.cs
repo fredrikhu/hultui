@@ -124,17 +124,107 @@ public class LoopWakeTests
     // ── Each deadline it owns comes on time ──
 
     [Fact]
-    public void ADelayTween_IsSteppedUntilItFires()
+    public void ADelay_FiresOnItsDeadline_WakingTheLoopOnce()
     {
         using var run = new Run();
         long start = run.Now;
         double firedAt = -1;
+        int passes = 0;
         Animate.Value(0f, 1f, _ => { }).Delay(1f).Duration(0f).OnComplete(() => firedAt = run.MsSince(start)).Start();
 
-        run.Session.RunLoop(() => firedAt >= 0, limit: TimeSpan.FromSeconds(3));
+        run.Session.RunLoop(() => { passes++; return firedAt >= 0; }, limit: TimeSpan.FromSeconds(3));
 
-        // A pure delay is stepped an interval at a time, as the 16 ms idle wait stepped it.
-        Assert.InRange(firedAt, 1000, 1017);
+        // Its first step, then the step when the delay is out. It was stepped every 16 ms, 63
+        // passes for one second.
+        Assert.InRange(firedAt, 1000, 1001);
+        Assert.InRange(passes, 2, 3);
+    }
+
+    /// <summary>A toast's hold was a tween with a Duration and a setter that changed nothing:
+    /// it stepped every frame interval, 118 steps for a 2 s toast's 20 frames.</summary>
+    [Fact]
+    public void AToast_WakesTheLoopForItsFramesAndOnceForItsHold()
+    {
+        using var run = new Run();
+        var toast = new ToastHost(() => run.Box.MarkPaintDirty());
+        long start = run.Now;
+        int passes = 0, before = run.Frames;
+        toast.Flash("Saved", seconds: 2f);
+
+        double goneAt = RunUntil(run, () => { passes++; return !toast.IsShowing; }, start, TimeSpan.FromSeconds(5));
+
+        // Fade in 0.12 s, hold 2 s from the flash, fade out 0.18 s: drawn at 60 Hz, two passes
+        // a frame (the frame, and the end of the wait for the next interval), and one for the
+        // hold. Stepped every 16 ms, the hold alone was 125 passes.
+        Assert.InRange(goneAt, 2180, 2220);
+        Assert.InRange(run.Frames - before, 15, 25);
+        Assert.InRange(passes, run.Frames - before, 2 * (run.Frames - before) + 6);
+    }
+
+    [Fact]
+    public void ATooltipsShowDelay_WakesTheLoopOnce()
+    {
+        var owner = Box.New().Width(Dimension.Px(100)).Height(Dimension.Px(50)).Background(Color.Gray);
+        owner.TooltipText = "A tooltip";
+        using var run = new Run(owner);
+        float delay = run.Session.Application.Theme.Tooltip.ShowDelay;
+        run.Session.Window.MoveMouse(20, 20);
+        long start = run.Now;
+        int passes = 0;
+
+        double shownAt = RunUntil(run, () => { passes++; return run.Session.Window.Window.OverlayContents.Any(); },
+            start, TimeSpan.FromSeconds(3));
+
+        // Stepped every 16 ms, the delay alone was 31 passes.
+        Assert.InRange(shownAt, delay * 1000, delay * 1000 + 1);
+        Assert.InRange(passes, 2, 6);
+    }
+
+    /// <summary>A tween started while the others wait out a long delay takes its first step with
+    /// the next frame, not when the delay is out.</summary>
+    [Fact]
+    public void ATweenStartedDuringALongDelay_StepsWithTheNextFrame()
+    {
+        using var run = new Run();
+        Animate.After(5f, () => { });
+        long start = run.Now;
+        double firstAt = -1;
+        bool started = false;
+
+        RunUntil(run, () => firstAt >= 0, start, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(100), () =>
+        {
+            if (started) return;
+            started = true;
+            Animate.Value(0f, 1f, _ => { if (firstAt < 0) firstAt = run.MsSince(start); run.Box.MarkPaintDirty(); })
+                .Duration(0.3f).Start();
+        });
+
+        Assert.InRange(firstAt, 100, 101);
+    }
+
+    /// <summary>The same for one started after the pass's step, by a frame that no tween drew:
+    /// a post-frame callback here, a Build in an app, of a frame a post asked for.</summary>
+    [Fact]
+    public void ATweenStartedByAFrameDuringALongDelay_StepsWithTheNextFrame()
+    {
+        using var run = new Run();
+        Animate.After(5f, () => { });
+        long start = run.Now;
+        double firstAt = -1;
+        bool posted = false;
+
+        RunUntil(run, () => firstAt >= 0, start, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(100), () =>
+        {
+            if (posted) return;
+            posted = true;
+            run.Box.MarkPaintDirty();
+            run.Session.Window.Window.RequestPostFrameCallback(() =>
+                Animate.Value(0f, 1f, _ => { if (firstAt < 0) firstAt = run.MsSince(start); run.Box.MarkPaintDirty(); })
+                    .Duration(0.3f).Start());
+        });
+
+        // The frame at 100 ms started it; its first step comes with the next, at 60 Hz.
+        Assert.InRange(firstAt, 116, 118);
     }
 
     [Fact]
@@ -444,8 +534,9 @@ public class LoopWakeTests
                 .Duration(0.3f).Ease(Easing.Linear).Start();
         }, limit: TimeSpan.FromSeconds(10));
 
-        // Stepped by the five seconds since the last step, it would draw its end at once.
-        Assert.InRange(first, 0f, 16f / 300f + 0.001f);
+        // Its clock starts at its first step: stepped by the five seconds since the last step, it
+        // would draw its end at once.
+        Assert.Equal(0f, first);
     }
 
     private sealed class SwitchedBridge : IAccessibilityBridge

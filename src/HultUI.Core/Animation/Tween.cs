@@ -5,6 +5,15 @@ internal interface ITween
     bool IsComplete { get; }
     void Tick(float deltaSeconds);
     void Cancel();
+
+    /// <summary>Whether it has had a step: a tween's clock starts at its first one in the frame
+    /// loop (<see cref="AnimationManager.Tick(float, float)"/>).</summary>
+    bool Started { get; }
+
+    /// <summary>Seconds from its last step until a step can next change anything: 0 when the
+    /// next one does (it is running, or has not had its first step), what is left of its delay
+    /// while it waits that out. Not asked of a complete tween.</summary>
+    float NextChangeIn { get; }
 }
 
 public sealed class Tween<T> : ITween
@@ -24,8 +33,13 @@ public sealed class Tween<T> : ITween
     private float _elapsed;
     private int _cycle;                // how many cycles have finished
     private bool _complete;
+    private bool _started;
 
     public bool IsComplete => _complete;
+
+    bool ITween.Started => _started;
+
+    float ITween.NextChangeIn => _started && _elapsed < _delay ? _delay - _elapsed : 0f;
 
     internal Tween(
         T from, T to,
@@ -55,6 +69,7 @@ public sealed class Tween<T> : ITween
     {
         if (_complete) return;
 
+        _started = true;
         _elapsed += deltaSeconds;
 
         if (_elapsed < _delay)

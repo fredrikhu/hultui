@@ -62,17 +62,14 @@ public sealed partial class TerminalElement
     {
         if (_search is not { Query.Length: > 0 } || _rebindPending) return;
         _rebindPending = true;
-        _rebindTimer = Animate.Value(0f, 1f, static _ => { })
-            .Duration((float)SearchRebindDelay.TotalSeconds)
-            .OnComplete(() =>
-            {
-                _rebindPending = false;
-                if (!IsHosted || _search is not { Query.Length: > 0 }) return;
-                Rebind();
-                MarkPaintDirty();
-                SearchChanged?.Invoke();
-            })
-            .Start();
+        _rebindTimer = Animate.After((float)SearchRebindDelay.TotalSeconds, () =>
+        {
+            _rebindPending = false;
+            if (!IsHosted || _search is not { Query.Length: > 0 }) return;
+            Rebind();
+            MarkPaintDirty();
+            SearchChanged?.Invoke();
+        });
     }
 
     private void StopSearchRebind()

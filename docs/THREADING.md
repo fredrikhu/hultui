@@ -58,6 +58,11 @@ What that changes for an application:
 - **A flag set off the UI thread is not seen until the next wake.** Hand results
   to the UI thread with `InvokeOnMainThread` or an `await`, not by writing a field
   that a `Build` or a frame reads; the loop no longer comes round to read it.
+- **Something set aside for later must name when it is due.** A timer is a tween
+  with a delay (`Animate.Value(0f, 1f, _ => { }).Delay(s).Duration(0f).OnComplete(…)`):
+  the loop wakes once for it. A tween with a `Duration` and a setter that changes
+  nothing steps every frame interval until it ends (see
+  [ANIMATIONS.md](ANIMATIONS.md#when-a-tween-steps)).
 - **A callback the wait itself runs on the UI thread** — a WebView2 event, an OLE
   drop, a WinRT `DispatcherQueue` item, a `WM_GETOBJECT` from a screen reader — comes
   with no event of SDL's to end the wait. What it changes wakes the loop anyway:

@@ -228,13 +228,9 @@ public sealed class VideoPlayer : Component
     {
         _hideTimer.Cancel();
         if (!AutoHideControls) return;
-        // A delayed tween is the framework's timer: it ticks with the frame loop, which
-        // keeps ticking through a pure delay, and cancels cleanly.
-        _hideTimer = Animate.Value(0f, 1f, _ => { })
-            .Delay((float)AutoHideDelay.TotalSeconds)
-            .Duration(0.01f)
-            .OnComplete(FadeOut)
-            .Start();
+        // A delayed tween is the framework's timer: it runs on the frame loop's clock, which
+        // wakes once for it when the delay is out, and cancels cleanly.
+        _hideTimer = Animate.After((float)AutoHideDelay.TotalSeconds, FadeOut);
     }
 
     private void FadeOut()

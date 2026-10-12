@@ -432,19 +432,23 @@ public sealed class Application : IDisposable
     /// which is how <see cref="Run"/> holds a dirty window back until the display's next
     /// interval; the dirt stays, so the next allowed frame draws it.</param>
     /// <param name="tick">Whether to step animations, by <paramref name="delta"/>.</param>
-    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true)
+    /// <param name="firstStepAtZero">Whether a tween's first step is 0 rather than
+    /// <paramref name="delta"/>: its clock starts at its first step (<see cref="Run"/>, whose
+    /// waits can be minutes long).</param>
+    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true,
+        bool firstStepAtZero = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick);
+        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick, firstStepAtZero);
 
         FrameLog.PassStart(this, _platform.TimeProvider);
         long before = GC.GetAllocatedBytesForCurrentThread();
-        bool rendered = RunPass(delta, forceRender, allowRender, tick);
+        bool rendered = RunPass(delta, forceRender, allowRender, tick, firstStepAtZero);
         FrameLog.PassEnd(rendered, tick, GC.GetAllocatedBytesForCurrentThread() - before);
         return rendered;
     }
 
-    private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick)
+    private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick, bool firstStepAtZero)
     {
         // Poll and route all native events. A platform asking to quit ends the frame
         // here, before anything touches a tree the platform may already have torn down.
@@ -464,7 +468,11 @@ public sealed class Application : IDisposable
 
         // Tick animations (marks elements dirty as needed). Run asks for it once per frame
         // it may draw, not once per pass (see RunUntil).
-        if (tick) AnimationManager.Tick((float)delta.TotalSeconds);
+        if (tick)
+        {
+            float seconds = (float)delta.TotalSeconds;
+            AnimationManager.Tick(seconds, firstStepAtZero ? 0f : seconds);
+        }
 
         // Run any inspector refresh its rate limit deferred, so the panel still
         // catches up after the inspected window goes idle mid-interval.
@@ -516,11 +524,6 @@ public sealed class Application : IDisposable
         // Whether the last step was drawn: a tween is moving on screen, and its next step
         // is due with the next frame.
         bool stepDrawn = false;
-        // Whether any animation was left after the last step. With none, the loop may have parked
-        // for minutes since, and a tween started in this pass (a hover transition) would be
-        // stepped by all of it and jump to its end; its first step gets what an idle pass gave
-        // it when the loop came round every 16 ms.
-        bool animating = false;
         // Idle waits in a row that asked for nothing (a deadline already due): a third is held
         // to a millisecond, so a deadline nothing consumes cannot spin the loop.
         int zeroWaits = 0;
@@ -548,18 +551,19 @@ public sealed class Application : IDisposable
             // millisecond, 2.2 in Reel while its bar faded. A step that draws nothing (a pure
             // delay, a minimized window, which is not drawn) puts the next one an interval on,
             // so events arriving in between do not step them either.
-            bool tick = due && (unpaced || now >= nextTickAt - slack);
+            // A tween that has not had its first step takes it with this frame, whatever the
+            // others wait for: a hover transition started while a toast holds is not left
+            // behind the hold's deadline. Its clock starts at that step (AnimationManager.Tick),
+            // so one started after minutes of idle does not jump to its end.
+            bool tick = due && (unpaced || now >= nextTickAt - slack || AnimationManager.HasFreshTweens);
             var elapsed = TimeSpan.Zero;
             if (tick)
             {
                 elapsed = clock.GetElapsedTime(lastTick, now);
-                if (!animating && elapsed > IdleStep) elapsed = IdleStep;
                 lastTick = now;
             }
 
-            bool rendered = RunFrameCore(elapsed, forceRender: false, allowRender: due, tick);
-            if (tick) animating = AnimationManager.HasActiveAnimations;
-            if (rendered)
+            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick, firstStepAtZero: true))
             {
                 if (tick) stepDrawn = true;
                 // The next deadline follows the schedule, not this render: a frame that
@@ -579,10 +583,18 @@ public sealed class Application : IDisposable
             if (tick)
             {
                 stepDrawn = false;
-                // A step that drew nothing (a pure delay, a minimized window): the next one an
+                // A step that drew nothing. Tweens that all wait out a delay (a toast's hold, a
+                // tooltip's show delay, a player's auto-hide) are stepped when the first delay
+                // is out, once, where they were stepped every interval of it: 118 steps for a
+                // 2 s toast's 20 frames. A running tween nothing shows (a minimized window's) an
                 // interval on, and not sooner than the 16 ms an idle pass used to take.
                 if (AnimationManager.HasActiveAnimations)
-                    nextTickAt = now + Math.Max((long)(frequency / DisplayHz()), frequency * IdleStepMs / 1000);
+                {
+                    float changeIn = AnimationManager.NextChangeIn;
+                    nextTickAt = changeIn > 0f
+                        ? now + (long)Math.Ceiling(Math.Min(changeIn, 86_400f) * frequency)
+                        : now + Math.Max((long)(frequency / DisplayHz()), frequency * IdleStepMs / 1000);
+                }
             }
 
             // Dirty, but too soon: wait out what is left of the interval. An event ends the
@@ -622,11 +634,9 @@ public sealed class Application : IDisposable
         if (FrameLog.On) FrameLog.LoopEnded(this);
     }
 
-    /// <summary>What an idle pass of the loop took when it parked 16 ms at a time: the longest
-    /// first step of a tween started after the loop was idle, and the shortest step of one whose
-    /// last step drew nothing.</summary>
+    /// <summary>What an idle pass of the loop took when it parked 16 ms at a time: the shortest
+    /// step of a running tween whose last step drew nothing.</summary>
     private const int IdleStepMs = 16;
-    private static readonly TimeSpan IdleStep = TimeSpan.FromMilliseconds(IdleStepMs);
 
     /// <summary>
     /// The earliest moment, on the platform's clock, at which the loop owes something while
@@ -637,10 +647,12 @@ public sealed class Application : IDisposable
     {
         long at = long.MaxValue;
         deadline = IdleDeadline.None;
-        // An animation steps with the next frame it may draw, or an interval after a step
-        // that drew nothing.
+        // An animation steps with the next frame it may draw: a new tween's first step, or one
+        // after a step that drew nothing, an interval on, or when the first delay is out.
         if (AnimationManager.HasActiveAnimations)
-            Earliest(ref at, ref deadline, Math.Max(nextTickAt, nextRenderAt), IdleDeadline.Animation);
+            Earliest(ref at, ref deadline,
+                AnimationManager.HasFreshTweens ? nextRenderAt : Math.Max(nextTickAt, nextRenderAt),
+                IdleDeadline.Animation);
         foreach (var w in _windows)
             if (w.IsOpen) w.NextDeadline(ref at, ref deadline);
         if (_inspectorHost?.NextRefreshAt is { } inspector)

@@ -55,10 +55,9 @@ public class VideoPlayerLoopTests
         }
     }
 
-    // The hide timer (1 s of delay and 10 ms) ends on the first step at or past 1.01 s, and the
-    // fade on the first at or past 300 ms after that: each at most a display interval (16.7 ms
-    // here) late.
-    private const double Due = 1310, Late = 2 * 1000.0 / 60 + 1;
+    // The hide timer (a 1 s delay) ends on the step its delay is out, and the fade on the first
+    // step at or past 300 ms after that: each at most a display interval (16.7 ms here) late.
+    private const double Due = 1300, Late = 2 * 1000.0 / 60 + 1;
 
     [Fact]
     public void TheBar_HidesOnTime_WhileEventsArriveEveryMillisecond()

@@ -77,10 +77,9 @@ public sealed class ToastHost
         }
 
         float hold = seconds ?? (action is null ? Seconds : ActionSeconds);
-        _hold = Animate.Value(0f, 1f, static _ => { })
-            .Duration(hold)
-            .OnComplete(() => { if (serial == _serial) FadeOut(serial); })
-            .Start();
+        // A timer: the loop wakes once, when it ends. A tween with this Duration and a setter
+        // that changed nothing stepped every frame interval: 118 steps for a 2 s toast.
+        _hold = Animate.After(hold, () => { if (serial == _serial) FadeOut(serial); });
         _onChanged();
     }
 

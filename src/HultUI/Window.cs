@@ -3021,10 +3021,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer
         _tooltipOwner = owner;
         var theme = Application.Theme;
         float delay = theme.Tooltip.ShowDelay;
-        _tooltipDelayTween = Animate.Value(0f, 1f, _ => { })
-            .Duration(delay)
-            .OnComplete(() => ShowTooltipOverlay(owner, text))
-            .Start();
+        // A timer: the loop wakes once for it, not every frame interval of the delay.
+        _tooltipDelayTween = Animate.After(delay, () => ShowTooltipOverlay(owner, text));
     }
 
     private void ShowTooltipOverlay(Element owner, string text)

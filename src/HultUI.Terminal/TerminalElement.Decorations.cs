@@ -161,10 +161,8 @@ public sealed partial class TerminalElement
         }
         if (_blinkRunning) return;
         _blinkRunning = true;
-        _blinkTimer = Animate.Value(0f, 1f, static _ => { })
-            .Duration((float)BlinkInterval.TotalSeconds)
-            .OnComplete(OnBlink)
-            .Start();
+        // A timer: the loop wakes once a half-period, not every frame interval of it.
+        _blinkTimer = Animate.After((float)BlinkInterval.TotalSeconds, OnBlink);
     }
 
     private void OnBlink()
