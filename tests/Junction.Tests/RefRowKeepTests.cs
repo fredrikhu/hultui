@@ -20,6 +20,9 @@ namespace Junction.Tests;
 /// compare pick and base/head tag. Everything else a row shows is in a shape that makes the rows
 /// again. One test per input: each fails with that input left out.
 /// </summary>
+// Serial: the colour-scheme and display-scale tests change process-wide state (the palette and
+// the glyph caches) that other sessions draw with.
+[Collection("JunctionDiff")]
 public class RefRowKeepTests
 {
     // ── Branches: what a key keeps ───────────────────────────────────────
@@ -180,6 +183,54 @@ public class RefRowKeepTests
                 Nocturne.Use("nocturne");
             }
         });
+    }
+
+    /// <summary>A move to a screen of another scale retires the glyph rasters the rows hold (and
+    /// the next change frees them): the rows on screen are made again with new ones.</summary>
+    [Fact]
+    public void ADisplayScaleChange_MakesTheBranchRowsAgain()
+    {
+        Hosted((session, app) =>
+        {
+            try
+            {
+                int onScreen = BranchRows(session).Count;
+                int made = app.BranchRowsMade;
+
+                session.Window.SetScale(1.5f);
+                session.PumpFrames(3);
+
+                Assert.True(app.BranchRowsMade - made >= onScreen, $"{app.BranchRowsMade - made} rows made of {onScreen}");
+            }
+            finally
+            {
+                session.Window.SetScale(1f);
+                session.PumpFrames(2);
+            }
+        });
+    }
+
+    [Fact]
+    public void ADisplayScaleChange_MakesTheTagRowsAgain()
+    {
+        Hosted((session, app) =>
+        {
+            try
+            {
+                int onScreen = TagRows(session).Count;
+                int made = app.TagRowsMade;
+
+                session.Window.SetScale(1.5f);
+                session.PumpFrames(3);
+
+                Assert.True(app.TagRowsMade - made >= onScreen, $"{app.TagRowsMade - made} rows made of {onScreen}");
+            }
+            finally
+            {
+                session.Window.SetScale(1f);
+                session.PumpFrames(2);
+            }
+        }, tags: true);
     }
 
     /// <summary>Pipelines land after the rows are made: the kept rows take the glyph. The

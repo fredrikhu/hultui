@@ -978,7 +978,7 @@ public partial class JunctionApp
         // instead of every row on screen. Everything else a row shows is told here: when any of
         // it changes, the rows on screen are made again.
         var shape = new HistoryRowShape(data.Graph, data.Remotes, stats, IssueRules(), _compactChrome,
-            _historyQuery.Trim(), data.Exhausted, GitLabRowData(), Nocturne.Theme);
+            _historyQuery.Trim(), data.Exhausted, GitLabRowData(), Nocturne.Theme, Ui.DisplayScale);
         // `|`, not `||`: the selection's snapshot is brought up to date either way.
         if (HistoryRowSelectionChanged() | shape != _historyRowShape)
         {
@@ -1015,11 +1015,14 @@ public partial class JunctionApp
     /// things its list compares. References are compared by identity: the graph, remotes and
     /// counts are new objects when a page or a chunk of counts lands, the issue rules when the
     /// rules file changes, and GitLab's pipelines and merge requests when a refresh lands. The
-    /// query and the end of the log decide which rows ask for the next page.
+    /// query and the end of the log decide which rows ask for the next page. The chips' glyphs
+    /// are cut at the display scale, and a change of scale retires the old rasters (the next
+    /// frees them), so the scale is here too.
     /// </summary>
     private readonly record struct HistoryRowShape(
         object Graph, object Remotes, object Stats, object IssueRules, bool Compact,
-        string Query, bool Exhausted, (object? Pipelines, object? MergeRequests) GitLab, object Theme);
+        string Query, bool Exhausted, (object? Pipelines, object? MergeRequests) GitLab, object Theme,
+        float Scale);
 
     private HistoryRowShape _historyRowShape;
 

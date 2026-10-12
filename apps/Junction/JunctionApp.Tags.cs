@@ -220,8 +220,9 @@ public partial class JunctionApp
     private Func<TreeNode<GitTag>, string?>? _tagItemLabel;
 
     /// <summary>What a tag row shows besides its node and whether it has the caret: the
-    /// table's columns (compact, narrow) and the colour scheme.</summary>
-    private readonly record struct TagRowShape(bool Compact, bool Narrow, object Theme);
+    /// table's columns (compact, narrow), the colour scheme and the display scale the glyphs
+    /// are cut at.</summary>
+    private readonly record struct TagRowShape(bool Compact, bool Narrow, object Theme, float Scale);
 
     private TagRowShape _tagRowShape;
 
@@ -232,7 +233,7 @@ public partial class JunctionApp
     /// build asked; takes the new state either way.</summary>
     private bool TagRowShapeChanged()
     {
-        var shape = new TagRowShape(_compactTables, _narrowTables, Nocturne.Theme);
+        var shape = new TagRowShape(_compactTables, _narrowTables, Nocturne.Theme, Ui.DisplayScale);
         bool changed = shape != _tagRowShape;
         _tagRowShape = shape;
         return changed;

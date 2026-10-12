@@ -532,7 +532,7 @@ public partial class JunctionApp
         // composer and threads, so while reviewing they are made again on every build, as all
         // rows were before.
         var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
-            Nocturne.Theme, DiffFindShape());
+            Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
         // `|`, not `||`: the staging snapshot is brought up to date either way.
         if (DiffStageSelectionChanged() | rowShape != _diffRowShape || review is not null)
         {
@@ -786,11 +786,13 @@ public partial class JunctionApp
     /// <summary>
     /// What a diff row shows besides its item — the one thing its list compares. The rows are
     /// compared by identity (the flattened list is new when anything they were made from is);
-    /// the rest are the settings and state the row builders read.
+    /// the rest are the settings and state the row builders read, and the display scale the
+    /// staging checkboxes' glyphs are cut at (a change retires the old rasters).
     /// </summary>
     private readonly record struct DiffRowShape(
         List<DiffRow> Rows, DiffInteract? Interact, bool Wrap, float PanOffset, string CodeFont, float CodeSize,
-        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find);
+        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find,
+        float Scale);
 
     private DiffRowShape _diffRowShape;
 

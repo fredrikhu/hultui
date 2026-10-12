@@ -195,6 +195,31 @@ public class DiffRowKeepTests
         });
     }
 
+    /// <summary>The staging checkboxes are glyphs cut at the display scale; a move to a screen
+    /// of another scale retires them (and the next change frees them): the rows are made again.</summary>
+    [Fact]
+    public void ADisplayScaleChange_MakesTheRowsAgain()
+    {
+        Hosted((session, app) =>
+        {
+            try
+            {
+                int onScreen = Rows(app).Count;
+                int made = app.DiffRowsMade;
+
+                session.Window.SetScale(1.5f);
+                session.PumpFrames(3);
+
+                Assert.True(app.DiffRowsMade - made >= onScreen, $"{app.DiffRowsMade - made} rows made of {onScreen}");
+            }
+            finally
+            {
+                session.Window.SetScale(1f);
+                session.PumpFrames(2);
+            }
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     private static T Get<T>(JunctionApp app, string field) =>

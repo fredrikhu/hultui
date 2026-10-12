@@ -356,11 +356,13 @@ public partial class JunctionApp
     /// What a branch row shows besides its item and whether it has the caret: the table's
     /// columns (compact, narrow), what GitLab knows (protection, pipelines, merge requests —
     /// new objects when a load lands, and nothing while the repository is not on GitLab with
-    /// an account) and the colour scheme. The IN HISTORY set is compared apart
+    /// an account), the colour scheme and the display scale the glyphs are cut at (a change
+    /// retires the old rasters). The IN HISTORY set is compared apart
     /// (<see cref="_branchRowIncludes"/>): it is changed in place.
     /// </summary>
     private readonly record struct BranchRowShape(
-        bool Compact, bool Narrow, object? Project, object? Pipelines, object? MergeRequests, object Theme);
+        bool Compact, bool Narrow, object? Project, object? Pipelines, object? MergeRequests, object Theme,
+        float Scale);
 
     private BranchRowShape _branchRowShape;
     private readonly HashSet<string> _branchRowIncludes = new(StringComparer.Ordinal);
@@ -377,7 +379,7 @@ public partial class JunctionApp
             hosted ? ProjectFor(_activeRepoPath).Value : null,
             hosted ? PipelinesFor(_activeRepoPath).Value : null,
             hosted ? MergeRequestsFor(_activeRepoPath).Value : null,
-            Nocturne.Theme);
+            Nocturne.Theme, Ui.DisplayScale);
         bool changed = shape != _branchRowShape;
         _branchRowShape = shape;
         var includes = IncludeSet(_activeRepoPath);
