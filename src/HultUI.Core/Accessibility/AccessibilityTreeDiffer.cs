@@ -123,6 +123,11 @@ public static class AccessibilityTreeDiffer
         // Most nodes carry none of the rarely set fields (a description, a value, native
         // content, text, a scroll offset); then there is nothing of them to compare.
         bool rare = prev.EitherHasRareFields(curr);
+        // A group became a dialog: first, so a reader re-reads the rest as the new kind of thing.
+        // It carries the previous node. Never compared before: a caching client (Orca) kept the
+        // old role, and UIA answered the new one only once something else had the tree applied.
+        if (prev.Role != curr.Role)
+            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Role, prev));
         if (prev.Name != curr.Name)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
         if (rare && prev.Description != curr.Description)

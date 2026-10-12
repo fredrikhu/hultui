@@ -186,6 +186,7 @@ internal static partial class UiaInterop
     public const int UIA_IsOffscreenPropertyId = 30022;
     public const int UIA_IsPasswordPropertyId = 30019;
     public const int UIA_ControlTypePropertyId = 30003;
+    public const int UIA_LocalizedControlTypePropertyId = 30004;
     public const int UIA_ValueValuePropertyId = 30045;
     public const int UIA_RangeValueValuePropertyId = 30047;
     public const int UIA_RangeValueIsReadOnlyPropertyId = 30048;

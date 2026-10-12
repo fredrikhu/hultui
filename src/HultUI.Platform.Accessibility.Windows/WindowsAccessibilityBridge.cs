@@ -632,6 +632,16 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             finally { Marshal.Release(source); }
             return;
         }
+        if (propertyName == AccessibilityProperties.Role)
+        {
+            // A role change, as Chromium tells one: the control type, and its localized name with
+            // it. This provider gives no localized name (UI Automation makes it from the control
+            // type), so that one goes with no value, as an old value goes, and a client reads it.
+            wrapper.GetPropertyValue(UiaInterop.UIA_ControlTypePropertyId, out var controlType);
+            RaiseProperty(wrapper, UiaInterop.UIA_ControlTypePropertyId, controlType);
+            RaiseProperty(wrapper, UiaInterop.UIA_LocalizedControlTypePropertyId, UiaVariant.Empty);
+            return;
+        }
         if (propertyName == AccessibilityProperties.NativeContent)
         {
             // A foreign tree came or went. Its window moves between the window root and the

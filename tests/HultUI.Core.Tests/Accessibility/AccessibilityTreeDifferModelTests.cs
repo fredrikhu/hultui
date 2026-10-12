@@ -395,6 +395,9 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
 
         private static void CompareProperties(TreeDiff diff, AccessibilityNode prev, AccessibilityNode curr)
         {
+            // Since plan 17 round 3 step 15: a role change is told, with the previous node.
+            if (prev.Role != curr.Role)
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Role, prev));
             if (prev.Name != curr.Name)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
             if (prev.Description != curr.Description)

@@ -423,6 +423,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 if (change.Node.Range is not { } range || change.Previous?.Range?.Value == range.Value) return false;
                 _signals!.EmitValueChanged(path, range.Value);
                 return true;
+            case AccessibilityProperties.Role:
+                // A client caches the role from the cache-add: a group that became a dialog went on
+                // reading "panel" in Orca's cache (seen live in WSL). The application's own object
+                // keeps its role, whatever its element's.
+                if (path == AtSpiConstants.RootPath) return false;
+                _signals!.EmitRoleChange(path, AtSpiAccessible.RoleOf(change.Node));
+                return true;
             case AccessibilityProperties.IsPassword:
                 // A client caches the role from the cache-add, so a field masked or revealed
                 // after it was first seen has to say its role changed.

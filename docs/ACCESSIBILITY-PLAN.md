@@ -315,6 +315,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   patching a box, a text or a canvas marks no layout, so a rebuild that changed only one of them
   was told nothing (Aperture's "Quality: …" box, VideoPlayer's Play/Pause). An `AutomationId`
   change raises no event; the tree that carries it is applied, so UIA answers the new id.
+  A role change (a group that becomes a dialog) is a `Role` property change in the diff, first
+  among the node's: UIA raises ControlType and LocalizedControlType property changes, AT-SPI sends
+  `property-change:accessible-role` (not for the application's own object). The differ never
+  compared roles before, and a caching AT-SPI client kept reading "panel" (seen live in WSL).
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
 - **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
