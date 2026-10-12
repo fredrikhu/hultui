@@ -195,10 +195,10 @@ an event every millisecond; a video player's bar fading over a playing film, 2.2
 setter and `OnComplete` run at most once per display interval, and a delay ends up to one
 interval late.
 
-A rebuild per frame is still a rebuild per frame: a `ToastHost` handed the app's
-`MarkDirty`, or a spinner that marks the whole app dirty on every step, rebuilds the whole
-app sixty times a second while it runs. Animate the element instead (`Animate.Opacity`, a
-`Transform`, `SpinnerElement`), or keep the animated part in a small component of its own.
+A rebuild per frame is still a rebuild per frame: a spinner that marks the whole app dirty
+on every step rebuilds the whole app sixty times a second while it runs. Animate the element
+instead (`Animate.Opacity`, a `Transform`, `SpinnerElement`), or keep the animated part in a
+small component of its own.
 
 When a rebuild in the middle of the animation must not undo it, keep the animated value in a
 plain field as well: the tween's setter writes the field and the live element (through a
@@ -207,6 +207,12 @@ plain field as well: the tween's setter writes the field and the live element (t
 of a fade rebuilt the player (Reel: 166 rebuilds in 12 s, three quarters of what its UI
 thread allocated); a fade frame now costs about 0.9 KB instead of 41 KB (headless, JIT), and
 the player rebuilds only where the bar appears and where it goes.
+
+`ToastHost` fades the same way. The `onChanged` you hand it (the apps hand it their window's
+`MarkDirty`) runs when the toast appears, changes or goes, and not on the frames of its fades,
+which write the toast on screen. It ran on every step until plan 17: one toast rebuilt Junction
+23 times, 4.5 MB of garbage (Meridian 1.5 MB, Aperture 3.1 MB); now twice, 0.39 MB (0.13,
+0.27; headless, JIT, the real loop).
 
 ### A drag rebuilds once per frame
 

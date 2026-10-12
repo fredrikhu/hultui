@@ -145,8 +145,9 @@ public class LoopWakeTests
     [Fact]
     public void AToast_WakesTheLoopForItsFramesAndOnceForItsHold()
     {
-        using var run = new Run();
-        var toast = new ToastHost(() => run.Box.MarkPaintDirty());
+        var owner = new ToastOwner();
+        using var run = new Run(owner.Mount());
+        var toast = owner.Toast;
         long start = run.Now;
         int passes = 0, before = run.Frames;
         toast.Flash("Saved", seconds: 2f);
@@ -159,6 +160,21 @@ public class LoopWakeTests
         Assert.InRange(goneAt, 2180, 2220);
         Assert.InRange(run.Frames - before, 15, 25);
         Assert.InRange(passes, run.Frames - before, 2 * (run.Frames - before) + 6);
+    }
+
+    /// <summary>A toast's owner, which adds the strip to what it builds.</summary>
+    private sealed class ToastOwner : HultUI.Core.Components.Component
+    {
+        public ToastHost Toast { get; }
+
+        public ToastOwner() => Toast = new ToastHost(MarkDirty);
+
+        public override Element Build()
+        {
+            var root = Box.New().Width(Dimension.Px(300)).Height(Dimension.Px(150));
+            if (Toast.Build() is { } strip) root.AddChild(strip);
+            return root;
+        }
     }
 
     [Fact]
