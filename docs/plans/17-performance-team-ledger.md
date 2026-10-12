@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–13 and 14a landed, step 14b in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–14 landed, step 15 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -154,7 +154,7 @@ Round 2 regressions first, then value per cost.
     log; keystroke churn −27/−28 % on 19k JSON and the log); weight BiDi/styled memos by bytes
     (~16 MB bound; worst case 58 MB → ≤16). Medium. Proof: random edits vs a fresh area incl.
     surrogates, ZWJ, CJK; re-run b23b203's 2.0 M-line audit.
-14. **Lists on item rows** (1/8; 14a LANDED 1e68166, 3409c2d, 518258a, 757a79b, 0ca47d5, 0971573; split into 14a: row inherit, item-label keep, Vesper's lists; 14b: Junction Branches, Tags, Files, Aperture's grid): **layout-virtuallist-row-inherit** (approved) first (rows resolved
+14. ~~**Lists on item rows**~~ (1/8; 14a LANDED 1e68166, 3409c2d, 518258a, 757a79b, 0ca47d5, 0971573; 14b LANDED 92224e3, 5a98a32, 11ced00, 73ec513; split into 14a: row inherit, item-label keep, Vesper's lists; 14b: Junction Branches, Tags, Files, Aperture's grid): **layout-virtuallist-row-inherit** (approved) first (rows resolved
     under their list: Junction Branches layouts per key 255 → 32, 0 px changed), then
     **adopt-item-rows** — Vesper panes (339 of 542 KB per key), Junction Branches and Tags (need
     stable or value-equal TreeNode items; −380 KB of 667 KB per key), Aperture's grid — and
@@ -175,7 +175,13 @@ Round 2 regressions first, then value per cost.
     replacement half-transparent for its whole hold), **customframe-install-activates** (the custom
     frame activates the window in the Application constructor), **junction-remoteop-test-flake**
     (`RemoteOpAnimationTests…(Push)`, new in 2894d98, failed once in step 14a's full run, passed 3/3
-    alone — find out whether it is the same fake race or a timing assumption). Small.
+    alone — find out whether it is the same fake race or a timing assumption),
+    **itemrows-remake-on-scale** (framework safety net from 14b: item rows are remade on a window
+    display-scale change, as on a Theme object switch, so an app that forgets the scale in its shape
+    cannot lose its icons — Junction History shipped that bug in junction-v1.20.0, fixed app-side in
+    11ced00), **aperture-library-paging** (pre-existing since 01e5bd7: the grid requests pages by window
+    height, so at 1440×900 a 250-film library loads 100 and End/arrows/wheel stop at the 100th; a
+    landed page does not rebuild the view once the total is known). Small.
 16. **linux-emoji-colour-fallback** (5, correctness) — emoji presentation and VS16 pick the colour
     emoji face (Linux 😀 ❤️ in DejaVu today; Windows #️⃣ ™️ ©️ monochrome). Changes those pixels;
     goldens unaffected (pinned faces). Proof on WSL with real Noto faces and on Windows.
@@ -391,6 +397,10 @@ Re-ranked by the round 4 survey.
 | 3 | 1e68166, 3409c2d | layout-virtuallist-row-inherit | Approved (question 6). One-argument rows resolve under their list (`ResolveUnder`). Per key: Junction Branches style-pass layout marks 240.7 → 0, layouts 255 → 33.7, ComputeLayout 975 → 478, leaf measures 830 → 205; Tags marks 153 → 0, layouts 166.7 → 30.7; Vesper walk marks 120 → 0, layouts 136.6 → 76.6. Branches/Tags min −4.6/−4.8 %, median −6/−7 % JIT; Vesper flat. Pixels: inherited-style diff over 7 suites + probe walks showed only Box/Image FontSize (unused); 15 headless screens 0 px different (positive control 3,994 px). ELEMENTS.md. |
 | 3 | 518258a, 757a79b, 0ca47d5 | a11y-item-label-keep | Approved (question 9). Item-rows lists keep `(item, label)` per index while the item is equal and the delegate the same; `InvalidateItems` (InvalidateRows, new Items, theme) and a new delegate clear it; UI thread only (lists over 2,000 are read off-thread). New row `a11y/selection walk 1,000 item rows, bridge on` 274.1 → 112.3 KB/op (−59 %), min −5.0 % JIT / −7.6 % AOT; real-loop walk 278 → 181 KB/op. New public `HeadlessWindow.AccessibilityTreesBuilt`. Contract documented on AccessibleLabel, ItemRowTemplate, InvalidateRows, ELEMENTS.md. |
 | 3 | 0971573 | vesper-item-rows | App: Vesper's panes (SelectedIndex = cursor, −1 inactive; `PaneRowState` shape: partner path normalised, size/date/zebra, results, scale, drop target, marks/cut/folder-size snapshots), comparison and viewer on item rows. Pane walk 360 keys: other-name folders 561 → 222 KB/key (−60 %), min −11 % JIT / −16 % AOT (a11y on −60 %, −10.5/−14.6 %); same-name folders −30 %, −9/−14 % (the F3 partner moves each key). Rows made per key 60 → 2.65; leaf measures 3,099 → 174. 23 headless frames byte-identical. KeptRowTests 18, 21 mutations caught. |
+| 3 | 92224e3 | junction-branches-tags-item-rows | App: Branches/Tags TreeNode rows memoized (`RefRowsMemo`: refs identity, query, flat/tree, open-folders generation); item rows with the caret as SelectedIndex; `BranchRowItem(Node, Index, Picked, Role)` from a lazy view so a pick or base/head change remakes only those rows; label delegates in fields. Synthetic repo, headless, JIT and AOT: Branches 756–775 → 212–219 KB/key (−72 %), min −10 %/−13 %; Tags 726–745 → 340–349 (−53 %), min −10 %; rows made 19.3 → 1.7 and 17 → 2.7. 30 frames byte-identical; 24 mutations caught. |
+| 3 | 5a98a32 | apps-junction-files-virtual | App: the Files tree is a `VirtualListElement<FileTreeRowItem>` (Node, Open, Cursor, Expanded) with visible rows memoized and a path index for the cursor; `RowsAreComposite`. 2,300-file search, Down key: 16.8–17.0 MB → 173–176 KB (−99 %), min 9.9–14.0 → 1.00–1.04 ms (−90 % AOT, −93 % JIT), median −95 %; bridge on 18 MB → 190 KB; elements 14,128 → 257; resolves per key 14,128 → 266; hit visits per move 3,502 → 34; render culls per frame 3,474 → 7. a11y: on-screen nodes identical over 23 states; off-screen rows no longer published (a VirtualList cannot publish them as tree items), no new events. 23 frames byte-identical; 13 mutations caught. |
+| 3 | 11ced00 | itemrows-scale-shape | Bug fix (hits a96c185 from round 2, released in junction-v1.20.0, and 16fc8ec/92224e3): kept rows were not remade on a display-scale change, and the retired glyph rasters were freed by the next one, so after 150 % and back every icon in Branches rows was gone (1,753 px; History 36 px). `Ui.DisplayScale` added to the four Junction shapes; round trip 0 px. ELEMENTS.md: put the scale in the shape. Framework safety net queued in step 17. |
+| 3 | 73ec513 | aperture-grid-item-rows | App: the poster grid on item rows, `GridRowItem(Row, CursorColumn)` from a lazy view; shape: loaded count, in-place patches, cards per row, artwork landings, display scale. 600 films: Right 359–362 → 130–131 KB/key (−64 %), Down 360 → 196 (−46 %); rows made 6 → 1.1/2.5; time flat (headless raster dominates). 16 frames byte-identical; 10 mutations caught. |
 
 ## Examined, not worth it
 
@@ -685,3 +695,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   notes: a shape field changes only when what is drawn changes (normalise "nothing"); a label lambda
   capturing build state keeps nothing — hold the delegate in a field. Lead: `InvalidateRow(i)` would
   let Vesper's same-name partner remake ~4 rows a key instead of 32.
+- 2026-10-12: step 14b landed (92224e3..73ec513): Junction Branches −72 %, Tags −53 % per key; Files
+  on a virtual list (−99 % per key, −90 % time); Aperture grid −46…−64 %. Found and fixed a released
+  bug (junction-v1.20.0): kept History rows lost their icons after a display-scale round trip. Step 17
+  gains a framework safety net for it and Aperture's library paging bug (pre-existing). Guideline
+  notes: per-row state goes in a value item from a lazy view, not the shape; keep the model objects
+  between builds; display-scale glyphs belong in the shape.
