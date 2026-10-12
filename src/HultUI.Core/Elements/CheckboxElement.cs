@@ -34,7 +34,16 @@ public class CheckboxElement : Element
     public string? Label
     {
         get => _label;
-        set { if (_label == value) return; _label = value; MarkLayoutDirty(); MarkPaintDirty(); }
+        set
+        {
+            if (_label == value) return;
+            _label = value;
+            MarkLayoutDirty();
+            MarkPaintDirty();
+            // It names the control for a screen reader: told as a name change, not left to the
+            // next rebuild that happens to come.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
+        }
     }
 
     public float LabelGap

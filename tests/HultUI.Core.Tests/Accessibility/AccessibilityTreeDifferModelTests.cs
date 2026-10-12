@@ -399,6 +399,9 @@ public class AccessibilityTreeDifferModelTests(ITestOutputHelper output)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
             if (prev.Description != curr.Description)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
+            // Since plan 17 round 3 step 15: an id change alone has the tree applied.
+            if (prev.AutomationId != curr.AutomationId)
+                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.AutomationId));
             // A node with text on both sides tells a change of it as its text, not its value.
             if (!(prev.Text is not null && curr.Text is not null) && prev.Value != curr.Value)
                 diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));

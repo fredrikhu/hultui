@@ -306,7 +306,15 @@ Remaining refinements (nice-to-have): a UIA `ScrollPattern` / `ItemContainer`
 Elements expose these to UIA today (property/pattern → how to opt in):
 
 - **AutomationId** — `AutomationId("id")` (stable test selectors).
-- **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name.
+- **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name. `Role`,
+  `AccessibleName`, `AccessibleDescription`, `AccessibleExpanded`, `AutomationId`, `Name` (the
+  name's fallback) and a check box's, radio button's or switch's `Label` tell the window when they
+  change (2026-10-12, plan 17), as a toggle does, and the next frame tells the reader: UIA Name,
+  HelpText, ExpandCollapseState; AT-SPI accessible-name, accessible-description,
+  state-changed:expanded. A component's rebuild patches these onto the elements it keeps, and
+  patching a box, a text or a canvas marks no layout, so a rebuild that changed only one of them
+  was told nothing (Aperture's "Quality: …" box, VideoPlayer's Play/Pause). An `AutomationId`
+  change raises no event; the tree that carries it is applied, so UIA answers the new id.
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
 - **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an

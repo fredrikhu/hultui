@@ -127,6 +127,10 @@ public static class AccessibilityTreeDiffer
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
         if (rare && prev.Description != curr.Description)
             diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
+        // No event for it: in the diff so the bridge takes the node, whose id UIA reads on request.
+        // Left out, a tree whose only change it was went unapplied, and the old id was answered.
+        if (rare && prev.AutomationId != curr.AutomationId)
+            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.AutomationId));
         // A node that offers text tells a change of it as a text change (UIA TextChanged, AT-SPI
         // text-changed), not as its value: the value of a rich text editor is the whole document,
         // and a keystroke raised it in a UIA property change (a 749,017-character BSTR) and an
