@@ -172,8 +172,8 @@ sealed record WalkItem(int Index, string Icon, string Subject, string Hash, stri
 /// The shape of Junction's History view: a header, then a <see cref="VirtualListElement{T}"/>
 /// of two-line rows (an icon, the subject, a line of detail), no keys on the rows, the
 /// selection drawn by the template from the index the pane's Build read, the list told the
-/// selected index for assistive technology, and its rows named for it by a label made on
-/// each call. A selection move writes a signal; the rebuild scrolls the row into view after
+/// selected index for assistive technology, and its rows named for it by a label made from
+/// the item alone. A selection move writes a signal; the rebuild scrolls the row into view after
 /// the build, as Junction's <c>OnAfterBuild</c> does. With <paramref name="itemRows"/> the
 /// template is the two-argument one, whose rows the list keeps while they are unchanged.
 /// With <paramref name="details"/> the same Build makes a details pane beside the list, for
@@ -193,21 +193,10 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
     /// <summary>Rows the template has made.</summary>
     public int RowsMade { get; private set; }
 
-    /// <summary>Item labels made for assistive technology. The accessibility tree asks for every
-    /// item's label each time it is built, and for nothing else, so this over the item count
-    /// counts the trees built.</summary>
-    public int LabelsMade { get; private set; }
-
-    public int ItemCount => items.Count;
-
-    // Made once, so counting adds nothing to a Build's allocation.
+    // Made once, as an app keeps a label that reads only its item: one delegate every build.
     private Func<WalkItem, string?>? _label;
 
-    private string Label(WalkItem item)
-    {
-        LabelsMade++;
-        return $"{item.Subject}, {item.Author}, {item.Hash}";
-    }
+    private static string Label(WalkItem item) => $"{item.Subject}, {item.Author}, {item.Hash}";
 
     public int Selected => _selected.Value;
 

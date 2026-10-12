@@ -126,6 +126,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// <summary>Whether the last frame found the bridge active and built (or kept) a tree for it.
     /// UI thread.</summary>
     internal bool AccessibilityTreeBuilt => _a11yWasActive;
+
+    /// <summary>How many accessibility trees this window's frames have built for a listening
+    /// bridge (a patched selection move builds none). UI thread.</summary>
+    internal int AccessibilityTreesBuilt { get; private set; }
     // Set when an element reports an a11y-visible property change (a text label's
     // content, a checkbox toggle, …). Such changes aren't structural, so they
     // force the next frame to rebuild+diff the tree — that regenerates the node
@@ -1178,6 +1182,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             using (_tracer.Begin("Phase", "A11y"))
             {
                 var newTree = BuildAccessibilityTreeWithOverlays(_root);
+                AccessibilityTreesBuilt++;
                 var diff = AccessibilityTreeDiffer.Diff(_previousA11yTree, newTree);
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);

@@ -102,6 +102,18 @@ static partial class Scenarios
                     reset: bridge.ClearDiffs);
             });
 
+        yield return new Scenario("a11y/selection walk 1,000 item rows, bridge on",
+            "The same walk with .RenderWith((item, selected) => …): every Down still rebuilds and diffs the tree (the row scrolled in), with an item node for each of the 1,000 rows and each one's label",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return SelectionWalk(ctx, _ =>
+                    bridge.Diffs.Count == 0 ? "the bridge received no change"
+                    : !HoldsItems(bridge.CurrentTree, 1_000) ? "the tree does not hold the list's 1,000 items"
+                    : null,
+                    reset: bridge.ClearDiffs, itemRows: true);
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
             ctx =>
@@ -162,10 +174,10 @@ static partial class Scenarios
     /// (<c>HeadlessSession.RunLoop</c>, on the virtual clock): Down every 60 ms through 1,000
     /// commits on item rows, beside a details pane the same Build makes again, unchanged, on
     /// every move, as an app's whole-window Build does. A step is one key and the loop's frames
-    /// until the next. The figure is the accessibility trees a key builds: the tree asks each
-    /// item's label once a build and for nothing else, so the labels made over the 1,000 items
-    /// count the builds. A scroll's refresh of the tree waits 100 ms, so keys 60 ms apart need
-    /// a build at most every other key for what moved; a selection move itself needs none.
+    /// until the next. The figure is the accessibility trees a key builds, as the window counts
+    /// them (it was the labels made over the 1,000 items until the list kept its labels). A
+    /// scroll's refresh of the tree waits 100 ms, so keys 60 ms apart need a build at most every
+    /// other key for what moved; a selection move itself needs none.
     /// <paramref name="told"/> checks the bridge was told the selected item.
     /// </summary>
     private static Op RealLoopWalk(Ctx ctx, Func<int, string?> told)
@@ -181,20 +193,20 @@ static partial class Scenarios
         pane.Open(pane.Selected);
         ctx.Session.PumpFrame(TimeSpan.FromMilliseconds(120));
         int first = pane.Selected;
-        int labelsBefore = 0;
+        int treesBefore = 0;
         bool nextKey = false;
         var keyEvery = TimeSpan.FromMilliseconds(60);
         return new Op
         {
             Run = _ =>
             {
-                labelsBefore = pane.LabelsMade;
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
                 ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
                 nextKey = false;
                 ctx.Session.RunLoop(() => nextKey, eventEvery: keyEvery, onEvent: () => nextKey = true);
             },
             Frames = 0,
-            Figure = () => (pane.LabelsMade - labelsBefore) / (double)pane.ItemCount,
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
             FigureUnit = "a11y trees/key",
             Check = step => pane.Verify(first + step + 1) ?? told(first + step + 1),
         };
