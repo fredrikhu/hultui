@@ -29,6 +29,12 @@ wait for each installer run and confirm each release has its installer ("not acq
 → rerun). Aperture's and Reel's notes should mention the playback heartbeat / resume-save fix
 (step 4b). Otherwise cut releases only when the user asks.
 
+**After round 3's release (user, 2026-10-12): pause.** Once round 3 is merged, CI is green and
+the five app releases are published, do NOT start the round 4 survey: set Phase to "paused after
+round 3's release; next: round 4 survey" with the resume line, stop the loop (ScheduleWakeup
+`stop: true`), and report to the user — including the two round 4 questions queued in Waiting
+(atspi-reorder-signal, button-isenabled-rebuild).
+
 ## Verdicts
 
 | Expert | Round | Satisfied | Review objections |
@@ -169,13 +175,14 @@ Round 2 regressions first, then value per cost.
     cache), then **a11y-layout-refresh-moved-only** (skip the bounds refresh when nothing moved: a
     tween frame with a reader 8.7 KB → 0). Approved: joins this round.
 17. **Round 3 fix-ups** (correctness found during this round's build; before the full suite):
-    **junction-gitlab-fake-race** (`FakeGitLabHandler.Seen` is a plain List written by the HTTP thread
-    and read by the UI thread; failed twice, steps 11 and 12 — would make the full suite and CI
-    flaky), **toasthost-second-flash-opacity** (pre-existing: a second Flash mid-fade leaves the
+    ~~junction-gitlab-fake-race~~ (**not ours**: the user started the suggested task "Fix
+    FakeGitLabHandler.Seen race in Junction tests" in a separate session on 2026-10-12; leave those
+    files alone, and if it lands on main before our merge, take it with the merge), **toasthost-second-flash-opacity** (pre-existing: a second Flash mid-fade leaves the
     replacement half-transparent for its whole hold), **customframe-install-activates** (the custom
     frame activates the window in the Application constructor), **junction-remoteop-test-flake**
     (`RemoteOpAnimationTests…(Push)`, new in 2894d98, failed once in step 14a's full run, passed 3/3
-    alone — find out whether it is the same fake race or a timing assumption),
+    alone — find out whether it is the same fake race (then leave it to the user's separate session) or
+    a timing assumption in our test (then fix it)),
     **itemrows-remake-on-scale** (framework safety net from 14b: item rows are remade on a window
     display-scale change, as on a Theme object switch, so an app that forgets the scale in its shape
     cannot lose its icons — Junction History shipped that bug in junction-v1.20.0, fixed app-side in
@@ -716,3 +723,5 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   when nothing moved) reverted by the orchestrator (97ff373): it cost every element 16 B and slowed
   a11y/create 5 % for a case this round already removed. Two possible new events queued as round 4
   questions (AT-SPI reorder, IsEnabled through a rebuild).
+- 2026-10-12: the user started the suggested task for the FakeGitLabHandler race in a separate
+  session (step 17 leaves it alone) and asked to pause after round 3 is merged and released.
