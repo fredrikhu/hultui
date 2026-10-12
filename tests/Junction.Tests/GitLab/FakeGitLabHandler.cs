@@ -16,8 +16,15 @@ internal sealed class FakeGitLabHandler : HttpMessageHandler
 {
     private readonly Dictionary<string, Func<HttpRequestMessage, HttpResponseMessage>> _routes = new(StringComparer.Ordinal);
     private readonly List<(HttpRequestMessage Request, string? Body)> _seen = [];
+    private readonly object _gate = new();
 
-    public IReadOnlyList<(HttpRequestMessage Request, string? Body)> Seen => _seen;
+    /// <summary>A copy of the requests so far. Requests are recorded on pool threads while a
+    /// test polls this from the UI thread, and <see cref="List{T}.Add"/> grows the count before
+    /// it writes the item, so reading the list itself can turn up an empty slot.</summary>
+    public IReadOnlyList<(HttpRequestMessage Request, string? Body)> Seen
+    {
+        get { lock (_gate) return _seen.ToArray(); }
+    }
 
     public FakeGitLabHandler Map(string route, Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
@@ -36,7 +43,7 @@ internal sealed class FakeGitLabHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-        _seen.Add((request, body));
+        lock (_gate) _seen.Add((request, body));
         var key = $"{request.Method} {request.RequestUri!.PathAndQuery}";
         if (_routes.TryGetValue(key, out var respond)) return respond(request);
         return Json("{\"message\":\"404 Not Found (no route " + key.Replace("\"", "'") + ")\"}", 404);
