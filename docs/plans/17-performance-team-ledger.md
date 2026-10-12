@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–15 landed, step 16 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–16 landed, step 17 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -189,7 +189,7 @@ Round 2 regressions first, then value per cost.
     11ced00), **aperture-library-paging** (pre-existing since 01e5bd7: the grid requests pages by window
     height, so at 1440×900 a 250-film library loads 100 and End/arrows/wheel stop at the 100th; a
     landed page does not rebuild the view once the total is known). Small.
-16. **linux-emoji-colour-fallback** (5, correctness) — emoji presentation and VS16 pick the colour
+16. ~~**linux-emoji-colour-fallback**~~ LANDED a52d481, 12c64b0, c1095da (5, correctness) — emoji presentation and VS16 pick the colour
     emoji face (Linux 😀 ❤️ in DejaVu today; Windows #️⃣ ™️ ©️ monochrome). Changes those pixels;
     goldens unaffected (pinned faces). Proof on WSL with real Noto faces and on Windows.
 
@@ -418,6 +418,7 @@ Re-ranked by the round 4 survey.
 | 3 | 68d3863, 0f28ca6 | a11y-role-change | Approved. The differ reports Role first; UIA raises ControlType and LocalizedControlType; AT-SPI sends property-change:accessible-role (not for the application root). Live WSL: a caching client's role now matches after a change in both directions. 6 tests. |
 | 3 | dd75acd, 2332fbe | a11y-atspi-cache-child-index | Approved. The survey's live check was invalid (its driver cleared the cache). libatspi overwrites a slot on cache-add and reinserts on children-changed:add: before, 6 of 10 insert cases left a wrong cached list. Now removals first, then one children-changed:add per added child in index order (the run ending the parent's children keeps one signal), cache-adds last. Live: 10 of 10 cases match. An `AtSpiClientCache` model reproduces the live results in tests. UIA unchanged. |
 | 3 | 9aa3516, 691d2a7 → 97ff373 | a11y-layout-refresh-moved-only (reverted) | Correct (1,155 shadow audits empty) but +16 B per element, +0.5…+1.9 % allocation on element-building rows, a11y/create +5.3 % min JIT, and its own probe paid more bytes than it saved; the common case it helped (whole-app rebuilds per animation frame) was removed by steps 4 and 12. Reverted by the orchestrator per the brief; numbers in DECISIONS.md. |
+| 3 | a52d481, 12c64b0, c1095da | linux-emoji-colour-fallback | Correctness, pixels changed on purpose. UTS #51 presentation: Emoji_Presentation characters, a pictograph or keycap base + VS16, the first character of a modifier or ZWJ sequence go to the colour emoji face ahead of the primary face; plain ™ © # 1 and ❤/↔ without VS16 stay text; VS15 turns the preference off. New `EmojiPresentation` (Unicode 16.0 tables checked against ICU), new public `IFontCollection.MatchEmoji` (default null), `SkiaFontCollection.MatchEmoji` (fontconfig `und-Zsye`; DirectWrite by family name; colour faces only). Windows: #️⃣ 1️⃣ *️⃣ ™️ ©️ ®️ ↔️ ▶️ ☝🏽 now Segoe UI Emoji; Fedora: 😀 ☕ ⚡ ❤️ now Noto Color Emoji, keycaps/☝🏽/❤️‍🔥 one glyph. Broad text pages byte-identical on both OSes; goldens unchanged. Perf 0 slower/faster (a first version cost +6/+11 % on long-document open and was replaced by a vectorized gate); new row `text/create 2,000 unique emoji labels`. WSL 10,216 passed. |
 
 ## Examined, not worth it
 
@@ -725,3 +726,5 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   questions (AT-SPI reorder, IsEnabled through a rebuild).
 - 2026-10-12: the user started the suggested task for the FakeGitLabHandler race in a separate
   session (step 17 leaves it alone) and asked to pause after round 3 is merged and released.
+- 2026-10-12: step 16 landed (a52d481..c1095da): colour emoji on Linux and VS16 symbols on Windows.
+  Guideline note: a per-character check in the itemizer must be gated by a vectorized scan.
