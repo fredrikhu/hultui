@@ -100,6 +100,21 @@ In `src/HultUI/Window.cs`:
 - In `OnFocusChanged` (line 99), also call
   `_accessibilityBridge.NotifyFocusChanged(FindNode(element))`.
 
+**Bounds refresh (2026-10-12, plan 17).** A layout change is told on a coalesced schedule
+(at once, then at most every 100 ms, then once on the trailing edge). It comes when a box the
+tree reads moved, not whenever a layout pass ran: the layout output setter compares each
+element's box on screen with the one the window last took, and marks the path to the root; the
+window's look (`Element.TakeMovedBoxes`, after the layout pass and again after drawing, where a
+virtual list makes its rows; overlays in the tree too) walks only the marked paths and takes the
+boxes as they are. A box written elsewhere and back within a pass is no move; a padding or
+border change is one. A component rebuilt on every frame of a tween patches its buttons, which
+mark their layout, and a reader listening cost a whole tree every 100 ms for an empty diff
+(300 rows: 22 trees per 150 frames, 11.4 KB a frame; now none). What a layout pass told by
+accident is now told for itself: the accessibility setters notify (above), and a list on item
+rows whose items changed off screen tells their labels. `Window.SkippedA11yRefreshAudit` (tests)
+builds a fresh tree at each frame the old rule would have refreshed and the new one left nothing
+pending, and diffs it against the applied one: empty over the Headless, Media and app suites.
+
 ### Step 3 — Windows UIA bridge
 
 New project: `src/HultUI.Platform.Accessibility.Windows/`.

@@ -178,7 +178,90 @@ public abstract class Element
 #endif
             return _layout;
         }
-        internal set => _layout = value;
+        internal set
+        {
+            // What the accessibility tree reads of it: the box on screen, written several times on
+            // the way (measured, placed, shifted with its parent), so compared with the box last
+            // taken (TakeMovedBoxes); and the content box inside its padding and border (a scroll
+            // view's clip, a list's item rows), whose change the layout pass reports where it
+            // reads them from the style (NoteInsetsChanged).
+            if ((_boxMarks & BoxMoved) == 0 && (value.AbsoluteX != _takenBox.X || value.AbsoluteY != _takenBox.Y
+                || value.Width != _takenBox.Width || value.Height != _takenBox.Height))
+                MarkBoxMoved(BoxMoved);
+            _layout = value;
+        }
+    }
+
+    // ──── Moved since the accessibility tree last looked ────
+    // A layout pass refreshed the whole accessibility tree, at most every 100 ms, whether or not it
+    // moved anything: a component rebuilt on every frame of a tween patches a button, which marks
+    // its layout, and a reader listening cost a whole tree every 100 ms for an empty diff. The
+    // window asks instead whether any box it reads changed (TakeMovedBoxes). An element written
+    // other than its box as last taken is marked, and its ancestors say one below them is, so the
+    // question walks only the marked paths.
+
+    /// <summary>The box (absolute position and size) as the window last took it.</summary>
+    private Rect _takenBox;
+    /// <summary>The marks below, and <see cref="Mounted"/>: one byte, where a byte of its own
+    /// made every element 8 bytes larger.</summary>
+    private byte _boxMarks;
+    /// <summary>Written other than <see cref="_takenBox"/> since the last look.</summary>
+    private const byte BoxMoved = 1;
+    /// <summary>This element or one below it is <see cref="BoxMoved"/>.</summary>
+    private const byte BoxPath = 2;
+    /// <summary>Its padding or border changed since the last look: its content box moved.</summary>
+    private const byte BoxInsets = 4;
+    private const byte BoxBits = BoxMoved | BoxPath | BoxInsets;
+    /// <summary>Not a mark: whether OnMounted has fired more recently than OnUnmounted.</summary>
+    private const byte Mounted = 8;
+
+    /// <summary>
+    /// The layout pass is about to write a padding or border other than the one this element has:
+    /// its content box moves, whether or not its box does. They come from the style, the same in
+    /// every write of a pass, so the one place that reads them from it says so.
+    /// </summary>
+    internal void NoteInsetsChanged()
+    {
+        if ((_boxMarks & BoxInsets) == 0) MarkBoxMoved(BoxMoved | BoxInsets);
+    }
+
+    private void MarkBoxMoved(byte marks)
+    {
+        _boxMarks |= (byte)(marks | BoxPath);
+        MarkBoxPathAbove();
+    }
+
+    private void MarkBoxPathAbove()
+    {
+        for (var e = Parent; e is not null && (e._boxMarks & BoxPath) == 0; e = e.Parent)
+            e._boxMarks |= BoxPath;
+    }
+
+    /// <summary>
+    /// Whether an element in this subtree has a box, or a padding or border, other than at the
+    /// last call, which takes them all as they are now. Visits only the elements written since,
+    /// and their ancestors. An element written elsewhere and back before the call has not moved.
+    /// UI thread.
+    /// </summary>
+    internal bool TakeMovedBoxes()
+    {
+        int marks = _boxMarks & BoxBits;
+        if (marks == 0) return false;
+        _boxMarks &= unchecked((byte)~BoxBits);
+        bool moved = false;
+        if ((marks & BoxMoved) != 0)
+        {
+            var b = _layout;
+            moved = (marks & BoxInsets) != 0 || b.AbsoluteX != _takenBox.X || b.AbsoluteY != _takenBox.Y
+                || b.Width != _takenBox.Width || b.Height != _takenBox.Height;
+            _takenBox = new Rect(b.AbsoluteX, b.AbsoluteY, b.Width, b.Height);
+        }
+        var children = _children;
+        if (children is not null)
+            for (int i = 0; i < children.Count; i++)
+                if ((children[i]._boxMarks & BoxBits) != 0 && children[i].TakeMovedBoxes())
+                    moved = true;
+        return moved;
     }
 
     /// <summary>
@@ -1146,6 +1229,12 @@ public abstract class Element
     /// </summary>
     private void NoteChildJoined(Element child)
     {
+        // A child written since the last look, or with such a one below it, is found through here.
+        if ((child._boxMarks & BoxBits) != 0 && (_boxMarks & BoxPath) == 0)
+        {
+            _boxMarks |= BoxPath;
+            MarkBoxPathAbove();
+        }
         if ((DirtyFlags & DirtyFlags.StyleSubtree) == 0
             || (child.DirtyFlags & DirtyFlags.StyleSubtree) != 0)
             return;
@@ -1159,7 +1248,11 @@ public abstract class Element
 
     // Whether OnMounted has fired more recently than OnUnmounted. Not the same as having a
     // parent: an element deep in a removed subtree keeps its parent and is unmounted.
-    private bool _mounted;
+    private bool _mounted
+    {
+        get => (_boxMarks & Mounted) != 0;
+        set => _boxMarks = value ? (byte)(_boxMarks | Mounted) : (byte)(_boxMarks & ~Mounted);
+    }
 
     /// <summary>
     /// Mounts this element and anything under it that is not mounted, children first: the
