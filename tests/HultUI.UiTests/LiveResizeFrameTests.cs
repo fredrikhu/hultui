@@ -74,6 +74,7 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
     [UiFact]
     public void EachStepOfAResize_DrawsOneFrame_AtItsNewSize()
     {
+        using var guard = ForegroundGuard.Begin();
         var (app, hwnd, counter) = Open(Plain);
         using var _ = app;
         GetClientRect(hwnd, out var start);
@@ -113,6 +114,7 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
     [UiFact]
     public void AWindowWindowsAsksToRepaint_IsDrawn()
     {
+        using var guard = ForegroundGuard.Begin();
         var (app, hwnd, counter) = Open(Plain);
         using var _ = app;
         const int times = 8;
@@ -131,6 +133,7 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
     [UiFact]
     public void TheLiveResizeTimer_DrawsOnlyAWindowWithSomethingNew()
     {
+        using var guard = ForegroundGuard.Begin();
         // SDL's live-resize timer: EXPOSED with data1 1, every ~10 ms while Win32 runs its modal
         // size/move loop — a held edge or a window being moved. Pushed by hand here: a drag
         // cannot be made without the mouse. SDL_PushEvent runs the event watch, as SDL's own does.

@@ -53,6 +53,7 @@ public sealed class FramePacingTests(ITestOutputHelper output)
         // Continuous redraw is unpaced; when it is switched off the next paced frame
         // must come within an interval, not once a schedule advanced by thousands of
         // unpaced frames has caught up (the window froze for tens of seconds).
+        using var guard = ForegroundGuard.Begin();
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "pacing", 200, 100);
         int frames = 0;
@@ -97,6 +98,7 @@ public sealed class FramePacingTests(ITestOutputHelper output)
     private static (int Frames, float Hz, float Seconds, long ElapsedMs, int EventsRaised) RunTween(
         bool eventStorm, FramePacing pacing = FramePacing.Display)
     {
+        using var guard = ForegroundGuard.Begin();
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "pacing", 200, 100);
         app.FramePacing = pacing;

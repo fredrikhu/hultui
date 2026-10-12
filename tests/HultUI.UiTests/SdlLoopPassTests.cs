@@ -25,6 +25,7 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
     [UiFact]
     public void AnIdlePass_AllocatesNothing()
     {
+        using var guard = ForegroundGuard.Begin();
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "idle pass", 300, 200);
         app.SetRoot(Flex.Column().Padding(8).Children(TextElement.New("Nothing changes here"), Button.New("Button")));
@@ -56,6 +57,7 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
     [UiFact]
     public void AShortWait_ParksForItsWholeTimeout()
     {
+        using var guard = ForegroundGuard.Begin();
         // Run waits out the rest of a display interval with waits of a few milliseconds, the
         // last of them 1 ms. On Windows SDL rounded what was left of a wait down to whole
         // milliseconds after its own clock had started, so 4 ms parked for ~3 and 1 ms not at
@@ -90,6 +92,7 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
     [UiFact]
     public void ADirtyWindow_WaitsForItsFrame_RatherThanSpinning()
     {
+        using var guard = ForegroundGuard.Begin();
         // While a tween runs the loop renders once per display interval and parks in between:
         // a pass that renders, a pass that waits out the rest of the interval, and now and then
         // one more. With a wait that returned at once it spun through the last millisecond of
