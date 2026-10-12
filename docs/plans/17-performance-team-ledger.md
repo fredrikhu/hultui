@@ -6,7 +6,8 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 3
 - **Phase:** build — round 3, resumed 2026-10-11; all build steps landed (1–17). Phase **release**: full suite passed, merged into main as
-  e260030 and pushed; CI fix 58c186f pushed; waiting for CI run 38323118109, then the five app releases, then pause. All eight reports are in
+  e260030 and pushed; CI fix 58c186f pushed, CI green (38323118109, re-run once); tags pushed, waiting
+  for the five installer runs, then the five app releases, then pause. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -203,7 +204,8 @@ Re-ranked by the round 4 survey.
   command maximizes without activating, so it needs its own design. Full screen on/off asks for 2.
 - **junction-watcher-self-reload** (8, app, from step 17) — Junction's GitWatcher (300 ms debounce)
   sometimes mistakes the app's own git writes under `.git` for an outside change and reloads (2 of 40
-  starts): a data-generation bump and 4 builds.
+  starts): a data-generation bump and 4 builds. It also made `DiffItemLabelTests.TheLabelsAreMadeOnce`
+  fail once in CI (38323118109 attempt 1). Fix the watcher (ignore the app's own writes), not the tests.
 - **atspi-reorder-signal (user, round 4 question)** (7, from step 15) — live, a caching AT-SPI client keeps
   the old order after children are reordered (nothing is sent today); a signal would be a new event.
 - **button-isenabled-rebuild (user, round 4 question)** (7, from step 15) — IsEnabled changed by a rebuild
@@ -754,3 +756,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   no run goes back; a test precondition, not a flake or a code bug (no re-run). Fixed 58c186f
   (`[DevanagariFontsFact]`, as `[HanFontsFact]`), pushed e260030..58c186f (fast-forward), primary
   fast-forwarded. CI run 38323118109 started.
+- 2026-10-13: CI 38323118109: test-linux green (the font fix worked); the Windows job failed once on
+  `Junction.Tests.DiffItemLabelTests.TheLabelsAreMadeOnce` (label remade between two reads — likely
+  Junction's watcher reloading after its own git writes, see junction-watcher-self-reload); re-run once
+  per the brief: attempt 2 green on all three jobs. Tagged 58c186f and pushed 3 + 2 tags:
+  junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0; installer runs
+  38324218701, 38324219011, 38324219212, 38324271540, 38324271987.
