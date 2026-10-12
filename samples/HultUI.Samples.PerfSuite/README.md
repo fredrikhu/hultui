@@ -10,7 +10,7 @@ It sits next to two narrower benchmarks:
 |---|---|---|
 | [`HultUI.Samples.Benchmark`](../HultUI.Samples.Benchmark/README.md) | One workload in depth: the js-framework-benchmark table, comparable to a browser | A real window, GPU, end to end |
 | [`HultUI.Samples.TextBench`](../HultUI.Samples.TextBench/README.md) | The text pipeline, per call, in nanoseconds | No UI at all |
-| **this suite** | The breadth: 121 scenarios over every feature area (112 off Windows) | Headless, CPU raster, any OS |
+| **this suite** | The breadth: 122 scenarios over every feature area (113 off Windows) | Headless, CPU raster, any OS |
 
 Use it to show that a change to one feature costs the others nothing, and to follow a
 scenario over time.
@@ -32,7 +32,7 @@ below). `--list` prints every scenario, `--help` every option.
 |---|---|
 | `layout/` | Resize drags over long lists, deep nesting, flex wrap, baseline alignment, aspect-ratio tiles, overfull rows and columns (flex shrink); building 300 cards |
 | `grid/` | Creating, resizing and editing a 1,800-cell grid with `auto` and `fr` columns |
-| `text/` | Re-wrapping paragraphs, cold labels (shaping), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out; long documents in a `TextArea`, among them Meridian's response viewer opening and wheeling a 19,000-line pretty-printed JSON response with its 23,000 colour spans, and its pane rebuilt around it by a keystroke elsewhere (`… highlighted JSON …`; the spans are the ones HultUI.Syntax gives it, written out); a file viewer of 400 selectable, syntax-coloured lines in one selection group, as Junction's diff and Vesper's reader are, hovered and wheeled (`text/selectable viewer …`) |
+| `text/` | Re-wrapping paragraphs, cold labels (shaping), cold labels with emoji in them (`text/create 2,000 unique emoji labels`: emoji alone on the plain path, and sequences — variation selectors, a keycap, a family, a skin tone, a flag — on the BiDi path, each drawn from the colour emoji face), ellipsis truncation, paint-only and metric rich-text spans; wrapping and truncation again over Hebrew mixed with Latin (`text/bidi …`), which the BiDi path lays out; long documents in a `TextArea`, among them Meridian's response viewer opening and wheeling a 19,000-line pretty-printed JSON response with its 23,000 colour spans, and its pane rebuilt around it by a keystroke elsewhere (`… highlighted JSON …`; the spans are the ones HultUI.Syntax gives it, written out); a file viewer of 400 selectable, syntax-coloured lines in one selection group, as Junction's diff and Vesper's reader are, hovered and wheeled (`text/selectable viewer …`) |
 | `scroll/` | Wheel and jumps through a 5,000-row list, sticky section headers, nested scroll chaining |
 | `virtual/`, `table/` | `VirtualListElement` with 100,000 items; a key walk down 1,000 two-line rows whose selection the owning component's Build reads, as Junction's History is walked (`virtual/selection walk …`: each Down rebuilds the owner and the list realizes its rows again in the render pass), and the same walk with rows from `.RenderWith((item, selected) => …)` (`… item rows`), which keeps the rows that did not change; both report the rows made a step; `TableView` with 10,000 rows: sort, wheel, column resize |
 | `component/` | Keyed and unkeyed rebuilds of 1,000 rows, reverse, a small component in a big tree, 300 mounts, a signal read by 500 effects |
