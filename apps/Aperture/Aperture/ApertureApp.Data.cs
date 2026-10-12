@@ -99,6 +99,9 @@ public sealed partial class ApertureApp
     private string? _gridKey;
     private int _gridTotal;
 
+    /// <summary>Bumped when cards already in the grid are changed in place (see PatchItem).</summary>
+    private int _gridPatches;
+
     internal ItemSort GridSort { get; private set; } = ItemSort.Name;
     internal bool GridDescending { get; private set; }
     internal bool? GridPlayedFilter { get; private set; }

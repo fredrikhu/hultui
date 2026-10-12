@@ -18,7 +18,7 @@ namespace Aperture;
 /// </summary>
 public sealed partial class ApertureApp
 {
-    private readonly Ref<VirtualListElement<int>> _gridList = new();
+    private readonly Ref<VirtualListElement<GridRowItem>> _gridList = new();
 
     private Element BuildLibraryView(Route route)
     {
@@ -58,10 +58,6 @@ public sealed partial class ApertureApp
         }
 
         int rowCount = asList ? items.Count : (items.Count + perRow - 1) / perRow;
-        // A trailing row for the "loading more" line, when there is more to come.
-        var rows = new List<int>(rowCount + 1);
-        for (int r = 0; r < rowCount; r++) rows.Add(r);
-        if (GridHasMore) rows.Add(-1);
 
         // Keep the cursor on screen as the arrows walk past the realized window.
         if (_gridList.Current is { } mounted && CursorIndex >= 0)
@@ -70,17 +66,21 @@ public sealed partial class ApertureApp
             mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
         }
 
-        var list = VirtualListElement<int>.New();
+        // The list keeps a row while its item is equal — its place and the column the cursor
+        // is in, so an arrow makes the row or two the cursor left and reached. Everything else
+        // a row shows is in the shape, and a change makes the rows on screen again.
+        if (GridRowShapeChanged(perRow)) _gridList.Current?.InvalidateRows();
+
+        var list = VirtualListElement<GridRowItem>.New();
         // Each item here is a row of posters, and every poster is its own button — so the
         // realized rows answer for themselves rather than the list publishing one node per
         // row (see VirtualListElement.RowsAreComposite).
         list.RowsAreComposite = true;
         column.AddChild(list
             .ItemHeight((int)rowStride)
-            .Items(rows)   // a fresh list each build → visible rows re-realize against current state
-            .RenderWith(r => r < 0 ? GridTailRow(perRow)
-                                   : asList ? ListRow(items[r], r)
-                                            : GridRow(items, r * perRow, perRow))
+            // A trailing row for the "loading more" line, when there is more to come.
+            .Items(new GridRowItems(rowCount, GridHasMore, perRow, CursorIndex))
+            .RenderWith((r, _) => GridRowFor(r, items, perRow, asList))
             .WithRef(_gridList)
             .Padding(new Thickness(0, Halide.S5, Halide.S5, Halide.S5))
             .AutomationId("library-grid")
@@ -260,6 +260,64 @@ public sealed partial class ApertureApp
         chip.OnClick(_ => onClick());
         if (!active) chip.HoverBg(Halide.Raised);
         return chip;
+    }
+
+    /// <summary>
+    /// One row of the grid as its list sees it: its place (-1 for the "loading more" row) and
+    /// the column the cursor is in there (-1 when it is elsewhere). The cards themselves are
+    /// the items at that place, which the shape answers for.
+    /// </summary>
+    internal readonly record struct GridRowItem(int Row, int CursorColumn);
+
+    /// <summary>The grid's rows as the list's items, each made when the list asks for it.</summary>
+    private sealed class GridRowItems(int rows, bool more, int perRow, int cursor) : IReadOnlyList<GridRowItem>
+    {
+        public int Count => rows + (more ? 1 : 0);
+
+        public GridRowItem this[int index] => index >= rows
+            ? new GridRowItem(-1, -1)
+            : new GridRowItem(index, cursor >= 0 && cursor / perRow == index ? cursor % perRow : -1);
+
+        public IEnumerator<GridRowItem> GetEnumerator()
+        {
+            for (var i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    /// <summary>
+    /// What a grid row shows besides its place and its cursor column: how much of the list has
+    /// loaded (a page fills the last row), the cards a watched or favourite toggle changed in
+    /// place, how many cards fit across, the pictures that have landed (a card made before its
+    /// picture shows a placeholder), and the display scale (glyphs and artwork are cut for it,
+    /// and a change retires the old rasters). Another library, sort or filter empties the list
+    /// first, which takes the grid off screen; the layout and the titles setting are another
+    /// row height: both make every row again by themselves.
+    /// </summary>
+    private readonly record struct GridRowShape(int Loaded, int Patched, int PerRow, int ArtworkLanded, float Scale);
+
+    private GridRowShape _gridRowShape;
+
+    /// <summary>Rows the grid's template has made, for tests.</summary>
+    internal int GridRowsMade { get; private set; }
+
+    /// <summary>Whether anything the grid rows show besides their items changed since the last
+    /// build asked; takes the new state either way.</summary>
+    private bool GridRowShapeChanged(int perRow)
+    {
+        var shape = new GridRowShape(_gridItems.Count, _gridPatches, perRow, _artworkLanded, Ui.DisplayScale);
+        bool changed = shape != _gridRowShape;
+        _gridRowShape = shape;
+        return changed;
+    }
+
+    private Element GridRowFor(GridRowItem r, IReadOnlyList<MediaItem> items, int perRow, bool asList)
+    {
+        GridRowsMade++;
+        return r.Row < 0 ? GridTailRow(perRow)
+            : asList ? ListRow(items[r.Row], r.Row)
+            : GridRow(items, r.Row * perRow, perRow);
     }
 
     private Element GridRow(IReadOnlyList<MediaItem> items, int start, int perRow)

@@ -478,6 +478,7 @@ public sealed partial class ApertureApp
     {
         for (int i = 0; i < _gridItems.Count; i++)
             if (_gridItems[i].Id == itemId) _gridItems[i] = change(_gridItems[i]);
+        _gridPatches++;   // the grid's kept rows show the old copies
         for (int i = 0; i < _queue.Count; i++)
             if (_queue[i].Id == itemId) _queue[i] = change(_queue[i]);
         Rerender();

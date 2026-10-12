@@ -104,7 +104,7 @@ public sealed partial class ApertureApp : Component, IDisposable
 
         _settings = settings ?? new ApertureSettings(CredentialStore.Default);
         _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
-        _posters = new PosterCache(() => Application.InvokeOnMainThread(Rerender), http: posterHttp);
+        _posters = new PosterCache(() => Application.InvokeOnMainThread(OnArtworkLanded), http: posterHttp);
 
         if (library is not null)
         {
