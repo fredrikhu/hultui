@@ -85,8 +85,8 @@ public sealed class Application : IDisposable
 
     /// <summary>
     /// Unparks the frame loop after queued work. Not from the UI thread while the loop runs:
-    /// the work is drained in this pass, and a wake would only queue a spurious event that
-    /// makes the next idle wait return at once. From the UI thread while the loop is parked,
+    /// the loop drains the work in this pass, or, posted after the drain, names it as due now
+    /// before it waits (NextDeadline); a wake would only queue a spurious event. From the UI thread while the loop is parked,
     /// yes: that is a callback the wait itself dispatched (a WebView2 event, a DispatcherQueue
     /// item), and the wait, which may have no deadline, would not end for it.
     /// </summary>
@@ -657,6 +657,11 @@ public sealed class Application : IDisposable
             if (w.IsOpen) w.NextDeadline(ref at, ref deadline);
         if (_inspectorHost?.NextRefreshAt is { } inspector)
             Earliest(ref at, ref deadline, inspector, IdleDeadline.Inspector);
+        // Work posted on the UI thread after this pass drained the queue — by a frame (a menu's
+        // close callback), by an await its code resumed, by a terminal's resize — is due now: a
+        // post from the UI thread while the loop runs does not wake it.
+        if (!_mainThreadQueue.IsEmpty)
+            Earliest(ref at, ref deadline, _platform.TimeProvider.GetTimestamp(), IdleDeadline.Posted);
         // A Vulkan window without display-colour events re-reads the display every 100 ms
         // (SDL3Window.PollDisplayColor): the slider for SDR content brightness sends no message.
         if (_platform is SdlWindowingPlatform && SDL3Window.NextDisplayColorPoll is { } poll)

@@ -429,6 +429,23 @@ public class LoopWakeTests
         Assert.InRange(drawnAt, 100, 101);
     }
 
+    /// <summary>A post made on the UI thread while the loop runs does not wake it (the loop is
+    /// not parked); one made after the pass drained the queue — here by a timer's completion, in
+    /// a pass that draws nothing — must still run, and not when something else next wakes the
+    /// loop.</summary>
+    [Fact]
+    public void APostMadeAfterThePassDrainedTheQueue_RunsWithTheNextPass()
+    {
+        using var run = new Run();
+        long start = run.Now;
+        bool ran = false;
+        Animate.After(0.5f, () => Application.InvokeOnMainThread(() => ran = true));
+
+        double at = RunUntil(run, () => ran, start, TimeSpan.FromSeconds(5));
+
+        Assert.InRange(at, 500, 501);
+    }
+
     [Fact]
     public void APostFromAnotherThread_WakesTheLoop()
     {

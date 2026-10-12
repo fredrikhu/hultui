@@ -37,6 +37,8 @@ internal enum IdleDeadline
     Inspector,
     /// <summary>A display-colour poll of a Vulkan window without display-colour events.</summary>
     DisplayColor,
+    /// <summary>Work posted on the UI thread after the pass drained the queue: due now.</summary>
+    Posted,
     Count,
 }
 
@@ -228,6 +230,7 @@ internal static class FrameLog
         IdleDeadline.Resize => "resize",
         IdleDeadline.Inspector => "inspector",
         IdleDeadline.DisplayColor => "display-colour",
+        IdleDeadline.Posted => "posted",
         _ => "?",
     };
 
