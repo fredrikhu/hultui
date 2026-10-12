@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–10 landed, step 11 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–11 landed, step 12 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -137,7 +137,7 @@ Round 2 regressions first, then value per cost.
     and auto-hide as `.Delay`; ~60 → 1 wake per delay) — a tween started after idle must not jump
     to its end. The env-gated per-loop log (r3rt patch) is the measurement; suite row
     **apps-scenario-loop-wakes**.
-11. **runtime-pointer-events-on-demand + reactivity-pointer-rebuild-per-frame** (4/6; user chose (b) on 2026-10-11, after first choosing (a): only the splitter, pan, slider and scrubber callbacks coalesce to once per frame that may be drawn; other pointer-move handlers keep every move) — make
+11. ~~**runtime-pointer-events-on-demand + reactivity-pointer-rebuild-per-frame**~~ LANDED 4bd3576, 3f7eccd, 6a7114c, 1608999, 1bd5e4c, b9e949e (4/6; user chose (b) on 2026-10-11, after first choosing (a): only the splitter, pan, slider and scrubber callbacks coalesce to once per frame that may be drawn; other pointer-move handlers keep every move) — make
     PointerMove/Enter/Leave event objects only when a handler wants them (hover frame 568 → ~150 B);
     pointer-driven rebuilds once per drawn frame (splitter, pan, slider, scrubber: 8–16 rebuilds per
     frame with a fast mouse, −78…−94 % bytes per drag frame).
@@ -176,6 +176,11 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **vesper-root-move-handler** (8, app, from step 11) — Vesper's root has its own non-passive
+  PointerMove handler: 104 B per move (vs 40) and a frame per move. Make it passive or narrower.
+- **junction-gitlab-fake-race** (test, from step 11) — `FakeGitLabHandler.Seen` is a plain `List` the
+  HTTP thread adds to while the UI thread enumerates it; `MergeRequestActionTests.ApproveSendsTheSha…`
+  failed once. A task chip was raised for it.
 - **idle-wake-latency-p90** (4, watch, from step 10) — with the loop parked in an infinite wait, a
   worker post → drawn frame keeps its median (0.39–0.48 → 0.44–0.55 ms) but the p90 in a
   never-focused background window rose 0.74–1.11 → 2.49–5.03 ms (6–8 of 80 wakes took ~4–5 ms to
@@ -367,6 +372,8 @@ Re-ranked by the round 4 survey.
 | 3 | c667032 | winforms-idle-ticks | The WinForms host's 8 ms timer ticks only when something is due; wakes post a tick. Idle 62.9 → 0 passes/s; spinner 63 fps unchanged; toast every 3 s 64 → 8.1; worker post → frame median 16.2 → 0.6 ms, p90 16.9 → 4.8; toast end ~2 ticks later. |
 | 3 | c229971 | apps-scenario-loop-wakes | Four `loop/` suite rows: idle 62.6 → 0.2 passes/s, minimized and changed 62.6 → 0.2, toast held 2 s 71.3 → 19.7, tooltip delay 66.4 → 8.0. |
 | 3 | 341ac09 | gl-uitests-focus-hardening | The in-process GL loop UiTests get `ForegroundGuard` (SDL hint, CBT hook with WS_EX_NOACTIVATE and activation refused, 5 ms watcher). Other GL UiTests (incl. WinFormsHostSampleTests' `EnsureForeground`) still unhardened. |
+| 3 | 3f7eccd, 6a7114c, 1608999 | runtime-pointer-events-on-demand | PointerMoveEvent made only if something on the pinned path listens; Enter/Leave made at the first listener and shared up the chain (handlers added mid-walk still heard); PaneSplitter/HorizontalPan's idle drag trackers register as passive-and-not-listening (`OnPassive(handler, listening)`, condition on the delegate target so handler entries stay 16 B). B per move incl. the 40 B MouseMoveInput: within an element 104 → 40, hover change 216 → 40; real windows (60 Hz posted moves, HULTUI_FRAMELOG, GL and Vulkan, JIT and AOT) synthetic/Junction/Reel 216 → 40, UI thread 13.0 → 2.4 KB/s; Vesper 216 → 104 (its root move handler); Meridian 418 → 242 JIT. Suite input/hover 0.2 → 0.0 KB/op; 0 slower. |
+| 3 | 4bd3576, 1bd5e4c, b9e949e | reactivity-pointer-rebuild-per-frame (b) | User's answer (b): only PaneSplitter, HorizontalPan, the slider (hover, OnChanged during drag, OnHoverValue → VideoPlayer scrubber) apply the latest position once per frame via internal `PointerFollow`/`IPreFrameHost` (run at the start of RenderFrame, no allocation); release, press, keys, a11y value sets and PanTo flush first, so a drag ends exactly on the pointer (Junction pane 431.6 → 438.0 for a 200 px drag); every other handler keeps every move. 1 kHz moves, real loop: 120-row splitter app 16.1 → 1.0 rebuilds/frame, 10,499 → 655 KB/frame (−94 %); Junction Commit splitter 8.1 → 1.03, 1,782 → 267 KB (−85 %); scrubber hover 15.7 → 0.97, 628 → 43 KB (−93 %); slider drag 10.3 → 1.0, OnChanged 309 → 30. New suite rows (117 rows): splitter drag −57 %/−62 % time JIT/AOT, 63.0 → 4.6 MB/op; slider drag −53/−59 %, 30.8 → 2.1 MB; scrubber hover −6/−9 %, −93 % bytes. REACTIVITY.md "A drag rebuilds once per frame"; ELEMENTS.md. |
 
 ## Examined, not worth it
 
@@ -642,3 +649,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   idle apps wake 0 times a second (was 61), minimized 0 (was 36–38); deadlines on time; focus guard
   never fired. Decided without asking: bound the tween first step by one interval (step 12), inside
   the approved answer to question 5.
+- 2026-10-12: step 11 landed (4bd3576..b9e949e): a hover move costs only the platform's 40 B input;
+  splitters, pans, sliders and the scrubber rebuild once per frame (−85…−94 % bytes per drag frame).
+  Focus guard never fired. Guideline notes: hover styles cost nothing per move; a root move handler
+  costs 64 B per move window-wide; an app's own move handler that calls MarkDirty still rebuilds per
+  move (no public coalescing API).
