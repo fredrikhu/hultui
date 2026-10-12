@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–9 landed, step 10 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–10 landed, step 11 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -128,7 +128,7 @@ Round 2 regressions first, then value per cost.
    bar move enters the same loop and must not pay two rebuilds. Proof with video (user asked about
    60+ fps): mpv frame drops and A/V sync during a drag, a move, a held-still drag and the release,
    at 1080p60 and a 120 fps clip, before vs after.
-10. **runtime-idle-wakeups + apps-tooling-generic-framelog** (4; with 3, 6, 7) — the loop waits for
+10. ~~**runtime-idle-wakeups + apps-tooling-generic-framelog**~~ LANDED 4f43237, 1521f47, 0e2bf80, 9c43337, c667032, c229971, 341ac09, 5c3c30a, a4b5bbb (4; with 3, 6, 7) — the loop waits for
     its next deadline or a wake instead of `WaitForEvents(16)`: idle ~60 → ≤1 wake/s in all five
     apps, minimized 38 → 0. Deadlines: animations incl. delay tweens, a11y trailing refresh 100 ms,
     range refresh 250 ms, resize throttle, inspector, Vulkan colour poll without colour events.
@@ -141,10 +141,14 @@ Round 2 regressions first, then value per cost.
     PointerMove/Enter/Leave event objects only when a handler wants them (hover frame 568 → ~150 B);
     pointer-driven rebuilds once per drawn frame (splitter, pan, slider, scrubber: 8–16 rebuilds per
     frame with a fast mouse, −78…−94 % bytes per drag frame).
-12. **reactivity-toasthost-fade-in-place + apps-whole-app-tween-rebuilds** (6/8; approved: `onChanged` on appear/change/go only) — the toast
+12. **reactivity-toasthost-fade-in-place + apps-whole-app-tween-rebuilds + tween-first-step-bounded** (6/8; approved: `onChanged` on appear/change/go only) — the toast
     fades its live element (one toast: 22–27 whole-app rebuilds → ~2–3, −90 %); Junction's spinner
     and remote-op tweens write Transform/Opacity on live elements (fetch: 12.1 MB per 61 frames).
-    Suite row **apps-scenario-toast**.
+    Suite row **apps-scenario-toast**. **tween-first-step-bounded** (from step 10): 9c43337's zero first
+    step draws one extra identical frame whenever a tween starts (+4 frames per toast, toast row +4 %
+    time). Step the first frame by min(gap since the last frame, one interval) instead: no jump after
+    idle and frames still shift by at most one interval — inside what the user approved for question
+    5 (decided by the orchestrator, 2026-10-12), so no new question.
 13. **text-textarea-incremental-wrap + text-memo-cache-byte-bound** (5) — carry each hard line's
     breaks by index and patch line starts around the edit (retained −8.2 MB on a wrapped 20,000-line
     log; keystroke churn −27/−28 % on 19k JSON and the log); weight BiDi/styled memos by bytes
@@ -172,6 +176,11 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **idle-wake-latency-p90** (4, watch, from step 10) — with the loop parked in an infinite wait, a
+  worker post → drawn frame keeps its median (0.39–0.48 → 0.44–0.55 ms) but the p90 in a
+  never-focused background window rose 0.74–1.11 → 2.49–5.03 ms (6–8 of 80 wakes took ~4–5 ms to
+  schedule, ~2 of 80 before). A focused window could not be measured (focus rule). Check in the
+  round 4 app survey from real input timing if a way is found without taking focus.
 - **customframe-install-activates** (3, correctness, from step 9b) — `WindowsCustomFrame.Install` calls
   `SetWindowPos` without `SWP_NOACTIVATE` inside the Application constructor, so a custom-frame app
   window (Aperture) activates at creation even with `SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0`. Small.
@@ -352,6 +361,12 @@ Re-ranked by the round 4 survey.
 | 3 | 58f78dd | vk-purge-disposed-image-textures | Sources disposed after a draw are counted (any thread); the Vulkan surface runs its scratch purge after a frame once the count moved, at most once a second, no GPU wait (0.02–0.2 ms). 8 × 3840×2400 photos drawn then disposed: DXGI 391.5 → 213.2 MB (−45 %), Skia purgeable 176 → 0 MB, nvidia-smi +355 → +175 MiB, private 538–586 → 401 MB. Poster-grid churn (27 disposals/s): uploads 25.8/s unchanged (no re-uploads), frame time no slower. GL untouched (driver keeps the memory). |
 | 3 | 68424c2 | vk-swapchain-target-per-frame | One GRBackendRenderTarget + SKSurface per swapchain image for the swapchain's life (`SwapchainTargets`); F16 blit with DrawSurface; host contract `SetSwapchainReleasing` (targets dropped before images go) and `TransitionAcquiredImage` (barrier to COLOR_ATTACHMENT_OPTIMAL: just before the blit on the offscreen path, at once on the direct path; a frame after a GPU source draw wraps per frame as before — a barrier at every acquire slowed mpv's GL draw, 1.25–1.47 vs 0.97–1.14 ms). Idle-animating window: 2,046–2,048 B/frame → 0 (F16 and 8-bit, JIT and AOT), frame min −10…−16 %, median −7…−15 %; vkCreateImageView/Framebuffer per frame 1 → 0. Reel HDR playback 2,580 → 530–552 B/frame (8-bit video unchanged by design), mpv drops 0. Validation (SDK 1.4.357, core + sync) clean on reused-frame captures (40th frame, 3 resizes + minimize, F16/offscreen/scaled/8-bit/FIFO/IMMEDIATE/fixed extent); positive control (no barrier) `VUID-vkCmdDraw-None-09600` ×10 — NVIDIA drew correctly anyway, so the capture UiTest runs under the layer. HDR.md invariant rewritten. |
 | 3 | c6bc336, 3be8ce1, 31500ab, 939bf33 | vk-drag-swapchain-overallocate | Approved (question 14). maintenance1 on by default on Windows; a drag (first size change inside WM_ENTERSIZEMOVE…EXITSIZEMOVE, seen by a new comctl32 subclass `WindowsSizeMoveWatch` on every Vulkan window incl. Reel's default frame) over-allocates a one-to-one swapchain the window still fits (kept on SUBOPTIMAL) and rebuilds exact at the end; a title-bar move never over-allocates (`SizeMoveTracker`). **MAILBOX only:** under FIFO a one-to-one swapchain hung for good (acquire fence never signals, 3 repros); under IMMEDIATE its first build cost 172–196 ms and showed a stretch — both keep exact rebuilds. `HULTUI_VULKAN_FIXED_EXTENT=1` fixed (60–65 → 6.9 ms/step; `=0` turns maintenance1 off). Surface-format query cached on kept steps; Resize skips the target drop when the host keeps the swapchain. Median ms per drag step JIT/AOT: probe 32.9 → 5.6 / 34.5 → 5.9–7.8; Aperture Home 35.5 → 8.1 / 36.5–38.1 → 8.0–8.1; Reel idle 33.9 → 5.6–7.3 / 33.2–35.2 → 5.8–7.3; p95 36–41 → 7–12.6; builds per drag 80 → 5; release frame 29.6–36.3 ms; Aperture AOT drag CPU 6.6–6.9 → 1.3–1.4 Gcycles. Move: 0 builds before and after. Video drops per drag (Reel AOT): 1080p60 35–36 → 0–2, 1080p120 228–241 → 11–12; release 0 → 0 (60) / 0 → 2–3 (120); A/V desync max 17.5–20 → 10–13 ms (60). GPU memory during a drag 299–318 → 321–322 MB, back to 214 after. Stretch 0/519 and 0/494 sampled (positive control 64/581); mid-drag capture 0 px differ; validation 0 messages incl. maximize/snap/minimize (positive control fired). The 157–163 ms FIXED_EXTENT outlier was the first swapchain replacement after show (190–290 ms on every path). |
+| 3 | 4f43237 | apps-tooling-generic-framelog | `HULTUI_FRAMELOG` (`1` = stderr, else a file) + `HULTUI_FRAMELOG_SECS`: per-interval passes/frames/ticks, idle and paced waits with early returns, time parked, deadline kinds, posts and wakes by source, inputs, bytes per pass and input, GCs, heap, private bytes, windows. One static readonly bool when off. ENVIRONMENT.md. |
+| 3 | 1521f47, 0e2bf80, 5c3c30a | runtime-idle-wakeups | The idle wait runs to the next owned deadline (animations; a11y trailing refreshes 100/250 ms only while a client listens; resize throttle; inspector; Vulkan colour poll only without colour events) or forever; wakes from AccessibilityActionRouter enqueues, AT-SPI status flips (`IAccessibilityActionHost.ActiveChanged`), first WM_GETOBJECT, and any UI-thread work done inside the wait (WebView2, OLE, DispatcherQueue); a non-empty post queue is a deadline due at once (0e2bf80 fixed a lost post). Real windows, JIT and AOT: idle 60.6–60.9 → 0.0 passes/s (all five apps, GL and Vulkan with colour events); Vulkan polled 60.7 → 10.6; minimized 36 → 0.1; minimized dirty 38.2 → 0.7. On time: spinner 120 fps unchanged; a11y layout refresh 102–112 → 100–101 ms (due 100), range 250–265 → 250–252; live resize 1.5 frames/step unchanged; Reel 1080p60/120 0 drops; WSL AT-SPI DoAction 4.9–8.0 → 1.7–3.4 ms. Input post → frame median unchanged, p90 in a background window 0.74–1.11 → 2.49–5.03 ms (watch item). Suite 0 slower, 2 faster; the real-loop selection walk now meets its 100 ms refresh (0.4 → 0.6 trees/key, by design). |
+| 3 | 9c43337 | reactivity-animation-deadline | Approved (question 5). `AnimationManager.NextChangeIn`; toast hold, tooltip show delay, VideoPlayer auto-hide and six Terminal timers are delays (`Animate.After`); in the loop a tween's first step is 0 (no jump after idle). A 1 s toast every 3 s: 44.5 → 31.2 passes/s, animation steps 30 → 13.7/s; tooltip every 3 s 12.1 → 2.6 passes/s, delay 486–500 → 500.6–502.6 ms (no longer early). Cost: an extra identical first frame per tween (toast row +4 % time) — step 12 bounds it. |
+| 3 | c667032 | winforms-idle-ticks | The WinForms host's 8 ms timer ticks only when something is due; wakes post a tick. Idle 62.9 → 0 passes/s; spinner 63 fps unchanged; toast every 3 s 64 → 8.1; worker post → frame median 16.2 → 0.6 ms, p90 16.9 → 4.8; toast end ~2 ticks later. |
+| 3 | c229971 | apps-scenario-loop-wakes | Four `loop/` suite rows: idle 62.6 → 0.2 passes/s, minimized and changed 62.6 → 0.2, toast held 2 s 71.3 → 19.7, tooltip delay 66.4 → 8.0. |
+| 3 | 341ac09 | gl-uitests-focus-hardening | The in-process GL loop UiTests get `ForegroundGuard` (SDL hint, CBT hook with WS_EX_NOACTIVATE and activation refused, 5 ms watcher). Other GL UiTests (incl. WinFormsHostSampleTests' `EnsureForeground`) still unhardened. |
 
 ## Examined, not worth it
 
@@ -623,3 +638,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   the user's browser instead of the probe window** (the driver's HWND_TOPMOST did not raise it); the
   agent viewed one and deleted both. Captures are now in-process only and saved only when the probe's
   marker is on screen; the remaining four are 1618×904 window frames.
+- 2026-10-12: the user is away until 18:00 (no load expected). Step 10 landed (4f43237..a4b5bbb):
+  idle apps wake 0 times a second (was 61), minimized 0 (was 36–38); deadlines on time; focus guard
+  never fired. Decided without asking: bound the tween first step by one interval (step 12), inside
+  the approved answer to question 5.
