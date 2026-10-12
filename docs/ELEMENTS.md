@@ -1207,6 +1207,32 @@ again, as before. The one-argument template keeps its behaviour exactly; nothing
 a list that does not opt in. On the perf suite's selection walk the opt-in makes 3 rows per
 step instead of 19 and allocates 26 KB instead of 97.
 
+**State that only some rows show.** A second highlight beside the selection (the open file
+under a tree's cursor, the branches picked for a comparison), a folder's open state: these
+change one or two rows at a time, and in the shape every change would make every row on
+screen again. Put them in the item instead. The item can be a small record struct — the
+row's model and those flags — made per index by an `IReadOnlyList<T>` view over the rows,
+so the list compares the rows on screen and makes again exactly those whose flags moved,
+with nothing allocated per row and no list built per rebuild:
+
+```csharp
+internal readonly record struct FileRowItem(TreeNode<string> Node, bool Open, bool Cursor, bool Expanded);
+
+sealed class FileRowItems(App app, List<TreeNode<string>> rows) : IReadOnlyList<FileRowItem>
+{
+    public int Count => rows.Count;
+    public FileRowItem this[int i] => new(rows[i], rows[i].Path == app.OpenPath,
+        rows[i].Path == app.CursorPath, app.Tree.IsExpanded(rows[i]));
+    // GetEnumerator: yield this[i] for each i
+}
+```
+
+The model objects themselves have to be kept between rebuilds for the comparison to hold:
+nodes made again by every build (a tree flattened from a fresh filter) are new objects at
+every index, and every row is made again. Keep them while what they come from is the same.
+Junction's Files tree, moved from a scroll view of every row onto a virtual list this way,
+makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now).
+
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
 and every scroll — so an item-rows list keeps each item's label while the item is equal to

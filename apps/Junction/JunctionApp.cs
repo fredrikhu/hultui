@@ -432,7 +432,8 @@ public partial class JunctionApp : Component, IDisposable
         // Blame replaces the file's text with a gutter view the search cannot bind to, and its
         // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.
         _filesFind.Opening = () => _filesBlame = false;
-        _filesTree = new TreeView<string>(MarkDirty);
+        // Every change to which folders are open comes through here: the kept rows go with it.
+        _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkDirty(); });
         _commitFilesTree = NewChangeTree();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
