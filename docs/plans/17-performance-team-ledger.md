@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–11 landed, step 12 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–12 landed, step 13 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -141,7 +141,7 @@ Round 2 regressions first, then value per cost.
     PointerMove/Enter/Leave event objects only when a handler wants them (hover frame 568 → ~150 B);
     pointer-driven rebuilds once per drawn frame (splitter, pan, slider, scrubber: 8–16 rebuilds per
     frame with a fast mouse, −78…−94 % bytes per drag frame).
-12. **reactivity-toasthost-fade-in-place + apps-whole-app-tween-rebuilds + tween-first-step-bounded** (6/8; approved: `onChanged` on appear/change/go only) — the toast
+12. ~~**reactivity-toasthost-fade-in-place + apps-whole-app-tween-rebuilds + tween-first-step-bounded**~~ LANDED bdd2aa3, 1d39128, 2894d98, 7cfd0c9, 752dcf1 (6/8; approved: `onChanged` on appear/change/go only) — the toast
     fades its live element (one toast: 22–27 whole-app rebuilds → ~2–3, −90 %); Junction's spinner
     and remote-op tweens write Transform/Opacity on live elements (fetch: 12.1 MB per 61 frames).
     Suite row **apps-scenario-toast**. **tween-first-step-bounded** (from step 10): 9c43337's zero first
@@ -168,6 +168,12 @@ Round 2 regressions first, then value per cost.
     **a11y-atspi-cache-child-index** (two middle inserts in one frame lose children in Orca's
     cache), then **a11y-layout-refresh-moved-only** (skip the bounds refresh when nothing moved: a
     tween frame with a reader 8.7 KB → 0). Approved: joins this round.
+17. **Round 3 fix-ups** (correctness found during this round's build; before the full suite):
+    **junction-gitlab-fake-race** (`FakeGitLabHandler.Seen` is a plain List written by the HTTP thread
+    and read by the UI thread; failed twice, steps 11 and 12 — would make the full suite and CI
+    flaky), **toasthost-second-flash-opacity** (pre-existing: a second Flash mid-fade leaves the
+    replacement half-transparent for its whole hold), **customframe-install-activates** (the custom
+    frame activates the window in the Application constructor). Small.
 16. **linux-emoji-colour-fallback** (5, correctness) — emoji presentation and VS16 pick the colour
     emoji face (Linux 😀 ❤️ in DejaVu today; Windows #️⃣ ™️ ©️ monochrome). Changes those pixels;
     goldens unaffected (pinned faces). Proof on WSL with real Noto faces and on Windows.
@@ -374,6 +380,10 @@ Re-ranked by the round 4 survey.
 | 3 | 341ac09 | gl-uitests-focus-hardening | The in-process GL loop UiTests get `ForegroundGuard` (SDL hint, CBT hook with WS_EX_NOACTIVATE and activation refused, 5 ms watcher). Other GL UiTests (incl. WinFormsHostSampleTests' `EnsureForeground`) still unhardened. |
 | 3 | 3f7eccd, 6a7114c, 1608999 | runtime-pointer-events-on-demand | PointerMoveEvent made only if something on the pinned path listens; Enter/Leave made at the first listener and shared up the chain (handlers added mid-walk still heard); PaneSplitter/HorizontalPan's idle drag trackers register as passive-and-not-listening (`OnPassive(handler, listening)`, condition on the delegate target so handler entries stay 16 B). B per move incl. the 40 B MouseMoveInput: within an element 104 → 40, hover change 216 → 40; real windows (60 Hz posted moves, HULTUI_FRAMELOG, GL and Vulkan, JIT and AOT) synthetic/Junction/Reel 216 → 40, UI thread 13.0 → 2.4 KB/s; Vesper 216 → 104 (its root move handler); Meridian 418 → 242 JIT. Suite input/hover 0.2 → 0.0 KB/op; 0 slower. |
 | 3 | 4bd3576, 1bd5e4c, b9e949e | reactivity-pointer-rebuild-per-frame (b) | User's answer (b): only PaneSplitter, HorizontalPan, the slider (hover, OnChanged during drag, OnHoverValue → VideoPlayer scrubber) apply the latest position once per frame via internal `PointerFollow`/`IPreFrameHost` (run at the start of RenderFrame, no allocation); release, press, keys, a11y value sets and PanTo flush first, so a drag ends exactly on the pointer (Junction pane 431.6 → 438.0 for a 200 px drag); every other handler keeps every move. 1 kHz moves, real loop: 120-row splitter app 16.1 → 1.0 rebuilds/frame, 10,499 → 655 KB/frame (−94 %); Junction Commit splitter 8.1 → 1.03, 1,782 → 267 KB (−85 %); scrubber hover 15.7 → 0.97, 628 → 43 KB (−93 %); slider drag 10.3 → 1.0, OnChanged 309 → 30. New suite rows (117 rows): splitter drag −57 %/−62 % time JIT/AOT, 63.0 → 4.6 MB/op; slider drag −53/−59 %, 30.8 → 2.1 MB; scrubber hover −6/−9 %, −93 % bytes. REACTIVITY.md "A drag rebuilds once per frame"; ELEMENTS.md. |
+| 3 | bdd2aa3 | apps-scenario-toast | Three `loop/` rows over a ~300-element screen built anew: toast (23.0 builds/toast, 5,941 KB/op at first), spinner rebuilt per step (1.0 rebuilds/frame, 7,630 KB/op) vs turned in place (0.0, ~0 KB). 120 rows; `--verify` passes. |
+| 3 | 1d39128 | reactivity-toasthost-fade-in-place | Approved (question 3). The fade writes `_opacity` and the mounted toast's Opacity through a Ref; `onChanged` on appear, change and go only; the hold stays a delay. Per toast: builds 23 → 2 in Junction, Meridian and Aperture; Junction 4,505 → 389 KB (−91 %, 6,215 → 959 with the bridge), Meridian 1,544 → 132, Aperture 3,139 → 272. Timing and screen-reader stream unchanged. Suite toast row 5,940.8 → 513.4 KB/op, −16.6 %/−21.9 % time JIT/AOT. |
+| 3 | 2894d98 | apps-whole-app-tween-rebuilds | App: Junction's remote-op icon motion and spinners write live elements through Refs; Meridian's 150 ms send readout writes its label and stops with its own send (ticks used to stack on repeated sends). Junction fetch 61 → 0 builds per 61 frames, 11.40 → 0 MB (14.18 → 0 with the bridge), still 60 fps; busy spinner 12.84 → 0 MB; AOT 0 B. Meridian repeated sends 11.9–17.9 builds/s → 0, 1,548–2,308 → 1.4 KB/s. Aperture has no such clock. |
+| 3 | 7cfd0c9, 752dcf1 | tween-first-step-bounded | The loop's first tween step is min(time since the loop's last step, 1/DisplayHz) (Run and the WinForms host; RunFrame/Tick unchanged); a tween that starts with a delay (tooltip, toast hold, auto-hide; internal `ITween.Delay`) still starts at 0 so it never fires early. A 300 ms tween after idle: 20 → 19 frames, done 316 → 299 ms; toast flash → gone unchanged; the extra identical first frame gone. Allocation identical on every row. AOT TableView 10k sort +4.4…7.1 % in 5/5 pairs, JIT ±0.3 %, attributed to AOT code placement (evidence in the commit). |
 
 ## Examined, not worth it
 
@@ -654,3 +664,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   Focus guard never fired. Guideline notes: hover styles cost nothing per move; a root move handler
   costs 64 B per move window-wide; an app's own move handler that calls MarkDirty still rebuilds per
   move (no public coalescing API).
+- 2026-10-12: step 12 landed (bdd2aa3..752dcf1): toasts 23 → 2 app builds; Junction spinners and
+  remote-op motion 0 rebuilds; Meridian's send readout no longer stacks; no extra first frame. Added
+  step 17 (round 3 fix-ups): the GitLab test-fake race failed twice and would make the full suite
+  flaky, a pre-existing toast opacity bug, and the custom-frame activation. Guideline notes: animate
+  the element through a Ref; `onChanged` wired to MarkDirty fires on discrete changes only; a readout
+  timer writes its label and stops with its owner.
