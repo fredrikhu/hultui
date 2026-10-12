@@ -457,6 +457,14 @@ public abstract class Element
     /// </summary>
     protected internal virtual void ApplyTheme(Theme theme) { }
 
+    /// <summary>
+    /// The window this element is in now has another display scale (it moved to a monitor at
+    /// another scale, or the scale of its monitor changed). Called by the window on every
+    /// element of its tree and its overlays, before its <c>Resized</c> event. An element that
+    /// keeps what it made for the old scale lets it go here; most keep nothing.
+    /// </summary>
+    internal virtual void OnDisplayScaleChanged() { }
+
     // ──── Visual ────
     private float _opacity = 1f;
     public float Opacity

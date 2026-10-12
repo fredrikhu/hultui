@@ -459,6 +459,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         Application = application;
         PlatformWindow = platformWindow;
         _chrome = platformWindow as IWindowChrome;
+        _displayScale = platformWindow.DisplayScale;
         _pointerState = new PointerState(application.Platform.TimeProvider);
         if (!string.IsNullOrEmpty(_envTracePath))
             _tracer.StartRecording();
@@ -1009,10 +1010,30 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
     internal void OnWindowResized()
     {
+        // A move to a monitor at another scale arrives as a resize. Told before Resized, so what
+        // an app's handler builds is made at the new scale either way.
+        float scale = PlatformWindow.DisplayScale;
+        bool scaleChanged = scale != _displayScale;
+        _displayScale = scale;
         if (_root is null) return;
+        if (scaleChanged)
+        {
+            TellDisplayScaleChanged(_root);
+            for (int i = 0; i < _overlays.Count; i++) TellDisplayScaleChanged(_overlays[i].Content);
+        }
         _root.MarkLayoutDirty();
         _root.MarkPaintDirty();
         Resized?.Invoke();
+    }
+
+    /// <summary>The display scale the tree was last told of (<see cref="Element.OnDisplayScaleChanged"/>).</summary>
+    private float _displayScale;
+
+    private static void TellDisplayScaleChanged(Element element)
+    {
+        element.OnDisplayScaleChanged();
+        var children = element.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++) TellDisplayScaleChanged(children[i]);
     }
 
     private readonly List<IGpuImageSource> _undrawnSources = [];

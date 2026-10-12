@@ -1207,12 +1207,15 @@ var shape = (stats, compact, Nocturne.Theme);   // what the rows show besides th
 if (shape != _rowShape) { _listRef.Current?.InvalidateRows(); _rowShape = shape; }
 ```
 
-Switching `Application.Theme` to another `Theme` object makes the rows again by itself; a
-theme changed in place does not. Nor does a move to a screen of another scale: a glyph cut
-for the display scale (`Phosphor.Draw(…, scale)`, an app's own icon cache) is retired when
-the cache is invalidated for the new scale and freed at the next invalidation, so a kept row
-holding one draws a freed raster. Put the scale in the shape. Without it, Junction's branch
-rows lost every icon after a move to 150 % and back. Handlers in a kept row are the ones it was made with, so
+Switching `Application.Theme` to another `Theme` object makes the rows again by itself, and so
+does a change of the window's display scale (a move to a screen at another scale); a theme
+changed in place does not. The scale matters because a glyph cut for it
+(`Phosphor.Draw(…, scale)`, an app's own icon cache) is retired when the cache is invalidated
+for the new scale and freed at the next invalidation: a kept row holding one drew a freed
+raster, and Junction's branch rows lost every icon after a move to 150 % and back, until the
+list made its rows again on a scale change. The window tells the list before its `Resized`
+event, so an owner that moves its cache to the new scale there has the rows made with the new
+glyphs. Handlers in a kept row are the ones it was made with, so
 they should read live state (`SelectionContains(c.Hash)`) rather than a value the build
 captured. Rows are matched by index: an insertion above the viewport makes the rows it moves
 again, as before. The one-argument template keeps its behaviour exactly; nothing changes for

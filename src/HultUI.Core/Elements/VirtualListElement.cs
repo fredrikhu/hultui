@@ -295,6 +295,16 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _activeTheme = theme;
     }
 
+    /// <summary>Kept rows were made at the display scale in force then: a glyph an app cuts at the
+    /// scale (Junction's icons) is a raster for that scale, which the app's cache retires when the
+    /// scale changes and frees at the next change. Another scale makes them again, as another theme
+    /// does, so a row whose shape forgot the scale cannot keep a freed raster (Junction History,
+    /// junction-v1.20.0: every icon gone after a move to 150 % and back).</summary>
+    internal override void OnDisplayScaleChanged()
+    {
+        if (_itemRowTemplate is not null) InvalidateItems();
+    }
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
         _childLayoutEngine ??= new LayoutEngine(ctx);
@@ -356,7 +366,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// with <see cref="InvalidateRows"/> on the mounted list (before the owner's rebuild, through
     /// its ref, or after it). Otherwise the kept rows go on showing what they showed when they
     /// were made, until they scroll out and back in. A switch to another <see cref="Theme"/>
-    /// object makes the rows again by itself; a theme changed in place does not. Handlers in a
+    /// object makes the rows again by itself, and so does a change of the window's display scale
+    /// (<see cref="Element.OnDisplayScaleChanged"/>); a theme changed in place does not. Handlers in a
     /// kept row are the ones it was made with, so they should read live state rather than
     /// capture what the build saw.
     /// </para>
