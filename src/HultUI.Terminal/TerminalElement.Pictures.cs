@@ -148,6 +148,7 @@ public sealed partial class TerminalElement
         public bool Started { get; private set; }
         // Every step can show a new frame: the engine knows its frames' times, not this.
         public float NextChangeIn => 0f;
+        public float Delay => 0f;
         public void Tick(float deltaSeconds)
         {
             Started = true;

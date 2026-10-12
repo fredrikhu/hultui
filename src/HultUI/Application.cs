@@ -432,23 +432,23 @@ public sealed class Application : IDisposable
     /// which is how <see cref="Run"/> holds a dirty window back until the display's next
     /// interval; the dirt stays, so the next allowed frame draws it.</param>
     /// <param name="tick">Whether to step animations, by <paramref name="delta"/>.</param>
-    /// <param name="firstStepAtZero">Whether a tween's first step is 0 rather than
-    /// <paramref name="delta"/>: its clock starts at its first step (<see cref="Run"/>, whose
+    /// <param name="boundFirstStep">Whether a tween's first step is <paramref name="delta"/> but
+    /// at most one display interval, and 0 for one that starts with a delay (<see cref="Run"/>, whose
     /// waits can be minutes long).</param>
     private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender, bool tick = true,
-        bool firstStepAtZero = false)
+        bool boundFirstStep = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick, firstStepAtZero);
+        if (!FrameLog.On) return RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
 
         FrameLog.PassStart(this, _platform.TimeProvider);
         long before = GC.GetAllocatedBytesForCurrentThread();
-        bool rendered = RunPass(delta, forceRender, allowRender, tick, firstStepAtZero);
+        bool rendered = RunPass(delta, forceRender, allowRender, tick, boundFirstStep);
         FrameLog.PassEnd(rendered, tick, GC.GetAllocatedBytesForCurrentThread() - before);
         return rendered;
     }
 
-    private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick, bool firstStepAtZero)
+    private bool RunPass(TimeSpan delta, bool forceRender, bool allowRender, bool tick, bool boundFirstStep)
     {
         // Poll and route all native events. A platform asking to quit ends the frame
         // here, before anything touches a tree the platform may already have torn down.
@@ -471,7 +471,10 @@ public sealed class Application : IDisposable
         if (tick)
         {
             float seconds = (float)delta.TotalSeconds;
-            AnimationManager.Tick(seconds, firstStepAtZero ? 0f : seconds);
+            if (boundFirstStep)
+                AnimationManager.Tick(seconds, 1f / DisplayHz());
+            else
+                AnimationManager.Tick(seconds);
         }
 
         // Run any inspector refresh its rate limit deferred, so the panel still
@@ -553,8 +556,9 @@ public sealed class Application : IDisposable
             // so events arriving in between do not step them either.
             // A tween that has not had its first step takes it with this frame, whatever the
             // others wait for: a hover transition started while a toast holds is not left
-            // behind the hold's deadline. Its clock starts at that step (AnimationManager.Tick),
-            // so one started after minutes of idle does not jump to its end.
+            // behind the hold's deadline. That step is the time since the last one but at most an
+            // interval (AnimationManager.Tick), so one started after minutes of idle does not jump
+            // to its end, and its first frame is not its start value drawn again.
             bool tick = due && (unpaced || now >= nextTickAt - slack || AnimationManager.HasFreshTweens);
             var elapsed = TimeSpan.Zero;
             if (tick)
@@ -563,7 +567,7 @@ public sealed class Application : IDisposable
                 lastTick = now;
             }
 
-            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick, firstStepAtZero: true))
+            if (RunFrameCore(elapsed, forceRender: false, allowRender: due, tick, boundFirstStep: true))
             {
                 if (tick) stepDrawn = true;
                 // The next deadline follows the schedule, not this render: a frame that
@@ -673,9 +677,9 @@ public sealed class Application : IDisposable
     //      a timer in someone else's message loop.
 
     /// <summary><see cref="RunFrame"/> for a host that waits for the loop's deadlines, which can be
-    /// minutes apart: a new tween's clock starts at its first step, as in <see cref="Run"/>.</summary>
+    /// minutes apart: a new tween's first step is at most one display interval, as in <see cref="Run"/>.</summary>
     internal bool HostRunFrame(TimeSpan delta, bool forceRender = false) =>
-        RunFrameCore(delta, forceRender, allowRender: true, tick: true, firstStepAtZero: true);
+        RunFrameCore(delta, forceRender, allowRender: true, tick: true, boundFirstStep: true);
 
     /// <summary>
     /// How long a host may wait after a frame before its next <see cref="HostRunFrame"/>:

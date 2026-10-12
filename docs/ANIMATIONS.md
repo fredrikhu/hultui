@@ -125,13 +125,20 @@ What follows from it:
   between its frames the loop waits for the next one. (A tween that wrote a signal used to
   be drawn at ~60 frames a second on a faster display when nothing else woke the loop: its
   zero-time step between frames changed nothing.)
-- **A tween's clock starts at its first step.** The loop waits for its next deadline, which
-  can be minutes away when nothing moves, so a tween started between frames (a hover
-  transition, by a pointer event after a long idle) is not stepped by all the time since the
-  last step: its first step is at its start value, with the next frame it may draw, and its
-  frames come at most one interval later than its start. `Application.RunFrame` and
-  `AnimationManager.Tick` step a new tween by the delta they are given, as before: a host or
-  a test that passes the time since its last call keeps its meaning.
+- **A tween's first step is at most one display interval.** The loop waits for its next
+  deadline, which can be minutes away when nothing moves, so a tween started between frames
+  (a hover transition, by a pointer event after a long idle) is not stepped by all the time
+  since the last step: its first step, with the next frame it may draw, is that time but at
+  most one interval, and its frames come at most one interval off its start. Its first frame
+  shows that much of it, not its start value: from plan 17's step 10 to step 12 the first step
+  was 0, which for a tween whose step marks something dirty drew one frame more, identical to
+  the one before, and put every frame after it an interval late (a 300 ms tween after idle:
+  20 frames and done 316 ms after its start, now 19 and 299 ms). A tween that starts with a
+  delay (a timer: a tooltip's show delay, a toast's hold) starts its clock at its first step:
+  nothing is drawn while it waits, and credited an interval it would end up to an interval
+  early. `Application.RunFrame` and `AnimationManager.Tick` step a new tween by the delta they
+  are given, as before: a host or a test that passes the time since its last call keeps its
+  meaning.
 - **A timer is a delay.** A tween that only waits — the tooltip's show delay, a video
   player's auto-hide, a toast's hold, a terminal's cursor blink — is
   `Animate.Value(0f, 1f, _ => { }).Delay(seconds).Duration(0f).OnComplete(…)`: while every

@@ -567,9 +567,70 @@ public class LoopWakeTests
                 .Duration(0.3f).Ease(Easing.Linear).Start();
         }, limit: TimeSpan.FromSeconds(10));
 
-        // Its clock starts at its first step: stepped by the five seconds since the last step, it
-        // would draw its end at once.
-        Assert.Equal(0f, first);
+        // Its first step is one display interval, not the five seconds since the last step,
+        // which would draw its end at once; and not 0, which drew its start value again.
+        Assert.Equal((1f / 60) / 0.3f, first, 0.001f);
+    }
+
+    /// <summary>A tween whose steps mark what draws it dirty, as a self-drawn spinner's or a
+    /// progress bar's do, started after the loop was idle: its first frame shows one interval of
+    /// it, and it ends 300 ms after it started. Its first step was 0 (plan 17, round 3, steps 10
+    /// to 12), which drew its start value again: one frame more, and the end an interval late
+    /// (20 frames, 316 ms; now 19 frames, 299 ms, the last step drawing the end value the
+    /// float sum of 18 intervals stops just short of).</summary>
+    [Fact]
+    public void ATweenStartedAfterIdle_DrawsNoFrameAtItsStartValue()
+    {
+        float value = 0f;
+        var drawn = new List<float>();
+        bool started = false, done = false;
+        long startedAt = 0;
+        double endedAt = -1;
+        var canvas = Canvas.New(_ => { if (started) drawn.Add(value); }).Width(Dimension.Px(100)).Height(Dimension.Px(20));
+        using var run = new Run(canvas);
+
+        run.Session.RunLoop(() => done && drawn.Count > 0 && drawn[^1] == 1f, eventEvery: TimeSpan.FromSeconds(2), onEvent: () =>
+        {
+            if (started) return;
+            started = true;
+            startedAt = run.Now;
+            Animate.Value(0f, 1f, v => { value = v; canvas.MarkPaintDirty(); })
+                .Duration(0.3f).Ease(Easing.Linear)
+                .OnComplete(() => { done = true; endedAt = run.MsSince(startedAt); }).Start();
+        }, limit: TimeSpan.FromSeconds(10));
+
+        Assert.Equal((1f / 60) / 0.3f, drawn[0], 0.001f);
+        Assert.InRange(drawn.Count, 18, 19);
+        Assert.InRange(endedAt, 300 - 1000.0 / 60, 301);
+    }
+
+    /// <summary>A tooltip's delay started by the pointer after the loop was idle still shows it
+    /// when the delay is out, not an interval early: a timer's clock starts at its first step.</summary>
+    [Fact]
+    public void ATooltipsDelayStartedAfterIdle_IsNotShortened()
+    {
+        var owner = Box.New().Width(Dimension.Px(100)).Height(Dimension.Px(50)).Background(Color.Gray);
+        owner.TooltipText = "A tooltip";
+        using var run = new Run(owner);
+        float delay = run.Session.Application.Theme.Tooltip.ShowDelay;
+        long movedAt = 0;
+        bool moved = false;
+
+        double shownAt = -1;
+        run.Session.RunLoop(() =>
+        {
+            if (!moved || !run.Session.Window.Window.OverlayContents.Any()) return false;
+            shownAt = run.MsSince(movedAt);
+            return true;
+        }, eventEvery: TimeSpan.FromSeconds(2), onEvent: () =>
+        {
+            if (moved) return;
+            moved = true;
+            movedAt = run.Now;
+            run.Session.Window.MoveMouse(20, 20);
+        }, limit: TimeSpan.FromSeconds(10));
+
+        Assert.InRange(shownAt, delay * 1000, delay * 1000 + 1000.0 / 60 + 1);
     }
 
     private sealed class SwitchedBridge : IAccessibilityBridge

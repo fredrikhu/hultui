@@ -61,8 +61,9 @@ public class AnimationClockTests
         Assert.False(AnimationManager.HasActiveAnimations);
     }
 
-    /// <summary>The frame loop's step: a tween that was not stepped yet starts its clock at it, so
-    /// one started after the loop waited minutes does not jump to its end.</summary>
+    /// <summary>The frame loop's step bounds a new tween's first step: bounded at 0, a tween that
+    /// was not stepped yet starts its clock at it, and one started after the loop waited minutes
+    /// does not jump to its end.</summary>
     [Fact]
     public void TheLoopsStep_StartsANewTweensClockAtIt()
     {
@@ -75,6 +76,43 @@ public class AnimationClockTests
 
         AnimationManager.Tick(0.15f, 0f);
         Assert.Equal(0.5f, value, 0.001f);
+        AnimationManager.Reset();
+    }
+
+    /// <summary>The loop's own bound, one display interval: a tween started after minutes of
+    /// idle is stepped by one interval on its first step, so its first frame neither jumps to
+    /// its end nor shows its start value again; one started less than an interval after the
+    /// last step is stepped by that time.</summary>
+    [Fact]
+    public void TheLoopsFirstStep_IsTheTimeSinceItsLastStep_AtMostAnInterval()
+    {
+        AnimationManager.Reset();
+        const float interval = 1f / 60;
+        float afterIdle = -1f, soon = -1f;
+        Animate.Value(0f, 1f, v => afterIdle = v).Duration(0.3f).Ease(Easing.Linear).Start();
+
+        AnimationManager.Tick(300f, interval);
+        Assert.Equal(interval / 0.3f, afterIdle, 0.0001f);
+
+        Animate.Value(0f, 1f, v => soon = v).Duration(0.3f).Ease(Easing.Linear).Start();
+        AnimationManager.Tick(0.006f, interval);
+        Assert.Equal(0.006f / 0.3f, soon, 0.0001f);
+        Assert.Equal((interval + 0.006f) / 0.3f, afterIdle, 0.0001f);
+        AnimationManager.Reset();
+    }
+
+    /// <summary>A timer's clock starts at the loop's first step of it: credited the time since the
+    /// loop's last step, it would end up to an interval early (a tooltip shown before its delay).</summary>
+    [Fact]
+    public void ADelayInTheLoop_StartsItsClockAtItsFirstStep()
+    {
+        AnimationManager.Reset();
+        int fired = 0;
+        Animate.After(0.5f, () => fired++);
+
+        AnimationManager.Tick(10f, 1f / 60);
+        Assert.Equal(0.5f, AnimationManager.NextChangeIn, 0.0001f);
+        Assert.Equal(0, fired);
         AnimationManager.Reset();
     }
 

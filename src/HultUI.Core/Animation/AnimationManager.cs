@@ -76,18 +76,24 @@ public static class AnimationManager
 
     /// <summary>Steps every active tween by <paramref name="deltaSeconds"/>, one that has not
     /// been stepped yet included.</summary>
-    public static void Tick(float deltaSeconds) => Tick(deltaSeconds, deltaSeconds);
+    public static void Tick(float deltaSeconds) => Step(deltaSeconds, deltaSeconds, delaysFromZero: false);
 
     /// <summary>
-    /// Steps every active tween by <paramref name="deltaSeconds"/>, and one that has not been
-    /// stepped yet by <paramref name="firstStepSeconds"/>. The frame loop passes 0: a tween
-    /// started between frames starts its clock at its first step, so one started after the
-    /// loop was idle — it waits for its next deadline, which can be minutes away — is not
-    /// stepped by all of that and does not jump to its end; its frames come at most an
-    /// interval later than its start. A host or a test that steps by the time since the last
-    /// step, a tween's start included, uses <see cref="Tick(float)"/>.
+    /// The frame loop's step: every active tween by <paramref name="deltaSeconds"/>, the time
+    /// since the loop's last step, and one that has not been stepped yet by that time but at
+    /// most <paramref name="firstStepBound"/>, one display interval. The loop waits for its next
+    /// deadline, which can be minutes away, so a tween started after it was idle (a hover
+    /// transition, by the pointer) is not stepped by all of that and does not jump to its end;
+    /// and its first frame shows an interval of it, not its start value again. Its frames
+    /// come at most an interval off its start. One that starts with a delay (a timer) starts
+    /// its clock at its first step instead: nothing is drawn while it waits, and stepped by an
+    /// interval it would end up to an interval early. A host or a test that steps by the time
+    /// since the last step, a tween's start included, uses <see cref="Tick(float)"/>.
     /// </summary>
-    internal static void Tick(float deltaSeconds, float firstStepSeconds)
+    internal static void Tick(float deltaSeconds, float firstStepBound) =>
+        Step(deltaSeconds, Math.Min(deltaSeconds, firstStepBound), delaysFromZero: true);
+
+    private static void Step(float deltaSeconds, float firstStepSeconds, bool delaysFromZero)
     {
         _freshAdded = false;
         if (_active.Count == 0 && _pendingAdd.Count == 0)
@@ -103,7 +109,9 @@ public static class AnimationManager
         for (int i = 0; i < _active.Count; i++)
         {
             var tween = _active[i];
-            tween.Tick(tween.Started ? deltaSeconds : firstStepSeconds);
+            tween.Tick(tween.Started ? deltaSeconds
+                : delaysFromZero && tween.Delay > 0f ? 0f
+                : firstStepSeconds);
         }
         _ticking = false;
 

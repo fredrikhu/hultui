@@ -6,9 +6,13 @@ internal interface ITween
     void Tick(float deltaSeconds);
     void Cancel();
 
-    /// <summary>Whether it has had a step: a tween's clock starts at its first one in the frame
-    /// loop (<see cref="AnimationManager.Tick(float, float)"/>).</summary>
+    /// <summary>Whether it has had a step: the frame loop steps a tween's first by the time since
+    /// its last step, at most an interval (<see cref="AnimationManager.Tick(float, float)"/>).</summary>
     bool Started { get; }
+
+    /// <summary>Seconds it waits before it moves: a timer's whole life. The frame loop starts
+    /// the clock of one that waits at its first step.</summary>
+    float Delay { get; }
 
     /// <summary>Seconds from its last step until a step can next change anything: 0 when the
     /// next one does (it is running, or has not had its first step), what is left of its delay
@@ -38,6 +42,8 @@ public sealed class Tween<T> : ITween
     public bool IsComplete => _complete;
 
     bool ITween.Started => _started;
+
+    float ITween.Delay => _delay;
 
     float ITween.NextChangeIn => _started && _elapsed < _delay ? _delay - _elapsed : 0f;
 
