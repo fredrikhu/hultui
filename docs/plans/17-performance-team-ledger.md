@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–16 landed, step 17 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; all build steps landed (1–17); full suite next, then release. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -174,7 +174,7 @@ Round 2 regressions first, then value per cost.
     **a11y-atspi-cache-child-index** (two middle inserts in one frame lose children in Orca's
     cache), then **a11y-layout-refresh-moved-only** (skip the bounds refresh when nothing moved: a
     tween frame with a reader 8.7 KB → 0). Approved: joins this round.
-17. **Round 3 fix-ups** (correctness found during this round's build; before the full suite):
+17. ~~**Round 3 fix-ups**~~ LANDED 8042e8e, 2e3083b, 3be0dea, 56046e4, a26ca68 (correctness found during this round's build; before the full suite):
     ~~junction-gitlab-fake-race~~ (**not ours**: the user started the suggested task "Fix
     FakeGitLabHandler.Seen race in Junction tests" in a separate session on 2026-10-12; leave those
     files alone, and if it lands on main before our merge, take it with the merge), **toasthost-second-flash-opacity** (pre-existing: a second Flash mid-fade leaves the
@@ -197,6 +197,12 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **maximized-placement-activates** (3, from step 17) — a maximized placement set before the first frame
+  (`WindowsPlacement.ShowMaximizedCloaked`) asks for 3 activations, ignoring the hint; no ShowWindow
+  command maximizes without activating, so it needs its own design. Full screen on/off asks for 2.
+- **junction-watcher-self-reload** (8, app, from step 17) — Junction's GitWatcher (300 ms debounce)
+  sometimes mistakes the app's own git writes under `.git` for an outside change and reloads (2 of 40
+  starts): a data-generation bump and 4 builds.
 - **atspi-reorder-signal (user, round 4 question)** (7, from step 15) — live, a caching AT-SPI client keeps
   the old order after children are reordered (nothing is sent today); a signal would be a new event.
 - **button-isenabled-rebuild (user, round 4 question)** (7, from step 15) — IsEnabled changed by a rebuild
@@ -276,7 +282,9 @@ Re-ranked by the round 4 survey.
   SyntaxHighlighter's single lock (up to a 3 s wait behind a worker); GitLab merge requests only.
 - **tooling-textbench-warmup** (5/4) — fresh indices per warm-up pass, warm until the compiled-method
   count stops rising (990 methods compiled during measurement today).
-- **test-frame-pacing-event-precondition** (4) — fails only on displays ≥~170 Hz.
+- **test-frame-pacing-event-precondition** (4) — fails only on displays ≥~170 Hz; the desk display now
+  runs at 200 Hz, so `FramePacingTests.AnEventEveryMillisecond…` fails in the gated UiTests (~512 of 603
+  needed `Sleep(1)` wakes).
 - **test-vesper-diffview-escape-flake** (8) — 0 of 1,400 runs; keep watching CI.
 - **paint-drawspannedline-overlap** (2, lowest) — no caller gives overlapping spans; could close with
   a Debug assert.
@@ -419,6 +427,11 @@ Re-ranked by the round 4 survey.
 | 3 | dd75acd, 2332fbe | a11y-atspi-cache-child-index | Approved. The survey's live check was invalid (its driver cleared the cache). libatspi overwrites a slot on cache-add and reinserts on children-changed:add: before, 6 of 10 insert cases left a wrong cached list. Now removals first, then one children-changed:add per added child in index order (the run ending the parent's children keeps one signal), cache-adds last. Live: 10 of 10 cases match. An `AtSpiClientCache` model reproduces the live results in tests. UIA unchanged. |
 | 3 | 9aa3516, 691d2a7 → 97ff373 | a11y-layout-refresh-moved-only (reverted) | Correct (1,155 shadow audits empty) but +16 B per element, +0.5…+1.9 % allocation on element-building rows, a11y/create +5.3 % min JIT, and its own probe paid more bytes than it saved; the common case it helped (whole-app rebuilds per animation frame) was removed by steps 4 and 12. Reverted by the orchestrator per the brief; numbers in DECISIONS.md. |
 | 3 | a52d481, 12c64b0, c1095da | linux-emoji-colour-fallback | Correctness, pixels changed on purpose. UTS #51 presentation: Emoji_Presentation characters, a pictograph or keycap base + VS16, the first character of a modifier or ZWJ sequence go to the colour emoji face ahead of the primary face; plain ™ © # 1 and ❤/↔ without VS16 stay text; VS15 turns the preference off. New `EmojiPresentation` (Unicode 16.0 tables checked against ICU), new public `IFontCollection.MatchEmoji` (default null), `SkiaFontCollection.MatchEmoji` (fontconfig `und-Zsye`; DirectWrite by family name; colour faces only). Windows: #️⃣ 1️⃣ *️⃣ ™️ ©️ ®️ ↔️ ▶️ ☝🏽 now Segoe UI Emoji; Fedora: 😀 ☕ ⚡ ❤️ now Noto Color Emoji, keycaps/☝🏽/❤️‍🔥 one glyph. Broad text pages byte-identical on both OSes; goldens unchanged. Perf 0 slower/faster (a first version cost +6/+11 % on long-document open and was replaced by a vectorized gate); new row `text/create 2,000 unique emoji labels`. WSL 10,216 passed. |
+| 3 | 8042e8e | toasthost-second-flash-opacity | Bug since ToastHost's first commit (32be2a6, every Aperture release): a second Flash during a fade kept the fade's level, so the replacement stayed half drawn for its hold. It now rises from its current level to full at the fade-in's pace (same in-place step), holds at 1, fades out normally; 2 owner rebuilds. |
+| 3 | 2e3083b | customframe-install-activates | `WindowsCustomFrame.Install`'s SetWindowPos (since 572ab77) gets SWP_NOACTIVATE: a custom-frame window no longer asks for activation while it is made. CustomFrameActivationTests under ForegroundGuard (Borderless fails without the flag; Default is the control). |
+| 3 | 3be0dea | junction-remoteop-test-flake | Test timing, not 2894d98's code: Junction's GitWatcher sometimes reloads after the app's own `.git` writes (2 of 40 starts), landing builds inside the measured window. `Settle` now waits for 700 ms of real time with no build (cap 3 s). 50/50 under two concurrent suite copies. |
+| 3 | 56046e4 | itemrows-remake-on-scale | Framework safety net: Window remembers the display scale; on a change it calls internal `Element.OnDisplayScaleChanged()` over the root and overlays before `Resized`, and item-row VirtualLists drop their rows (as on a Theme switch). One float compare per resize. The apps keep the scale in their shapes (one compare per build); Junction's five scale tests pass through the framework alone. |
+| 3 | a26ca68 | aperture-library-paging | Bug since 01e5bd7: pages requested by window height only, so End, arrows and the wheel stopped at the 100th film; a landed page waited for an unrelated rebuild. Now the next page loads when the furthest realized row or the cursor comes within a page of the loaded end; End goes to the last item (up to 1,000 per request); the build reads `_gridPage.Value` so a landed page shows; a second after-frame reveal. 250 and 1,000 films reach the end; End ≤ 3 requests. |
 
 ## Examined, not worth it
 
@@ -728,3 +741,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   session (step 17 leaves it alone) and asked to pause after round 3 is merged and released.
 - 2026-10-12: step 16 landed (a52d481..c1095da): colour emoji on Linux and VS16 symbols on Windows.
   Guideline note: a per-character check in the itemizer must be gated by a vectorized scan.
+- 2026-10-13: step 17 landed (8042e8e..a26ca68): toast replacement opacity, custom-frame activation,
+  Junction remote-op test settle, item rows remade on a display-scale change, Aperture library paging.
+  Round 3 build complete; full suite next.
