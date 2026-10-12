@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–14 landed, step 15 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–15 landed, step 16 in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -162,7 +162,7 @@ Round 2 regressions first, then value per cost.
     28 MB per key → ~200 KB; 3,501 hit visits per move → ~25). **a11y-item-label-keep** (approved) goes
     with it (keep each item's a11y label while item and delegate are unchanged: −63 % per move with
     a reader).
-15. **a11y events** (7, correctness; all four added events approved 2026-10-11): **a11y-patched-props-untold** (Name, Description,
+15. ~~**a11y events**~~ LANDED d35cf89, 12fe5c2, 68d3863, 0f28ca6, dd75acd, 2332fbe; change 4 reverted 97ff373 (7, correctness; all four added events approved 2026-10-11): **a11y-patched-props-untold** (Name, Description,
     Expanded, Role, AutomationId setters notify; a rebuild that changes only these is told nothing
     today), **a11y-role-change** (UIA ControlType, AT-SPI accessible-role),
     **a11y-atspi-cache-child-index** (two middle inserts in one frame lose children in Orca's
@@ -190,6 +190,12 @@ Round 2 regressions first, then value per cost.
 
 Re-ranked by the round 4 survey.
 
+- **atspi-reorder-signal (user, round 4 question)** (7, from step 15) — live, a caching AT-SPI client keeps
+  the old order after children are reordered (nothing is sent today); a signal would be a new event.
+- **button-isenabled-rebuild (user, round 4 question)** (7, from step 15) — IsEnabled changed by a rebuild
+  marks style only, so a reader is never told (same class as d35cf89; a new event kind).
+- **element-forced-size-nan** (1, from step 15) — `CacheForcedW/H` as NaN-encoded `float` instead of
+  `float?`: −8 B per element.
 - **vesper-root-move-handler** (8, app, from step 11) — Vesper's root has its own non-passive
   PointerMove handler: 104 B per move (vs 40) and a frame per move. Make it passive or narrower.
 - **junction-gitlab-fake-race** (test, from step 11) — `FakeGitLabHandler.Seen` is a plain `List` the
@@ -401,6 +407,10 @@ Re-ranked by the round 4 survey.
 | 3 | 5a98a32 | apps-junction-files-virtual | App: the Files tree is a `VirtualListElement<FileTreeRowItem>` (Node, Open, Cursor, Expanded) with visible rows memoized and a path index for the cursor; `RowsAreComposite`. 2,300-file search, Down key: 16.8–17.0 MB → 173–176 KB (−99 %), min 9.9–14.0 → 1.00–1.04 ms (−90 % AOT, −93 % JIT), median −95 %; bridge on 18 MB → 190 KB; elements 14,128 → 257; resolves per key 14,128 → 266; hit visits per move 3,502 → 34; render culls per frame 3,474 → 7. a11y: on-screen nodes identical over 23 states; off-screen rows no longer published (a VirtualList cannot publish them as tree items), no new events. 23 frames byte-identical; 13 mutations caught. |
 | 3 | 11ced00 | itemrows-scale-shape | Bug fix (hits a96c185 from round 2, released in junction-v1.20.0, and 16fc8ec/92224e3): kept rows were not remade on a display-scale change, and the retired glyph rasters were freed by the next one, so after 150 % and back every icon in Branches rows was gone (1,753 px; History 36 px). `Ui.DisplayScale` added to the four Junction shapes; round trip 0 px. ELEMENTS.md: put the scale in the shape. Framework safety net queued in step 17. |
 | 3 | 73ec513 | aperture-grid-item-rows | App: the poster grid on item rows, `GridRowItem(Row, CursorColumn)` from a lazy view; shape: loaded count, in-place patches, cards per row, artwork landings, display scale. 600 films: Right 359–362 → 130–131 KB/key (−64 %), Down 360 → 196 (−46 %); rows made 6 → 1.1/2.5; time flat (headless raster dominates). 16 frames byte-identical; 10 mutations caught. |
+| 3 | d35cf89, 12fe5c2 | a11y-patched-props-untold | Approved (question 7). Role, AccessibleName, AccessibleDescription, AccessibleExpanded, AutomationId, Name and the Label of Checkbox/RadioButton/ToggleSwitch notify on change; the differ compares AutomationId (no event; UIA answered the old id before). 13 standard scripts identical; a new script tells each change at its own step (UIA Name, HelpText, ExpandCollapseState; AT-SPI accessible-name, -description, expanded). 26 tests, 9 mutations caught. Allocation identical on 121 rows; 0 slower. |
+| 3 | 68d3863, 0f28ca6 | a11y-role-change | Approved. The differ reports Role first; UIA raises ControlType and LocalizedControlType; AT-SPI sends property-change:accessible-role (not for the application root). Live WSL: a caching client's role now matches after a change in both directions. 6 tests. |
+| 3 | dd75acd, 2332fbe | a11y-atspi-cache-child-index | Approved. The survey's live check was invalid (its driver cleared the cache). libatspi overwrites a slot on cache-add and reinserts on children-changed:add: before, 6 of 10 insert cases left a wrong cached list. Now removals first, then one children-changed:add per added child in index order (the run ending the parent's children keeps one signal), cache-adds last. Live: 10 of 10 cases match. An `AtSpiClientCache` model reproduces the live results in tests. UIA unchanged. |
+| 3 | 9aa3516, 691d2a7 → 97ff373 | a11y-layout-refresh-moved-only (reverted) | Correct (1,155 shadow audits empty) but +16 B per element, +0.5…+1.9 % allocation on element-building rows, a11y/create +5.3 % min JIT, and its own probe paid more bytes than it saved; the common case it helped (whole-app rebuilds per animation frame) was removed by steps 4 and 12. Reverted by the orchestrator per the brief; numbers in DECISIONS.md. |
 
 ## Examined, not worth it
 
@@ -701,3 +711,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   gains a framework safety net for it and Aperture's library paging bug (pre-existing). Guideline
   notes: per-row state goes in a value item from a lazy view, not the shape; keep the model objects
   between builds; display-scale glyphs belong in the shape.
+- 2026-10-12: step 15 landed (d35cf89..2332fbe): rebuild-made name/description/expanded/role changes
+  told; AT-SPI child order right in a caching client (10/10 live). Change 4 (skip the bounds refresh
+  when nothing moved) reverted by the orchestrator (97ff373): it cost every element 16 B and slowed
+  a11y/create 5 % for a case this round already removed. Two possible new events queued as round 4
+  questions (AT-SPI reorder, IsEnabled through a rebuild).
