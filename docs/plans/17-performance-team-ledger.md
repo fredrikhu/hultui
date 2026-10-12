@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–12 landed, step 13 in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–13 landed, step 14a in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -149,12 +149,12 @@ Round 2 regressions first, then value per cost.
     time). Step the first frame by min(gap since the last frame, one interval) instead: no jump after
     idle and frames still shift by at most one interval — inside what the user approved for question
     5 (decided by the orchestrator, 2026-10-12), so no new question.
-13. **text-textarea-incremental-wrap + text-memo-cache-byte-bound** (5) — carry each hard line's
+13. ~~**text-textarea-incremental-wrap + text-memo-cache-byte-bound**~~ LANDED 5b71b4f, d98cca3, dc028f9, d18ef87, 2808caf (5) — carry each hard line's
     breaks by index and patch line starts around the edit (retained −8.2 MB on a wrapped 20,000-line
     log; keystroke churn −27/−28 % on 19k JSON and the log); weight BiDi/styled memos by bytes
     (~16 MB bound; worst case 58 MB → ≤16). Medium. Proof: random edits vs a fresh area incl.
     surrogates, ZWJ, CJK; re-run b23b203's 2.0 M-line audit.
-14. **Lists on item rows** (1/8): **layout-virtuallist-row-inherit** (approved) first (rows resolved
+14. **Lists on item rows** (1/8; split into 14a: row inherit, item-label keep, Vesper's lists; 14b: Junction Branches, Tags, Files, Aperture's grid): **layout-virtuallist-row-inherit** (approved) first (rows resolved
     under their list: Junction Branches layouts per key 255 → 32, 0 px changed), then
     **adopt-item-rows** — Vesper panes (339 of 542 KB per key), Junction Branches and Tags (need
     stable or value-equal TreeNode items; −380 KB of 667 KB per key), Aperture's grid — and
@@ -384,6 +384,8 @@ Re-ranked by the round 4 survey.
 | 3 | 1d39128 | reactivity-toasthost-fade-in-place | Approved (question 3). The fade writes `_opacity` and the mounted toast's Opacity through a Ref; `onChanged` on appear, change and go only; the hold stays a delay. Per toast: builds 23 → 2 in Junction, Meridian and Aperture; Junction 4,505 → 389 KB (−91 %, 6,215 → 959 with the bridge), Meridian 1,544 → 132, Aperture 3,139 → 272. Timing and screen-reader stream unchanged. Suite toast row 5,940.8 → 513.4 KB/op, −16.6 %/−21.9 % time JIT/AOT. |
 | 3 | 2894d98 | apps-whole-app-tween-rebuilds | App: Junction's remote-op icon motion and spinners write live elements through Refs; Meridian's 150 ms send readout writes its label and stops with its own send (ticks used to stack on repeated sends). Junction fetch 61 → 0 builds per 61 frames, 11.40 → 0 MB (14.18 → 0 with the bridge), still 60 fps; busy spinner 12.84 → 0 MB; AOT 0 B. Meridian repeated sends 11.9–17.9 builds/s → 0, 1,548–2,308 → 1.4 KB/s. Aperture has no such clock. |
 | 3 | 7cfd0c9, 752dcf1 | tween-first-step-bounded | The loop's first tween step is min(time since the loop's last step, 1/DisplayHz) (Run and the WinForms host; RunFrame/Tick unchanged); a tween that starts with a delay (tooltip, toast hold, auto-hide; internal `ITween.Delay`) still starts at 0 so it never fires early. A 300 ms tween after idle: 20 → 19 frames, done 316 → 299 ms; toast flash → gone unchanged; the extra identical first frame gone. Allocation identical on every row. AOT TableView 10k sort +4.4…7.1 % in 5/5 pairs, JIT ±0.3 %, attributed to AOT code placement (evidence in the commit). |
+| 3 | 5b71b4f, d98cca3 | text-textarea-incremental-wrap | Line starts kept and patched in place: untouched rows stay, later rows shift by one vectorized add, only touched lines re-wrap; the text-keyed wrap memo is gone; replaced runs matched in order (hash lookup after 8 misses) so new text sharing its ends stays cheap. Fixed an old bug: an edited Arabic line at narrow widths could break unlike a fresh layout (break search started from a carried width). Wrapped 20,000-line log: typing 8,777 → 6,353 KB/key (−28 %; the rest is the new 6.3 MB string), 4.9 → 2.1 ms JIT, 5.0 → 2.4 AOT; held while open 8.63 → 0.34 MB (−8.3 MB). 19k JSON typing 981 → 724 KB (−26 %), 0.92 → 0.77 ms. Suite: 2,000-line typing −7 % KB, −5 %/−2 % min; wrapped 900-line −8 %, −7/−3 %; undo-redo −8 %, −7/−4 %; 0 slower. Equivalence: 1,500 random edits in a test (mixed scripts, widths 37–2,400, font changes), 12 × 2,500 soak, b23b203's audit 10.7 M lines 0 different; WSL passes. |
+| 3 | dc028f9, d18ef87, 2808caf | text-memo-cache-byte-bound | BiDi/styled memos and remembered lines bounded by weight too (10 MB and 12 MB; `LruCache.Reweigh`), `MemoRange` keys hold an entry number so evicted entries are not kept alive; weights within 3–5 % of full-GC measurements. Retained after the texts go: 2,000-char Hebrew/Latin 64.7 → 26.5 MB (−59 %), styled 45.2 → 22.1 (−51 %), 400-char 32.9 → 26.0. The 5,000-block rich document re-open unchanged (31.18 MB). Suite 0 slower; styled ellipsis −2.4 % KB. 2808caf fixed a flaky memo test (a string gets its memo on its second layout if no other string took its admission slot). |
 
 ## Examined, not worth it
 
@@ -670,3 +672,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   flaky, a pre-existing toast opacity bug, and the custom-frame activation. Guideline notes: animate
   the element through a Ref; `onChanged` wired to MarkDirty fires on discrete changes only; a readout
   timer writes its label and stops with its owner.
+- 2026-10-12: step 13 landed (5b71b4f..2808caf): TextArea edits re-wrap only touched lines (−8.3 MB
+  held on a 20k-line log, typing −26…−28 %), text memos bounded by bytes (worst case −51…−59 %
+  retained). Step 14 split: 14a framework parts + Vesper, 14b Junction lists + Aperture grid.
