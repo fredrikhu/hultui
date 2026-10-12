@@ -816,15 +816,15 @@ public abstract class Element
     /// that is made still runs the handler, which decides for itself as before.
     /// </summary>
     internal void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
-        AddHandler(EventPhase.Bubble, handler, owned: false, passive: true, listening);
+        ListForMutation(typeof(TEvent)).Add(new EventHandlerEntry(EventPhase.Bubble,
+            new ListeningHandler<TEvent>(handler, listening).Invoke, Owned: false, Passive: true));
 
-    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false,
-        Func<bool>? listening = null) where TEvent : ElementEvent
+    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent
     {
         // A handler can register another handler on the same element mid-dispatch, so this
         // goes through the copy-on-write path like every other mutation.
         ListForMutation(typeof(TEvent))
-            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned, passive, listening));
+            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned, passive));
     }
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
@@ -1536,10 +1536,28 @@ public abstract class Element
     }
 }
 
-/// <param name="Listening">For a passive handler that acts only some of the time (a drag
-/// tracker on a root): whether it wants events now. Null is always. Only asked before a pointer
-/// move is made (<see cref="Events.EventDispatcher.DispatchPointerMove"/>), never to skip the
-/// handler: a move that is made still runs it.</param>
 internal readonly record struct EventHandlerEntry(
-    EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false,
-    Func<bool>? Listening = null);
+    EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false);
+
+/// <summary>Whether a handler wants events now: what a handler registered with a listening
+/// condition is the target of (<see cref="ListeningHandler{TEvent}"/>).</summary>
+internal interface IListeningHandler
+{
+    bool Listening { get; }
+}
+
+/// <summary>
+/// A passive handler that acts only some of the time — a drag tracker on a root — with the
+/// condition for it (<see cref="Element.OnPassive{TEvent}(Action{TEvent}, Func{bool})"/>). Only
+/// asked before a pointer move is made (<see cref="Events.EventDispatcher.DispatchPointerMove"/>),
+/// never to skip the handler: a move that is made still runs it. The entry's delegate points at
+/// this rather than the entry carrying the condition, which kept a field on every handler entry
+/// of every build: 8 bytes each, +3…5 % allocation on build-heavy perf-suite rows.
+/// </summary>
+internal sealed class ListeningHandler<TEvent>(Action<TEvent> handler, Func<bool> listening) : IListeningHandler
+    where TEvent : ElementEvent
+{
+    public bool Listening => listening();
+
+    public void Invoke(ElementEvent evt) => handler((TEvent)evt);
+}

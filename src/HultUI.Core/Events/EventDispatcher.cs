@@ -75,7 +75,7 @@ public static class EventDispatcher
         {
             if (pinned[i] is not { } list) continue;
             for (int j = 0; j < list.Count; j++)
-                if (list[j].Listening is not { } listening || listening()) return true;
+                if (list[j].Handler.Target is not IListeningHandler handler || handler.Listening) return true;
         }
         return false;
     }
