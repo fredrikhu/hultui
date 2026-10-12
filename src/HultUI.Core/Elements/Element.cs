@@ -808,12 +808,23 @@ public abstract class Element
     public void OnPassive<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent =>
         AddHandler(EventPhase.Bubble, handler, owned: false, passive: true);
 
-    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent
+    /// <summary>
+    /// <see cref="OnPassive{TEvent}(Action{TEvent})"/> for a tracker that acts only while
+    /// <paramref name="listening"/> says so — a splitter's or a pan's drag, heard on a root. A
+    /// pointer move that nothing else on its way listens for is then not made at all: on a root,
+    /// such a tracker made one on every move in the window, 64 bytes each, to do nothing. A move
+    /// that is made still runs the handler, which decides for itself as before.
+    /// </summary>
+    internal void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
+        AddHandler(EventPhase.Bubble, handler, owned: false, passive: true, listening);
+
+    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false,
+        Func<bool>? listening = null) where TEvent : ElementEvent
     {
         // A handler can register another handler on the same element mid-dispatch, so this
         // goes through the copy-on-write path like every other mutation.
         ListForMutation(typeof(TEvent))
-            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned, passive));
+            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned, passive, listening));
     }
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
@@ -1525,5 +1536,10 @@ public abstract class Element
     }
 }
 
+/// <param name="Listening">For a passive handler that acts only some of the time (a drag
+/// tracker on a root): whether it wants events now. Null is always. Only asked before a pointer
+/// move is made (<see cref="Events.EventDispatcher.DispatchPointerMove"/>), never to skip the
+/// handler: a move that is made still runs it.</param>
 internal readonly record struct EventHandlerEntry(
-    EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false);
+    EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false,
+    Func<bool>? Listening = null);

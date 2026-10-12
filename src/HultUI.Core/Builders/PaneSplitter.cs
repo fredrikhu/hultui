@@ -28,6 +28,8 @@ public sealed class PaneSplitter
     private float _grabAt;
     private float _grabSize;
     private bool _dragMoved;
+    // Made once, not per AttachDrag (owners call it on every build).
+    private Func<bool>? _listening;
 
     /// <param name="onChanged">Runs whenever the size moves — normally the owner's
     /// <c>MarkDirty</c>, since the pane is rebuilt at the new size.</param>
@@ -99,14 +101,15 @@ public sealed class PaneSplitter
     /// <summary>
     /// Hears the move and release on an ancestor, because a drag routinely ends with the
     /// pointer well off the handle — often outside the window's client area entirely.
-    /// Passive so an idle window does not re-render on every pointer move over it.
+    /// Passive so an idle window does not re-render on every pointer move over it, and heard
+    /// only while dragging, so a move over the window makes no move event for it.
     /// </summary>
     public void AttachDrag(Element root)
     {
         root.OnPassive<PointerMoveEvent>(e =>
         {
             if (IsDragging) DragTo(Axis == SplitterAxis.Horizontal ? e.Position.X : e.Position.Y);
-        });
+        }, _listening ??= () => IsDragging);
         root.OnPassive<PointerUpEvent>(_ =>
         {
             if (!IsDragging) return;

@@ -52,17 +52,32 @@ public static class EventDispatcher
     /// for one. Most moves reach no move handler at all — hover styles, cursors and tooltips
     /// need no event — and the event was 64 bytes a move, the bulk of what a 1,000 Hz mouse
     /// left behind. Nothing else differs: the path is pinned first, so whether anything listens
-    /// is asked of the same handler lists the walk would run.
+    /// is asked of the same handler lists the walk would run. A handler registered with a
+    /// listening condition (<see cref="Element.OnPassive{TEvent}(Action{TEvent}, Func{bool})"/>)
+    /// counts only while it holds; if a move is made, every handler on the path runs as ever.
     /// </summary>
     internal static void DispatchPointerMove(Element target, Point position, Point delta, KeyModifiers modifiers)
     {
         var path = PinPath(target, typeof(PointerMoveEvent), out var pinned, out int depth, out bool listened);
-        if (!listened)
+        if (!listened || !AnyListening(pinned, depth))
         {
             Release(path, pinned, depth);
             return;
         }
         Walk(new PointerMoveEvent { Position = position, Delta = delta, Modifiers = modifiers }, target, path, pinned, depth);
+    }
+
+    /// <summary>Whether a pinned handler wants the event now: one with no listening condition,
+    /// or one whose condition holds.</summary>
+    private static bool AnyListening(List<EventHandlerEntry>?[] pinned, int depth)
+    {
+        for (int i = 0; i < depth; i++)
+        {
+            if (pinned[i] is not { } list) continue;
+            for (int j = 0; j < list.Count; j++)
+                if (list[j].Listening is not { } listening || listening()) return true;
+        }
+        return false;
     }
 
     /// <summary>

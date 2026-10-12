@@ -41,6 +41,8 @@ public sealed class HorizontalPan : ISidewaysScroller
     private readonly Ref<BoxElement> _trackRef = new();
     private float _offset;
     private float _grab;
+    // Made once, not per AttachDrag (owners call it on every build).
+    private Func<bool>? _listening;
 
     /// <param name="onChanged">Runs whenever the offset actually moves — normally the
     /// owner's <c>MarkDirty</c>, since the content has to be rebuilt to show it.</param>
@@ -169,7 +171,10 @@ public sealed class HorizontalPan : ISidewaysScroller
         // onChanged. Registered as ordinary app handlers they would force a frame
         // per move over an idle window (the input safety net counts handlers that
         // ran), which is exactly the idle-rerender bug this wording exists to stop.
-        root.OnPassive<PointerMoveEvent>(ev => { if (IsDragging) DragTo(ev.Position.X); });
+        // And heard only while dragging, so a move over the surface makes no move event
+        // for it (the window makes one only when something wants it).
+        root.OnPassive<PointerMoveEvent>(ev => { if (IsDragging) DragTo(ev.Position.X); },
+            _listening ??= () => IsDragging);
         root.OnPassive<PointerUpEvent>(_ => IsDragging = false);
     }
 

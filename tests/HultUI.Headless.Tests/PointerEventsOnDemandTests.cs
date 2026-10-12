@@ -76,6 +76,41 @@ public class PointerEventsOnDemandTests
         Assert.Equal(Rest, rows[last == 5 ? 2 : 5].BackgroundColor);
     }
 
+    /// <summary><see cref="PaneSplitter.AttachDrag"/> and <see cref="HorizontalPan.AttachDrag"/>
+    /// listen on a root, so a drag that leaves the handle is still followed. Idle, they made a move
+    /// event on every move in the window (Junction has three on its root); they ask for moves only
+    /// while their drag is on. That the drag is still followed is PaneSplitterTests' to show: its
+    /// root has nothing else listening.</summary>
+    [Fact]
+    public void IdleDragTrackersOnTheRoot_AskForNoMoveEvents()
+    {
+        var (session, root, _, _) = Screen();
+        using var _ = session;
+        new PaneSplitter(() => { }, null, 100, 300, 200).AttachDrag(root);
+        new HorizontalPan(() => { }).AttachDrag(root);
+        var window = session.Window;
+        var app = session.Application;
+        var p = In(2);
+        for (int i = 0; i < 10; i++) { window.MoveMouse(p.X + i % 2, p.Y); app.RunFrame(Frame); }
+
+        long input = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++)
+                _sink = new InputEvent.MouseMoveInput(200, 75, 1, 0, KeyModifiers.None);
+        });
+        long moves = Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                window.MoveMouse(p.X + i % 2, p.Y);
+                app.RunFrame(Frame);
+            }
+        }, goal: input);
+
+        Assert.True(moves <= input,
+            $"100 moves allocated {moves} B; the platform's input alone is {input} B (a move event for each is {100 * 64} B)");
+    }
+
     [Fact]
     public void AMoveHandlerOnAnAncestor_HearsEveryMove_InEachPhase()
     {

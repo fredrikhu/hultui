@@ -1050,7 +1050,7 @@ Flex.Row().AlignItems(AlignItems.Stretch).Children(
 |---|---|
 | `Size` | the pane's width (side by side) or height (stacked), always within `min..max` |
 | `Handle()` / `Handle(hover, grabbed)` | the grip, themed or with explicit tints |
-| `AttachDrag(root)` | hears the move and release on an ancestor; passive, so an idle window does not repaint per pointer move |
+| `AttachDrag(root)` | hears the move and release on an ancestor; passive, so an idle window does not repaint per pointer move, and asks for moves only while dragging, so an idle one makes no move event either |
 | `Restore(size)` | set from remembered settings; no callback |
 | `IsDragging` | true while grabbed |
 | `SplitterAxis.Vertical` (constructor) | stacked panes: the handle is a horizontal strip dragged up and down |
