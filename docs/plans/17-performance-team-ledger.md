@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; steps 1–13 landed, step 14a in progress. All eight reports are in
+- **Phase:** build — round 3, resumed 2026-10-11; steps 1–13 and 14a landed, step 14b in progress. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -154,7 +154,7 @@ Round 2 regressions first, then value per cost.
     log; keystroke churn −27/−28 % on 19k JSON and the log); weight BiDi/styled memos by bytes
     (~16 MB bound; worst case 58 MB → ≤16). Medium. Proof: random edits vs a fresh area incl.
     surrogates, ZWJ, CJK; re-run b23b203's 2.0 M-line audit.
-14. **Lists on item rows** (1/8; split into 14a: row inherit, item-label keep, Vesper's lists; 14b: Junction Branches, Tags, Files, Aperture's grid): **layout-virtuallist-row-inherit** (approved) first (rows resolved
+14. **Lists on item rows** (1/8; 14a LANDED 1e68166, 3409c2d, 518258a, 757a79b, 0ca47d5, 0971573; split into 14a: row inherit, item-label keep, Vesper's lists; 14b: Junction Branches, Tags, Files, Aperture's grid): **layout-virtuallist-row-inherit** (approved) first (rows resolved
     under their list: Junction Branches layouts per key 255 → 32, 0 px changed), then
     **adopt-item-rows** — Vesper panes (339 of 542 KB per key), Junction Branches and Tags (need
     stable or value-equal TreeNode items; −380 KB of 667 KB per key), Aperture's grid — and
@@ -173,7 +173,9 @@ Round 2 regressions first, then value per cost.
     and read by the UI thread; failed twice, steps 11 and 12 — would make the full suite and CI
     flaky), **toasthost-second-flash-opacity** (pre-existing: a second Flash mid-fade leaves the
     replacement half-transparent for its whole hold), **customframe-install-activates** (the custom
-    frame activates the window in the Application constructor). Small.
+    frame activates the window in the Application constructor), **junction-remoteop-test-flake**
+    (`RemoteOpAnimationTests…(Push)`, new in 2894d98, failed once in step 14a's full run, passed 3/3
+    alone — find out whether it is the same fake race or a timing assumption). Small.
 16. **linux-emoji-colour-fallback** (5, correctness) — emoji presentation and VS16 pick the colour
     emoji face (Linux 😀 ❤️ in DejaVu today; Windows #️⃣ ™️ ©️ monochrome). Changes those pixels;
     goldens unaffected (pinned faces). Proof on WSL with real Noto faces and on Windows.
@@ -386,6 +388,9 @@ Re-ranked by the round 4 survey.
 | 3 | 7cfd0c9, 752dcf1 | tween-first-step-bounded | The loop's first tween step is min(time since the loop's last step, 1/DisplayHz) (Run and the WinForms host; RunFrame/Tick unchanged); a tween that starts with a delay (tooltip, toast hold, auto-hide; internal `ITween.Delay`) still starts at 0 so it never fires early. A 300 ms tween after idle: 20 → 19 frames, done 316 → 299 ms; toast flash → gone unchanged; the extra identical first frame gone. Allocation identical on every row. AOT TableView 10k sort +4.4…7.1 % in 5/5 pairs, JIT ±0.3 %, attributed to AOT code placement (evidence in the commit). |
 | 3 | 5b71b4f, d98cca3 | text-textarea-incremental-wrap | Line starts kept and patched in place: untouched rows stay, later rows shift by one vectorized add, only touched lines re-wrap; the text-keyed wrap memo is gone; replaced runs matched in order (hash lookup after 8 misses) so new text sharing its ends stays cheap. Fixed an old bug: an edited Arabic line at narrow widths could break unlike a fresh layout (break search started from a carried width). Wrapped 20,000-line log: typing 8,777 → 6,353 KB/key (−28 %; the rest is the new 6.3 MB string), 4.9 → 2.1 ms JIT, 5.0 → 2.4 AOT; held while open 8.63 → 0.34 MB (−8.3 MB). 19k JSON typing 981 → 724 KB (−26 %), 0.92 → 0.77 ms. Suite: 2,000-line typing −7 % KB, −5 %/−2 % min; wrapped 900-line −8 %, −7/−3 %; undo-redo −8 %, −7/−4 %; 0 slower. Equivalence: 1,500 random edits in a test (mixed scripts, widths 37–2,400, font changes), 12 × 2,500 soak, b23b203's audit 10.7 M lines 0 different; WSL passes. |
 | 3 | dc028f9, d18ef87, 2808caf | text-memo-cache-byte-bound | BiDi/styled memos and remembered lines bounded by weight too (10 MB and 12 MB; `LruCache.Reweigh`), `MemoRange` keys hold an entry number so evicted entries are not kept alive; weights within 3–5 % of full-GC measurements. Retained after the texts go: 2,000-char Hebrew/Latin 64.7 → 26.5 MB (−59 %), styled 45.2 → 22.1 (−51 %), 400-char 32.9 → 26.0. The 5,000-block rich document re-open unchanged (31.18 MB). Suite 0 slower; styled ellipsis −2.4 % KB. 2808caf fixed a flaky memo test (a string gets its memo on its second layout if no other string took its admission slot). |
+| 3 | 1e68166, 3409c2d | layout-virtuallist-row-inherit | Approved (question 6). One-argument rows resolve under their list (`ResolveUnder`). Per key: Junction Branches style-pass layout marks 240.7 → 0, layouts 255 → 33.7, ComputeLayout 975 → 478, leaf measures 830 → 205; Tags marks 153 → 0, layouts 166.7 → 30.7; Vesper walk marks 120 → 0, layouts 136.6 → 76.6. Branches/Tags min −4.6/−4.8 %, median −6/−7 % JIT; Vesper flat. Pixels: inherited-style diff over 7 suites + probe walks showed only Box/Image FontSize (unused); 15 headless screens 0 px different (positive control 3,994 px). ELEMENTS.md. |
+| 3 | 518258a, 757a79b, 0ca47d5 | a11y-item-label-keep | Approved (question 9). Item-rows lists keep `(item, label)` per index while the item is equal and the delegate the same; `InvalidateItems` (InvalidateRows, new Items, theme) and a new delegate clear it; UI thread only (lists over 2,000 are read off-thread). New row `a11y/selection walk 1,000 item rows, bridge on` 274.1 → 112.3 KB/op (−59 %), min −5.0 % JIT / −7.6 % AOT; real-loop walk 278 → 181 KB/op. New public `HeadlessWindow.AccessibilityTreesBuilt`. Contract documented on AccessibleLabel, ItemRowTemplate, InvalidateRows, ELEMENTS.md. |
+| 3 | 0971573 | vesper-item-rows | App: Vesper's panes (SelectedIndex = cursor, −1 inactive; `PaneRowState` shape: partner path normalised, size/date/zebra, results, scale, drop target, marks/cut/folder-size snapshots), comparison and viewer on item rows. Pane walk 360 keys: other-name folders 561 → 222 KB/key (−60 %), min −11 % JIT / −16 % AOT (a11y on −60 %, −10.5/−14.6 %); same-name folders −30 %, −9/−14 % (the F3 partner moves each key). Rows made per key 60 → 2.65; leaf measures 3,099 → 174. 23 headless frames byte-identical. KeptRowTests 18, 21 mutations caught. |
 
 ## Examined, not worth it
 
@@ -675,3 +680,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-12: step 13 landed (5b71b4f..2808caf): TextArea edits re-wrap only touched lines (−8.3 MB
   held on a 20k-line log, typing −26…−28 %), text memos bounded by bytes (worst case −51…−59 %
   retained). Step 14 split: 14a framework parts + Vesper, 14b Junction lists + Aperture grid.
+- 2026-10-12: step 14a landed (1e68166..0971573): rows inherit from their list (Branches layouts per
+  key 255 → 34), kept item labels (−59 % a11y walk), Vesper on kept rows (−60 % per key). Guideline
+  notes: a shape field changes only when what is drawn changes (normalise "nothing"); a label lambda
+  capturing build state keeps nothing — hold the delegate in a field. Lead: `InvalidateRow(i)` would
+  let Vesper's same-name partner remake ~4 rows a key instead of 32.
