@@ -328,8 +328,9 @@ public class SpannedLineSubBlobTests
     }
 
     /// <summary>The pixel corpus takes both ways to a stretch's glyphs: runs in X order (the
-    /// binary search) and runs whose X goes back (the pass over the run).</summary>
-    [Fact]
+    /// binary search) and runs whose X goes back (the pass over the run). Runs go back only where
+    /// a font shapes Devanagari's pre-base vowel sign, so the test needs one.</summary>
+    [DevanagariFontsFact]
     public void TheCorpus_HasRunsInXOrder_AndRunsWhoseXGoesBack()
     {
         using var surface = new SkiaRasterRenderSurface();
