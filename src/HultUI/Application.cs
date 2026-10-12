@@ -669,6 +669,61 @@ public sealed class Application : IDisposable
         return at;
     }
 
+    // ──── A host's own loop (HultUI.WinForms): what Run does between frames, for a pump that is
+    //      a timer in someone else's message loop.
+
+    /// <summary><see cref="RunFrame"/> for a host that waits for the loop's deadlines, which can be
+    /// minutes apart: a new tween's clock starts at its first step, as in <see cref="Run"/>.</summary>
+    internal bool HostRunFrame(TimeSpan delta, bool forceRender = false) =>
+        RunFrameCore(delta, forceRender, allowRender: true, tick: true, firstStepAtZero: true);
+
+    /// <summary>
+    /// How long a host may wait after a frame before its next <see cref="HostRunFrame"/>:
+    /// <paramref name="frameInterval"/> while a window needs a frame or a tween moves, the time to
+    /// the next deadline the loop owns (a delay, a coalesced accessibility refresh, the inspector),
+    /// or null with none — then the platform's <c>Wake</c>, or a change made on the UI thread
+    /// while the host is parked (<see cref="HostPark"/>), says when.
+    /// </summary>
+    internal TimeSpan? HostNextFrameIn(TimeSpan frameInterval)
+    {
+        if (AnyWindowNeedsRender() || AnimationManager.HasFreshTweens) return frameInterval;
+        // Posted on the UI thread after the frame drained the queue (see NextDeadline).
+        if (!_mainThreadQueue.IsEmpty) return TimeSpan.Zero;
+        var clock = _platform.TimeProvider;
+        long frequency = clock.TimestampFrequency;
+        long now = clock.GetTimestamp();
+        long at = long.MaxValue;
+        var deadline = IdleDeadline.None;
+        if (AnimationManager.HasActiveAnimations)
+        {
+            float changeIn = AnimationManager.NextChangeIn;
+            if (changeIn <= 0f) return frameInterval;
+            Earliest(ref at, ref deadline, now + (long)Math.Ceiling(Math.Min(changeIn, 86_400f) * frequency),
+                IdleDeadline.Animation);
+        }
+        foreach (var w in _windows)
+            if (w.IsOpen) w.NextDeadline(ref at, ref deadline);
+        if (_inspectorHost?.NextRefreshAt is { } inspector)
+            Earliest(ref at, ref deadline, inspector, IdleDeadline.Inspector);
+        if (at == long.MaxValue) return null;
+        return TimeSpan.FromSeconds(Math.Max(0, at - now) / (double)frequency);
+    }
+
+    /// <summary>The host waits for its next tick: work posted or done on the UI thread meanwhile
+    /// wakes it through <paramref name="wake"/>, as it ends Run's wait.</summary>
+    internal void HostPark(Action wake)
+    {
+        _parked = true;
+        UIThread.Park(wake);
+    }
+
+    /// <summary>The host is about to run a frame.</summary>
+    internal void HostUnpark()
+    {
+        UIThread.Unpark();
+        _parked = false;
+    }
+
     internal static void Earliest(ref long at, ref IdleDeadline deadline, long candidate, IdleDeadline kind)
     {
         if (candidate >= at) return;

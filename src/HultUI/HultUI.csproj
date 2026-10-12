@@ -19,6 +19,9 @@
     <!-- So the accessibility bridge factory's backend-agnostic selection can be
          tested against a platform window that is not the SDL one. -->
     <InternalsVisibleTo Include="HultUI.Headless.Tests" />
+    <!-- The WinForms host pumps the frame loop from a timer in WinForms' message loop: it asks
+         for the loop's next deadline and parks it between ticks, as Run does (Application.Host*). -->
+    <InternalsVisibleTo Include="HultUI.WinForms" />
   </ItemGroup>
 
   <ItemGroup>

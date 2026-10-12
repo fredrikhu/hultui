@@ -77,9 +77,14 @@ internal sealed class WinFormsWindowingPlatform : IWindowingPlatform
     /// wait here would stall the form.</summary>
     public void WaitForEvents(int timeoutMs) { }
 
-    /// <summary>No-op: there is no wait here to cut short. The host's timer or idle
-    /// handler decides when the next <c>RunFrame</c> runs.</summary>
-    public void Wake() { }
+    /// <summary>Set by <see cref="HultUIApplicationHost"/> while it pumps: brings its next tick
+    /// forward. Thread-safe.</summary>
+    internal Action? Woken { get; set; }
+
+    /// <summary>Work arrived (a post from another thread, or a change on the UI thread while the
+    /// host's pump waits): the host ticks now, or as soon as its frame interval allows, where it
+    /// would otherwise wait for its next deadline, or for good.</summary>
+    public void Wake() => Woken?.Invoke();
 
     public void Dispose()
     {
