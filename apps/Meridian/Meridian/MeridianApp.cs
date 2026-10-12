@@ -199,10 +199,15 @@ public partial class MeridianApp : Component, IDisposable
 
     internal CollectionWorkspace? Workspace => _workspace;
 
+    /// <summary>Builds so far, for tests: each one makes the whole window again.</summary>
+    internal int Builds { get; private set; }
+
     public override Element Build()
     {
+        Builds++;
         // Track the revision signal so a Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
+        _sendElapsed.Current = null;   // set again by the readout of a send in flight, if shown
 
         var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
         var body = BuildBody(); body.Key = "body";
@@ -543,7 +548,7 @@ public partial class MeridianApp : Component, IDisposable
         var cts = tab.Sending = new CancellationTokenSource();
         tab.SendStartedTs = System.Diagnostics.Stopwatch.GetTimestamp();
         MarkDirty();
-        TickWhileSending(tab);
+        TickWhileSending(tab, cts);
         try
         {
             if (await ApplyAuthAsync(tab, resolver, headers, cts.Token) is { } authError)
@@ -581,19 +586,34 @@ public partial class MeridianApp : Component, IDisposable
         ActiveTab?.Sending?.Cancel();
     }
 
-    /// <summary>Repaints the live elapsed readout while a send is in flight.
-    /// Started on the UI thread, so the awaits resume there too.</summary>
-    private async void TickWhileSending(RequestTab tab)
+    /// <summary>The elapsed readout of the shown tab's send in flight, which the tick below
+    /// rewrites in place; null when the last build showed none.</summary>
+    private readonly Ref<TextElement> _sendElapsed = new();
+
+    /// <summary>
+    /// Keeps the elapsed readout current while <paramref name="sending"/> is in flight, by
+    /// rewriting the readout on screen when its tab is the one shown. Started on the UI thread,
+    /// so the awaits resume there too.
+    ///
+    /// <para>It rebuilt the whole window every 150 ms instead, about seven times a second for as
+    /// long as a request took; and a tick waiting when its send ended and the next one began
+    /// went on ticking beside the next one's, so sends in a row stacked rebuilds.</para>
+    /// </summary>
+    private async void TickWhileSending(RequestTab tab, CancellationTokenSource sending)
     {
-        while (tab.Sending != null)
+        while (tab.Sending == sending)
         {
             await Task.Delay(150);
-            if (tab.Sending != null) MarkDirty();
+            if (tab.Sending == sending && ActiveTab == tab && _sendElapsed.Current is { } readout)
+                readout.Content = ElapsedText(tab);
         }
     }
 
     internal TimeSpan SendElapsed(RequestTab tab) =>
         System.Diagnostics.Stopwatch.GetElapsedTime(tab.SendStartedTs);
+
+    /// <summary>The elapsed readout's text: seconds, to a tenth.</summary>
+    internal string ElapsedText(RequestTab tab) => $"{SendElapsed(tab).TotalSeconds:0.0} s";
 
     // ── Keyboard ─────────────────────────────────────────────────────────
 

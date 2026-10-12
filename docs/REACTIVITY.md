@@ -196,9 +196,12 @@ setter and `OnComplete` run at most once per display interval, and a delay ends 
 interval late.
 
 A rebuild per frame is still a rebuild per frame: a spinner that marks the whole app dirty
-on every step rebuilds the whole app sixty times a second while it runs. Animate the element
-instead (`Animate.Opacity`, a `Transform`, `SpinnerElement`), or keep the animated part in a
-small component of its own.
+on every step rebuilds the whole app sixty times a second while it runs. Junction's busy
+buttons and its toolbar's fetch, pull and push did, until plan 17: 191–215 KB a frame, about
+12 MB a second (History, headless, JIT). Animate the element instead (`Animate.Opacity`, a
+`Transform`, `SpinnerElement`), or keep the animated part in a small component of its own.
+Junction's spinners now keep one `Ref<Element>` per spinner a build makes, and the step turns
+each one on screen; a frame of a fetch costs nothing.
 
 When a rebuild in the middle of the animation must not undo it, keep the animated value in a
 plain field as well: the tween's setter writes the field and the live element (through a
@@ -274,6 +277,13 @@ public override Element Build()
 The `Ref` follows the element on screen across rebuilds, so the effect always writes the live
 one, and the build's own value is never stale because it reads the current one. The player's
 position report now costs 420 B instead of 41 KB (headless, JIT).
+
+A timer that only refreshes a readout is the same case. Meridian's elapsed time while a request
+is in flight ticked every 150 ms by rebuilding the whole window; its tick now writes the label
+through a `Ref` (1.5 MB → 1.4 KB a second of waiting, headless, JIT). Stop such a tick with the
+thing it was started for (here the send's own cancellation source, not "any send in flight"):
+Meridian's kept going when the next send started within one tick of the last one ending, so
+sends in a row stacked ticks.
 
 When the build needs only something coarse derived from the value, read that through a
 `Computed<T>` instead. An effect that read a computed value runs again only when the value it

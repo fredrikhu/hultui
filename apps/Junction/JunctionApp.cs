@@ -792,7 +792,7 @@ public partial class JunctionApp : Component, IDisposable
     public override Element Build()
     {
         SyncWindowTitle();
-        _spinnerWanted = false;   // set again by any Spinner() built below
+        ResetSpinners();   // asked for again by any Spinner() built below
         _issueRulesLooked = false;   // the rules file is looked at again, once (see IssueRules)
         _highlightShown = null;   // set again by the diff pane built below (see HighlightForCurrent)
         Builds++;

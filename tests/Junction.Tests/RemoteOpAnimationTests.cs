@@ -1,6 +1,7 @@
 using System.Reflection;
 using HultUI.Core.Animation;
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 using HultUI.Headless;
 using Xunit;
 
@@ -15,8 +16,10 @@ namespace Junction.Tests;
 /// idle while it was not. These pin the two halves of the fix: the label, which is what a
 /// screen reader gets, and the motion, which is what everyone else does.</para>
 ///
-/// <para>The animation is driven by a plain field and a rebuild, so the assertion is on
-/// the built tree after ticking the clock rather than on anything the renderer did.</para>
+/// <para>The animation is driven by a plain field that a step writes to the icon on screen
+/// and a build gives the icon it makes, so the assertions are on the live tree after
+/// ticking the clock rather than on anything the renderer did. The busy buttons' spinner
+/// turns the same way.</para>
 /// </summary>
 public class RemoteOpAnimationTests
 {
@@ -130,6 +133,97 @@ public class RemoteOpAnimationTests
             // repainting for the rest of the session.
             var icon = Button(app, "fetch").Children[0];
             Assert.True(icon.Transform is null || icon.Transform.Value.IsIdentity);
+        });
+    }
+
+    /// <summary>The motion moves the icon on screen, frame by frame in the real loop, and builds
+    /// nothing: every step rebuilt the whole window (History: 191 KB a frame).</summary>
+    [Theory]
+    [InlineData("Fetch", "fetch")]
+    [InlineData("Push", "push")]
+    public void TheMotionMovesTheIconOnScreen_WithoutRebuildingTheWindow(string op, string key)
+    {
+        Hosted((session, app) =>
+        {
+            Invoke(app, "BeginRemoteOp", RemoteOp(op));
+            session.PumpFrames(3);
+            var icon = Button(app, key).Children[0];
+            int builds = app.Builds;
+            var poses = new HashSet<(Transform2D?, float)>();
+            long start = session.Time.GetTimestamp();
+
+            session.RunLoop(() =>
+            {
+                poses.Add((icon.Transform, icon.Opacity));
+                return session.Time.GetElapsedTime(start) >= TimeSpan.FromSeconds(0.5);
+            }, limit: TimeSpan.FromSeconds(5));
+
+            Assert.Equal(builds, app.Builds);
+            Assert.Same(icon, Button(app, key).Children[0]);
+            Assert.True(poses.Count >= 25, $"the icon took {poses.Count} poses in 0.5 s");
+            Invoke(app, "EndRemoteOp");
+        });
+    }
+
+    /// <summary>A build in the middle of the motion (anything else that rebuilds the window)
+    /// poses the icon where the motion is, and the steps after it move the icon still on screen.</summary>
+    [Fact]
+    public void ARebuildInTheMiddleOfAFetch_KeepsTheIconTurning()
+    {
+        Hosted((session, app) =>
+        {
+            Invoke(app, "BeginRemoteOp", RemoteOp("Fetch"));
+            session.PumpFrame();
+            AnimationManager.Tick(0.3f);
+            float turned = Button(app, "fetch").Children[0].Transform!.Value.RotationDegrees;
+            Assert.True(turned > 1f);
+
+            Invoke(app, "Rerender");
+            session.PumpFrame(TimeSpan.Zero);
+            var icon = Button(app, "fetch").Children[0];
+            Assert.Equal(turned, icon.Transform!.Value.RotationDegrees, 0.01f);
+
+            AnimationManager.Tick(0.3f);
+            Assert.True(icon.Transform!.Value.RotationDegrees > turned + 1f,
+                $"the icon on screen stopped at {icon.Transform.Value.RotationDegrees}° after the rebuild");
+            Invoke(app, "EndRemoteOp");
+        });
+    }
+
+    /// <summary>A busy button's spinner (here the To-do panel's while it marks everything done)
+    /// turns on screen without rebuilding the window, and stops once no build asks for it.</summary>
+    [Fact]
+    public void ABusyButtonsSpinner_TurnsOnScreen_WithoutRebuildingTheWindow()
+    {
+        Hosted((session, app) =>
+        {
+            var busy = typeof(JunctionApp).GetField("_todoBusy", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            app.OpenTodos();
+            busy.SetValue(app, "Marking all…");
+            Invoke(app, "Rerender");
+            session.PumpFrames(3);
+            // The busy button: the spinner, then its label.
+            var label = Descendants(app.Mount()).OfType<TextElement>().First(t => t.Content == "Marking all…");
+            var spinner = label.Parent!.Children[0];
+            Assert.NotNull(spinner.Transform);
+            int builds = app.Builds;
+            var turns = new HashSet<float>();
+            long start = session.Time.GetTimestamp();
+
+            session.RunLoop(() =>
+            {
+                turns.Add(spinner.Transform!.Value.RotationDegrees);
+                return session.Time.GetElapsedTime(start) >= TimeSpan.FromSeconds(0.5);
+            }, limit: TimeSpan.FromSeconds(5));
+
+            Assert.Equal(builds, app.Builds);
+            Assert.True(turns.Count >= 25, $"the spinner took {turns.Count} turns in 0.5 s");
+
+            busy.SetValue(app, null);
+            Invoke(app, "Rerender");
+            session.PumpFrame();
+            var phase = (TweenHandle)typeof(JunctionApp).GetField("_spinnerTween", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            Assert.True(phase.IsComplete, "the spinner's phase still runs with no spinner up");
         });
     }
 

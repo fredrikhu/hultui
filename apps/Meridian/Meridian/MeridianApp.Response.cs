@@ -149,7 +149,9 @@ public partial class MeridianApp
         if (tab.Sending != null)
         {
             status.AddChild(Text.New("sending…").FontSize(12.5f).TextColor(Azimuth.TextMuted));
-            status.AddChild(Ui.Mono($"{SendElapsed(tab).TotalSeconds:0.0} s", 11f, Azimuth.TextMuted));
+            // Kept current by the send's tick, which rewrites it in place (TickWhileSending).
+            status.AddChild(Ui.Mono(ElapsedText(tab), 11f, Azimuth.TextMuted)
+                .AutomationId("send-elapsed").WithRef(_sendElapsed));
         }
         else if (tab.Result?.Response is { } response)
         {

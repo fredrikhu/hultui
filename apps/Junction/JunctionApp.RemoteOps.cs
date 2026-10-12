@@ -2,6 +2,7 @@ using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using Junction.Git;
 using Junction.Theme;
 
@@ -25,9 +26,14 @@ public partial class JunctionApp
     /// <summary>0→1 and round again while a remote command runs; every frame of the
     /// toolbar's motion is a function of it. One number rather than a tween per button
     /// because the buttons are rebuilt, and an animation writing into an element the last
-    /// rebuild replaced animates nothing anyone can see.</summary>
+    /// rebuild replaced animates nothing anyone can see: a step poses the icon on screen,
+    /// which <see cref="_remoteOpIcon"/> follows across rebuilds, and a build poses the icon
+    /// it makes.</summary>
     private float _remoteOpPhase;
     private TweenHandle _remoteOpTween;
+    private Action<float>? _remoteOpStep;
+    /// <summary>The running command's icon, on screen.</summary>
+    private readonly Ref<Element> _remoteOpIcon = new();
 
     /// <summary>Whether any remote command is in flight — the guard every entry
     /// point checks, so two of them can never race for git's index lock.</summary>
@@ -36,19 +42,20 @@ public partial class JunctionApp
     /// <summary>
     /// Marks a remote command as started and puts its button in motion.
     ///
-    /// <para>The loop drives a plain field and rebuilds, which is how the rest of this app
-    /// animates state it owns (the pane splitters and the diff's horizontal pan do the
-    /// same). It costs a build per frame for the seconds a fetch takes, and in exchange
-    /// nothing has to survive a rebuild.</para>
+    /// <para>The loop drives a plain field and poses the icon on screen with it: a repaint.
+    /// It rebuilt the whole window on every step, a build per frame for the seconds a fetch
+    /// takes (191 KB a frame in History, 11.4 MB a second); the window is built where the
+    /// command starts and where it ends.</para>
     /// </summary>
     private void BeginRemoteOp(RemoteOp op)
     {
         _remoteOp = op;
         _remoteOpPhase = 0f;
         _remoteOpTween.Cancel();
+        _remoteOpIcon.Current = null;   // the build below makes the running one's
         // Fetch turns; pull and push travel. The travel is the shorter of the two so the
         // arrows read as a stream rather than as one slow slide.
-        _remoteOpTween = Animate.Value(0f, 1f, v => { _remoteOpPhase = v; MarkDirty(); })
+        _remoteOpTween = Animate.Value(0f, 1f, _remoteOpStep ??= StepRemoteOp)
             .Duration(op == RemoteOp.Fetch ? 1.1f : 0.75f)
             .Ease(Easing.Linear)
             .Loop()
@@ -62,7 +69,16 @@ public partial class JunctionApp
         _remoteOpTween = default;
         _remoteOp = RemoteOp.None;
         _remoteOpPhase = 0f;
+        _remoteOpIcon.Current = null;
         MarkDirty();
+    }
+
+    /// <summary>A step of the motion: the phase, and the running command's icon on screen
+    /// posed at it.</summary>
+    private void StepRemoteOp(float phase)
+    {
+        _remoteOpPhase = phase;
+        if (_remoteOpIcon.Current is { } icon) PoseRemoteOpIcon(icon, _remoteOp, phase);
     }
 
     // ── The motion ───────────────────────────────────────────────────────
@@ -85,11 +101,18 @@ public partial class JunctionApp
         var icon = Ui.Icon(glyph, size, color);
         if (_remoteOp != op) return icon;
 
-        float p = _remoteOpPhase;
+        PoseRemoteOpIcon(icon, op, _remoteOpPhase);
+        return icon.WithRef(_remoteOpIcon);
+    }
+
+    /// <summary>Where the running command's icon is at <paramref name="p"/>: turned for a
+    /// fetch; for a pull or a push moved along its arrow and faded at the ends of the pass.</summary>
+    private static void PoseRemoteOpIcon(Element icon, RemoteOp op, float p)
+    {
         if (op == RemoteOp.Fetch)
         {
             icon.Transform = Transform2D.Rotate(p * 360f);
-            return icon;
+            return;
         }
 
         // Down for pull, up for push.
@@ -101,7 +124,6 @@ public partial class JunctionApp
         icon.Opacity = p < RemoteOpFadeIn ? p / RemoteOpFadeIn
             : p > RemoteOpFadeOut ? (1f - p) / (1f - RemoteOpFadeOut)
             : 1f;
-        return icon;
     }
 
     /// <summary>What the button says while it is working. Present tense, because it is
