@@ -234,7 +234,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
-    private readonly Ref<VirtualListElement<TreeNode<GitBranch>>> _branchScrollRef = new();
+    private readonly Ref<VirtualListElement<BranchRowItem>> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
     // Tags state, shaped like the branches state above.

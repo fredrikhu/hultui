@@ -93,8 +93,11 @@ public partial class JunctionApp
     /// <c>v1.2.3</c> — stay at the top level, so a plain semver repo looks the same in
     /// either mode.</summary>
     private List<TreeNode<GitTag>> TagRowsOf(IReadOnlyList<GitTag> all) =>
-        RefRows(FilterTags(all), RefKindTag, t => t.Name, flag: null,
-            filtering: _tagQuery.Trim().Length > 0);
+        _tagRowsMemo.Get(this, all, _tagQuery.Trim(), static (app, tags, query) =>
+            app.RefRows(app.FilterTags(tags), RefKindTag, t => t.Name, flag: null,
+                filtering: query.Length > 0));
+
+    private readonly RefRowsMemo<GitTag> _tagRowsMemo = new();
 
     private List<TreeNode<GitTag>> TagRows() => TagRowsOf(_tags.Value.All);
 
@@ -180,22 +183,25 @@ public partial class JunctionApp
         }
 
         // Virtualized like the branch table, and fed the same way: the expanded tree
-        // flattened into one row list, indexed by node identity.
-        var indexOf = new Dictionary<TreeNode<GitTag>, int>(rows.Count);
-        for (var i = 0; i < rows.Count; i++) indexOf[rows[i]] = i;
+        // flattened into one row list of kept nodes, so the list keeps every row a key does
+        // not move the caret onto or off. What else a row shows is in the shape.
+        if (TagRowShapeChanged()) _tagScrollRef.Current?.InvalidateRows();
 
         return VirtualListElement<TreeNode<GitTag>>.New()
             .ItemHeight(TagRowHeight)
             .Items(rows)
-            .RenderWith(n => TagRow(n, indexOf[n]))
+            .RenderWith((n, focused) => TagRow(n, focused))
             // The virtual list surfaces items to assistive tech by this label alone
             // (rows off-screen are never realized as elements), so it carries
-            // everything the row says: name, kind, annotation message, commit.
-            .AccessibleItemLabel(n => n.IsFolder ? RefFolderLabel(RefKindTag, n) : TagLabel(n.Item))
+            // everything the row says: name, kind, annotation message, commit. One
+            // delegate, reading the node alone, so the list keeps each item's label.
+            .AccessibleItemLabel(_tagItemLabel ??= n =>
+                n.IsFolder ? RefFolderLabel(RefKindTag, n) : TagLabel(n.Item))
             .OnActivateItem(n =>
             {
                 // Assistive-tech activation mirrors a plain row click.
-                if (!indexOf.TryGetValue(n, out var i)) return;
+                var i = _tagRowsMemo.IndexOf(n);
+                if (i < 0) return;
                 if (n.IsFolder) { _tagSel = i; ToggleFolder(RefKindTag, n); }
                 else SelectTag(i);
             })
@@ -211,9 +217,33 @@ public partial class JunctionApp
         ? $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {t.Message}, {ShortHash(t.Hash)} {t.Subject}"
         : $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {ShortHash(t.Hash)} {t.Subject}";
 
-    private Element TagRow(TreeNode<GitTag> node, int index)
+    private Func<TreeNode<GitTag>, string?>? _tagItemLabel;
+
+    /// <summary>What a tag row shows besides its node and whether it has the caret: the
+    /// table's columns (compact, narrow) and the colour scheme.</summary>
+    private readonly record struct TagRowShape(bool Compact, bool Narrow, object Theme);
+
+    private TagRowShape _tagRowShape;
+
+    /// <summary>Rows the tag table's template has made, for tests.</summary>
+    internal int TagRowsMade { get; private set; }
+
+    /// <summary>Whether anything the tag rows show besides their nodes changed since the last
+    /// build asked; takes the new state either way.</summary>
+    private bool TagRowShapeChanged()
     {
-        var focused = index == _tagSel;
+        var shape = new TagRowShape(_compactTables, _narrowTables, Nocturne.Theme);
+        bool changed = shape != _tagRowShape;
+        _tagRowShape = shape;
+        return changed;
+    }
+
+    private Element TagRow(TreeNode<GitTag> node, bool focused)
+    {
+        TagRowsMade++;
+        // The node is one of the kept rows, so its place is the memo's (the row's click and
+        // context menu select it by index).
+        var index = _tagRowsMemo.IndexOf(node);
         return node.IsFolder
             ? RefFolderRow(RefKindTag, node, index, focused, TagRowHeight, SelectTagRow)
             : TagLeafRow(node, index, focused);

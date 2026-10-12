@@ -136,8 +136,11 @@ public partial class JunctionApp
     /// name segment (<c>origin/feature/x</c>), so the tree groups them under it for free —
     /// and the folder says so with a cloud, because every ref beneath it is remote.</summary>
     private List<TreeNode<GitBranch>> BranchRowsOf(IReadOnlyList<GitBranch> all) =>
-        RefRows(FilterBranches(all), RefKindBranch, b => b.Name, b => b.IsRemote,
-            filtering: _branchQuery.Trim().Length > 0);
+        _branchRowsMemo.Get(this, all, _branchQuery.Trim(), static (app, refs, query) =>
+            app.RefRows(app.FilterBranches(refs), RefKindBranch, b => b.Name, b => b.IsRemote,
+                filtering: query.Length > 0));
+
+    private readonly RefRowsMemo<GitBranch> _branchRowsMemo = new();
 
     private List<TreeNode<GitBranch>> BranchRows() => BranchRowsOf(ActiveBranches);
 
@@ -270,26 +273,31 @@ public partial class JunctionApp
         // per rebuild (every row built and measured); the virtual list realizes only
         // the visible ~20. The tree feeds it the same way — one flat row list of the
         // expanded nodes — so grouping costs a row per open folder, never a subtree.
-        // The template gets the row alone, so rows find their index through this map
-        // (nodes are rebuilt per build, so identity is the natural key — and unlike a
-        // name it can't collide when a ref is also a folder prefix).
-        var indexOf = new Dictionary<TreeNode<GitBranch>, int>(rows.Count);
-        for (var i = 0; i < rows.Count; i++) indexOf[rows[i]] = i;
+        //
+        // The list keeps a row while its item and its caret are what it was made with, so a
+        // key that moves the caret makes the two rows it moved between. The items are the
+        // kept nodes (see RefRowsMemo) with what a row shows of the other rows: its compare
+        // pick and base/head tag. Everything else a row shows is in the shape: when that
+        // changes, the rows on screen are made again.
+        if (BranchRowShapeChanged()) _branchScrollRef.Current?.InvalidateRows();
 
-        return VirtualListElement<TreeNode<GitBranch>>.New()
+        return VirtualListElement<BranchRowItem>.New()
             .ItemHeight(BranchRowHeight)
-            .Items(rows)
-            .RenderWith(n => BranchRow(n, indexOf[n]))
+            .Items(new BranchRowItems(this, rows))
+            .RenderWith((r, focused) => BranchRow(r, focused))
             // The virtual list surfaces items to assistive tech by this label alone
             // (rows off-screen are never realized as elements), so it says what the
-            // row says: name, current marker, ahead/behind, last commit.
-            .AccessibleItemLabel(n => n.IsFolder ? RefFolderLabel(RefKindBranch, n) : BranchLabel(n.Item))
-            .OnActivateItem(n =>
+            // row says: name, current marker, ahead/behind, last commit. One delegate,
+            // reading the item alone: the list keeps each item's label while the item is
+            // equal (a folder's open state comes with new nodes).
+            .AccessibleItemLabel(_branchItemLabel ??= r =>
+                r.Node.IsFolder ? RefFolderLabel(RefKindBranch, r.Node) : BranchLabel(r.Node.Item))
+            .OnActivateItem(r =>
             {
                 // Assistive-tech activation mirrors a plain row click.
-                if (indexOf.TryGetValue(n, out var i)) _branchSel = i;
-                if (n.IsFolder) ToggleFolder(RefKindBranch, n);
-                else BranchSelectSingle(n.Item);
+                _branchSel = r.Index;
+                if (r.Node.IsFolder) ToggleFolder(RefKindBranch, r.Node);
+                else BranchSelectSingle(r.Node.Item);
                 MarkDirty();
             })
             .SelectedIndex(_branchSel)
@@ -306,21 +314,93 @@ public partial class JunctionApp
         ? $"{b.Name}, remote, {b.Subject}"
         : $"{b.Name}{(b.IsCurrent ? ", current" : "")}, ahead {b.AheadCount} behind {b.BehindCount}, {b.Subject}";
 
-    private Element BranchRow(TreeNode<GitBranch> node, int index)
+    /// <summary>
+    /// One row of the branch table as its list sees it: the node, where it stands, and what a
+    /// branch row shows of the rows around it — whether it is picked for a comparison and
+    /// whether it is the comparison's base or head. The list keeps a row while its item is
+    /// equal, so a pick, an unpick or a base or head that moves makes the rows it changes.
+    /// </summary>
+    internal readonly record struct BranchRowItem(TreeNode<GitBranch> Node, int Index, bool Picked, string? Role);
+
+    /// <summary>The branch rows as the list's items, each made when the list asks for it: a
+    /// key compares the two dozen on screen, never the whole list.</summary>
+    private sealed class BranchRowItems(JunctionApp app, List<TreeNode<GitBranch>> rows) : IReadOnlyList<BranchRowItem>
     {
-        var focused = index == _branchSel;
-        return node.IsFolder
-            ? RefFolderRow(RefKindBranch, node, index, focused, BranchRowHeight, SelectBranch)
-            : BranchLeafRow(node.Item, node.Depth, index, focused);
+        public int Count => rows.Count;
+
+        public BranchRowItem this[int index]
+        {
+            get
+            {
+                var node = rows[index];
+                if (node.IsFolder) return new BranchRowItem(node, index, false, null);
+                var full = node.Item.FullName;
+                var role = app._branchCompare is { } bc
+                    ? (full == bc.BaseFull ? "base" : full == bc.HeadFull ? "head" : null)
+                    : null;
+                return new BranchRowItem(node, index, app._selectedBranches.Contains(full), role);
+            }
+        }
+
+        public IEnumerator<BranchRowItem> GetEnumerator()
+        {
+            for (var i = 0; i < rows.Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    private Element BranchLeafRow(GitBranch b, int depth, int index, bool focused)
+    private Func<BranchRowItem, string?>? _branchItemLabel;
+
+    /// <summary>
+    /// What a branch row shows besides its item and whether it has the caret: the table's
+    /// columns (compact, narrow), what GitLab knows (protection, pipelines, merge requests —
+    /// new objects when a load lands, and nothing while the repository is not on GitLab with
+    /// an account) and the colour scheme. The IN HISTORY set is compared apart
+    /// (<see cref="_branchRowIncludes"/>): it is changed in place.
+    /// </summary>
+    private readonly record struct BranchRowShape(
+        bool Compact, bool Narrow, object? Project, object? Pipelines, object? MergeRequests, object Theme);
+
+    private BranchRowShape _branchRowShape;
+    private readonly HashSet<string> _branchRowIncludes = new(StringComparer.Ordinal);
+
+    /// <summary>Rows the branch table's template has made, for tests.</summary>
+    internal int BranchRowsMade { get; private set; }
+
+    /// <summary>Whether anything the branch rows show besides their items changed since the
+    /// last build asked; takes the new state either way.</summary>
+    private bool BranchRowShapeChanged()
+    {
+        bool hosted = GitLabActive(_activeRepoPath);
+        var shape = new BranchRowShape(_compactTables, _narrowTables,
+            hosted ? ProjectFor(_activeRepoPath).Value : null,
+            hosted ? PipelinesFor(_activeRepoPath).Value : null,
+            hosted ? MergeRequestsFor(_activeRepoPath).Value : null,
+            Nocturne.Theme);
+        bool changed = shape != _branchRowShape;
+        _branchRowShape = shape;
+        var includes = IncludeSet(_activeRepoPath);
+        if (!_branchRowIncludes.SetEquals(includes))
+        {
+            changed = true;
+            _branchRowIncludes.Clear();
+            _branchRowIncludes.UnionWith(includes);
+        }
+        return changed;
+    }
+
+    private Element BranchRow(BranchRowItem r, bool focused)
+    {
+        BranchRowsMade++;
+        return r.Node.IsFolder
+            ? RefFolderRow(RefKindBranch, r.Node, r.Index, focused, BranchRowHeight, SelectBranch)
+            : BranchLeafRow(r.Node.Item, r.Node.Depth, r.Index, focused, r.Picked, r.Role);
+    }
+
+    private Element BranchLeafRow(GitBranch b, int depth, int index, bool focused, bool comparePick, string? compareRole)
     {
         // Rows in the compare selection are highlighted; the base/head extremes tagged.
-        var comparePick = _selectedBranches.Contains(b.FullName);
-        var compareRole = _branchCompare is { } bc0
-            ? (b.FullName == bc0.BaseFull ? "base" : b.FullName == bc0.HeadFull ? "head" : null)
-            : null;
         // The focus caret (Ctrl+arrows) can sit outside the selection. Same colours
         // as the History list: the selection is accent, the caret a neutral tint.
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);

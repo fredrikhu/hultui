@@ -460,7 +460,7 @@ public class BranchesViewTests
         {
             session.PumpUntil(() =>
             {
-                var list = LayoutProbe.Descendants<VirtualListElement<TreeNode<GitBranch>>>(Root(session),
+                var list = LayoutProbe.Descendants<VirtualListElement<JunctionApp.BranchRowItem>>(Root(session),
                     l => l.Layout.AbsoluteContentBox.Height > 0).SingleOrDefault();
                 return list is not null && LeafRows(list).Any(r => Names(r, title)
                     && LayoutProbe.Descendants<TextElement>(r, t => t.Content == "current").Count == 1);
@@ -511,7 +511,7 @@ public class BranchesViewTests
         {
             session.PumpUntil(() =>
             {
-                found = LayoutProbe.Descendants<VirtualListElement<TreeNode<GitBranch>>>(Root(session),
+                found = LayoutProbe.Descendants<VirtualListElement<JunctionApp.BranchRowItem>>(Root(session),
                         l => l.Layout.AbsoluteContentBox.Height > 0)
                     .Cast<Element>().ToList();
                 return found.Count == 1 && found[0].Children.Count > 1;
