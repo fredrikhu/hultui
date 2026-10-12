@@ -390,14 +390,23 @@ public class CacheBoundTests
         // than the rich text document's lines, so 4,000 of them weigh ~10 MB.
         string Segment(int i) => $"commit {i:000} {(char)0x05E9}{(char)0x05DC}{(char)0x05D5}{(char)0x05DD} merged by {(char)0x05D0}{(char)0x05D1}{(char)0x05D2} into main";
         var labels = Enumerable.Range(0, 1_000).Select(i => string.Join(' ', Enumerable.Range(0, 4).Select(k => Segment(i + k)))).ToArray();
+        void LayOut(string label, float width) => Assert.Equal(2, pipeline.Layout(label, Style, width, null).Lines.Count);
         void Pass(float width)
         {
             ForgetLayouts(pipeline);
             foreach (var label in labels)
-                Assert.Equal(2, pipeline.Layout(label, Style, width, null).Lines.Count);
+                LayOut(label, width);
         }
-        foreach (float width in new[] { 900f, 900f, 850f, 900f, 850f })
-            Pass(width);
+
+        // Each label at both widths in a row, so its entry is made at its second layout: with
+        // other labels in between, one could take its note first (string hashes differ from run
+        // to run) and it would get none. Then the first width again, for its lines.
+        foreach (var label in labels)
+        {
+            LayOut(label, 900f);
+            LayOut(label, 850f);
+        }
+        Pass(900f);
 
         int shaped = shaper.Calls;
         Pass(900f);
