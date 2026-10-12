@@ -120,6 +120,37 @@ public sealed class SdlLoopPassTests(ITestOutputHelper output)
         Assert.True(perFrame <= 6, $"{platform.Passes} loop passes for {frames} frames ({perFrame:F1} a frame)");
     }
 
+    [UiFact]
+    public void AnIdleWindow_DoesNotComeRound()
+    {
+        // The idle loop waits for its next deadline or a wake; it used to park 16 ms at a time,
+        // ~60 passes a second in every idle window (plan 17, runtime-idle-wakeups). A worker posts
+        // twice, a second apart, reading the count: two wakes, and nothing else in between.
+        using var guard = ForegroundGuard.Begin();
+        var platform = new CountingPlatform(new SdlWindowingPlatform());
+        using var app = new Application(platform, "idle", 300, 200);
+        app.SetRoot(Flex.Column().Padding(8).Children(TextElement.New("Nothing changes here")));
+        int first = -1, second = -1;
+        var worker = new Thread(() =>
+        {
+            Thread.Sleep(1000);   // the window shown and settled
+            Application.InvokeOnMainThread(() => first = platform.Passes);
+            Thread.Sleep(1000);
+            Application.InvokeOnMainThread(() =>
+            {
+                second = platform.Passes;
+                app.PrimaryWindow.Close();
+            });
+        }) { IsBackground = true };
+        worker.Start();
+        app.Run();
+        worker.Join();
+
+        output.WriteLine($"{second - first} loop passes in the idle second between two posts");
+        Assert.True(first >= 0 && second >= 0, "the posts did not run");
+        Assert.True(second - first <= 4, $"{second - first} loop passes in an idle second");
+    }
+
     /// <summary>The SDL platform, counting the loop's passes.</summary>
     private sealed class CountingPlatform(IWindowingPlatform inner) : IWindowingPlatform
     {

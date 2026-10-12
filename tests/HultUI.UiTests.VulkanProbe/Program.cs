@@ -345,11 +345,25 @@ internal static class Program
         int stage = 0, stageFrames = frames;
         long stageStart = 0;
         platform.Passes = 0;
-        platform.OnPass = () =>
+        // Each stage ends on a post from a timer thread. It ended on the first loop pass past its
+        // time, which an idle loop used to make every 16 ms; it now waits for its next deadline or
+        // a wake, and a minimized window with a change waiting owns none (plan 17,
+        // runtime-idle-wakeups), so the stage never ended.
+        int[] ends = [1500, 2500, 3000];
+        new Thread(() =>
+        {
+            foreach (int end in ends)
+            {
+                int wait = end - (int)clock.ElapsedMilliseconds;
+                if (wait > 0) Thread.Sleep(wait);
+                Application.InvokeOnMainThread(EndStage);
+            }
+        }) { IsBackground = true }.Start();
+
+        void EndStage()
         {
             long ms = clock.ElapsedMilliseconds;
-            int[] ends = [1500, 2500, 3000];
-            if (stage >= ends.Length || ms < ends[stage]) return;
+            if (stage >= ends.Length) return;
             double seconds = (ms - stageStart) / 1000.0;
             string what = stage switch { 0 => "minimized", 1 => "restored", _ => "resized" };
             Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
@@ -372,7 +386,7 @@ internal static class Program
             stageStart = ms;
             stageFrames = frames;
             platform.Passes = 0;
-        };
+        }
         app.Run();
         Console.WriteLine("probe: done");
         return 0;
