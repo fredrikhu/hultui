@@ -6,7 +6,7 @@ file after every step and commits it with the step's work. Full survey reports a
 
 - **Round:** 3
 - **Phase:** build — round 3, resumed 2026-10-11; all build steps landed (1–17). Phase **release**: full suite passed, merged into main as
-  e260030 and pushed; waiting for CI run 38322327278, then the five app releases, then pause. All eight reports are in
+  e260030 and pushed; CI fix 58c186f pushed; waiting for CI run 38323118109, then the five app releases, then pause. All eight reports are in
   `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
   `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
   with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
@@ -749,3 +749,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   moved (8524328: the user's separate session fixed the GitLab fake race), so the merge was made on a
   detached origin/main (e260030), built and the full suite run again on it (30 projects, 0 failures),
   pushed 8524328..e260030, primary fast-forwarded behind the guard. CI run 38322327278 started.
+- 2026-10-13: CI 38322327278 red on test-linux only: `SpannedLineSubBlobTests.TheCorpus_HasRunsInXOrder_
+  AndRunsWhoseXGoesBack` ("122 runs in X order, 0 going back") — the runner has no Devanagari font, so
+  no run goes back; a test precondition, not a flake or a code bug (no re-run). Fixed 58c186f
+  (`[DevanagariFontsFact]`, as `[HanFontsFact]`), pushed e260030..58c186f (fast-forward), primary
+  fast-forwarded. CI run 38323118109 started.
