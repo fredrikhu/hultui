@@ -1,7 +1,11 @@
+using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
+using HultUI.Core.Styling;
 
 namespace PerfSuite;
 
@@ -121,6 +125,155 @@ static partial class Scenarios
                         : loop.Seconds is < 0.45 or > 0.6 ? $"the tooltip came after {loop.Seconds:0.000} s" : null,
                 };
             });
+
+        yield return new Scenario("loop/toast over a screen built anew, real loop",
+            "A toast over a screen whose Build makes its ~300 elements again, as an app's does (Junction, Aperture and Meridian hand ToastHost their MarkDirty): Application.Run's own loop on the virtual clock from the flash until it has gone, held 1.7 s (all under build); reports the screen's builds per toast",
+            ctx =>
+            {
+                var screen = new AppScreen(ctx.Rng);
+                ctx.Mount(screen.Mount());
+                var loop = new LoopCount(ctx);
+                int before = 0;
+                return new Op
+                {
+                    Run = _ =>
+                    {
+                        before = screen.Builds;
+                        screen.Brightest = 0f;
+                        screen.Toast.Flash("Fetched origin");
+                        loop.RunUntil(() => !screen.Toast.IsShowing, TimeSpan.FromSeconds(5));
+                    },
+                    Frames = 0,
+                    Figure = () => screen.Builds - before,
+                    FigureUnit = "builds/toast",
+                    Check = _ => screen.Toast.IsShowing ? "the toast did not go"
+                        : screen.Brightest < 0.99f ? $"the toast was drawn at {screen.Brightest:0.00} at most"
+                        : loop.Seconds is < 1.85 or > 1.95 ? $"the toast lived {loop.Seconds:0.000} s" : null,
+                };
+            });
+
+        foreach (bool inPlace in new[] { false, true })
+        {
+            yield return new Scenario(inPlace
+                    ? "loop/spinner on a screen built anew, turned in place, real loop"
+                    : "loop/spinner on a screen built anew, rebuilt per step, real loop",
+                inPlace
+                    ? "The same screen with a turning spinner whose looping tween writes the live spinner's Transform through a Ref, as Junction's busy buttons now do: Application.Run's own loop on the virtual clock for 30 frames (all under build); reports the screen's builds per frame drawn"
+                    : "A screen whose Build makes its ~300 elements again, with a turning spinner whose looping tween writes a phase field and calls the screen's MarkDirty, as Junction's busy buttons and toolbar fetch did: Application.Run's own loop on the virtual clock for 30 frames (all under build); reports the screen's builds per frame drawn",
+                ctx =>
+                {
+                    var screen = new AppScreen(ctx.Rng) { Spinning = true };
+                    ctx.Mount(screen.Mount());
+                    int builds = 0, frames = 0, turnsDrawn = 0;
+                    return new Op
+                    {
+                        Run = _ =>
+                        {
+                            int b0 = screen.Builds, f0 = screen.Frames, t0 = screen.TurnsDrawn;
+                            var spin = Animate.Value(0f, 1f, inPlace ? screen.TurnInPlace : screen.TurnByRebuild)
+                                .Duration(0.9f).Ease(Easing.Linear).Loop().Start();
+                            ctx.Session.RunLoop(() => screen.Frames - f0 >= 30, limit: TimeSpan.FromSeconds(5));
+                            spin.Cancel();
+                            builds = screen.Builds - b0;
+                            frames = screen.Frames - f0;
+                            turnsDrawn = screen.TurnsDrawn - t0;
+                        },
+                        Frames = 0,
+                        Figure = () => builds / (double)Math.Max(1, frames),
+                        FigureUnit = "rebuilds/frame",
+                        Check = _ => turnsDrawn < frames - 1 ? $"the spinner was drawn turned {turnsDrawn} times in {frames} frames"
+                            : MathF.Abs(screen.SpinnerShown - screen.Turn) > 0.001f ? $"the spinner on screen is at {screen.SpinnerShown:0.000} of a turn, not {screen.Turn:0.000}"
+                            : inPlace && builds > 0 ? $"{builds} rebuilds while it turned in place" : null,
+                    };
+                });
+        }
+    }
+
+    /// <summary>
+    /// A screen built the way an app builds its own: 48 rows of six elements and a header made
+    /// again by every Build, about 300 elements, a toast from <see cref="ToastHost"/> handed this
+    /// component's MarkDirty, and, when asked, a spinner in the header. Counts its builds and the
+    /// frames drawn, and keeps the brightest the toast was drawn at.
+    /// </summary>
+    private sealed class AppScreen : Component
+    {
+        private readonly string[] _labels;
+        private readonly Ref<BoxElement> _spinner = new();
+        private ToastHost? _toast;
+        private ToastElement? _shownToast;
+
+        public AppScreen(Random rng)
+        {
+            _labels = new string[48];
+            for (int i = 0; i < _labels.Length; i++) _labels[i] = Ui.Label(rng);
+        }
+
+        public ToastHost Toast => _toast ??= new ToastHost(MarkDirty);
+        public int Builds { get; private set; }
+        public int Frames { get; private set; }
+        public float Brightest { get; set; }
+        public bool Spinning { get; init; }
+        /// <summary>Where the spinner is, 0..1 of a turn.</summary>
+        public float Turn { get; private set; }
+        /// <summary>The turn the spinner on screen was last drawn at.</summary>
+        public float SpinnerShown { get; private set; }
+        /// <summary>Frames that drew the spinner at a turn the frame before had not.</summary>
+        public int TurnsDrawn { get; private set; }
+
+        /// <summary>A step that writes the phase and rebuilds the screen.</summary>
+        public void TurnByRebuild(float turn)
+        {
+            Turn = turn;
+            MarkDirty();
+        }
+
+        /// <summary>A step that writes the phase and the spinner on screen: a repaint.</summary>
+        public void TurnInPlace(float turn)
+        {
+            Turn = turn;
+            if (_spinner.Current is { } spinner) spinner.Transform = Transform2D.Rotate(turn * 360f);
+        }
+
+        public override Element Build()
+        {
+            Builds++;
+            var header = Flex.Row(gap: 8).Padding(10).FlexShrink(0).AlignItems(AlignItems.Center).Children(
+                Text.New("Repository").FontSize(14f).FontWeight(FontWeight.SemiBold),
+                Box.New().FlexGrow(1));
+            if (Spinning)
+                header.AddChild(Box.New().Width(Dimension.Px(14)).Height(Dimension.Px(14)).CornerRadius(7f)
+                    .BorderColor(Ui.Accent).BorderWidth(2f).Transform(Transform2D.Rotate(Turn * 360f)).WithRef(_spinner));
+            var rows = new Element[_labels.Length];
+            for (int i = 0; i < rows.Length; i++) rows[i] = Ui.Row(i + 1, _labels[i]);
+            var root = Flex.Column().FlexGrow(1).Children(
+                header,
+                ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)),
+                Canvas.New(_ => OnFrame()).Width(Dimension.Px(1)).Height(Dimension.Px(1)));
+            if (Toast.Build() is { } strip) root.AddChild(strip);
+            return root;
+        }
+
+        private void OnFrame()
+        {
+            Frames++;
+            if (_spinner.Current?.Transform is { } turned && turned.RotationDegrees / 360f != SpinnerShown)
+            {
+                SpinnerShown = turned.RotationDegrees / 360f;
+                TurnsDrawn++;
+            }
+            if (_toast is not { IsShowing: true }) { _shownToast = null; return; }
+            _shownToast ??= FindToast(Mount());
+            if (_shownToast is not null) Brightest = MathF.Max(Brightest, _shownToast.Opacity);
+        }
+
+        private static ToastElement? FindToast(Element element)
+        {
+            if (element is ToastElement toast) return toast;
+            var children = element.Children;
+            for (int i = 0; i < children.Count; i++)
+                if (FindToast(children[i]) is { } found) return found;
+            return null;
+        }
     }
 
     /// <summary>Runs the session's loop and counts its passes (every one but the pass that finds
