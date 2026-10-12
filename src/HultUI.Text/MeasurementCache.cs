@@ -229,6 +229,32 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
     /// </summary>
     public void Add(TKey key, TValue value, int weight = 0) => _map.Add(key, FirstNode(key, value, Counted(weight)));
 
+    /// <summary>
+    /// What the entry under <paramref name="key"/> counts for from now on, for an entry that
+    /// keeps more alive than when it was put (a value that fills in later). It keeps its place
+    /// in the order; the least recently used others go if it leaves the cache over its bound.
+    /// Nothing happens without such an entry.
+    /// </summary>
+    public void Reweigh(TKey key, int weight)
+    {
+        if (!_map.TryGetValue(key, out var node)) return;
+        weight = Counted(weight);
+        _weight += weight - node.Value.Weight;
+        node.Value = node.Value with { Weight = weight };
+        for (var other = _order.Last; _weight > _maxWeight && other is not null;)
+        {
+            var newer = other.Previous;
+            if (other != node)
+            {
+                _order.Remove(other);
+                _map.Remove(other.Value.Key);
+                _weight -= other.Value.Weight;
+                Keep(other);
+            }
+            other = newer;
+        }
+    }
+
     private int Counted(int weight) => weight <= _maxWeight / 2 ? weight : (int)(_maxWeight / 2);
 
     // A new entry, most recently used, after the least recently used ones it leaves no room

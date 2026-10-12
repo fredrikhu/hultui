@@ -222,6 +222,199 @@ public class CacheBoundTests
         }
     }
 
+    // ── The BiDi and styled memos ──
+
+    // Paragraphs of about `length` characters, a third of their words Hebrew (or, styled, Latin
+    // with a bold first word), each laid out at 2,000, 2,000 and 1,990 pixels (lines of some 200
+    // characters): an entry at its second layout, lines remembered at the third.
+    private static void LayOutParagraphs(TextPipeline pipeline, int count, int length, bool styled, int seed = 5)
+    {
+        var rng = new Random(seed);
+        var style = styled ? Style : Style with { TextDirection = TextDirection.Rtl };
+        var bold = new[] { new HultUI.Core.Rendering.TextSpan(0, 5, HultUI.Core.Primitives.Color.Black, Weight: FontWeight.Bold) };
+        for (int i = 0; i < count; i++)
+        {
+            var sb = new System.Text.StringBuilder();
+            while (sb.Length < length)
+            {
+                bool hebrew = !styled && rng.Next(3) == 0;
+                for (int k = 2 + rng.Next(7); k > 0; k--)
+                    sb.Append(hebrew ? (char)(0x05D0 + rng.Next(27)) : (char)('a' + rng.Next(26)));
+                sb.Append(' ');
+            }
+            string text = sb.ToString();
+            foreach (float width in new[] { 2_000f, 2_000f, 1_990f })
+                pipeline.Layout(text, style, width, null, TextOverflow.Clip, styled ? bold : null);
+        }
+    }
+
+    /// <summary>
+    /// What the BiDi and styled paths keep of a string between widths — its entry (levels,
+    /// breaks, segment widths, the line of the whole text) and the lines it was cut into — is
+    /// bounded by bytes too. By their counts alone, 4,096 paragraphs of 2,000 characters kept
+    /// ~58 MB of entries.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LongParagraphs_LeaveTheMemosWithinTheirBounds(bool styled)
+    {
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        LayOutParagraphs(pipeline, 1_500, 2_000, styled);
+
+        Check(pipeline.MemoCacheUse, TextPipeline.MemoCacheBytes, 1_500, "memo");
+        Check(pipeline.MemoLineCacheUse, TextPipeline.MemoLineCacheBytes, 4_096, "remembered line");
+
+        // Within the bound, near it, and the bound is what stopped it: 1,500 entries and 4,096
+        // lines fit the counts.
+        static void Check((int Entries, long Bytes) use, long bound, int entries, string name)
+        {
+            Assert.True(use.Bytes <= bound, $"{name} cache holds {use.Bytes:N0} bytes, over its {bound:N0}");
+            Assert.True(use.Bytes > bound / 2, $"{name} cache holds only {use.Bytes:N0} bytes of {bound:N0}");
+            Assert.True(use.Entries < entries, $"{name} cache kept {use.Entries:N0} entries");
+        }
+    }
+
+    [Fact]
+    public void AMemosWeight_IsAtLeastWhatItKeeps()
+    {
+        // An entry keeps its key's text (2 bytes a character) and, on the BiDi path, a level a
+        // character; a remembered line 16 bytes a glyph. Weighed less, the bound would let more
+        // than it says stay.
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        var rtl = Style with { TextDirection = TextDirection.Rtl };
+        string hebrew = string.Concat(Enumerable.Repeat(((char)0x05E9).ToString() + (char)0x05DC + (char)0x05D5 + (char)0x05DD + " ", 400));
+        foreach (float width in new[] { 640f, 630f })
+            pipeline.Layout(hebrew, rtl, width, null);
+        Assert.Equal(1, pipeline.MemoCacheUse.Entries);
+        Assert.InRange(pipeline.MemoCacheUse.Bytes, 3 * hebrew.Length, 12 * hebrew.Length + 2_000);
+        Assert.InRange(pipeline.MemoLineCacheUse.Bytes, 16 * hebrew.Length - 4_000, 22 * hebrew.Length + 20_000);
+
+        // The line of the whole text, kept on the entry once a width fits it all, counts too.
+        long before = pipeline.MemoCacheUse.Bytes;
+        pipeline.Layout(hebrew, rtl, float.PositiveInfinity, null);
+        Assert.InRange(pipeline.MemoCacheUse.Bytes - before, 16 * hebrew.Length, 22 * hebrew.Length + 2_000);
+    }
+
+    /// <summary>
+    /// A width or a line remembered for a range of a string is keyed by its entry's number, not
+    /// the entry: an entry the cache has let go is gone, though ranges of it are still there.
+    /// Keyed by the entry, each kept its entry alive — levels, breaks, segment widths and the
+    /// line of the whole text — for as long as any of its ranges stayed.
+    /// </summary>
+    [Fact]
+    public void AnEntryTheCacheLetGo_IsNotKeptAliveByItsLines()
+    {
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        var entry = FirstEntryOf(pipeline, () => LayOutParagraphs(pipeline, 1, 2_000, styled: false));
+        Assert.True(pipeline.MemoLineCacheUse.Entries > 10, "the paragraph's lines were not remembered");
+
+        // 4,096 short labels, each laid out twice, take every entry's place; their lines are
+        // their whole texts, kept on their entries, so the paragraph's lines stay remembered.
+        int lines = pipeline.MemoLineCacheUse.Entries;
+        var rtl = Style with { TextDirection = TextDirection.Rtl };
+        for (int i = 0; i < 4_200; i++)
+        {
+            string label = $"{(char)(0x05D0 + i % 27)}{(char)(0x05D0 + i / 27 % 27)} {i}";
+            pipeline.Layout(label, rtl, 600f, null);
+            pipeline.Layout(label, rtl, 590f, null);
+        }
+        Assert.Equal(lines, pipeline.MemoLineCacheUse.Entries);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.False(entry.IsAlive, "the paragraph's entry was let go by the cache but is still alive");
+    }
+
+    /// <summary>
+    /// After the last entry number, the numbers start over, and nothing remembered under a number
+    /// is found for the entry that has it next: every entry, width and line goes first.
+    /// </summary>
+    [Fact]
+    public void AfterTheLastEntryNumber_NothingRememberedIsFoundForAnotherString()
+    {
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        var reference = new TextPipeline(new StubFontCollection(), new StubTextShaper()) { ReuseAcrossWidths = false };
+        var rtl = Style with { TextDirection = TextDirection.Rtl };
+        string Hebrew(int seed) => string.Concat(Enumerable.Range(0, 60).Select(i => (char)(0x05D0 + (i * seed + i / 5) % 27) + (i % 5 == 4 ? " " : "")));
+        string first = Hebrew(3), next = Hebrew(7), last = Hebrew(11);
+        foreach (float width in new[] { 300f, 250f, 200f })
+            pipeline.Layout(first, rtl, width, null);           // entry 1, its lines remembered
+
+        typeof(TextPipeline).GetField("_lastMemoId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(pipeline, int.MaxValue - 1);
+        foreach (var text in new[] { next, last })
+            foreach (float width in new[] { 300f, 250f, 200f })
+            {
+                var laidOut = pipeline.Layout(text, rtl, width, null);
+                var expected = reference.Layout(text, rtl, width, null);
+                static string Of(TextLayout layout) =>
+                    string.Join('|', layout.Lines.Select(l => $"{l.Start}+{l.Length}:{string.Concat(l.Runs.Select(r => r.Text))}"));
+                Assert.Equal(Of(expected), Of(laidOut));
+            }
+        Assert.Equal(1, pipeline.MemoCacheUse.Entries);   // the last one, numbered 1 again
+    }
+
+    // The entry the pipeline's first memo is, weakly: found by reflection, in a frame of its own
+    // so no local keeps it.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference FirstEntryOf(TextPipeline pipeline, Action fill)
+    {
+        fill();
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var cache = typeof(TextPipeline).GetField("_memos", Private)!.GetValue(pipeline)!;
+        var map = (System.Collections.IDictionary)cache.GetType().GetField("_map", Private)!.GetValue(cache)!;
+        foreach (System.Collections.DictionaryEntry e in map)
+        {
+            var node = e.Value!;
+            var entry = node.GetType().GetProperty("Value")!.GetValue(node)!;
+            return new WeakReference(entry.GetType().GetProperty("Value")!.GetValue(entry));
+        }
+        throw new InvalidOperationException("no memo was made");
+    }
+
+    /// <summary>
+    /// A thousand wrapped labels on the BiDi path, laid out again at two widths, as a list that
+    /// is resized: once each has its entry and its lines at those widths, laying them out again
+    /// shapes nothing, with the layouts themselves gone from the layout cache. The bounds sit
+    /// above what such use fills (and what the perf suite's 5,000-block rich text document
+    /// fills, opened twice and resized: see MemoCacheBytes).
+    /// </summary>
+    [Fact]
+    public void WrappedLabelsLaidOutAgain_ShapeNothing()
+    {
+        var shaper = new CountingShaper();
+        var pipeline = new TextPipeline(new StubFontCollection(), shaper);
+        // Lines of ~80 characters, a run a word or two: ~2.5 KB each as weighed, a little more
+        // than the rich text document's lines, so 4,000 of them weigh ~10 MB.
+        string Segment(int i) => $"commit {i:000} {(char)0x05E9}{(char)0x05DC}{(char)0x05D5}{(char)0x05DD} merged by {(char)0x05D0}{(char)0x05D1}{(char)0x05D2} into main";
+        var labels = Enumerable.Range(0, 1_000).Select(i => string.Join(' ', Enumerable.Range(0, 4).Select(k => Segment(i + k)))).ToArray();
+        void Pass(float width)
+        {
+            ForgetLayouts(pipeline);
+            foreach (var label in labels)
+                Assert.Equal(2, pipeline.Layout(label, Style, width, null).Lines.Count);
+        }
+        foreach (float width in new[] { 900f, 900f, 850f, 900f, 850f })
+            Pass(width);
+
+        int shaped = shaper.Calls;
+        Pass(900f);
+        Pass(850f);
+        Assert.Equal(shaped, shaper.Calls);
+        Assert.Equal(labels.Length, pipeline.MemoCacheUse.Entries);
+        Assert.Equal(4 * labels.Length, pipeline.MemoLineCacheUse.Entries);
+        Assert.True(pipeline.MemoLineCacheUse.Bytes > 8L << 20, $"the lines weigh only {pipeline.MemoLineCacheUse.Bytes:N0} bytes");
+    }
+
+    private static void ForgetLayouts(TextPipeline pipeline)
+    {
+        var cache = typeof(TextPipeline).GetField("_cache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(pipeline)!;
+        cache.GetType().GetMethod("Clear")!.Invoke(cache, null);
+    }
+
     private sealed class CountingFonts : IFontCollection
     {
         private readonly StubFontCollection _inner = new();
