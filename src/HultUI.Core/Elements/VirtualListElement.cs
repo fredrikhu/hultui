@@ -193,24 +193,6 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     private string? LabelOf(T item) => _accessibleLabel is { } label ? label(item) : item?.ToString();
 
-    /// <summary>
-    /// Whether <paramref name="items"/> differ from the items the last accessibility tree took its
-    /// labels from: in number, or at an index it labelled (equal by
-    /// <see cref="EqualityComparer{T}.Default"/>, the contract of the kept labels). False when no
-    /// tree has taken a label since the labels were last let go: then nothing was told to compare.
-    /// </summary>
-    private bool ItemLabelsMayDiffer(IReadOnlyList<T> items)
-    {
-        var labels = _labels;
-        if (labels is null) return false;
-        if (labels.Length != items.Count) return true;
-        var comparer = EqualityComparer<T>.Default;
-        for (int i = 0; i < labels.Length; i++)
-            if (labels[i].Made && !comparer.Equals(labels[i].Item, items[i]))
-                return true;
-        return false;
-    }
-
     void IAccessibleItemSource.ActivateItem(int index)
     {
         if (index >= 0 && index < _items.Count)
@@ -862,12 +844,6 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// <see cref="ItemHeightFor"/>: then they are worked out again.</param>
     private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction)
     {
-        // An item changed off screen makes no row and moves no box, and the window refreshes the
-        // accessibility tree's bounds only for what moved: its label, in the node the list
-        // publishes for every item, is told as a name change. The layout pass this patch marks
-        // used to bring a refresh whatever it moved.
-        if (ItemLabelsMayDiffer(items))
-            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
         _items = items;
         var comparer = EqualityComparer<T>.Default;
         foreach (var (index, row) in _activeElements)

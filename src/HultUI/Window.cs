@@ -969,37 +969,6 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         && _accessibilityBridge.IsActive;
 
     /// <summary>
-    /// For tests: told, at the end of a frame whose layout pass would have refreshed the
-    /// accessibility tree before bounds were refreshed only for what moved (plan 17, round 3,
-    /// step 15) and that leaves nothing pending, how a tree built afresh then differs from the
-    /// applied one. The shadow that proves the skipped refreshes would have told nothing. Null
-    /// (the default) builds nothing.
-    /// </summary>
-    internal Action<TreeDiff>? SkippedA11yRefreshAudit { get; set; }
-
-    /// <summary>
-    /// Whether a box the accessibility tree reads moved since the last look, which takes them as
-    /// they are: the window's elements and those of the overlays in the tree (a menu, a dialog).
-    /// </summary>
-    private bool TakeMovedA11yBoxes()
-    {
-        bool moved = _root!.TakeMovedBoxes();
-        for (int i = 0; i < _overlays.Count; i++)
-            if (_overlays[i].IsHitTestable && _overlays[i].Content.TakeMovedBoxes())
-                moved = true;
-        return moved;
-    }
-
-    private void AuditSkippedA11yRefresh(bool a11yActive, bool layoutWasDirty, bool rebuilt)
-    {
-        if (SkippedA11yRefreshAudit is not { } audit || !a11yActive || !layoutWasDirty || rebuilt
-            || _a11yLayoutRefreshPending || _a11yRangeRefreshPending || _a11yPropertyDirty
-            || _a11ySelectionMoved.Count > 0 || _previousA11yTree is null || _root is null)
-            return;
-        audit(AccessibilityTreeDiffer.Diff(_previousA11yTree, BuildAccessibilityTreeWithOverlays(_root)));
-    }
-
-    /// <summary>
     /// Folds into <paramref name="at"/> the earliest moment, on the platform's clock, this window
     /// owes a frame while it needs none now: the trailing edge of a coalesced accessibility
     /// refresh (layout bounds, a range's value), and a resize the throttle held back. The frame
@@ -1186,12 +1155,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
         bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
             || (_root.DirtyFlags & DirtyFlags.Children) != 0);
-        // Bounds are refreshed when the layout moved or resized an element, not whenever it ran: a
-        // component rebuilt on every frame of a tween patches its buttons, which mark their layout,
-        // and a reader listening cost a whole tree every 100 ms for an empty diff (26 trees per 150
-        // frames, 8.7 KB a frame, with 300 rows). The look takes the boxes as they are; one that
-        // moved keeps the refresh pending until it comes.
-        if (a11yActive && TakeMovedA11yBoxes())
+        if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
         long nowMs = A11yClockMs;
         bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
@@ -1254,11 +1218,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // Nothing to draw: the tree is built and told, and the window shows what it showed.
         // Junction's History walked a key every 60 ms: a refresh came due between keys on every
         // other key, and each drew the window again, 0.5 frames a key on top of the keys' own.
-        if (!draws)
-        {
-            AuditSkippedA11yRefresh(a11yActive, layoutWasDirty, a11yRebuild);
-            return false;
-        }
+        if (!draws) return false;
 
         // Keep the maximize button's non-client hover highlight alive across rebuilds.
         ReassertMaximizeButtonHover();
@@ -1293,14 +1253,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 _root.MarkPaintDirty();
             ClearFlags(_root, DirtyFlags.Children);
             ServiceUndrawnSources();
-            AuditSkippedA11yRefresh(a11yActive, layoutWasDirty, a11yRebuild);
             return false;
         }
-        if (!PlatformWindow.Surface.BeginFrame())
-        {
-            AuditSkippedA11yRefresh(a11yActive, layoutWasDirty, a11yRebuild);
-            return false;
-        }
+        if (!PlatformWindow.Surface.BeginFrame()) return false;
 
         var ctx = PlatformWindow.Surface.RenderContext;
         _perf.BeginRender();
@@ -1347,12 +1302,6 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         using (_tracer.Begin("Phase", "Flush"))
             ctx.EndFrame();
         _perf.EndFlush();
-
-        // A virtual list makes and places its rows as it is drawn: what that moved is told by the
-        // coalesced refresh, which this asks for (the frame's look came before the draw).
-        if (a11yActive && TakeMovedA11yBoxes())
-            _a11yLayoutRefreshPending = true;
-        AuditSkippedA11yRefresh(a11yActive, layoutWasDirty, a11yRebuild);
 
         // Clear remaining dirty flags after full render
         ClearAllFlags(_root);

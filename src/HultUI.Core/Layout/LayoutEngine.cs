@@ -141,10 +141,6 @@ public sealed partial class LayoutEngine
             finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
         }
 
-        // The one write that takes padding and border from the style: a change of them moves the
-        // content box a screen reader's tree reads (a scroll view's clip, a list's items).
-        if (padding != element.Layout.Padding || border != element.Layout.Border)
-            element.NoteInsetsChanged();
         element.Layout = new LayoutResult(0, 0, finalW, finalH, padding, border, margin)
         {
             AbsoluteX = absoluteX + margin.Left,
