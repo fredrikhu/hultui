@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); step 1 next.
-  4 questions wait in Needs the user (steps 8 and 14 have (user) parts; the rest go ahead). To
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); step 1 landed, step 2 next.
+  All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
@@ -47,7 +47,7 @@ in Needs the user; the rest of their step goes ahead.
 
 Correctness first, then value per cost.
 
-1. **Runtime fix-ups** (4): **runtime-sdl-wake-flag-after-poll** (a wake landing between
+1. ~~**Runtime fix-ups**~~ LANDED ec4ced5, 397eca4, 94fc1ef (4): **runtime-sdl-wake-flag-after-poll** (a wake landing between
    `_wakePending`'s clear and the poll's last `SDL_PollEvent` is swallowed and the flag stays set, so
    later wakes return early; since 1521f47 an idle loop then waits for the next input — dummy driver: 3/3
    waits ran to the 2,000 ms cap vs 51 ms; clear the flag where the poll consumes the wake;
@@ -95,7 +95,7 @@ Correctness first, then value per cost.
 8. **Text** (5): **text-prefix-table-transient** (the TextArea's break search gets a view over kept
    scratch: long-document open 1,373 → ~440 KB/op, log open 65.8 → ~5 MB, wrapped resize −77…−98 %),
    **text-paragraph-construct-diet** (selectable viewer wheel −27 %, rich text −7 %),
-   **text-textarea-mono-ascii-fits (user)** (JSON open −86 %, −4.15 MB retained). Suite row "text/resize a
+   **text-textarea-mono-ascii-fits** (approved 2026-10-13) (JSON open −86 %, −4.15 MB retained). Suite row "text/resize a
    wrapped TextArea".
 9. **paint-subblob-variable-fonts** (2) — per-run glyph bounds for faces whose box Skia distrusts
    (Cascadia Mono/Code, Segoe UI Variable, Bahnschrift): glyphs per frame −84…−92 % on viewer, JSON and
@@ -118,7 +118,7 @@ Correctness first, then value per cost.
     only when the grid's geometry changes: −55…−65 % per key, ≥ −90 % per resize step — e0b816f's cost).
 14. **Real-window test hygiene** (3): **sdl-hint-honoured-placement-and-uitests-guard** (the framework's
     maximize/full-screen/restore under a CBT hook when the hint is set; SWP_NOACTIVATE on full-screen;
-    ForegroundGuard on the 13 unguarded UiTest classes), **foreground UiTests opt-in (user)**.
+    ForegroundGuard on the 13 unguarded UiTest classes), **foreground UiTests opt-in** (approved: e.g. `HULTUI_UITESTS_FOREGROUND=1`).
 
 ### Waiting
 
@@ -137,7 +137,7 @@ Re-ranked by the round 5 survey.
 - **junction-commit-file-switch** (8, lead) — walking a large commit's files 2.72 MB per key; profile.
 - **reconcile-restyle-on-change (b)** (6/1) — after step 12's part (a); needs the 32-override audit and a
   rule that a never-resolved element always resolves (a prototype drew an unresolved Text).
-- **text-open-measures-every-line (full) (user)** (5).
+- **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
 - **vk-startup-preload** (3, low) — at the 10 ms edge; measure on AOT first.
 - **layout-ordered-children** (1, low) — suite rows only now.
 - **apps-tokenize-on-ui-thread** (5/8, low).
@@ -285,6 +285,9 @@ Re-ranked by the round 5 survey.
 | 3 | 3be0dea | junction-remoteop-test-flake | Test timing, not 2894d98's code: Junction's GitWatcher sometimes reloads after the app's own `.git` writes (2 of 40 starts), landing builds inside the measured window. `Settle` now waits for 700 ms of real time with no build (cap 3 s). 50/50 under two concurrent suite copies. |
 | 3 | 56046e4 | itemrows-remake-on-scale | Framework safety net: Window remembers the display scale; on a change it calls internal `Element.OnDisplayScaleChanged()` over the root and overlays before `Resized`, and item-row VirtualLists drop their rows (as on a Theme switch). One float compare per resize. The apps keep the scale in their shapes (one compare per build); Junction's five scale tests pass through the framework alone. |
 | 3 | a26ca68 | aperture-library-paging | Bug since 01e5bd7: pages requested by window height only, so End, arrows and the wheel stopped at the 100th film; a landed page waited for an unrelated rebuild. Now the next page loads when the furthest realized row or the cursor comes within a page of the loaded end; End goes to the last item (up to 1,000 per request); the build reads `_gridPage.Value` so a landed page shows; a second after-frame reveal. 250 and 1,000 films reach the end; End ≤ 3 requests. |
+| 4 | ec4ced5 | runtime-sdl-wake-flag-after-poll | Correctness (1521f47 with 3a539f8): `PumpEvents` clears `_wakePending` after `PollAllEvents` (in a finally, Interlocked.Exchange), so a wake landing between the clear and the first poll's OS pump (window messages, live-resize watchers, main-thread callbacks) is no longer swallowed. Dummy-driver test through the real PumpEvents: a wake 50 ms into a 3,000 ms wait ran 3,001 ms before, ~50 ms after. Real window: idle 0.0 passes/s, spinner 199 fps unchanged, 0 lost in 3,000 wake pairs. |
+| 4 | 397eca4 | test-frame-pacing-event-precondition | The storm thread spins to a schedule (Stopwatch + SpinWait, 1 ms or four per display interval above 250 Hz) and the precondition scales with the display: at 200.01 Hz 512 → 1,008 events, all 4 FramePacingTests pass under ForegroundGuard. |
+| 4 | 94fc1ef | tooling-textbench-warmup | The JIT warm-up runs on a second scenario set following the measurement's index sequence, cold rows get a new string per call, warm-up runs ≥3 s then until the compiled-method count is flat for 1 s (cap 30 s), and a health line prints. Methods compiled during measurement 914–960 → 126; run-to-run spread 2× → ≤12 %; cold rows −1…−6 %, resize rows −7…−60 % min (the old warm-up measured them partly at tier 0). Old TextBench captures are not comparable across this change. |
 
 ## Examined, not worth it
 
@@ -357,22 +360,22 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-Round 4 questions (2026-10-13, open). Recommendations in brackets.
+Round 4 questions, all answered 2026-10-13 (recommendations taken). Recommendations in brackets.
 
 1. **text-textarea-mono-ascii-fits:** may a TextArea treat a printable-ASCII line in a proven
    fixed-pitch face (all 95 printable ASCII one advance, "MM" two) as fitting when (n + 1) × advance ≤
    width, without shaping it — as Junction's diff and Vesper's comparison already do? JSON open −86 %
    bytes, −4.15 MB kept after close, TODO.md −27 %. Risk: a mono face that kerned ASCII past one
-   advance across a line would draw it clipped instead of wrapped. [Yes.]
+   advance across a line would draw it clipped instead of wrapped. [Yes.] → **yes** (2026-10-13).
 2. **text-open-measures-every-line (full):** may a TextArea measure only the lines on screen and
    estimate the rest of the scroll extent, refining it as lines are drawn (the scrollbar can shift)?
-   [Not now: question 1 covers the apps' cases.]
+   [Not now: question 1 covers the apps' cases.] → **not now** (2026-10-13).
 3. **Foreground UiTests:** WinFormsHostSampleTests and WebViewAccessibilityTests (12 facts) take the
    foreground on purpose for Tab traversal. Run them only with an explicit opt-in (e.g.
-   `HULTUI_UITESTS_FOREGROUND=1`) so a `HULTUI_UITESTS=1` run never takes focus? [Yes, opt-in.]
+   `HULTUI_UITESTS_FOREGROUND=1`) so a `HULTUI_UITESTS=1` run never takes focus? [Yes, opt-in.] → **opt-in** (2026-10-13).
 4. **idle-wake-latency-p90:** close the watch item as OS behaviour (a long-parked thread resumes
    slowly now and then; only ~60 wakes/s would hide it), or run the latency probe once with its window
-   focused by hand? [Close it.]
+   focused by hand? [Close it.] → **closed** (2026-10-13).
 
 Reminder: remove the "aperture-survey" devices on jellyfin.home (rounds 2–4) and revoke the API key
 when the work is done.
@@ -666,3 +669,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-13: round 4 surveys in (all eight not satisfied); reports in `17-reports/r4-*`. One review
   objection each from 4 (lost wake since the infinite idle wait) and 6 (Vesper grid resize rebuilds);
   round 3 confirmed in the real apps. 14 build steps, 4 questions; survey worktrees removed.
+- 2026-10-13: the user took every recommendation on the 4 round 4 questions (mono-ASCII fits yes;
+  estimated extents not now; foreground UiTests opt-in; wake-latency watch item closed). Step 1 landed
+  (ec4ced5, 397eca4, 94fc1ef): lost wake fixed, frame-pacing test at 200 Hz, TextBench warm-up.
