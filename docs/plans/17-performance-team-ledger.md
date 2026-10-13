@@ -5,7 +5,11 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–2 landed, step 3 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–2 landed, step 3 running.
+  **Weekly usage at 99 % (2026-10-13 evening):** after step 3 the loop pauses until the weekly reset
+  (Sunday 2026-10-18 05:00); a one-shot job in this session (CronCreate 5b483f32, 05:07 Oct 18) runs the
+  `/loop` line then. **On resume, first check `git status` and the last commits:** if the limit cut step 3
+  (or any step) off mid-way, finish or revert its uncommitted edits by reverse edit before the next step.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
