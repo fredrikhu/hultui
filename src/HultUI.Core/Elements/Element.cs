@@ -899,12 +899,16 @@ public abstract class Element
 
     /// <summary>
     /// <see cref="OnPassive{TEvent}(Action{TEvent})"/> for a tracker that acts only while
-    /// <paramref name="listening"/> says so — a splitter's or a pan's drag, heard on a root. A
-    /// pointer move that nothing else on its way listens for is then not made at all: on a root,
-    /// such a tracker made one on every move in the window, 64 bytes each, to do nothing. A move
-    /// that is made still runs the handler, which decides for itself as before.
+    /// <paramref name="listening"/> says so — a splitter's or a pan's drag heard on a root, a row
+    /// that extends a right-drag selection. It is asked before a <see cref="PointerMoveEvent"/>
+    /// is made: a move that no handler on its way listens for is not made at all. On a root, a
+    /// tracker without the condition made one on every move in the window, 64 bytes each, to do
+    /// nothing. A move that is made still runs the handler, which decides for itself as before;
+    /// any other event is made and runs it as for <see cref="OnPassive{TEvent}(Action{TEvent})"/>.
+    /// Hand the same delegate to every build (a field, as <c>_listening ??= () => _dragging</c>),
+    /// or each build makes one.
     /// </summary>
-    internal void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
+    public void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
         ListForMutation(typeof(TEvent)).Add(new EventHandlerEntry(EventPhase.Bubble,
             new ListeningHandler<TEvent>(handler, listening).Invoke, Owned: false, Passive: true));
 

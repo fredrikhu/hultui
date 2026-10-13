@@ -449,7 +449,10 @@ public partial class CommanderApp
             if (IsDoublePress(side, e.FullPath)) ActivateCursor(side);
             MarkDirty();
         });
-        el.On<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); });
+        // Passive and heard only while a right-drag marks: ApplyRightMark rebuilds for what it
+        // changes, and a move over a row otherwise changes nothing.
+        el.OnPassive<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); },
+            _rowMoveListening ??= () => _rmarkActive);
 
         // Press-and-drag hands the selection to the desktop (see CommanderApp.DragDrop).
         // ".." is a way back, not a file, so it is neither dragged nor dropped onto.

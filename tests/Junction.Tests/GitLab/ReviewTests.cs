@@ -319,6 +319,48 @@ public class ReviewTests
         }, handler);
     }
 
+    /// <summary>The rows hear the pointer only while a range is dragged (plan 17, round 4: their
+    /// move handler is passive and listens only then). A move along an idle row draws no frame;
+    /// a drag from the + still grows the range over every row it crosses, and the release opens
+    /// the composer.</summary>
+    [Fact]
+    public void DraggingFromThePlusGrowsTheRangeOverTheRowsCrossed_AndAnIdleMoveDrawsNoFrame()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+
+            var plus = ById(session, "review-plus")!;
+            var box = plus.WindowBorderBox;
+            float x = box.X + box.Width / 2, y = box.Y + box.Height / 2;
+            float rowHeight = plus.Parent!.Parent!.WindowBorderBox.Height;
+
+            // Along the code of a line, nothing pressed: nothing changes, so nothing is drawn.
+            session.Window.MoveMouse(x + 200, y);
+            session.PumpFrames(2);
+            session.Window.MoveMouse(x + 203, y);
+            Assert.False(session.PumpFrame(), "a move along an idle review row drew a frame");
+
+            session.Window.MoveMouse(x, y);
+            session.PumpFrame();
+            session.Window.MouseDown(x, y);
+            session.PumpFrame();
+            int first = app.ReviewCaret;
+            Assert.True(first >= 0, "the press on the + placed no caret");
+            session.Window.MoveMouse(x, y + rowHeight);
+            session.PumpFrame();
+            session.Window.MoveMouse(x, y + 2 * rowHeight);
+            session.PumpFrame();
+            Assert.Equal((first, first + 2), app.ReviewRange);
+
+            session.Window.MouseUp(x, y + 2 * rowHeight);
+            session.PumpUntil(() => ById(session, "review-composer") is not null, TimeSpan.FromSeconds(10));
+            Assert.True(TreeHas(session, "New comment on lines 19–21 (new)"));
+        });
+    }
+
     [Fact]
     public void ARangeStopsWhereTheSideChanges()
     {

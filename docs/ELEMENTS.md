@@ -131,7 +131,17 @@ So a handler that runs often and usually does nothing — a move tracker on a ro
 only during a resize drag or a right-drag selection — belongs in `el.OnPassive<TEvent>(handler)`.
 A passive handler promises to mark what it changes (`MarkDirty()` on its component,
 `MarkPaintDirty()` or `MarkLayoutDirty()` on an element), and an input that ran only passive
-handlers draws no frame of its own. A callback a control calls
+handlers draws no frame of its own. A move handler that acts only while something is under
+way can say so: `el.OnPassive<PointerMoveEvent>(handler, listening)` asks `listening` before a
+move is made, and a move that nothing on its way listens for makes no event at all (64 bytes
+a move otherwise, on every move over the element — over a root, over the window). Hand the
+same delegate to every build, from a field (`_listening ??= () => _resizing`), or each build
+makes one. Vesper Commander's two move handlers, the root's (the Find dialog's resize grip, a
+right-button hold) and each file row's (a right-drag marking rows), drew a full frame for
+every move over the panes as ordinary handlers: 60 idle moves along a row drew 60 frames.
+Passive and listening only during their gesture, the same moves draw 1 (where the hover left
+the file's name), and a move allocates 40 bytes instead of 104.
+A callback a control calls
 (`OnChanged`, `LinkActivated`, a toast's action) is not a handler: it shares the frame the
 control's own change asks for, so one that changes something on screen while the control
 itself changes nothing must mark it.

@@ -54,6 +54,11 @@ public partial class JunctionApp
         public (int Anchor, int From, int To)? Range;
         public bool RangeStopped;
         public bool Dragging;
+        /// <summary>Whether the rows' move handler listens: only during a range drag (see
+        /// <see cref="Element.OnPassive{TEvent}(Action{TEvent}, Func{bool})"/>). One for the
+        /// session, so a build hands every row the same one.</summary>
+        public Func<bool> DragListening => _dragListening ??= () => Dragging;
+        private Func<bool>? _dragListening;
         public readonly HashSet<string> Expanded = new(StringComparer.Ordinal);
         public bool ExpandAll;
         public string? FocusThread;
@@ -684,13 +689,16 @@ public partial class JunctionApp
     /// composer, and places the caret on a plain click.</summary>
     private void WireReviewRow(ReviewSession rv, BoxElement row, int line)
     {
-        row.On<PointerMoveEvent>(_ =>
+        // Passive, and heard only during a range drag: it rebuilds for what it changes, and a
+        // move over a row otherwise changes nothing — as an ordinary handler it drew a full
+        // frame for every move along the diff.
+        row.OnPassive<PointerMoveEvent>(_ =>
         {
             if (!rv.Dragging) return;
             if (rv.Range is { } r && r.To == line) return;
             ExtendRangeTo(rv, line);
             MarkDirty();
-        });
+        }, rv.DragListening);
         row.On<PointerUpEvent>(e =>
         {
             if (!rv.Dragging) return;
