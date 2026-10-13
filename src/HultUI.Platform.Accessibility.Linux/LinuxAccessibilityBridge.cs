@@ -242,7 +242,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // order matters. The cache-adds came first and one children-changed:add per parent after
         // them, and an object added anywhere but at the end took a sibling's place: [A, B, C] with
         // X inserted after A read [A, X, C]; with X and Y, [A, X, Y]. Now the gone objects go
-        // first, then each added object is put in its place, then the cache-adds fill those places.
+        // first, then each added object is put in its place, and each child of a reordered parent
+        // that is out of place (plan 17, round 4: a reorder sent nothing, and the client kept the
+        // old order), then the cache-adds fill those places.
 
         // Gone objects only. One the new snapshot still has moved to another parent (a box
         // that gained a name takes its children): the diff removes it from the old parent and
@@ -263,7 +265,12 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!firstBuild)
         {
             EmitRemovedChildNudges(diff.BoundaryRemoved());
-            EmitAddedChildNudges(diff.BoundaryAdded());
+            // A reordered parent's children are all put in place by its own pass, added ones with
+            // them; every other parent's added children by theirs.
+            HashSet<ElementId>? reordered = null;
+            foreach (var parent in diff.Reordered) (reordered ??= []).Add(parent.ElementId);
+            EmitAddedChildNudges(diff.BoundaryAdded(), reordered);
+            foreach (var parent in diff.Reordered) EmitReorderNudges(previous, parent);
         }
 
         // Cache-add is genuinely per-node: it populates the AT client's object cache (the first
@@ -279,11 +286,6 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             DebugSignalsEmitted++;
         }
 
-        // diff.Reordered (same children, new order) sends nothing: a client that reads the
-        // children from the bus gets the new order, but a caching one keeps the old order until
-        // something else changes the list (seen live, plan 17 round 3 step 15; not approved as an
-        // added signal yet).
-
         if (!firstBuild)
             foreach (var change in diff.PropertyChanged)
                 if (EmitPropertyChange(change)) DebugSignalsEmitted++;
@@ -296,7 +298,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     // end, where the client grows the list. A bulk append stays one signal; a run inserted at the
     // front or in the middle is one signal per child. The gone children have left the client's
     // list already (above), so each index is the child's place among those there before it.
-    private void EmitAddedChildNudges(List<AddedNode> boundary)
+    // A reordered parent's added children are left to EmitReorderNudges, which puts them with the rest.
+    private void EmitAddedChildNudges(List<AddedNode> boundary, HashSet<ElementId>? reordered)
     {
         if (boundary.Count == 0) return;
         var added = new HashSet<ElementId>(boundary.Count);
@@ -305,7 +308,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         Dictionary<ElementId, int>? runStarts = null;
         foreach (var entry in boundary)
         {
-            if (entry.Parent is not { } parent) continue;
+            if (entry.Parent is not { } parent || reordered?.Contains(parent.ElementId) == true) continue;
             string childPath = PathOf(entry.Node);
             if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
             runStarts ??= [];
@@ -318,6 +321,64 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             }
             if (acc.IndexInParent > runStart) continue;
             _signals!.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
+            DebugSignalsEmitted++;
+        }
+    }
+
+    /// <summary>
+    /// A parent whose children changed order (added and gone ones besides, maybe): one
+    /// children-changed:add per child that is not where a caching client's list has it, in the
+    /// order of the parent's children, each naming its index, so the list ends in the new order. A
+    /// reorder sent nothing, and libatspi kept the old order until something else changed the list
+    /// (seen live in WSL: all seven reorder shapes read the old order). What the client holds is the
+    /// previous snapshot's children less those that left this parent (their cache-remove or
+    /// children-changed:remove went first); each signal moves its child to its index, so the
+    /// children before it are in place and the rest keep their old order: a child is in place when
+    /// it is the first of the old order not yet put. At most one signal per child but the last;
+    /// [A, B, C] reversed is two. Added children are put the same way, except the run that ends the
+    /// parent's children: one signal for its first, as in <see cref="EmitAddedChildNudges"/>, and
+    /// the cache-adds of the rest land past the end.
+    /// </summary>
+    private void EmitReorderNudges(Snapshot previous, AccessibilityNode parent)
+    {
+        string parentPath = PathOf(parent);
+        if (!previous.ByPath.TryGetValue(parentPath, out var before)
+            || !_snapshot.ByPath.TryGetValue(parentPath, out var now)) return;
+        var kids = now.ChildPaths;
+
+        // The client's list is the old order less the children that left this parent. Those still
+        // waiting to be put, as each is put the set loses it: one set, no list.
+        var old = before.ChildPaths;
+        var waiting = new HashSet<string>(old.Count);
+        foreach (var path in old)
+            if (_snapshot.ByPath.TryGetValue(path, out var child) && child.ParentPath == parentPath)
+                waiting.Add(path);
+        // Where the run of children new to this parent that ends its children starts.
+        int runStart = kids.Count;
+        while (runStart > 0 && !waiting.Contains(kids[runStart - 1])) runStart--;
+
+        int next = 0;   // the first child of the client's list not yet put
+        for (int i = 0; i < kids.Count; i++)
+        {
+            string path = kids[i];
+            if (i >= runStart)
+            {
+                if (i == runStart) Emit(path, i);
+                break;
+            }
+            while (next < old.Count && !waiting.Contains(old[next])) next++;
+            if (next < old.Count && old[next] == path)
+            {
+                next++;   // already there
+                continue;
+            }
+            waiting.Remove(path);
+            Emit(path, i);
+        }
+
+        void Emit(string path, int index)
+        {
+            _signals!.EmitChildrenChanged(parentPath, path, index, isAdd: true);
             DebugSignalsEmitted++;
         }
     }

@@ -17,8 +17,9 @@ public sealed class TreeDiff
     public List<RemovedNode> Removed { get; } = [];
 
     /// <summary>
-    /// Parent nodes whose children kept the same set of <see cref="AccessibilityNode.ElementId"/>s
-    /// but in a different order. The bridge should reshuffle sibling indices under these nodes.
+    /// Parent nodes (of the new tree) whose children that were there before are in a different
+    /// order now; some may have been added or removed besides. The bridge should reshuffle sibling
+    /// indices under these nodes.
     /// </summary>
     public List<AccessibilityNode> Reordered { get; } = [];
 

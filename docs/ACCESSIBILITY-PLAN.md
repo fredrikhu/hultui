@@ -252,8 +252,17 @@ Files:
       the cache-adds came first with one signal per parent, and an object added anywhere but at
       the end took a sibling's place: `[A, B, C]` with X after A read `[A, X, C]` in a live pyatspi
       client; with X and Y, `[A, X, Y]`. `AtSpiClientCache` in the Linux bridge tests models those
-      rules. A reorder still sends nothing, and a caching client keeps the old order (seen live;
-      a signal for it is not approved yet).
+      rules.
+    - **Reorders (2026-10-13, plan 17 round 4).** For each parent in `diff.Reordered`, one
+      `children-changed:add` per child that is not where a caching client's list has it, in the
+      order of the parent's children, each naming its index (the client's list is the previous
+      snapshot's children less those that left the parent); added children of that parent are put
+      the same way, and a run of added children that ends its children keeps one signal. `[A, B, C]`
+      reversed is two signals, a swap one, a rotation two, at most one per child but the last.
+      Before, a reorder sent nothing and libatspi kept the old order: all seven shapes checked live
+      in WSL (reverse, swap, rotate, last to front, and a reverse with an insert, a removal or an
+      append) read the old order; now all 17 insert and reorder cases match. UIA raises
+      `ChildrenReordered` on the parent, as it did.
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 

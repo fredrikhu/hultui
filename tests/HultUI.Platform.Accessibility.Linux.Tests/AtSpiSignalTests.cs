@@ -245,4 +245,113 @@ public class AtSpiSignalTests
         Assert.Equal(50, s.Recorder.Lines.Count(l => l.StartsWith("cache-add", StringComparison.Ordinal)));
         Assert.Equal(s.Real(), s.Cached());
     }
+
+    // ── Children reordered (plan 17, round 4) ──
+    //
+    // A reorder sent nothing, and a caching client kept the old order: all seven shapes below read
+    // [A, B, C] (or that less a removed child) in a live pyatspi client in WSL after the list changed.
+    // Now each child that is not where the client's list has it gets a children-changed:add naming
+    // its index, in the order of the parent's children, so the list ends in the new order.
+
+    public static TheoryData<string> ReorderCases => new()
+    {
+        "reverse", "swap", "rotate", "lastToFront", "reverseInsert", "reverseRemove", "reverseAppend",
+    };
+
+    private static Element[] Reordered(Scene s, string which) => which switch
+    {
+        "reverse" => [s.C, s.B, s.A],
+        "swap" => [s.B, s.A, s.C],
+        "rotate" => [s.B, s.C, s.A],
+        "lastToFront" => [s.C, s.A, s.B],
+        "reverseInsert" => [s.C, s.X, s.B, s.A],
+        "reverseRemove" => [s.C, s.A],
+        "reverseAppend" => [s.C, s.B, s.A, s.X, s.Y],
+        _ => throw new ArgumentOutOfRangeException(nameof(which)),
+    };
+
+    [Theory]
+    [MemberData(nameof(ReorderCases))]
+    public void ChildrenReordered_AreInTheNewOrder_InACachingClient(string which)
+    {
+        var s = new Scene();
+        Assert.Equal(["A", "B", "C"], s.Cached());
+
+        s.List.ReplaceChildren(Reordered(s, which));
+        s.Apply();
+        Assert.Equal(s.Real(), s.Cached());
+
+        // And back: a reorder again.
+        s.List.ReplaceChildren(s.A, s.B, s.C);
+        s.Apply();
+        Assert.Equal(["A", "B", "C"], s.Cached());
+    }
+
+    [Theory]
+    [InlineData("reverse", new[] { "C 0", "B 1" })]
+    [InlineData("swap", new[] { "B 0" })]
+    [InlineData("rotate", new[] { "B 0", "C 1" })]
+    [InlineData("lastToFront", new[] { "C 0" })]
+    [InlineData("reverseInsert", new[] { "C 0", "X 1", "B 2" })]
+    [InlineData("reverseRemove", new[] { "C 0" })]
+    [InlineData("reverseAppend", new[] { "C 0", "B 1", "X 3" })]
+    public void AReorder_IsOneSignalPerChildOutOfPlace_InIndexOrder_BeforeTheCacheAdds(string which, string[] expected)
+    {
+        var s = new Scene();
+        s.List.ReplaceChildren(Reordered(s, which));
+        s.Apply();
+
+        string list = SignalRecorder.Short(Scene.Path(s.List));
+        var byId = new[] { s.A, s.B, s.C, s.X, s.Y }.ToDictionary(e => Id(e), e => e.Content);
+        var adds = s.Recorder.Lines.Where(l => l.StartsWith($"children-changed:add {list} ", StringComparison.Ordinal))
+            .Select(l => l.Split(' ')).Select(p => $"{byId[p[2]]} {p[3]}").ToList();
+        Assert.Equal(expected, adds);
+        // At most one per child but the last.
+        Assert.True(adds.Count <= s.List.Children.Count - 1);
+        // Every signal before every cache-add, which then finds its object in its place.
+        int lastSignal = s.Recorder.Lines.FindLastIndex(l => l.StartsWith("children-changed", StringComparison.Ordinal));
+        int firstCacheAdd = s.Recorder.Lines.FindIndex(l => l.StartsWith("cache-add", StringComparison.Ordinal));
+        Assert.True(firstCacheAdd < 0 || lastSignal < firstCacheAdd, string.Join("\n", s.Recorder.Lines));
+    }
+
+    [Fact]
+    public void AReorderWhileAChildMovesToAnotherParent_LeavesBothListsRight()
+    {
+        // B leaves the list for a named box beside it while C and A swap: its old parent's
+        // children-changed:remove takes it out, and the reorder is of the two that stay.
+        var a = TextElement.New("A");
+        var b = TextElement.New("B");
+        var c = TextElement.New("C");
+        var d = TextElement.New("D");
+        var list = BoxElement.New();
+        list.AccessibleName = "list";
+        list.AddChild(a);
+        list.AddChild(b);
+        list.AddChild(c);
+        var other = BoxElement.New();
+        other.AccessibleName = "other";
+        other.AddChild(d);
+        var root = BoxElement.New();
+        root.AddChild(list);
+        root.AddChild(other);
+        var client = new AtSpiClientCache();
+        var bridge = new LinuxAccessibilityBridge(client);
+        AccessibilityNode? tree = null;
+        void Apply()
+        {
+            var next = AccessibilityTreeBuilder.Build(root);
+            bridge.ApplyChanges(AccessibilityTreeDiffer.Diff(tree, next), next);
+            tree = next;
+        }
+        List<string> Cached(Element parent) =>
+            [.. client.ChildrenOf(bridge, AtSpiConstants.AccessiblePathPrefix + parent.Id.Value).Select(p => ((IAtSpiTree)bridge).Find(p)?.Name ?? p)];
+        Apply();
+
+        list.ReplaceChildren(c, a);
+        other.ReplaceChildren(d, b);
+        Apply();
+
+        Assert.Equal(["C", "A"], Cached(list));
+        Assert.Equal(["D", "B"], Cached(other));
+    }
 }
