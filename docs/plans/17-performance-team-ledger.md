@@ -4,17 +4,19 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 3
-- **Phase:** build — round 3, resumed 2026-10-11; all build steps landed (1–17). Phase **release**: full suite passed, merged into main as
-  e260030 and pushed; CI fix 58c186f pushed, CI green (38323118109, re-run once); tags pushed, waiting
-  for the five installer runs, then the five app releases, then pause. All eight reports are in
-  `17-reports/r3-*`; the round 3 build order is below; all 15 round 3 questions answered (2026-10-10/11); no step waits on the user. To resume after a pause, run in this worktree:
-  `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md,
-  with state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's
-  Phase calls for, record it in the ledger, and commit.`
+- **Round:** 4
+- **Phase:** survey — **paused after round 3's release** (the user asked to pause once round 3 was
+  merged and released, 2026-10-12). Round 3: merged into main as e260030, CI fixes 58c186f and
+  b3e00b0, CI green on b3e00b0 (run 38326831433); five app releases published with installers
+  (junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0 — re-run once —, aperture-v1.20.0,
+  reel-v1.5.0, all tagged on 58c186f). Next: the round 4 survey. Before it, ask the user the two
+  questions queued in Waiting (atspi-reorder-signal, button-isenabled-rebuild). To resume, run in
+  this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read
+  both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
-- **Review commits since:** 0951288 (round 4 reviews all of round 3's build)
+- **Review commits since:** 0951288 (round 4 reviews all of round 3: 0951288..b3e00b0)
 - **Probe code kept for the build phase** (session scratchpad): round 1–2 `probes/`,
   `painting-probes.patch`, `PaintProbe.cs`, `probedriver.cs`; round 3 `l1r3/` (layout
   counters, inherited-style diff logger), `r3paint/` (render-pass probe, sub-blob and native
@@ -768,3 +770,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   bound of 40: a single-shot read caught a retired ~8 KB allocation context) — re-run once (attempt 2),
   and the bound fixed to 120 on the branch (b3e00b0; the no-presize mutation still fails at 279 B),
   pushed 58c186f..b3e00b0 to main (fast-forward), CI on it started.
+- 2026-10-13: Meridian's installer re-run green; Meridian-Setup-1.4.0.exe published. CI 38326831433
+  on b3e00b0 green on all three jobs. Round 3 closed: Round 4, paused before its survey at the user's
+  request.
