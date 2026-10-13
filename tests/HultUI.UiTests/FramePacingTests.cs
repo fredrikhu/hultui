@@ -30,11 +30,12 @@ public sealed class FramePacingTests(ITestOutputHelper output)
         // Each event ends the loop's wait early, as a mouse report does; the render must
         // still wait its turn, and at the display's rate, not a millisecond early each
         // time (which read 136 on a 120 Hz display before the deadline followed the
-        // schedule). Wake is the cheapest event another thread can raise.
+        // schedule). Wake is the cheapest event another thread can raise. The test means
+        // something only with several events to each frame the display allows.
         var run = RunTween(eventStorm: true);
         AssertPaced(run);
-        Assert.True(run.EventsRaised > run.Frames * 3,
-            $"the storm raised {run.EventsRaised} events, not enough to test {run.Frames} frames against");
+        Assert.True(run.EventsRaised > run.Seconds * run.Hz * 3,
+            $"the storm raised {run.EventsRaised} events, not enough to test {run.Hz} Hz against");
     }
 
     [UiFact]
@@ -113,12 +114,28 @@ public sealed class FramePacingTests(ITestOutputHelper output)
         if (hz <= 0f) hz = 60f;   // what the loop assumes when the platform does not know
         const float seconds = 1f;
 
+        // The storm keeps its own time rather than Sleep(1)'s, which on Windows' default timer
+        // is nearer 2 ms: 512 events in the second, too few against a 200 Hz display's 202
+        // frames. It spins to a schedule of an event every millisecond, or four to an interval
+        // on a display faster than 250 Hz, so the events outnumber the frames whatever the rate.
+        // Late (the thread was descheduled), it starts the schedule again rather than catch up
+        // in a burst.
+        long period = (long)(Stopwatch.Frequency * Math.Min(0.001, 1.0 / (hz * 4)));
         int eventsRaised = 0;
         bool stop = false;
         var storm = new Thread(() =>
         {
-            while (!Volatile.Read(ref stop)) { platform.Wake(); eventsRaised++; Thread.Sleep(1); }
-        });
+            long next = Stopwatch.GetTimestamp();
+            while (!Volatile.Read(ref stop))
+            {
+                platform.Wake();
+                eventsRaised++;
+                next += period;
+                long now;
+                while ((now = Stopwatch.GetTimestamp()) < next) Thread.SpinWait(20);
+                if (now - next > period) next = now;
+            }
+        }) { IsBackground = true, Name = "event storm" };
 
         Animate.Value(0f, 1f, v => { shade = v; box.Background(new Color((byte)(v * 255), 0, 0)); box.MarkPaintDirty(); })
             .Duration(seconds)
