@@ -19,7 +19,7 @@ AppId={{7C4B2E19-58A3-4F6D-9B21-0D5E8A31C7F4}
 AppName=Reel
 AppVersion={#AppVersion}
 AppPublisher=Fredrik Hult
-AppPublisherURL=https://github.com/fredrikhu/hului-revamped
+AppPublisherURL=https://github.com/fredrikhu/hultui-revamped
 DefaultDirName={autopf}\Reel
 ; Per-user by default (no UAC prompt for an unsigned installer; {autopf} then
 ; resolves to %LocalAppData%\Programs). The dialog still offers an all-users

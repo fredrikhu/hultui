@@ -18,7 +18,7 @@ AppId={{6F34B795-A13D-4470-8AAE-F5C656D90EB9}
 AppName=Junction
 AppVersion={#AppVersion}
 AppPublisher=Fredrik Hult
-AppPublisherURL=https://github.com/fredrikhu/hului-revamped
+AppPublisherURL=https://github.com/fredrikhu/hultui-revamped
 DefaultDirName={autopf}\Junction
 ; Per-user install by default (no UAC prompt — sensible for an unsigned
 ; installer; {autopf} then resolves to %LocalAppData%\Programs). The dialog

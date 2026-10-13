@@ -366,7 +366,7 @@ mkdir -p ~/actions-runner && cd ~/actions-runner && curl -o runner.tar.gz -L <th
 ```
 
 ```bash
-./config.sh --url https://github.com/fredrikhu/hului-revamped --token <TOKEN> --name hultui-build --labels self-hosted,linux,x64 --unattended
+./config.sh --url https://github.com/fredrikhu/hultui-revamped --token <TOKEN> --name hultui-build --labels self-hosted,linux,x64 --unattended
 ```
 
 `--unattended` accepts the defaults instead of prompting. The labels are what

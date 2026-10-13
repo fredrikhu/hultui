@@ -489,8 +489,9 @@ DRM.
   libplacebo (LGPL-2.1), dav1d (BSD), FreeType, HarfBuzz, fribidi. Any distro or
   community build a consumer would find on their own is GPL, so an LGPL story
   requires shipping our build, not documenting one.
-- The repository still has no LICENSE file (`PACKAGING.md`), so neither choice is
-  constrained by HultUI's own licence yet.
+- HultUI itself is MPL-2.0 (`LICENSE`, since 2026-10-13). Either library is
+  loaded dynamically and keeps its own LGPL terms, so neither choice conflicts
+  with it.
 
 ### Engineering cost
 

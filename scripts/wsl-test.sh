@@ -9,13 +9,13 @@
 # target  a test project or solution filter. Default: HultUI.CrossPlatform.slnf, what CI's
 #         test-linux job runs.
 #
-# The clone lives at ~/src/hului-revamped on WSL's own disk, made on first use. Building on
+# The clone lives at ~/src/hultui-revamped on WSL's own disk, made on first use. Building on
 # /mnt/c instead would be slow, and would share bin/ and obj/ with the Windows builds.
 #
 # From Git Bash, prefix MSYS_NO_PATHCONV=1, or /mnt/c/... becomes C:/Program Files/Git/mnt/c/...
 set -euo pipefail
 
-clone=~/src/hului-revamped
+clone=~/src/hultui-revamped
 
 # The checkout this script is in. A worktree's .git is a file naming the main repository in
 # Windows form (gitdir: C:/.../.git/worktrees/<name>), so climb to the repository itself.
@@ -41,6 +41,8 @@ if [ ! -d "$clone" ]; then
     git -C "$clone" config --add remote.win.fetch '+refs/remotes/origin/*:refs/remotes/github/*'
 fi
 cd "$clone"
+# Follow the Windows checkout if its folder has moved since the clone was made.
+git remote set-url win "$win"
 git fetch -q --prune win
 
 ref=${1:-github/main}

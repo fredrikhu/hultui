@@ -114,10 +114,10 @@ worth adding.
 
 ## Before anything is published
 
-- **License.** The repository has no LICENSE file, so the packages deliberately
-  carry no `PackageLicenseExpression` — choosing a license is a decision packing
-  must not make. Pick one, add the file, set the property in
-  `src/Directory.Build.props`.
+- **License.** Settled: MPL-2.0 (`LICENSE`), set as `PackageLicenseExpression`
+  in `src/Directory.Build.props`. The packages built from third-party code set
+  their own: `HultUI.Media.Mpv.Natives` (LGPL-2.1-or-later),
+  `HultUI.WebView.Cef.Natives` (BSD-3-Clause), `HultUI.Terminal.XTermNet` (MIT).
 - **Publishing** to nuget.org (or a private feed) is not wired anywhere and should
   be an explicit, tag-gated CI step when wanted — the release-tag convention
   (`vesper-v*`, `junction-v*`) has room for a `hultui-v*`.

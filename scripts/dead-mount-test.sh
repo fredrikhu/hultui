@@ -9,7 +9,7 @@
 # Needs sshfs, fusermount3 and sshd (Fedora: fuse-sshfs openssh-server). Run it from a checkout
 # on the Linux side; from Windows, scripts/wsl-test.sh's clone is one:
 #
-#   wsl -d FedoraLinux-44 --exec bash -c 'cd ~/src/hului-revamped && scripts/dead-mount-test.sh'
+#   wsl -d FedoraLinux-44 --exec bash -c 'cd ~/src/hultui-revamped && scripts/dead-mount-test.sh'
 set -u
 export PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin
 repo=$(cd "$(dirname "$0")/.." && pwd)

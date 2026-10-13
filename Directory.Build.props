@@ -9,7 +9,7 @@
     <VersionSuffix>preview</VersionSuffix>
     <Authors>Fredrik Hult</Authors>
     <Company>Fredrik Hult</Company>
-    <RepositoryUrl>https://github.com/fredrikhu/hului-revamped</RepositoryUrl>
+    <RepositoryUrl>https://github.com/fredrikhu/hultui-revamped</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 

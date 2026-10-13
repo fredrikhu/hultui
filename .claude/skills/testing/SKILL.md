@@ -49,7 +49,7 @@ happens to contain the string.
 ### On Linux, from this Windows machine (WSL)
 
 The `FedoraLinux-44` WSL distro runs the Linux tests locally, no push needed. `scripts/wsl-test.sh`
-keeps its own clone at `~/src/hului-revamped` on WSL's disk (made on first use), fetches from
+keeps its own clone at `~/src/hultui-revamped` on WSL's disk (made on first use), fetches from
 the Windows checkout, checks out the ref and runs `dotnet test`:
 
 ```bash

@@ -245,4 +245,12 @@ these carry a whole product's worth of them.
 
 ## License
 
-MIT
+[Mozilla Public License 2.0](LICENSE) (MPL-2.0).
+
+Third-party code and assets in the tree keep their own licenses, noted beside them:
+
+- `external/XTerm.NET/` -- MIT (upstream's `LICENSE`), HultUI's patches to it included
+- `src/HultUI.Headless/Fonts/` -- DejaVu fonts, Bitstream Vera / Arev license (`LICENSE-DejaVu.txt`)
+- `src/HultUI.Icons/Phosphor.Paths.g.cs` -- Phosphor Icons, MIT
+- `apps/Junction/Assets/` -- Octicons, MIT (`OCTICONS-LICENSE.txt`)
+- `native/mpv/` builds an LGPL-2.1-or-later libmpv (`src/HultUI.Media.Mpv.Natives/THIRD-PARTY-NOTICES.md`); `native/cef/` packages CEF, BSD-3-Clause
