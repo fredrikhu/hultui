@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -81,7 +82,8 @@ public class ButtonElement : BoxElement
     /// <summary>
     /// Off: dimmed, out of the Tab ring, and its click goes nowhere. It stays hit-testable so
     /// a tooltip can explain why. Turning a focused button off does not move focus; the
-    /// window's next traversal skips it.
+    /// window's next traversal skips it. A change is told: UIA's IsEnabled, AT-SPI's enabled
+    /// and sensitive states.
     /// </summary>
     public bool IsEnabled
     {
@@ -92,6 +94,9 @@ public class ButtonElement : BoxElement
             _enabled = value;
             IsFocusable = value;
             MarkStyleDirty();
+            // It marks only style: set on the live button (through a Ref) it was never told, and
+            // through its owner's rebuild only by the layout refresh the patch happened to bring.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsEnabled);
         }
     }
 

@@ -331,6 +331,11 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   among the node's: UIA raises ControlType and LocalizedControlType property changes, AT-SPI sends
   `property-change:accessible-role` (not for the application's own object). The differ never
   compared roles before, and a caching AT-SPI client kept reading "panel" (seen live in WSL).
+  A button's `IsEnabled` tells the window too (2026-10-13, plan 17 round 4): UIA IsEnabled, AT-SPI
+  `state-changed:enabled` and `state-changed:sensitive`. It marked only the button's style, so set on
+  the live button (a `Ref` write) it was never told — a caching AT-SPI client kept it enabled (seen
+  live in WSL) — and through its owner's rebuild only when the layout refresh its patch brought came
+  due. No other control has an enabled state.
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
 - **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
