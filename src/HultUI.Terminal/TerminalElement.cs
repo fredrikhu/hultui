@@ -252,7 +252,9 @@ public sealed partial class TerminalElement : Element
         if (_controller is null) return;
         e.StopPropagation = true;
         _heldChord = null; // the key typed a character: it was AltGr, not a chord
-        _preedit = null;
+        // The composition gives way to what it typed. The program's echo repaints the screen,
+        // but a program that echoes nothing (a password prompt) would leave it standing.
+        if (_preedit is not null) { _preedit = null; MarkPaintDirty(); }
         if (_keyText is { } sent)
         {
             _keyText = null;

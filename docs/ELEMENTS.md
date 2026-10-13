@@ -114,6 +114,28 @@ hover allocates nothing beyond the platform's own input record. A `PointerMoveEv
 handler makes an event on every move over its element or anything inside it — on a root,
 every move in the window — so attach a move handler to the element that needs it.
 
+**Which inputs draw a frame.** An input draws a frame when it changes something: an element
+marked itself dirty (a control's own state, a scroll, a hover or pressed style, an overlay),
+the hover moved to another element, a drag is under way or has just ended, or the focus ring
+moved, showed or hid. It also draws one when an app handler ran for an event the input
+dispatched — the key, the press and the focus and blur it caused, the release and its
+click, the wheel's `ScrollEvent` — on that event's way through the tree (`On<TEvent>`,
+`.OnClick` and the other fluent ones). A handler may change what is drawn without marking
+anything (see "Layout styles do not self-invalidate" in REACTIVITY.md; `HULTUI002` catches
+the common case), so the window repaints after one to be safe. Nothing else draws a frame: a
+key-up no handler hears, a wheel notch over a list that has nothing to scroll, a press on
+static text. Until plan 17's round 4 every input but a pointer move drew one, and a key-up's
+frame was 42–46 % of a key press's frame time in Junction and Vesper Commander.
+
+So a handler that runs often and usually does nothing — a move tracker on a root that acts
+only during a resize drag or a right-drag selection — belongs in `el.OnPassive<TEvent>(handler)`.
+A passive handler promises to mark what it changes (`MarkDirty()` on its component,
+`MarkPaintDirty()` or `MarkLayoutDirty()` on an element), and an input that ran only passive
+handlers draws no frame of its own. A callback a control calls
+(`OnChanged`, `LinkActivated`, a toast's action) is not a handler: it shares the frame the
+control's own change asks for, so one that changes something on screen while the control
+itself changes nothing must mark it.
+
 **Pointer capture.** A `PointerDownEvent` handler can call `e.CapturePointer()`.
 From then until the button comes up, every `PointerMoveEvent` and the
 `PointerUpEvent` go to that element wherever the pointer is, in that element's

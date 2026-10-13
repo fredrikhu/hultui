@@ -1464,12 +1464,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
         if (TryHandleDevToolsInput(evt)) return;
 
-        // Snapshot state that decides whether a mouse move needs a frame (see
-        // the tail of this method). Everything a move can visually change marks
-        // itself dirty (interaction styles, scrollbar/text-selection capture
-        // drags, tooltip overlays) — these are the remaining signals.
+        // Snapshot the state that decides whether the input needs a frame (see the tail of
+        // this method). Everything the framework changes on an input marks itself dirty
+        // (interaction styles, controls' own state, scrolling, overlays, capture drags) —
+        // these are the remaining signals.
         long handlersBefore = EventDispatcher.HandlerInvocationCount;
         var hoveredBefore = _lastHoveredElement;
+        bool draggingBefore = _isDragging;
+        var focusedBefore = _focusManager.FocusedElement;
+        bool keyboardBefore = _focusFromKeyboard;
 
         switch (evt)
         {
@@ -1932,6 +1935,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                         _devTools.HoveredElement = null;
                     }
                     _devTools.ShowBoundingBoxes = _devTools.IsEnabled;
+                    // The HUD and the boxes come or go: the window's own drawing, which no
+                    // element marks.
+                    _root.MarkPaintDirty();
                     break;
                 }
 
@@ -2118,23 +2124,29 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             }
         }
 
-        // Any input event may have triggered visual changes via handlers, so as
-        // a safety net force a render — except for mouse moves, the one
-        // high-frequency event. A move over static content (no handler ran, no
-        // hover change, no active drag) changes nothing visual: interaction
-        // styles, capture drags, and overlays all mark dirty themselves, and a
-        // handler that did run is caught by the invocation counter (handlers may
-        // mutate without marking, per the imperative-mutation convention's
-        // safety net). This turns pointer motion over an idle window from a
-        // full frame per event into no work at all.
+        // The input safety net. An app handler may change what is drawn without marking
+        // anything dirty (the imperative-mutation convention; HULTUI002 catches the common
+        // miss), so an input that ran one gets a frame. Every input follows the same rule: a
+        // key-up, a wheel notch that scrolls nothing or a press on static content used to
+        // force a frame as well, whatever it changed — the up frame was 42–46 % of a key
+        // press's frame time in Junction and Vesper Commander. Nothing else needs the net:
+        // the framework's own handlers (owned, OnOwn) and passive ones (OnPassive) mark what
+        // they change, as do interaction styles, scrolling, overlays and capture drags. What
+        // counts as "a handler ran" is an ordinary handler for an event this input
+        // dispatched (the key, the press and its focus and blur, the click, the drag's
+        // enter, over and leave) on that event's path. The rest of the conditions are the
+        // window's own drawing: the hover chain, the drag ghost (while a drag runs and on
+        // the input that ends it) and the focus ring, which moves with the focus and shows
+        // or hides as the keyboard takes over or the pointer does.
         // Note: DevTools needs no clause of its own — its element inspector
         // renders from the hovered element only (not the raw pointer position),
         // so the hover-changed condition already covers it. Forcing a render per
         // move while the overlay is open just spins the FPS counter.
-        if (evt is not InputEvent.MouseMoveInput
-            || EventDispatcher.HandlerInvocationCount != handlersBefore // a handler ran — may have mutated silently
-            || !ReferenceEquals(_lastHoveredElement, hoveredBefore)     // hover chain changed (enter/leave side effects)
-            || _isDragging)                                             // drag ghost follows the cursor
+        if (EventDispatcher.HandlerInvocationCount != handlersBefore     // a handler ran — may have mutated silently
+            || !ReferenceEquals(_lastHoveredElement, hoveredBefore)      // hover chain changed (enter/leave side effects)
+            || _isDragging || draggingBefore                             // drag ghost follows the cursor, or goes
+            || !ReferenceEquals(_focusManager.FocusedElement, focusedBefore)
+            || (_focusFromKeyboard != keyboardBefore && _focusManager.FocusedElement is not null))
         {
             _root.MarkPaintDirty();
         }

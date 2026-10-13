@@ -108,6 +108,23 @@ public class TerminalElementTests
         Assert.Equal("ls ö", t.Expect("ö"));
     }
 
+    [Fact]
+    public void TypedText_TakesTheCompositionOffTheScreen_WhenTheProgramEchoesNothing()
+    {
+        // A text-input event draws a frame only when something marks one (plan 17, round 4):
+        // the program's echo usually does, but a password prompt echoes nothing, and with a
+        // steady cursor no blink clock repaints either.
+        using var t = Term.Shown();
+        t.Emit("\x1b[2 q");
+        t.Session.PumpFrame();
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "か", SegmentLength = 1 }, t.Element!);
+        Assert.True(t.Session.PumpFrame(), "the composition was not drawn");
+
+        t.Window.TypeText("か");
+        Assert.True(t.Session.PumpFrame(), "the committed composition stayed on the screen");
+        Assert.Equal("か", t.Expect("か"));
+    }
+
     [Theory]
     [InlineData(KeyCode.Enter, KeyModifiers.None, "\r")]
     [InlineData(KeyCode.Backspace, KeyModifiers.None, "\x7f")]
