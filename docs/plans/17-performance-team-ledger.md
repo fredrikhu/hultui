@@ -5,13 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** survey — **paused after round 3's release** (the user asked to pause once round 3 was
-  merged and released, 2026-10-12). Round 3: merged into main as e260030, CI fixes 58c186f and
-  b3e00b0, CI green on b3e00b0 (run 38326831433); five app releases published with installers
-  (junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0 — re-run once —, aperture-v1.20.0,
-  reel-v1.5.0, all tagged on 58c186f). Next: the round 4 survey. Before it, ask the user the two
-  questions queued in Waiting (atspi-reorder-signal, button-isenabled-rebuild). To resume, run in
-  this worktree: `/loop Run the next step of the performance team: follow
+- **Phase:** survey — round 4 started 2026-10-13 after round 3's release (merge e260030, CI green on
+  b3e00b0, five app releases). The user answered the two queued questions (both yes). To resume after
+  a pause, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read
   both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
@@ -208,9 +204,9 @@ Re-ranked by the round 4 survey.
   sometimes mistakes the app's own git writes under `.git` for an outside change and reloads (2 of 40
   starts): a data-generation bump and 4 builds. It also made `DiffItemLabelTests.TheLabelsAreMadeOnce`
   fail once in CI (38323118109 attempt 1). Fix the watcher (ignore the app's own writes), not the tests.
-- **atspi-reorder-signal (user, round 4 question)** (7, from step 15) — live, a caching AT-SPI client keeps
+- **atspi-reorder-signal** (7, from step 15; **approved by the user 2026-10-13**) — live, a caching AT-SPI client keeps
   the old order after children are reordered (nothing is sent today); a signal would be a new event.
-- **button-isenabled-rebuild (user, round 4 question)** (7, from step 15) — IsEnabled changed by a rebuild
+- **button-isenabled-rebuild** (7, from step 15; **approved by the user 2026-10-13**) — IsEnabled changed by a rebuild
   marks style only, so a reader is never told (same class as d35cf89; a new event kind).
 - **element-forced-size-nan** (1, from step 15) — `CacheForcedW/H` as NaN-encoded `float` instead of
   `float?`: −8 B per element.
@@ -773,3 +769,5 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-13: Meridian's installer re-run green; Meridian-Setup-1.4.0.exe published. CI 38326831433
   on b3e00b0 green on all three jobs. Round 3 closed: Round 4, paused before its survey at the user's
   request.
+- 2026-10-13: resumed; the user approved both queued a11y events (AT-SPI reorder signal; IsEnabled
+  changed by a rebuild). Round 4 survey started, eight experts.
