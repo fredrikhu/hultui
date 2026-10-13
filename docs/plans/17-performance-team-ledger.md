@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); step 1 landed, step 2 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–2 landed, step 3 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -55,7 +55,7 @@ Correctness first, then value per cost.
    (fails at the desk's 200 Hz: 516 events, 606 needed; storm cadence independent of `Sleep(1)`),
    **tooling-textbench-warmup** (warm until the compiled-method count stops rising; 922–928 compiled
    during measurement). Small.
-2. **events-noop-input-frames + apps-vesper-passive-move-handlers** (4/1, 8) — any key-up, any wheel
+2. ~~**events-noop-input-frames + apps-vesper-passive-move-handlers**~~ LANDED c0560e1, 82ee093, 4000186, ea4e01a (4/1, 8) — any key-up, any wheel
    notch that scrolls nothing and any other non-move input forces a full repaint (Window.cs:2133-2138):
    the up frame is 42–46 % of a key press's frame time in Junction and Vesper; repaint only when an
    ordinary handler ran, hover changed, a drag is active or something marked itself dirty (audit owned
@@ -125,6 +125,8 @@ Correctness first, then value per cost.
 Re-ranked by the round 5 survey.
 
 - **a11y-textarea-text-pattern** (7; approved rule) — after step 4, if step 4 did not take it.
+- **terminal-noop-scrollback-wheel** (2/Terminal, from step 2) — Terminal raises ContentChanged (a frame) on a
+  scrollback wheel notch at the top that scrolls nothing.
 - **a11y-virtual-items-and-selection** (7; added events approved) — lists over 2,000: AT-SPI ChildCount 0,
   moves told to nobody; with a11y-uia-host-reads-off-thread's container node.
 - **a11y-atspi-snapshot-per-diff + apps-scenario-atspi-rows** (7) — 271 B per node per apply; AT-SPI steps
@@ -288,6 +290,8 @@ Re-ranked by the round 5 survey.
 | 4 | ec4ced5 | runtime-sdl-wake-flag-after-poll | Correctness (1521f47 with 3a539f8): `PumpEvents` clears `_wakePending` after `PollAllEvents` (in a finally, Interlocked.Exchange), so a wake landing between the clear and the first poll's OS pump (window messages, live-resize watchers, main-thread callbacks) is no longer swallowed. Dummy-driver test through the real PumpEvents: a wake 50 ms into a 3,000 ms wait ran 3,001 ms before, ~50 ms after. Real window: idle 0.0 passes/s, spinner 199 fps unchanged, 0 lost in 3,000 wake pairs. |
 | 4 | 397eca4 | test-frame-pacing-event-precondition | The storm thread spins to a schedule (Stopwatch + SpinWait, 1 ms or four per display interval above 250 Hz) and the precondition scales with the display: at 200.01 Hz 512 → 1,008 events, all 4 FramePacingTests pass under ForegroundGuard. |
 | 4 | 94fc1ef | tooling-textbench-warmup | The JIT warm-up runs on a second scenario set following the measurement's index sequence, cold rows get a new string per call, warm-up runs ≥3 s then until the compiled-method count is flat for 1 s (cap 30 s), and a health line prints. Methods compiled during measurement 914–960 → 126; run-to-run spread 2× → ≤12 %; cold rows −1…−6 %, resize rows −7…−60 % min (the old warm-up measured them partly at tier 0). Old TextBench captures are not comparable across this change. |
+| 4 | c0560e1, 82ee093 | events-noop-input-frames | Every input follows the move rule: a frame when an ordinary handler ran for an event the input dispatched on that event's path (key, press with focus/blur, release with click, ScrollEvent, drag enter/over/leave), hover changed, something marked itself dirty, a drag was active before/after, focus moved, or the keyboard-focus flag flipped; F12 marks the root; the safety net for app handlers stays (HULTUI002). Audit of every owned/passive handler; one miss fixed (Terminal's IME composition clear did not mark). Shadow audit: 69/70 skipped no-op inputs pixel-identical (the 70th a test's off-thread echo). Real windows AOT, UIA listening: frames per key press 2 → 1; frame time per press Junction 2.0 → 1.18 ms (−42…−44 %), Vesper 1.64 → 0.92 (−40…−47 %); no-op wheel notches 16–20 → 0 frames. New rows: key press 1.326 → 0.696 ms JIT (−47.5 %), −45.9 % AOT; 20 no-op wheel notches 5.4 → 0.005 ms. 0 slower. ELEMENTS.md "Which inputs draw a frame". |
+| 4 | 4000186, ea4e01a | apps-vesper-passive-move-handlers | Vesper's root and pane-row PointerMove handlers and Junction's review rows are passive and listen only while they act; **`Element.OnPassive<TEvent>(Action<TEvent>, Func<bool> listening)` made public** (API addition). Vesper: 60 idle moves along a row 57–60 → 1 frame; 104 → 40 B per move. Tests incl. right-drag mark, Find grip, review drag. |
 
 ## Examined, not worth it
 
@@ -672,3 +676,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-13: the user took every recommendation on the 4 round 4 questions (mono-ASCII fits yes;
   estimated extents not now; foreground UiTests opt-in; wake-latency watch item closed). Step 1 landed
   (ec4ced5, 397eca4, 94fc1ef): lost wake fixed, frame-pacing test at 200 Hz, TextBench warm-up.
+- 2026-10-13: step 2 landed (c0560e1..ea4e01a): a key press draws one frame, not two (−40…−47 % frame
+  time per press), no-op wheels draw nothing, Vesper idle moves draw nothing; `OnPassive(handler,
+  listening)` public. Guideline notes: a mostly-idle move handler goes in OnPassive with a cached
+  listening delegate; any ordinary handler costs a full frame each run (incl. a root KeyDown/PointerUp
+  ignoring most input, any KeyUp); a control callback that changes something visible must mark dirty.
