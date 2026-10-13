@@ -417,12 +417,14 @@ public class SpannedLineSubBlobTests
         long subBlobsBefore = ctx.BlobsMade;
         // One round on its own: hundreds of sub-blobs into the map the first ones made. Grown
         // from a default capacity it was ~300 B a row; a one-off retired allocation context
-        // (see Allocations) is at most ~40.
+        // (see Allocations) is about 8 KB, ~40 B a row over 200 rows — and the Linux runner
+        // read 40.4 once (the Meridian installer run of 2026-10-13), so the bound sits well
+        // between the two rather than on the retired context's edge.
         long first = GC.GetAllocatedBytesForCurrentThread();
         for (int i = next; i < next + Round; i++) ctx.DrawParagraph(rows[i], new Point(4, 4));
         next += Round;
         double firstPerRow = (GC.GetAllocatedBytesForCurrentThread() - first) / (double)Round;
-        Assert.True(firstPerRow < 40, $"the sub-blob map grew: {firstPerRow:0.#} B a row");
+        Assert.True(firstPerRow < 120, $"the sub-blob map grew: {firstPerRow:0.#} B a row");
 
         long bytes = Allocations.Least(() =>
         {
