@@ -762,3 +762,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   per the brief: attempt 2 green on all three jobs. Tagged 58c186f and pushed 3 + 2 tags:
   junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0; installer runs
   38324218701, 38324219011, 38324219212, 38324271540, 38324271987.
+- 2026-10-13: Junction, Vesper, Aperture and Reel released with installers (Junction-Setup-1.21.0.exe,
+  VesperCommander-Setup-1.21.0.exe, Aperture-Setup-1.20.0.exe, Reel-Setup-1.5.0.exe). Meridian's run
+  failed test-linux on `SpannedLineSubBlobTests.ANewSubBlob_AllocatesNothing` (40.4 B a row against a
+  bound of 40: a single-shot read caught a retired ~8 KB allocation context) — re-run once (attempt 2),
+  and the bound fixed to 120 on the branch (b3e00b0; the no-presize mutation still fails at 279 B),
+  pushed 58c186f..b3e00b0 to main (fast-forward), CI on it started.
