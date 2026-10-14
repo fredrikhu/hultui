@@ -310,4 +310,32 @@ public class DropdownTests
         session.PumpFrame();
         Assert.Equal(199, dropdown.SelectedIndex);
     }
+
+    /// <summary>
+    /// A press the window never sees (its OS title bar, another window) is told with
+    /// DismissPopups: the open list and an open menu close, as on an outside click, and the
+    /// control opens again on the next click; a dialog shown not to light-dismiss stays.
+    /// </summary>
+    [Fact]
+    public void DismissPopups_ClosesListsAndMenus_ButNotDialogs()
+    {
+        using var session = HeadlessSession.Create();
+        var dropdown = Mount(session);
+        var window = session.Window.Window;
+        session.Window.Click(dropdown);
+        session.PumpFrame();
+        Assert.True(dropdown.IsOpen);
+        window.ShowOverlay(Box.New().Width(50f).Height(50f), 300, 300, dismissOnOutsideClick: false);
+
+        window.DismissPopups();
+        session.PumpFrame();
+        Assert.False(dropdown.IsOpen);
+        Assert.Single(session.Window.OverlayContents);
+
+        window.OpenMenu([new ContextMenuItem { Label = "One" }], new Point(10, 10));
+        Assert.Equal(2, session.Window.OverlayContents.Count);
+        window.DismissPopups();
+        Assert.Single(session.Window.OverlayContents);
+        Assert.False(dropdown.IsOpen);
+    }
 }

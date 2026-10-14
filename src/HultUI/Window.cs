@@ -3452,6 +3452,17 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// <inheritdoc/>
     public void CloseMenu() => CloseContextMenu(MenuCloseReason.Dismissed);
 
+    /// <summary>
+    /// Closes every light-dismiss overlay — context menus, dropdown lists, popovers — as a press
+    /// outside them does. For the presses this window never receives: on its OS title bar or
+    /// frame, in another window, in another application. Overlays shown with
+    /// <c>dismissOnOutsideClick: false</c> (dialogs, tooltips) stay.
+    /// </summary>
+    public void DismissPopups()
+    {
+        if (_overlays.Count > 0) DismissOverlaysOnOutsideClick();
+    }
+
     private void TryShowContextMenu(Element target, Point pos)
     {
         var (owner, itemsProvider) = FindContextMenuOwner(target);
