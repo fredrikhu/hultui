@@ -817,10 +817,6 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
-    /// Runs the probe with <paramref name="environment"/> on top of this process's, minus the
-    /// variables that would change what is being tested. A null value removes one.
-    /// </summary>
-    /// <summary>
     /// <c>Window.SaveFrame</c> on each path a frame takes to the screen: GL's back buffer, an 8-bit
     /// swapchain and an scRGB one read back by the host, and the scRGB offscreen read by Skia.
     /// Every one has to come out as the frame looks, and the right way up: red top left, green
@@ -866,6 +862,10 @@ public sealed class VulkanProbeTests
         }
     }
 
+    /// <summary>
+    /// Runs the probe with <paramref name="environment"/> on top of this process's, minus the
+    /// variables that would change what is being tested. A null value removes one.
+    /// </summary>
     private static (int ExitCode, string Output) RunProbe(Dictionary<string, string?> environment, string arguments = "")
     {
         var start = new ProcessStartInfo(SamplePath.VulkanProbe(), arguments)
