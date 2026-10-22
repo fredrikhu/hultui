@@ -11,7 +11,7 @@ namespace HultUI.Headless;
 /// never requests quit; the one thing it delivers is a change to the simulated
 /// monitors (<see cref="SetMonitors"/>), as a real platform delivers a hot-plug.
 /// </summary>
-internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource
+internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSource, ISideBySidePlatform
 {
     private readonly HeadlessTimeProvider _time;
     private readonly List<HeadlessPlatformWindow> _windows = [];

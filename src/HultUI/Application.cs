@@ -27,6 +27,30 @@ public sealed class Application : IDisposable
 {
     private static Application? _current;
 
+    // Every application alive in this process, oldest first: one, except under HultUI.Headless,
+    // whose sessions may run side by side (ISideBySidePlatform). Guarded by itself.
+    private static readonly List<Application> s_live = [];
+
+    // The application the running code is for: set where one is entered, and carried by the
+    // ExecutionContext into the work that code starts (Task.Run, timers, async I/O), so a
+    // worker's InvokeOnMainThread reaches the application that started it.
+    private static readonly AsyncLocal<Application?> s_ambient = new();
+
+    // This application's tweens, while another's are current (AnimationManager.Use).
+    private readonly AnimationSet _animations;
+    private UIThreadSynchronizationContext? _syncContext;
+    // The thread this application was last entered on.
+    private int _threadId;
+
+    /// <summary>The hop <see cref="AsyncLoader{T}"/> producers take for this application (a
+    /// headless session's deferred queue); null for the thread pool. See <see cref="AsyncWork"/>.</summary>
+    internal Action<Func<Action?>>? AsyncScheduler { get; set; }
+
+    /// <summary>The tweens this application steps.</summary>
+    internal AnimationSet Animations => _animations;
+
+    internal bool IsDisposed => _disposed;
+
     private readonly IWindowingPlatform _platform;
     private readonly List<Window> _windows = [];
     private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
@@ -91,21 +115,93 @@ public sealed class Application : IDisposable
     /// starts now. Use this to safely update component state from background
     /// threads (e.g. filesystem watchers, async completions).
     /// </summary>
-    public static void InvokeOnMainThread(Action action) => _current?.Post(action);
+    /// <remarks>
+    /// With headless sessions side by side, the action goes to the application the calling code
+    /// runs for: the one whose synchronization context this thread has (its UI thread, its await
+    /// continuations), else the one whose code started this work (it flows with the
+    /// <see cref="ExecutionContext"/>), else the one entered last. With one application, it is
+    /// that one. A caller that holds its application can <see cref="Post"/> to it instead.
+    /// </remarks>
+    public static void InvokeOnMainThread(Action action)
+    {
+        // An application since disposed is no target: work it started (a long-lived worker made
+        // in one test and used by the next) goes to the current one, as it always has.
+        var app = SynchronizationContext.Current is UIThreadSynchronizationContext { Owner: { _disposed: false } owner }
+            ? owner
+            : s_ambient.Value is { _disposed: false } ambient ? ambient : _current;
+        app?.Post(action);
+    }
 
     /// <summary>
     /// <see cref="InvokeOnMainThread"/> for work that belongs to this application: it runs here or
-    /// nowhere. Work that waits on another thread and posts back later (a load's retry) takes the
-    /// application it was started under, not the one current when it lands: an application
-    /// disposed meanwhile and its successor (a test host's next session, a replaced WinForms host)
-    /// are different applications, and the successor's loop must neither wake for it nor run it.
-    /// A disposed application's queue is never drained again, so what it is sent there is dropped.
+    /// nowhere, on its UI thread during its next frame, from any thread. Work that waits on another
+    /// thread and posts back later (a load's retry) takes the application it was started under, not
+    /// the one current when it lands: an application disposed meanwhile and its successor (a test
+    /// host's next session, a replaced WinForms host) are different applications, and the
+    /// successor's loop must neither wake for it nor run it. A disposed application's queue is never
+    /// drained again, so what it is sent there is dropped.
     /// </summary>
-    internal void Post(Action action)
+    public void Post(Action action)
     {
         _mainThreadQueue.Enqueue(action);
         if (FrameLog.On) FrameLog.Post();
         WakeIfParked(WakeSource.Post);
+    }
+
+    /// <summary>
+    /// Makes this the application the code on this thread runs for: <see cref="Current"/>, the
+    /// target of an <see cref="InvokeOnMainThread"/> it makes or starts, its synchronization
+    /// context (once one is installed), its tweens, its <see cref="AsyncLoader{T}"/> hop and the
+    /// UI-thread binding. HultUI.Headless enters a session's application wherever a test drives
+    /// it (a pump, input, a root), so sessions side by side keep to their own. A no-op with one
+    /// application.
+    /// </summary>
+    internal void Enter()
+    {
+        if (_disposed || (_current == this && s_live.Count == 1)) return;
+        Switch();
+    }
+
+    private void Switch()
+    {
+        _current = this;
+        _threadId = Environment.CurrentManagedThreadId;
+        if (s_ambient.Value != this) s_ambient.Value = this;
+        if (_syncContext is not null && SynchronizationContext.Current != _syncContext)
+            SynchronizationContext.SetSynchronizationContext(_syncContext);
+        AnimationManager.Use(_animations);
+        AsyncWork.SetScheduler(AsyncScheduler);
+        if (UIThread.BoundThreadId != _threadId) UIThread.Bind();
+    }
+
+    /// <summary>
+    /// Takes this application out of the process: hands <see cref="Current"/> and the rest of
+    /// what <see cref="Enter"/> switches to the most recent application left on this thread, or
+    /// returns them to their inert state when there is none here.
+    /// </summary>
+    private void Leave()
+    {
+        Application? next;
+        lock (s_live)
+        {
+            s_live.Remove(this);
+            next = s_live.Count > 0 ? s_live[^1] : null;
+        }
+        if (s_ambient.Value == this) s_ambient.Value = null;
+        if (_current != this) return;
+        if (next is not null && next._threadId == Environment.CurrentManagedThreadId)
+        {
+            next.Switch();
+            return;
+        }
+        // One left behind on another thread (a session a test never disposed) stays reachable
+        // through Current, but this thread is not its UI thread.
+        _current = next;
+        // Return the guard to its inert state. A test host that runs the next
+        // session on a different pool thread would otherwise inherit this
+        // binding and fail on a thread that is legitimately its UI thread.
+        UIThread.Unbind();
+        AsyncWork.SetScheduler(null);
     }
 
     /// <summary>
@@ -282,25 +378,36 @@ public sealed class Application : IDisposable
     /// <c>InvokeOnMainThread</c> quietly posting to a queue nothing drained. Disposing
     /// an application releases the claim, so creating one, disposing it, and creating
     /// another is fine.</para>
+    ///
+    /// <para>The exception is HultUI.Headless: its sessions may run side by side (two desks of
+    /// one system in one test), each its own application, entered wherever the test drives it
+    /// (see <see cref="Enter"/>). Only when they are all headless; a real window beside any
+    /// other application still throws.</para>
     /// </remarks>
     public Application(IWindowingPlatform platform, string title = "HultUI Application",
         int width = 800, int height = 600, WindowStyle style = WindowStyle.Default)
     {
-        if (_current is not null)
-            throw new InvalidOperationException(
+        lock (s_live)
+        {
+            if (s_live.Count > 0 && !(platform is ISideBySidePlatform
+                    && s_live.TrueForAll(a => a._platform is ISideBySidePlatform)))
+                throw new InvalidOperationException(
                 "A HultUI Application is already running in this process. Application.Current, " +
                 "InvokeOnMainThread and the UI-thread binding are static, so a second one would " +
                 "take them from the first. Use the existing application's CreateWindow for another " +
                 "window (or, when hosting, HultUIApplicationHost, which owns the one application " +
                 "every HultUIControl shares), and dispose the current application before creating " +
                 "a replacement.");
+            s_live.Add(this);
+        }
 
         _platform = platform ?? throw new ArgumentNullException(nameof(platform));
-        _current = this;
+        // The one application steps the tweens that were current already, as it always has.
+        _animations = s_live.Count == 1 ? AnimationManager.CurrentSet : new AnimationSet();
         if (_platform is IMonitorSource monitors) monitors.MonitorsChanged += () => MonitorsChanged?.Invoke();
         // Claim this thread before any window (and therefore any element) exists, so
         // the tree can never be built on one thread and driven from another.
-        UIThread.Bind();
+        Switch();
 
         try
         {
@@ -313,8 +420,7 @@ public sealed class Application : IDisposable
             // window creation — no GL context, no display — would leave the process
             // unable to create any application at all, and the second attempt would
             // report the first one as "already running".
-            _current = null;
-            UIThread.Unbind();
+            Leave();
             throw;
         }
 
@@ -849,9 +955,11 @@ public sealed class Application : IDisposable
     internal SynchronizationContext? InstallSynchronizationContext()
     {
         var previous = SynchronizationContext.Current;
-        SynchronizationContext.SetSynchronizationContext(
-            new UIThreadSynchronizationContext(_mainThreadQueue,
-                _wakeForAwait ??= () => WakeIfParked(WakeSource.Await)));
+        _syncContext ??= new UIThreadSynchronizationContext(this, _mainThreadQueue,
+            _wakeForAwait ??= () => WakeIfParked(WakeSource.Await),
+            // Another application's context is not the one to give the thread back: what it replaced is.
+            previous is UIThreadSynchronizationContext other ? other.Replaced : previous);
+        SynchronizationContext.SetSynchronizationContext(_syncContext);
         return previous;
     }
 
@@ -986,14 +1094,7 @@ public sealed class Application : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (_current == this)
-        {
-            _current = null;
-            // Return the guard to its inert state. A test host that runs the next
-            // session on a different pool thread would otherwise inherit this
-            // binding and fail on a thread that is legitimately its UI thread.
-            UIThread.Unbind();
-        }
+        Leave();
 
         if (_onAccessibilityClients is not null)
             AccessibilityClients.ActiveChanged -= _onAccessibilityClients;
@@ -1006,16 +1107,30 @@ public sealed class Application : IDisposable
     }
 }
 
+/// <summary>Marks a windowing platform whose applications may run side by side in one process
+/// (HultUI.Headless): see the <see cref="Application"/> constructor.</summary>
+internal interface ISideBySidePlatform;
+
 internal sealed class UIThreadSynchronizationContext : SynchronizationContext
 {
     private readonly ConcurrentQueue<Action> _queue;
     private readonly Action _wake;
 
-    public UIThreadSynchronizationContext(ConcurrentQueue<Action> queue, Action wake)
+    public UIThreadSynchronizationContext(Application owner, ConcurrentQueue<Action> queue, Action wake,
+        SynchronizationContext? replaced)
     {
+        Owner = owner;
         _queue = queue;
         _wake = wake;
+        Replaced = replaced;
     }
+
+    /// <summary>The application whose queue this posts to.</summary>
+    public Application Owner { get; }
+
+    /// <summary>The thread's context before the first application's was installed (xunit's, under
+    /// xunit): the one to restore when the last goes.</summary>
+    public SynchronizationContext? Replaced { get; }
 
     // A continuation whose antecedent completed on another thread (file I/O, a
     // Task.Run) posts from that thread; without the wake it would sit in the queue

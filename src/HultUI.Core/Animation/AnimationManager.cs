@@ -4,8 +4,11 @@ namespace HultUI.Core.Animation;
 
 public static class AnimationManager
 {
-    private static readonly List<ITween> _active = [];
-    private static readonly List<ITween> _pendingAdd = [];
+    // The tweens of the application running now (see AnimationSet): the fields below are its,
+    // swapped by Use when headless sessions run side by side.
+    private static AnimationSet _set = new();
+    private static List<ITween> _active = _set.Active;
+    private static List<ITween> _pendingAdd = _set.PendingAdd;
     private static bool _ticking;
 
     public static bool HasActiveAnimations => _active.Count > 0 || _pendingAdd.Count > 0;
@@ -74,6 +77,38 @@ public static class AnimationManager
         _freshAdded = false;
     }
 
+    /// <summary>The set the static state belongs to now: the one application's, in a process
+    /// with one.</summary>
+    internal static AnimationSet CurrentSet => _set;
+
+    /// <summary>
+    /// Makes <paramref name="set"/> the one Add, Tick and the frame loop's questions work on,
+    /// keeping the current one's state in it; returns the set it replaced. Headless sessions that
+    /// run side by side each own a set, so one session's frames neither step nor reset the
+    /// other's tweens. Never called with one application.
+    /// </summary>
+    internal static AnimationSet Use(AnimationSet set)
+    {
+        var previous = _set;
+        if (set == previous) return previous;
+        previous.Ticking = _ticking;
+        previous.FreshAdded = _freshAdded;
+        _set = set;
+        _active = set.Active;
+        _pendingAdd = set.PendingAdd;
+        _ticking = set.Ticking;
+        _freshAdded = set.FreshAdded;
+        return previous;
+    }
+
+    /// <summary><see cref="Reset()"/> for one set, current or not.</summary>
+    internal static void Reset(AnimationSet set)
+    {
+        var previous = Use(set);
+        Reset();
+        Use(previous);
+    }
+
     /// <summary>Steps every active tween by <paramref name="deltaSeconds"/>, one that has not
     /// been stepped yet included.</summary>
     public static void Tick(float deltaSeconds) => Step(deltaSeconds, deltaSeconds, delaysFromZero: false);
@@ -129,4 +164,13 @@ public static class AnimationManager
             _pendingAdd.Clear();
         }
     }
+}
+
+/// <summary>One application's tweens and step state, while another application's are current
+/// (<see cref="AnimationManager.Use"/>).</summary>
+internal sealed class AnimationSet
+{
+    internal readonly List<ITween> Active = [];
+    internal readonly List<ITween> PendingAdd = [];
+    internal bool Ticking, FreshAdded;
 }

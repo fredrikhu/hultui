@@ -15,9 +15,12 @@ namespace HultUI.Headless;
 /// session.Window.SetRoot(BuildUi());
 /// session.PumpFrame();
 /// </code>
-/// Sessions own process-global state (Application.Current, the animation
-/// list, the thread's SynchronizationContext); create and dispose them
-/// sequentially — one session at a time, tests not parallelized.
+/// Sessions may run side by side — two desks of one system in one test — each its
+/// own application with its own main-thread queue, synchronization context, tweens
+/// and clock. Process-wide state (Application.Current, the animation list, the
+/// thread's SynchronizationContext) follows the session a test drives: see
+/// <see cref="MakeCurrent"/>. Drive them from one thread at a time, and keep tests
+/// that use sessions from running in parallel.
 /// </summary>
 public sealed class HeadlessSession : IDisposable
 {
@@ -54,7 +57,9 @@ public sealed class HeadlessSession : IDisposable
         _time = time;
         _platform = platform;
         Application = application;
-        _previousSyncContext = application.InstallSynchronizationContext();
+        var previous = application.InstallSynchronizationContext();
+        // A session already alive on this thread: what its context replaced is what to restore.
+        _previousSyncContext = previous is UIThreadSynchronizationContext other ? other.Replaced : previous;
 
         // AsyncLoader's thread-pool hop becomes a queue this session drains at the top
         // of each PumpFrame. A load requested during frame N's build runs its producer
@@ -63,11 +68,12 @@ public sealed class HeadlessSession : IDisposable
         // instead of whenever the pool got to it.
         // The queued load is work the loop's next pass must see (RunLoop drains it there), as a
         // real producer's post is: it wakes the loop.
-        AsyncWork.SetScheduler(work =>
+        application.AsyncScheduler = work =>
         {
             _deferredWork.Enqueue(work);
             platform.Wake();
-        });
+        };
+        AsyncWork.SetScheduler(application.AsyncScheduler);
 
         Window = Wrap(application.PrimaryWindow);
     }
@@ -92,6 +98,7 @@ public sealed class HeadlessSession : IDisposable
         float scale = 1f, WindowStyle style = WindowStyle.Default)
     {
         ThrowIfDisposed();
+        Application.Enter();
         _platform.NextWindowScale = scale;
         return Wrap(Application.CreateWindow(title, width, height, style));
     }
@@ -127,6 +134,22 @@ public sealed class HeadlessSession : IDisposable
         _platform.SetMonitors(monitors);
     }
 
+    /// <summary>
+    /// Makes this session's application the one the code on this thread runs for, as its pumps,
+    /// input and <see cref="HeadlessWindow.SetRoot"/> already do: <c>Application.InvokeOnMainThread</c>
+    /// (and the work it starts, which carries it along), <c>await</c> continuations, tweens and
+    /// <c>AsyncLoader</c> loads go to this session. Call it before a test runs app code for one of
+    /// several sessions directly (a store's method, a component's constructor). A no-op while it is
+    /// the only session.
+    /// </summary>
+    public void MakeCurrent()
+    {
+        ThrowIfDisposed();
+        Application.Enter();
+    }
+
+    internal void Enter() => Application.Enter();
+
     private HeadlessWindow Wrap(Window window)
         => new(this, window, (HeadlessPlatformWindow)window.PlatformWindow);
 
@@ -150,6 +173,7 @@ public sealed class HeadlessSession : IDisposable
     public bool PumpFrame(TimeSpan delta, bool forceRender = false)
     {
         ThrowIfDisposed();
+        Application.Enter();
         _time.Advance(delta);
         // Before the frame, so a producer's completion is applied by the same frame's
         // main-thread drain inside RunFrame — the one-frame-later contract below.
@@ -193,6 +217,7 @@ public sealed class HeadlessSession : IDisposable
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(until);
+        Application.Enter();
         long deadline = _time.GetTimestamp() + (limit ?? TimeSpan.FromSeconds(60)).Ticks;
         bool timedOut = false;
         _platform.SetEventSource(eventEvery, onEvent, eventsEndWaits);
@@ -309,7 +334,11 @@ public sealed class HeadlessSession : IDisposable
     }
 
     /// <summary>Renders all open windows now, without advancing time. Used by pixel capture.</summary>
-    internal void RenderNow() => Application.RenderDirtyWindows(force: true);
+    internal void RenderNow()
+    {
+        Application.Enter();
+        Application.RenderDirtyWindows(force: true);
+    }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -320,19 +349,23 @@ public sealed class HeadlessSession : IDisposable
 
         // Order matters: disposing the application closes windows (which may
         // cancel tooltip tweens), then the animation reset drops whatever test
-        // code left running, so nothing ticks into the next session.
+        // code left running, so nothing ticks into the next session. Disposing
+        // hands the process to a session still alive on this thread, if any
+        // (Application.Leave), so the reset is of this session's tweens only.
         Application.Dispose();
-        AnimationManager.Reset();
+        AnimationManager.Reset(Application.Animations);
 
-        // Give AsyncLoader back its thread pool, and drop producers no frame will
-        // ever run — a real app started after this session must not enqueue into a
-        // queue nothing drains.
-        AsyncWork.SetScheduler(null);
+        // AsyncLoader has its thread pool back (or the other session's queue) from
+        // the application's disposal; drop producers no frame will ever run — a real
+        // app started after this session must not enqueue into a queue nothing drains.
         _deferredWork.Clear();
 
         // Give the thread back its previous context (under xunit, the
         // AsyncTestSyncContext) — without this, later async tests deadlock
-        // posting continuations to a queue nothing drains anymore.
-        SynchronizationContext.SetSynchronizationContext(_previousSyncContext);
+        // posting continuations to a queue nothing drains anymore. Only a dead
+        // application's context: another session's live one is in use, and a
+        // session disposed from another thread leaves this thread's alone.
+        if (SynchronizationContext.Current is UIThreadSynchronizationContext { Owner.IsDisposed: true })
+            SynchronizationContext.SetSynchronizationContext(_previousSyncContext);
     }
 }

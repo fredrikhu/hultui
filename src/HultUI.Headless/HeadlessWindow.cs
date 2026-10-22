@@ -21,6 +21,7 @@ public sealed partial class HeadlessWindow
         _session = session;
         Window = window;
         _platform = platform;
+        _platform.Entering ??= session.Enter;
     }
 
     /// <summary>The framework window under test.</summary>
@@ -128,7 +129,11 @@ public sealed partial class HeadlessWindow
         return router;
     }
 
-    public void SetRoot(Element root) => Window.SetRoot(root);
+    public void SetRoot(Element root)
+    {
+        _session.Enter();
+        Window.SetRoot(root);
+    }
 
     /// <summary>
     /// Resizes the client area, in layout units, and relayouts immediately —

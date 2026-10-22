@@ -127,7 +127,15 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public Action? LiveResizeFrame { get; set; }
 
     /// <summary>Delivers an input event to the framework Window, synchronously, in layout units.</summary>
-    public void RaiseInput(InputEvent evt) => InputReceived?.Invoke(evt);
+    public void RaiseInput(InputEvent evt)
+    {
+        Entering?.Invoke();
+        InputReceived?.Invoke(evt);
+    }
+
+    /// <summary>Runs before injected input is dispatched: enters the session's application, so
+    /// what its handlers start is that session's (sessions side by side).</summary>
+    internal Action? Entering { get; set; }
 
     /// <summary>Resizes the client area, in layout units. The surface resizes immediately.</summary>
     public void SetClientSize(float layoutWidth, float layoutHeight)

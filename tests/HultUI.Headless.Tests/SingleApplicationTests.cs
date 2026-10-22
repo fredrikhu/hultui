@@ -6,7 +6,8 @@ using Xunit;
 namespace HultUI.Headless.Tests;
 
 /// <summary>
-/// One application per process, enforced.
+/// One application per process, enforced — but for headless sessions, which may run side
+/// by side (<see cref="SideBySideSessionTests"/>).
 ///
 /// <para><see cref="Application.Current"/>, <c>InvokeOnMainThread</c> and the UI-thread
 /// binding are static, so a second application takes them from the first. That used to

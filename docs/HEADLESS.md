@@ -260,16 +260,32 @@ GoldenImage.Match(session.Window, "my-panel");   // Golden/my-panel.png beside t
 
 ## Test Isolation
 
-A session owns process-global state: `Application.Current`, the animation list, and the thread's `SynchronizationContext`. Two live sessions would corrupt each other, so:
+A session is a whole application: its own main-thread queue, `SynchronizationContext`, tweens, `AsyncLoader` queue and clock. Process-wide state (`Application.Current`, the animation list, the thread's `SynchronizationContext`, the UI-thread binding) follows the session the test drives, so:
 
-- **one session at a time**, created and disposed per test (`using var session = …`),
-- **disable test parallelization** in the assembly:
+- **create and dispose a session per test** (`using var session = …`),
+- **disable test parallelization** in the assembly — sessions are driven from one thread at a time:
 
 ```csharp
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 ```
 
-`Dispose` resets everything — animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored.
+`Dispose` resets everything — its animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored. A session a test failed to dispose does not stop the next one being created; it stays alive beside it, and nothing of it reaches the new one.
+
+### Sessions side by side
+
+Two (or more) sessions may be alive at once — two desks of one system, each signed in as a different user. A session's pumps, `RunLoop`, input, `SetRoot` and `CreateWindow` *enter* its application: `Application.InvokeOnMainThread`, `await` continuations, new tweens and `AsyncLoader` loads from code on that thread go to it. Work that code starts carries it along (it flows with the `ExecutionContext`), so a worker started by session A posts to A even while the test drives B. Each session's frames step only its own tweens and drain only its own queue; disposing one leaves the other running.
+
+```csharp
+using var a = HeadlessSession.Create();
+using var b = HeadlessSession.Create();
+a.Window.SetRoot(DeskA());                 // enters A
+b.Window.SetRoot(DeskB());                 // enters B
+a.MakeCurrent();                           // before calling A's app code directly
+storeA.SignIn("reader-a");
+b.PumpUntil(() => b.Window.FindByText("Locked by reader-a") is not null);
+```
+
+Call `session.MakeCurrent()` before a test calls one session's app code directly (a store, a component's constructor); `session.Application.Post(action)` posts to a session whatever is current. Work started with no session entered (a `Thread` of its own, a callback that does not flow the `ExecutionContext`) goes to the session entered last, as does work started by a session since disposed. Only headless applications run side by side: a real window beside any other application still throws.
 
 It does not stop work already on another thread. What the framework posts back for it — an `AsyncLoader` retry still waiting out its backoff, a pooled load — goes to the application that started it, so the next session neither wakes for it nor runs it (it once did: a failed load's retry, 0.5 s after its test ended, woke whichever test came next). A test's own `Task.Run` that posts with `Application.InvokeOnMainThread` reaches whichever session is current when it lands: wait for it before the test returns. For the same reason a session's wake count (`Platform.WakeCalls`) takes wakes from any thread: assert that a call asks for no wake where the wake is asked for (`AccessibilityActionRouter.WakesAsked`), never as an unchanged count across a real sleep.
 
