@@ -15,7 +15,7 @@ using HultUI.Core.Threading;
 
 namespace HultUI;
 
-public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
+public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer, IPreFrameHost
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -1548,7 +1548,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         _perf.BeginPresent();
         using (_tracer.Begin("Phase", "Present"))
         {
-            PlatformWindow.Surface.Present();
+            // A frame SaveFrame asked for is read back as it is presented; otherwise a count.
+            if (_frameSaves.Count > 0) PresentSavingFrame();
+            else PlatformWindow.Surface.Present();
             PlatformWindow.SwapBuffers();
         }
         _perf.EndPresent();
@@ -3759,6 +3761,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     {
         if (_disposed) return;
         _disposed = true;
+        FailFrameSaves();
         if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
             _tracer.StopRecording(_envTracePath);
         PlatformWindow.InputReceived -= HandleInputEvent;

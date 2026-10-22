@@ -820,6 +820,52 @@ public sealed class VulkanProbeTests
     /// Runs the probe with <paramref name="environment"/> on top of this process's, minus the
     /// variables that would change what is being tested. A null value removes one.
     /// </summary>
+    /// <summary>
+    /// <c>Window.SaveFrame</c> on each path a frame takes to the screen: GL's back buffer, an 8-bit
+    /// swapchain and an scRGB one read back by the host, and the scRGB offscreen read by Skia.
+    /// Every one has to come out as the frame looks, and the right way up: red top left, green
+    /// bottom left, blue on the right.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("gl")]
+    [InlineData("vulkan-8bit")]
+    [InlineData("vulkan-scrgb-offscreen")]
+    [InlineData("vulkan-scrgb-scaled-space")]
+    public void SaveFrame_WritesTheFrameAsItLooks_OnEveryPath(string path)
+    {
+        Dictionary<string, string?> environment = path switch
+        {
+            "gl" => new() { ["HULTUI_RENDERER"] = "gl" },
+            "vulkan-8bit" => new() { ["HULTUI_VULKAN_F16"] = "0" },
+            "vulkan-scrgb-offscreen" => new() { ["HULTUI_VULKAN_F16"] = "1", ["HULTUI_VULKAN_WHITE_SCALE"] = "3" },
+            _ => new()
+            {
+                ["HULTUI_VULKAN_F16"] = "1", ["HULTUI_VULKAN_WHITE_SCALE"] = "3", ["HULTUI_VULKAN_SCALED_SPACE"] = "1",
+            },
+        };
+        string png = Path.Combine(Path.GetTempPath(), $"hultui-save-frame-{Guid.NewGuid():N}.png");
+        try
+        {
+            var run = RunProbe(environment, $"--save-frame=\"{png}\"");
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: frame saved", run.Output);
+            if (path != "gl") Assert.Contains(" vulkan device=", run.Output);
+
+            using var frame = SkiaSharp.SKBitmap.Decode(png);
+            Assert.NotNull(frame);
+            var topLeft = frame.GetPixel(frame.Width / 4, frame.Height / 4);
+            var right = frame.GetPixel(frame.Width * 3 / 4, frame.Height / 2);
+            var bottomLeft = frame.GetPixel(frame.Width / 4, frame.Height * 3 / 4);
+            Assert.True(topLeft is { Red: > 200, Green: < 60, Blue: < 60 }, $"top left was {topLeft}, expected red\n{run.Output}");
+            Assert.True(right is { Red: < 60, Green: < 60, Blue: > 200 }, $"right half was {right}, expected blue\n{run.Output}");
+            Assert.True(bottomLeft is { Red: < 60, Green: > 200, Blue: < 60 }, $"bottom left was {bottomLeft}, expected green\n{run.Output}");
+        }
+        finally
+        {
+            File.Delete(png);
+        }
+    }
+
     private static (int ExitCode, string Output) RunProbe(Dictionary<string, string?> environment, string arguments = "")
     {
         var start = new ProcessStartInfo(SamplePath.VulkanProbe(), arguments)

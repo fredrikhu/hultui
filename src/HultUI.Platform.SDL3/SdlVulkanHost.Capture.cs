@@ -83,6 +83,61 @@ internal sealed unsafe partial class SdlVulkanHost
     private void Capture(VkImage image, string path)
     {
         int width = _widthPx, height = _heightPx;
+        ReadBack(image, mapped =>
+        {
+            WritePpm(path, mapped, width, height, _format, SdrWhiteScale);
+            if (_format == VkFormat.R16G16B16A16Sfloat) ReportRange((Half*)mapped, width, height);
+        });
+        Console.Error.WriteLine($"[vulkan] captured frame {_presentedFrames} ({width}x{height}) to {path}");
+    }
+
+    /// <inheritdoc />
+    /// <remarks>The same copy <c>HULTUI_VULKAN_CAPTURE</c> makes, at the same moment: Skia's work
+    /// is submitted, the present transition is not, and the image is still a colour attachment.
+    /// </remarks>
+    public bool ReadAcquiredImage(byte[] rgba)
+    {
+        if (!_haveAcquired || _swapchain.IsNull) return false;
+        int width = _widthPx, height = _heightPx;
+        if (rgba.Length < width * height * 4)
+            throw new ArgumentException($"{width}x{height} RGBA needs {width * height * 4} bytes.", nameof(rgba));
+        var format = _format;
+        float inverse = SdrWhiteScale > 0f ? 1f / SdrWhiteScale : 1f;
+        ReadBack(_images[_acquiredIndex], mapped =>
+        {
+            int pixels = width * height;
+            if (format == VkFormat.R16G16B16A16Sfloat)
+            {
+                var halves = (Half*)mapped;
+                for (int i = 0; i < pixels; i++)
+                {
+                    for (int c = 0; c < 3; c++)
+                        rgba[i * 4 + c] = (byte)Math.Clamp(
+                            SrgbEncode((float)halves[i * 4 + c] * inverse) * 255f + 0.5f, 0f, 255f);
+                    rgba[i * 4 + 3] = 255;
+                }
+                return;
+            }
+            bool bgra = format is VkFormat.B8G8R8A8Unorm or VkFormat.B8G8R8A8Srgb;
+            for (int i = 0; i < pixels; i++)
+            {
+                byte a = mapped[i * 4], b = mapped[i * 4 + 1], c = mapped[i * 4 + 2];
+                rgba[i * 4] = bgra ? c : a;
+                rgba[i * 4 + 1] = b;
+                rgba[i * 4 + 2] = bgra ? a : c;
+                rgba[i * 4 + 3] = 255;
+            }
+        });
+        return true;
+    }
+
+    private delegate void MappedPixels(byte* pixels);
+
+    /// <summary>Copies <paramref name="image"/>'s top-left window-sized region into host memory and
+    /// hands it to <paramref name="read"/> while mapped. Waits for the queue.</summary>
+    private void ReadBack(VkImage image, MappedPixels read)
+    {
+        int width = _widthPx, height = _heightPx;
         int bytesPerPixel = BytesPerPixel(_format);
         ulong bytes = (ulong)width * (ulong)height * (ulong)bytesPerPixel;
 
@@ -140,13 +195,16 @@ internal sealed unsafe partial class SdlVulkanHost
 
         void* mapped;
         Check(_vk.MapMemory(_device, memory, 0, bytes, 0, &mapped), "vkMapMemory");
-        WritePpm(path, (byte*)mapped, width, height, _format, SdrWhiteScale);
-        if (_format == VkFormat.R16G16B16A16Sfloat) ReportRange((Half*)mapped, width, height);
-        _vk.UnmapMemory(_device, memory);
-
-        _vk.DestroyBuffer(_device, buffer, 0);
-        _vk.FreeMemory(_device, memory, 0);
-        Console.Error.WriteLine($"[vulkan] captured frame {_presentedFrames} ({width}x{height}) to {path}");
+        try
+        {
+            read((byte*)mapped);
+        }
+        finally
+        {
+            _vk.UnmapMemory(_device, memory);
+            _vk.DestroyBuffer(_device, buffer, 0);
+            _vk.FreeMemory(_device, memory, 0);
+        }
     }
 
     private static VkImageMemoryBarrier Barrier(VkImage image, VkImageLayout from, VkImageLayout to,

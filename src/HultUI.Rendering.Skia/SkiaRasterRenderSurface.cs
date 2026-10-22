@@ -11,7 +11,7 @@ namespace HultUI.Rendering.Skia;
 /// HultUI.Headless; also suitable for server-side or golden-image rendering —
 /// <see cref="Snapshot"/> and <see cref="ReadPixels"/> expose the frame's pixels.
 /// </summary>
-public sealed class SkiaRasterRenderSurface : IRenderSurface
+public sealed class SkiaRasterRenderSurface : IRenderSurface, ISkiaFrameCapture
 {
     private readonly SkiaRenderContext _renderContext = new();
     private readonly SkiaTextServices _text;
@@ -80,6 +80,15 @@ public sealed class SkiaRasterRenderSurface : IRenderSurface
     public void Present()
     {
         _surface?.Canvas.Flush();
+    }
+
+    /// <inheritdoc />
+    public SKImage PresentCapturing()
+    {
+        Present();
+        if (_surface is null)
+            throw new InvalidOperationException("Surface not initialized — call Resize first.");
+        return SkiaFrameCapture.Copy(_surface, _width, _height);
     }
 
     /// <summary>

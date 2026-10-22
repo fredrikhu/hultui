@@ -59,6 +59,9 @@ using HultUI.WebView.WebView2;
 // (a swapchain kept across four sizes, and the exact one its end builds) (Windows). Prints one
 // "probe: capture" line a capture.
 //
+// --save-frame=<path> writes the frame with Window.SaveFrame after the frames above. The window's
+// bottom-left quarter is green then, so the file shows which way up it is.
+//
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
 //
@@ -100,9 +103,30 @@ internal static class Program
         app.SetRoot(Flex.Row().Width(320f).Height(200f).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
             Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))));
+        // A green bottom-left quarter for a saved frame, which can come out upside down (GL).
+        if (args.Any(a => a.StartsWith("--save-frame=")))
+            app.SetRoot(Flex.Column().Width(320f).Height(200f).Children(
+                Flex.Row().FlexGrow(1).Children(
+                    Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
+                    Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF"))),
+                Flex.Row().FlexGrow(1).Children(
+                    Box.New().FlexGrow(1).Background(Color.FromHex("#00FF00")),
+                    Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF")))));
 
         for (int i = 0; i < frames; i++)
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        // Window.SaveFrame through whichever surface the window got, after the frames above: the
+        // window is clean, so the save has to ask for its frame.
+        if (args.FirstOrDefault(a => a.StartsWith("--save-frame=")) is { } save)
+        {
+            var saved = app.PrimaryWindow.SaveFrame(save["--save-frame=".Length..]);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!saved.IsCompleted && clock.Elapsed.TotalSeconds < 10)
+                app.RunFrame(TimeSpan.FromMilliseconds(16));
+            saved.GetAwaiter().GetResult();
+            Console.WriteLine("probe: frame saved");
+        }
 
         Console.WriteLine("probe: done");
         return 0;

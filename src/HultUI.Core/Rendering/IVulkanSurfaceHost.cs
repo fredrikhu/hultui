@@ -122,6 +122,16 @@ public interface IVulkanSurfaceHost
     /// </summary>
     bool SdrIsGamma22 => false;
 
+    /// <summary>
+    /// Copies the image acquired for this frame, as drawn and submitted so far, into
+    /// <paramref name="rgba"/>: <see cref="WidthPx"/> × <see cref="HeightPx"/> pixels of opaque
+    /// 8-bit sRGB RGBA, top row first, whatever the swapchain's format, an scRGB one divided by
+    /// <see cref="SdrWhiteScale"/> first. For saving a frame (<c>Window.SaveFrame</c>), never per
+    /// frame: it waits for the GPU. Called after the renderer's work is submitted and before
+    /// <see cref="PresentAcquiredImage"/>. False when the host cannot, which is the default.
+    /// </summary>
+    bool ReadAcquiredImage(byte[] rgba) => false;
+
     /// <summary>Resolves a Vulkan entry point by name. <paramref name="device"/> is zero for
     /// instance-level commands, which is the convention Skia's own resolver uses.</summary>
     nint GetProcedureAddress(string name, nint instance, nint device);

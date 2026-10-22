@@ -22,7 +22,7 @@ namespace HultUI.Rendering.Skia;
 /// <para>This assembly knows nothing about Vulkan beyond what SkiaSharp needs, which is
 /// handles and integers. <see cref="IVulkanSurfaceHost"/> is the whole of the contract.</para>
 /// </summary>
-public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurface
+public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurface, ISkiaFrameCapture
 {
     private readonly IVulkanSurfaceHost _host;
     private readonly GRVkExtensions _extensions;
@@ -504,6 +504,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (_offscreen is { } offscreen && _frame is { } target)
         {
             offscreen.Flush();
+            if (_capturing) Capture(offscreen);
             // Nothing of Skia's on the swapchain image is recorded before the blit below, so
             // nothing of it can have been submitted before this.
             if (_transitionBeforeBlit) _host.TransitionAcquiredImage();
@@ -517,6 +518,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
         _grContext.Flush();
         _grContext.Submit();
+        if (_capturing) Capture(null);
         _host.PresentAcquiredImage();
         _frameOpen = false;
 
@@ -525,6 +527,54 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             && _imagePurge.IsDue(disposals, System.Diagnostics.Stopwatch.GetTimestamp());
         if (_purgeScratch || images) PurgeScratch(images);
         if (images) _imagePurge.Purged(disposals, System.Diagnostics.Stopwatch.GetTimestamp());
+    }
+
+    /// <summary>The next <see cref="Present"/> reads its frame back; see <see cref="PresentCapturing"/>.</summary>
+    private bool _capturing;
+    private SKImage? _captured;
+    private Exception? _captureFailed;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>Through the offscreen, the offscreen is read, before the blit: a texture of Skia's own,
+    /// whose layouts Skia tracks, holding the frame at 0..1 before any SDR white scale. Straight
+    /// onto the swapchain, the host copies the image after Skia's work is submitted and before the
+    /// present transition (<see cref="IVulkanSurfaceHost.ReadAcquiredImage"/>): Skia reading it
+    /// would leave it in a layout neither the host's present barrier nor a kept target expects.</para>
+    /// </remarks>
+    public SKImage PresentCapturing()
+    {
+        _capturing = _frameOpen;
+        try { Present(); }
+        finally { _capturing = false; }
+        var (frame, failed) = (_captured, _captureFailed);
+        (_captured, _captureFailed) = (null, null);
+        if (failed is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failed);
+        return frame ?? throw new InvalidOperationException("No frame was open to capture.");
+    }
+
+    /// <summary>Reads this frame back, once, keeping what failed for <see cref="PresentCapturing"/>
+    /// to throw after the present.</summary>
+    private void Capture(SKSurface? offscreen)
+    {
+        _capturing = false;
+        try
+        {
+            if (offscreen is not null)
+            {
+                _captured = SkiaFrameCapture.Copy(offscreen, _width, _height);
+                return;
+            }
+            int width = _host.WidthPx, height = _host.HeightPx;
+            var rgba = new byte[width * height * 4];
+            if (!_host.ReadAcquiredImage(rgba))
+                throw new NotSupportedException("This Vulkan host cannot read its swapchain image back.");
+            _captured = SkiaFrameCapture.FromRgba(rgba, width, height);
+        }
+        catch (Exception ex)
+        {
+            _captureFailed = ex;
+        }
     }
 
     /// <summary>An offscreen was let go since the last purge; see <see cref="ReleaseOffscreen"/>.</summary>

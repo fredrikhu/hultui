@@ -428,10 +428,14 @@ public sealed class Application : IDisposable
         // read it in their frames (Linux bridges also say so through their action host).
         AccessibilityClients.ActiveChanged += _onAccessibilityClients = _ => WakeIfParked(WakeSource.A11yClient);
 
+        // A tool's requests for a frame (Window.SaveFrame), when it asked for the hook.
+        _frameRequests = FrameRequests.Start(this, Environment.GetEnvironmentVariable(FrameRequests.Variable));
+
         StartupTrace.Mark("application ready");
     }
 
     private Action<bool>? _onAccessibilityClients;
+    private IDisposable? _frameRequests;
 
     /// <summary>
     /// Sets the root element of the primary window.
@@ -1098,6 +1102,7 @@ public sealed class Application : IDisposable
 
         if (_onAccessibilityClients is not null)
             AccessibilityClients.ActiveChanged -= _onAccessibilityClients;
+        _frameRequests?.Dispose();
 
         foreach (var window in _windows)
             window.Dispose();
