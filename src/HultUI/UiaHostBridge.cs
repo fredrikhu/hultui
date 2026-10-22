@@ -46,6 +46,8 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
     public void SelectElement(ElementId id) => _router.SelectElement(id);
     public void SetValue(ElementId id, string value) => _router.SetValue(id, value);
     public void RequestFocus(ElementId id) => _router.RequestFocus(id);
+    public void ExpandCollapseElement(ElementId id, bool expand) => _router.ExpandCollapseElement(id, expand);
+    public void ScrollIntoView(ElementId id) => _router.ScrollIntoView(id);
 
     /// <summary>A client asked for the root. If the window has not built a tree for a listening
     /// client yet (one has just attached), the loop wakes and its next frame builds it.</summary>
@@ -79,11 +81,12 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
             catch { return null; }
         }
 
+        // As the tree says it (a switch, a toggling button too: they answered indeterminate).
         return GetElementOrNull(id) switch
         {
-            CheckboxElement cb => cb.IsChecked,
             RadioButtonElement rb => rb.IsChecked,
-            _ => null,
+            { } element => AccessibilityTreeBuilder.ResolveIsToggled(element),
+            null => null,
         };
     }
 

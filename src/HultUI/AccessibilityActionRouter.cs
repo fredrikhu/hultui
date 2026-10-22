@@ -115,14 +115,11 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
                 source.ActivateItem(index);
             return;
         }
+        // A checkbox, a switch or a toggling button (Element.AccessibleToggled) is toggled by
+        // being pressed: the click runs its own handler and anything the app hung on the click.
+        // A switch had no route here and its Toggle did nothing.
         var target = FindElement(id);
-        if (target is CheckboxElement cb)
-        {
-            cb.IsChecked = !cb.IsChecked;
-            cb.OnChanged?.Invoke(cb.IsChecked);
-        }
-        // A toggling button (Element.AccessibleToggled) is toggled by being pressed.
-        else if (target is { AccessibleToggled: not null })
+        if (target is CheckboxElement or ToggleSwitchElement or { AccessibleToggled: not null })
             EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, target);
     });
 
@@ -138,14 +135,73 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         }
         switch (FindElement(id))
         {
-            case RadioButtonElement rb when !rb.IsChecked:
-                rb.IsChecked = true;
-                rb.OnChanged?.Invoke(true);
+            // A radio is selected by its click, which also clears the rest of its group: set
+            // directly, the group was left with two checked.
+            case RadioButtonElement { IsChecked: false } rb:
+                EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, rb);
                 break;
             // One of a set that selects itself on click — a tab.
             case { AccessibleSelected: false } item:
                 EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, item);
                 break;
+        }
+    });
+
+    /// <summary>
+    /// Opens or closes what the element opens. A dropdown and a date picker open on a press,
+    /// not a click, so they are opened as Enter opens them; a submenu through its menu; anything
+    /// else that says it opens (<see cref="Element.AccessibleExpanded"/>: an expander, a popover's
+    /// anchor) by its click, when it is not already as asked.
+    /// </summary>
+    public void ExpandCollapseElement(ElementId id, bool expand) => Enqueue(() =>
+    {
+        if (ToContent(id, AccessibleContentAction.Invoke)) return;
+        if (VirtualItemId.TryDecode(id, out var listId, out var index))
+        {
+            if (FindElement(listId) is IAccessibleItemSource source) source.SetItemExpanded(index, expand);
+            return;
+        }
+        switch (FindElement(id))
+        {
+            case DropdownElement dropdown:
+                dropdown.SetOpenFromAssistiveTool(expand);
+                break;
+            case DatePickerElement picker:
+                if (expand) picker.OpenPopup();
+                else picker.ClosePopup();
+                break;
+            case { AccessibleExpanded: { } open } element when open != expand:
+                EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, element);
+                break;
+        }
+    });
+
+    /// <summary>
+    /// Scrolls the element into view in every scroll view that holds it, innermost first. A list
+    /// item is scrolled into its list first (it may have no element); a described node brings its
+    /// owner into view.
+    /// </summary>
+    public void ScrollIntoView(ElementId id) => Enqueue(() =>
+    {
+        if (ContentNodeId.TryDecode(id, out var owner, out _)) id = owner;
+        else if (VirtualItemId.TryDecode(id, out var listId, out var index))
+        {
+            if (FindElement(listId) is ScrollViewElement list and IAccessibleItemSource source
+                && index >= 0 && index < source.ItemCount)
+            {
+                var (top, height) = source.ItemBounds(index) ?? (index * source.ItemHeight, source.ItemHeight);
+                list.ScrollRangeIntoView(top, height);
+            }
+            id = listId;
+        }
+        if (FindElement(id) is not { } element) return;
+        // Layout boxes are unscrolled, so each view reads the element's box in its own content space.
+        var box = element.Layout.AbsoluteBorderBox;
+        for (var parent = element.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent is not ScrollViewElement view) continue;
+            view.ScrollIntoView(element);
+            view.ScrollRangeIntoViewHorizontal(box.X - view.Layout.AbsoluteContentBox.X, box.Width);
         }
     });
 
@@ -164,8 +220,9 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
         if (ToContent(id, AccessibleContentAction.SetValue, value)) return;
         switch (FindElement(id))
         {
-            case TextInputElement input: input.Text = value; input.TextChanged?.Invoke(value); break;
-            case TextAreaElement area: area.Text = value; area.TextChanged?.Invoke(value); break;
+            // As a paste over the whole value: undoable, refused where a paste is.
+            case TextInputElement input: input.SetValueFromAssistiveTool(value); break;
+            case TextAreaElement area: area.SetValueFromAssistiveTool(value); break;
             case RichTextEditorElement editor: editor.SetValueFromAssistiveTool(value); break;
         }
     });

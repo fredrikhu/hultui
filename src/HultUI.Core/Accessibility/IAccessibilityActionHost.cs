@@ -32,6 +32,15 @@ public interface IAccessibilityActionHost
     /// clamped to its range; nothing for a read-only one.</summary>
     void SetRangeValue(ElementId id, double value) { }
 
+    /// <summary>Opens or closes what the element opens (a dropdown's list, an expander, a
+    /// submenu), as the keyboard or the pointer would. The default invokes it, which toggles an
+    /// element that opens on a click.</summary>
+    void ExpandCollapseElement(ElementId id, bool expand) => InvokeElement(id);
+
+    /// <summary>Scrolls every scroll view holding the element (or list item) until it is in
+    /// view, as moving the keyboard to it would.</summary>
+    void ScrollIntoView(ElementId id) { }
+
     /// <summary>
     /// The bridge's <see cref="IAccessibilityBridge.IsActive"/> may have changed, on any thread:
     /// assistive technology was switched on or off, or a client attached. The window reads

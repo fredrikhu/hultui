@@ -111,6 +111,22 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         return item < 0 ? null : _items[item].IsChecked;
     }
 
+    bool? Accessibility.IAccessibleItemSource.ItemIsExpanded(int index)
+    {
+        int item = ItemIndex(index);
+        return item < 0 || !_items[item].HasChildren ? null : PinnedIndex == item;
+    }
+
+    void Accessibility.IAccessibleItemSource.SetItemExpanded(int index, bool expanded)
+    {
+        int item = ItemIndex(index);
+        if (item < 0 || !_items[item].HasChildren) return;
+        if (expanded) ((Accessibility.IAccessibleItemSource)this).ActivateItem(index);
+        // Closed the way the pointer closes it: the host closes the flyout when nothing with
+        // children is hovered.
+        else if (PinnedIndex == item) HoverChanged?.Invoke(-1);
+    }
+
     void Accessibility.IAccessibleItemSource.ActivateItem(int index)
     {
         int item = ItemIndex(index);

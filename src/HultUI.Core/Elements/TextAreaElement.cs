@@ -1368,6 +1368,18 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         NotifyChanged();
     }
 
+    /// <summary>What an assistive tool's set-value does (UIA's value pattern): the whole buffer
+    /// replaced as a paste over Ctrl+A would, one edit Ctrl+Z takes back, told through
+    /// <see cref="TextChanged"/>. Refused when <see cref="ReadOnly"/>, as a paste is, and while
+    /// an input method is composing.</summary>
+    internal void SetValueFromAssistiveTool(string value)
+    {
+        if (ReadOnly || _composition.IsActive || value == _text) return;
+        Replace(0, _text.Length, value, TextUndoHistory.EditKind.Other);
+        NotifyChanged();
+        MarkPaintDirty();
+    }
+
     private void OnPointerDown(PointerDownEvent evt)
     {
         if (evt.Button != 0) return;

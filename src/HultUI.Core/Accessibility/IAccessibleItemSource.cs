@@ -71,6 +71,23 @@ public interface IAccessibleItemSource
     bool? ItemIsToggled(int index) => null;
 
     /// <summary>
+    /// Whether the item at <paramref name="index"/> opens something that is open now (a menu
+    /// item's submenu), or <c>null</c> (the default) when the item opens nothing. What UIA's
+    /// ExpandCollapse pattern reports for the item.
+    /// </summary>
+    bool? ItemIsExpanded(int index) => null;
+
+    /// <summary>
+    /// Opens or closes what the item at <paramref name="index"/> opens (UIA
+    /// <c>ExpandCollapse.Expand</c>/<c>Collapse</c>), the way the keyboard or the pointer would.
+    /// The default expands by activating the item and cannot collapse.
+    /// </summary>
+    void SetItemExpanded(int index, bool expanded)
+    {
+        if (expanded) ActivateItem(index);
+    }
+
+    /// <summary>
     /// Index of the currently selected item, or -1 if none. Exposed so assistive
     /// tech can report and move to the selection (UIA SelectionItem). Single-select.
     /// </summary>

@@ -45,6 +45,7 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
         {
             UiaInterop.UIA_InvokePatternId => new UiaInvokeProvider(bridge, id),
             UiaInterop.UIA_SelectionItemPatternId => new UiaSelectionItemProvider(bridge, id),
+            UiaInterop.UIA_ScrollItemPatternId => new UiaScrollItemProvider(bridge, id),
             _ => null,
         };
         pPatternProvider = provider is null ? IntPtr.Zero : NativeProvider.Create(provider);

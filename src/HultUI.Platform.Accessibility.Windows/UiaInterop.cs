@@ -235,6 +235,7 @@ internal static partial class UiaInterop
     public const int UIA_ValuePatternId = 10002;
     public const int UIA_ExpandCollapsePatternId = 10005;
     public const int UIA_ScrollPatternId = 10004;
+    public const int UIA_ScrollItemPatternId = 10017;
     public const int UIA_RangeValuePatternId = 10003;
     public const int UIA_ItemContainerPatternId = 10019;
     public const int UIA_TextPatternId = 10014;

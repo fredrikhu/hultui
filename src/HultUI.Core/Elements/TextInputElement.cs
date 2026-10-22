@@ -485,6 +485,17 @@ public class TextInputElement : BoxElement
         NotifyChanged();
     }
 
+    /// <summary>What an assistive tool's set-value does (UIA's value pattern): the whole value
+    /// replaced as a paste over Ctrl+A would, one edit Ctrl+Z takes back, told through
+    /// <see cref="TextChanged"/>. Nothing while an input method is composing.</summary>
+    internal void SetValueFromAssistiveTool(string value)
+    {
+        if (_composition.IsActive || value == _text) return;
+        Replace(0, _text.Length, value, TextUndoHistory.EditKind.Other);
+        NotifyChanged();
+        MarkPaintDirty();
+    }
+
     /// <summary>The one way the value is edited: the range [<paramref name="start"/>,
     /// <paramref name="end"/>) becomes <paramref name="inserted"/>, the caret lands collapsed
     /// after it, and the undo history hears about it. An edit that bypasses this is one Ctrl+Z

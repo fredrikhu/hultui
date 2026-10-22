@@ -145,7 +145,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // and later edit fields.
             _ when patternId is UiaInterop.UIA_TextPatternId or UiaInterop.UIA_TextPattern2Id && _hasText
                 => new UiaTextProvider(_bridge, ElementId),
-            AccessibilityRole.Button or AccessibilityRole.ColumnHeader when patternId == UiaInterop.UIA_InvokePatternId
+            AccessibilityRole.Button or AccessibilityRole.ColumnHeader or AccessibilityRole.MenuItem or AccessibilityRole.Link
+                when patternId == UiaInterop.UIA_InvokePatternId
                 => new UiaInvokeProvider(_bridge, ElementId),
             // List items are invokable so assistive tech can activate any row —
             // including virtualized ones whose id routes back to the owning list —
@@ -185,6 +186,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // Any expandable element (regardless of role) exposes ExpandCollapse.
             _ when patternId == UiaInterop.UIA_ExpandCollapsePatternId && _expanded is not null
                 => new UiaExpandCollapseProvider(_bridge, ElementId),
+            // Anything a scroll view or a list holds can be scrolled into view.
+            _ when patternId == UiaInterop.UIA_ScrollItemPatternId && InScrollable(Node)
+                => new UiaScrollItemProvider(_bridge, ElementId),
             _ => null,
         };
 
@@ -351,6 +355,13 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     }
 
     // ── Helpers ──
+
+    private static bool InScrollable(AccessibilityNode node)
+    {
+        for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+            if (parent.Role is AccessibilityRole.ScrollView or AccessibilityRole.List) return true;
+        return false;
+    }
 
     private static int MapControlType(AccessibilityRole role) => role switch
     {

@@ -22,6 +22,12 @@ public interface IUiaHostBridge
     void SetValue(ElementId id, string value);
     void RequestFocus(ElementId id);
 
+    /// <summary>ExpandCollapse: opens or closes what the element opens. The default invokes it.</summary>
+    void ExpandCollapseElement(ElementId id, bool expand) => InvokeElement(id);
+
+    /// <summary>ScrollItem: scrolls the element (or list item) into view. The default does nothing.</summary>
+    void ScrollIntoView(ElementId id) { }
+
     /// <summary>
     /// Current display scale (OS DPI factor, e.g. 1.5 at 150%). Element bounds
     /// are in density-independent layout units; the bridge multiplies by this to

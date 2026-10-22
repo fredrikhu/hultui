@@ -407,9 +407,24 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   the live button (a `Ref` write) it was never told — a caching AT-SPI client kept it enabled (seen
   live in WSL) — and through its owner's rebuild only when the layout refresh its patch brought came
   due. No other control has an enabled state.
-- **Invoke** — buttons and list items (routes to click/activation).
-- **Toggle** — checkboxes.
-- **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
+- **Acting through a pattern** (2026-10-22) — every pattern below that changes something
+  queues the change for the UI thread (`AccessibilityActionRouter`) and makes it through the
+  element's own handler, as the pointer, a key or a paste would: the same events, the same
+  refusals (a disabled button stops its own click, a read-only text area refuses a paste). So a
+  test or a script can drive the app without sending input: press, toggle, set a field, open a
+  dropdown and pick from it, open a submenu, scroll a row into view. An overlay shown or closed
+  (a menu, a dropdown's list, a popover) rebuilds the tree on the next frame; it marked only
+  paint dirty, so a menu opened by a key or from code never reached UIA.
+- **Invoke** — buttons, column headers, menu items, links and list items (routes to
+  click/activation).
+- **Toggle** — checkboxes, switches and toggling buttons (`AccessibleToggled`), by a click;
+  ToggleState is the tree's (a switch answered indeterminate, and its Toggle did nothing).
+- **ScrollItem** — anything a scroll view or a list holds, and the items of a large list:
+  `ScrollIntoView` scrolls each view holding it, innermost first (a list item into its list,
+  then the list into its views), the least distance that shows it.
+- **Value** — text inputs and text areas. `SetValue` replaces the value as a paste over Ctrl+A
+  does: one edit Ctrl+Z takes back, told through `TextChanged`; a read-only text area or rich
+  text editor says `IsReadOnly` and refuses it with `UIA_E_ELEMENTNOTENABLED`. A change of it is told as a UIA ValueValue property change and an
   AT-SPI `accessible-value` signal, as Chromium tells an `<input>`'s. Not for a node that also
   offers text (below: the rich text editor, the terminal) (2026-10-10): its change is told as a text
   change only (UIA `Text_TextChanged`, AT-SPI `text-changed`), and its value is read on request
@@ -434,8 +449,13 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   that has it (UIA property events, AT-SPI `state-changed:selected`), marked on the applied
   tree without a rebuild (2026-10-11, see the focus move above). Before, a move that
   scrolled nothing changed no node and no reader was told.
-- **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
-  Expand/Collapse reuse the element's click-to-toggle. A change raises the
+- **ExpandCollapse** — any element with `AccessibleExpanded` set (an expander, a popover's
+  anchor, a dropdown, a date picker) and a menu item with a submenu
+  (`IAccessibleItemSource.ItemIsExpanded`/`SetItemExpanded`). Expand/Collapse go through
+  `IAccessibilityActionHost.ExpandCollapseElement`: a dropdown or a date picker opens and closes
+  as Enter and Escape do (they open on a press, not a click, so the click the pattern used to
+  send did nothing), a submenu through its menu, anything else by its click. A dropdown's open
+  list is a list: its rows offer Invoke and SelectionItem, which commit the row. A change raises the
   ExpandCollapseState property event (2026-10-05), and on Linux the node carries AT-SPI's
   `expandable` state, plus `expanded` while open, with a `state-changed:expanded` signal —
   before that, Orca read every expandable node as a plain button.
@@ -452,7 +472,8 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   (2026-10-05).
 - **Selected** — `Element.AccessibleSelected` (`null` = not selectable) for one of a set —
   a tab; a `RadioButtonElement` is selected when checked. The node's `IsSelected` gives UIA
-  the SelectionItem pattern (a tab's container is its strip; `Select` clicks the element)
+  the SelectionItem pattern (a tab's container is its strip; `Select` clicks the element, a
+  radio too, which clears the rest of its group)
   and its IsSelected property and change event, and AT-SPI the `selectable` and `selected`
   states. AT-SPI's `selected` used to come from `IsToggled`, which no radio or tab carried,
   so neither was ever announced as selected.

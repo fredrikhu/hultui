@@ -317,6 +317,7 @@ public static class AccessibilityTreeBuilder
                 isEnabled: true,
                 isToggled: source.ItemIsToggled(i),
                 value: null,
+                expanded: source.ItemIsExpanded(i),
                 // In the node, so the differ sees a move of the selection: without it a move that
                 // scrolled nothing changed no node, and no reader heard which item was selected.
                 isSelected: source.IsItemSelected(i))

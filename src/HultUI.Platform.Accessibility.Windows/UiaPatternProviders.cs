@@ -54,10 +54,13 @@ internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, Elemen
 
     public int SetValue(IntPtr pwsz)
     {
-        if (readOnly) return ElementNotEnabled;
+        if (IsReadOnly) return ElementNotEnabled;
         bridge.SetValue(elementId, Marshal.PtrToStringUni(pwsz) ?? "");
         return 0;
     }
+
+    /// <summary>A document's value is never written; a field's is refused while it is read-only.</summary>
+    private bool IsReadOnly => readOnly || bridge.IsValueReadOnly(elementId);
 
     public int GetValue(out IntPtr pRetVal)
     {
@@ -67,7 +70,7 @@ internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, Elemen
 
     public int GetIsReadOnly(out int pRetVal)
     {
-        pRetVal = readOnly ? 1 : 0;
+        pRetVal = IsReadOnly ? 1 : 0;
         return 0;
     }
 }
@@ -171,9 +174,10 @@ internal sealed class UiaItemContainerProvider(WindowsAccessibilityBridge bridge
 }
 
 /// <summary>
-/// ExpandCollapse for a tree item / expander. State comes from the node snapshot;
-/// Expand/Collapse reuse the element's click-to-toggle (via Invoke), acting only
-/// when the current state actually needs to change.
+/// ExpandCollapse for anything that opens something: a dropdown, an expander, a submenu's item,
+/// a popover's anchor. State comes from the node snapshot; Expand/Collapse go to the host, which
+/// opens or closes the element as the keyboard or the pointer would (a dropdown opens on a press,
+/// not a click), acting only when the current state actually needs to change.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
@@ -181,13 +185,13 @@ internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridg
 {
     public int Expand()
     {
-        if (bridge.GetExpanded(elementId) == false) bridge.InvokeElement(elementId);
+        if (bridge.GetExpanded(elementId) == false) bridge.ExpandCollapse(elementId, true);
         return 0;
     }
 
     public int Collapse()
     {
-        if (bridge.GetExpanded(elementId) == true) bridge.InvokeElement(elementId);
+        if (bridge.GetExpanded(elementId) == true) bridge.ExpandCollapse(elementId, false);
         return 0;
     }
 
@@ -240,6 +244,20 @@ internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, Eleme
 
     public int GetVerticallyScrollable(out int pRetVal)
     { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) && i.VerticallyScrollable ? -1 : 0; return 0; }
+}
+
+/// <summary>
+/// ScrollItem for anything inside a scroll view or a list (an item of a large list too): every
+/// view holding it scrolls until it is in view, on the UI thread.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaScrollItemProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeScrollItem
+{
+    public int ScrollIntoView()
+    {
+        bridge.ScrollIntoView(elementId);
+        return 0;
+    }
 }
 
 /// <summary>
