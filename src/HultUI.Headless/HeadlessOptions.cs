@@ -44,6 +44,13 @@ public sealed class HeadlessOptions
     public IReadOnlyList<Core.Platform.MonitorInfo>? Monitors { get; set; }
 
     /// <summary>
+    /// Windows that behave like HultUI's windows on Windows — invisible resize borders, posted
+    /// maximize and restore, window-moved events: see <see cref="HeadlessWindowsFrame"/>. Takes
+    /// effect with <see cref="Monitors"/>. Null (the default) keeps the plain desktop above.
+    /// </summary>
+    public HeadlessWindowsFrame? WindowsFrame { get; set; }
+
+    /// <summary>
     /// Recording enabled with cross-platform deterministic text measurement:
     /// the configuration for snapshot baselines committed to a repo that CI
     /// runs on a different OS.

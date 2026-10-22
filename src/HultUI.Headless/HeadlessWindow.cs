@@ -154,6 +154,34 @@ public sealed partial class HeadlessWindow
     }
 
     /// <summary>
+    /// Raised from the event pump (the next <see cref="HeadlessSession.PumpFrame()"/>) after the
+    /// window's outer position changed — placed, maximized, restored, moved by the person or off
+    /// a monitor that went — as SDL's window-moved event is. Windows-like windows only
+    /// (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// </summary>
+    public event Action? Moved
+    {
+        add => _platform.Moved += value;
+        remove => _platform.Moved -= value;
+    }
+
+    /// <summary>
+    /// Where the window's content (client area) is, in screen pixels: what <c>ClientToScreen</c>
+    /// and <c>GetClientRect</c> give on Windows. Smaller than <see cref="Window.Placement"/> by the
+    /// invisible resize borders. Windows-like windows only (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// </summary>
+    public Core.Primitives.Rect ContentBounds => _platform.ContentBounds;
+
+    /// <summary>
+    /// Stands in for the person moving or resizing the window by its title bar or borders (or
+    /// snapping it): the outer rectangle, in pixels, is set as given, without fitting, and a
+    /// maximized window comes out of maximized. <see cref="Moved"/> follows from the next pump.
+    /// Windows-like windows only (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// </summary>
+    public void MoveByUser(int x, int y, int width, int height) =>
+        _platform.MoveByUser(new Core.Platform.WindowPlacement(x, y, width, height, false));
+
+    /// <summary>
     /// Renders a fresh frame and returns its pixels. The caller owns the
     /// returned image and must dispose it. Pixel dimensions are layout size ×
     /// scale. Cross-machine caution: text glyphs come from system fonts unless

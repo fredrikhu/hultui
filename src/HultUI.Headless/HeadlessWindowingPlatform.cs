@@ -63,6 +63,7 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
         };
         _windows.RemoveAll(w => !w.IsOpen);
         _windows.Add(window);
+        window.NoteWhereItIs();
         return window;
     }
 
@@ -85,6 +86,11 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform, IMonitorSo
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
     {
         Volatile.Write(ref _wakePending, false);
+        // Windows-like windows: the maximize and restore the custom frame posts land here, as
+        // posted messages do in SDL's pump, and moves are told of (HeadlessWindowsFrame).
+        if (_options?.WindowsFrame is not null)
+            for (int i = 0; i < _windows.Count; i++)
+                if (_windows[i].IsOpen) _windows[i].DeliverPosted();
         if (_monitorsChangedPending)
         {
             _monitorsChangedPending = false;
