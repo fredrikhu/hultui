@@ -135,6 +135,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         lock (_nativeLock)
         {
             if (_nativeByElement.TryGetValue(id, out p)) return p;
+            // Again under the lock: an element dropped meanwhile (Drop) gets no object that
+            // nothing would ever detach.
+            if (!_wrappers.ContainsKey(id)) return IntPtr.Zero;
             p = NativeProvider.Create(wrapper); // refcount 1 = bridge's ref
             _nativeByElement[id] = p;
             return p;
@@ -561,11 +564,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             var id = removed.Node.ElementId;
             if (_wrappers.TryGetValue(id, out var wrapper) && wrapper.Generation == generation)
                 continue;
-            _wrappers.TryRemove(id, out _);
-            // Drop the bridge's reference to the element's cached native object;
-            // it frees once any client references are also released.
-            if (_nativeByElement.TryRemove(id, out var native))
-                Marshal.Release(native);
+            Drop(id);
         }
 
         // 3) Apply property changes to surviving wrappers.
@@ -683,10 +682,44 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         foreach (var (id, wrapper) in _wrappers)
         {
             if (wrapper.Generation == generation) continue;
-            _wrappers.TryRemove(id, out _);
-            if (_nativeByElement.TryRemove(id, out var native))
-                Marshal.Release(native);
+            Drop(id);
         }
+    }
+
+    /// <summary>
+    /// Drops an element that left the tree: its wrapper, and its native object, which a client
+    /// may still hold. UI Automation is told the provider is gone (UiaDisconnectProvider), and the
+    /// object is cut from its wrapper: every call a client makes on it, or on a pattern or a text
+    /// range of the element, answers UIA_E_ELEMENTNOTAVAILABLE, not the name, value or text it
+    /// showed, and it no longer keeps the old tree alive. A locked screen that replaced a
+    /// person's details left them readable from every element a client had held.
+    /// </summary>
+    private void Drop(ElementId id)
+    {
+        _wrappers.TryRemove(id, out _);
+        IntPtr native;
+        lock (_nativeLock)
+            if (!_nativeByElement.TryRemove(id, out native)) return;
+
+        // Told while the object still answers: UI Automation may ask it for its runtime id.
+        IntPtr simple = NativeProvider.Tearoff(native, NativeProvider.As.Simple);
+        try { UiaInterop.UiaDisconnectProvider(simple); }
+        finally { Marshal.Release(simple); }
+        NativeProvider.Detach(native);
+        Marshal.Release(native);
+        ProviderDisconnected?.Invoke(id);
+    }
+
+    /// <summary>For tests: told of each element whose provider the bridge disconnected (<see cref="Drop"/>).</summary>
+    internal Action<ElementId>? ProviderDisconnected;
+
+    /// <summary>Whether a provider's element left the tree (or the bridge is gone): a node's
+    /// element has no wrapper, a virtual list item's list has none.</summary>
+    internal bool IsGone(ElementId id)
+    {
+        if (VirtualItemId.TryDecode(id, out var listId, out _))
+            return listId == default || !_wrappers.ContainsKey(listId);
+        return !_wrappers.ContainsKey(id);
     }
 
     /// <summary>
@@ -1006,8 +1039,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         // Drop the bridge's references to cached native objects.
         lock (_nativeLock)
         {
+            // Detached too: a client that holds one after the window is gone reads nothing of it.
             foreach (var native in _nativeByElement.Values)
+            {
+                NativeProvider.Detach(native);
                 Marshal.Release(native);
+            }
             _nativeByElement.Clear();
             if (_rootNative != IntPtr.Zero) { Marshal.Release(_rootNative); _rootNative = IntPtr.Zero; }
         }

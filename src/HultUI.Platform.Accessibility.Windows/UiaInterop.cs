@@ -265,6 +265,9 @@ internal static partial class UiaInterop
     /// <summary>UIA_E_INVALIDOPERATION: what selecting read-only text answers.</summary>
     public const int UIA_E_INVALIDOPERATION = unchecked((int)0x80131509);
 
+    /// <summary>UIA_E_ELEMENTNOTAVAILABLE: what every call on an element that left the tree answers.</summary>
+    public const int UIA_E_ELEMENTNOTAVAILABLE = unchecked((int)0x80040201);
+
     // ──── ScrollAmount + "no scroll" sentinel
     public const int ScrollAmount_LargeDecrement = 0;
     public const int ScrollAmount_SmallDecrement = 1;

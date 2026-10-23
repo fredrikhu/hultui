@@ -46,6 +46,14 @@ internal interface INativeHwndOverride
     int GetOverrideProviderForHwnd(IntPtr hwnd, out IntPtr pRetVal);
 }
 
+/// <summary>Provider logic that stands for one element by its id (a pattern, a text range, a
+/// virtual list item): <see cref="Gone"/> once the element left the tree, and every call on it
+/// then answers UIA_E_ELEMENTNOTAVAILABLE (<see cref="NativeProvider"/>).</summary>
+internal interface IElementBound
+{
+    bool Gone { get; }
+}
+
 [SupportedOSPlatform("windows")]
 internal interface INativeInvoke { int Invoke(); }
 
@@ -457,15 +465,52 @@ internal static unsafe class NativeProvider
     /// for pointers this class produced; passing a foreign COM pointer is
     /// undefined. Returns null for <see cref="IntPtr.Zero"/>.
     /// </summary>
-    public static object? LogicOf(IntPtr tearoff) => tearoff == IntPtr.Zero ? null : Target(tearoff);
+    public static object? LogicOf(IntPtr tearoff) => tearoff == IntPtr.Zero ? null : RawTarget(tearoff);
 
     // ── helpers to recover state inside a thunk ──
     private static byte* Base(IntPtr pThis) => (byte*)*((IntPtr*)pThis + 1);
 
     private static object? Target(IntPtr pThis)
     {
+        var logic = LogicOf(pThis);
+        if (logic == Detached || logic is IElementBound { Gone: true }) throw NotAvailable.Instance;
+        return logic;
+    }
+
+    private static object? RawTarget(IntPtr pThis)
+    {
         IntPtr gch = *(IntPtr*)(Base(pThis) + HdrGcHandle);
         return gch == IntPtr.Zero ? null : GCHandle.FromIntPtr(gch).Target;
+    }
+
+    /// <summary>What a detached object holds in place of its logic.</summary>
+    private static readonly object Detached = new();
+
+    /// <summary>
+    /// Cuts the object from its logic: every call on it answers UIA_E_ELEMENTNOTAVAILABLE from
+    /// now on, and what the logic held (a fragment's node, through it its whole tree, and the
+    /// text it showed) is no longer kept alive by a client that still holds the object. The
+    /// handle is repointed, not freed, so a call on another thread meanwhile reads the logic or
+    /// the stand-in, never a freed handle.
+    /// </summary>
+    public static void Detach(IntPtr anyTearoff)
+    {
+        IntPtr gch = *(IntPtr*)(Base(anyTearoff) + HdrGcHandle);
+        if (gch == IntPtr.Zero) return;
+        var handle = GCHandle.FromIntPtr(gch);
+        handle.Target = Detached;
+    }
+
+    /// <summary>The HRESULT a thunk answers for an exception: UIA_E_ELEMENTNOTAVAILABLE for an
+    /// element that left the tree, else what it answered before.</summary>
+    private static int Hr(Exception e, int otherwise) =>
+        e is NotAvailable ? UiaInterop.UIA_E_ELEMENTNOTAVAILABLE : otherwise;
+
+    /// <summary>Thrown by <see cref="Target"/> for a detached object or a gone element; one
+    /// instance, as only the thunks see it.</summary>
+    private sealed class NotAvailable : Exception
+    {
+        public static readonly NotAvailable Instance = new();
     }
 
     // ── IUnknown thunks (shared by every tear-off) ──
@@ -526,25 +571,25 @@ internal static unsafe class NativeProvider
     }
 
     // ── IRawElementProviderSimple ──
-    [UnmanagedCallersOnly] private static int Simple_GetProviderOptions(IntPtr t, int* p) { try { int hr = ((INativeSimple)Target(t)!).GetProviderOptions(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Simple_GetPatternProvider(IntPtr t, int id, IntPtr* p) { try { return ((INativeSimple)Target(t)!).GetPatternProvider(id, out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Simple_GetPropertyValue(IntPtr t, int id, void* p) { try { int hr = ((INativeSimple)Target(t)!).GetPropertyValue(id, out var v); *(UiaVariant*)p = v; return hr; } catch { *(UiaVariant*)p = UiaVariant.Empty; return 0; } }
-    [UnmanagedCallersOnly] private static int Simple_GetHostRawElementProvider(IntPtr t, IntPtr* p) { try { return ((INativeSimple)Target(t)!).GetHostRawElementProvider(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int Simple_GetProviderOptions(IntPtr t, int* p) { try { int hr = ((INativeSimple)Target(t)!).GetProviderOptions(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Simple_GetPatternProvider(IntPtr t, int id, IntPtr* p) { try { return ((INativeSimple)Target(t)!).GetPatternProvider(id, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Simple_GetPropertyValue(IntPtr t, int id, void* p) { try { int hr = ((INativeSimple)Target(t)!).GetPropertyValue(id, out var v); *(UiaVariant*)p = v; return hr; } catch (Exception ex) { *(UiaVariant*)p = UiaVariant.Empty; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Simple_GetHostRawElementProvider(IntPtr t, IntPtr* p) { try { return ((INativeSimple)Target(t)!).GetHostRawElementProvider(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
 
     // ── IRawElementProviderFragment ──
-    [UnmanagedCallersOnly] private static int Fragment_Navigate(IntPtr t, int dir, IntPtr* p) { try { return ((INativeFragment)Target(t)!).Navigate(dir, out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Fragment_GetRuntimeId(IntPtr t, IntPtr* p) { try { return ((INativeFragment)Target(t)!).GetRuntimeId(out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Fragment_GetBoundingRectangle(IntPtr t, void* p) { try { int hr = ((INativeFragment)Target(t)!).GetBoundingRectangle(out var r); *(UiaRect*)p = r; return hr; } catch { *(UiaRect*)p = default; return 0; } }
-    [UnmanagedCallersOnly] private static int Fragment_GetEmbeddedFragmentRoots(IntPtr t, IntPtr* p) { try { return ((INativeFragment)Target(t)!).GetEmbeddedFragmentRoots(out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Fragment_SetFocus(IntPtr t) { try { return ((INativeFragment)Target(t)!).SetFocus(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Fragment_GetFragmentRoot(IntPtr t, IntPtr* p) { try { return ((INativeFragment)Target(t)!).GetFragmentRoot(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int Fragment_Navigate(IntPtr t, int dir, IntPtr* p) { try { return ((INativeFragment)Target(t)!).Navigate(dir, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Fragment_GetRuntimeId(IntPtr t, IntPtr* p) { try { return ((INativeFragment)Target(t)!).GetRuntimeId(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Fragment_GetBoundingRectangle(IntPtr t, void* p) { try { int hr = ((INativeFragment)Target(t)!).GetBoundingRectangle(out var r); *(UiaRect*)p = r; return hr; } catch (Exception ex) { *(UiaRect*)p = default; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Fragment_GetEmbeddedFragmentRoots(IntPtr t, IntPtr* p) { try { return ((INativeFragment)Target(t)!).GetEmbeddedFragmentRoots(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Fragment_SetFocus(IntPtr t) { try { return ((INativeFragment)Target(t)!).SetFocus(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Fragment_GetFragmentRoot(IntPtr t, IntPtr* p) { try { return ((INativeFragment)Target(t)!).GetFragmentRoot(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
 
     // ── IRawElementProviderFragmentRoot ──
-    [UnmanagedCallersOnly] private static int Root_ElementProviderFromPoint(IntPtr t, double x, double y, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).ElementProviderFromPoint(x, y, out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Root_GetFocus(IntPtr t, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).GetFocus(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int Root_ElementProviderFromPoint(IntPtr t, double x, double y, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).ElementProviderFromPoint(x, y, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Root_GetFocus(IntPtr t, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).GetFocus(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
 
     // ── IRawElementProviderHwndOverride ──
-    [UnmanagedCallersOnly] private static int Override_GetProvider(IntPtr t, IntPtr hwnd, IntPtr* p) { try { return ((INativeHwndOverride)Target(t)!).GetOverrideProviderForHwnd(hwnd, out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int Override_GetProvider(IntPtr t, IntPtr hwnd, IntPtr* p) { try { return ((INativeHwndOverride)Target(t)!).GetOverrideProviderForHwnd(hwnd, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
 
     // ── IServiceProvider ──
     [UnmanagedCallersOnly] private static int SP_QueryService(IntPtr t, Guid* service, Guid* riid, IntPtr* ppv)
@@ -554,70 +599,70 @@ internal static unsafe class NativeProvider
     }
 
     // ── pattern providers ──
-    [UnmanagedCallersOnly] private static int Invoke_Invoke(IntPtr t) { try { return ((INativeInvoke)Target(t)!).Invoke(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Toggle_Toggle(IntPtr t) { try { return ((INativeToggle)Target(t)!).Toggle(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Toggle_GetToggleState(IntPtr t, int* p) { try { int hr = ((INativeToggle)Target(t)!).GetToggleState(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Value_SetValue(IntPtr t, IntPtr s) { try { return ((INativeValue)Target(t)!).SetValue(s); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Value_GetValue(IntPtr t, IntPtr* p) { try { return ((INativeValue)Target(t)!).GetValue(out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Value_GetIsReadOnly(IntPtr t, int* p) { try { int hr = ((INativeValue)Target(t)!).GetIsReadOnly(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Sel_Select(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).Select(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Sel_AddToSelection(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).AddToSelection(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Sel_RemoveFromSelection(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).RemoveFromSelection(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Sel_GetIsSelected(IntPtr t, int* p) { try { int hr = ((INativeSelectionItem)Target(t)!).GetIsSelected(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Sel_GetSelectionContainer(IntPtr t, IntPtr* p) { try { return ((INativeSelectionItem)Target(t)!).GetSelectionContainer(out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int EC_Expand(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Expand(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int EC_Collapse(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Collapse(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int EC_GetState(IntPtr t, int* p) { try { int hr = ((INativeExpandCollapse)Target(t)!).GetExpandCollapseState(out int v); *p = v; return hr; } catch { *p = 3; return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_Scroll(IntPtr t, int h, int v) { try { return ((INativeScroll)Target(t)!).Scroll(h, v); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_SetScrollPercent(IntPtr t, double h, double v) { try { return ((INativeScroll)Target(t)!).SetScrollPercent(h, v); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_GetHPercent(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontalScrollPercent(out double v); *p = v; return hr; } catch { *p = -1; return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_GetVPercent(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalScrollPercent(out double v); *p = v; return hr; } catch { *p = -1; return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_GetHViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontalViewSize(out double v); *p = v; return hr; } catch { *p = 100; return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_GetVViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalViewSize(out double v); *p = v; return hr; } catch { *p = 100; return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_GetHScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontallyScrollable(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Scr_GetVScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticallyScrollable(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int SI_ScrollIntoView(IntPtr t) { try { return ((INativeScrollItem)Target(t)!).ScrollIntoView(); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int RV_SetValue(IntPtr t, double val) { try { return ((INativeRangeValue)Target(t)!).SetValue(val); } catch { return 0; } }
-    [UnmanagedCallersOnly] private static int RV_GetValue(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetValue(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int RV_GetIsReadOnly(IntPtr t, int* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetIsReadOnly(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int RV_GetMaximum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMaximum(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int RV_GetMinimum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMinimum(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int RV_GetLargeChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetLargeChange(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int RV_GetSmallChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetSmallChange(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Sel2_GetSelection(IntPtr t, IntPtr* p) { try { return ((INativeSelection)Target(t)!).GetSelection(out *p); } catch { *p = IntPtr.Zero; return 0; } }
-    [UnmanagedCallersOnly] private static int Sel2_GetCanSelectMultiple(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetCanSelectMultiple(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int Sel2_GetIsSelectionRequired(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetIsSelectionRequired(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
-    [UnmanagedCallersOnly] private static int IC_FindItemByProperty(IntPtr t, IntPtr startAfter, int propertyId, UiaVariant value, IntPtr* p) { try { return ((INativeItemContainer)Target(t)!).FindItemByProperty(startAfter, propertyId, value, out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int Invoke_Invoke(IntPtr t) { try { return ((INativeInvoke)Target(t)!).Invoke(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Toggle_Toggle(IntPtr t) { try { return ((INativeToggle)Target(t)!).Toggle(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Toggle_GetToggleState(IntPtr t, int* p) { try { int hr = ((INativeToggle)Target(t)!).GetToggleState(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Value_SetValue(IntPtr t, IntPtr s) { try { return ((INativeValue)Target(t)!).SetValue(s); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Value_GetValue(IntPtr t, IntPtr* p) { try { return ((INativeValue)Target(t)!).GetValue(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Value_GetIsReadOnly(IntPtr t, int* p) { try { int hr = ((INativeValue)Target(t)!).GetIsReadOnly(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel_Select(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).Select(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel_AddToSelection(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).AddToSelection(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel_RemoveFromSelection(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).RemoveFromSelection(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel_GetIsSelected(IntPtr t, int* p) { try { int hr = ((INativeSelectionItem)Target(t)!).GetIsSelected(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel_GetSelectionContainer(IntPtr t, IntPtr* p) { try { return ((INativeSelectionItem)Target(t)!).GetSelectionContainer(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int EC_Expand(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Expand(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int EC_Collapse(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Collapse(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int EC_GetState(IntPtr t, int* p) { try { int hr = ((INativeExpandCollapse)Target(t)!).GetExpandCollapseState(out int v); *p = v; return hr; } catch (Exception ex) { *p = 3; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_Scroll(IntPtr t, int h, int v) { try { return ((INativeScroll)Target(t)!).Scroll(h, v); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_SetScrollPercent(IntPtr t, double h, double v) { try { return ((INativeScroll)Target(t)!).SetScrollPercent(h, v); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_GetHPercent(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontalScrollPercent(out double v); *p = v; return hr; } catch (Exception ex) { *p = -1; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_GetVPercent(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalScrollPercent(out double v); *p = v; return hr; } catch (Exception ex) { *p = -1; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_GetHViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontalViewSize(out double v); *p = v; return hr; } catch (Exception ex) { *p = 100; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_GetVViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalViewSize(out double v); *p = v; return hr; } catch (Exception ex) { *p = 100; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_GetHScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontallyScrollable(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Scr_GetVScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticallyScrollable(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int SI_ScrollIntoView(IntPtr t) { try { return ((INativeScrollItem)Target(t)!).ScrollIntoView(); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_SetValue(IntPtr t, double val) { try { return ((INativeRangeValue)Target(t)!).SetValue(val); } catch (Exception ex) { return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_GetValue(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetValue(out double v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_GetIsReadOnly(IntPtr t, int* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetIsReadOnly(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_GetMaximum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMaximum(out double v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_GetMinimum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMinimum(out double v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_GetLargeChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetLargeChange(out double v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int RV_GetSmallChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetSmallChange(out double v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel2_GetSelection(IntPtr t, IntPtr* p) { try { return ((INativeSelection)Target(t)!).GetSelection(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel2_GetCanSelectMultiple(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetCanSelectMultiple(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int Sel2_GetIsSelectionRequired(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetIsSelectionRequired(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, 0); } }
+    [UnmanagedCallersOnly] private static int IC_FindItemByProperty(IntPtr t, IntPtr startAfter, int propertyId, UiaVariant value, IntPtr* p) { try { return ((INativeItemContainer)Target(t)!).FindItemByProperty(startAfter, propertyId, value, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, 0); } }
 
     // ── ITextProvider / ITextProvider2 ──
-    [UnmanagedCallersOnly] private static int Text_GetSelection(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetSelection(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_GetVisibleRanges(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetVisibleRanges(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_RangeFromChild(IntPtr t, IntPtr c, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromChild(c, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_RangeFromPoint(IntPtr t, UiaPoint pt, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromPoint(pt, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_GetDocumentRange(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetDocumentRange(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_GetSupportedTextSelection(IntPtr t, int* p) { try { int hr = ((INativeTextProvider)Target(t)!).GetSupportedTextSelection(out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_RangeFromAnnotation(IntPtr t, IntPtr a, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromAnnotation(a, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int Text_GetCaretRange(IntPtr t, int* active, IntPtr* p) { try { int hr = ((INativeTextProvider)Target(t)!).GetCaretRange(out int a, out *p); *active = a; return hr; } catch { *active = 0; *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int Text_GetSelection(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetSelection(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_GetVisibleRanges(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetVisibleRanges(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_RangeFromChild(IntPtr t, IntPtr c, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromChild(c, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_RangeFromPoint(IntPtr t, UiaPoint pt, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromPoint(pt, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_GetDocumentRange(IntPtr t, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).GetDocumentRange(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_GetSupportedTextSelection(IntPtr t, int* p) { try { int hr = ((INativeTextProvider)Target(t)!).GetSupportedTextSelection(out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_RangeFromAnnotation(IntPtr t, IntPtr a, IntPtr* p) { try { return ((INativeTextProvider)Target(t)!).RangeFromAnnotation(a, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int Text_GetCaretRange(IntPtr t, int* active, IntPtr* p) { try { int hr = ((INativeTextProvider)Target(t)!).GetCaretRange(out int a, out *p); *active = a; return hr; } catch (Exception ex) { *active = 0; *p = IntPtr.Zero; return Hr(ex, Failed); } }
 
     // ── ITextRangeProvider ──
-    [UnmanagedCallersOnly] private static int TR_Clone(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).Clone(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_Compare(IntPtr t, IntPtr r, int* p) { try { int hr = ((INativeTextRange)Target(t)!).Compare(r, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_CompareEndpoints(IntPtr t, int e, IntPtr r, int te, int* p) { try { int hr = ((INativeTextRange)Target(t)!).CompareEndpoints(e, r, te, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_ExpandToEnclosingUnit(IntPtr t, int u) { try { return ((INativeTextRange)Target(t)!).ExpandToEnclosingUnit(u); } catch { return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_FindAttribute(IntPtr t, int id, UiaVariant v, int back, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).FindAttribute(id, v, back, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_FindText(IntPtr t, IntPtr s, int back, int ic, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).FindText(s, back, ic, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_GetAttributeValue(IntPtr t, int id, void* p) { try { int hr = ((INativeTextRange)Target(t)!).GetAttributeValue(id, out var v); *(UiaVariant*)p = v; return hr; } catch { *(UiaVariant*)p = UiaVariant.Empty; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_GetBoundingRectangles(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetBoundingRectangles(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_GetEnclosingElement(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetEnclosingElement(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_GetText(IntPtr t, int max, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetText(max, out *p); } catch { *p = IntPtr.Zero; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_Move(IntPtr t, int u, int c, int* p) { try { int hr = ((INativeTextRange)Target(t)!).Move(u, c, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_MoveEndpointByUnit(IntPtr t, int e, int u, int c, int* p) { try { int hr = ((INativeTextRange)Target(t)!).MoveEndpointByUnit(e, u, c, out int v); *p = v; return hr; } catch { *p = 0; return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_MoveEndpointByRange(IntPtr t, int e, IntPtr r, int te) { try { return ((INativeTextRange)Target(t)!).MoveEndpointByRange(e, r, te); } catch { return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_Select(IntPtr t) { try { return ((INativeTextRange)Target(t)!).Select(); } catch { return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_AddToSelection(IntPtr t) { try { return ((INativeTextRange)Target(t)!).AddToSelection(); } catch { return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_RemoveFromSelection(IntPtr t) { try { return ((INativeTextRange)Target(t)!).RemoveFromSelection(); } catch { return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_ScrollIntoView(IntPtr t, int top) { try { return ((INativeTextRange)Target(t)!).ScrollIntoView(top); } catch { return Failed; } }
-    [UnmanagedCallersOnly] private static int TR_GetChildren(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetChildren(out *p); } catch { *p = IntPtr.Zero; return Failed; } }
+    [UnmanagedCallersOnly] private static int TR_Clone(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).Clone(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_Compare(IntPtr t, IntPtr r, int* p) { try { int hr = ((INativeTextRange)Target(t)!).Compare(r, out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_CompareEndpoints(IntPtr t, int e, IntPtr r, int te, int* p) { try { int hr = ((INativeTextRange)Target(t)!).CompareEndpoints(e, r, te, out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_ExpandToEnclosingUnit(IntPtr t, int u) { try { return ((INativeTextRange)Target(t)!).ExpandToEnclosingUnit(u); } catch (Exception ex) { return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_FindAttribute(IntPtr t, int id, UiaVariant v, int back, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).FindAttribute(id, v, back, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_FindText(IntPtr t, IntPtr s, int back, int ic, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).FindText(s, back, ic, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_GetAttributeValue(IntPtr t, int id, void* p) { try { int hr = ((INativeTextRange)Target(t)!).GetAttributeValue(id, out var v); *(UiaVariant*)p = v; return hr; } catch (Exception ex) { *(UiaVariant*)p = UiaVariant.Empty; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_GetBoundingRectangles(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetBoundingRectangles(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_GetEnclosingElement(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetEnclosingElement(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_GetText(IntPtr t, int max, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetText(max, out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_Move(IntPtr t, int u, int c, int* p) { try { int hr = ((INativeTextRange)Target(t)!).Move(u, c, out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_MoveEndpointByUnit(IntPtr t, int e, int u, int c, int* p) { try { int hr = ((INativeTextRange)Target(t)!).MoveEndpointByUnit(e, u, c, out int v); *p = v; return hr; } catch (Exception ex) { *p = 0; return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_MoveEndpointByRange(IntPtr t, int e, IntPtr r, int te) { try { return ((INativeTextRange)Target(t)!).MoveEndpointByRange(e, r, te); } catch (Exception ex) { return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_Select(IntPtr t) { try { return ((INativeTextRange)Target(t)!).Select(); } catch (Exception ex) { return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_AddToSelection(IntPtr t) { try { return ((INativeTextRange)Target(t)!).AddToSelection(); } catch (Exception ex) { return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_RemoveFromSelection(IntPtr t) { try { return ((INativeTextRange)Target(t)!).RemoveFromSelection(); } catch (Exception ex) { return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_ScrollIntoView(IntPtr t, int top) { try { return ((INativeTextRange)Target(t)!).ScrollIntoView(top); } catch (Exception ex) { return Hr(ex, Failed); } }
+    [UnmanagedCallersOnly] private static int TR_GetChildren(IntPtr t, IntPtr* p) { try { return ((INativeTextRange)Target(t)!).GetChildren(out *p); } catch (Exception ex) { *p = IntPtr.Zero; return Hr(ex, Failed); } }
 
     /// <summary>E_FAIL. The text pattern's thunks answer it for an exception, where the older
     /// ones answer S_OK with an empty result: a reader told a text call failed asks again or

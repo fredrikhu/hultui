@@ -20,8 +20,11 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementId listId, int index)
-    : INativeSimple, INativeFragment
+    : INativeSimple, INativeFragment, IElementBound
 {
+    /// <summary>An item of a list that left the tree is gone with it.</summary>
+    public bool Gone => bridge.IsGone(listId);
+
     /// <summary>The owning list, so ItemContainer can decode a startAfter item.</summary>
     public ElementId ListId => listId;
 
