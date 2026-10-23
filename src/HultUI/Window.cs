@@ -3465,6 +3465,33 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         if (_overlays.Count > 0) DismissOverlaysOnOutsideClick();
     }
 
+    /// <summary>
+    /// Closes every overlay the window shows — menus, dropdown lists, popovers, tooltips and
+    /// overlays their owners close themselves — and, with <paramref name="includeDialogs"/>, the
+    /// modal ones too: <see cref="Core.Dialogs.Dialog.Confirm"/>, <see cref="Core.Dialogs.Dialog.Show{TResult}"/>
+    /// and any other overlay shown with <c>modal: true</c>. Each closes the way a dismissal
+    /// closes it: a menu's owner is told <see cref="MenuCloseReason.Dismissed"/>, an overlay's
+    /// <c>onDismissed</c> runs, and a dialog resolves with its default result, as Escape gives
+    /// (false for a confirmation), even one that does not close on Escape. For a window whose
+    /// content is replaced at once, a lock screen: nothing it showed stays above it.
+    /// </summary>
+    public void CloseOverlays(bool includeDialogs = false)
+    {
+        if (_overlays.Count == 0) return;
+        HideTooltip();
+        CloseContextMenu(MenuCloseReason.Dismissed);
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            // A dismissal callback can close other overlays.
+            if (i >= _overlays.Count) continue;
+            var entry = _overlays[i];
+            if (entry.IsModal && !includeDialogs) continue;
+            RemoveOverlayAt(i);
+            _root?.MarkPaintDirty();
+            entry.OnDismissed?.Invoke();
+        }
+    }
+
     private void TryShowContextMenu(Element target, Point pos)
     {
         var (owner, itemsProvider) = FindContextMenuOwner(target);

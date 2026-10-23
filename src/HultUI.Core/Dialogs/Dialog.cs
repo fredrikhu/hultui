@@ -71,7 +71,9 @@ public static class Dialog
         scrim.TabIndex = -1;
 
         // Modal: Tab stays inside, and keys reach nothing behind the dialog.
-        var handle = host.ShowOverlay(scrim, 0, 0, dismissOnOutsideClick: false, hitTestable: true, modal: true);
+        // Closed by the window (Window.CloseOverlays), it resolves as a dismissal does.
+        var handle = host.ShowOverlay(scrim, 0, 0, dismissOnOutsideClick: false, hitTestable: true,
+            onDismissed: () => controller.Close(default!), modal: true);
         controller.Bind(host, handle);
 
         // The dialog takes the keyboard, as a modal one has to: its first control, or the
