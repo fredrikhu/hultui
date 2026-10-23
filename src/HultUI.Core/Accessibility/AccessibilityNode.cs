@@ -21,12 +21,48 @@ public sealed class AccessibilityNode
     /// </summary>
     public Point ScrollOffset
     {
-        get => _extras?.ScrollOffset ?? default;
+        get => _extras?.Scroll?.Offset ?? default;
         internal set
         {
-            if (_extras is null && value == default) return;
-            Extras.ScrollOffset = value;
+            if (_extras?.Scroll is null && value == default) return;
+            Scroll.Offset = value;
         }
+    }
+
+    /// <summary>
+    /// A scroll view's (a virtual list's) box its content scrolls in, on screen in layout units —
+    /// the scroll of the views above it applied, not its own — and the size of that content, as
+    /// this tree was built: what UI Automation's Scroll pattern answers, on the client's thread.
+    /// Null for anything that does not scroll.
+    /// </summary>
+    public AccessibleScrollExtent? ScrollExtent =>
+        _extras?.Scroll is { IsScrollView: true } s ? new AccessibleScrollExtent(s.Viewport, s.Content) : null;
+
+    /// <summary>
+    /// The list a node of a list stands for (<see cref="IAccessibleItemSource"/>): its items' nodes
+    /// are this node's children, or, for a list over <c>MaxEagerVirtualItems</c>
+    /// (<see cref="IsVirtualItemContainer"/>), a bridge asks it for them by index when a reader
+    /// does. Null for anything else. It is the live list, read on the bridge's thread: only what is
+    /// served on demand is read from it, never what the tree carries.
+    /// </summary>
+    public IAccessibleItemSource? ItemSource
+    {
+        get => _extras?.Scroll?.Items;
+        internal set
+        {
+            if (_extras?.Scroll is null && value is null) return;
+            Scroll.Items = value;
+        }
+    }
+
+    /// <summary>Gives the node its scroll view's geometry (<see cref="ScrollExtent"/>) and offset.</summary>
+    internal void SetScrollView(Point offset, Rect viewport, Size content)
+    {
+        var scroll = Scroll;
+        scroll.Offset = offset;
+        scroll.Viewport = viewport;
+        scroll.Content = content;
+        scroll.IsScrollView = true;
     }
 
     public bool IsFocusable => (_flags & FocusableBit) != 0;
@@ -198,7 +234,7 @@ public sealed class AccessibilityNode
         public string? Description;
         public string? Value;
         public string? AutomationId;
-        public Point ScrollOffset;
+        public ScrollFields? Scroll;
         public NativeAccessibleContent NativeContent;
         public AccessibleText? Text;
         public IAccessibleTextSource? TextSource;
@@ -206,9 +242,25 @@ public sealed class AccessibilityNode
         public AccessibleRange? Range;
     }
 
+    /// <summary>
+    /// A scroll view's or a list's fields, in an object of their own that only those nodes get: the
+    /// offset was the one of them a rare field had, and RareFields stays the size it was for every
+    /// other node that has one (a text field, a described control).
+    /// </summary>
+    private sealed class ScrollFields
+    {
+        public Point Offset;
+        public Rect Viewport;
+        public Size Content;
+        public bool IsScrollView;
+        public IAccessibleItemSource? Items;
+    }
+
     private RareFields? _extras;
 
     private RareFields Extras => _extras ??= new RareFields();
+
+    private ScrollFields Scroll => Extras.Scroll ??= new ScrollFields();
 
     /// <summary>Whether this node or <paramref name="other"/> carries any of the rarely set
     /// fields; when neither does, the differ has none of them to compare.</summary>
@@ -284,3 +336,10 @@ public sealed class AccessibilityNode
         _children = children;
     }
 }
+
+/// <summary>A scroll view as an accessibility tree was built with it
+/// (<see cref="AccessibilityNode.ScrollExtent"/>).</summary>
+/// <param name="Viewport">The box its content scrolls in, on screen in layout units: the scroll of
+/// the views above it applied, not its own (<see cref="AccessibilityNode.ScrollOffset"/>).</param>
+/// <param name="Content">How big the content that scrolls in it is.</param>
+public readonly record struct AccessibleScrollExtent(Rect Viewport, Size Content);

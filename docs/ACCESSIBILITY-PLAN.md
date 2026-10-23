@@ -196,7 +196,19 @@ the move changed (a scroll) is told by the coalesced layout refresh, as before.
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
-access).
+access). Since 2026-10-24 (plan 17 round 4) every read a client makes answers
+from the element's node in the applied tree, which never changes once applied:
+properties and patterns alike — a text input's value, a toggle, a range, a list
+item's selected state, a list's selection, a scroll view's percents (the node
+carries its viewport and content size, `AccessibilityNode.ScrollExtent`). Pattern
+reads went to the host (`IUiaHostBridge`), which found the element with a walk
+of the live element tree on the client's thread, unsynchronized with the UI
+thread (on a 1,533-element page a check box's toggle visited 1,532 elements),
+and answered what the element was now, not what the events had told: the
+RangeValue pattern and its Value property disagreed until the range's coalesced
+refresh, and a switch's Toggle pattern said indeterminate. A scroll refresh's
+percent event read the scroll view the same way on the UI thread. The host's
+read members stay, unused.
 
 ### Step 4 — Linux AT-SPI2 bridge
 
@@ -314,8 +326,11 @@ navigate, and act on the whole list at any size. Built in increments, all done:
   `AccessibilityTreeBuilder.MaxEagerVirtualItems` a list is marked
   `IsVirtualItemContainer` and emits no child nodes; the bridge synthesizes a
   fresh `UiaVirtualItem` per navigation result (identity via the stable
-  `VirtualItemId` runtime id, so no caching), resolving name/bounds/count live
-  through `IUiaHostBridge`. Nothing is built eagerly and scrolling recomputes
+  `VirtualItemId` runtime id, so no caching), resolving name/count/selection
+  from the list itself, which the list's node carries (`AccessibilityNode.ItemSource`,
+  2026-10-24; it went through `IUiaHostBridge`, which first found the list with a
+  walk of the element tree), and bounds from the node's viewport and scroll at
+  the item height. Nothing is built eagerly and scrolling recomputes
   bounds on demand rather than re-emitting per-item events — verified with a
   100k-item list (navigate, hit-test, invoke all instant). The cap is now just a
   fast-path switch, not a ceiling.
@@ -408,8 +423,8 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   for every node on screen (133 per rebuild over 1,000 rows). A node that moved or
   resized within the view still raises its bounds change. AT-SPI sends nothing for a
   scroll, before and after, as Chromium (`browser_accessibility_manager_auralinux.cc`
-  ignores both scroll events) and GTK do. Bounds and the offscreen state are read
-  from the current tree when a client asks.
+  ignores both scroll events) and GTK do. Bounds, the offscreen state and the Scroll
+  pattern's percents and view sizes are read from the current tree when a client asks.
 - **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
   read/set the value and its bounds. Each node carries its range (`AccessibilityNode.Range`,
   2026-10-10), so a move is a `RangeValue` change: UIA raises a RangeValue.Value property change
@@ -422,6 +437,8 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   `OnValueChanged`). A number field's text change and its number change tell AT-SPI once, with the
   number. Before, a slider or a progress bar that moved told nothing on either platform, and AT-SPI
   had no Value interface: a keyboard user moving VideoPlayer's Seek slider heard nothing.
+  The RangeValue pattern answers from the node, as the RangeValue properties do (2026-10-24):
+  it read the live slider, ahead of what was told.
   A range can move on every frame — a drag, a download, a playing video, a key held down — and
   each refresh rebuilds the whole tree, so the window tells a range's change on the leading edge,
   then at most every 250 ms, then once with the value it came to rest at (`Window.A11yRangeCoalesceMs`).

@@ -122,9 +122,16 @@ public static class AccessibilityTreeBuilder
         node.NativeContent = element.NativeAccessibleContent;
         if (element is IRangeValueElement range)
             node.Range = AccessibleRange.Of(range);
-        // What ChildScroll subtracts from everything under it.
+        // What ChildScroll subtracts from everything under it, and what UI Automation's Scroll
+        // pattern answers from: it read the live scroll view through a walk of the element tree on
+        // the client's thread.
         if (element is ScrollViewElement sv)
-            node.ScrollOffset = new Point(sv.ScrollOffsetX, sv.ScrollOffsetY);
+        {
+            var viewport = element.Layout.AbsoluteContentBox;
+            node.SetScrollView(new Point(sv.ScrollOffsetX, sv.ScrollOffsetY),
+                new Rect(viewport.X - scrollX, viewport.Y - scrollY, viewport.Width, viewport.Height),
+                new Size(sv.ContentWidth, sv.ContentHeight));
+        }
         if (textSource is not null)
         {
             node.TextSource = textSource;
@@ -254,6 +261,8 @@ public static class AccessibilityTreeBuilder
         // its own: its realized rows carry the real controls, and one node per row would
         // bury them.
         if (!source.PublishesItemNodes) return false;
+        // What a bridge asks for the items it serves on demand, without finding the list first.
+        node.ItemSource = source;
         if (source.ItemCount <= MaxEagerVirtualItems)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).

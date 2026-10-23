@@ -11,7 +11,7 @@ namespace HultUI;
 /// Hooks the Windows UIA bridge into the frame loop.
 ///
 /// UIA clients call provider methods from worker threads, which means we must
-/// either snapshot everything (we do, for reads) or marshal writes onto the
+/// either snapshot everything (the bridge does, for reads: the tree) or marshal writes onto the
 /// UI thread. This adapter uses a
 /// <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/> drained at
 /// the start of each frame, so element mutations happen on the same thread as
@@ -54,8 +54,9 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
         if (!_window.AccessibilityTreeBuilt) _router.ActiveChanged();
     }
 
-    // ──── Reads — safe to run on the calling thread since we only touch
-    //      simple CLR properties that don't mutate collections.
+    // ──── Reads — the bridge no longer calls these (plan 17, round 4): each found the
+    //      element with a walk of the live tree on the client's thread, and the bridge
+    //      answers from the accessibility tree it applied instead. Kept for the interface.
 
     public string? GetValue(ElementId id) => GetElementOrNull(id) switch
     {

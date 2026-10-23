@@ -101,13 +101,23 @@ public class AccessibilityRebuildAllocationTests
         var tree = AccessibilityTreeBuilder.Build(root);
 
         long node = Bytes(() => s_kept = new AccessibilityNode(default, AccessibilityRole.None, null, null, default));
+        // A scroll view's node carries its geometry, and a list's the list (what UI Automation's
+        // Scroll pattern and on-demand items answer from, plan 17 round 4): one object of its rare
+        // fields and one of these, for those nodes only.
+        long scrollView = Bytes(() =>
+        {
+            var n = new AccessibilityNode(default, AccessibilityRole.List, null, null, default);
+            n.SetScrollView(default, default, default);
+            s_kept = n;
+        }) - node;
         long expected = 0;
-        int nodes = 0, parents = 0;
+        int nodes = 0, parents = 0, scrollViews = 0;
         Count(tree);
         void Count(AccessibilityNode n)
         {
             nodes++;
             expected += node;
+            if (n.ScrollExtent is not null) { scrollViews++; expected += scrollView; }
             if (n.Children.Count > 0)
             {
                 parents++;
@@ -120,6 +130,7 @@ public class AccessibilityRebuildAllocationTests
         long built = Bytes(() => s_kept = AccessibilityTreeBuilder.Build(root), goal: expected);
 
         Assert.True(nodes > 150 && parents >= 4, $"{nodes} nodes, {parents} parents");
+        Assert.Equal(1, scrollViews);
         // Nothing else: no list per node, no enumerator per child list, no list grown in steps,
         // no string to name a button whose one text names it.
         Assert.Equal(expected, built);
@@ -129,7 +140,8 @@ public class AccessibilityRebuildAllocationTests
     public void ANode_KeepsItsRarelySetFields_InAnObjectOnlyTheNodesThatSetOneGet()
     {
         // Description, value, automation id, scroll offset, native content and text: most nodes
-        // have none of them, and they were 64 bytes of every node.
+        // have none of them, and they were 64 bytes of every node. A scroll view's geometry and a
+        // list's source go in one more object, which only those nodes get.
         long plain = Bytes(() => s_kept = new AccessibilityNode(default, AccessibilityRole.Label, "Name", null, default));
         long described = Bytes(() => s_kept = new AccessibilityNode(default, AccessibilityRole.Label, "Name", "Help", default));
         if (IntPtr.Size == 8)
@@ -164,6 +176,10 @@ public class AccessibilityRebuildAllocationTests
         Assert.Equal(("Help", "text", "field"), (rich.Description, rich.Value, rich.AutomationId));
         Assert.Equal(new Point(3, 4), rich.ScrollOffset);
         Assert.Equal(new NativeAccessibleContent(7, 8), rich.NativeContent);
+        Assert.Null(rich.ScrollExtent);
+        rich.SetScrollView(new Point(5, 6), new Rect(1, 2, 30, 40), new Size(300, 400));
+        Assert.Equal(new Point(5, 6), rich.ScrollOffset);
+        Assert.Equal(new AccessibleScrollExtent(new Rect(1, 2, 30, 40), new Size(300, 400)), rich.ScrollExtent);
     }
 
     [Fact]
