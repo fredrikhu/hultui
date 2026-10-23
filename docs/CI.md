@@ -124,14 +124,24 @@ one, minutes count against the account's allowance, and Windows minutes count do
 
 Hosted runners start from a clean image every time, so each job restores NuGet packages and
 the natives builds fetch their sources again. They are also slower than the development
-machine the old Windows runner was. Measured on the first runs, 2026-10-24, with the
+machine the old Windows runner was, and a private repository's standard runners have half the
+cores of a public one's (2 against 4). Measured on the first runs, 2026-10-24, with the
 repository still private:
 
-| Job | Hosted | Self-hosted before |
+| Job | Hosted, private (2 cores) | Self-hosted before |
 |---|---|---|
-| `ci.yml` `docs` | about 2 min | |
-| `ci.yml` `test` (Windows) | see the conversion PR | `Junction.Tests` alone about 3.5 min |
-| `ci.yml` `test-linux` | see the conversion PR | |
+| `ci.yml` `docs` | 2 min | |
+| `ci.yml` `test` (Windows) | 25.5–26 min: build 4, tests 21–22 | |
+| — of which `Junction.Tests` | 15–17 min | about 3.5 min |
+| — `HultUI.Rendering.Skia.Tests`, `VesperCommander.Tests`, `HultUI.Text.Tests` | 2.5–4.5, 1–3.5, 2.5 min | |
+| `ci.yml` `test-linux` | 8.5 min: tests 8 | |
+| `mpv-natives.yml` | 22 min: Windows 21 (MSYS2 1.5, build 18), Linux 13, package 1 | |
+| `cef-natives.yml` | 7 min | |
+| `cef-helper.yml` | 2 min | |
+
+The Windows job is the long pole, and `Junction.Tests` is most of it. Splitting that
+assembly into several test processes measured 4 min → 1.7 min on the development machine, and
+is the next lever if the time matters.
 
 ## Traps
 
@@ -141,3 +151,12 @@ repository still private:
 - **A job whose `runs-on` matches no runner waits** — for up to a day — rather than failing.
   That is how the first push to this repository looked: its jobs still asked for
   `[self-hosted, windows, x64]`.
+- **The MSYS2 toolchain is always today's.** `msys2/setup-msys2` with `update: true` installs
+  the current packages, and MSYS2 builds `mingw-w64-crt` from upstream's git. The old runner's
+  MSYS2 had stayed at crt r375; the first hosted run got r532, which moved `__mingw_fe_dfl_env`
+  into `libmingw32.a` and broke the static `libmpv-2.dll` link (worked around in
+  `native/mpv/build-libmpv.sh`). A native build that fails at a link step with nothing changed
+  here is most likely the toolchain moving: compare the `pacman` versions in the log.
+- **Ubuntu 24.04 limits user namespaces.** See the `sysctl` row above: without it, every CEF
+  engine test times out after ten seconds with "CEF is not running", which looks like a hang,
+  not a missing permission.
