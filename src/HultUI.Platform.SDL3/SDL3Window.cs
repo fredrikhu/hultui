@@ -143,6 +143,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public bool ActivatedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
 
+    /// <summary>Set by the framework while it draws a frame of this window: the event watcher
+    /// then leaves a new size pending instead of resizing the surface under the frame.</summary>
+    internal bool DrawingFrame { get; set; }
+
     /// <summary>
     /// Invoked from the event watcher during a Win32 modal resize loop,
     /// when <see cref="SDL_PollEvent"/> is blocked and the main loop cannot
@@ -685,6 +689,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     // Only handle events for this specific window
                     if (!evt->window.windowID.Equals(window.WindowId))
                         break;
+
+                    // Inside a frame of this window (a wait in its draw pumped the size loop's
+                    // messages): resizing now disposed the canvas under it, and the rest of the
+                    // frame drew unscaled and uncleared onto a fresh one. The size stays pending
+                    // for the drag's next event or the loop's next pass, which read it.
+                    if (window.DrawingFrame)
+                    {
+                        window.ResizePending = true;
+                        break;
+                    }
 
                     bool changed = window.UpdateSize();
 

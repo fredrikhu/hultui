@@ -1293,8 +1293,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private readonly struct DrawingFrame : IDisposable
     {
         private readonly Window _window;
-        public DrawingFrame(Window window) { _window = window; window.IsDrawingFrame = true; }
-        public void Dispose() => _window.IsDrawingFrame = false;
+        public DrawingFrame(Window window) { _window = window; Set(window, true); }
+        public void Dispose() => Set(_window, false);
+
+        // The SDL window too: its event watcher must not resize the surface under the frame.
+        private static void Set(Window window, bool drawing)
+        {
+            window.IsDrawingFrame = drawing;
+            if (window.PlatformWindow is HultUI.Platform.SDL3.SDL3Window sdl) sdl.DrawingFrame = drawing;
+        }
     }
 
     /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>

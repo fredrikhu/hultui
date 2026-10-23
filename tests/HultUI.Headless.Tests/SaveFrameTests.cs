@@ -201,6 +201,29 @@ public sealed class SaveFrameTests : IDisposable
     }
 
     [Fact]
+    public void ARequestHeldPastTheLastTry_IsAnsweredWithAnError()
+    {
+        using var session = Session();
+        using var watch = FrameRequests.Start(session.Application, _dir);
+        int tries = FrameRequests.HeldTries;
+        FrameRequests.HeldTries = 3;
+        try
+        {
+            // Held without FileShare.Delete past every try: the delete is refused too, and that
+            // refusal once kept the .error from being written, so the tool waited for good.
+            string request = Path.Combine(_dir, "stuck.request");
+            string error = Path.Combine(_dir, "stuck.error");
+            using var held = new FileStream(request, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            session.PumpUntil(() => File.Exists(error), TimeSpan.FromSeconds(10));
+            Assert.False(File.Exists(Path.Combine(_dir, "stuck.png")));
+        }
+        finally
+        {
+            FrameRequests.HeldTries = tries;
+        }
+    }
+
+    [Fact]
     public void ARequestForAWindowThatIsNotThere_SaysSo()
     {
         using var session = Session();

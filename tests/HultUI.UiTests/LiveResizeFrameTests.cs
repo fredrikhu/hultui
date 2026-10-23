@@ -254,6 +254,60 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
     [DllImport("user32.dll")] private static extern bool PostThreadMessageW(uint thread, uint msg, nint w, nint l);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
 
+    [UiFact]
+    public void ASizeChangeInsideADraw_LeavesTheFrameItsSurface_AndIsDrawnAfter()
+    {
+        using var guard = ForegroundGuard.Begin();
+        // A wait in a draw that pumps the size loop's messages: SetWindowPos runs the event watch
+        // before it returns, as such a pump does. The watch resized the surface under the frame,
+        // which then finished unscaled and uncleared on a fresh canvas.
+        SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+        string? a11y = Environment.GetEnvironmentVariable("HULTUI_A11Y");
+        Environment.SetEnvironmentVariable("HULTUI_A11Y", "0");
+        Application app;
+        try { app = new Application(new SdlWindowingPlatform(), "live resize", 400, 300); }
+        finally { Environment.SetEnvironmentVariable("HULTUI_A11Y", a11y); }
+        using var _app = app;
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+        // Off screen before its first frame shows it.
+        SetWindowPos(hwnd, 0, -30000, -30000, 0, 0, NoSize | NoZOrder | NoActivate);
+        var window = (SDL3Window)typeof(Window).GetProperty("PlatformWindow", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app.PrimaryWindow)!;
+
+        bool resizeNow = false;
+        int frames = 0, insideBefore = 0, insideAfter = 0, framesInside = 0;
+        var sizes = new List<int>();
+        app.SetRoot(Canvas.New(_ =>
+        {
+            frames++;
+            sizes.Add(window.PixelWidth);
+            if (!resizeNow) return;
+            resizeNow = false;
+            insideBefore = window.PixelWidth;
+            int before = frames;
+            SetWindowPos(hwnd, 0, 0, 0, 520, 380, NoMove | NoZOrder | NoActivate);
+            framesInside = frames - before;
+            insideAfter = window.PixelWidth;
+        }).Width(1f).Height(1f));
+        for (int i = 0; i < 3; i++) app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        resizeNow = true;
+        app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        output.WriteLine($"inside the draw: {insideBefore} -> {insideAfter} px wide, {framesInside} frames drawn");
+        Assert.Equal(insideBefore, insideAfter);
+        Assert.Equal(0, framesInside);
+
+        // The new size is drawn once the frame is over.
+        GetClientRect(hwnd, out var client);
+        for (int i = 0; i < 10 && window.PixelWidth != client.Right - client.Left; i++)
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+        app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Assert.Equal(client.Right - client.Left, window.PixelWidth);
+        Assert.Equal(client.Right - client.Left, sizes[^1]);
+    }
+
+    private const uint NoSize = 0x0001;
+
     private static unsafe void PushLiveResizeExpose(SDL_WindowID window)
     {
         SDL_Event evt = default;

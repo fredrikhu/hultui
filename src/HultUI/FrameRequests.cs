@@ -47,7 +47,7 @@ internal static class FrameRequests
 
     /// <summary>How often, and how far apart, a request someone still holds open is tried again:
     /// its writer still writing, or a virus scanner looking at the file that just arrived.</summary>
-    private const int HeldTries = 50;
+    internal static int HeldTries = 50;   // a test shortens it
     private static readonly TimeSpan HeldRetry = TimeSpan.FromMilliseconds(100);
 
     /// <summary>On the watcher's thread: the window is picked on the UI thread, which owns the list.</summary>
@@ -97,12 +97,15 @@ internal static class FrameRequests
             saved.ContinueWith(t =>
             {
                 if (t.Exception is null) return;
+                // The answer first: a request still held cannot be deleted, and that refusal
+                // stopped the .error being written, so the tool waited for good.
                 try
                 {
-                    File.Delete(request);
                     File.WriteAllText(error + ".partial", t.Exception.GetBaseException().Message);
                     File.Move(error + ".partial", error, overwrite: true);
                 }
+                catch (IOException) { }
+                try { File.Delete(request); }
                 catch (IOException) { }
             }, TaskScheduler.Default);
         });

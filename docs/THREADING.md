@@ -145,7 +145,8 @@ Any wait on the UI thread inside a frame (`Parallel.For`, `Task.Wait`, a contend
 watcher's resize events. A window never draws a frame inside one of its own:
 `Window.RenderFrame` returns at once while it runs, and the live-resize frame
 asked for from inside it is left for the drag's next event (the resize stays
-pending). And a frame that throws is only one bad frame: the next one starts from
+pending). Nor is its surface resized under it: the new size is only noted, and
+read once the frame is over. And a frame that throws is only one bad frame: the next one starts from
 the canvas's base save count, so a clip or layer the throw left pushed does not
 hold every later frame inside it.
 
