@@ -50,6 +50,24 @@ public class CloseOverlaysTests
     }
 
     [Fact]
+    public void CancelsATooltipStillInItsShowDelay()
+    {
+        using var session = HeadlessSession.Create(500, 400);
+        var box = Box.New().Width(100).Height(50).Tooltip("Anna Andersson");
+        session.Window.SetRoot(Flex.Column().Padding(10).Children(box));
+        session.PumpFrame();
+
+        session.Window.MoveMouse(50, 30);   // starts the show delay; nothing is open yet
+        session.PumpFrame(TimeSpan.FromMilliseconds(100));
+        Assert.Empty(session.Window.OverlayContents);
+
+        session.Window.Window.CloseOverlays();
+        session.PumpFrame(TimeSpan.FromSeconds(1));
+
+        Assert.Empty(session.Window.OverlayContents);
+    }
+
+    [Fact]
     public async Task ClosesADialogThatEscapeDoesNotClose_WithItsDefaultResult()
     {
         using var session = HeadlessSession.Create(500, 400);

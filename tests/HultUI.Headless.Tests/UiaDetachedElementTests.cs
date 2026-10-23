@@ -188,4 +188,92 @@ public class UiaDetachedElementTests(ITestOutputHelper output)
         foreach (var p in new[] { labelSimple, labelFragment, fieldSimple, reportSimple, value, text, range })
             Marshal.Release(p);
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (IntPtr Root, WeakReference Bridge) HeldRootOfDisposedBridge(TestHwnd hwnd, HeadlessSession session)
+    {
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        session.Window.SetRoot(TextB.New("Anna Andersson"));
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(150));
+
+        var root = bridge.NativeRootSimple();   // what WM_GETOBJECT hands a client
+        Assert.Equal(0, Name(root).Hr);
+        bridge.Dispose();
+        session.Window.InstallAccessibilityBridge();   // the window lets go of it, as a closed window would
+        return (root, new WeakReference(bridge));
+    }
+
+    [WindowsFact]
+    public void TheRootAClientHolds_AnswersElementNotAvailable_AfterTheBridgeIsDisposed()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        var (root, bridge) = HeldRootOfDisposedBridge(hwnd, session);
+        try
+        {
+            var name = Name(root);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.Equal(NotAvailable, name.Hr);
+            Assert.Null(name.Text);
+            Assert.False(bridge.IsAlive);   // the root no longer holds the bridge and its last tree
+        }
+        finally { Marshal.Release(root); }
+    }
+
+    /// <summary>
+    /// A UIA thread looking a provider up while the UI thread drops its element. The lookup and
+    /// its AddRef were outside the lock Drop takes, so the drop could free the object between them
+    /// and the AddRef write freed memory. A race: without the lock this corrupts the heap only
+    /// sometimes, so it runs many rounds.
+    /// </summary>
+    [WindowsFact]
+    public void LookingUpAProviderWhileItsElementIsDropped_GetsALiveObjectOrNone()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        using var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+
+        var label = TextB.New("Anna Andersson");
+        var other = TextB.New("Locked");
+        using var stop = new CancellationTokenSource();
+        int got = 0, bad = 0;
+        var client = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                var p = bridge.NativeFragmentSimple(label.Id);
+                if (p == IntPtr.Zero) continue;
+                int hr = Name(p).Hr;
+                if (hr != 0 && hr != NotAvailable) Interlocked.Increment(ref bad);
+                Marshal.Release(p);
+                Interlocked.Increment(ref got);
+            }
+        });
+        for (int i = 0; i < 300; i++)
+        {
+            session.Window.SetRoot(label);
+            session.PumpFrame();
+            session.Window.SetRoot(other);
+            session.PumpFrame();
+        }
+        stop.Cancel();
+        client.Wait();
+        output.WriteLine($"Providers the client got: {got}");
+        Assert.Equal(0, bad);
+    }
 }

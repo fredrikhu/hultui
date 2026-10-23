@@ -3477,8 +3477,10 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     /// </summary>
     public void CloseOverlays(bool includeDialogs = false)
     {
-        if (_overlays.Count == 0) return;
+        // Before the early return: a tooltip still in its show delay is no overlay yet, and
+        // would otherwise open over whatever replaced its owner's content.
         HideTooltip();
+        if (_overlays.Count == 0) return;
         CloseContextMenu(MenuCloseReason.Dismissed);
         for (int i = _overlays.Count - 1; i >= 0; i--)
         {
