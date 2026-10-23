@@ -194,4 +194,9 @@ public sealed partial class HeadlessWindow
         _session.RenderNow();
         return _platform.RasterSurface.Snapshot();
     }
+
+    /// <summary>Whether this window is drawing a frame now: true for code running inside one (a
+    /// build, a draw callback), where <see cref="CapturePixels"/> cannot draw another and
+    /// <c>Window.SaveFrame</c> waits for the next.</summary>
+    public bool IsDrawingFrame => Window.IsDrawingFrame;
 }

@@ -128,15 +128,26 @@ public sealed class Locator
 
     // ──── Resolving ────
 
-    /// <summary>The matching elements now, in tree order, without waiting.</summary>
+    /// <summary>The matching elements now, in tree order, without waiting. A node with no element
+    /// of its own (a virtual list's item, an element's described content) is one too, paired with
+    /// the element that owns it.</summary>
     public IReadOnlyList<HeadlessElement> All()
     {
         var root = Window.Window.BuildAccessibilityTree();
         if (root is null) return [];
         var found = new List<HeadlessElement>();
         foreach (var node in _query(root))
+        {
             if (Window.Window.FindElement(node.ElementId) is { } element)
                 found.Add(new HeadlessElement(Window, node, element));
+            else
+                for (var owner = node.Parent; owner is not null; owner = owner.Parent)
+                    if (Window.Window.FindElement(owner.ElementId) is { } ownerElement)
+                    {
+                        found.Add(new HeadlessElement(Window, node, ownerElement, owner));
+                        break;
+                    }
+        }
         return found;
     }
 
@@ -174,11 +185,13 @@ public sealed class Locator
         }
     }
 
-    /// <summary>Waits until exactly one element matches and it is visible, enabled and where it
-    /// was a frame ago, then returns it.</summary>
-    private HeadlessElement Actionable(string action, TimeSpan? timeout)
+    /// <summary>Waits until exactly one element matches and it is visible, enabled, in view (scrolled
+    /// there if a scroll view hides it) and where it was a frame ago, then returns it and the point
+    /// in the window to aim at.</summary>
+    private (HeadlessElement Element, Point At) Actionable(string action, TimeSpan? timeout)
     {
         HeadlessElement? target = null;
+        Point at = default;
         Rect? previous = null;
         string state = "no element matched";
         var limit = TimeoutOr(timeout);
@@ -188,6 +201,10 @@ public sealed class Locator
             if (all.Count > 1) throw StrictViolation(all);
             if (all.Count == 0) { state = "no element matched"; previous = null; return false; }
             var e = all[0];
+            // Scrolled into view before the visibility check: a row of a scrolled list is off screen
+            // until then.
+            if (e.Bounds.Width > 0 && e.Bounds.Height > 0 && !InView(e, out at))
+            { state = $"element is outside the visible part of its scroll view: {Describe(e)}"; previous = null; return false; }
             if (!IsVisible(e)) { state = $"element is not visible: {Describe(e)}"; previous = null; return false; }
             if (!e.IsEnabled) { state = $"element is disabled: {Describe(e)}"; previous = null; return false; }
             bool stable = previous == e.Bounds;
@@ -199,19 +216,58 @@ public sealed class Locator
         if (!ok)
             throw new TimeoutException(
                 $"{action} on locator {this} timed out after {limit.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} s of virtual time: {state}.");
-        return target!;
+        return (target!, at);
     }
+
+    /// <summary>
+    /// Whether the element's centre shows through every scroll view around it, and the point to aim
+    /// at: the centre of its visible part. A scroll view that hides the centre is scrolled toward
+    /// it (false: look again next frame); one that cannot scroll further leaves the visible part.
+    /// </summary>
+    private static bool InView(HeadlessElement e, out Point at)
+    {
+        var box = e.WindowBox;
+        var seen = box;
+        var centre = Centre(box);
+        for (var a = e.HasOwnElement ? e.Element.Parent : e.Element; a is not null; a = a.Parent)
+        {
+            if (a is not ScrollViewElement sv) continue;
+            var viewport = sv.WindowContentBox;
+            if (!viewport.Contains(centre) && ScrollToward(sv, box, viewport)) { at = default; return false; }
+            seen = seen.Intersect(viewport);
+        }
+        at = Centre(seen);
+        return seen.Width > 0 && seen.Height > 0;
+    }
+
+    private static Point Centre(Rect r) => new(r.X + r.Width / 2f, r.Y + r.Height / 2f);
+
+    /// <summary>Scrolls <paramref name="sv"/> so <paramref name="box"/> is inside <paramref name="viewport"/>
+    /// (its start, when it does not fit); false when the view did not move.</summary>
+    private static bool ScrollToward(ScrollViewElement sv, Rect box, Rect viewport)
+    {
+        float x = sv.ScrollOffsetX, y = sv.ScrollOffsetY;
+        sv.ScrollOffsetY = y + Delta(box.Y, box.Bottom, viewport.Y, viewport.Bottom);
+        sv.ScrollOffsetX = x + Delta(box.X, box.Right, viewport.X, viewport.Right);
+        return sv.ScrollOffsetX != x || sv.ScrollOffsetY != y;
+    }
+
+    private static float Delta(float start, float end, float viewStart, float viewEnd)
+        => start < viewStart || end - start > viewEnd - viewStart ? start - viewStart
+         : end > viewEnd ? end - viewEnd
+         : 0;
 
     // ──── Actions ────
 
-    /// <summary>Clicks the element's centre once it is actionable.</summary>
-    public void Click(TimeSpan? timeout = null) => Actionable("Click", timeout).Click();
+    /// <summary>Clicks the element's centre (of its visible part) once it is actionable.</summary>
+    public void Click(TimeSpan? timeout = null) => ClickAt(Actionable("Click", timeout).At);
+
+    private void ClickAt(Point at) => Window.Click(at.X, at.Y);
 
     /// <summary>Focuses the field by clicking it, selects all its text and types <paramref name="value"/> over it.</summary>
     public void Fill(string value, TimeSpan? timeout = null)
     {
-        var e = Actionable("Fill", timeout);
-        e.Click();
+        ClickAt(Actionable("Fill", timeout).At);
         Window.PressKey(KeyCode.A, KeyModifiers.Ctrl);
         Window.PressKey(KeyCode.Backspace);
         Window.TypeText(value);
@@ -220,15 +276,15 @@ public sealed class Locator
     /// <summary>Focuses the element and presses <paramref name="key"/>.</summary>
     public void Press(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, TimeSpan? timeout = null)
     {
-        Actionable("Press", timeout).Focus();
+        Actionable("Press", timeout).Element.Focus();
         Window.PressKey(key, modifiers);
     }
 
     /// <summary>Moves the mouse to the element's centre.</summary>
     public void Hover(TimeSpan? timeout = null)
     {
-        var box = Actionable("Hover", timeout).Element.WindowBorderBox;
-        Window.MoveMouse(box.X + box.Width / 2f, box.Y + box.Height / 2f);
+        var at = Actionable("Hover", timeout).At;
+        Window.MoveMouse(at.X, at.Y);
     }
 
     /// <summary>Clicks the checkbox (switch, radio button) unless it is already checked, then
@@ -240,9 +296,9 @@ public sealed class Locator
 
     private void SetChecked(bool on, TimeSpan? timeout)
     {
-        var e = Actionable(on ? "Check" : "Uncheck", timeout);
+        var (e, at) = Actionable(on ? "Check" : "Uncheck", timeout);
         if (IsChecked(e) == on) return;
-        e.Click();
+        ClickAt(at);
         if (!PumpUntil(() => All() is [var now] && IsChecked(now) == on, TimeoutOr(timeout)))
             throw new TimeoutException($"Clicking locator {this} did not make it {(on ? "checked" : "unchecked")}: {DumpNow()}");
     }
@@ -251,15 +307,15 @@ public sealed class Locator
     /// click and selects the row with the keyboard, as a person would.</summary>
     public void SelectOption(string option, TimeSpan? timeout = null)
     {
-        var e = Actionable("SelectOption", timeout);
-        if (e.Element is not DropdownElement dropdown)
+        var (e, at) = Actionable("SelectOption", timeout);
+        if (e.Element is not DropdownElement dropdown || !e.HasOwnElement)
             throw new InvalidOperationException($"SelectOption: locator {this} is not a dropdown: {Describe(e)}");
         int index = dropdown.Items.ToList().IndexOf(option);
         if (index < 0)
             throw new InvalidOperationException(
                 $"SelectOption: dropdown {this} has no option \"{option}\"; it has: {string.Join(", ", dropdown.Items.Select(i => $"\"{i}\""))}.");
         if (dropdown.SelectedIndex == index) return;
-        if (!dropdown.IsOpen) e.Click();
+        if (!dropdown.IsOpen) ClickAt(at);
         Window.PressKey(KeyCode.Home);
         for (int i = 0; i < index; i++) Window.PressKey(KeyCode.Down);
         Window.PressKey(KeyCode.Enter);

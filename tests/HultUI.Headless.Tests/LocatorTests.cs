@@ -281,4 +281,62 @@ public class LocatorTests
         Expect(second.GetByText("Only here", exact: true)).ToBeVisible();
         Expect(a.GetByText("Only here")).ToHaveCount(0);
     }
+
+    [Fact]
+    public void VirtualListItems_AreFound_AndClicked_ScrolledIntoViewFirst()
+    {
+        string? clicked = null;
+        var items = Enumerable.Range(0, 40).Select(i => $"Row {i}").ToList();
+        var list = VirtualListElement<string>.New().ItemHeight(24)
+            .RenderWith(t => Button.New(t).OnClick(_ => clicked = t))
+            .Items(items);
+        list.Height(Dimension.Px(120));
+        using var session = Mount(list);
+
+        // Item nodes have no element of their own: the locator pairs them with the list.
+        Expect(session.GetByText("Row 2", exact: true)).ToHaveCount(1);
+        Expect(session.GetByRole(AccessibilityRole.ListItem)).ToHaveCount(40);
+        Assert.Same(list, session.GetByText("Row 2", exact: true).Resolve().Element);
+
+        session.GetByText("Row 2", exact: true).Click();
+        Assert.Equal("Row 2", clicked);
+
+        session.GetByText("Row 30", exact: true).Click();   // far below the list's viewport
+        Assert.Equal("Row 30", clicked);
+        Assert.True(list.ScrollOffsetY > 0);
+    }
+
+    [Fact]
+    public void Click_ScrollsAPartlyClippedElementIntoView_RatherThanHittingWhatIsUnderItsCentre()
+    {
+        int target = 0, other = 0;
+        var scroll = ScrollView.Vertical().Height(100).Children(
+            Flex.Column().Children(
+                Box.New().Height(Dimension.Px(90)),
+                Button.New("Target").Height(Dimension.Px(40)).OnClick(_ => target++)));
+        using var session = Mount(scroll, Button.New("Other").OnClick(_ => other++));
+
+        session.GetByRole(AccessibilityRole.Button, "Target", exact: true).Click();
+        Assert.Equal((1, 0), (target, other));
+        Assert.True(scroll.ScrollOffsetY > 0);
+    }
+
+    [Fact]
+    public void IsEntered_AndIsDrawingFrame_TellWhereTheTestIs()
+    {
+        using var a = HeadlessSession.Create(100, 100);
+        using var b = HeadlessSession.Create(100, 100);
+        bool? drawingInside = null;
+        a.Window.SetRoot(Canvas.New(_ => drawingInside = a.Window.IsDrawingFrame).Width(Dimension.Px(10)).Height(Dimension.Px(10)));
+        a.PumpFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Assert.True(drawingInside);
+        Assert.False(a.Window.IsDrawingFrame);
+
+        b.Enter();
+        Assert.True(b.IsEntered);
+        Assert.False(a.IsEntered);
+        a.Enter();
+        Assert.True(a.IsEntered);
+        Assert.False(b.IsEntered);
+    }
 }

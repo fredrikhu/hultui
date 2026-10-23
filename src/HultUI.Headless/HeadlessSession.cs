@@ -157,6 +157,11 @@ public sealed partial class HeadlessSession : IDisposable
         Application.Enter();
     }
 
+    /// <summary>Whether this session's application is the one entered last (<see cref="Enter"/>, or
+    /// a pump, input or root of it): for test infrastructure that drives several sessions and has
+    /// to hand the test back the one it had.</summary>
+    public bool IsEntered => !_disposed && Application.Current == Application;
+
     private HeadlessWindow Wrap(Window window)
         => new(this, window, (HeadlessPlatformWindow)window.PlatformWindow);
 

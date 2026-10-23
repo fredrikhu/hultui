@@ -181,13 +181,22 @@ Expect(session.GetByLabel("Email"), TimeSpan.FromSeconds(1)).ToHaveValue("a@b.c"
   `GetByTestId` is the `AutomationId`. The window's root node is searched too. On a
   `HeadlessWindow` the text form is `GetByText(text, exact)` — the one-argument
   `GetByText(text)` is still the eager query above.
+- **Nodes without an element are found too.** A virtual list's rows are `ListItem` nodes the
+  list makes (its realised row elements are not in the tree), and an element's described
+  content (`IAccessibleContentSource`) is nodes as well. A locator matches them like any node;
+  the `HeadlessElement` it gives pairs the node with the element that owns it (the list), and a
+  click goes to the node's own place. The eager queries above skip such nodes — use a locator
+  to find a row, or to check that a name is nowhere in the window.
 - **Strict.** An action, or an assertion on one element, that matches several fails at once
   with `Strict mode violation`, listing each match (role, name, bounds). `ToHaveCount` is the
   one that is not strict.
 - **Actions wait.** `Click`, `Fill`, `Press`, `Hover`, `Check`/`Uncheck`, `SelectOption` pump
   frames until exactly one element matches and it is visible (non-empty bounds, not offscreen),
   enabled and *stable* — the same bounds on two frames in a row — then act through the input
-  driver above (a click at the centre of `WindowBorderBox`). So every action costs at least one
+  driver above (a click at the centre of `WindowBorderBox`). An element whose centre a scroll
+  view hides — partly or wholly scrolled away, a list row below the fold — is scrolled into
+  view first, and one bigger than the view is clicked at the centre of its visible part, so a
+  click never lands on whatever lies under a clipped centre. So every action costs at least one
   frame of virtual time; a test of double-click timing uses the driver directly. A timeout says
   what it was waiting for (`element is disabled: Button "Send" bounds=…`).
   `SelectOption` drives a `Dropdown` the way a person does: a click to open, Home, Down, Enter.
@@ -327,7 +336,7 @@ A session is a whole application: its own main-thread queue, `SynchronizationCon
 
 `Dispose` resets everything — its animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored. A session a test failed to dispose does not stop the next one being created; it stays alive beside it, and nothing of it reaches the new one.
 
-`HeadlessSession.Created` is raised on the creating thread for every new session. Test infrastructure uses it to find a test's sessions without each test handing them over — to save each window's frame and accessibility tree when the test fails, for instance.
+`HeadlessSession.Created` is raised on the creating thread for every new session. Test infrastructure uses it to find a test's sessions without each test handing them over — to save each window's frame and accessibility tree when the test fails, for instance. Such a hook works on the test's thread in the middle of the test, so it has two more things to look at: `session.IsEntered` (the session the test has entered last, to enter again when it is done with the others) and `window.IsDrawingFrame` (true for code running inside a frame — a build or draw callback that threw — where no other frame can be drawn, so `CapturePixels` draws nothing and `Window.SaveFrame` waits for a later one).
 
 ### Sessions side by side
 
