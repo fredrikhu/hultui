@@ -26,6 +26,19 @@ file after every step and commits it with the step's work. Full survey reports a
   R4_TAGS_ONCE), `r4a11y/` (reorder prototype, live WSL driver), `r4apps/` (app probe, keyup.py);
   round 3 builds `r3b2/`…`r3b17/`, `r3b9b/`, `r3b14b/`; older `probes/`, `l1r3/`, `r3*`.
 
+**Repository move (user, 2026-10-24): HultUI moved to `github.com/fredrikhu/hultui`; the old
+`hultui-revamped` will be deleted. Never push to the old URL again.** The new main has the same
+history (a9081035 on both, checked). At round 4's release, before merging: `git remote set-url
+origin git@github.com:fredrikhu/hultui.git`, `git fetch --prune origin`, then merge and push to the new
+origin as usual (the remote is shared with the primary checkout and other worktrees — that is the
+user's intent). No local `pacs-support` branch exists (checked 2026-10-24); if one appears, delete it
+(`git branch -D pacs-support`), never push it (replaced by app-support). Open PRs/issues on the old repo
+don't carry over. Plan 17 adds nothing PACS/Sectra/healthcare-related (round 4 diff and plan docs
+checked); keep it that way for the open-sourcing. **Blocker to raise before the release: the new repo has
+0 self-hosted runners** (`gh api repos/fredrikhu/hultui/actions/runners` → 0; CI run 40030590762 on
+a9081035 queued since 2026-10-23 21:59). Registering runners is the user's job (memory
+`ci-runners-access`); without them CI cannot finish and the round cannot close.
+
 **App releases:** cut only when the user asks (they asked after rounds 2 and 3; round 3's on
 58c186f: junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0). Follow
 memory `release-tagging` (≤3 tags per push).
