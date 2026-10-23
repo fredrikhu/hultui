@@ -1,12 +1,15 @@
 # Tests every push to main.
 #
 # The installer workflows gate each release on the same suites, but they only
-# run on a tag — so between releases nothing was checking main at all. That gap
-# existed because hosted Windows minutes were scarce; on self-hosted runners the
-# builds are unmetered, so the net is back.
+# run on a tag — so between releases nothing else checks main at all.
 #
 # Deliberately no packaging here: this answers "does main still work", and the
 # installer workflows answer "can we ship it".
+#
+# GitHub-hosted runners only (docs/CI.md): the repository is public, and a
+# self-hosted runner attached to a public repository runs whatever reaches a
+# workflow on it. The images are pinned rather than -latest, so an image move is
+# a change made here on purpose; the apt package names below are Ubuntu 24.04's.
 
 name: CI
 
@@ -24,16 +27,27 @@ concurrency:
   # because only the tip of main is interesting.
   cancel-in-progress: true
 
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
 jobs:
   test:
-    runs-on: [self-hosted, windows, x64]
+    runs-on: windows-2025
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # No global.json: any 10.0 SDK builds the solution, so take the newest.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
       # external/XTerm.NET must be exactly upstream at the pinned commit plus
       # external/XTerm.NET.patches (docs/design/TERMINAL.md). A hand edit there would be lost at
-      # the next update, so it fails here instead. On this job because it needs pwsh and git,
-      # which the Linux runner is not set up with; it fetches one upstream commit, shallow.
+      # the next update, so it fails here instead. It fetches one upstream commit, shallow.
       - name: Verify the vendored XTerm.NET
         shell: pwsh
         run: ./scripts/vendor-xterm-net.ps1 -Verify
@@ -61,9 +75,25 @@ jobs:
           retention-days: 7
 
   test-linux:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # The tests that need a script's font skip without one, naming the package
+      # ([HanFontsFact], [DevanagariFontsFact], [ColourEmojiFact]); Vesper's [SevenZipFact]
+      # does the same for 7z. These make them run. Golden images bring their own DejaVu.
+      - name: Install fonts and 7-Zip
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji 7zip
 
       - name: Run tests
         run: dotnet test HultUI.CrossPlatform.slnf -c Release
@@ -85,9 +115,16 @@ jobs:
   # published site. Nothing is deployed — see docs/PACKAGING.md for the
   # publishing decisions that are still open.
   docs:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Restore tools
         run: dotnet tool restore
