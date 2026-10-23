@@ -148,6 +148,37 @@ static partial class Scenarios
                 return ProgressTicks(bar);
             });
 
+        yield return new Scenario("a11y/caret walk in rich text beside 300 rows, bridge on",
+            "Right and Left in a 20-block rich text editor beside 300 rows while a reader listens: each caret move told, and the trees a key builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var editor = MountCaretWalk(ctx);
+                return CaretWalk(ctx, editor, _ => ToldCaret(bridge.CurrentTree, editor));
+            });
+
+        yield return new Scenario("a11y/caret walk in 5,000 blocks, a reader reading, bridge on",
+            "Right and Left in the 5,000-block document while a reader reads the line at the caret after each move, from its own thread: the text it reads, made for each move",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var editor = MountEditor(ctx, LongDocument(ctx.Rng, 5_000));
+                editor.State.Select(HultUI.Core.RichText.RichSelection.Caret(2_501, 3));
+                ctx.Pump(2);
+                var walk = CaretWalk(ctx, editor, _ => ToldCaret(bridge.CurrentTree, editor));
+                return new Op
+                {
+                    // The reader reads between keys, untimed: on its thread, as UI Automation's
+                    // workers and the AT-SPI bus thread do. The key after it pays for what that
+                    // read asks of the next version.
+                    Reset = _ => ReadLineAtCaret(bridge.CurrentTree, editor),
+                    Run = walk.Run,
+                    Figure = walk.Figure,
+                    FigureUnit = walk.FigureUnit,
+                    Check = walk.Check,
+                };
+            });
+
         if (OperatingSystem.IsWindows())
             foreach (var scenario in UiaAccessibility())
                 yield return scenario;
@@ -168,6 +199,87 @@ static partial class Scenarios
         Run = step => bar.Value = (step % 1_000 + 1) / 1_000.0,
         Check = step => bar.Value == (step % 1_000 + 1) / 1_000.0 ? null : $"the bar reads {bar.Value}",
     };
+
+    /// <summary>A 20-block rich text editor above 300 benchmark rows, focused, the caret at the
+    /// start of its first paragraph.</summary>
+    private static RichTextEditorElement MountCaretWalk(Ctx ctx)
+    {
+        var editor = RichTextEditor.New(LongDocument(ctx.Rng, 20)).Width(Dimension.Px(420)).Height(Dimension.Px(300));
+        ctx.Mount(Flex.Column(gap: 8).FlexGrow(1).Padding(8).Children(
+            editor, ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 300))));
+        ctx.Window.Click(editor);
+        ctx.Pump();
+        editor.State.Select(HultUI.Core.RichText.RichSelection.Caret(1, 0));
+        ctx.Pump();
+        return editor;
+    }
+
+    /// <summary>
+    /// Each step a Right or a Left, twenty of each, so the caret stays on the block's first
+    /// lines. A reader listens while the key is handled (<see cref="AccessibilityClients.Force"/>,
+    /// put back after it): the editor tells a reader its caret only then, and leaving it on would
+    /// change the rows that run after this one. The figure is the accessibility trees a key builds.
+    /// </summary>
+    private static Op CaretWalk(Ctx ctx, Element editor, Func<int, string?> told)
+    {
+        int treesBefore = 0;
+        return new Op
+        {
+            Run = step =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                var was = AccessibilityClients.Force;
+                AccessibilityClients.Force = true;
+                try { ctx.Window.PressKey(step % 40 < 20 ? HultUI.Core.Events.KeyCode.Right : HultUI.Core.Events.KeyCode.Left); }
+                finally { AccessibilityClients.Force = was; }
+            },
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/key",
+            Check = told,
+        };
+    }
+
+    /// <summary>Null when the bridge's tree has the editor's caret where the editor has it.</summary>
+    private static string? ToldCaret(AccessibilityNode? tree, RichTextEditorElement editor)
+    {
+        if (Find(tree, editor) is not { } node) return "the bridge's tree has no node for the editor";
+        int caret = editor.Document.ToOffset(editor.State.Selection.Focus);
+        return node.Text?.Caret == caret ? null : $"the bridge's tree has the caret at {node.Text?.Caret}, the editor at {caret}";
+    }
+
+    /// <summary>What a screen reader does after a caret move: reads the line at the caret, on its
+    /// own thread, through the node's text source.</summary>
+    private static void ReadLineAtCaret(AccessibilityNode? tree, Element editor)
+    {
+        if (Find(tree, editor)?.TextSource is not { } source) return;
+        Task.Run(() =>
+        {
+            if (source.AccessibleText is not { } text) return;
+            int line = text.LineAt(Math.Max(0, text.Caret));
+            _ = text.Text.Substring(text.LineStart(line), text.LineEnd(line) - text.LineStart(line));
+        }).Wait();
+    }
+
+    private static AccessibilityNode? Find(AccessibilityNode? node, Element element)
+    {
+        if (node is null) return null;
+        if (node.ElementId == element.Id) return node;
+        var children = node.Children;
+        for (int i = 0; i < children.Count; i++)
+            if (Find(children[i], element) is { } found) return found;
+        return null;
+    }
+
+    /// <summary>A 2,000-line text area, ten words a line, filling the window, focused.</summary>
+    private static TextAreaElement MountLongTextArea(Ctx ctx)
+    {
+        var text = string.Join('\n', Enumerable.Range(0, 2_000).Select(_ => Ui.Paragraph(ctx.Rng, 10)));
+        var area = TextArea.New(text).FlexGrow(1);
+        ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+        ctx.Window.Click(area);
+        ctx.Pump();
+        return area;
+    }
 
     /// <summary>
     /// The selection walk as a person walks a History list, in the application's own loop
@@ -401,6 +513,37 @@ static partial class Scenarios
                 var (bar, root) = ProgressOverRows(ctx);
                 ctx.Mount(root);
                 return ProgressTicks(bar);
+            });
+
+        yield return new Scenario("a11y/caret walk in rich text beside 300 rows, UIA",
+            "Right and Left in a 20-block rich text editor beside 300 rows with the UIA bridge: the caret events, and the trees a key builds",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var editor = MountCaretWalk(ctx);
+                return CaretWalk(ctx, editor, Applied(rig));
+            });
+
+        yield return new Scenario("a11y/type in a 2,000-line TextArea, UIA",
+            "Type one character into a 2,000-line text area (121,744 characters) with the UIA bridge: whatever a keystroke's change carries",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                MountLongTextArea(ctx);
+                return new Op
+                {
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = Applied(rig),
+                };
+            });
+
+        yield return new Scenario("a11y/caret walk in a 2,000-line TextArea, UIA",
+            "Right and Left in a 2,000-line text area with the UIA bridge: what a caret move tells, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                var area = MountLongTextArea(ctx);
+                return CaretWalk(ctx, area, _ => null);
             });
     }
 
