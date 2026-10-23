@@ -205,7 +205,14 @@ build_mpv() {
     #
     # The DirectX interops stay off. gl-dxinterop in particular would bring back the
     # 8-bit dxva2 bridge, which is a zero-copy path that throws away the ten bits.
-    host_opts=(-Dc_link_args=-static -Dcpp_link_args=-static -Dprefer_static=true
+    #
+    # --undefined=__mingw_fe_dfl_env: from mingw-w64-crt 14.0.0.r532 (2026-10) FE_DFL_ENV is
+    # defined in libmingw32.a's CRT_fp10.o rather than beside fesetenv in libmingwex.a, but
+    # GCC still links -lmingw32 before -lmingwex, so a static DLL that pulls in fesetenv
+    # late ends "undefined reference to __mingw_fe_dfl_env". Asking for the symbol up front
+    # makes the first -lmingw32 provide it; on an older crt it names the object already linked.
+    local fe_dfl='-Wl,--undefined=__mingw_fe_dfl_env'
+    host_opts=("-Dc_link_args=-static $fe_dfl" "-Dcpp_link_args=-static $fe_dfl" -Dprefer_static=true
                -Dcuda-hwaccel=enabled -Dcuda-interop=enabled
                -Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled -Dgl-dxinterop=disabled -Degl-angle=disabled)
   else
