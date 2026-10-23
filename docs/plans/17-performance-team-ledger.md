@@ -5,7 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–2 landed, step 3 running.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–2 landed, step 3 resumed 2026-10-24 (its changes 1–2 committed
+  968bd8d1, 1698b4a6; change 3 was uncommitted when the weekly limit cut the agent off on 2026-10-13;
+  the same agent was resumed from its transcript to finish it). origin/main moved meanwhile to a9081035
+  (another session: MPL-2.0 licence, repository renamed to hultui-revamped) — merge it at round end.
   **Weekly usage at 99 % (2026-10-13 evening):** after step 3 the loop pauses until the weekly reset
   (Sunday 2026-10-18 05:00); a one-shot job in this session (CronCreate 5b483f32, 05:07 Oct 18) runs the
   `/loop` line then. **On resume, first check `git status` and the last commits:** if the limit cut step 3
