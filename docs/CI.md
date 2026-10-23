@@ -42,6 +42,7 @@ What the jobs add to the image:
 |---|---|---|
 | every job that runs `dotnet` | `actions/setup-dotnet`, `10.0.x` | there is no `global.json`, so any 10.0 SDK builds the solution, and the newest is taken |
 | `test-linux` | `fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji 7zip` | see the next section |
+| `test-linux`, `cef-natives` | `sysctl kernel.apparmor_restrict_unprivileged_userns=0` | Ubuntu 24.04 forbids an unconfined program a user namespace, so Chromium's sandbox cannot start: the CEF engine tests time out and `CefSandboxTests.OnThisMachine_TheSandboxCanStart` fails. The old runner, a Proxmox container, had its host's 0. Not something to ask of a user (`docs/design/WEBVIEW-LINUX-BRIEF.md`), but a hosted VM is thrown away after its job |
 | installers | Inno Setup, when the image lacks it | the step falls back to `choco install innosetup` |
 | `mpv-natives` Windows | an MSYS2 MINGW64 toolchain and the packages `native/mpv/README.md` lists | through `msys2/setup-msys2` |
 | `mpv-natives` Linux | the apt list in `native/mpv/README.md` | |

@@ -95,6 +95,13 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends \
             fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji 7zip
 
+      # Ubuntu 23.10 and later forbid an unconfined program a user namespace
+      # (kernel.apparmor_restrict_unprivileged_userns=1), so Chromium's sandbox cannot start, and
+      # CefSandboxTests.OnThisMachine_TheSandboxCanStart says so. The self-hosted runner before
+      # was a Proxmox container, which has its host's 0; this VM is thrown away after the job.
+      - name: Let Chromium's sandbox make user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Run tests
         run: dotnet test HultUI.CrossPlatform.slnf -c Release
 
