@@ -327,6 +327,8 @@ A session is a whole application: its own main-thread queue, `SynchronizationCon
 
 `Dispose` resets everything — its animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored. A session a test failed to dispose does not stop the next one being created; it stays alive beside it, and nothing of it reaches the new one.
 
+`HeadlessSession.Created` is raised on the creating thread for every new session. Test infrastructure uses it to find a test's sessions without each test handing them over — to save each window's frame and accessibility tree when the test fails, for instance.
+
 ### Sessions side by side
 
 Two (or more) sessions may be alive at once — two desks of one system, each signed in as a different user. A session's pumps, `RunLoop`, input, `SetRoot` and `CreateWindow` *enter* its application: `Application.InvokeOnMainThread`, `await` continuations, new tweens and `AsyncLoader` loads from code on that thread go to it. Work that code starts carries it along (it flows with the `ExecutionContext`), so a worker started by session A posts to A even while the test drives B. Each session's frames step only its own tweens and drain only its own queue; disposing one leaves the other running.

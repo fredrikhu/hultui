@@ -90,8 +90,17 @@ public sealed partial class HeadlessSession : IDisposable
             Options = options,
         };
         var application = new Application(platform, title, width, height, style);
-        return new HeadlessSession(time, platform, application);
+        var session = new HeadlessSession(time, platform, application);
+        Created?.Invoke(session);
+        return session;
     }
+
+    /// <summary>
+    /// Raised on the creating thread for every new session, before <see cref="Create"/> returns:
+    /// for test infrastructure that keeps track of a test's sessions (to save their windows when
+    /// the test fails, say) without each test handing them over. A handler must not throw.
+    /// </summary>
+    public static event Action<HeadlessSession>? Created;
 
     /// <summary>Creates an additional window in this session.</summary>
     public HeadlessWindow CreateWindow(string title = "", int width = 800, int height = 600,

@@ -23,6 +23,20 @@ public class HeadlessSessionTests
     }
 
     [Fact]
+    public void Created_IsRaisedForEachNewSession_OnTheCreatingThread()
+    {
+        var seen = new List<(HeadlessSession Session, int Thread)>();
+        void Record(HeadlessSession s) { lock (seen) seen.Add((s, Environment.CurrentManagedThreadId)); }
+        HeadlessSession.Created += Record;
+        try
+        {
+            using var session = HeadlessSession.Create(width: 200, height: 100);
+            lock (seen) Assert.Contains((session, Environment.CurrentManagedThreadId), seen);
+        }
+        finally { HeadlessSession.Created -= Record; }
+    }
+
+    [Fact]
     public void PumpFrame_RespectsDirtyTracking()
     {
         using var session = HeadlessSession.Create();
