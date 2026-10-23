@@ -45,7 +45,7 @@ internal static class FrameRequests
     private static void Requested(Application application, string request)
     {
         if (!request.EndsWith(".request", StringComparison.OrdinalIgnoreCase)) return;
-        Application.InvokeOnMainThread(() =>
+        application.Post(() =>
         {
             if (!File.Exists(request)) return;   // a duplicate event for one already served
             string png = Path.ChangeExtension(request, ".png");

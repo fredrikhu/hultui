@@ -33,7 +33,8 @@ public sealed partial class Window
         path = Path.GetFullPath(path);
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (UIThread.IsCurrent) QueueFrameSave(path, done);
-        else Application.InvokeOnMainThread(() => QueueFrameSave(path, done));
+        // To this window's application, not whichever is current (headless sessions side by side).
+        else Application.Post(() => QueueFrameSave(path, done));
         return done.Task;
     }
 
