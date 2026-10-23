@@ -34,10 +34,13 @@ origin as usual (the remote is shared with the primary checkout and other worktr
 user's intent). No local `pacs-support` branch exists (checked 2026-10-24); if one appears, delete it
 (`git branch -D pacs-support`), never push it (replaced by app-support). Open PRs/issues on the old repo
 don't carry over. Plan 17 adds nothing PACS/Sectra/healthcare-related (round 4 diff and plan docs
-checked); keep it that way for the open-sourcing. **Blocker to raise before the release: the new repo has
-0 self-hosted runners** (`gh api repos/fredrikhu/hultui/actions/runners` → 0; CI run 40030590762 on
-a9081035 queued since 2026-10-23 21:59). Registering runners is the user's job (memory
-`ci-runners-access`); without them CI cannot finish and the round cannot close.
+checked); keep it that way for the open-sourcing. **The new repo will be public and will NOT get
+self-hosted runners (user, 2026-10-24: anyone could push code that runs on them); it uses GitHub-hosted
+runners.** Every workflow is hard-wired to `[self-hosted, …]` today (0 runners on the new repo; CI run
+40030590762 on a9081035 queued since 2026-10-23), so round 4's release waits until the workflows run on
+GitHub-hosted runners — offered to the user as a separate task (chip task_f35e3acf, "Move CI to
+GitHub-hosted runners"). Plan 17 never registers a runner. Hosted runners are slower and differ in fonts
+and tooling: expect new CI precondition failures like 58c186f's, fixed in tests, not by adding runners.
 
 **App releases:** cut only when the user asks (they asked after rounds 2 and 3; round 3's on
 58c186f: junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0). Follow
