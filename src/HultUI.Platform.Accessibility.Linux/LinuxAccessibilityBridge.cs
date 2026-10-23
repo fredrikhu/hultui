@@ -58,6 +58,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     // status, which is always on. Written on the watcher's thread, read on the UI thread.
     private readonly IAtSpiStatus? _status;
     private volatile bool _statusOn;
+    // Set once the watch is set up: the first status, read while the bridge is made, wakes nobody.
+    private volatile bool _statusWatched;
     private volatile Snapshot _snapshot = Snapshot.Empty;
     private bool _hasBuilt;
     private string? _focusedPath;
@@ -127,19 +129,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (status is not null) WatchStatus(_status = status);
     }
 
+    // The watch subscribes first and then reads (AtSpiStatusReader.Watch). The status was read
+    // here and the watch subscribed after it: a change in between was never read.
     private void WatchStatus(IAtSpiStatus status)
     {
-        _statusOn = status.ReadStatus();
-        AccessibilityClients.Report(_statusOn);
         status.WatchStatus(on =>
         {
             _statusOn = on;
             AccessibilityClients.Report(on);
-            // On a thread-pool thread (AtSpiStatusReader): the window's loop, which reads
-            // IsActive in its frames, is waiting for a deadline or a wake, and turning on is
+            // A change, on a thread-pool thread (AtSpiStatusReader): the window's loop, which
+            // reads IsActive in its frames, is waiting for a deadline or a wake, and turning on is
             // what builds and publishes the whole tree.
-            _actionHost?.ActiveChanged();
+            if (_statusWatched) _actionHost?.ActiveChanged();
         });
+        _statusWatched = true;
     }
 
     /// <summary>A childless application root, valid from Embed until the first build.</summary>

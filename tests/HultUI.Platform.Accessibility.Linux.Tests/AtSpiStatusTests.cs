@@ -13,14 +13,18 @@ public sealed class AccessibilityClientsCollection
     public const string Name = "AccessibilityClients";
 }
 
-/// <summary><c>org.a11y.Status</c> as a test switches it.</summary>
+/// <summary><c>org.a11y.Status</c> as a test switches it. Watched, it tells the status at once, as
+/// the bus's watch does with its first read.</summary>
 internal sealed class FakeStatus(bool on) : IAtSpiStatus
 {
     private Action<bool>? _changed;
     public bool On { get; private set; } = on;
 
-    public bool ReadStatus() => On;
-    public void WatchStatus(Action<bool> changed) => _changed += changed;
+    public void WatchStatus(Action<bool> changed)
+    {
+        _changed += changed;
+        changed(On);
+    }
 
     public void Set(bool on)
     {
@@ -214,6 +218,82 @@ public class AtSpiStatusTests
         reader.Changed();
         Assert.Equal([true, false, true], Settle(bus, 3));
         Assert.Equal(3, bus.Reads);
+    }
+
+    // ── The first read (plan 17, round 4) ──
+    //
+    // The bridge read the status and then subscribed to its changes: a change between the two
+    // (Orca starting while the window opens) sent its signal before anyone listened, the read had
+    // taken the old value, and the bridge stayed off with a reader running until the next change.
+    // Its own read also ran beside the reader's, unserialized. Now the watch subscribes first and
+    // the first read goes through the reader.
+
+    [Fact]
+    public void TheStatus_IsWatchedBeforeItIsRead_SoAChangeBetweenIsNotLost()
+    {
+        // The status is off; it turns on while the watch subscribes, and that change's signal
+        // reaches no one: it came before the match rule was in place.
+        bool value = false;
+        var told = new List<bool>();
+        AtSpiStatusReader.Watch(subscribe: _ => value = true, read: () => value, changed: told.Add);
+        Assert.Equal([true], told);
+    }
+
+    [Fact]
+    public void AChangeDuringTheFirstRead_IsReadAgain_AfterIt()
+    {
+        // The first read is slow (a D-Bus round trip); a change's signal comes while it is out. A
+        // read of the change's own, beside the first, could finish first and be told before it.
+        var bus = new SlowBus { Value = false };
+        var firstOut = bus.Stall(1);
+        Action? signal = null;
+        var watching = Task.Run(() => AtSpiStatusReader.Watch(s => signal = s, bus.Read, bus.Tell));
+        Assert.True(bus.Began[1].Wait(TimeSpan.FromSeconds(10)));
+        bus.Value = true;
+        signal!();
+        // Long enough for a read of its own to run and finish, if the change got one.
+        if (bus.Began[2].Wait(TimeSpan.FromMilliseconds(300))) Settle(bus, 1);
+        firstOut.Set();
+        Assert.True(watching.Wait(TimeSpan.FromSeconds(10)));
+
+        var told = Settle(bus, 2);
+        Assert.Equal([false, true], told);
+        Assert.Equal(2, bus.Reads);
+    }
+
+    private sealed class Host : IAccessibilityActionHost
+    {
+        public int ActiveChanges;
+        public void InvokeElement(ElementId id) { }
+        public void ToggleElement(ElementId id) { }
+        public void SelectElement(ElementId id) { }
+        public void ActiveChanged() => ActiveChanges++;
+    }
+
+    [Fact]
+    public void TheBridge_TakesItsFirstStatus_FromTheWatch_AndWakesNobodyForIt()
+    {
+        var forced = AccessibilityClients.Force;
+        AccessibilityClients.Force = null;
+        try
+        {
+            var host = new Host();
+            var status = new FakeStatus(on: true);
+            using var bridge = new LinuxAccessibilityBridge(new SignalRecorder(), host, status);
+            Assert.True(bridge.IsActive);
+            Assert.True(AccessibilityClients.Active);
+            Assert.Equal(0, host.ActiveChanges);
+
+            // A change wakes the window's loop, whose frames read IsActive.
+            status.Set(false);
+            Assert.False(bridge.IsActive);
+            Assert.Equal(1, host.ActiveChanges);
+        }
+        finally
+        {
+            AccessibilityClients.Report(false);
+            AccessibilityClients.Force = forced;
+        }
     }
 
     [Fact]

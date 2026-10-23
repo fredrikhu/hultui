@@ -25,8 +25,7 @@ public class A11yAtSpiStatusTests
     {
         private Action<bool>? _changed;
         public bool On { get; private set; } = on;
-        public bool ReadStatus() => On;
-        public void WatchStatus(Action<bool> changed) => _changed += changed;
+        public void WatchStatus(Action<bool> changed) { _changed += changed; changed(On); }
         public void Set(bool on) { On = on; _changed?.Invoke(on); }
     }
 

@@ -645,8 +645,7 @@ public class LoopWakeTests
     {
         private Action<bool>? _changed;
         private bool _on;
-        public bool ReadStatus() => _on;
-        public void WatchStatus(Action<bool> changed) => _changed += changed;
+        public void WatchStatus(Action<bool> changed) { _changed += changed; changed(_on); }
         public void Set(bool on) { _on = on; _changed?.Invoke(on); }
     }
 

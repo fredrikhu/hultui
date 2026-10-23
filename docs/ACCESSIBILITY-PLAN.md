@@ -227,7 +227,9 @@ Files:
   - `IsActive` returns true once registration with the AT-SPI registry
     succeeds **and** `org.a11y.Status` says assistive technology is on
     (`IsEnabled` or `ScreenReaderEnabled`, which Orca and accerciser set; the
-    bridge watches the property), as Qt does (2026-10-10, plan 17). The bus is
+    bridge watches the property — subscribed before its first read since 2026-10-24, so a
+    change between the two is not lost, and the first read goes through the same one-at-a-time
+    reader as the changes'), as Qt does (2026-10-10, plan 17). The bus is
     reachable in every GNOME and KDE session, and an active bridge rebuilt the
     tree and sent AT-SPI every change with no reader running: a keystroke in a
     603-node form cost 385 KB against 3.2 KB with no bridge. When the status
