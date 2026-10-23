@@ -73,6 +73,15 @@ jobs:
           fi
           command -v cc >/dev/null || echo "::warning::No C compiler (cc): hultui-cef-helper cannot be built, and the engine reports itself unavailable."
 
+      # Ubuntu 23.10 and later forbid an unconfined program a user namespace
+      # (kernel.apparmor_restrict_unprivileged_userns=1), and Chromium's sandbox is made of them,
+      # so without this CEF never starts and every engine test times out. Option 4 of
+      # docs/design/WEBVIEW-LINUX-BRIEF.md: not something to ask of a user, but this VM is thrown
+      # away after the job. The self-hosted runner before was a Proxmox container, which has its
+      # host's 0.
+      - name: Let Chromium's sandbox make user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # The engine's own tests, on the packaged CEF rather than any the runner has.
       - name: Prove it with the engine tests
         run: |
