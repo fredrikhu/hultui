@@ -1,14 +1,13 @@
 # Builds the Meridian Windows installer.
 #
 # Runs on release tags only. Pushing a tag like `meridian-v1.2.0` builds the
-# installer and publishes a GitHub Release with it attached.
+# installer and publishes a GitHub Release with it attached. Push at most three
+# tags in one `git push`: GitHub fires no push events for a larger one, so no
+# release starts (recover with `gh workflow run meridian-installer.yml --ref <tag>`).
 #
-# Runs on self-hosted runners (see docs/SELF-HOSTED-RUNNERS.md), so the machines
-# have to be awake for a queued job to start. Kept to tags rather than every
-# push from when these were hosted Windows runners, which bill at twice the
-# minute rate and exhausted a month's free allowance in nine days. Use
-# `workflow_dispatch` for an off-tag build — it still produces a CI-versioned
-# installer as an artifact, without publishing a release.
+# GitHub-hosted runners only (docs/CI.md). Use `workflow_dispatch` for an off-tag
+# build — it still produces a CI-versioned installer as an artifact, without
+# publishing a release.
 
 name: Meridian installer
 
@@ -22,22 +21,26 @@ permissions:
 
 concurrency:
   group: meridian-installer-${{ github.ref }}
-  # Never cancelled: every run is now either a release tag or a deliberate
-  # manual build, and neither is worth superseding.
+  # Never cancelled: every run is either a release tag or a deliberate manual
+  # build, and neither is worth superseding.
   cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
 
 jobs:
   test:
-    runs-on: [self-hosted, windows, x64]
+    runs-on: windows-2025
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
-      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
-      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
-      # try to install into that same Program Files directory, which the
-      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
-      # every step after it is skipped.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Build solution
         run: dotnet build HultUI.slnx -c Release
@@ -55,36 +58,44 @@ jobs:
   # HultUI.UiTests — testing each project separately instead would rebuild the
   # shared graph once per project.
   test-linux:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
-      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
-      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
-      # try to install into that same Program Files directory, which the
-      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
-      # every step after it is skipped.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # As in ci.yml: the font- and 7z-gated tests skip without these, naming the package.
+      - name: Install fonts and 7-Zip
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji 7zip
 
       - name: Run tests
         run: dotnet test HultUI.CrossPlatform.slnf -c Release
 
   installer:
     needs: [test, test-linux]
-    runs-on: [self-hosted, windows, x64]
+    runs-on: windows-2025
+    timeout-minutes: 45
     permissions:
       contents: write # for the release step on tag builds
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
-      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
-      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
-      # try to install into that same Program Files directory, which the
-      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
-      # every step after it is skipped.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
-      # Tag meridian-v1.2.0 -> 1.2.0; other builds get a CI prerelease version.
+      # Tag meridian-v1.2.0 -> 1.2.0; other builds get a CI prerelease version. The
+      # version reaches command lines below, so a tag that does not hold one stops here.
       - name: Determine version
         id: version
         shell: pwsh
@@ -94,6 +105,7 @@ jobs:
           } else {
             $version = "0.1.0-ci.$env:GITHUB_RUN_NUMBER"
           }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "Not a version: '$version'" }
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Installer version: $version"
 
@@ -102,19 +114,25 @@ jobs:
       # Two publishes: the windowed app and the console CLI. The installer
       # ships both — the pipeline story is half the product.
       - name: Publish Meridian (win-x64, AOT)
-        run: dotnet publish apps/Meridian/Meridian/Meridian.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet publish apps/Meridian/Meridian/Meridian.csproj -c Release -r win-x64 "-p:Version=$env:VERSION"
 
       - name: Publish the meridian CLI (win-x64, AOT)
-        run: dotnet publish apps/Meridian/Meridian.Cli/Meridian.Cli.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet publish apps/Meridian/Meridian.Cli/Meridian.Cli.csproj -c Release -r win-x64 "-p:Version=$env:VERSION"
 
       - name: Compile installer
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
-          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\Meridian\Meridian\Installer\meridian.iss
+          & $iscc "/DAppVersion=$env:VERSION" apps\Meridian\Meridian\Installer\meridian.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # A convenience copy: the release step attaches the installer from the workspace, so a
@@ -135,8 +153,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           $exe = Get-ChildItem apps\Meridian\Meridian\Installer\Output\*.exe | Select-Object -First 1
           gh release create $env:GITHUB_REF_NAME $exe.FullName `
-            --title "Meridian ${{ steps.version.outputs.version }}" `
+            --title "Meridian $env:VERSION" `
             --generate-notes

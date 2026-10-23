@@ -254,4 +254,4 @@ A session owns process-global state: `Application.Current`, the animation list, 
 
 ## CI
 
-Headless tests need no display server, GPU, or GL — a stock `ubuntu-latest`/`windows-latest` runner works as-is, golden images included (they bring their own fonts). The repo's `test-linux` job in `.github/workflows/junction-installer.yml` is the reference setup. A headless session never loads the SDL3 native library (there's a test asserting exactly that).
+Headless tests need no display server, GPU, or GL — a stock `ubuntu-latest`/`windows-latest` runner works as-is, golden images included (they bring their own fonts). The repo's `test-linux` job in `.github/workflows/ci.yml` is the reference setup ([CI](CI.md)). A headless session never loads the SDL3 native library (there's a test asserting exactly that).

@@ -1,18 +1,18 @@
 # Builds the trimmed LGPL libmpv for HultUI.Media.Mpv (native/mpv/README.md), proves
 # it with the backend tests, and packs HultUI.Media.Mpv.Natives.
 #
-# Runs on the self-hosted runners (docs/SELF-HOSTED-RUNNERS.md). The Windows runner
-# needs an MSYS2 with the MINGW64 packages the README lists; MSYS2_ROOT says where
-# (default C:\msys64). The Ubuntu runner needs the apt packages the README lists.
+# GitHub-hosted runners only (docs/CI.md). The Windows job installs the MSYS2 MINGW64
+# packages the README lists through msys2/setup-msys2; the Ubuntu job apt-installs
+# the README's list.
 #
 # Outputs travel between jobs as assets of a GitHub release, through
 # scripts/release-transport.sh: a tag run uses the release for its tag, a
 # dispatch run a rolling "mpv-natives-ci" prerelease whose assets are replaced each
-# time. Neither artifact storage (a small quota) nor actions/cache (its cross-OS
-# archive fails on the Windows runner) survived contact with these machines.
+# time. The installers of Aperture and Reel fetch libmpv from that release, so it is
+# also how the binary reaches them, and it is useful to a person afterwards.
 #
-# Tags only, plus workflow_dispatch: a native build is half an hour of runner time
-# and the result changes only when versions.env does.
+# Tags only, plus workflow_dispatch: a native build is the better part of an hour of
+# runner time and the result changes only when versions.env does.
 
 name: mpv natives
 
@@ -22,33 +22,53 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: mpv-natives-${{ github.ref }}
   cancel-in-progress: false
 
 env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
   # A tag run publishes to its own release; anything else to the rolling prerelease.
   RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/mpv-natives-v') && github.ref_name || 'mpv-natives-ci' }}
   RELEASE_KIND: ${{ startsWith(github.ref, 'refs/tags/mpv-natives-v') && '' || '--prerelease' }}
 
+# The write token is given to the steps that publish, not to the job: the build
+# steps compile a dozen upstream projects, and none of them needs it.
 jobs:
   windows:
-    runs-on: [self-hosted, windows, x64]
-    env:
-      MSYS2_ROOT: ${{ vars.MSYS2_ROOT || 'C:\msys64' }}
-      GH_TOKEN: ${{ github.token }}
+    runs-on: windows-2025
+    timeout-minutes: 150
+    permissions:
+      contents: write # the binary goes to the release
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # A third-party action, so pinned to a commit rather than a movable tag.
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel git
+            mingw-w64-x86_64-toolchain mingw-w64-x86_64-meson mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf mingw-w64-x86_64-nasm mingw-w64-x86_64-python
+            mingw-w64-x86_64-python-jinja mingw-w64-x86_64-libass mingw-w64-x86_64-dav1d
+            mingw-w64-x86_64-zlib mingw-w64-x86_64-freetype mingw-w64-x86_64-fribidi
+            mingw-w64-x86_64-harfbuzz mingw-w64-x86_64-libpng mingw-w64-x86_64-brotli
+            mingw-w64-x86_64-bzip2 mingw-w64-x86_64-libiconv
 
       - name: Build libmpv (MSYS2 MINGW64)
-        shell: pwsh
-        run: |
-          $env:MSYSTEM = 'MINGW64'
-          $env:CHERE_INVOKING = '1'
-          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && bash ./build-libmpv.sh"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        shell: msys2 {0}
+        run: cd native/mpv && bash ./build-libmpv.sh
 
       - name: Prove it with the backend tests
         shell: pwsh
@@ -57,39 +77,37 @@ jobs:
           $env:HULTUI_MPV_EXPECT_LGPL = '1'
           dotnet test tests/HultUI.Media.Backends.Tests -c Release
 
+      # Git for Windows' bash, which is enough here: the transport is Python, found on PATH.
       - name: Publish the binary to the release
-        shell: pwsh
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $env:MSYSTEM = 'MINGW64'
-          $env:CHERE_INVOKING = '1'
-          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && bash ../../scripts/release-transport.sh ensure '$env:RELEASE_TAG' $env:RELEASE_KIND && bash ../../scripts/release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/libmpv-2.dll libmpv-2.dll && bash ../../scripts/release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/LICENCE-REPORT.txt LICENCE-REPORT-win-x64.txt"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cd native/mpv
+          bash ../../scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
+          bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/win-x64/libmpv-2.dll libmpv-2.dll
+          bash ../../scripts/release-transport.sh upload "$RELEASE_TAG" out/win-x64/LICENCE-REPORT.txt LICENCE-REPORT-win-x64.txt
 
   linux:
-    runs-on: [self-hosted, linux, x64]
-    env:
-      GH_TOKEN: ${{ github.token }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write # the binary goes to the release
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      # The runner account is unprivileged (docs/SELF-HOSTED-RUNNERS.md). With
-      # passwordless sudo the packages install themselves; without it, the job says
-      # what to install and stops before spending half an hour to find out.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
       - name: Build dependencies
         run: |
-          pkgs="build-essential git meson ninja-build nasm pkg-config python3 python3-jinja2 autoconf automake libtool \
-                libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev libdav1d-dev zlib1g-dev \
-                libasound2-dev libpulse-dev libpipewire-0.3-dev libgl-dev"
-          if sudo -n true 2>/dev/null; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq $pkgs
-          else
-            missing=""
-            for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"; done
-            if [ -n "$missing" ]; then
-              echo "::error::Missing packages on this runner and no passwordless sudo. Install as root: apt install -y$missing"
-              exit 1
-            fi
-          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential git meson ninja-build nasm pkg-config python3 python3-jinja2 \
+            autoconf automake libtool libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev libdav1d-dev \
+            zlib1g-dev libasound2-dev libpulse-dev libpipewire-0.3-dev libgl-dev
 
       - name: Build libmpv
         run: cd native/mpv && bash ./build-libmpv.sh
@@ -98,6 +116,8 @@ jobs:
         run: HULTUI_MPV_PATH="$PWD/native/mpv/out/linux-x64/libmpv.so.2" HULTUI_MPV_EXPECT_LGPL=1 dotnet test tests/HultUI.Media.Backends.Tests -c Release
 
       - name: Publish the binary to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cd native/mpv
           bash ../../scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
@@ -106,13 +126,22 @@ jobs:
 
   package:
     needs: [windows, linux]
-    runs-on: [self-hosted, linux, x64]
-    env:
-      GH_TOKEN: ${{ github.token }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write # the package goes to the release
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Fetch both binaries from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cd native/mpv
           bash ../../scripts/release-transport.sh download "$RELEASE_TAG" libmpv-2.dll out/win-x64/libmpv-2.dll
@@ -120,20 +149,27 @@ jobs:
           bash ../../scripts/release-transport.sh download "$RELEASE_TAG" libmpv.so.2 out/linux-x64/libmpv.so.2
           bash ../../scripts/release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-linux-x64.txt out/linux-x64/LICENCE-REPORT.txt
 
-      # Tag mpv-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp.
+      # Tag mpv-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp. The
+      # version reaches a command line below, so a tag that does not hold one stops here.
       - name: Version
         id: version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/mpv-natives-v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/mpv-natives-v}" >> "$GITHUB_OUTPUT"
+            version=${GITHUB_REF#refs/tags/mpv-natives-v}
           else
-            echo "version=0.0.0-ci.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            version=0.0.0-ci.$GITHUB_RUN_NUMBER
           fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Not a version: '$version'"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Pack
-        run: dotnet pack src/HultUI.Media.Mpv.Natives/HultUI.Media.Mpv.Natives.csproj -c Release -o artifacts/packages -p:Version=${{ steps.version.outputs.version }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet pack src/HultUI.Media.Mpv.Natives/HultUI.Media.Mpv.Natives.csproj -c Release -o artifacts/packages "-p:Version=$VERSION"
 
       - name: Publish the package to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           for f in artifacts/packages/*.nupkg; do
             bash scripts/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"

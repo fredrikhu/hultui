@@ -185,7 +185,7 @@ out of a shipped build. See [DevTools](docs/DEVTOOLS.md).
 - [Headless Testing](docs/HEADLESS.md) -- drive an app with a virtual clock and assert on what it rendered
 - [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
 - [Packaging](docs/PACKAGING.md) -- what ships, and the gates before anything is published
-- [Self-Hosted Runners](docs/SELF-HOSTED-RUNNERS.md) -- optional Windows and Proxmox build hosts
+- [Continuous Integration](docs/CI.md) -- the workflows, the GitHub-hosted runners they use, and the rules for a public repository
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
 
 ### Building the docs site

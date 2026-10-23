@@ -9,7 +9,8 @@
 # (the same CEF version and build, another architecture). As two jobs, arm64 published from
 # runs whose linux-x64 tests had failed.
 #
-# Tags only, plus workflow_dispatch: the result changes only when versions.env does.
+# GitHub-hosted runners only (docs/CI.md). Tags only, plus workflow_dispatch: the result
+# changes only when versions.env does.
 name: cef natives
 
 on:
@@ -18,23 +19,44 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: cef-natives-${{ github.ref }}
   cancel-in-progress: false
 
 env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
   RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/cef-natives-v') && github.ref_name || 'cef-natives-ci' }}
   RELEASE_KIND: ${{ startsWith(github.ref, 'refs/tags/cef-natives-v') && '' || '--prerelease' }}
 
 jobs:
   pack:
-    runs-on: [self-hosted, linux, x64]
-    env:
-      GH_TOKEN: ${{ github.token }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write # the packages go to the release
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # build.sh: bzip2 to unpack, and a strip that reads each RID's ELF. The engine tests:
+      # CEF's own libraries (the ones an application's .deb declares;
+      # src/HultUI.WebView.Cef.Natives/README.md), Mesa to render in software, and a C
+      # compiler for hultui-cef-helper. The image has most of these already.
+      - name: Install what the build and the engine tests need
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl bzip2 binutils binutils-aarch64-linux-gnu build-essential \
+            libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libasound2t64 \
+            libglib2.0-0t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxkbcommon0 libpango-1.0-0 \
+            libcairo2 libgbm1 libegl1 libgl1 libegl-mesa0 libgl1-mesa-dri
 
       - name: Fetch, check, flatten and strip CEF for linux-x64
         run: native/cef/build.sh linux-x64
@@ -65,25 +87,33 @@ jobs:
       - name: Fetch, check, flatten and strip CEF for linux-arm64
         run: native/cef/build.sh linux-arm64
 
+      # Tag cef-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp. The
+      # version reaches a command line below, so a tag that does not hold one stops here.
       - name: Version
         id: version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/cef-natives-v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/cef-natives-v}" >> "$GITHUB_OUTPUT"
+            version=${GITHUB_REF#refs/tags/cef-natives-v}
           else
-            echo "version=0.0.0-ci.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            version=0.0.0-ci.$GITHUB_RUN_NUMBER
           fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Not a version: '$version'"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           for rid in linux-x64 linux-arm64; do
             dotnet pack src/HultUI.WebView.Cef.Natives/HultUI.WebView.Cef.Natives.csproj -c Release -o artifacts/packages \
-              -p:Rid=$rid -p:Version=${{ steps.version.outputs.version }}
+              -p:Rid=$rid "-p:Version=$VERSION"
           done
 
       # Each upload replaces an asset of the same name; a rolling release's older builds have
       # other names (the version is in them), so they are pruned, or each run added 300 MB.
       - name: Publish the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           bash scripts/release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
           for rid in linux-x64 linux-arm64; do
@@ -92,7 +122,3 @@ jobs:
               bash scripts/release-transport.sh prune "$RELEASE_TAG" "HultUI.WebView.Cef.Natives.$rid." "$(basename "$f")"
             done
           done
-
-      - name: Free the runner's disk
-        if: always()
-        run: rm -rf native/cef/out native/cef/cache artifacts/packages engine-tests.log
