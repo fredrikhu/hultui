@@ -5,14 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–2 landed, step 3 resumed 2026-10-24 (its changes 1–2 committed
-  968bd8d1, 1698b4a6; change 3 was uncommitted when the weekly limit cut the agent off on 2026-10-13;
-  the same agent was resumed from its transcript to finish it). origin/main moved meanwhile to a9081035
-  (another session: MPL-2.0 licence, repository renamed to hultui-revamped) — merge it at round end.
-  **Weekly usage at 99 % (2026-10-13 evening):** after step 3 the loop pauses until the weekly reset
-  (Sunday 2026-10-18 05:00); a one-shot job in this session (CronCreate 5b483f32, 05:07 Oct 18) runs the
-  `/loop` line then. **On resume, first check `git status` and the last commits:** if the limit cut step 3
-  (or any step) off mid-way, finish or revert its uncommitted edits by reverse edit before the next step.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–3 landed, step 4 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -85,7 +78,7 @@ Correctness first, then value per cost.
    handlers acting on key-up or wheel). Vesper's root and pane-row PointerMove handlers
    (CommanderApp.cs:745, CommanderApp.Views.cs:452) and Junction's review rows (JunctionApp.Review.cs:687)
    go passive: 60 idle moves → 0 frames. Suite row: key-down and key-up apart, frames per press.
-3. **a11y correctness** (7): **button-isenabled-rebuild** (approved; IsEnabled set on the live element is
+3. ~~**a11y correctness**~~ LANDED 968bd8d1, 1698b4a6, 9218026a, 78f3a22b (7): **button-isenabled-rebuild** (approved; IsEnabled set on the live element is
    never told), **atspi-reorder-signal** (approved; one children-changed:add per moved child in index
    order — live 17/17 cases match with the prototype in the scratchpad `r4a11y/reorder-proto.diff`),
    **a11y-uia-host-reads-off-thread** (UIA reads answer from the node, not a live-tree walk on a UIA
@@ -148,6 +141,8 @@ Correctness first, then value per cost.
 Re-ranked by the round 5 survey.
 
 - **a11y-textarea-text-pattern** (7; approved rule) — after step 4, if step 4 did not take it.
+- **richtext-readonly-a11y** (7, from step 3, unverified) — `RichTextEditorElement.ReadOnly` marks paint only, so a
+  change may not reach the text version a reader sees until something else rebuilds the tree. Check.
 - **terminal-noop-scrollback-wheel** (2/Terminal, from step 2) — Terminal raises ContentChanged (a frame) on a
   scrollback wheel notch at the top that scrolls nothing.
 - **a11y-virtual-items-and-selection** (7; added events approved) — lists over 2,000: AT-SPI ChildCount 0,
@@ -315,6 +310,10 @@ Re-ranked by the round 5 survey.
 | 4 | 94fc1ef | tooling-textbench-warmup | The JIT warm-up runs on a second scenario set following the measurement's index sequence, cold rows get a new string per call, warm-up runs ≥3 s then until the compiled-method count is flat for 1 s (cap 30 s), and a health line prints. Methods compiled during measurement 914–960 → 126; run-to-run spread 2× → ≤12 %; cold rows −1…−6 %, resize rows −7…−60 % min (the old warm-up measured them partly at tier 0). Old TextBench captures are not comparable across this change. |
 | 4 | c0560e1, 82ee093 | events-noop-input-frames | Every input follows the move rule: a frame when an ordinary handler ran for an event the input dispatched on that event's path (key, press with focus/blur, release with click, ScrollEvent, drag enter/over/leave), hover changed, something marked itself dirty, a drag was active before/after, focus moved, or the keyboard-focus flag flipped; F12 marks the root; the safety net for app handlers stays (HULTUI002). Audit of every owned/passive handler; one miss fixed (Terminal's IME composition clear did not mark). Shadow audit: 69/70 skipped no-op inputs pixel-identical (the 70th a test's off-thread echo). Real windows AOT, UIA listening: frames per key press 2 → 1; frame time per press Junction 2.0 → 1.18 ms (−42…−44 %), Vesper 1.64 → 0.92 (−40…−47 %); no-op wheel notches 16–20 → 0 frames. New rows: key press 1.326 → 0.696 ms JIT (−47.5 %), −45.9 % AOT; 20 no-op wheel notches 5.4 → 0.005 ms. 0 slower. ELEMENTS.md "Which inputs draw a frame". |
 | 4 | 4000186, ea4e01a | apps-vesper-passive-move-handlers | Vesper's root and pane-row PointerMove handlers and Junction's review rows are passive and listen only while they act; **`Element.OnPassive<TEvent>(Action<TEvent>, Func<bool> listening)` made public** (API addition). Vesper: 60 idle moves along a row 57–60 → 1 frame; 104 → 40 B per move. Tests incl. right-drag mark, Find grip, review drag. |
+| 4 | 968bd8d1 | button-isenabled-rebuild | Approved. `ButtonElement.IsEnabled` notifies (the only control with an enabled state). UIA IsEnabled and AT-SPI enabled + sensitive now told for a direct off/on and in a rebuild's own frame; live WSL: a directly disabled button stayed enabled in the client's cache 2/2 → 0/2. Allocation identical on 124 rows. 8 tests. |
+| 4 | 1698b4a6 | atspi-reorder-signal | Approved. One children-changed:add per child out of place in the client's cached list (previous snapshot minus departed children), added children through the same pass, a trailing run keeps one signal. Live WSL: all 7 reorder shapes read the old order before; 17/17 insert and reorder cases match after. Apply after reversing 1,000 children 265.4 → 287.3 KB (999 signals). UIA unchanged. 15 tests on the `AtSpiClientCache` model. |
+| 4 | 9218026a | atspi-status-subscribe-first | `AtSpiStatusReader.Watch` subscribes to org.a11y.Status, then makes the first read through the same reader (a change during subscription or a slow first read is read again); live WSL 29/29. |
+| 4 | 78f3a22b | a11y-uia-host-reads-off-thread | Every UIA pattern read (value, toggle, range, item selected, list selection, find, scroll, on-demand items) and RaiseScrolled answer from the applied node; new rare node data `ScrollExtent` and `ItemSource` (API additions; `IUiaHostBridge` reads stay, unused). Visits per UIA read on a 1,533-element page 1,494–1,532 → 0; scroll refresh UI-thread reads 2 → 0. Events and trees identical in 18 scripts; pattern answers now match their properties (a switch's Toggle pattern said indeterminate). a11y/create +0.2 KB/op; 0 slower. |
 
 ## Examined, not worth it
 
@@ -704,3 +703,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   listening)` public. Guideline notes: a mostly-idle move handler goes in OnPassive with a cached
   listening delegate; any ordinary handler costs a full frame each run (incl. a root KeyDown/PointerUp
   ignoring most input, any KeyUp); a control callback that changes something visible must mark dirty.
+- 2026-10-24: step 3 landed after the weekly reset (968bd8d1, 1698b4a6, 9218026a, 78f3a22b): button
+  enabled state and AT-SPI reorders told; status subscribed before read; UIA reads from the node (0 visits).
+  Windows suites and WSL pass.
