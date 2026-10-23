@@ -281,12 +281,12 @@ using var a = HeadlessSession.Create();
 using var b = HeadlessSession.Create();
 a.Window.SetRoot(DeskA());                 // enters A
 b.Window.SetRoot(DeskB());                 // enters B
-a.MakeCurrent();                           // before calling A's app code directly
+a.Enter();                           // before calling A's app code directly
 storeA.SignIn("reader-a");
 b.PumpUntil(() => b.Window.FindByText("Locked by reader-a") is not null);
 ```
 
-Call `session.MakeCurrent()` before a test calls one session's app code directly (a store, a component's constructor); `session.Application.Post(action)` posts to a session whatever is current. Work started with no session entered (a `Thread` of its own, a callback that does not flow the `ExecutionContext`) goes to the session entered last, as does work started by a session since disposed. Only headless applications run side by side: a real window beside any other application still throws.
+Call `session.Enter()` before a test calls one session's app code directly (a store, a component's constructor); `session.Application.Post(action)` posts to a session whatever is current. Work started with no session entered (a `Thread` of its own, a callback that does not flow the `ExecutionContext`) goes to the session entered last, as does work started by a session since disposed. Only headless applications run side by side: a real window beside any other application still throws.
 
 It does not stop work already on another thread. What the framework posts back for it — an `AsyncLoader` retry still waiting out its backoff, a pooled load — goes to the application that started it, so the next session neither wakes for it nor runs it (it once did: a failed load's retry, 0.5 s after its test ended, woke whichever test came next). A test's own `Task.Run` that posts with `Application.InvokeOnMainThread` reaches whichever session is current when it lands: wait for it before the test returns. For the same reason a session's wake count (`Platform.WakeCalls`) takes wakes from any thread: assert that a call asks for no wake where the wake is asked for (`AccessibilityActionRouter.WakesAsked`), never as an unchanged count across a real sleep.
 

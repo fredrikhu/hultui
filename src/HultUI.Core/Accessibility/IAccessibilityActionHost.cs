@@ -39,7 +39,7 @@ public interface IAccessibilityActionHost
 
     /// <summary>Scrolls every scroll view holding the element (or list item) until it is in
     /// view, as moving the keyboard to it would.</summary>
-    void ScrollIntoView(ElementId id) { }
+    void ScrollElementIntoView(ElementId id) { }
 
     /// <summary>
     /// The bridge's <see cref="IAccessibilityBridge.IsActive"/> may have changed, on any thread:

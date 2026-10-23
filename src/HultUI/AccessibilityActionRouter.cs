@@ -181,7 +181,7 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
     /// item is scrolled into its list first (it may have no element); a described node brings its
     /// owner into view.
     /// </summary>
-    public void ScrollIntoView(ElementId id) => Enqueue(() =>
+    public void ScrollElementIntoView(ElementId id) => Enqueue(() =>
     {
         if (ContentNodeId.TryDecode(id, out var owner, out _)) id = owner;
         else if (VirtualItemId.TryDecode(id, out var listId, out var index))

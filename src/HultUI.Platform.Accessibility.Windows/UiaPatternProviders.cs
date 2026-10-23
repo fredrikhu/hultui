@@ -255,7 +255,7 @@ internal sealed class UiaScrollItemProvider(WindowsAccessibilityBridge bridge, E
 {
     public int ScrollIntoView()
     {
-        bridge.ScrollIntoView(elementId);
+        bridge.ScrollElementIntoView(elementId);
         return 0;
     }
 }

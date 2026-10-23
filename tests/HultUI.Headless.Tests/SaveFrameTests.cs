@@ -105,6 +105,54 @@ public sealed class SaveFrameTests : IDisposable
     }
 
     [Fact]
+    public void ASaveFromAnotherThread_FailsWhenTheApplicationGoesBeforeItArrives()
+    {
+        var session = Session();
+        var window = session.Window.Window;
+        Task? before = null;
+        var other = new Thread(() => before = window.SaveFrame(Path.Combine(_dir, "before.png")));
+        other.Start();
+        other.Join();
+        session.Dispose();   // the posted save never reaches the UI thread
+
+        Task? after = null;
+        other = new Thread(() => after = window.SaveFrame(Path.Combine(_dir, "after.png")));
+        other.Start();
+        other.Join();
+
+        foreach (var save in new[] { before!, after! })
+        {
+            Assert.True(save.IsFaulted);
+            Assert.IsType<ObjectDisposedException>(save.Exception!.GetBaseException());
+        }
+    }
+
+    [Fact]
+    public void WithSessionsSideBySide_ARequestIsServedByTheSessionWithTheWindow()
+    {
+        using var a = Session();
+        using var b = Session();
+        b.CreateWindow("B").SetRoot(Box.New().Background(Color.FromHex("#10B981")));
+        b.PumpFrames(2);
+        using var watchA = FrameRequests.Start(a.Application, _dir);
+        using var watchB = FrameRequests.Start(b.Application, _dir);
+
+        string staged = Path.Combine(_dir, "x.tmp");
+        File.WriteAllText(staged, "B");
+        File.Move(staged, Path.Combine(_dir, "x.request"));
+
+        string png = Path.Combine(_dir, "x.png");
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!File.Exists(png) && DateTime.UtcNow < until)
+        {
+            a.PumpFrame();   // A has no window B: it leaves the request alone
+            b.PumpFrame();
+        }
+        Assert.True(File.Exists(png));
+        Assert.False(File.Exists(Path.Combine(_dir, "x.error")));
+    }
+
+    [Fact]
     public void ARequestFileFromATool_WritesThePrimaryWindowsFrame_WithoutInput()
     {
         using var session = Session();

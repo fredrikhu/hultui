@@ -11,7 +11,7 @@ using Text = HultUI.Core.Builders.Text;
 /// <summary>
 /// Headless sessions side by side: two desks of one system in one test, each its own
 /// application. Each keeps its own main-thread queue, synchronization context, tweens and
-/// AsyncLoader queue; what a test drives (a pump, input, a root, <see cref="HeadlessSession.MakeCurrent"/>)
+/// AsyncLoader queue; what a test drives (a pump, input, a root, <see cref="HeadlessSession.Enter"/>)
 /// says which one the code on the thread runs for, and work that code starts carries it along.
 /// And a session a test never disposed no longer poisons the process: the next one is created
 /// beside it.
@@ -31,9 +31,9 @@ public class SideBySideSessionTests
         var ran = new List<string>();
         a.Application.Post(() => ran.Add("a"));
         b.Application.Post(() => ran.Add("b"));
-        a.MakeCurrent();
+        a.Enter();
         Application.InvokeOnMainThread(() => ran.Add("a, static"));
-        b.MakeCurrent();
+        b.Enter();
         Application.InvokeOnMainThread(() => ran.Add("b, static"));
 
         b.PumpFrame();
@@ -54,7 +54,7 @@ public class SideBySideSessionTests
 
         // A worker started while A runs, which posts after the test has moved on to B: a desk's
         // server push, a file watcher.
-        a.MakeCurrent();
+        a.Enter();
         var gate = new TaskCompletionSource();
         bool workerRan = false;
         var worker = Task.Run(async () =>
@@ -72,7 +72,7 @@ public class SideBySideSessionTests
         }
         var continuation = ResumeAsync();
 
-        b.MakeCurrent();
+        b.Enter();
         gate.SetResult();
         // Not awaited: the test's own continuation would go to B's queue, which nothing drains.
         Assert.True(worker.Wait(TimeSpan.FromSeconds(10)));
@@ -93,7 +93,7 @@ public class SideBySideSessionTests
         using var a = HeadlessSession.Create();
         using var b = HeadlessSession.Create();
 
-        a.MakeCurrent();
+        a.Enter();
         float aValue = 0f;
         Animate.Value(0f, 1f, v => aValue = v).Duration(1f).Start();
 
@@ -118,7 +118,7 @@ public class SideBySideSessionTests
         using var a = HeadlessSession.Create();
         using var b = HeadlessSession.Create();
 
-        a.MakeCurrent();
+        a.Enter();
         var loader = new AsyncLoader<string>("empty");
         loader.Load("key", () => "loaded");
 
@@ -150,7 +150,7 @@ public class SideBySideSessionTests
         Assert.True(ran);
 
         // A post to B itself goes nowhere, not to A.
-        Assert.Throws<ObjectDisposedException>(() => b.MakeCurrent());
+        Assert.Throws<ObjectDisposedException>(() => b.Enter());
         bool stray = false;
         b.Application.Post(() => stray = true);
         a.PumpFrame();

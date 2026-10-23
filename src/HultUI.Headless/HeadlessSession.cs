@@ -142,13 +142,11 @@ public sealed class HeadlessSession : IDisposable
     /// several sessions directly (a store's method, a component's constructor). A no-op while it is
     /// the only session.
     /// </summary>
-    public void MakeCurrent()
+    public void Enter()
     {
         ThrowIfDisposed();
         Application.Enter();
     }
-
-    internal void Enter() => Application.Enter();
 
     private HeadlessWindow Wrap(Window window)
         => new(this, window, (HeadlessPlatformWindow)window.PlatformWindow);

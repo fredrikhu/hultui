@@ -11,6 +11,11 @@ public sealed partial class Window
     /// UI thread only.</summary>
     private readonly List<(string Path, TaskCompletionSource Done)> _frameSaves = [];
 
+    /// <summary>Saves asked for from another thread, on their way to the UI thread: failed by
+    /// <see cref="Dispose"/> when the window goes before they arrive (a disposed application
+    /// drops what is posted to it). Under its own lock.</summary>
+    private readonly List<TaskCompletionSource> _frameSavesPosted = [];
+
     /// <summary>
     /// Writes the window's next complete frame to <paramref name="path"/> as a PNG, at device
     /// pixels, read from the surface HultUI draws into rather than from the screen: whole whatever
@@ -33,8 +38,24 @@ public sealed partial class Window
         path = Path.GetFullPath(path);
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (UIThread.IsCurrent) QueueFrameSave(path, done);
-        // To this window's application, not whichever is current (headless sessions side by side).
-        else Application.Post(() => QueueFrameSave(path, done));
+        else
+        {
+            lock (_frameSavesPosted)
+            {
+                if (_disposed || Application.IsDisposed)
+                {
+                    done.TrySetException(new ObjectDisposedException(nameof(Window)));
+                    return done.Task;
+                }
+                _frameSavesPosted.Add(done);
+            }
+            // To this window's application, not whichever is current (headless sessions side by side).
+            Application.Post(() =>
+            {
+                lock (_frameSavesPosted) _frameSavesPosted.Remove(done);
+                QueueFrameSave(path, done);
+            });
+        }
         return done.Task;
     }
 
@@ -122,5 +143,11 @@ public sealed partial class Window
         foreach (var save in _frameSaves)
             save.Done.TrySetException(new ObjectDisposedException(nameof(Window)));
         _frameSaves.Clear();
+        lock (_frameSavesPosted)
+        {
+            foreach (var done in _frameSavesPosted)
+                done.TrySetException(new ObjectDisposedException(nameof(Window)));
+            _frameSavesPosted.Clear();
+        }
     }
 }

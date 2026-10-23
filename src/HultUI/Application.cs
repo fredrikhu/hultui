@@ -82,6 +82,30 @@ public sealed class Application : IDisposable
     /// </summary>
     internal static Application? Current => _current;
 
+    /// <summary>Whether this is the oldest application alive in the process (the only one, unless
+    /// headless sessions run side by side). <see cref="FrameRequests"/> serves an empty request
+    /// from it.</summary>
+    internal bool IsOldestLive
+    {
+        get { lock (s_live) return s_live.Count > 0 && s_live[0] == this; }
+    }
+
+    /// <summary>Whether any application alive has an open window titled <paramref name="title"/>,
+    /// read from one application's UI thread about all of them: for <see cref="FrameRequests"/>,
+    /// which only says no window has the title when none does.</summary>
+    internal static bool AnyOpenWindowTitled(string title)
+    {
+        Application[] live;
+        lock (s_live) live = [.. s_live];
+        foreach (var app in live)
+        {
+            // Another application's list, copied whole (List.CopyTo never throws on a change).
+            foreach (var window in app._windows.ToArray())
+                if (window is not null && window.IsOpen && window.Title == title) return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// The first window created by this application.
     /// </summary>

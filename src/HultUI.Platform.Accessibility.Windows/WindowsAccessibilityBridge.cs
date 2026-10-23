@@ -952,7 +952,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal void SelectElement(ElementId id) => _host.SelectElement(id);
     internal void SetValue(ElementId id, string value) => _host.SetValue(id, value);
     internal void ExpandCollapse(ElementId id, bool expand) => _host.ExpandCollapseElement(id, expand);
-    internal void ScrollIntoView(ElementId id) => _host.ScrollIntoView(id);
+    internal void ScrollElementIntoView(ElementId id) => _host.ScrollElementIntoView(id);
     /// <summary>Whether a node's value may not be written: a text area's or a rich text editor's,
     /// as the text it offers says (read from the node, on any thread, as its text pattern is).</summary>
     internal bool IsValueReadOnly(ElementId id) => GetText(id) is { IsReadOnly: true };

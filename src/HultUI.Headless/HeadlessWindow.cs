@@ -131,7 +131,7 @@ public sealed partial class HeadlessWindow
 
     public void SetRoot(Element root)
     {
-        _session.Enter();
+        _session.Application.Enter();
         Window.SetRoot(root);
     }
 

@@ -33,7 +33,8 @@ public sealed class HeadlessWindowsFrame
     /// <summary>
     /// The invisible resize border, in pixels, at each display scale: Windows 11's standard
     /// frame (<c>SM_CXFRAME</c> + <c>SM_CXPADDEDBORDER</c>), 8 at 100 %, 9 at 125 %, 11 at
-    /// 150 % and 13 at 200 %.
+    /// 150 % and 13 at 200 %. Taken at the scale of the window's own monitor, as the custom frame
+    /// takes it (<c>GetSystemMetricsForDpi</c> at <c>GetDpiForWindow</c>), not the primary's.
     /// </summary>
     public IReadOnlyDictionary<float, int> ResizeBorders { get; init; } = new Dictionary<float, int>
     {

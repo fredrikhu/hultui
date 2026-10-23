@@ -26,7 +26,7 @@ public interface IUiaHostBridge
     void ExpandCollapseElement(ElementId id, bool expand) => InvokeElement(id);
 
     /// <summary>ScrollItem: scrolls the element (or list item) into view. The default does nothing.</summary>
-    void ScrollIntoView(ElementId id) { }
+    void ScrollElementIntoView(ElementId id) { }
 
     /// <summary>
     /// Current display scale (OS DPI factor, e.g. 1.5 at 150%). Element bounds

@@ -10,6 +10,9 @@ namespace HultUI;
 /// <c>&lt;name&gt;.png</c>, moved into place whole, and the request is deleted; when it cannot be
 /// written, <c>&lt;name&gt;.error</c> says why. Read when the application starts; unset, nothing
 /// watches and nothing is paid.</para>
+///
+/// <para>With headless sessions side by side, each application watches: a title is served by the
+/// session that has the window, and an empty request by the oldest session alive.</para>
 /// </summary>
 internal static class FrameRequests
 {
@@ -54,10 +57,20 @@ internal static class FrameRequests
             try
             {
                 string title = File.ReadAllText(request).Trim();
-                var window = title.Length == 0
-                    ? application.PrimaryWindow
-                    : application.Windows.FirstOrDefault(w => w.IsOpen && w.Title == title)
-                        ?? throw new InvalidOperationException($"No open window is titled \"{title}\".");
+                Window? window;
+                if (title.Length == 0)
+                {
+                    // Headless sessions side by side each watch: the oldest answers.
+                    if (!application.IsOldestLive) return;
+                    window = application.PrimaryWindow;
+                }
+                else
+                {
+                    window = application.Windows.FirstOrDefault(w => w.IsOpen && w.Title == title);
+                    // Another session's window: left for its own watcher.
+                    if (window is null && Application.AnyOpenWindowTitled(title)) return;
+                    if (window is null) throw new InvalidOperationException($"No open window is titled \"{title}\".");
+                }
                 File.Delete(request);
                 saved = window.SaveFrame(png);
             }

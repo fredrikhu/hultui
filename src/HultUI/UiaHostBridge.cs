@@ -47,7 +47,7 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
     public void SetValue(ElementId id, string value) => _router.SetValue(id, value);
     public void RequestFocus(ElementId id) => _router.RequestFocus(id);
     public void ExpandCollapseElement(ElementId id, bool expand) => _router.ExpandCollapseElement(id, expand);
-    public void ScrollIntoView(ElementId id) => _router.ScrollIntoView(id);
+    public void ScrollElementIntoView(ElementId id) => _router.ScrollElementIntoView(id);
 
     /// <summary>A client asked for the root. If the window has not built a tree for a listening
     /// client yet (one has just attached), the loop wakes and its next frame builds it.</summary>

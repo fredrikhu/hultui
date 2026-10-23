@@ -278,7 +278,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         int px = _captionHeightPx;
         if (IsFullscreen) px = 0;
         else if (IsZoomed(_hwnd))
-            px += GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            px += FrameBorder(_hwnd, SM_CYFRAME);
         var margins = new MARGINS { CyTopHeight = px };
         DwmExtendFrameIntoClientArea(_hwnd, ref margins);
     }
@@ -421,8 +421,8 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // content isn't clipped off the edges of the screen.
         if (IsZoomed(hwnd))
         {
-            int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            int fx = FrameBorder(hwnd, SM_CXFRAME);
+            int fy = FrameBorder(hwnd, SM_CYFRAME);
             p->rgrc0.Left += fx;
             p->rgrc0.Top += fy;
             p->rgrc0.Right -= fx;
@@ -589,7 +589,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
             // Alt+Space: below the top-left corner of the visible caption,
             // like the native menu.
             GetWindowRect(hwnd, out RECT wr);
-            int inset = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            int inset = FrameBorder(hwnd, SM_CXFRAME);
             x = wr.Left + (zoomed ? inset : 0);
             y = wr.Top + (zoomed ? inset : 0) + _captionHeightPx;
         }
@@ -704,8 +704,20 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     [DllImport("user32", EntryPoint = "PostMessageW")]
     private static extern bool PostMessageW(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
 
+    /// <summary>The standard frame's resize border (<paramref name="frameMetric"/> plus the padded
+    /// border) at the window's own DPI, not the system's: maximized on a monitor at another scale
+    /// than the primary, Windows hangs that monitor's frame off-screen.</summary>
+    private static int FrameBorder(IntPtr hwnd, int frameMetric)
+    {
+        uint dpi = GetDpiForWindow(hwnd);
+        return GetSystemMetricsForDpi(frameMetric, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    }
+
     [DllImport("user32")]
-    private static extern int GetSystemMetrics(int nIndex);
+    private static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+    [DllImport("user32")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
 
     [DllImport("user32")]
     private static extern bool IsZoomed(IntPtr hWnd);
