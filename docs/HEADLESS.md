@@ -150,6 +150,61 @@ window.DumpAccessibilityTree();                        // debugging
 
 A handle pairs the snapshot (`Name`, `Value`, `Role`, `Bounds`, `IsToggled`, …) with the live element. Interactions (`handle.Click()`) inject input at the element's *current* position; snapshot properties are frozen at query time — re-query after interacting.
 
+### Locators and expectations
+
+A Playwright-style layer over the same tree, on **virtual** time. A locator is lazy — it
+resolves against the current tree every time it is used — and belongs to its window, hence its
+session:
+
+```csharp
+using static HultUI.Headless.HeadlessExpect;
+
+session.GetByRole(AccessibilityRole.Button, "Save").Click();       // name: case-insensitive substring
+session.GetByLabel("Email").Fill("a@b.c");                          // select all + type
+session.GetByTestId("search-box").Press(KeyCode.Enter);             // AutomationId
+session.GetByRole(AccessibilityRole.ComboBox).SelectOption("Beta");
+session.GetByRole(AccessibilityRole.Checkbox, "Remember me").Check();
+var rows = session.GetByRole(AccessibilityRole.Group);
+rows.Filter("Beta").GetByRole(AccessibilityRole.Button, "Delete").Click();   // chained, within
+rows.First / rows.Nth(2) / rows.Count / rows.All() / rows.Resolve();
+
+Expect(session.GetByText("Saved")).ToBeVisible();                   // pumps until true
+Expect(rows).ToHaveCount(2);
+Expect(session.GetByLabel("Email"), TimeSpan.FromSeconds(1)).ToHaveValue("a@b.c");
+```
+
+- **Matching.** `GetByRole(role, name?, exact?)` and `GetByText(text, exact?)` match a name (or,
+  for text, a value) as a case-insensitive, whitespace-normalised substring; `exact: true` is
+  ordinal equality. `GetByLabel` finds a control (field, checkbox, combo, slider, button) whose
+  accessible name matches, or the first control after a matching label among its siblings —
+  HultUI has no label-for association, so the "label, then field" row is the convention.
+  `GetByTestId` is the `AutomationId`. The window's root node is searched too. On a
+  `HeadlessWindow` the text form is `GetByText(text, exact)` — the one-argument
+  `GetByText(text)` is still the eager query above.
+- **Strict.** An action, or an assertion on one element, that matches several fails at once
+  with `Strict mode violation`, listing each match (role, name, bounds). `ToHaveCount` is the
+  one that is not strict.
+- **Actions wait.** `Click`, `Fill`, `Press`, `Hover`, `Check`/`Uncheck`, `SelectOption` pump
+  frames until exactly one element matches and it is visible (non-empty bounds, not offscreen),
+  enabled and *stable* — the same bounds on two frames in a row — then act through the input
+  driver above (a click at the centre of `WindowBorderBox`). So every action costs at least one
+  frame of virtual time; a test of double-click timing uses the driver directly. A timeout says
+  what it was waiting for (`element is disabled: Button "Send" bounds=…`).
+  `SelectOption` drives a `Dropdown` the way a person does: a click to open, Home, Down, Enter.
+- **Expectations** (`HeadlessExpect.Expect(locator, timeout?)`): `ToBeVisible`, `ToBeHidden`,
+  `ToBeEnabled`, `ToBeDisabled`, `ToBeChecked(bool = true)`, `ToHaveText` (name, else value,
+  whitespace normalised), `ToContainText`, `ToHaveValue` (a field's text, a dropdown's choice),
+  `ToHaveCount`. Each asks before every frame and fails with `LocatorAssertionException`:
+  what was expected, what was found, and the matches.
+- **Timeouts are virtual.** Default 5 s of the session's clock (`session.LocatorTimeout`), or
+  per call. A wait for a 1.5 s timer takes 1.5 s of virtual time and milliseconds of real time;
+  a wait never sleeps, so it does not cover raw background threads — that is still
+  `PumpUntil`'s job.
+- **Synchronous first.** The `…Async` forms run in place and return a finished (or faulted)
+  task; the pump belongs on the test thread.
+- **Several sessions.** A locator pumps only its own session; `session.GetByX` searches the
+  primary window, `window.GetByX` another.
+
 To test the accessibility *pipeline* itself (the per-frame build/diff that feeds UIA/AT-SPI), install a recording bridge:
 
 ```csharp

@@ -22,7 +22,7 @@ namespace HultUI.Headless;
 /// <see cref="MakeCurrent"/>. Drive them from one thread at a time, and keep tests
 /// that use sessions from running in parallel.
 /// </summary>
-public sealed class HeadlessSession : IDisposable
+public sealed partial class HeadlessSession : IDisposable
 {
     private readonly HeadlessTimeProvider _time;
     private readonly HeadlessWindowingPlatform _platform;
