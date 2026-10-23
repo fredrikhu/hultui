@@ -174,6 +174,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // Nothing should be held here; a frame that threw between a draw and its
         // EndFrame would have leaked its borrows into this one.
         ReleaseHeldFrames();
+        // Nor should a push: a clip or layer left by a frame that threw would hold every later
+        // frame, its clear included, inside it. The canvas comes from an SKSurface, whose base
+        // save count is 1. Once a frame, not once a push.
+        _saveStack.Clear();
+        Canvas.RestoreToCount(1);
         Canvas.ResetMatrix();
         Canvas.Scale(scaleFactor);
         Canvas.Clear(clearColor is { } c ? ToSkColor(c) : SKColors.Transparent);

@@ -507,9 +507,17 @@ public sealed class Application : IDisposable
     /// drag is held. Before, the source's post waited in the queue the held loop cannot run, and
     /// the timer drew for that post: about 64 frames a second, whatever the video's rate. A
     /// platform that does not answer requests still draws for posted work.</para>
+    ///
+    /// <para>Never inside a frame of the same window: a wait on the UI thread in a draw can pump
+    /// the size loop's messages, and the frame drawn from there drew the same elements again
+    /// inside the first. That request waits for the next event, the resize still pending.</para>
     /// </summary>
     private void RenderLiveResizeFrame(Window window)
     {
+        // Inside a frame of this window (a wait in its draw pumped the size loop's messages): not
+        // laid out or drawn mid-draw. ResizePending stays set, so the next event of the drag (the
+        // live-resize timer's, ~10 ms on) or the loop after it draws the new size.
+        if (window.IsDrawingFrame) return;
         // This can run inside the loop's own wait (the modal loop was entered from a message the
         // wait dispatched), where the frame's own changes would count as work done while parked
         // and wake the loop (UIThread.Park): an SDL_PushEvent from inside SDL's event watcher, for

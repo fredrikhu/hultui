@@ -1286,6 +1286,17 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         for (int i = 0; i < children.Count; i++) CollectGpuSources(children[i], into);
     }
 
+    /// <summary>Whether <see cref="RenderFrame"/> is running for this window (UI thread).</summary>
+    internal bool IsDrawingFrame { get; private set; }
+
+    /// <summary>Sets <see cref="IsDrawingFrame"/> for a frame, cleared however the frame ends.</summary>
+    private readonly struct DrawingFrame : IDisposable
+    {
+        private readonly Window _window;
+        public DrawingFrame(Window window) { _window = window; window.IsDrawingFrame = true; }
+        public void Dispose() => _window.IsDrawingFrame = false;
+    }
+
     /// <param name="evenIfMinimized">Draw a minimized window too, as a forced frame does.</param>
     /// <param name="drawClean">Draw even with nothing dirty: a live resize holds the loop, and a
     /// video's next frame, posted and not yet run, is taken from its decoder by the draw.</param>
@@ -1293,6 +1304,12 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     internal bool RenderFrame(bool evenIfMinimized = false, bool drawClean = false)
     {
         if (_root is null) return false;
+        // Not inside a frame of this window: a wait in a draw (Parallel.For, Task.Wait, a
+        // contended lock) on the UI thread can pump messages, and on Windows a live-resize
+        // event then asked for a whole frame inside this one, drawing the same elements again
+        // mid-draw. The asker keeps what it wants (ResizePending, the dirt) for the next one.
+        if (IsDrawingFrame) return false;
+        using var _drawing = new DrawingFrame(this);
 
         // Drain queued UI-thread actions from the accessibility action router.
         // AT callbacks (UIA worker threads, the AT-SPI D-Bus receive thread) run

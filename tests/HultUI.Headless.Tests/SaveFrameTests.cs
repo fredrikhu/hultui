@@ -173,6 +173,34 @@ public sealed class SaveFrameTests : IDisposable
     }
 
     [Fact]
+    public void ARequestStillHeldOpen_IsServedOnceReleased_NotRefused()
+    {
+        using var session = Session();
+        using var watch = FrameRequests.Start(session.Application, _dir);
+
+        // Written in place and still open, as its writer or a virus scanner looking at the new
+        // file holds it: once refused as "being used by another process".
+        string request = Path.Combine(_dir, "held.request");
+        string png = Path.Combine(_dir, "held.png");
+        string error = Path.Combine(_dir, "held.error");
+        using (var held = new FileStream(request, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        {
+            var until = DateTime.UtcNow + TimeSpan.FromMilliseconds(600);
+            while (DateTime.UtcNow < until)
+            {
+                session.PumpFrame();
+                Thread.Sleep(10);
+            }
+            Assert.False(File.Exists(error), File.Exists(error) ? File.ReadAllText(error) : null);
+            Assert.False(File.Exists(png));
+        }
+
+        session.PumpUntil(() => File.Exists(png), TimeSpan.FromSeconds(10));
+        Assert.False(File.Exists(error));
+        Assert.False(File.Exists(request));
+    }
+
+    [Fact]
     public void ARequestForAWindowThatIsNotThere_SaysSo()
     {
         using var session = Session();
