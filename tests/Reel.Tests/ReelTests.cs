@@ -715,4 +715,77 @@ public class ReelTests : IDisposable
         Assert.False(app.ChaptersOpen);
         Assert.Null(session.Window.FindByAutomationId("chapters"));
     }
+
+    // ── Scrubber stills ──────────────────────────────────────────────────
+
+    /// <summary>Stills made one at a time as the test lets them through, as Reel's background
+    /// decoder makes them: each the same small PNG.</summary>
+    private sealed class HeldStills : IScrubFrameSource
+    {
+        private readonly SemaphoreSlim _let = new(0);
+        private static readonly byte[] Png = MakePng();
+        private int _made;
+
+        public int Made => Volatile.Read(ref _made);
+        public void Let(int count) => _let.Release(count);
+        public Task<bool> OpenAsync(string path, CancellationToken cancellationToken) => Task.FromResult(true);
+
+        public async Task<byte[]?> GrabAsync(TimeSpan position, CancellationToken cancellationToken)
+        {
+            await _let.WaitAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref _made);
+            return Png;
+        }
+
+        public void Dispose() { }
+
+        private static byte[] MakePng()
+        {
+            using var bitmap = new SkiaSharp.SKBitmap(64, 36);
+            bitmap.Erase(new SkiaSharp.SKColor(200, 80, 40));
+            using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            return data.ToArray();
+        }
+    }
+
+    /// <summary>The time the scrubber's preview card reads, or null with no card.</summary>
+    private static string? CardTime(HeadlessSession session) =>
+        session.Window.FindByAutomationId("video-preview-card")?.Element.Children
+            .OfType<HultUI.Core.Elements.TextElement>().FirstOrDefault()?.Content;
+
+    /// <summary>Rests the pointer halfway along the scrubber: 12:00 of the 24-minute film.</summary>
+    private static void RestOnTheScrubber(HeadlessSession session)
+    {
+        var track = session.Window.FindByAutomationId("video-seek")!.Element.Layout.AbsoluteContentBox;
+        session.Window.MoveMouse(track.X + track.Width / 2f, track.Y + track.Height / 2f);
+        session.PumpFrames(2);
+    }
+
+    [Fact]
+    public void TheNextFileInTheFolderHasScrubberStillsToo()
+    {
+        // Each file gets a player of its own; the stills used to be handed to the first one only,
+        // so from the second file in a folder on, the scrubber had no preview.
+        var first = File_("a.mkv");
+        File_("b.mkv");
+        var (session, app, _) = Host();
+        using var _s = session;
+        var stills = new HeldStills();
+        app.ScrubFrameSource = () => stills;
+        app.Open(first);
+        session.PumpFrames(4);
+        Assert.True(app.Step(1));
+        session.PumpFrames(4);
+        app.Player!.Pause();                  // the bar stays up while paused
+        session.PumpFrames(2);
+
+        stills.Let(120);
+        session.PumpUntil(() => app.VideoPlayer!.PreviewFrame?.Invoke(TimeSpan.FromMinutes(12))?.Time
+            == TimeSpan.FromMinutes(12), TimeSpan.FromSeconds(10));
+        RestOnTheScrubber(session);
+
+        Assert.EndsWith("b.mkv", app.CurrentFile);
+        Assert.Equal("12:00", CardTime(session));
+    }
 }
