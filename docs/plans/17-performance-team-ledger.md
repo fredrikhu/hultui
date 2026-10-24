@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–6 landed, step 7 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–7 landed, step 8 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -103,7 +103,7 @@ Correctness first, then value per cost.
    change: 120 fps clip during a move 57 → 169 frames, drops 50 → 0; the subclass on GL windows too),
    **vk-drag-kept-step-remakes** (keep the F16 offscreen in the drag bucket: 82 → 10 creations, 81 → 9
    sync submits per 80-step drag). Suite row: Vulkan steady-frame bytes (Windows real window).
-7. **VideoPlayer and Reel** (6): **reactivity-scrubber-preview-in-place** (preview card through Refs:
+7. ~~**VideoPlayer and Reel**~~ LANDED 769748ab, bf5165f4, 211e3245, 5c1ed2cf, ee779b45 (6): **reactivity-scrubber-preview-in-place** (preview card through Refs:
    suite scrubber hover 420.7 KB/op, ≥ −80 %), **reel-still-previews-rebuild** (a public
    `VideoPlayer.RefreshPreview()`; 120 → 0 app rebuilds per file, and the card updates under a resting
    pointer), **reactivity-computed-pooled-notify** (Computed notifies through a rented snapshot: 64 → 0 B
@@ -333,6 +333,11 @@ Re-ranked by the round 5 survey.
 | 4 | 91b4e5a7 | apps-scenario-vulkan-steady-frame | No headless GPU source, so a gated real-window row: `VulkanProbe --video-frame-bytes` + `VulkanProbeTests.ASteadyVideoFrame_AllocatesAlmostNothing_AndThePictureKeepsChanging`. B/frame F16 395.2 → 35.2 (limit 100), 8-bit 2,820 → 2,331 (limit 2,500), GL 157.3 → 13.3 (limit 100); brightness must climb > 20. |
 | 4 | 0607f2f7 | media-modal-loop-video-rate | Internal `LiveFrameRequests`: in Win32's size/move loop, MediaPlayer's and WebViewController's off-thread repaint requests post a registered message; the subclass (now on GL windows too) draws a live frame, skipping within 20 ms of a size change; SDL's timer stops drawing duplicate frames for posted work meanwhile. Reel 1080p120 Vulkan, frames/drops: move 56/49 → 107/0, held drag 128/111 → 240/0, hold 170/115 → 274/3; drag phase 287/11 → 223/11 (duplicates gone, drops unchanged), step time flat. GL move 56/48 → 104/2. THREADING.md, MEDIA.md. |
 | 4 | d9d465f2 | vk-drag-kept-step-remakes | The F16 offscreen is made at the swapchain's allocated size (canvas clipped to the window) and kept with it; **`VulkanFrameTarget.AllocatedWidthPx/AllocatedHeightPx` public** (API addition). 80-step drag: offscreens made (each a sync submit + purge) 81 → 5; step median 5.4 → 4.4 ms (−20 %), drag CPU −17 %; Skia cache peak 52.7 → 55.7 MB. Reel drag step within noise, bytes per frame 2,437 → 1,408. 34 Vulkan UiTests pass under the layer. |
+| 4 | 769748ab | apps-scenario-scrubber-card | Suite row `media/scrubber hover with a preview card, 1 kHz mouse, real loop` (120 stills; the old hover row had no `PreviewFrame`, so never showed a card); README count 133 (121 off Windows). |
+| 4 | bf5165f4 | reactivity-scrubber-preview-in-place | The hovered position is a plain field; a hover writes the card through Refs (Left, picture Source/SourceRect/AspectRatio, time label); only a card appearing or leaving builds (`Signal<int>`); Build clears the refs when it makes no card. Hover row 420.7 → 22.8 KB/op (−94.6 %), card row 447.9 → 23.5 (−94.8 %), AOT −94.4/−94.6 %; builds per frame 1 → 0; bytes per frame 42,507 → 1,912 (the 16 pointer moves). 21 frames byte-identical, a11y trees identical. 0 slower. |
+| 4 | 211e3245 | reel-next-file-stills | Correctness (found in passing): `PreviewFrame`/`PreviewWidth` reached only the first file's player, so from the second file in a folder on (N/P, roll-on) the scrubber had no preview — in every released Reel. Internal `ScrubFrameSource` seam for tests. |
+| 4 | 5c1ed2cf | reel-still-previews-rebuild | **Public `VideoPlayer.RefreshPreview()`** (API addition; MEDIA.md): asks `PreviewFrame` again for the hovered point and updates the card in place. Reel posts it when a still lands (not `Rerender`); Aperture likewise for trickplay sheets (same gap). Reel, 120 stills: app rebuilds per file 120 → 0; pointer elsewhere 2,042 → 0 B per still (bridge 5,912 → 0); pointer resting on the scrubber: the card never appeared → appears with the first still, 1,116 B per still. |
+| 4 | ee779b45 | reactivity-computed-pooled-notify | Computed notifies through a rented snapshot like Signal: per upstream write 128 → 0 B (70.4 → 0 for one change in ten, 160 → 0 with three readers), JIT and AOT. Reel with the chapter panel open −12 % per report. 6 tests (re-entry, dispose, subscribe and unsubscribe mid-notify). 0 slower. |
 
 ## Examined, not worth it
 
@@ -739,3 +744,10 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   49–115 → 0–3); a drag keeps the F16 offscreen (81 → 5 made, step −20 %). Focus guard 0 events over 36
   launches; validation clean. Guideline note: a GPU producer raises repaints off the UI thread through
   `IVideoSink.RequestRepaint`, not its own post, so it keeps its rate inside the modal loop.
+- 2026-10-24: step 7 landed (769748ab..ee779b45): scrubber hover −94.6 % (card moved in place through
+  Refs), `VideoPlayer.RefreshPreview()` (Reel 120 → 0 rebuilds per file; the card now appears under a
+  resting pointer), Computed notifies without allocating; Reel's next-file stills bug fixed (every
+  released Reel). Guideline notes: a value that follows the pointer is written through Refs, build only
+  when an element appears or leaves; clear Refs when a build stops making their element; call
+  `RefreshPreview()` when a late still lands. Build trap: restoring a file with PowerShell `Copy-Item`
+  keeps its old mtime and MSBuild skips the rebuild — restore with `git show >`/`cp`, then `touch`.
