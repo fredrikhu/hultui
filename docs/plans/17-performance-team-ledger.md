@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–4 landed, step 5 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–5 landed, step 6 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -89,7 +89,7 @@ Correctness first, then value per cost.
    reading client the next text version shares the previous tables (5,000 blocks 474.5 → ~2 KB per
    move). Suite row (caret walk in rich text, bridge on and UIA). Then, if it fits,
    **a11y-textarea-text-pattern** (approved rule; must follow the caret patch).
-5. **Junction** (6/8, app): **apps-junction-components** (approved: titlebar, sidebar, toolbar as
+5. ~~**Junction**~~ LANDED 39e3fbb1, 59a11d7d, 5808d9f1, 4f6e6fc2, 4076ddb0, 098d0649, 77fd347f (6/8, app): **apps-junction-components** (approved: titlebar, sidebar, toolbar as
    persistent `ChromePart`s read through `_chromeRevision`; view-only paths opt out — the r4-6 design;
    −40…−75 % per key on six walks, AOT app: chrome 128.6 KB per build), **apps-junction-tags-double-rebuild**
    (Tags key rebuilds twice, −43 %), **junction-review-rows-shape** (review mode remakes ~30 rows per caret
@@ -318,6 +318,12 @@ Re-ranked by the round 5 survey.
 | 4 | 07ed97e3 | richtext-readonly-a11y | Correctness (lead from step 3, confirmed): the editor's ReadOnly setter notifies and the patch swaps in the new version, so a reader's thread no longer answers the old read-only state until another rebuild. |
 | 4 | 30d19928 | a11y-text-caret-shares-text | When only the caret/selection moved (same document, width, theme stamp, scroll, read-only, blocks on screen), the next text shares the last one's text, tables and geometry (internal AccessibleText constructor; at most one share source, dropped once made). 5,000 blocks with a reader reading: 474 → 1.3 KB/key both bridges; walk 1.136 → 0.711 ms (−37.4 %) JIT, −47.6 % AOT. Every shared answer equals a fresh build. |
 | 4 | a0221337 | a11y-textarea-text-pattern | Approved rule. TextArea offers a versioned text source (lines = drawn rows; character boxes for visible rows ±1); a keystroke is told as UIA TextChanged / AT-SPI text-changed with the characters, never a whole-text Value (still readable on request); caret moves, read-only and re-wraps patched; caret moves with a reader share tables; `AccessibleTextVersion.Characters`. 2,000-line area, 40 keys: BSTR characters 4,869,780 → 0, AT-SPI signal characters 4,869,780 → 40; managed flat. Caret moves now told (0.4 → 1.0 KB/op). Live WSL: the area has a Text interface now, 11/11. BiDi limitation (boxes between caret positions) documented. |
+| 4 | 39e3fbb1 | apps-junction-tags-double-rebuild | A Tags key rebuilds once: builds per key 2 → 1; 406.0 → 231.3 KB/key (−43 %), bridge −41 %; the key's rebuild 0.82 → 0.41 ms. Test: 30 keys, one build each, selection stays in view. |
+| 4 | 59a11d7d | reconcile-moved-host-unmarked | Framework (found while measuring the chrome split): a move made during a component's build no longer marks the old parent at once; the keyed reconcile puts a host back unmarked when its children come out the same (`Element.TryRestoreMoved`), carrying the host's own marks up; anything else is marked as before (`SettleMove`/`FlushPendingMoves`); moves outside a build unchanged. With chrome parts, a11y trees per key at 2/4/8 frames per key 1.00 → 0.33/0.68/1.00 (= pre-split). 7 tests, 5 mutations caught. |
+| 4 | 5808d9f1 | apps-junction-components | Approved. Title bar, sidebar (rail + list) and toolbar are `ChromePart`s reading `_chromeRevision`; `MarkDirty`/`Rerender` bump it, view-only paths (`MarkViewDirty`/`RerenderView`: selections, cursors, search and composer fields, find bars, splitters, diff pan) don't; hosts `FlexShrink(0)`, sidebar root `FlexGrow(1)`. Headless KB/key −56…−73 % on six walks (bridge −40…−68 %); chrome builds per key 0; AOT app History 257.5 → 119.0 KB/key, typing 204.5 → 66.1. 15 tests compare each chrome input with a forced full rebuild; 8 mutations caught. 0 px on 21 screens. |
+| 4 | 4f6e6fc2 | junction-review-rows-shape | Review mode keeps the woven list across caret moves (checked against everything the weave reads); caret and range in `DiffRow.Mark`; one stable label delegate. 1,011 → 156.7 KB/key (−84 %), bridge −82 %; rows made per key 31 → 2; time per key min 4.52 → 3.07 ms. |
+| 4 | 4076ddb0 | junction-fixture-quiet-git | `TempRepo` sets `GIT_OPTIONAL_LOCKS=0` and fixtures turn automatic maintenance off: the app rewrote the fixture index in 40/40 starts → 0/40 (0/100 twice); `FixtureQuietTests` 0 of 8 runs beside other classes. The writer behind the remaining 3/11 failures with locks alone is unproven (detached `git maintenance run --auto` is the best guess). `DiffItemLabelTests` reports whether the data generation moved. |
+| 4 | 098d0649, 77fd347f | apps-scenario-kept-chrome | Suite rows: list walk beside chrome built with it 173.5 vs in kept parts 35.2 KB/op; selection walk beside kept chrome parts with the bridge 1.0 → 0.6 trees/key (pins 59a11d7d). Full compare 0 slower (bar fade +15 % min = its 52/60 ms noise on rerun). REACTIVITY.md "Keep what a key does not change in a child component". |
 
 ## Examined, not worth it
 
@@ -713,3 +719,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-24: step 4 landed (1e1948f9..a0221337): rich text caret moves patch the a11y tree (−99 % per
   key), share text with a reader, read-only reaches readers, and the TextArea text pattern (no
   whole-text Value per keystroke). All suites and WSL pass.
+- 2026-10-24: step 5 landed (39e3fbb1..77fd347f): Junction keeps its chrome in parts (−56…−73 % per key
+  headless, AOT History −54 %), Tags rebuilds once, review caret moves keep the rows (−84 %), a reconcile
+  puts a kept host back unmarked (framework), fixtures quiet git. 0 px on 21 screens; all suites pass.
+  Guideline notes: a child component's host is a flex item of its own (give it the root's FlexShrink/
+  FlexGrow); kept hosts need keyed parents; persistent parts need a signal for the plain state they show,
+  with "rebuild the chrome" the default and view-only paths opting out.
