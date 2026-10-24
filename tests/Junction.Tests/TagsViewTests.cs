@@ -176,6 +176,43 @@ public class TagsViewTests
         });
     }
 
+    /// <summary>A key in the Tags list rebuilds the window once, and the list scrolls to keep
+    /// the selected row on screen. MoveTagSel rebuilt twice — once through SelectTag, then
+    /// again for nothing — and the one rebuild left has to be the one the scroll follows.</summary>
+    [Fact]
+    public void ATagsKeyRebuildsOnce_AndTheListFollowsTheSelection()
+    {
+        Hosted(repo =>
+        {
+            for (int i = 0; i < 40; i++) repo.Git("tag", $"v{i:00}");
+        }, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit6);
+            PumpUntilVisible(session, "v39");
+            session.PumpFrames(3);
+
+            for (int i = 1; i <= 30; i++)
+            {
+                int builds = app.Builds;
+                session.Window.PressKey(KeyCode.Down);
+                session.PumpFrames(2);
+                Assert.Equal(1, app.Builds - builds);
+
+                var list = HultUI.Headless.LayoutProbe.Descendants<HultUI.Core.Elements.VirtualListElement<HultUI.Core.Builders.TreeNode<Junction.Git.GitTag>>>(
+                    Root(session), l => l.Layout.AbsoluteContentBox.Height > 0).Single();
+                Assert.Equal(i, list.SelectedIndex);
+                float top = i * list.ItemHeight, bottom = top + list.ItemHeight;
+                float viewTop = list.ScrollOffsetY, viewBottom = viewTop + list.Layout.AbsoluteContentBox.Height;
+                Assert.True(top >= viewTop - 0.5f && bottom <= viewBottom + 0.5f,
+                    $"row {i} ({top}–{bottom}) is off the list's view ({viewTop}–{viewBottom})");
+            }
+        });
+    }
+
+    private static HultUI.Core.Elements.Element Root(HeadlessSession session) =>
+        (HultUI.Core.Elements.Element)typeof(HultUI.Window).GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(session.Window.Window)!;
+
     // ── harness ──────────────────────────────────────────────────────────
     private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body)
     {
