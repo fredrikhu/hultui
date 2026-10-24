@@ -283,8 +283,19 @@ internal abstract class AccessibleTextVersion
     /// text: what comparing the two snapshots' <see cref="AccessibleText.Text"/> would answer.</summary>
     public abstract bool SameText(AccessibleTextVersion other);
 
+    /// <summary>The caret's offset, or -1 when there is none: what <see cref="Text"/>'s
+    /// <see cref="AccessibleText.Caret"/> is, without making the text. Any thread.</summary>
+    public abstract int Caret { get; }
+
+    /// <summary>The selection, as <see cref="Text"/>'s <see cref="AccessibleText.SelectionStart"/>
+    /// and <see cref="AccessibleText.SelectionEnd"/> are (both 0 for none), without making the
+    /// text. Any thread.</summary>
+    public abstract int SelectionStart { get; }
+    public abstract int SelectionEnd { get; }
+
     /// <summary>Whether <paramref name="other"/> has the caret and the selection at the same offsets.</summary>
-    public abstract bool SameSelection(AccessibleTextVersion other);
+    public bool SameSelection(AccessibleTextVersion other) =>
+        Caret == other.Caret && SelectionStart == other.SelectionStart && SelectionEnd == other.SelectionEnd;
 
     /// <summary>The text of this version, made on first ask; any thread.</summary>
     public abstract AccessibleText Text { get; }

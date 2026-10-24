@@ -187,12 +187,13 @@ public partial class RichTextEditorElement
 
         // As AccessibleText keeps them: the caret clamped into the text, a selection ordered and
         // clamped, none where the anchor is the caret.
-        private int Caret => _focus < 0 ? -1 : Math.Min(_focus, _length);
+        public override int Caret => _focus < 0 ? -1 : Math.Min(_focus, _length);
 
-        private (int Start, int End) Selection =>
-            _focus >= 0 && _anchor >= 0 && _focus != _anchor
-                ? (Math.Clamp(Math.Min(_focus, _anchor), 0, _length), Math.Clamp(Math.Max(_focus, _anchor), 0, _length))
-                : (0, 0);
+        public override int SelectionStart =>
+            _focus >= 0 && _anchor >= 0 && _focus != _anchor ? Math.Clamp(Math.Min(_focus, _anchor), 0, _length) : 0;
+
+        public override int SelectionEnd =>
+            _focus >= 0 && _anchor >= 0 && _focus != _anchor ? Math.Clamp(Math.Max(_focus, _anchor), 0, _length) : 0;
 
         public override bool SameText(AccessibleTextVersion other) =>
             other is EditorTextVersion o
@@ -200,9 +201,6 @@ public partial class RichTextEditorElement
                 // Another document with the same text, as a formatting change makes: only then is
                 // the text made and compared, as every text was before.
                 || (_length == o._length && string.Equals(PlainText, o.PlainText, StringComparison.Ordinal)));
-
-        public override bool SameSelection(AccessibleTextVersion other) =>
-            other is EditorTextVersion o && Caret == o.Caret && Selection == o.Selection;
 
         /// <summary>The document's plain text, the editor's value; any thread.</summary>
         public override string? Value => Key.Document.ToPlainText();

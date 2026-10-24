@@ -357,6 +357,32 @@ public static class AccessibilityTreeBuilder
         return true;
     }
 
+    /// <summary>
+    /// What a move of the caret or the selection changes in an applied tree's node of text that is
+    /// made on request (<see cref="IVersionedAccessibleTextSource"/>: the rich text editor's),
+    /// without building the tree again: the version the source has now, in <paramref name="next"/>
+    /// (null when it is the node's own), and the <see cref="AccessibilityProperties.TextSelection"/>
+    /// change the differ would report when its caret or selection moved, added to
+    /// <paramref name="changes"/> with a stand-in for the node as it was
+    /// (<see cref="AccessibilityNode.TextStandIn"/>). A version that differs in what is not the text
+    /// (its layout, its scroll, read-only) is put in place with nothing to tell. The node is not
+    /// touched. False, adding nothing, when the tree has to be built again: the text itself
+    /// changed, or the node carries no version of this source's kind.
+    /// </summary>
+    internal static bool TextSelectionChange(AccessibilityNode node, IVersionedAccessibleTextSource source,
+        List<PropertyChange> changes, out AccessibleTextVersion? next)
+    {
+        next = null;
+        if (node.TextVersion is not { } previous) return false;
+        var current = source.CurrentVersion;
+        if (ReferenceEquals(current, previous)) return true;
+        if (current.GetType() != previous.GetType() || !current.SameText(previous)) return false;
+        next = current;
+        if (!current.SameSelection(previous))
+            changes.Add(new PropertyChange(node, AccessibilityProperties.TextSelection, node.TextStandIn(previous)));
+        return true;
+    }
+
 
     /// <summary>
     /// Determines whether an element is semantically meaningful in the accessibility tree.

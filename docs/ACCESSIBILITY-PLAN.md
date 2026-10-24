@@ -193,6 +193,19 @@ as a diff would have. A frame that rebuilds anyway tells the move in its diff; a
 whose node is not there yet, or whose items changed in number, is rebuilt. What else
 the move changed (a scroll) is told by the coalesced layout refresh, as before.
 
+A move of the caret or the selection in text made on request (the rich text editor's,
+below) rebuilds no tree either (2026-10-24, plan 17 round 4). The editor asked for a
+rebuild on every caret move while a reader listened: each arrow key built and diffed the
+whole tree, 79 KB a key beside 300 rows, and the AT-SPI bridge made the whole document's
+text, its lines and its boxes to read the caret from it, 475 KB a key at 5,000 blocks.
+The frame takes the editor's new version of its text (`AccessibleTextVersion`, which
+holds the caret's and the selection's offsets), puts it on the applied tree's node in
+place and hands the bridges the move (`ApplyPatchedProperties`, a `TextSelection` change
+whose previous node is a stand-in carrying the old version): UIA raises
+Text_TextSelectionChanged, AT-SPI sends text-caret-moved and text-selection-changed,
+reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built. A
+move that comes with an edit is told by the edit's rebuild, as before.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element

@@ -187,7 +187,11 @@ public sealed class AccessibilityNode
     }
 
     /// <summary>The text as this tree was built with it, not yet made (see <see cref="Text"/>);
-    /// null for a node whose text was made with the tree, or that has none.</summary>
+    /// null for a node whose text was made with the tree, or that has none. One of the properties
+    /// that change after the tree is built (with <see cref="IsFocused"/> and a list item's
+    /// <see cref="IsSelected"/>): a move of the caret or the selection rebuilds no tree, so the
+    /// window puts the text's new version on the applied tree's node in place
+    /// (<see cref="ReplaceTextVersion"/>), and the next diff does not report the move again.</summary>
     internal AccessibleTextVersion? TextVersion
     {
         get => _extras?.TextVersion;
@@ -197,6 +201,25 @@ public sealed class AccessibilityNode
             Extras.TextVersion = value;
         }
     }
+
+    /// <summary>Puts a newer version of the same text on a node of a tree that is out (UI thread),
+    /// one reference write: a bridge's thread reading the node meanwhile reads the old version or
+    /// the new, each whole.</summary>
+    internal void ReplaceTextVersion(AccessibleTextVersion version) =>
+        Volatile.Write(ref Extras.TextVersion, version);
+
+    /// <summary>
+    /// A node of no tree standing for this one as it was with <paramref name="previous"/>, an
+    /// earlier version of its text: what a patched caret move hands a bridge as the change's
+    /// previous node, which a diff takes from the previous tree. It carries what a bridge reads of
+    /// a previous node for a text change — the text and where to read it — and the id and role.
+    /// </summary>
+    internal AccessibilityNode TextStandIn(AccessibleTextVersion previous) =>
+        new(ElementId, Role, Name, description: null, BoundingRect)
+        {
+            TextSource = TextSource,
+            TextVersion = previous,
+        };
 
     /// <summary>Where a bridge reads the text as it is now, from its own thread, between
     /// rebuilds; null with <see cref="Text"/>.</summary>

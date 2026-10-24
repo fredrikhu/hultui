@@ -225,7 +225,8 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
     {
         _needsScrollToCaret = true;
         MarkPaintDirty();
-        // A reader follows the caret: the tree is built again and the bridge tells it moved.
+        // A reader follows the caret: the window puts the text's new version on the applied tree,
+        // and the bridge tells it moved. No tree is built for it (plan 17, round 4).
         if (AccessibilityClients.Active) NotifyAccessibilityPropertyChanged(AccessibilityProperties.TextSelection);
         SelectionChanged?.Invoke();
     }

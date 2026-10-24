@@ -613,10 +613,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
-    /// item that had the selection and the one that has it. Their wrappers already point at those
-    /// nodes; they take the new state and raise what a diff would have (SelectionItem.IsSelected
-    /// property events), with no walk of the tree. Anything but property changes is applied as a
-    /// diff.
+    /// item that had the selection and the one that has it; a caret or selection move in text made
+    /// on request (the rich text editor's). Their wrappers already point at those nodes; they take
+    /// the new state and raise what a diff would have (SelectionItem.IsSelected property events,
+    /// Text_TextSelectionChanged), with no walk of the tree. Anything but property changes is
+    /// applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {

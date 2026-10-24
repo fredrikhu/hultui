@@ -19,7 +19,8 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
 /// focused state of its two objects in it, and a list's selection move
 /// (<see cref="ApplyPatchedProperties"/>) the selected state of its two items, all on the UI
-/// thread. The
+/// thread; a caret move in text made on request is told through the same call, with nothing in
+/// the snapshot to change. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
@@ -440,9 +441,11 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
-    /// item that had the selection and the one that has it. Their objects in the published
-    /// snapshot take the new state and the bridge sends what a diff would have
-    /// (state-changed:selected), with no new snapshot. Anything else is applied as a diff.
+    /// item that had the selection and the one that has it; a caret or selection move in text made
+    /// on request (the rich text editor's). Their objects in the published snapshot take the new
+    /// state (a text's object reads its text through its source, so it has none to take) and the
+    /// bridge sends what a diff would have (state-changed:selected; text-caret-moved and
+    /// text-selection-changed), with no new snapshot. Anything else is applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {
@@ -450,7 +453,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         var snapshot = _snapshot;
         bool inPlace = _hasBuilt && patch.Added.Count == 0 && patch.Removed.Count == 0 && patch.Reordered.Count == 0;
         foreach (var change in patch.PropertyChanged)
-            inPlace &= change.PropertyName == AccessibilityProperties.IsSelected
+            inPlace &= (change.PropertyName == AccessibilityProperties.IsSelected
+                    || (change.PropertyName == AccessibilityProperties.TextSelection && change.Node.TextSource is not null))
                 && snapshot.ByPath.ContainsKey(PathOf(change.Node));
         if (!inPlace)
         {
@@ -460,7 +464,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         foreach (var change in patch.PropertyChanged)
         {
             string path = PathOf(change.Node);
-            snapshot.ByPath[path].Selected = change.Node.IsSelected == true;
+            if (change.PropertyName == AccessibilityProperties.IsSelected)
+                snapshot.ByPath[path].Selected = change.Node.IsSelected == true;
             if (EmitPropertyChange(change, path)) DebugSignalsEmitted++;
         }
     }
@@ -534,10 +539,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             }
             case AccessibilityProperties.TextSelection:
             {
-                var (before, after) = (change.Previous?.Text, change.Node.Text);
-                if (after is not null && after.Caret >= 0 && before?.Caret != after.Caret)
-                    _signals!.EmitTextCaretMoved(path, after.Caret);
-                if (before?.SelectionStart != after?.SelectionStart || before?.SelectionEnd != after?.SelectionEnd)
+                var (before, after) = (SelectionOf(change.Previous), SelectionOf(change.Node));
+                if (after is { Caret: >= 0 } now && before?.Caret != now.Caret)
+                    _signals!.EmitTextCaretMoved(path, now.Caret);
+                if (before?.Start != after?.Start || before?.End != after?.End)
                     _signals!.EmitTextSelectionChanged(path);
                 return true;
             }
@@ -545,6 +550,17 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 return false;
         }
     }
+
+    /// <summary>
+    /// A node's caret and selection as its text has them. From the version of a text made on
+    /// request (the rich text editor's), which holds the offsets: making the text to read them made
+    /// the whole document's text, its lines and its boxes on every caret move (475 KB at 5,000
+    /// blocks), for two numbers. Null for a node with no text.
+    /// </summary>
+    private static (int Caret, int Start, int End)? SelectionOf(AccessibilityNode? node) =>
+        node?.TextVersion is { } version ? (version.Caret, version.SelectionStart, version.SelectionEnd)
+        : node?.Text is { } text ? (text.Caret, text.SelectionStart, text.SelectionEnd)
+        : null;
 
     /// <summary>An AT-SPI announcement from the element's object, or the application's.</summary>
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
