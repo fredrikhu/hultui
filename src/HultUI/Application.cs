@@ -595,6 +595,12 @@ public sealed class Application : IDisposable
                 continue;
             }
 
+            // A pass that closed the last window or took a quit ends the loop here. The wait below
+            // owns no deadline with no window open, and nothing may be left to send it anything:
+            // closed by a WM_CLOSE another process posted, the app stayed running, windowless,
+            // until some unrelated wake.
+            if (!IsRunning) break;
+
             if (tick)
             {
                 stepDrawn = false;
