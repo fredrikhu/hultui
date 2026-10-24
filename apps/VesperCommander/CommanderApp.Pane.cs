@@ -155,6 +155,7 @@ public partial class CommanderApp
         bool active = _active == side;
         var list = Rows(side);   // filtered view while a type-to-find is active
         var state = PaneStateOf(side);
+        BeginFit(side);
 
         var pane = Flex.Column(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch)
             .BorderColor(active ? Nocturne.Accent800 : Color.Transparent)
@@ -502,13 +503,51 @@ public partial class CommanderApp
         // so a click that landed on a crumb still just navigates.
         row.OnClick(e => { if (ReferenceEquals(e.Target, e.CurrentTarget)) OpenGotoPrompt(side); });
 
+        var (root, driveLabel, server, segs, prefixes, archIdx, pin, start, truncated) = PlanCrumbs(dir);
+        NoteFitCrumbs(side, start, null);
+        row.AddChild(DriveCrumb(side, driveLabel, root, active, server));
+
+        if (pin >= 0)
+        {
+            row.AddChild(Sep());
+            row.AddChild(Crumb(side, segs[pin], prefixes[pin], leaf: segs.Length == 1));
+        }
+        if (truncated)
+        {
+            row.AddChild(Sep());
+            // "…" is a shortcut to the deepest hidden folder, not a no-op.
+            row.AddChild(Crumb(side, "…", prefixes[start - 1], leaf: false));
+        }
+        for (int i = start; i < segs.Length; i++)
+        {
+            row.AddChild(Sep());
+            row.AddChild(Crumb(side, segs[i], prefixes[i], leaf: i == segs.Length - 1, archive: i == archIdx));
+        }
+
+        // The crumb row + the pinned view toggle share the breadcrumb strip's padding.
+        var outer = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(7, 12, 5, 12));
+        outer.AddChild(row);
+        outer.AddChild(ViewToggle(side));
+        return outer;
+    }
+
+    /// <summary>What the path trail shows for a folder at the window's present width: the root
+    /// (and its label), the segments and the path each one goes to, the archive and share
+    /// crumbs that are pinned, and the first segment kept after truncation. The width enters
+    /// through <see cref="BreadcrumbBudget"/> alone, so a window resize changes only
+    /// <c>Start</c> — which is how a resize tells whether the trail needs a build.</summary>
+    private readonly record struct CrumbPlan(string Root, string DriveLabel, bool Server, string[] Segs,
+        string[] Prefixes, int ArchIdx, int Pin, int Start, bool Truncated);
+
+    private CrumbPlan PlanCrumbs(string dir)
+    {
         // Leading segment: monospace accent crumb. Trim the trailing separator so the first
         // "/" divider isn't doubled ("C:\ /").
         string root = CrumbRoot(dir);
         bool server = PathProbe.HostOf(dir) != null;
         string driveLabel = root.TrimEnd(System.IO.Path.DirectorySeparatorChar,
             System.IO.Path.AltDirectorySeparatorChar);
-        row.AddChild(DriveCrumb(side, driveLabel, root, active, server));
 
         var rest = dir.Length > root.Length ? dir[root.Length..] : "";
         var segs = rest.Split(
@@ -557,29 +596,7 @@ public partial class CommanderApp
         while (truncated && archIdx < 0 && start < segs.Length - 1 && used > budget)
             used -= EstSepWidth() + EstTextWidth(segs[start++], mono: false);
 
-        if (pin >= 0)
-        {
-            row.AddChild(Sep());
-            row.AddChild(Crumb(side, segs[pin], prefixes[pin], leaf: segs.Length == 1));
-        }
-        if (truncated)
-        {
-            row.AddChild(Sep());
-            // "…" is a shortcut to the deepest hidden folder, not a no-op.
-            row.AddChild(Crumb(side, "…", prefixes[start - 1], leaf: false));
-        }
-        for (int i = start; i < segs.Length; i++)
-        {
-            row.AddChild(Sep());
-            row.AddChild(Crumb(side, segs[i], prefixes[i], leaf: i == segs.Length - 1, archive: i == archIdx));
-        }
-
-        // The crumb row + the pinned view toggle share the breadcrumb strip's padding.
-        var outer = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(7, 12, 5, 12));
-        outer.AddChild(row);
-        outer.AddChild(ViewToggle(side));
-        return outer;
+        return new CrumbPlan(root, driveLabel, server, segs, prefixes, archIdx, pin, start, truncated);
     }
 
     private static Element Sep() =>

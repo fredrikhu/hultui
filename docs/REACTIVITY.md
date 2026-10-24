@@ -406,6 +406,33 @@ same accessibility trees a key with a reader. The perf suite pins the pattern:
 (35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
 as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
 
+### Hand back the elements a key does not change
+
+What the reconciler does for a kept host it does for any live element a build hands back: it
+moves the element into the new tree and puts it back where it was, untouched — no patch, no
+layout mark. A grid of many small cells that a virtual list cannot hold (Vesper's Brief view:
+columns of names, scrolled sideways) can keep its cells that way: remember each cell with what
+it was made from, and when a build would make it from the same things, add the live element
+instead of a new one. Only the cells that changed are made, and patched into the ones they
+replace. Four things keep it right:
+
+- **Key the cells, and key every child of their parent.** A kept element comes back through
+  the keyed reconcile, which matches the rest by key and puts the kept ones back in place. In
+  an unkeyed parent the old children are matched by position, and the ones the build moved out
+  are missing from it: the reconciler would patch one cell from another.
+- **Only from the build just before.** A cell another build dropped is out of the tree (its
+  column scrolled away, the view changed); handing it back is mounting a removed element again.
+  Count builds and keep the cells for the next one only.
+- **Keep the live element, not the one you built.** A changed cell is patched into the old one,
+  and the element the build made is thrown away; keep a `Ref` on it, which follows the patch.
+- **Everything the cell shows is in what you compare.** The entry, the cursor, and a shape of
+  the rest (the marks, the theme, the row height, the scale) as kept rows need one.
+
+Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 300 files): a
+key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
+real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
+moves to its new column (755.8 → 229.4 KB a step).
+
 ---
 
 ## Component Model

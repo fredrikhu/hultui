@@ -42,6 +42,12 @@ public sealed class ThumbnailCache : IDisposable
     /// <summary>Number of decodes currently running (for the "decoding n…" footer).</summary>
     public int PendingCount { get { lock (_lock) return _inFlight.Count; } }
 
+    /// <summary>How many decodes have landed, ever. Counted before the repaint callback runs, so a
+    /// build that the callback asks for sees it moved: the grid keeps its rows of tiles between
+    /// builds, and a tile still showing the placeholder is made again only when this changes.</summary>
+    public int Landed => Volatile.Read(ref _landed);
+    private int _landed;
+
     /// <summary>The thumbnail for a file at a target box size, or (null, Pending) while a
     /// background decode runs. Keyed by path + mtime + size + target so an edited file or a
     /// density change re-decodes.</summary>
@@ -99,6 +105,7 @@ public sealed class ThumbnailCache : IDisposable
             _inFlight.Remove(key);
             Trim();
         }
+        Interlocked.Increment(ref _landed);
         _onDecoded();   // caller marshals to the UI + coalesces the repaint
     }
 

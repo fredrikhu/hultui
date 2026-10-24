@@ -293,6 +293,118 @@ public class KeptRowTests
         finally { Icons.DisplayScale = scale; }
     }
 
+    // ── The grid views ───────────────────────────────────────────────────
+
+    /// <summary>The thumbnail grid's rows by the first name on each.</summary>
+    private static Dictionary<string, Element> ThumbRows(DiffViewTests.Fixture t, char side)
+    {
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>(side == 'L' ? "_thumbVListL" : "_thumbVListR").Current
+            ?? throw new Xunit.Sdk.XunitException($"the {side} pane has no thumbnail grid");
+        var rows = new Dictionary<string, Element>();
+        for (int i = 1; i < list.Children.Count; i++)
+            rows[TileName(list.Children[i].Children[0])] = list.Children[i];
+        return rows;
+    }
+
+    private static string TileName(Element tile) => tile.Children.OfType<TextElement>().Single().Content;
+
+    private static BoxElement TileOf(Dictionary<string, Element> rows, string name) =>
+        (BoxElement)rows.Values.SelectMany(r => r.Children).Single(tile => TileName(tile) == name);
+
+    [Fact]
+    public void AThumbnailCursorMove_MakesTheRowsItMovedBetween_AndKeepsTheRest()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        t.Session.PumpFrames(2);
+        int perRow = t.Field<int[]>("_thumbCols")[0];
+        // The listing is "..", "docs", then the files: the first row ends on file perRow - 3.
+        t.PutCursorOn('L', Name(perRow - 3));
+        var before = ThumbRows(t, 'L');
+        Assert.Contains("..", before.Keys);
+
+        t.Press(KeyCode.Right);                    // onto the first tile of the second row
+        t.Session.PumpFrames(1);
+
+        var after = ThumbRows(t, 'L');
+        Assert.Equal(before.Keys, after.Keys);
+        foreach (var (first, row) in after)
+        {
+            if (first == ".." || first == Name(perRow - 2)) Assert.NotSame(before[first], row);
+            else Assert.Same(before[first], row);
+        }
+        Assert.Equal(Nocturne.Accent600, TileOf(after, Name(perRow - 2)).BorderColor);
+        Assert.Equal(Color.Transparent, TileOf(after, Name(perRow - 3)).BorderColor);
+    }
+
+    /// <summary>A mark is in the grid's shape: the rows are made again and the tile turns red.</summary>
+    [Fact]
+    public void AThumbnailMark_IsShownByTheKeptGrid()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        t.Mark('L', Name(6));
+        t.Session.PumpFrames(2);
+        var name = TileOf(ThumbRows(t, 'L'), Name(6)).Children.OfType<TextElement>().Single();
+        Assert.Equal(Nocturne.MarkRed, name.ResolvedInherited.TextColor);
+    }
+
+    /// <summary>The Brief grid's cells by the name they show.</summary>
+    private static Dictionary<string, BoxElement> BriefCells(DiffViewTests.Fixture t, char side)
+    {
+        var scroll = t.Field<Ref<ScrollViewElement>>(side == 'L' ? "_briefScrollL" : "_briefScrollR").Current
+            ?? throw new Xunit.Sdk.XunitException($"the {side} pane has no Brief grid");
+        var cells = new Dictionary<string, BoxElement>();
+        foreach (var column in scroll.Children[0].Children)
+            foreach (var cell in column.Children)
+                cells[cell.Children.OfType<TextElement>().Single().Content] = (BoxElement)cell;
+        return cells;
+    }
+
+    /// <summary>The Brief grid keeps its cells: a key makes the two the cursor moved between (and
+    /// patches them into the ones they replace) and hands every other cell back untouched. A
+    /// patch copies what the build gave the cell, so a mark left on a cell that no build gave it
+    /// is still there on the cells nothing patched.</summary>
+    [Fact]
+    public void ABriefCursorMove_MakesTheTwoCellsItMovedBetween_AndLeavesTheRestUntouched()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // view: Brief
+        t.Session.PumpFrames(2);
+        t.PutCursorOn('L', Name(3));
+        var before = BriefCells(t, 'L');
+        foreach (var cell in before.Values) cell.AutomationId = "untouched";
+
+        t.Press(KeyCode.Down);
+        t.Session.PumpFrames(1);
+
+        var after = BriefCells(t, 'L');
+        Assert.Equal(before.Keys.Order(), after.Keys.Order());
+        foreach (var (name, cell) in after)
+        {
+            Assert.Same(before[name], cell);   // patched or kept, the cell is the same element
+            if (name == Name(3) || name == Name(4)) Assert.Null(cell.AutomationId);
+            else Assert.Equal("untouched", cell.AutomationId);
+        }
+        Assert.Equal(Nocturne.Accent600, after[Name(4)].BorderColor);
+        Assert.Equal(Color.Transparent, after[Name(3)].BorderColor);
+    }
+
+    /// <summary>A mark is in the Brief grid's shape: every cell is made again, and the marked one
+    /// is red.</summary>
+    [Fact]
+    public void ABriefMark_IsShownByTheKeptGrid()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        t.Mark('L', Name(6));
+        t.Session.PumpFrames(2);
+        var name = BriefCells(t, 'L')[Name(6)].Children.OfType<TextElement>().Single();
+        Assert.Equal(Nocturne.MarkRed, name.ResolvedInherited.TextColor);
+    }
+
     // ── The comparison ───────────────────────────────────────────────────
 
     private static IReadOnlyList<Element> DiffRows(DiffViewTests.Fixture t) => t.BodyRows();
