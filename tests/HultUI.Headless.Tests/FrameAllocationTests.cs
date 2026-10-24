@@ -250,16 +250,17 @@ public class FrameAllocationTests
         Assert.True(perFrame < 1, $"repainting a TextArea allocated {perFrame:0.#} B per frame");
     }
 
-    /// <summary>A rich text editor's ticked tasks, repainted, allocate no more than the same tasks
-    /// unticked. Each tick is a polyline, and each polyline was a new <c>SKPath</c>: ~80 B a tick a
-    /// frame, 3.1 KB a frame over a screen of 40 ticked tasks (plan 17, round 3). (The editor
-    /// allocates 24 B a frame either way: the record it notes where it was drawn in.)</summary>
+    /// <summary>A rich text editor's tasks, ticked or not, repainted, allocate nothing. Each tick is
+    /// a polyline, and each polyline was a new <c>SKPath</c>: ~80 B a tick a frame, 3.1 KB a frame
+    /// over a screen of 40 ticked tasks (plan 17, round 3). The editor also noted where it was
+    /// drawn in a new record every frame, 24 B, until round 4 kept the record while the editor
+    /// stays put.</summary>
     [Fact]
-    public void ASteadyRepaintOfTickedTasks_AllocatesNoMoreThanOfOpenTasks()
+    public void ASteadyRepaintOfTasks_AllocatesNothing()
     {
         double ticked = Repaint(done: true), open = Repaint(done: false);
 
-        Assert.True(ticked <= open, $"repainting ticked tasks allocated {ticked:0.#} B per frame; open ones, {open:0.#} B");
+        Assert.True(ticked < 1 && open < 1, $"repainting ticked tasks allocated {ticked:0.#} B per frame; open ones, {open:0.#} B");
 
         static double Repaint(bool done)
         {

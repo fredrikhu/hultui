@@ -73,12 +73,14 @@ public partial class RichTextEditorElement
     // Called from Render: where the document is drawn now. A version taken before there was a
     // layout to read, or at another width or theme, has lines and boxes that are not these: the
     // tree is built again, which takes a new one. The tree is built before the frame is drawn,
-    // so the first version an editor gives is always taken without its layout.
+    // so the first version an editor gives is always taken without its layout. The place is a
+    // new record only when the editor moved or scrolled: one a frame was the editor's only
+    // render-pass allocation (24 B; plan 17, round 4).
     private void NoteViewFrame()
     {
         var box = WindowContentBox;
-        var frame = new ViewFrame(box.X, box.Y - _scrollY);
-        if (frame != _viewFrame) _viewFrame = frame;
+        float x = box.X, y = box.Y - _scrollY;
+        if (_viewFrame is not { } frame || frame.X != x || frame.Y != y) _viewFrame = new ViewFrame(x, y);
         if (_textVersion is { } version && AccessibilityClients.Active
             && (version.Key.Width != _laidOutWidth || version.Key.Stamp != _laidOutStamp || !version.LaidOut))
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.Text);
