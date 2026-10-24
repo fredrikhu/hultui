@@ -201,10 +201,11 @@ static partial class Scenarios
     };
 
     /// <summary>A 20-block rich text editor above 300 benchmark rows, focused, the caret at the
-    /// start of its first paragraph.</summary>
+    /// start of its first paragraph. The editor keeps its height: the column shrank it to 10 px to
+    /// make room for the rows, shorter than a line.</summary>
     private static RichTextEditorElement MountCaretWalk(Ctx ctx)
     {
-        var editor = RichTextEditor.New(LongDocument(ctx.Rng, 20)).Width(Dimension.Px(420)).Height(Dimension.Px(300));
+        var editor = RichTextEditor.New(LongDocument(ctx.Rng, 20)).Width(Dimension.Px(420)).Height(Dimension.Px(300)).FlexShrink(0);
         ctx.Mount(Flex.Column(gap: 8).FlexGrow(1).Padding(8).Children(
             editor, ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 300))));
         ctx.Window.Click(editor);
@@ -235,7 +236,9 @@ static partial class Scenarios
             },
             Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
             FigureUnit = "a11y trees/key",
-            Check = told,
+            Check = step => editor.Layout.AbsoluteContentBox.Height < 100
+                ? $"the editor is {editor.Layout.AbsoluteContentBox.Height:0} px high, shorter than a few lines"
+                : told(step),
         };
     }
 
