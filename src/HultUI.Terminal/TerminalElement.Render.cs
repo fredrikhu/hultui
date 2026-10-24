@@ -63,6 +63,15 @@ public sealed partial class TerminalElement
     private readonly List<TextSpan> _spans = [];
     private readonly List<int> _specials = [];
 
+    // Each row's text as last drawn, kept while it stays the same: a frame that draws the screen
+    // again (a blink, the cursor, a selection, a hover) makes no strings. A new string per drawn
+    // row was 1.6–6 KB a frame (plan 17, round 4).
+    private string?[] _rowStrings = [];
+
+    /// <summary>A code point drawn on its own, or under a block cursor, as a string; kept, as the
+    /// row strings are.</summary>
+    private readonly Dictionary<int, string> _codePointTexts = [];
+
     /// <summary>The cell's size in layout units, as the last frame measured it.</summary>
     internal (float Width, float Height) CellSize => (_cellWidth, _cellHeight);
 
@@ -131,6 +140,7 @@ public sealed partial class TerminalElement
         _metricsKey = key;
         _glyphs.Clear();
         _glyphWidths.Clear();
+        _codePointTexts.Clear();
 
         _font = ctx.MeasureFont(style);
         _cellWidth = _font.CharacterWidth > 0 ? _font.CharacterWidth : style.FontSize * 0.6f;
@@ -347,7 +357,7 @@ public sealed partial class TerminalElement
 
         if (lastInk > 0)
         {
-            var text = _rowText.ToString(0, lastInk);
+            var text = RowString(row, lastInk);
             var bounds = new Rect(left, y, (s.Columns + 1) * _cellWidth, _cellHeight);
             ctx.DrawText(text, bounds, style, TextOverflow.Clip, 1, TrimSpans(lastInk));
         }
@@ -360,6 +370,25 @@ public sealed partial class TerminalElement
         }
 
         DrawDecorations(ctx, s, row, left, y, scale);
+    }
+
+    /// <summary>The row's text up to its last ink: the string drawn there last time when the text
+    /// is the same, else a new one, kept for the next frame.</summary>
+    private string RowString(int row, int length)
+    {
+        if (row >= _rowStrings.Length)
+            Array.Resize(ref _rowStrings, Math.Max(row + 1, 2 * _rowStrings.Length));
+        _rowText.Length = length;
+        if (_rowStrings[row] is { } kept && _rowText.Equals(kept.AsSpan())) return kept;
+        return _rowStrings[row] = _rowText.ToString();
+    }
+
+    /// <summary>A code point as a string; U+FFFD for a value that is not a scalar.</summary>
+    private string TextOf(int cp)
+    {
+        if (!_codePointTexts.TryGetValue(cp, out var text))
+            _codePointTexts[cp] = text = (Rune.IsValid(cp) ? new Rune(cp) : Rune.ReplacementChar).ToString();
+        return text;
     }
 
     /// <summary>A code point as UTF-16: one char, or a surrogate pair above the BMP; U+FFFD for a
@@ -429,7 +458,7 @@ public sealed partial class TerminalElement
         if (cell.Cluster is null && BoxDrawing.TryDraw(ctx, cell.CodePoint, SnapRect(rect, scale), color, scale))
             return;
 
-        var text = cell.Cluster ?? (Rune.IsValid(cell.CodePoint) ? new Rune(cell.CodePoint) : Rune.ReplacementChar).ToString();
+        var text = cell.Cluster ?? TextOf(cell.CodePoint);
         var glyphStyle = style with
         {
             TextColor = color,
@@ -525,9 +554,7 @@ public sealed partial class TerminalElement
                         TextColor = (cell.Flags & CellFlags.DefaultBackground) != 0 ? Rgb(s.DefaultBackground) : Rgb(cell.Background),
                         FontWeight = (cell.Flags & CellFlags.Bold) != 0 ? FontWeight.Bold : FontWeight.Regular,
                     };
-                    var glyph = new StringBuilder(2);
-                    AppendCodePoint(glyph, cell.CodePoint);
-                    ctx.DrawText(glyph.ToString(), rect with { Width = rect.Width + _cellWidth }, under, TextOverflow.Clip, 1);
+                    ctx.DrawText(TextOf(cell.CodePoint), rect with { Width = rect.Width + _cellWidth }, under, TextOverflow.Clip, 1);
                 }
                 break;
         }

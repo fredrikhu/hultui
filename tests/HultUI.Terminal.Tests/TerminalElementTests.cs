@@ -7,6 +7,7 @@ using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Headless;
 using HultUI.Terminal.Emulation;
+using HultUI.Testing;
 using Xunit;
 using static HultUI.Terminal.Tests.TerminalControllerTests;
 
@@ -591,6 +592,53 @@ public class TerminalElementTests
         t.Window.RenderLog.Clear();
         t.Session.PumpFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
         Assert.Contains(t.Window.RenderLog.Named("DrawRoundedRect"), o => o.Args.Contains("stroke="));
+    }
+
+    /// <summary>
+    /// A frame that draws the same screen again — the cursor's blink, a hover, anything else that
+    /// repaints — makes no strings: each row keeps the text it drew last, and so does a character
+    /// drawn on its own or under the block cursor. A new string per drawn row was 1.6–6 KB a frame
+    /// (plan 17, round 4).
+    /// </summary>
+    [Fact]
+    public void AFrameThatDrawsTheSameScreenAgain_AllocatesNothing()
+    {
+        using var t = Term.Shown(width: 800, height: 300);
+        for (int row = 0; row < 6; row++)
+            t.Emit($"\x1b[3{row + 1}msrc\x1b[0m  \x1b[1;9{row % 8}mbin\x1b[0m  obj  \x1b[4mREADME.md\x1b[0m  build-{row}.sh\r\n");
+        // Cells drawn on their own: wide ones, right-to-left letters, an emoji.
+        t.Emit("東京 שלום 🙂 done\r\n");
+        // The block cursor over a character, which it draws in the background colour.
+        t.Emit("demo$ ls\x1b[2D");
+        var frame = TimeSpan.FromMilliseconds(16);
+        for (int i = 0; i < 4; i++) t.Session.PumpFrame(frame, forceRender: true);
+
+        double perFrame = Allocations.PerCall(50, () => t.Session.PumpFrame(frame, forceRender: true));
+
+        Assert.True(perFrame < 1, $"a frame of the same screen allocated {perFrame:0.#} B");
+    }
+
+    /// <summary>The kept text is for an unchanged row only: a row whose characters change, even
+    /// to the same length, draws its new text.</summary>
+    [Fact]
+    public void ARowWhoseTextChanges_DrawsTheNewText()
+    {
+        using var t = Term.Shown(recording: true);
+        t.Emit("abcde fgh");
+        t.Session.PumpFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        t.Emit("\rabXde");
+        t.Window.RenderLog.Clear();
+        t.Session.PumpFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        var rows = t.Window.RenderLog.Named("DrawText").Select(o => o.Args).ToList();
+        Assert.Contains(rows, a => a.StartsWith("\"abXde fgh\"", StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, a => a.StartsWith("\"abcde", StringComparison.Ordinal));
+
+        t.Emit("\x1b[2K\rab");
+        t.Window.RenderLog.Clear();
+        t.Session.PumpFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        rows = t.Window.RenderLog.Named("DrawText").Select(o => o.Args).ToList();
+        Assert.Contains(rows, a => a.StartsWith("\"ab\"", StringComparison.Ordinal));
     }
 
     // ──── Lifetime ────

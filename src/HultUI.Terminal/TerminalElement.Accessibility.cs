@@ -49,12 +49,15 @@ public sealed partial class TerminalElement
 
     internal override IAccessibleTextSource? AccessibleTextSource => _textSource ??= new ScreenTextSource(this);
 
-    /// <summary>Records where the grid is; called from <see cref="Render"/>.</summary>
+    /// <summary>Records where the grid is; called from <see cref="Render"/>. A new record only when
+    /// something in it moved: one a frame was the element's last render-pass allocation.</summary>
     private void NoteTextFrame()
     {
         var box = ScreenContentBox;
-        var frame = new TextFrame(box.X, box.Y, _cellWidth, _cellHeight);
-        if (frame != _textFrame) _textFrame = frame;
+        if (_textFrame is { } frame && frame.X == box.X && frame.Y == box.Y
+            && frame.CellWidth == _cellWidth && frame.CellHeight == _cellHeight)
+            return;
+        _textFrame = new TextFrame(box.X, box.Y, _cellWidth, _cellHeight);
     }
 
     /// <summary>The element's text for a bridge, on whichever thread it asks: rebuilt when the

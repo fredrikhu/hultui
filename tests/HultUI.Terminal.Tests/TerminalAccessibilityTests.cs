@@ -1,4 +1,5 @@
 using HultUI.Core.Accessibility;
+using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using Xunit;
 
@@ -138,6 +139,25 @@ public class TerminalAccessibilityTests
         // A point in 本's second cell finds 本; a point past a row's text finds its end.
         Assert.Equal(3, text.OffsetAt(new Point(box.X + 5.5f * w, box.Y + 0.5f * h)));
         Assert.Equal(5, text.OffsetAt(new Point(box.X + 20 * w, box.Y + 0.5f * h)));
+    }
+
+    /// <summary>The grid's place is noted as the element draws; it follows the element when it
+    /// moves (a frame that draws it in the same place keeps the note it has).</summary>
+    [Fact]
+    public void TheGeometry_FollowsTheElement_WhenItMoves()
+    {
+        var above = Box.New().Height(Dimension.Px(10));
+        using var t = Term.Shown(around: e => Flex.Column().Children(above, e));
+        t.Emit("abc");
+        float before = TextOf(t).Geometry!.CharacterBounds(TextOf(t), 1).Y;
+
+        above.Height(Dimension.Px(50));
+        above.MarkLayoutDirty();
+        t.Session.PumpFrames(2);
+
+        float after = TextOf(t).Geometry!.CharacterBounds(TextOf(t), 1).Y;
+        Assert.Equal(before + 40, after, 0.01f);
+        Assert.Equal(t.Element!.ScreenContentBox.Y, after, 0.01f);
     }
 
     [Fact]

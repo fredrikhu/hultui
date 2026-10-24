@@ -174,8 +174,8 @@ public class TerminalGlyphShapeTests
 
     /// <summary>A terminal frame with six Powerline prompt lines on screen allocates no more than
     /// the same lines with each separator a plain character. With the demo shell's boxes page on
-    /// screen six times, a frame was 12.6 KB; it is 1.7 KB, against 1.8 KB with the separators as
-    /// text (plan 17, round 3). What is left is the rows' text.</summary>
+    /// screen six times, a frame was 12.6 KB; it was 1.7 KB, against 1.8 KB with the separators as
+    /// text (plan 17, round 3). What was left, the rows' text, is kept since round 4: both are 0.</summary>
     [Fact]
     public void AFrameOfPowerlinePromptLines_AllocatesNoMoreThanTheSameLinesInText()
     {
