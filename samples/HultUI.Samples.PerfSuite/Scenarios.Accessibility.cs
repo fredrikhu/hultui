@@ -122,6 +122,14 @@ static partial class Scenarios
                 return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index));
             });
 
+        yield return new Scenario("a11y/selection walk beside details, keys 500 ms apart, real loop, bridge on",
+            "The walk beside details above at a reader's pace, Down every 500 ms: past the 100 ms a scroll's refresh waits, so its leading edge rebuilds the tree on every key and the selection move's patch never runs; the trees a key builds (all under build)",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index), keyEvery: ReaderPace);
+            });
+
         yield return new Scenario("a11y/selection walk beside details and kept chrome parts, keys 60 ms apart, real loop, bridge on",
             "The walk beside details above inside a window's chrome kept in three child components the Build hands on: a host put back where it was marks no structure, so a key builds no more trees than the walk without the chrome",
             ctx =>
@@ -300,10 +308,13 @@ static partial class Scenarios
     /// until the next. The figure is the accessibility trees a key builds, as the window counts
     /// them (it was the labels made over the 1,000 items until the list kept its labels). A
     /// scroll's refresh of the tree waits 100 ms, so keys 60 ms apart need a build at most every
-    /// other key for what moved; a selection move itself needs none.
+    /// other key for what moved; a selection move itself needs none. At a reader's pace
+    /// (<paramref name="keyEvery"/> = <see cref="ReaderPace"/>) every key is past that wait, so the
+    /// refresh's leading edge builds a tree on every key.
     /// <paramref name="told"/> checks the bridge was told the selected item.
     /// </summary>
-    private static Op RealLoopWalk(Ctx ctx, Func<int, string?> told, WalkChrome chrome = WalkChrome.None)
+    private static Op RealLoopWalk(Ctx ctx, Func<int, string?> told, WalkChrome chrome = WalkChrome.None,
+        TimeSpan? keyEvery = null)
     {
         var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows: true, details: true, chrome: chrome);
         var host = pane.Mount();
@@ -318,7 +329,7 @@ static partial class Scenarios
         int first = pane.Selected;
         int treesBefore = 0;
         bool nextKey = false;
-        var keyEvery = TimeSpan.FromMilliseconds(60);
+        var every = keyEvery ?? TimeSpan.FromMilliseconds(60);
         return new Op
         {
             Run = _ =>
@@ -326,7 +337,7 @@ static partial class Scenarios
                 treesBefore = ctx.Window.AccessibilityTreesBuilt;
                 ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
                 nextKey = false;
-                ctx.Session.RunLoop(() => nextKey, eventEvery: keyEvery, onEvent: () => nextKey = true);
+                ctx.Session.RunLoop(() => nextKey, eventEvery: every, onEvent: () => nextKey = true);
             },
             Frames = 0,
             Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
@@ -334,6 +345,10 @@ static partial class Scenarios
             Check = step => pane.Verify(first + step + 1) ?? pane.VerifyChrome() ?? told(first + step + 1),
         };
     }
+
+    /// <summary>How long a person using a screen reader waits between keys: long enough to hear
+    /// the item (plan 17's round 4 measured Junction's History walked this way).</summary>
+    private static readonly TimeSpan ReaderPace = TimeSpan.FromMilliseconds(500);
 
     /// <summary>Null when the bridge's tree has item <paramref name="index"/> of the 1,000-item
     /// list selected, or what it has instead.</summary>
@@ -499,6 +514,15 @@ static partial class Scenarios
                 var rig = UiaRig.Install(ctx.Window);
                 var applied = Applied(rig);
                 return RealLoopWalk(ctx, applied);
+            });
+
+        yield return new Scenario("a11y/selection walk beside details, keys 500 ms apart, real loop, UIA",
+            "The real-loop walk at a reader's pace with the UIA bridge: a tree built on every key by the scroll's refresh, its upkeep and events (all under build)",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var applied = Applied(rig);
+                return RealLoopWalk(ctx, applied, keyEvery: ReaderPace);
             });
 
         yield return new Scenario("a11y/type in rich text, UIA",
