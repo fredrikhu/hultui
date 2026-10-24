@@ -122,6 +122,14 @@ static partial class Scenarios
                 return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index));
             });
 
+        yield return new Scenario("a11y/selection walk beside details and kept chrome parts, keys 60 ms apart, real loop, bridge on",
+            "The walk beside details above inside a window's chrome kept in three child components the Build hands on: a host put back where it was marks no structure, so a key builds no more trees than the walk without the chrome",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index), WalkChrome.Kept);
+            });
+
         yield return new Scenario("a11y/type beside a 150-line diff, rows made in Build, bridge on",
             "Type beside a 150-line diff whose rows Build flattens anew, an accessibility client listening: the list has no item label, so every item is named by its record's ToString()",
             ctx =>
@@ -295,9 +303,9 @@ static partial class Scenarios
     /// other key for what moved; a selection move itself needs none.
     /// <paramref name="told"/> checks the bridge was told the selected item.
     /// </summary>
-    private static Op RealLoopWalk(Ctx ctx, Func<int, string?> told)
+    private static Op RealLoopWalk(Ctx ctx, Func<int, string?> told, WalkChrome chrome = WalkChrome.None)
     {
-        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows: true, details: true);
+        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows: true, details: true, chrome: chrome);
         var host = pane.Mount();
         host.On<HultUI.Core.Events.KeyDownEvent>(e =>
         {
@@ -323,7 +331,7 @@ static partial class Scenarios
             Frames = 0,
             Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
             FigureUnit = "a11y trees/key",
-            Check = step => pane.Verify(first + step + 1) ?? told(first + step + 1),
+            Check = step => pane.Verify(first + step + 1) ?? pane.VerifyChrome() ?? told(first + step + 1),
         };
     }
 

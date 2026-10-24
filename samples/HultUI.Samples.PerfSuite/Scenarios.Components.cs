@@ -90,6 +90,14 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("component/list walk beside chrome built with it",
+            "virtual/selection walk 1,000 item rows inside a window's chrome — a title bar, a sidebar of workspaces and repositories, a toolbar of tabs and actions, about 130 elements — that the walk's own Build makes again, unchanged, on every move, as Junction's whole-window Build did until plan 17's round 4",
+            ctx => SelectionWalk(ctx, null, itemRows: true, chrome: WalkChrome.Built));
+
+        yield return new Scenario("component/list walk beside chrome in kept parts",
+            "The same walk with the chrome in three child components the walk's Build hands on unchanged: a move moves their hosts into the new tree and the reconciler puts them back, building nothing in them and marking nothing around them",
+            ctx => SelectionWalk(ctx, null, itemRows: true, chrome: WalkChrome.Kept));
+
         yield return new Scenario("component/signal fan-out to 500 labels",
             "One Signal read by 500 Effects, each setting a label: a write updates all 500",
             ctx =>

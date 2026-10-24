@@ -112,11 +112,13 @@ static partial class Scenarios
     /// with an accessibility client listening every step rebuilds its tree: a scroll's refresh
     /// waits 100 ms. <paramref name="check"/> adds what the bridge must have seen. With
     /// <paramref name="itemRows"/> the rows come from <c>.RenderWith((item, selected) => …)</c>,
-    /// which keeps the ones that did not change. The row reports the rows made per step.
+    /// which keeps the ones that did not change. The row reports the rows made per step. With
+    /// <paramref name="chrome"/> the pane sits in a window's chrome (<see cref="WalkChrome"/>).
     /// </summary>
-    internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false)
+    internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false,
+        WalkChrome chrome = WalkChrome.None)
     {
-        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows);
+        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows, chrome: chrome);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -139,7 +141,7 @@ static partial class Scenarios
             FrameDelta = WalkFrame,
             Figure = () => pane.RowsMade - madeBefore,
             FigureUnit = "rows made",
-            Check = step => pane.Verify(first + step + 1) ?? check?.Invoke(step),
+            Check = step => pane.Verify(first + step + 1) ?? pane.VerifyChrome() ?? check?.Invoke(step),
         };
     }
 
@@ -169,6 +171,24 @@ static partial class Scenarios
 sealed record WalkItem(int Index, string Icon, string Subject, string Hash, string Author, string Meta);
 
 /// <summary>
+/// The window around a <see cref="WalkPane"/>, shaped like Junction's: a title bar (brand,
+/// breadcrumb, search, window buttons), a sidebar (workspaces and repositories with their
+/// badges) and a toolbar (seven tabs, five actions) — about 130 elements, none of which a
+/// selection move changes.
+/// </summary>
+enum WalkChrome
+{
+    /// <summary>No chrome: the pane alone.</summary>
+    None,
+    /// <summary>Made by the pane's own Build, with the list, on every move — what a window that
+    /// is one component does.</summary>
+    Built,
+    /// <summary>Three child components the pane makes once and hands to every build: a move
+    /// moves their hosts into the new tree and the reconciler puts them back.</summary>
+    Kept,
+}
+
+/// <summary>
 /// The shape of Junction's History view: a header, then a <see cref="VirtualListElement{T}"/>
 /// of two-line rows (an icon, the subject, a line of detail), no keys on the rows, the
 /// selection drawn by the template from the index the pane's Build read, the list told the
@@ -180,9 +200,24 @@ sealed record WalkItem(int Index, string Icon, string Subject, string Hash, stri
 /// the commit the walk started on (<see cref="DetailsPane"/>): what an app's whole-window
 /// Build makes again, unchanged, on every move.
 /// </summary>
-sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details = false) : Component
+sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details = false,
+    WalkChrome chrome = WalkChrome.None) : Component
 {
     public const float RowHeight = 46f;
+
+    /// <summary>A part of the kept chrome: builds what it is given, once.</summary>
+    private sealed class ChromePart(Func<Element> build) : Component
+    {
+        public int Builds;
+
+        public override Element Build()
+        {
+            Builds++;
+            return build();
+        }
+    }
+
+    private ChromePart? _titlePart, _sidePart, _toolPart;
 
     private readonly Signal<int> _selected = new(0);
     private readonly Ref<VirtualListElement<WalkItem>> _list = new();
@@ -238,8 +273,144 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                     Text.New("History").FontSize(13f).FontWeight(FontWeight.SemiBold),
                     Text.New($"{items.Count:N0} commits").FontSize(12f).TextColor(Ui.Muted)),
             list.WithRef(_list));
-        if (!details) return pane;
-        return Flex.Row(gap: 0).FlexGrow(1).Children(pane, DetailsPane(items[Math.Max(0, _opened)]));
+        Element content = details
+            ? Flex.Row(gap: 0).FlexGrow(1).Children(pane, DetailsPane(items[Math.Max(0, _opened)]))
+            : pane;
+        if (chrome == WalkChrome.None) return content;
+
+        // Keyed throughout, as Junction keys its shell, so each list reconciles by identity.
+        Element title, side, tools;
+        if (chrome == WalkChrome.Kept)
+        {
+            title = (_titlePart ??= new ChromePart(TitleBar)).Mount().FlexShrink(0);
+            side = (_sidePart ??= new ChromePart(Sidebar)).Mount().FlexShrink(0);
+            tools = (_toolPart ??= new ChromePart(Toolbar)).Mount().FlexShrink(0);
+        }
+        else
+        {
+            title = TitleBar();
+            side = Sidebar();
+            tools = Toolbar();
+        }
+        content.Key = "view";
+        var main = Flex.Column(gap: 0).FlexGrow(1).Children(tools, content);
+        main.Key = "main";
+        var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch).Children(side, main);
+        body.Key = "body";
+        return Flex.Column(gap: 0).FlexGrow(1).Children(title, body);
+    }
+
+    /// <summary>Null when the kept chrome was built once and never again, or what happened.</summary>
+    public string? VerifyChrome()
+    {
+        if (chrome != WalkChrome.Kept) return null;
+        int builds = (_titlePart?.Builds ?? 0) + (_sidePart?.Builds ?? 0) + (_toolPart?.Builds ?? 0);
+        return builds == 3 ? null : $"the kept chrome was built {builds} times";
+    }
+
+    private static readonly string[] ChromeTabs = ["Overview", "History", "Commit", "Changes", "Branches", "Tags", "Files"];
+    private static readonly string[] ChromeTabIcons = ["squares-four", "git-commit", "git-diff", "pencil", "git-branch", "tag", "folders"];
+    private static readonly string[] ChromeRepos = ["hultui", "junction-notes", "vesper", "meridian"];
+
+    private static Element TitleBar()
+    {
+        var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(0, 0, 0, 14)).Children(
+            Text.New("Junction").FontSize(13f).FontWeight(FontWeight.Medium),
+            Text.New("·").FontSize(13f).TextColor(Ui.Muted),
+            Phosphor.Draw("git-fork", 13f, Ui.Accent),
+            Text.New("hultui").FontSize(13f),
+            Text.New("·").FontSize(13f).TextColor(Ui.Muted),
+            Phosphor.Draw("git-branch", 12f, Ui.Accent),
+            Text.New("main").FontSize(12f),
+            Text.New("·").FontSize(13f).TextColor(Ui.Muted),
+            Text.New("Frameworks").FontSize(13f));
+        var search = Flex.Row(gap: 8).Height(26).AlignItems(AlignItems.Center).Padding(new Thickness(0, 8, 0, 10))
+            .BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(6f).Children(
+                Phosphor.Draw("magnifying-glass", 13f, Ui.Muted),
+                Text.New("Search & commands").FontSize(12f).TextColor(Ui.Muted),
+                Box.New().Padding(new Thickness(1, 4)).BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(3f)
+                    .Children(Text.New("Ctrl+P").FontSize(10f).TextColor(Ui.Muted)));
+        var buttons = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch).Children(
+            WindowButton("minus"), WindowButton("square"), WindowButton("x"));
+        var bar = Flex.Row(gap: 0).Height(40).FlexShrink(0).AlignItems(AlignItems.Stretch)
+            .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0)).Children(
+                crumb,
+                Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Center).Children(
+                    Box.New().FlexGrow(1), search, Box.New().Width(10), buttons));
+        bar.Key = "titlebar";
+        return bar;
+
+        static Element WindowButton(string icon) =>
+            Flex.Row(gap: 0).Width(46).Height(40).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+                .Children(Phosphor.Draw(icon, 13f, Ui.Muted));
+    }
+
+    private static Element Sidebar()
+    {
+        var aside = Flex.Column(gap: 2).Width(266).FlexShrink(0).FlexGrow(1).Padding(new Thickness(12, 10))
+            .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 1, 0, 0));
+        aside.AddChild(Flex.Row(gap: 9).AlignItems(AlignItems.Center).Padding(new Thickness(0, 4, 8, 4)).Children(
+            Box.New().Width(22).Height(22).CornerRadius(5f).Background(Ui.Selected).AlignItems(AlignItems.Center)
+                .JustifyContent(JustifyContent.Center).Children(Phosphor.Draw("git-fork", 14f, Ui.Accent)),
+            Text.New("Junction").FontSize(15f).FontWeight(FontWeight.Medium).FlexGrow(1),
+            Phosphor.Draw("sidebar", 16f, Ui.Muted)));
+        aside.AddChild(Section("stack", "Workspaces", "3"));
+        foreach (var (name, count, active) in new[] { ("Frameworks", "4", true), ("Apps", "6", false), ("Home lab", "2", false) })
+            aside.AddChild(Flex.Row(gap: 9).AlignItems(AlignItems.Center).Padding(new Thickness(7, 8))
+                .Background(active ? Ui.Selected : Color.Transparent).CornerRadius(6f).Children(
+                    Phosphor.Draw("stack", 15f, Ui.Accent),
+                    Text.New(name).FontSize(13f).FlexGrow(1),
+                    Text.New(count).FontSize(11f).TextColor(Ui.Muted)));
+        aside.AddChild(Section("folders", "Repositories", ChromeRepos.Length.ToString()));
+        for (int i = 0; i < ChromeRepos.Length; i++)
+        {
+            var name = ChromeRepos[i];
+            aside.AddChild(Flex.Row(gap: 9).AlignItems(AlignItems.Center).Padding(new Thickness(7, 8))
+                .Background(i == 0 ? Ui.Selected : Color.Transparent).CornerRadius(6f).Children(
+                    Box.New().Width(24).Height(24).CornerRadius(5f).Background(Ui.CardFill).AlignItems(AlignItems.Center)
+                        .JustifyContent(JustifyContent.Center).Children(Text.New(name[..1].ToUpperInvariant()).FontSize(11f)),
+                    Flex.Column(gap: 0).FlexGrow(1).FlexShrink(1).Children(
+                        Text.New(name).FontSize(13f).FontWeight(FontWeight.Medium).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                        Text.New($@"C:\Users\dev\source\{name}").FontSize(10.5f).TextColor(Ui.Muted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)),
+                    Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center).Children(
+                        Box.New().Width(7).Height(7).CornerRadius(3.5f).Background(Ui.Accent),
+                        Flex.Row(gap: 1).AlignItems(AlignItems.Center).Children(
+                            Phosphor.Draw("arrow-up", 9f, Ui.Muted), Text.New($"{i}").FontSize(10f).TextColor(Ui.Muted)),
+                        Flex.Row(gap: 1).AlignItems(AlignItems.Center).Children(
+                            Phosphor.Draw("arrow-down", 9f, Ui.Muted), Text.New($"{2 * i}").FontSize(10f).TextColor(Ui.Muted)))));
+        }
+        aside.Key = "sidebar";
+        return aside;
+
+        static Element Section(string icon, string text, string count) =>
+            Flex.Row(gap: 6).AlignItems(AlignItems.Center).Padding(new Thickness(12, 6, 6, 6)).Children(
+                Phosphor.Draw(icon, 12f, Ui.Muted),
+                Text.New(text.ToUpperInvariant()).FontSize(10f).TextColor(Ui.Muted).FlexGrow(1),
+                Text.New(count).FontSize(11f).TextColor(Ui.Muted),
+                Box.New().Width(22).Height(22).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+                    .Children(Phosphor.Draw("plus", 14f, Ui.Muted)));
+    }
+
+    private static Element Toolbar()
+    {
+        var tabs = Flex.Row(gap: 2).FlexShrink(0).Padding(new Thickness(3)).AlignItems(AlignItems.Center)
+            .BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(6f);
+        for (int i = 0; i < ChromeTabs.Length; i++)
+            tabs.AddChild(Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(5, 10))
+                .BorderColor(i == 1 ? Ui.Accent : Color.Transparent).BorderWidth(1f).CornerRadius(4f).Children(
+                    Phosphor.Draw(ChromeTabIcons[i], 13f, i == 1 ? Ui.Accent : Ui.Muted),
+                    Text.New(ChromeTabs[i]).FontSize(12.5f).FontWeight(FontWeight.Medium),
+                    Box.New().Padding(new Thickness(1, 4)).BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(3f)
+                        .Children(Text.New($"{i + 1}").FontSize(9f).TextColor(Ui.Muted))));
+        var actions = Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center);
+        foreach (var (icon, label) in new[] { ("arrows-clockwise", "Fetch"), ("arrow-down", "Pull"), ("arrow-up", "Push"), ("tray-arrow-down", "Stash"), ("wrench", "Tools") })
+            actions.AddChild(Flex.Row(gap: 6).Height(34).AlignItems(AlignItems.Center).Padding(new Thickness(0, 10))
+                .BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(6f).Children(
+                    Phosphor.Draw(icon, 14f, Ui.Muted), Text.New(label).FontSize(12.5f)));
+        var bar = Flex.Row(gap: 14).Height(52).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(0, 16))
+            .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0)).Children(tabs, Box.New().FlexGrow(1), actions);
+        bar.Key = "toolbar";
+        return bar;
     }
 
     /// <summary>
