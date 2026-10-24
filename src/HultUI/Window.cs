@@ -128,12 +128,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     internal bool AccessibilityTreeBuilt => _a11yWasActive;
 
     /// <summary>How many accessibility trees this window's frames have built for a listening
-    /// bridge (a patched selection move builds none). UI thread.</summary>
+    /// bridge (a patch — a selection or caret move, a leaf's own property — builds none). UI thread.</summary>
     internal int AccessibilityTreesBuilt { get; private set; }
-    // Set when an element reports an a11y-visible property change (a text label's
-    // content, a checkbox toggle, …). Such changes aren't structural, so they
-    // force the next frame to rebuild+diff the tree — that regenerates the node
-    // snapshots (Name, bounds, …) and emits precise property-changed events.
+    // Set when an element reports an a11y-visible property change that cannot be patched in
+    // (a role, an enabled state, a radio's selection, anything of an element with children, …).
+    // Such changes aren't structural, so they force the next frame to rebuild+diff the tree —
+    // that regenerates the node snapshots (Name, bounds, …) and emits precise property-changed
+    // events. A leaf's own properties are patched instead (_a11yLeafChanged).
     private bool _a11yPropertyDirty;
     // Lists whose selection moved since the last frame, while a client listened. A move changes
     // the selected state of two item nodes, which the frame marks on the applied tree in place
@@ -145,12 +146,39 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     // its text, puts it on the applied tree's node in place and tells the move from it, as it
     // tells a list's selection move (TryPatchA11y), unless the frame rebuilds the tree anyway.
     private readonly List<Element> _a11yTextMoved = [];
-    // Kept for the patch: the nodes of the moved lists and texts in the applied tree, in tree
-    // order, each with its element and whether it is a list; the changes found; each text's new
-    // version, put on its node once every change of the frame is found.
-    private readonly List<(AccessibilityNode Node, Element Element, bool IsList)> _a11yPatchTargets = [];
+    // Leaves (elements with no children) that told a change of a property their node takes on its
+    // own — a name, a description, an expanded state, a value, a toggle — since the last frame, while
+    // a client listened. The frame makes each one's node again, compares it with the applied one and
+    // puts it in the applied tree in its place (TryPatchA11y), unless the frame rebuilds the tree
+    // anyway; whatever cannot be told that way rebuilds it, as every such change did: a keystroke in a
+    // text input beside 200 rows built and diffed 603 nodes for one value.
+    private readonly List<Element> _a11yLeafChanged = [];
+    // Elements whose range moved since the range refresh last told them (A11yRangeCoalesceMs): when
+    // it comes due, or a leaf's patch comes first, they are patched the same way. A playing video's
+    // scrubber built the whole tree two or three times a second.
+    private readonly List<Element> _a11yRangeChanged = [];
+    // More leaves than this in a frame (a bulk edit of labels) rebuild the tree: finding each node
+    // costs a walk down its ancestors, a rebuild one walk of everything.
+    private const int MaxPatchedLeaves = 32;
+    // Kept for the patch: the nodes of the moved lists and texts and the changed leaves in the applied
+    // tree, sorted into tree order, each with its element, its kind and its place in the tree (the
+    // child indices from the root, in _a11yPaths); the changes found; each text's new version and each
+    // leaf's new node, put in place once every change of the frame is found; the element's ancestors,
+    // bottom up, while its node is looked for (FindNodeDown).
+    private readonly List<A11yPatchTarget> _a11yPatchTargets = [];
+    private readonly List<int> _a11yPaths = [];
     private readonly List<PropertyChange> _a11ySelectionChanges = [];
     private readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> _a11yTextVersions = [];
+    private readonly List<(A11yPatchTarget Target, AccessibilityNode Node)> _a11yRemade = [];
+    private readonly List<Element> _a11yChain = [];
+
+    private enum A11yPatchKind : byte { List, Text, Leaf }
+
+    /// <summary>What a frame patches on the applied tree: a list whose selection moved, a text whose
+    /// caret did, or a leaf whose own properties changed; with its node and its place in the tree,
+    /// <see cref="PathLength"/> child indices from the root in <see cref="_a11yPaths"/>.</summary>
+    private readonly record struct A11yPatchTarget(AccessibilityNode Node, Element Element, A11yPatchKind Kind,
+        int PathStart, int PathLength);
     /// <summary>Announcements made since the last frame, handed to the bridge once the tree
     /// holding their elements is applied (<see cref="Element.Announce"/>).</summary>
     private readonly List<(Element Source, string Text, AnnouncementPoliteness Politeness)> _announcements = [];
@@ -743,43 +771,66 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     }
 
     /// <summary>
-    /// A move of a list's selection, or of a text's caret or selection, told without a rebuild:
-    /// marks the selected state of the item nodes a list's move changed, and puts each moved text's
-    /// new version on its node, on the applied tree in place, and hands the bridge those changes,
-    /// which are what the next rebuild's diff would have reported (0912a5e made every list move
-    /// force that rebuild; the rich text editor asked for one on every caret move, a whole tree
-    /// built and diffed for one caret, on every key). The next diff compares against the marked
-    /// tree, so it does not report them again. Whatever else the move changed is told on its own
-    /// schedule: a scroll by the coalesced layout refresh, as it always was. False when a list or a
-    /// text cannot be patched, and the tree must be rebuilt: no applied tree, an element with no
-    /// node in it (mounted since), a list whose items are not its node's
-    /// (<see cref="AccessibilityTreeBuilder.ItemSelectionChanges"/>), or a text that changed with
-    /// its caret (<see cref="AccessibilityTreeBuilder.TextSelectionChange"/>). Nothing is marked then.
+    /// Changes of a few nodes' own properties, told without a rebuild: a move of a list's selection
+    /// (the selected state of the item nodes it changed is marked), of a text's caret or selection (its
+    /// new version goes on its node), and a change of a leaf's own properties — a name, a description,
+    /// an expanded state, a value, a toggle, a range — for which the leaf's node is made again and put
+    /// in its place, all on the applied tree in place; then the bridge is handed those changes, which
+    /// are what the next rebuild's diff would have reported, in its order (0912a5e made every list move
+    /// force that rebuild; the rich text editor asked for one on every caret move; a keystroke in a
+    /// text input, a check box's click and a range's refresh each built and diffed the whole tree for
+    /// one node). The next diff compares against the patched tree, so it does not report them again.
+    /// Whatever else changed is told on its own schedule: a scroll, or a label that moved others, by
+    /// the coalesced layout refresh, as it always was. With <paramref name="withRanges"/>, the ranges
+    /// waiting for their refresh are patched too.
+    /// <para>False when something cannot be patched, and the tree must be rebuilt: no applied tree, an
+    /// element with no node in it (mounted since, or a node only a rebuild would make), a list whose
+    /// items are not its node's (<see cref="AccessibilityTreeBuilder.ItemSelectionChanges"/>), a text
+    /// that changed with its caret (<see cref="AccessibilityTreeBuilder.TextSelectionChange"/>), an
+    /// element that is not a leaf or changed in another way (<see cref="AccessibilityTreeBuilder.RemakeLeaf"/>),
+    /// or a leaf's change while a focus move waits for its node. Nothing is marked then.</para>
     /// </summary>
-    private bool TryPatchA11y()
+    private bool TryPatchA11y(bool withRanges)
     {
         if (_previousA11yTree is not { } tree) return false;
         var targets = _a11yPatchTargets;
         var changes = _a11ySelectionChanges;
         var versions = _a11yTextVersions;
+        var remade = _a11yRemade;
         try
         {
+            if (!AddPatchTargets(tree, _a11ySelectionMoved, A11yPatchKind.List)
+                || !AddPatchTargets(tree, _a11yTextMoved, A11yPatchKind.Text)
+                || !AddPatchTargets(tree, _a11yLeafChanged, A11yPatchKind.Leaf)
+                || (withRanges && !AddPatchTargets(tree, _a11yRangeChanged, A11yPatchKind.Leaf)))
+                return false;
+            // A leaf's node would be the rebuild's to mark focused, and to tell the bridge of.
+            if (_a11yPendingFocusId is not null && (_a11yLeafChanged.Count > 0 || withRanges)) return false;
             // In tree order, as a diff lists them.
-            FindPatchTargets(tree);
-            if (targets.Count < _a11ySelectionMoved.Count + _a11yTextMoved.Count) return false;
-            foreach (var (node, element, isList) in targets)
+            if (targets.Count > 1) SortByTreeOrder(targets);
+            foreach (var target in targets)
             {
-                if (isList)
+                var (node, element) = (target.Node, target.Element);
+                switch (target.Kind)
                 {
-                    if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes)) return false;
+                    case A11yPatchKind.List:
+                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes)) return false;
+                        break;
+                    case A11yPatchKind.Text:
+                        if (element.AccessibleTextSource is not IVersionedAccessibleTextSource source
+                            || !AccessibilityTreeBuilder.TextSelectionChange(node, source, changes, out var next))
+                            return false;
+                        if (next is not null) versions.Add((node, next));
+                        break;
+                    default:
+                        if (!AccessibilityTreeBuilder.RemakeLeaf(element, node, _focusManager, changes, out var made)) return false;
+                        if (made is not null) remade.Add((target, made));
+                        break;
                 }
-                else if (element.AccessibleTextSource is not IVersionedAccessibleTextSource source
-                    || !AccessibilityTreeBuilder.TextSelectionChange(node, source, changes, out var next))
-                    return false;
-                else if (next is not null)
-                    versions.Add((node, next));
             }
             foreach (var (node, version) in versions) node.ReplaceTextVersion(version);
+            foreach (var (target, node) in remade)
+                target.Node.Parent!.ReplaceChild(_a11yPaths[target.PathStart + target.PathLength - 1], node);
             if (changes.Count == 0) return true;   // moved back, or served on demand: nothing to tell
             var patch = new TreeDiff();
             foreach (var change in changes)
@@ -794,35 +845,110 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         finally
         {
             targets.Clear();
+            _a11yPaths.Clear();
             changes.Clear();
             versions.Clear();
+            remade.Clear();
         }
     }
 
-    /// <summary>Adds the nodes of the lists whose selection moved and of the texts whose caret did to
-    /// <see cref="_a11yPatchTargets"/>, in tree order. Stops once it has them all, and does not walk
-    /// into a list's items.</summary>
-    private bool FindPatchTargets(AccessibilityNode node)
+    /// <summary>Adds each element's node in the applied tree to <see cref="_a11yPatchTargets"/>, with
+    /// its place in the tree. A leaf told twice (a number field's value and its range) is added once.
+    /// False when an element has no node there.</summary>
+    private bool AddPatchTargets(AccessibilityNode tree, List<Element> elements, A11yPatchKind kind)
     {
-        int all = _a11ySelectionMoved.Count + _a11yTextMoved.Count;
-        if (Matches(_a11ySelectionMoved, isList: true) || Matches(_a11yTextMoved, isList: false))
-            return _a11yPatchTargets.Count == all;
-        // By index: foreach over the interface boxes an enumerator per node.
-        var children = node.Children;
-        for (int i = 0; i < children.Count; i++)
-            if (FindPatchTargets(children[i])) return true;
-        return false;
-
-        bool Matches(List<Element> moved, bool isList)
+        var targets = _a11yPatchTargets;
+        for (int i = 0; i < elements.Count; i++)
         {
-            for (int i = 0; i < moved.Count; i++)
-            {
-                if (moved[i].Id != node.ElementId) continue;
-                _a11yPatchTargets.Add((node, moved[i], isList));
-                return true;
-            }
+            var element = elements[i];
+            if (kind == A11yPatchKind.Leaf && IsLeafTarget(element)) continue;
+            int start = _a11yPaths.Count;
+            if (FindNodeDown(tree, element) is not { } node) return false;
+            targets.Add(new A11yPatchTarget(node, element, kind, start, _a11yPaths.Count - start));
+        }
+        return true;
+
+        bool IsLeafTarget(Element element)
+        {
+            foreach (var target in targets)
+                if (target.Kind == A11yPatchKind.Leaf && ReferenceEquals(target.Element, element)) return true;
             return false;
         }
+    }
+
+    /// <summary>
+    /// The node of <paramref name="element"/> in the applied tree, found down the element's ancestors
+    /// from the root, and its place there, the child index at each step, added to
+    /// <see cref="_a11yPaths"/>: each ancestor that has a node of its own (a semantic one) has it among
+    /// the children of the node above, and the rest pass theirs up. So it looks only at the children of
+    /// the nodes on the way, not at the whole tree. Null when the element has no node there: it is not
+    /// in the root's tree (an overlay's), or the tree was built otherwise than its ancestors say now (one
+    /// that became semantic since, a list whose items stand for its rows, a button whose name is the text
+    /// inside), and a rebuild makes what it makes.
+    /// </summary>
+    private AccessibilityNode? FindNodeDown(AccessibilityNode tree, Element element)
+    {
+        var chain = _a11yChain;
+        try
+        {
+            var top = element;
+            while (top.Parent is { } parent)
+            {
+                chain.Add(top);
+                top = parent;
+            }
+            if (!ReferenceEquals(top, _root)) return null;
+            var node = tree;
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                var step = chain[i];
+                if (i > 0 && !AccessibilityTreeBuilder.IsSemantic(step)) continue;
+                // By index: foreach over the interface boxes an enumerator.
+                var children = node.Children;
+                int found = -1;
+                for (int c = 0; c < children.Count; c++)
+                {
+                    if (children[c].ElementId != step.Id) continue;
+                    found = c;
+                    break;
+                }
+                if (found < 0) return null;
+                _a11yPaths.Add(found);
+                node = children[found];
+            }
+            return node;
+        }
+        finally
+        {
+            chain.Clear();
+        }
+    }
+
+    /// <summary>Sorts the targets into the order of their nodes in the tree (an insertion sort: a
+    /// frame has a few).</summary>
+    private void SortByTreeOrder(List<A11yPatchTarget> targets)
+    {
+        for (int i = 1; i < targets.Count; i++)
+        {
+            var target = targets[i];
+            int j = i - 1;
+            for (; j >= 0 && ComparePlaces(targets[j], target) > 0; j--)
+                targets[j + 1] = targets[j];
+            targets[j + 1] = target;
+        }
+    }
+
+    /// <summary>Which of two nodes comes first in the tree, from their child indices from the root: an
+    /// ancestor before its descendants.</summary>
+    private int ComparePlaces(in A11yPatchTarget a, in A11yPatchTarget b)
+    {
+        int common = Math.Min(a.PathLength, b.PathLength);
+        for (int k = 0; k < common; k++)
+        {
+            int d = _a11yPaths[a.PathStart + k] - _a11yPaths[b.PathStart + k];
+            if (d != 0) return d;
+        }
+        return a.PathLength - b.PathLength;
     }
 
     /// <summary>Finds the nodes of two elements in one walk, which stops once it has both.</summary>
@@ -995,6 +1121,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // dirt of its own anyway).
         || _a11ySelectionMoved.Count > 0
         || _a11yTextMoved.Count > 0
+        || _a11yLeafChanged.Count > 0
         // A coalesced layout-driven a11y refresh is due — force the trailing frame
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
@@ -1218,14 +1345,23 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
         bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
-        bool a11yRebuild = a11yImmediate || a11yLayoutDue || a11yRangeDue;
-        // A list's selection moved, or a text's caret, and nothing else asks for a rebuild: the
-        // changes are marked on the applied tree and told from it. A rebuild in this frame tells
-        // them in its diff.
-        if (a11yActive && !a11yRebuild && (_a11ySelectionMoved.Count > 0 || _a11yTextMoved.Count > 0))
+        bool a11yRebuild = a11yImmediate || a11yLayoutDue;
+        // A list's selection moved, a text's caret, a leaf's own property, or a range's refresh came
+        // due, and nothing else asks for a rebuild: the changes are marked on the applied tree and told
+        // from it. A leaf's patch tells the ranges waiting for their refresh too, as the rebuild it
+        // stands for would have. A rebuild in this frame tells all of them in its diff.
+        if (a11yActive && !a11yRebuild && (_a11ySelectionMoved.Count > 0 || _a11yTextMoved.Count > 0
+            || _a11yLeafChanged.Count > 0 || a11yRangeDue))
         {
+            bool withRanges = _a11yRangeRefreshPending && (a11yRangeDue || _a11yLeafChanged.Count > 0);
             using (_tracer.Begin("Phase", "A11y"))
-                a11yRebuild = !TryPatchA11y();
+                a11yRebuild = !TryPatchA11y(withRanges);
+            if (!a11yRebuild && withRanges)
+            {
+                _a11yRangeRefreshPending = false;
+                _lastA11yRangeMs = nowMs;
+                _a11yRangeChanged.Clear();
+            }
         }
 
         if (a11yRebuild)
@@ -1236,6 +1372,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 _a11yRangeRefreshPending = false;
                 _lastA11yRangeMs = nowMs;
             }
+            _a11yRangeChanged.Clear();
             using (_tracer.Begin("Phase", "A11y"))
             {
                 var newTree = BuildAccessibilityTreeWithOverlays(_root);
@@ -1257,6 +1394,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
             _a11yRangeRefreshPending = false;
+            _a11yRangeChanged.Clear();
         }
         if (_announcements.Count > 0)
         {
@@ -1269,6 +1407,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         _a11yPropertyDirty = false;
         _a11ySelectionMoved.Clear();
         _a11yTextMoved.Clear();
+        _a11yLeafChanged.Clear();
         _a11yWasActive = a11yActive;
         // Note: the Children flag is cleared with everything else by ClearAllFlags at the end
         // of the frame, below, or where a minimized window stops.
@@ -3557,10 +3696,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// a rebuild+diff next frame rather than patching a single node: the rebuild
     /// regenerates every snapshot from current state (so derived values like a
     /// button's name-from-content stay correct) and the diff emits exactly the
-    /// property-changed events that platforms forward to assistive tech. A list's selection move
-    /// and a caret move in text made on request are the exceptions: the list's two items' selected
-    /// state, and the text's new version, are marked on the applied tree in place
-    /// (<see cref="TryPatchA11y"/>), as a focus move's is.
+    /// property-changed events that platforms forward to assistive tech. A list's selection move,
+    /// a caret move in text made on request and a change of a leaf's own properties (its name, its
+    /// description, its expanded state, its value, its toggle, its range) are the exceptions: the
+    /// list's two items' selected state, the text's new version and the leaf's node made again are
+    /// marked on the applied tree in place (<see cref="TryPatchA11y"/>), as a focus move's is.
     /// </summary>
     void IAccessibilityAnnouncer.Announce(Element source, string text, AnnouncementPoliteness politeness)
     {
@@ -3581,9 +3721,29 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             // frame of a 1.9 ms frame in a scrolling History list, and up to 9 ms.
             if (propertyName == AccessibilityProperties.BoundingRect)
                 window._a11yLayoutRefreshPending = true;
-            // A range's value can move every frame (a drag, a playback): on its own schedule.
+            // A range's value can move every frame (a drag, a playback): on its own schedule, when
+            // the range's node is made again and patched in (TryPatchA11y), as a leaf's is.
             else if (propertyName == AccessibilityProperties.RangeValue)
+            {
                 window._a11yRangeRefreshPending = true;
+                var ranges = window._a11yRangeChanged;
+                if (ranges.Count >= MaxPatchedLeaves) window._a11yPropertyDirty = true;
+                else if (!ranges.Contains(element)) ranges.Add(element);
+            }
+            // A leaf's own property: its node is made again and patched into the applied tree
+            // (TryPatchA11y), unless it cannot be, and then the tree is rebuilt. A rebuild for it
+            // built and diffed the whole tree for one node: a keystroke in a text input beside 200
+            // rows 53 KB, a check box's click among 500 rows 87 KB, with UIA. Not an element that
+            // offers text (a text area's, a rich text editor's value is its text, and its keystroke
+            // changes the text): its rebuild is not tried as a patch first.
+            else if (propertyName is AccessibilityProperties.Name or AccessibilityProperties.Description
+                    or AccessibilityProperties.IsExpanded or AccessibilityProperties.Value or AccessibilityProperties.IsToggled
+                && element.Children.Count == 0 && element.AccessibleTextSource is null)
+            {
+                var leaves = window._a11yLeafChanged;
+                if (leaves.Count >= MaxPatchedLeaves) window._a11yPropertyDirty = true;
+                else if (!leaves.Contains(element)) leaves.Add(element);
+            }
             // A list's selection moved: two items' selected state, which the frame marks on the
             // applied tree and tells without a rebuild (TryPatchA11y). A rebuild for it
             // built and diffed the whole tree on every key of a walk: Junction's History list, a

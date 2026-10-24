@@ -325,15 +325,16 @@ public class A11yPatchedPropertyTests
     }
 
     [Fact]
-    public void AChangeOnItsOwn_BuildsOneTree_AndANoChangeSetBuildsNone()
+    public void AChangeOnItsOwn_IsToldOnce_AndANoChangeSetTellsNothing()
     {
         using var session = HeadlessSession.Create(800, 600);
-        session.Window.InstallAccessibilityBridge();
+        var bridge = session.Window.InstallAccessibilityBridge();
         var box = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(24)).AccessibleName("Inbox (0)").AutomationId("inbox");
         Mount(session, new Scene(Flex.Column().Children(TextB.New("Status"), box), box, () => { }));
         int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
 
-        // The same values again: nothing changed, and nothing is built.
+        // The same values again: nothing changed, and nothing is built or told.
         box.AccessibleName = "Inbox (0)";
         box.AutomationId = "inbox";
         box.Role = AccessibilityRole.None;
@@ -341,8 +342,17 @@ public class A11yPatchedPropertyTests
         box.AccessibleExpanded = null;
         session.PumpFrame();
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Empty(bridge.Diffs);
 
+        // A leaf's own name: its node is made again and patched in (plan 17, round 4), no tree built.
         box.AccessibleName = "Inbox (1)";
+        session.PumpFrame();
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        var change = Assert.Single(Assert.Single(bridge.Diffs).PropertyChanged);
+        Assert.Equal((box.Id, AccessibilityProperties.Name, "Inbox (1)"), (change.Node.ElementId, change.PropertyName, change.Node.Name));
+
+        // Its automation id is not a leaf property: the tree is built for it.
+        box.AutomationId = "inbox-1";
         session.PumpFrame();
         Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
     }

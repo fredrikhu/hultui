@@ -207,11 +207,42 @@ Text_TextSelectionChanged, AT-SPI sends text-caret-moved and text-selection-chan
 reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built. A
 move that comes with an edit is told by the edit's rebuild, as before.
 
+A change of a leaf's own properties rebuilds no tree either (2026-10-24, plan 17 round 4):
+a text input's value (a password field's bullets, never its text), a toggle (a check box,
+a switch, `AccessibleToggled`), a range (a slider, a progress bar, a number field, a
+playing video's scrubber, at its coalesced refresh), and a name, a description or an
+expanded state. A leaf is an element with no children whose node has none. The frame
+finds the leaf's node down its ancestors (each semantic one's node is a child of the one
+above), makes the node again from the element with the applied node's box and offscreen
+state, compares the two as the differ does, puts the new node in its place in its parent's
+children (one reference write; a reader on another thread finds the old node or the new,
+each whole) and hands the bridges the changes (`ApplyPatchedProperties`), in tree order
+with any list selection or caret move of the same frame. The UIA wrapper takes the new
+node and raises what a diff raises (ValueValue, ToggleState, RangeValue, Name, HelpText,
+ExpandCollapseState); the AT-SPI object sets its name, description, value, range, checked
+or expanded field (settable for these since this change) and sends the signal a diff
+sends. Ranges waiting for their refresh are told by a leaf's patch, as by the rebuild it
+stands for. Each change rebuilt and diffed the whole tree for one node: a keystroke beside
+200 rows was 53 KB with UIA, a check box's click among 500 rows 87 KB; now about 1 KB each.
+
+Anything else rebuilds, as before: a role, an enabled state, a radio button's or a tab's
+selection, a masked field revealed, an element with children (a button whose name is its
+text), a box that becomes a node or stops being one, a leaf whose node is not in the tree
+(inside a list that publishes its items, text a button takes for its name), a name,
+description or expanded state under an ancestor named from its content (a button or tab
+with no name of its own), more than 32 leaves in a frame, or a leaf's change while a focus
+move waits for its node. A label's change marks layout: its name is patched, and the bounds
+it moved (its own and its neighbours') are told by the coalesced layout refresh, as every
+move is — or by its leading edge at once, which rebuilds, when no rebuild came in the last
+100 ms. Two consequences, both of the coalescing: a reader asking within 100 ms reads the old
+bounds, and a node removed within the wait never had its new bounds told.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
 access). Since 2026-10-24 (plan 17 round 4) every read a client makes answers
-from the element's node in the applied tree, which never changes once applied:
+from the element's node in the applied tree, which never changes once applied (a leaf
+whose own properties changed gets a new node, put in place of the old one, above):
 properties and patterns alike — a text input's value, a toggle, a range, a list
 item's selected state, a list's selection, a scroll view's percents (the node
 carries its viewport and content size, `AccessibilityNode.ScrollExtent`). Pattern
@@ -456,8 +487,9 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   The RangeValue pattern answers from the node, as the RangeValue properties do (2026-10-24):
   it read the live slider, ahead of what was told.
   A range can move on every frame — a drag, a download, a playing video, a key held down — and
-  each refresh rebuilds the whole tree, so the window tells a range's change on the leading edge,
+  each refresh rebuilt the whole tree, so the window tells a range's change on the leading edge,
   then at most every 250 ms, then once with the value it came to rest at (`Window.A11yRangeCoalesceMs`).
+  Since 2026-10-24 a refresh patches the range's node in place (above) instead of rebuilding.
   250 ms is how often Chromium moves a playing video's scrubber (`html_media_element.cc`,
   `kMaxTimeupdateEventFrequency`; `media_controls_impl.cc` leaves its aria-valuetext alone on
   `timeupdate`). A progress bar moved every frame for two seconds is told 8–10 times, not 120.

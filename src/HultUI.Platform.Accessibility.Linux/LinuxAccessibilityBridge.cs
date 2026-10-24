@@ -442,10 +442,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
     /// item that had the selection and the one that has it; a caret or selection move in text made
-    /// on request (the rich text editor's). Their objects in the published snapshot take the new
-    /// state (a text's object reads its text through its source, so it has none to take) and the
-    /// bridge sends what a diff would have (state-changed:selected; text-caret-moved and
-    /// text-selection-changed), with no new snapshot. Anything else is applied as a diff.
+    /// on request (the rich text editor's); a leaf's change of its own name, description, value,
+    /// range, toggle or expanded state, whose node the window made again and put in its place. Their
+    /// objects in the published snapshot take the new state (a text's object reads its text through
+    /// its source, so it has none to take) and the bridge sends what a diff would have
+    /// (state-changed:selected; text-caret-moved and text-selection-changed; accessible-name,
+    /// accessible-description, accessible-value, state-changed:checked or expanded), with no new
+    /// snapshot. Anything else is applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {
@@ -453,9 +456,19 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         var snapshot = _snapshot;
         bool inPlace = _hasBuilt && patch.Added.Count == 0 && patch.Removed.Count == 0 && patch.Reordered.Count == 0;
         foreach (var change in patch.PropertyChanged)
-            inPlace &= (change.PropertyName == AccessibilityProperties.IsSelected
-                    || (change.PropertyName == AccessibilityProperties.TextSelection && change.Node.TextSource is not null))
-                && snapshot.ByPath.ContainsKey(PathOf(change.Node));
+        {
+            inPlace &= snapshot.ByPath.ContainsKey(PathOf(change.Node))
+                && change.PropertyName switch
+                {
+                    AccessibilityProperties.IsSelected => true,
+                    AccessibilityProperties.TextSelection => change.Node.TextSource is not null,
+                    // Not the application's own object, which is named as the application.
+                    AccessibilityProperties.Name or AccessibilityProperties.Description or AccessibilityProperties.Value
+                        or AccessibilityProperties.RangeValue or AccessibilityProperties.IsToggled
+                        or AccessibilityProperties.IsExpanded => change.Node.Parent is not null && change.Node.TextSource is null,
+                    _ => false,
+                };
+        }
         if (!inPlace)
         {
             ApplyChanges(patch, root);
@@ -464,8 +477,19 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         foreach (var change in patch.PropertyChanged)
         {
             string path = PathOf(change.Node);
-            if (change.PropertyName == AccessibilityProperties.IsSelected)
-                snapshot.ByPath[path].Selected = change.Node.IsSelected == true;
+            var acc = snapshot.ByPath[path];
+            var node = change.Node;
+            switch (change.PropertyName)
+            {
+                case AccessibilityProperties.IsSelected: acc.Selected = node.IsSelected == true; break;
+                case AccessibilityProperties.Name: acc.Name = node.Name ?? ""; break;
+                case AccessibilityProperties.Description: acc.Description = node.Description ?? ""; break;
+                // As the snapshot takes them (AtSpiAccessible.From): a password's bullets, never its text.
+                case AccessibilityProperties.Value: acc.Value = node.Value; break;
+                case AccessibilityProperties.RangeValue: acc.Range = node.Range; break;
+                case AccessibilityProperties.IsToggled: acc.Toggled = node.IsToggled; break;
+                case AccessibilityProperties.IsExpanded: acc.Expanded = node.Expanded; break;
+            }
             if (EmitPropertyChange(change, path)) DebugSignalsEmitted++;
         }
     }

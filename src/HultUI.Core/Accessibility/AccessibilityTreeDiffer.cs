@@ -48,7 +48,7 @@ public static class AccessibilityTreeDiffer
     private static void DiffSubtree(TreeDiff diff, AccessibilityNode prev, AccessibilityNode curr,
         Point prevScroll, Point currScroll)
     {
-        CompareProperties(diff, prev, curr, prevScroll, currScroll);
+        CompareProperties(diff.PropertyChanged, prev, curr, prevScroll, currScroll);
         // The children sit in this node's scrolled content.
         prevScroll += prev.ScrollOffset;
         currScroll += curr.ScrollOffset;
@@ -117,7 +117,15 @@ public static class AccessibilityTreeDiffer
             diff.Reordered.Add(curr);
     }
 
-    private static void CompareProperties(TreeDiff diff, AccessibilityNode prev, AccessibilityNode curr,
+    /// <summary>
+    /// The property changes a diff reports between a node and the same node made again in the same
+    /// place (a leaf's, <see cref="AccessibilityTreeBuilder.RemakeLeaf"/>), added to
+    /// <paramref name="changes"/> in the order a diff lists them.
+    /// </summary>
+    internal static void CompareNodes(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr) =>
+        CompareProperties(changes, prev, curr, default, default);
+
+    private static void CompareProperties(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr,
         Point prevScroll, Point currScroll)
     {
         // Most nodes carry none of the rarely set fields (a description, a value, native
@@ -127,15 +135,15 @@ public static class AccessibilityTreeDiffer
         // It carries the previous node. Never compared before: a caching client (Orca) kept the
         // old role, and UIA answered the new one only once something else had the tree applied.
         if (prev.Role != curr.Role)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Role, prev));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.Role, prev));
         if (prev.Name != curr.Name)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Name));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.Name));
         if (rare && prev.Description != curr.Description)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Description));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.Description));
         // No event for it: in the diff so the bridge takes the node, whose id UIA reads on request.
         // Left out, a tree whose only change it was went unapplied, and the old id was answered.
         if (rare && prev.AutomationId != curr.AutomationId)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.AutomationId));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.AutomationId));
         // A node that offers text tells a change of it as a text change (UIA TextChanged, AT-SPI
         // text-changed), not as its value: the value of a rich text editor is the whole document,
         // and a keystroke raised it in a UIA property change (a 749,017-character BSTR) and an
@@ -145,46 +153,46 @@ public static class AccessibilityTreeDiffer
         // (ax_platform_node_auralinux.cc, OnValueChanged). A reader still reads the value on
         // request. A text input with no text pattern keeps its value change, as an <input> does.
         if (rare && !(prev.OffersText && curr.OffersText) && prev.Value != curr.Value)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Value));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.Value));
         // A slider, a progress bar or a number field moved, or its bounds or steps changed: the
         // bridge tells which (UIA RangeValue.Value, Minimum, Maximum; AT-SPI accessible-value).
         if (rare && prev.Range != curr.Range)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.RangeValue, prev));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.RangeValue, prev));
         // The states share one field: when it is the same, none of them changed.
         if (prev.States != curr.States)
         {
             if (prev.IsPassword != curr.IsPassword)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsPassword));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.IsPassword));
             if (prev.IsToggled != curr.IsToggled)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsToggled));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.IsToggled));
             if (prev.IsSelected != curr.IsSelected)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsSelected));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.IsSelected));
             if (prev.IsEnabled != curr.IsEnabled)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsEnabled));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.IsEnabled));
             if (prev.Expanded != curr.Expanded)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsExpanded));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.IsExpanded));
             if (prev.IsFocused != curr.IsFocused)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.IsFocused));
         }
         if (rare && prev.NativeContent != curr.NativeContent)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.NativeContent));
         if (rare && prev.TextVersion is { } pv && curr.TextVersion is { } cv && pv.GetType() == cv.GetType())
         {
             // Text made on request: the versions say what changed without making either. A long
             // document's text was made on every rebuild, and compared here character by character.
             if (!cv.SameText(pv))
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Text, prev));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.Text, prev));
             if (!cv.SameSelection(pv))
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
         }
         else if (rare && (prev.OffersText || curr.OffersText)
             && !ReferenceEquals(prev.Text, curr.Text) && (prev.Text is not null || curr.Text is not null))
         {
             var (a, b) = (prev.Text, curr.Text);
             if (a?.Text != b?.Text)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.Text, prev));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.Text, prev));
             if (a?.Caret != b?.Caret || a?.SelectionStart != b?.SelectionStart || a?.SelectionEnd != b?.SelectionEnd)
-                diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.TextSelection, prev));
         }
         // Skip bounding-rect changes for nodes that are off-screen before and
         // after: assistive tech doesn't use an off-screen node's exact bounds, and
@@ -203,9 +211,9 @@ public static class AccessibilityTreeDiffer
         // tree. Each rebuild during a wheel turn over 1,000 rows raised a bounds event for each of
         // the ~130 rows on screen.
         if (!(prev.IsOffscreen && curr.IsOffscreen) && Moved(prev.BoundingRect, curr.BoundingRect, prevScroll, currScroll))
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.BoundingRect));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.BoundingRect));
         if (rare && prev.ScrollOffset != curr.ScrollOffset)
-            diff.PropertyChanged.Add(new PropertyChange(curr, AccessibilityProperties.ScrollPosition, prev));
+            changes.Add(new PropertyChange(curr, AccessibilityProperties.ScrollPosition, prev));
     }
 
     /// <summary>

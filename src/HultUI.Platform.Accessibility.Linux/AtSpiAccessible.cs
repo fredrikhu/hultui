@@ -6,10 +6,13 @@ using HultUI.Core.Elements;
 namespace HultUI.Platform.Accessibility.Linux;
 
 /// <summary>
-/// An immutable snapshot of one accessible object as it is exposed on the a11y
+/// A snapshot of one accessible object as it is exposed on the a11y
 /// bus. One is built per <see cref="AccessibilityNode"/> on each structural
 /// rebuild; the object <see cref="Path"/> is derived from the stable
 /// <see cref="ElementId"/> so a node keeps its D-Bus identity across rebuilds.
+/// What changes without a rebuild is set in place on the UI thread: the focused and
+/// selected states, and a leaf's name, description, value, range, toggle and expanded
+/// state (the window's patch).
 /// </summary>
 /// <remarks>
 /// The snapshot carries everything the D-Bus method handlers need to answer a
@@ -24,14 +27,34 @@ internal sealed class AtSpiAccessible
     public required bool IsRoot { get; init; }
 
     public uint Role { get; init; }
-    public string Name { get; init; } = "";
-    public string Description { get; init; } = "";
+
+    /// <summary>The name. Changes after the snapshot is built, as <see cref="Description"/>,
+    /// <see cref="Value"/>, <see cref="Range"/>, <see cref="Toggled"/> and <see cref="Expanded"/> do:
+    /// a leaf's change of its own properties rebuilds no snapshot (plan 17, round 4), so the bridge
+    /// sets the new value on the UI thread, one write each, while the bus thread may read it.</summary>
+    public string Name
+    {
+        get => Volatile.Read(ref _name);
+        set => Volatile.Write(ref _name, value);
+    }
+    private string _name = "";
+
+    public string Description
+    {
+        get => Volatile.Read(ref _description);
+        set => Volatile.Write(ref _description, value);
+    }
+    private string _description = "";
 
     /// <summary>The node's string value: a text field's text (a password's bullets).</summary>
     public string? Value
     {
-        get => _value is RangeBox box ? box.Value : (string?)_value;
-        init => _value = _value is RangeBox box ? box with { Value = value } : value;
+        get
+        {
+            var value = Volatile.Read(ref _value);   // once: the UI thread may replace it meanwhile
+            return value is RangeBox box ? box.Value : (string?)value;
+        }
+        set => Volatile.Write(ref _value, _value is RangeBox box ? box with { Value = value } : value);
     }
 
     // Bounding box in window-relative layout coordinates.
@@ -64,9 +87,25 @@ internal sealed class AtSpiAccessible
         set => Volatile.Write(ref _selected, value);
     }
     private bool _selected;
-    public bool? Toggled { get; init; }
+    /// <summary>Checked or not, for a toggle; null for anything else.</summary>
+    public bool? Toggled
+    {
+        get => FromTriState(Volatile.Read(ref _toggled));
+        set => Volatile.Write(ref _toggled, ToTriState(value));
+    }
+    private byte _toggled;
+
     /// <summary>Open or closed, for an object that can be either; null for one that cannot.</summary>
-    public bool? Expanded { get; init; }
+    public bool? Expanded
+    {
+        get => FromTriState(Volatile.Read(ref _expanded));
+        set => Volatile.Write(ref _expanded, ToTriState(value));
+    }
+    private byte _expanded;
+
+    // A nullable state in one byte, written and read whole: none, false, true.
+    private static byte ToTriState(bool? value) => value is { } v ? (byte)(v ? 2 : 1) : (byte)0;
+    private static bool? FromTriState(byte state) => state == 0 ? null : state == 2;
 
     /// <summary>A value in a range, for the Value interface: a slider's, a progress bar's, a number
     /// field's; null for anything else. Kept with the string value in one field, in an object of
@@ -74,12 +113,13 @@ internal sealed class AtSpiAccessible
     /// the range inline would have been 56 bytes more in each, a fifth of a node's cost on AT-SPI.</summary>
     public AccessibleRange? Range
     {
-        get => (_value as RangeBox)?.Range;
-        init => _value = value is { } range ? new RangeBox(range, Value) : _value;
+        get => (Volatile.Read(ref _value) as RangeBox)?.Range;
+        set => Volatile.Write(ref _value, value is { } range ? new RangeBox(range, Value) : Value);
     }
 
-    // The string value, or a RangeBox holding a range and the string value.
-    private readonly object? _value;
+    // The string value, or a RangeBox holding a range and the string value. Replaced whole when either
+    // changes, so a reader on the bus thread reads both as they were or both as they are.
+    private object? _value;
 
     private sealed record RangeBox(AccessibleRange Range, string? Value);
 

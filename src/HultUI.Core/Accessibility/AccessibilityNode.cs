@@ -140,7 +140,11 @@ public sealed class AccessibilityNode
 
     public AccessibilityNode? Parent { get; private set; }
 
-    /// <summary>The node's children, in order. Never changes once the tree is built.</summary>
+    /// <summary>The node's children, in order. Never changes once the tree is built, but for a
+    /// leaf whose own properties changed: the window makes its node again and puts it in its
+    /// place in the applied tree (<see cref="ReplaceChild"/>), one reference write, so a reader on
+    /// another thread finds the leaf's old node there or its new one, each whole, with the same id
+    /// and parent.</summary>
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
     /// <summary>
@@ -346,6 +350,16 @@ public sealed class AccessibilityNode
         foreach (var child in children)
             child.Parent = this;
         _children = children;
+    }
+
+    /// <summary>Puts <paramref name="child"/> in place of the child at <paramref name="index"/>, in
+    /// a tree that is out (UI thread): a leaf's node made again for a change of its own properties
+    /// (<see cref="AccessibilityTreeBuilder.RemakeLeaf"/>), with the id of the one it replaces and
+    /// no children. One reference write into the array readers on other threads walk.</summary>
+    internal void ReplaceChild(int index, AccessibilityNode child)
+    {
+        child.Parent = this;
+        Volatile.Write(ref _children[index], child);
     }
 
     /// <summary>Adds one child after the others. Copies the children each time: for the odd
