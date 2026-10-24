@@ -342,30 +342,51 @@ public sealed class MenuBar : Component
 /// <summary>The row <see cref="MenuBar"/> builds; it takes <see cref="MenuBarTheme"/> each style pass.</summary>
 public sealed class MenuBarElement : BoxElement
 {
+    // Its own geometry and its titles' are the theme's, compared on a themed twin, which themes
+    // the twin's titles too (MenuTitleElement compares against those).
+    private protected override bool PatchMarksOwnLayout => true;
+    private protected override bool PatchThemesTwin => true;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var t = theme.Get<MenuBarTheme>();
         BackgroundColor = t.Background ?? Color.Transparent;
         BorderColor = t.Divider ?? Color.Transparent;
-        Box.BorderWidth = t.Divider is null ? new Thickness(0) : new Thickness(0, 0, 1, 0);
-        Box.Padding = t.Padding;
-        Flex.Gap = t.Gap;
-        Box.Height = Dimension.Px(t.Height);
+        // A theme with other sizes lays the bar out again, and a title it resizes.
+        var border = t.Divider is null ? new Thickness(0) : new Thickness(0, 0, 1, 0);
+        var height = Dimension.Px(t.Height);
+        if (BoxRead.BorderWidth != border || BoxRead.Padding != t.Padding || FlexRead.Gap != t.Gap || BoxRead.Height != height)
+        {
+            Box.BorderWidth = border;
+            Box.Padding = t.Padding;
+            Flex.Gap = t.Gap;
+            Box.Height = height;
+            MarkLayoutDirty();
+        }
 
         var hover = t.HoverBackground ?? theme.SurfaceVariant;
-        foreach (var child in Children)
+        // By index: foreach over the Children interface boxes an enumerator, now on twins too.
+        var children = Children;
+        for (int i = 0; i < children.Count; i++)
         {
-            if (child is not MenuTitleElement title) continue;
+            if (children[i] is not MenuTitleElement title) continue;
             title.HoverColor = hover;
             title.BackgroundColor = title.IsOpen ? t.OpenBackground ?? hover
                 : title.IsHighlighted ? hover
                 : Color.Transparent;
             title.CornerRadius = new CornerRadius(t.TitleCornerRadius);
-            title.Box.Padding = t.TitlePadding;
-            title.Flex.AlignItems = AlignItems.Center;
-            title.Box.Height = Dimension.Percent(100);
-            foreach (var text in title.Children)
+            if (title.BoxRead.Padding != t.TitlePadding || title.FlexRead.AlignItems != AlignItems.Center
+                || title.BoxRead.Height != Dimension.Percent(100))
             {
+                title.Box.Padding = t.TitlePadding;
+                title.Flex.AlignItems = AlignItems.Center;
+                title.Box.Height = Dimension.Percent(100);
+                title.MarkLayoutDirty();
+            }
+            var texts = title.Children;
+            for (int j = 0; j < texts.Count; j++)
+            {
+                var text = texts[j];
                 text.Inherited.FontSize = t.FontSize;
                 var color = title.IsOpen ? t.OpenText ?? t.Text : t.Text;
                 if (color is { } c) text.Inherited.TextColor = c;
@@ -386,6 +407,10 @@ public sealed class MenuTitleElement : BoxElement
         Flex.Direction = FlexDirection.Row;
         this.OnHover(t => { if (!t.IsOpen) t.BackgroundColor = t.HoverColor; });
     }
+
+    // Its geometry is written by its bar's theme, which a themed twin bar wrote into this twin
+    // too; what it copies below is state the theme reads for colours.
+    private protected override bool PatchMarksOwnLayout => true;
 
     internal override void PatchFrom(Element source)
     {

@@ -132,7 +132,17 @@ lays out every such control and everything up to the root (the perf suite's
 lays out none and allocates nothing since plan 17 round 3). A size written into a
 *part's* box or flex style (`Box.Padding`, `MinHeight`, `Flex.Gap`) marks nothing by itself:
 mark that part's layout, not only the control's, or the part keeps its old box (an
-expander's header did).
+expander's header did). The same holds for the control's *own* box: `ButtonElement`,
+`KbdElement`, `TextInputElement`, `MenuBarElement` and the table's header, cells and grips
+write their padding, border and size in `ApplyTheme`, compare each with the value it had, and
+mark layout when one changed — a theme switch, or a `Style` or `Variant` set on the live
+control. They no longer get that layout from a rebuild: since plan 17 round 4 a rebuild
+patches them against a twin themed the way the style pass will theme them
+(`PatchThemesTwin`), and one that changes nothing lays nothing out (Junction's Commit view:
+elements laid out per key 17.7 → 1.1, measurements 1,274 → 85). A third-party control's patch
+still lays it out every time, so for one the rule above is about theme switches only. A
+framework control that opts in has an `ApplyTheme` that touches only itself and its own
+children, since the patch runs it on the twin too.
 
 ## Adding a scheme
 

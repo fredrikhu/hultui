@@ -780,8 +780,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return true;
     }
 
+    // Of what it copies below, the rows and their heights reach layout, and every path that
+    // changes them marks it: InvalidateItems, DropGathered, and the height check in
+    // KeepUnchangedRows. An item-rows list patched by a rebuild that changed none of them keeps
+    // its layout, and so do the boxes around it.
+    private protected override bool PatchMarksOwnLayout => true;
+
     internal override void PatchFrom(Element source)
     {
+        var offsetsBefore = _offsets;
         base.PatchFrom(source);
         if (source is VirtualListElement<T> vl)
         {
@@ -824,7 +831,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
             if (keepRows)
             {
-                KeepUnchangedRows(vl._items, heightsFromFunction);
+                KeepUnchangedRows(vl._items, heightsFromFunction, offsetsBefore);
                 return;
             }
 
@@ -853,7 +860,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     /// <param name="heightsFromFunction">Whether row heights came, or now come, from
     /// <see cref="ItemHeightFor"/>: then they are worked out again.</param>
-    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction)
+    /// <param name="offsetsBefore">The row offsets before the patch, to tell whether they moved.</param>
+    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction, float[]? offsetsBefore)
     {
         _items = items;
         var comparer = EqualityComparer<T>.Default;
@@ -865,14 +873,23 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         DropGathered();
 
         // A height function closes over the rebuilt rows, so its heights are worked out again,
-        // as every patch has always done; the window is realized again so the spacer and the
-        // kept rows take them (without re-making a row whose item did not change). The same when
-        // a list stops using one and every row goes back to ItemHeight.
+        // as every patch has always done. When one moved, the window is realized again so the
+        // spacer and the kept rows take them (without re-making a row whose item did not change),
+        // and the list is laid out again; the same when a list stops using one and every row goes
+        // back to ItemHeight. When none moved there is nothing to redo: a diff list patched by a
+        // rebuild for something beside it laid out itself and everything around it on every key.
         if (heightsFromFunction)
         {
             _offsets = null;
-            _visibleStart = -1;
-            _visibleEnd = -1;
+            EnsureOffsets();
+            if (offsetsBefore is null || _offsets is not { } now || !offsetsBefore.AsSpan().SequenceEqual(now))
+            {
+                _offsets = null;
+                _visibleStart = -1;
+                _visibleEnd = -1;
+                MarkLayoutDirty();
+                MarkPaintDirty();
+            }
         }
     }
 }

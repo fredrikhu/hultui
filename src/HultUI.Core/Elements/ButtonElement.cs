@@ -177,9 +177,17 @@ public class ButtonElement : BoxElement
         var v = bt.For(_variant);
         var s = _style;
 
-        // Geometry: the element's style, the variant's, then the theme's shared values.
-        Box.Padding = s?.Padding ?? v.Padding ?? bt.Padding;
-        Box.BorderWidth = s?.BorderWidth ?? v.BorderWidth ?? bt.BorderWidth;
+        // Geometry: the element's style, the variant's, then the theme's shared values. Written
+        // only where it differs, and a pass that changes any of it — another theme, a style or
+        // variant set on the live button — lays the button out again: a rebuild no longer does
+        // that for every button it patches (Element.PatchThemesTwin), and the label's font goes
+        // through the style pass's own check.
+        var box = BoxRead;
+        bool resized = false;
+        var padding = s?.Padding ?? v.Padding ?? bt.Padding;
+        if (box.Padding != padding) { Box.Padding = padding; resized = true; }
+        var borderWidth = s?.BorderWidth ?? v.BorderWidth ?? bt.BorderWidth;
+        if (box.BorderWidth != borderWidth) { Box.BorderWidth = borderWidth; resized = true; }
         Inherited.FontSize = s?.FontSize ?? v.FontSize ?? bt.FontSize;
         Inherited.FontWeight = s?.FontWeight ?? v.FontWeight ?? bt.FontWeight;
         Inherited.Cursor = _enabled ? CursorType.Pointer : CursorType.Default;
@@ -190,11 +198,13 @@ public class ButtonElement : BoxElement
         float? size = s?.Size ?? v.Size;
         if (size is { } fixed_)
         {
-            Box.Width = Dimension.Px(fixed_);
-            Box.Height = Dimension.Px(fixed_);
+            var side = Dimension.Px(fixed_);
+            if (box.Width != side) { Box.Width = side; resized = true; }
+            if (box.Height != side) { Box.Height = side; resized = true; }
         }
-        if ((s?.MinWidth ?? v.MinWidth) is { } minW) Box.MinWidth = minW;
-        if ((s?.MinHeight ?? v.MinHeight) is { } minH) Box.MinHeight = minH;
+        if ((s?.MinWidth ?? v.MinWidth) is { } minW && box.MinWidth != minW) { Box.MinWidth = minW; resized = true; }
+        if ((s?.MinHeight ?? v.MinHeight) is { } minH && box.MinHeight != minH) { Box.MinHeight = minH; resized = true; }
+        if (resized) MarkLayoutDirty();
 
         // Round is a statement about the radius, so a nearer layer saying "round" beats a
         // farther one naming a radius, the same as it would beat a farther "round".
@@ -256,6 +266,11 @@ public class ButtonElement : BoxElement
         c.A);
 
     private static Color Tint(Color c, float alpha) => new(c.R, c.G, c.B, (byte)Math.Clamp(alpha * 255f, 0f, 255f));
+
+    // Its geometry is the theme's (compared on a themed twin), and what it copies below reaches
+    // layout only through ApplyTheme, which marks it.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(ButtonElement);
+    private protected override bool PatchThemesTwin => GetType() == typeof(ButtonElement);
 
     internal override void PatchFrom(Element source)
     {

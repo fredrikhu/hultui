@@ -265,8 +265,17 @@ public class TextInputElement : BoxElement
         if (DrawsChrome)
         {
             CornerRadius = s?.CornerRadius ?? ti.CornerRadius;
-            Box.Padding = s?.Padding ?? ti.Padding;
-            Box.BorderWidth = s?.BorderWidth ?? ti.BorderWidth;
+            // Another padding or border (a theme, a style set on the live field) lays the field
+            // out again: a rebuild no longer does it for every field it patches.
+            var box = BoxRead;
+            var padding = s?.Padding ?? ti.Padding;
+            var border = s?.BorderWidth ?? ti.BorderWidth;
+            if (box.Padding != padding || box.BorderWidth != border)
+            {
+                Box.Padding = padding;
+                Box.BorderWidth = border;
+                MarkLayoutDirty();
+            }
             BackgroundColor = s?.Background ?? ti.Background ?? theme.Background;
             BorderColor = s?.Border ?? ti.BorderColor ?? theme.Border;
         }
@@ -856,11 +865,18 @@ public class TextInputElement : BoxElement
         ctx.Pop(); // clip
     }
 
+    // Its chrome is the theme's (compared on a themed twin); of what it copies below, the content
+    // is measured on the value and the caret's width, so a change to either marks layout here.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(TextInputElement);
+    private protected override bool PatchThemesTwin => GetType() == typeof(TextInputElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);
         if (source is TextInputElement input)
         {
+            if (CursorWidth != input.CursorWidth || _text != (input.Text ?? ""))
+                MarkLayoutDirty();
             Placeholder = input.Placeholder;
             DrawsChrome = input.DrawsChrome;
             Style = input.Style;

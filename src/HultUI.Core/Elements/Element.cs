@@ -1517,6 +1517,17 @@ public abstract class Element
     // ──── Patching (used by TreeDiffer) ────
     internal virtual void PatchFrom(Element source)
     {
+        // A themed control's look is written by the theme on every style pass, and the twin a
+        // build hands over has never had one: its padding and border were the builder's, so the
+        // copy below changed the live element's layout styles on every rebuild and the next style
+        // pass changed them back. Themed the way the style pass will theme the live element, the
+        // twin compares as what it is (PatchThemesTwin). With no window theme to hand the twin
+        // keeps the builder's values, the copy finds them different, and the patch marks layout
+        // as it always did.
+        if (PatchThemesTwin && !ReferenceEquals(source, this) && source.GetType() == GetType()
+            && OverlayHost?.ActiveTheme is { } theme)
+            source.ApplyTheme(theme);
+
         Key = source.Key;
         Name = source.Name;
         CopyOriginFrom(source);
@@ -1599,6 +1610,18 @@ public abstract class Element
     /// (<c>GetType() == typeof(...)</c>): a subclass copies more, and has to be checked on its own.
     /// </summary>
     private protected virtual bool PatchMarksOwnLayout => false;
+
+    /// <summary>
+    /// Whether <see cref="PatchFrom"/> themes the incoming twin before comparing it: for a kind
+    /// whose <see cref="ApplyTheme"/> writes layout styles (padding, border, size) that the twin,
+    /// fresh from a builder, does not have. The theme is the window's
+    /// (<see cref="IOverlayHost.ActiveTheme"/>), the one the style pass applies. Such an
+    /// ApplyTheme must touch nothing but the element and its own children, since it then runs
+    /// on twins too, and must mark layout itself when it changes a size it writes — the patch
+    /// no longer does it for every rebuild. Answers for its own type only, as
+    /// <see cref="PatchMarksOwnLayout"/> does.
+    /// </summary>
+    private protected virtual bool PatchThemesTwin => false;
 
     /// <summary>
     /// Drop this element's app handlers and adopt the incoming build's, preserving
