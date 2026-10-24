@@ -364,7 +364,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// The contract: a row that shows anything else — the owner's state, data that arrives
     /// later for an unchanged item, a window width, a setting — must be told when that changes,
     /// with <see cref="InvalidateRows"/> on the mounted list (before the owner's rebuild, through
-    /// its ref, or after it). Otherwise the kept rows go on showing what they showed when they
+    /// its ref, or after it), or with <see cref="InvalidateRow"/> for the rows it changed when it
+    /// changes only a few. Otherwise the kept rows go on showing what they showed when they
     /// were made, until they scroll out and back in. A switch to another <see cref="Theme"/>
     /// object makes the rows again by itself, and so does a change of the window's display scale
     /// (<see cref="Element.OnDisplayScaleChanged"/>); a theme changed in place does not. Handlers in a
@@ -429,6 +430,28 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// accessible labels, which it keeps the same way.
     /// </summary>
     public void InvalidateRows() => InvalidateItems();
+
+    /// <summary>
+    /// <see cref="InvalidateRows"/> for one item: throws away the realized row at
+    /// <paramref name="index"/>, and the item's kept accessible label, so the next frame makes
+    /// them again from the latest template and label; every other row stays as it is. For item
+    /// rows (<see cref="ItemRowTemplate"/>) that show something beside their item and selected
+    /// state which only a row or two show at a time and which moves — a second highlight that
+    /// follows another list's cursor, say — when the app knows which rows it left and reached:
+    /// told through <see cref="InvalidateRows"/>, each move made every row on screen again.
+    /// An index whose row is not realized lets go of its label only; one outside the items the
+    /// list holds now does nothing (no row is realized there). The scroll position is kept. Like
+    /// <see cref="InvalidateRows"/> it can be called through the list's ref at the top of the
+    /// owner's build, before the list is patched, or after it.
+    /// </summary>
+    public void InvalidateRow(int index)
+    {
+        if ((uint)index >= (uint)_items.Count) return;
+        if (_labels is { } labels && index < labels.Length) labels[index] = default;
+        if (!_activeElements.ContainsKey(index)) return;
+        _dropping.Add(index);
+        DropGathered();
+    }
 
     private void InvalidateItems()
     {

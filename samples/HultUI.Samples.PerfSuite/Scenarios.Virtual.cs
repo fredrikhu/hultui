@@ -56,6 +56,14 @@ static partial class Scenarios
             "The same walk with .RenderWith((item, selected) => …): the list keeps the rows whose item and selection did not change and makes only the old and the new selected row (and the one scrolled in)",
             ctx => SelectionWalk(ctx, null, itemRows: true));
 
+        yield return new Scenario("virtual/partner walk beside 1,000 item rows, every row told",
+            "Down in the left of two 1,000-row lists on item rows while the right one rings the row at the same index, as a file manager marks the file the other pane's cursor pairs with: the ring is told to the right list with InvalidateRows, so each move makes every row on screen there again",
+            ctx => PartnerWalk(ctx, oneRow: false));
+
+        yield return new Scenario("virtual/partner walk beside 1,000 item rows, two rows told",
+            "The same walk telling the right list only the row the ring left and the row it reached, with InvalidateRow: each move makes those two there, and the one scrolled in",
+            ctx => PartnerWalk(ctx, oneRow: true));
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
@@ -146,6 +154,34 @@ static partial class Scenarios
     }
 
     private static readonly TimeSpan WalkFrame = TimeSpan.FromMilliseconds(120);
+
+    /// <summary>A key walk down the left list of a <see cref="PartnerPane"/>; the row reports the
+    /// rows both lists made per step.</summary>
+    private static Op PartnerWalk(Ctx ctx, bool oneRow)
+    {
+        var pane = new PartnerPane(WalkItems(ctx.Rng, 1_000), oneRow);
+        var host = pane.Mount();
+        host.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Down) { pane.Move(1); e.StopPropagation = true; }
+        });
+        ctx.Mount(host);
+        pane.Select(pane.LastWholeRow());
+        ctx.Session.PumpFrame();
+        int first = pane.Selected;
+        int madeBefore = 0;
+        return new Op
+        {
+            Run = _ =>
+            {
+                madeBefore = pane.RowsMade;
+                ctx.Window.PressKey(KeyCode.Down);
+            },
+            Figure = () => pane.RowsMade - madeBefore,
+            FigureUnit = "rows made",
+            Check = step => pane.Verify(first + step + 1),
+        };
+    }
 
     private static readonly string[] WalkIcons = ["git-commit", "git-commit", "git-commit", "git-merge", "git-commit", "tag"];
     private static readonly string[] WalkAuthors = ["Fredrik Hult", "Ada Lovelace", "Grace Hopper", "Linus Torvalds", "Barbara Liskov"];
@@ -493,6 +529,107 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
             var box = row.WindowBorderBox;
             if (y >= box.Y && y < box.Bottom) return row;
         }
+        return null;
+    }
+}
+
+/// <summary>
+/// Two lists of the same commits on item rows, side by side, as Vesper's two panes over folders
+/// of the same names: the left one's selection is a signal the Build reads, and the right one
+/// rings the row at the selected index — what the row shows beside its item and selection, so
+/// the list has to be told when it moves. With <paramref name="oneRow"/> it is told the row the
+/// ring left and the row it reached (<see cref="VirtualListElement{T}.InvalidateRow"/>);
+/// without, every row (<see cref="VirtualListElement{T}.InvalidateRows"/>), which is what an app
+/// that keeps the ring in its "what the rows show" shape does. Both lists follow the selection.
+/// </summary>
+sealed class PartnerPane(List<WalkItem> items, bool oneRow) : Component
+{
+    private const float RowHeight = WalkPane.RowHeight;
+
+    private readonly Signal<int> _selected = new(0);
+    private readonly Ref<VirtualListElement<WalkItem>> _left = new(), _right = new();
+    private int _ringed = -1, _built;
+    private bool _reveal;
+    private Func<WalkItem, string?>? _label;
+
+    /// <summary>Rows the templates have made, both lists.</summary>
+    public int RowsMade { get; private set; }
+
+    public int Selected => _selected.Value;
+
+    public void Select(int index)
+    {
+        _reveal = true;
+        _selected.Value = Math.Clamp(index, 0, items.Count - 1);
+    }
+
+    public void Move(int delta) => Select(_selected.Value + delta);
+
+    public int LastWholeRow() =>
+        Math.Max(0, (int)((_left.Current?.Layout.AbsoluteContentBox.Height ?? 0) / RowHeight) - 1);
+
+    public override Element Build()
+    {
+        int selected = _built = _selected.Value;
+        // Told before the right list is patched, through its ref, as the ring moves.
+        if (_ringed != selected && _right.Current is { } mounted)
+        {
+            if (oneRow) { mounted.InvalidateRow(_ringed); mounted.InvalidateRow(selected); }
+            else mounted.InvalidateRows();
+        }
+        _ringed = selected;
+        _label ??= item => item.Subject;
+        var left = VirtualListElement<WalkItem>.New()
+            .ItemHeight(RowHeight).Items(items).SelectedIndex(selected).AccessibleItemLabel(_label)
+            .RenderWith((item, isSelected) => Row(item, isSelected, ringed: false))
+            .FlexGrow(1).FlexBasis(Dimension.Px(0));
+        var right = VirtualListElement<WalkItem>.New()
+            .ItemHeight(RowHeight).Items(items).AccessibleItemLabel(_label)
+            .RenderWith((item, _) => Row(item, false, ringed: item.Index == selected))
+            .FlexGrow(1).FlexBasis(Dimension.Px(0));
+        return Flex.Row(gap: 0).FlexGrow(1).Children(left.WithRef(_left), right.WithRef(_right));
+    }
+
+    protected override void OnAfterBuild()
+    {
+        if (!_reveal) return;
+        _reveal = false;
+        _left.Current?.ScrollRangeIntoView(_built * RowHeight, RowHeight);
+        _right.Current?.ScrollRangeIntoView(_built * RowHeight, RowHeight);
+    }
+
+    private BoxElement Row(WalkItem item, bool selected, bool ringed)
+    {
+        RowsMade++;
+        return Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(0, 16))
+            .Background(selected ? Ui.Selected : Color.Transparent)
+            .BorderColor(ringed ? Ui.Accent : Color.Transparent).BorderWidth(1f)
+            .Children(
+                Phosphor.Draw(item.Icon, 18f, selected ? Ui.Accent : Ui.Muted),
+                Flex.Column(gap: 3).FlexGrow(1).FlexShrink(1).Children(
+                    Text.New(item.Subject).FontSize(13f).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                    Text.New(item.Meta).FontSize(11f).TextColor(Ui.Muted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)));
+    }
+
+    /// <summary>Null when row <paramref name="expected"/> is selected on the left and ringed on
+    /// the right, and the right row above it no longer is.</summary>
+    public string? Verify(int expected)
+    {
+        if (_selected.Value != expected) return $"the selection is on row {_selected.Value}, not {expected}";
+        if (_right.Current is not { } right) return "the right list is not mounted";
+        BoxElement? ring = null, above = null;
+        var view = right.WindowContentBox;
+        float top = view.Y + expected * RowHeight - right.ScrollOffsetY;
+        for (int i = 0; i < right.Children.Count; i++)
+        {
+            if (right.Children[i] is not BoxElement { Children.Count: > 0 } row) continue;
+            var box = row.WindowBorderBox;
+            if (top + RowHeight / 2 >= box.Y && top + RowHeight / 2 < box.Bottom) ring = row;
+            if (top - RowHeight / 2 >= box.Y && top - RowHeight / 2 < box.Bottom) above = row;
+        }
+        if (ring is null) return $"no row is drawn where row {expected} is on the right";
+        if (ring.BorderColor != Ui.Accent) return $"row {expected} is not ringed on the right";
+        if (above is not null && above.BorderColor == Ui.Accent) return $"row {expected - 1} is still ringed on the right";
         return null;
     }
 }

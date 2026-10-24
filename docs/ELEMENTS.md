@@ -1193,6 +1193,7 @@ var list = VirtualListElement<FileEntry>.New()
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
+| — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 
 **How rows live.** With the one-argument template, the visible window plus a row or two of
 overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
@@ -1279,6 +1280,29 @@ nodes made again by every build (a tree flattened from a fresh filter) are new o
 every index, and every row is made again. Keep them while what they come from is the same.
 Junction's Files tree, moved from a scroll view of every row onto a virtual list this way,
 makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now).
+
+When the items are records the list is handed as they come (a folder's entries straight from
+the loader) and the highlight is one value that moves, the app can instead tell the list the
+rows it moved between: `InvalidateRow(index)` makes that one row again (and lets go of its kept
+label), and keeps every other. Call it for the row the highlight left and the row it reached,
+through the list's ref, before the rebuild patches the list — the same place `InvalidateRows()`
+goes:
+
+```csharp
+if (partner != _partnerWas && _listRef.Current is { } list)
+{
+    list.InvalidateRow(IndexOf(rows, _partnerWas));   // -1, or past the items, does nothing
+    list.InvalidateRow(IndexOf(rows, partner));
+}
+_partnerWas = partner;
+```
+
+Vesper rings the file the other pane's cursor would be compared with, and in two folders of the
+same names that ring moves with every key; in the shape it made every row of the pane again.
+With `InvalidateRow` a key makes about 3.5 rows across both panes instead of 31.6 (same-name
+walk, headless: 427 → 259 KB a key). The perf suite pins it: `virtual/partner walk beside 1,000 item
+rows, every row told` makes 23 rows a step and allocates 105 KB, `… two rows told` makes 6 and
+allocates 39 KB.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
