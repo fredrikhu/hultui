@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–10 landed, step 11 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–11 landed, step 12 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -122,7 +122,7 @@ Correctness first, then value per cost.
     **paint-menu-rows-outside-window** (cull a context menu's off-window rows: 200-item dropdown 278 text
     items per frame, 173 outside). Suite row: terminal coloured screen, forced frame (added by step 9,
     ca9a9ab7: 5.9 KB/op).
-11. **a11y-leaf-property-patch** (7) — on a frame that would rebuild only for leaf property changes, remake
+11. ~~**a11y-leaf-property-patch**~~ LANDED 0d9aacea, e2fafa31, 87e11055 (7) — on a frame that would rebuild only for leaf property changes, remake
     those nodes and patch (TextInput UIA 53 → ~3–4 KB/op, checkbox 87 → ~1; incl. range values: Reel's
     scrubber refresh is 3 full a11y builds a second, half of playback bytes with a reader). Suite row: the
     real-loop a11y walk at a reader's pace (500 ms).
@@ -151,6 +151,14 @@ Re-ranked by the round 5 survey.
   3.5–4.2× UIA's. Medium–large.
 - **a11y-layout-refresh-bounds-only** (7, from 8) — with a reader, a layout-due refresh rebuilds the whole
   tree (History at a reader's pace 113 KB per key, 30 %); re-snapshot bounds or rebuild moved subtrees.
+  Pinned since step 11 by `a11y/selection walk beside details, keys 500 ms apart` (1.0 tree/key, 219 KB/op:
+  the leading edge rebuilds every key, so the selection patch never runs). `TextElement.Content` always
+  marks layout, so a ticking label (Reel's elapsed time) still costs one full tree a second.
+- **a11y-overlay-property-changes** (7, correctness, lead from step 11) — overlay content has no parent and
+  no `AccessibilityObserver`, so a property change inside an open menu or dialog reaches no reader until
+  the next rebuild (open/close now rebuild, 87e11055). Also: AT-SPI sends no `state-changed:expandable` when
+  `AccessibleExpanded` goes to null (a caching client keeps "expandable"; old gap); the suite row
+  `a11y/progress bar ticks…` reads 0 KB/op because its 16 ms steps never reach the 250 ms range refresh.
 - **apps-meridian-components, apps-vesper-components** (6/8; one app at a time after Junction).
 - **meridian-response-frame-flush** (2/3, lead) — the 18,884-line response frame flushes 86–152 ms;
   needs a trace.
@@ -357,6 +365,9 @@ Re-ranked by the round 5 survey.
 | 4 | d52ac4bd | richtext-viewframe-record | `NoteViewFrame` makes a record only when X or Y changed: 40 ticked tasks 24 → 0 B per frame (the editor's last render allocation). |
 | 4 | 321c93d8 | aperture-hero-scrim-seam | Approved visual fix: `Halide.BackdropScrim` horizontal ends at `Alpha(Bg, 0)` (item page and Discover heroes). Headless read across the scrim edge: a 9-level step → at most 1 (gradient rounding). |
 | 4 | c3c9d9fa | paint-menu-rows-outside-window | `ContextMenuElement.Render` skips rows and separators wholly outside `ctx.ClipBounds` (layout, hit-test, keys, submenu anchors and a11y unchanged; the edge row still drawn); label heights measured once per text style. 200-item dropdown: text items per frame 202 → 30, label measurements 200 → 0, hover step −13 %; suite `overlay/dropdown open 200 items` −8.4 % JIT, −10.0 % AOT, +0.8 KB per open (the heights array). 20/20 frames identical; WSL Fedora 10,365 pass. |
+| 4 | 0d9aacea | apps-scenario-reader-pace-walk | Suite rows `a11y/selection walk beside details, keys 500 ms apart, real loop, {bridge on, UIA}`: 1.0 tree/key, 219 KB/op vs 0.6 and 181 at 60 ms (pins a11y-layout-refresh-bounds-only); README 138 scenarios (125 off Windows). |
+| 4 | e2fafa31 | a11y-leaf-property-patch | A leaf's own value (TextInput), toggle, range (at its coalesced refresh), name, description or expanded change remakes that node (found by walking semantic ancestors), compares with `CompareNodes`, swaps it in with `ReplaceChild` and hands the bridges a patch in tree order with selection/caret patches; role, enabled, radio/tab selection, masking, nodes with children, content-named ancestors, > 32 leaves a frame or a pending focus move still rebuild. AT-SPI object fields settable in place. UIA KB/op: TextInput 53.5 → 1.4 (−97 %), checkbox in 500 rows 87.2 → 0.8 (−99 %), label of 1,000 rows 173.7 → 35.8 (−79 %); min −14…−42 % JIT and AOT. AT-SPI TextInput 214.5 → 3.9, checkbox 352.4 → 1.2. Reel playback trees/s 3.05 → 1.05, a11y bytes −57 %. Equivalence: 29/30 stream scripts identical (find bar: 2 BoundingRectangle events lost inside the 100 ms layout wait, accepted coalescing), 53 patched-vs-forced-rebuild tests, FlaUI 14 steps and live AT-SPI 29 commands identical before/after. 0 slower. |
+| 4 | 87e11055 | a11y-overlay-open-rebuild | Correctness: a hit-testable overlay opening or closing marks the tree for the next frame. Fixes e2fafa31's regression (Dropdown/DatePicker are leaves whose `AccessibleExpanded` notification used to force the rebuild that found their list) and an older gap (a plain `ShowOverlay` never reached a reader: 0 trees over open, change, close). |
 
 ## Examined, not worth it
 
@@ -792,3 +803,10 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   filtering list (palette, VirtualList), not a menu; a scrim ending inside a picture fades to 0 %. Test
   traps: an overlay that doesn't fit moves to y = 0, so aim at the popup's `WindowBorderBox`; a stub
   subclassing `NullRenderContext` must re-declare `IRenderContext` for a default-member override to apply.
+- 2026-10-24: step 11 landed (0d9aacea, e2fafa31, 87e11055): with a reader, a leaf's value, toggle, range or
+  name patches one node (TextInput −97 %, checkbox −99 %, label −79 %; Reel playback a11y bytes −57 %);
+  overlays opening/closing reach readers (regression caught in-step, older gap fixed). Streams identical
+  in 29/30 scripts plus FlaUI and live AT-SPI; all suites, guarded UiTests and WSL (10,395) pass.
+  Guideline notes: a leaf's own value/toggle/range/name change costs ~1 KB and no tree with a reader; a
+  name change under a button or tab with no `AccessibleName` rebuilds the whole tree (give such buttons
+  an AccessibleName); a text that changes often marks layout and rebuilds once per refresh.
