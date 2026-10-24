@@ -475,7 +475,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
     `AccessibleTextVersion` instead, which the differ compares without making the text, and the
     node's `Text` and `Value` are made from it on the first ask. The bridges read a node with a
     source through the source, its value on request (UIA's ValueValue property), so nothing makes
-    the text unless a reader asks or AT-SPI needs it to describe a change.
+    the text unless a reader asks or AT-SPI needs it to describe a change. A reader reading makes
+    each next version's text from the layout as it is taken; when only the caret or the selection
+    moved since a version whose text was made (the same document, width, theme, scroll, read-only
+    state and blocks on screen), the new text is that one's with the new caret and selection,
+    sharing its text, the tables of its lines and paragraphs and its geometry (2026-10-24, plan 17
+    round 4): a caret move in a 5,000-block document made 474 KB of text each time, now 1.3 KB.
   - **Lines and paragraphs (2026-10-07).** A paragraph is a `'\n'`-separated run. A line
     is a paragraph unless the element says where its text wraps (`lineStarts`), and then
     it is a line as drawn, which is what a word processor's reader means by one.
