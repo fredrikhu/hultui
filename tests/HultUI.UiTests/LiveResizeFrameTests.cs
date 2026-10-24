@@ -180,6 +180,80 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         Assert.Equal(0, afterDrain);
     }
 
+    /// <summary>
+    /// Inside Win32's modal size/move loop each frame a video asks for is drawn. The request is a
+    /// post the held loop cannot run, so the video was drawn only when SDL's live-resize timer came
+    /// round, about 64 times a second: a 120 fps clip showed 57 frames and mpv dropped 48 over a
+    /// 0.9 s move, 128 and 111 over a drag held still for 2 s (plan 17 round 4,
+    /// media-modal-loop-video-rate). Now the request also posts the window a message the loop
+    /// dispatches, and the window draws for it, once: the timer no longer draws for the post
+    /// beside it. The loop is framed here as Win32 frames it (sent
+    /// WM_ENTERSIZEMOVE, GetMessage and DispatchMessage, sent WM_EXITSIZEMOVE): a drag cannot be
+    /// made without the mouse. A player's requests at 120 a second for a second, from another
+    /// thread, as a decoder makes them; on a GL window, which has the watch too.
+    /// </summary>
+    [UiFact]
+    public void InsideTheModalLoop_EachFrameAVideoAsksFor_IsDrawn()
+    {
+        using var guard = ForegroundGuard.Begin();
+        var (app, hwnd, counter) = Open(Plain);
+        using var _ = app;
+        var backend = new HultUI.Media.Testing.FakeMediaBackend();
+        using var player = new HultUI.Media.MediaPlayer(backend);
+        var sink = backend.Sink ?? throw new InvalidOperationException("the player attached no sink");
+
+        const int requests = 120;
+        uint thread = GetCurrentThreadId();
+        var requester = new Thread(() =>
+        {
+            // On a schedule, not Sleep(8), which a 15.6 ms timer turns into 16.
+            var schedule = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < requests; i++)
+            {
+                double due = i * 1000.0 / requests;
+                while (schedule.Elapsed.TotalMilliseconds < due) Thread.SpinWait(50);
+                sink.RequestRepaint();
+            }
+            Thread.Sleep(20);
+            PostThreadMessageW(thread, StopLoop, 0, 0);
+        }) { IsBackground = true, Name = "decoder" };
+
+        int before = counter.Frames;
+        SendMessageW(hwnd, EnterSizeMove, 0, 0);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        requester.Start();
+        while (GetMessageW(out var msg, 0, 0, 0) > 0)
+        {
+            if (msg.message == StopLoop && msg.hwnd == 0) break;
+            TranslateMessage(ref msg);
+            DispatchMessageW(ref msg);
+        }
+        double seconds = clock.Elapsed.TotalSeconds;
+        SendMessageW(hwnd, ExitSizeMove, 0, 0);
+        int drawn = counter.Frames - before;
+        app.RunFrame(TimeSpan.FromMilliseconds(16));   // the player's post, held by the loop
+
+        output.WriteLine($"{drawn} frames inside the loop ({seconds:0.00} s) for {requests} requests");
+        // Before, SDL's timer drew for the player's post, about 64 a second, whatever the rate. Now
+        // 110 to 112 (2026-10-24): a request made while the last one's message is still on its way
+        // is taken by the same frame, as the frame takes the newest picture.
+        Assert.True(drawn >= requests * 3 / 4, $"{drawn} frames in {seconds:0.00} s for {requests} requests");
+        // And each request once: the timer no longer draws the same picture again beside them.
+        Assert.True(drawn <= requests + 5, $"{drawn} frames in {seconds:0.00} s for {requests} requests");
+    }
+
+    private const uint EnterSizeMove = 0x0231, ExitSizeMove = 0x0232, StopLoop = 0x8000 + 0x3B9;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Msg { public nint hwnd; public uint message; public nint wParam; public nint lParam; public uint time; public int x, y; public uint priv; }
+
+    [DllImport("user32.dll")] private static extern int GetMessageW(out Msg msg, nint hwnd, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Msg msg);
+    [DllImport("user32.dll")] private static extern nint DispatchMessageW(ref Msg msg);
+    [DllImport("user32.dll")] private static extern nint SendMessageW(nint hwnd, uint msg, nint w, nint l);
+    [DllImport("user32.dll")] private static extern bool PostThreadMessageW(uint thread, uint msg, nint w, nint l);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+
     private static unsafe void PushLiveResizeExpose(SDL_WindowID window)
     {
         SDL_Event evt = default;

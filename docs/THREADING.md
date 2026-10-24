@@ -130,6 +130,16 @@ the known case (`HultUI.Media` hops such requests through the thread pool); a
 plain producer that only publishes and posts is fine, because nothing in a frame
 waits for it.
 
+Inside Win32's modal size/move loop (a window dragged by its edge or its title
+bar, or held still mid-drag) a post waits for the loop to end. So a GPU source's
+repaint request (`MediaPlayer`'s, `WebViewController`'s) is also answered from
+inside the loop: the request posts the window a message, a `PostMessage`, which
+never waits and so is safe from the decoder's own thread; the loop dispatches it
+and the window draws. A 120 fps clip shows its 120 frames a second while its
+window is moved or a drag is held, on GL and Vulkan (before: about 64, SDL's
+live-resize timer, and mpv dropped half). Not within 20 ms of a new size, whose
+own frame took the newest picture.
+
 The converse holds too: a frame must not wait for a thread that is waiting for
 that frame. mpv's core waits, for up to 200 ms after every load and seek, for the
 UI thread to draw the first frame. So the mpv backend never makes a synchronous

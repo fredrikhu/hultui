@@ -114,7 +114,9 @@ wakes the loop through `SDL_PushEvent`) during a live resize, the two would wait
 other forever. The backend hops its repaint request through the thread pool for this
 reason. A backend of your own must do the same; a plain producer that only publishes
 frames and posts is fine, because nothing in a frame waits for it. See
-[THREADING.md](THREADING.md).
+[THREADING.md](THREADING.md). Its `IVideoSink.RequestRepaint` is also answered while the
+window is moved or resized on Windows, inside the modal loop where posts wait: the video
+keeps its own frame rate there.
 
 **The converse: the UI thread must never wait for a decoder that is waiting for it.** In GPU
 mode the UI thread is the render thread, and mpv's core waits up to 200 ms after every load and

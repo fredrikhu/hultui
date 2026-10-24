@@ -232,10 +232,15 @@ public sealed class MediaPlayer : IDisposable
     // only flips a flag, and a thread-pool item does the posting: the renderer's
     // thread never touches the platform, and requests that pile up while a post is
     // pending fold into it (the render pulls the newest frame anyway).
+    //
+    // Inside Win32's size/move loop the post waits for the loop to end, so the request is
+    // also answered with a frame drawn from inside it (LiveFrameRequests: a PostMessage to
+    // the window, which never waits).
     private void OnRepaintRequested()
     {
         if (_disposed) return;
         if (UIThread.IsCurrent) { FrameArrived?.Invoke(); return; }
+        LiveFrameRequests.Request();
         if (Interlocked.Exchange(ref _repaintPending, 1) == 0)
             ThreadPool.UnsafeQueueUserWorkItem(_repaintHop, preferLocal: false);
     }
