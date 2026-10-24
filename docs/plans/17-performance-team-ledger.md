@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–8 landed, step 9 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–9 landed, step 10 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -113,14 +113,15 @@ Correctness first, then value per cost.
    **text-paragraph-construct-diet** (selectable viewer wheel −27 %, rich text −7 %),
    **text-textarea-mono-ascii-fits** (approved 2026-10-13) (JSON open −86 %, −4.15 MB retained). Suite row "text/resize a
    wrapped TextArea".
-9. **paint-subblob-variable-fonts** (2) — per-run glyph bounds for faces whose box Skia distrusts
+9. ~~**paint-subblob-variable-fonts**~~ LANDED ca9a9ab7, 13c66d49 (2) — per-run glyph bounds for faces whose box Skia distrusts
    (Cascadia Mono/Code, Segoe UI Variable, Bahnschrift): glyphs per frame −84…−92 % on viewer, JSON and
    terminal screens. Pixel A/B with an A/A control (DirectWrite regenerates glyph masks after strike
    purges) and on WSL Fedora. Watch expert 4's lead: 7.5 native blobs per newly drawn spanned line vs 1.1.
 10. **Small paint and controls** (2/1): **terminal-row-strings** (1.6–6.0 KB per terminal frame → 0) +
     **richtext-viewframe-record** (24 B → 0), **aperture-hero-scrim-seam** (approved: end at 0 %),
     **paint-menu-rows-outside-window** (cull a context menu's off-window rows: 200-item dropdown 278 text
-    items per frame, 173 outside). Suite row: terminal coloured screen, forced frame.
+    items per frame, 173 outside). Suite row: terminal coloured screen, forced frame (added by step 9,
+    ca9a9ab7: 5.9 KB/op).
 11. **a11y-leaf-property-patch** (7) — on a frame that would rebuild only for leaf property changes, remake
     those nodes and patch (TextInput UIA 53 → ~3–4 KB/op, checkbox 87 → ~1; incl. range values: Reel's
     scrubber refresh is 3 full a11y builds a second, half of playback bytes with a reader). Suite row: the
@@ -166,6 +167,8 @@ Re-ranked by the round 5 survey.
 - **layout-ordered-children** (1, low) — suite rows only now.
 - **apps-tokenize-on-ui-thread** (5/8, low).
 - **paint-drawspannedline-overlap** (2, lowest).
+- **paint-subblob-trusted-face-bounds** (2, lead from step 9) — trusted faces' boxes are wide too (Segoe
+  UI reaches 2.12 em right, DejaVu Serif 2.23 em), so per-run bounds could tighten their sub-blobs.
 - **Suite scenarios** (8): document-switch, image-grid.
 - **Leads:** a VirtualList measured as a leaf (1–2 %); Vesper zebra tint O(n) per row made (off by
   default); one prefix table per hard line (after step 8: a wrap's last line still builds a durable
@@ -345,6 +348,8 @@ Re-ranked by the round 5 survey.
 | 4 | 1333083b | text-prefix-table-transient | `IRenderContext.MeasureTextPrefixes(text, start, length, style)` (API addition; default measures a substring): the pipeline answers with a view over kept lists, good until the next text call; `FontItemizer` reports runs as ranges. Per op JIT = AOT: wrapped resize 1,028 → 19 KB (−98 %), long document open 1,373 → 372 KB (−73 %), wrapped typing −5 %; 20,000-line log open 65.9 → 6.7 MB, its resize step 69.2 → 6.3 MB. Min −1…−5 %. `text/wrap`/`ellipsis` +6…+12 % in filtered JIT reruns = tiering (PGO off / `DOTNET_TC_CallCountingDelayMs=0` / AOT flat). |
 | 4 | 0567c1ce | text-paragraph-construct-diet | `PipelineTextParagraph` keeps one exact line array and makes its selection list on first selection draw; styled and BiDi wraps make no ellipsis closure without ellipsis. Selectable viewer wheel 2.2 → 1.6 KB (−27 %), rich text open 5,000 blocks −7.3 %, resize 1,000 −7.0 % (min −4 %); wraps −2…−4 %. 0 slower. |
 | 4 | 9a5f6a2f | text-textarea-mono-ascii-fits | Approved. `IRenderContext.MonospaceAsciiAdvance(style)` (API addition, default 0) proven once per face and size with the shaper (own glyph for all 95 printable ASCII, single and every ordered pair one glyph at the same advance within 1/4096; none with letter spacing); a printable-ASCII line fits unmeasured when (n + 1) × advance ≤ width. Highlighted JSON open 6.23 → 0.57 ms JIT (−91 %), 8.02 → 0.73 AOT, 1,902 → 270 KB; retained 4.38 → 0.17 MB; JSON wheel 7.9 → 9.6 KB/op, +2 % (words shaped at first draw). Proof ~0.5 ms, 219 KB per face and size. ELEMENTS.md: give logs, JSON and code a monospace face. |
+| 4 | ca9a9ab7 | apps-scenario-terminal-json-page | Suite rows `terminal/coloured screen, forced frame` (Cascadia Mono on Windows, runs last) and `text/page down through highlighted JSON in a TextArea` (every step a first draw: the cost side of sub-blobs). |
+| 4 | 13c66d49 | paint-subblob-variable-fonts | An outline face whose box Skia marks as a guess takes each run's ink extent from its own glyphs (`GetGlyphWidths` at 2048 per 256 glyphs into kept buffers, face slack; map at the sub-blob bound, ~57 KB per context, starts over when full); a spanned line looks up extents once per line. Colour and bitmap faces still whole. Min JIT/AOT: terminal coloured screen −60.4/−60.9 %, selectable viewer hover −48.2/−49.3 %, wheel −47/−49 %, JSON rebuild −15 %, wheel −14 %, open −10/−8 %, page down (first draw) −5/−9 %. Glyphs per frame Cascadia viewer 34,374 → 4,268, terminal 42,445 → 3,549. First draw: 7.0 native blobs per new line vs 1.0, sub-blob map restarts 68× in 389 screens, still faster. Pixels: 160 in-process scenes identical with a 512 MB glyph cache (default cache: A/A itself differs in 12, sub-blobs match one draw), WSL identical; pixel tests accept either of two whole-run draws, up to 3 tries. 0 slower. |
 
 ## Examined, not worth it
 
@@ -766,3 +771,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   filtered default-JIT runs show +6–12 % on barely touched rows (recheck with
   `DOTNET_TC_CallCountingDelayMs=0`, PGO off or AOT); the shaper's float pen drifts over ~9,000
   characters, so proofs shape long strings in pieces.
+- 2026-10-24: step 9 landed (ca9a9ab7, 13c66d49): variable fonts (Cascadia, Segoe UI Variable, Noto Sans on
+  Linux) draw sub-blobs: terminal coloured screen −60 %, selectable viewer −48 %, JSON −10…−15 %, first
+  draw −5…−9 %. All Windows suites and WSL (10,358) pass. Guideline notes: colour spans in any outline
+  face draw only what each stretch reaches; colour-emoji and bitmap-strike faces (Calibri, Courier New
+  Regular) still draw the whole run per stretch — avoid them for coloured code, logs and terminals. A
+  Windows pixel A/B needs an A/A control or a raised glyph cache (DirectWrite remakes masks by history).
