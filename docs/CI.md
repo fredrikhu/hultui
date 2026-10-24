@@ -134,7 +134,9 @@ repository still private:
 | `ci.yml` `test` (Windows) | 25.5–26 min: build 4, tests 21–22 | |
 | — of which `Junction.Tests` | 15–17 min | about 3.5 min |
 | — `HultUI.Rendering.Skia.Tests`, `VesperCommander.Tests`, `HultUI.Text.Tests` | 2.5–4.5, 1–3.5, 2.5 min | |
-| `ci.yml` `test-linux` | 8.5 min: tests 8 | |
+| `ci.yml` `test-linux` | 8.5 min: tests 8 (one run of the same job in `junction-installer.yml` took 21) | |
+| `<app>-installer.yml` `installer` | 3–4 min: NativeAOT publish, Inno Setup (on the image) | |
+| Vesper, Aperture, Reel `test` | 2.5–5.5 min | |
 | `mpv-natives.yml` | 22 min: Windows 21 (MSYS2 1.5, build 18), Linux 13, package 1 | |
 | `cef-natives.yml` | 7 min | |
 | `cef-helper.yml` | 2 min | |
