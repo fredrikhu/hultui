@@ -804,10 +804,16 @@ public sealed class TextPipeline
         }
         var styledLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight));
         return overflow == TextOverflow.Ellipsis
-            ? ApplyEllipsis(text, styledLayout, maxWidth,
-                (start, tailEnd) => BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth, memo))
+            ? EllipsizeStyled(text, styledLayout, style, spans, maxWidth, memo)
             : styledLayout;
     }
+
+    // Its own method: a lambda that captures parameters makes its closure on entry to the method
+    // declaring it, so ComputeWrappedStyled made one (~110 B) on every layout, ellipsis or not.
+    private TextLayout EllipsizeStyled(string text, TextLayout styledLayout, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, TextMemo? memo) =>
+        ApplyEllipsis(text, styledLayout, maxWidth,
+            (start, tailEnd) => BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth, memo));
 
     // ── BiDi internals (docs/plans/14-bidi.md) ──
 
@@ -1460,10 +1466,16 @@ public sealed class TextPipeline
         }
         var bidiLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight), rtlParagraph);
         return overflow == TextOverflow.Ellipsis
-            ? ApplyEllipsis(text, bidiLayout, maxWidth,
-                (start, tailEnd) => BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans))
+            ? EllipsizeBidi(text, bidiLayout, style, levels, rtlParagraph, maxWidth, bidi, spans)
             : bidiLayout;
     }
+
+    // Its own method, as EllipsizeStyled: ComputeWrappedBidi made the lambda's closure on every
+    // layout, ellipsis or not.
+    private TextLayout EllipsizeBidi(string text, TextLayout bidiLayout, ResolvedInheritedStyle style, byte[] levels,
+        bool rtlParagraph, float maxWidth, TextMemo? bidi, IReadOnlyList<Core.Rendering.TextSpan>? spans) =>
+        ApplyEllipsis(text, bidiLayout, maxWidth,
+            (start, tailEnd) => BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans));
 
     private int BidiFitPrefix(string text, int from, int to,
         ResolvedInheritedStyle style, byte[] levels, float maxWidth, TextMemo? bidi,
