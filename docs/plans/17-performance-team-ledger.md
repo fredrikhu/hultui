@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–11 landed, step 12 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–12 landed, step 13 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -126,7 +126,7 @@ Correctness first, then value per cost.
     those nodes and patch (TextInput UIA 53 → ~3–4 KB/op, checkbox 87 → ~1; incl. range values: Reel's
     scrubber refresh is 3 full a11y builds a second, half of playback bytes with a reader). Suite row: the
     real-loop a11y walk at a reader's pace (500 ms).
-12. **layout-themed-patch-keeps-layout + reconcile-restyle-on-change (a)** (1/6) — themed controls and
+12. ~~**layout-themed-patch-keeps-layout + reconcile-restyle-on-change (a)**~~ LANDED ef0a1f49, f14bc82d (1/6) — themed controls and
     item-row VirtualLists keep layout across a patch that changes nothing (Junction Commit layouts per key
     20.7 → 1.1, MeasureSize 1,281 → 85); a patch marks only the patched element for style, resolving down
     only where a style changed (resolves −50…−80 % per key). Part (b) waits.
@@ -164,7 +164,11 @@ Re-ranked by the round 5 survey.
   needs a trace.
 - **junction-commit-file-switch** (8, lead) — walking a large commit's files 2.72 MB per key; profile.
 - **reconcile-restyle-on-change (b)** (6/1) — after step 12's part (a); needs the 32-override audit and a
-  rule that a never-resolved element always resolves (a prototype drew an unresolved Text).
+  rule that a never-resolved element always resolves (a prototype drew an unresolved Text). After (a):
+  the only route to Meridian's 214 resolves per key during URL typing (every element patched there).
+- **layout-virtuallist-spacer-stale** (1, lead from step 12; invisible) — VirtualList spacer boxes keep a
+  stale layout (the list places its rows itself at draw); shows in any fresh-versus-incremental layout
+  audit, 24 more frames since ef0a1f49. Also: twin theming allocates a box style per twin button with none.
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
 - **vk-startup-preload** (3, low) — at the 10 ms edge; measure on AOT first.
 - **vk-sdr-video-frame-target-wrap** (3/4, lead from step 6) — an 8-bit swapchain still pays ~2.3 KB per
@@ -368,6 +372,8 @@ Re-ranked by the round 5 survey.
 | 4 | 0d9aacea | apps-scenario-reader-pace-walk | Suite rows `a11y/selection walk beside details, keys 500 ms apart, real loop, {bridge on, UIA}`: 1.0 tree/key, 219 KB/op vs 0.6 and 181 at 60 ms (pins a11y-layout-refresh-bounds-only); README 138 scenarios (125 off Windows). |
 | 4 | e2fafa31 | a11y-leaf-property-patch | A leaf's own value (TextInput), toggle, range (at its coalesced refresh), name, description or expanded change remakes that node (found by walking semantic ancestors), compares with `CompareNodes`, swaps it in with `ReplaceChild` and hands the bridges a patch in tree order with selection/caret patches; role, enabled, radio/tab selection, masking, nodes with children, content-named ancestors, > 32 leaves a frame or a pending focus move still rebuild. AT-SPI object fields settable in place. UIA KB/op: TextInput 53.5 → 1.4 (−97 %), checkbox in 500 rows 87.2 → 0.8 (−99 %), label of 1,000 rows 173.7 → 35.8 (−79 %); min −14…−42 % JIT and AOT. AT-SPI TextInput 214.5 → 3.9, checkbox 352.4 → 1.2. Reel playback trees/s 3.05 → 1.05, a11y bytes −57 %. Equivalence: 29/30 stream scripts identical (find bar: 2 BoundingRectangle events lost inside the 100 ms layout wait, accepted coalescing), 53 patched-vs-forced-rebuild tests, FlaUI 14 steps and live AT-SPI 29 commands identical before/after. 0 slower. |
 | 4 | 87e11055 | a11y-overlay-open-rebuild | Correctness: a hit-testable overlay opening or closing marks the tree for the next frame. Fixes e2fafa31's regression (Dropdown/DatePicker are leaves whose `AccessibleExpanded` notification used to force the rebuild that found their list) and an older gap (a plain `ShowOverlay` never reached a reader: 0 trees over open, change, close). |
+| 4 | ef0a1f49 | layout-themed-patch-keeps-layout | A patch applies the window's theme to the incoming twin for kinds opting in through `Element.PatchThemesTwin` (Button, Kbd, TextInput, MenuBar, table header/cells/grips) before comparing; those plus SplitterHandle, MenuTitle, table row, sort mark and item-row VirtualList opt into `PatchMarksOwnLayout`; their `ApplyTheme` writes geometry only where it differs and marks layout (also fixes a theme switch without a rebuild and `Style`/`Variant` set on a live button keeping the old box); item-row lists compare row-height offsets. Laid out / MeasureSize per key: Junction Commit 17.7 → 1.1 / 1,273.5 → 84.6, Vesper other names 19.1 → 8.1 / 501 → 285, Meridian URL typing 25 → 0 / 359 → 0; History/Branches/Tags/Files −30…−38 %. AOT Junction Commit frame −6.3 %. ~120 B per themed twin button (tween row +4 % bytes). 0 slower. |
+| 4 | f14bc82d | reconcile-restyle-on-change (a) | A patch marks only the patched element (and the way up); the style pass enters a child only if marked or the parent's resolved style changed; a moved or joining child marks where it lands; `Mount()` marks only itself (a fresh box's mount re-marked whole persistent child components: 70 elements per key from Junction's chrome). Resolves per key: Junction History 331 → 59, Commit 319 → 57, Branches 683 → 90, Tags 521 → 76 (−81…−87 %), Vesper −48/−62 %, Meridian History −43 %, Aperture grid −61/−71 %; theme switch still 518. Style phase −72…−87 % on kept-part rows; clears the scaling bar, not the 5 % frame bar (style is 1–2 % of a frame). Proof for both: env-gated layout + style audits over all 28 test projects (style: 0 differences; layout: only pre-existing VirtualList spacers), 51 frames identical across themes/scales/run-time switches; full `HultUI.slnx` and WSL (10,422) pass. THEMES.md, REACTIVITY.md. |
 
 ## Examined, not worth it
 
@@ -810,3 +816,12 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   Guideline notes: a leaf's own value/toggle/range/name change costs ~1 KB and no tree with a reader; a
   name change under a button or tab with no `AccessibleName` rebuilds the whole tree (give such buttons
   an AccessibleName); a text that changes often marks layout and rebuilds once per refresh.
+- 2026-10-24: step 12 landed (ef0a1f49, f14bc82d): themed controls keep layout across a no-op patch (Junction
+  Commit 17.7 → 1.1 laid out per key), a rebuild restyles only what it patched (−81…−87 % resolves on
+  Junction walks). Audits clean, 51 frames identical, full solution and WSL pass. Guideline notes: a
+  control whose `ApplyTheme` writes its own padding/border/size compares and marks layout on change (and
+  with `PatchThemesTwin` touches only itself and its children); writing a part's inherited style from
+  `ApplyTheme` needs `part.MarkStyleDirty()` unless it depends only on the theme; a write through a `Ref`
+  into kept rows, persistent child components or a control's parts needs `MarkStyleDirty()`. Process: the
+  agent wrote to two temporary sibling worktrees with shell commands before a session hook stopped
+  Edit/Write there; both removed (checked with `git worktree list`), all later work in this worktree.
