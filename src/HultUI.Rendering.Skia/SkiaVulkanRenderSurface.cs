@@ -124,6 +124,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private bool _offscreenEncoded;
     private int _offscreenWidth, _offscreenHeight;
 
+    /// <summary>The frame size the offscreen's canvas is clipped to while it is larger than the
+    /// frame, or (0, 0); see <see cref="OffscreenFor"/>.</summary>
+    private (int Width, int Height) _offscreenClip;
+
     private int _width;
     private int _height;
     private bool _frameOpen;
@@ -751,20 +755,43 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         }
         bool encoded = path == ScRgbFramePath.EncodedOffscreen;
 
-        if (_offscreen is null || _offscreenWidth != frame.WidthPx || _offscreenHeight != frame.HeightPx
+        // While a drag keeps an over-allocated swapchain, the offscreen is made at the swapchain's
+        // size and kept with it: the frame is drawn into its top-left corner and the blit, clipped
+        // to the render target (the window's size), carries only that. Remade at every size, each
+        // kept step of an 80-step drag paid a new F16 surface (18-26 MB), a synchronous submit to
+        // free the old one and a scratch purge: 82 creations against 5 swapchain builds.
+        int width = frame.AllocatedWidthPx > 0 ? Math.Max(frame.AllocatedWidthPx, frame.WidthPx) : frame.WidthPx;
+        int height = frame.AllocatedWidthPx > 0 ? Math.Max(frame.AllocatedHeightPx, frame.HeightPx) : frame.HeightPx;
+        if (_offscreen is null || _offscreenWidth != width || _offscreenHeight != height
             || _offscreenEncoded != encoded)
         {
             ReleaseOffscreen();
 
-            var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
+            var info = new SKImageInfo(width, height, SKColorType.RgbaF16,
                 SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
             _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
             if (_offscreen is null) return null;
             _offscreenCanvas = _offscreen.Canvas;
 
-            _offscreenWidth = frame.WidthPx;
-            _offscreenHeight = frame.HeightPx;
+            _offscreenWidth = width;
+            _offscreenHeight = height;
             _offscreenEncoded = encoded;
+            _offscreenClip = (0, 0);
+        }
+
+        // Larger than the frame, the canvas is clipped to it, so the drawing culls as it does on an
+        // offscreen of the window's size (Skia keeps the clip across frames; the render context's
+        // own saves are balanced within a frame).
+        var clip = width != frame.WidthPx || height != frame.HeightPx ? (frame.WidthPx, frame.HeightPx) : (0, 0);
+        if (clip != _offscreenClip)
+        {
+            _offscreenCanvas!.RestoreToCount(1);
+            if (clip != (0, 0))
+            {
+                _offscreenCanvas.Save();
+                _offscreenCanvas.ClipRect(SKRect.Create(clip.Item1, clip.Item2));
+            }
+            _offscreenClip = clip;
         }
 
         // Apart from the surface, because the white scale changes without the size: a move

@@ -265,12 +265,12 @@ internal static class Program
 
         nint hwnd = app.PrimaryWindow.NativeHandle;
         const int steps = 16;
-        int builds = trace.Builds, oneToOne = trace.OneToOne, before = frames;
+        int builds = trace.Builds, oneToOne = trace.OneToOne, before = frames, purges = trace.Purges;
         SendMessageW(hwnd, EnterSizeMove, 0, 0);
         for (int i = 0; i < steps; i++)
             SetWindowPos(hwnd, 0, 0, 0, 1000 + 24 * (i + 1), 700 + 16 * (i + 1), NoMove | NoZOrder | NoActivate);
         Console.WriteLine($"probe: drag {steps} steps, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one), " +
-            $"{frames - before} frames");
+            $"{frames - before} frames, {trace.Purges - purges} offscreens freed");
         builds = trace.Builds; oneToOne = trace.OneToOne; before = frames;
         SendMessageW(hwnd, ExitSizeMove, 0, 0);
         GetClientRect(hwnd, out var client);
@@ -289,16 +289,18 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>stderr, counting the swapchain builds HULTUI_STARTUP=1 reports.</summary>
+    /// <summary>stderr, counting the swapchain builds HULTUI_STARTUP=1 reports, and the scratch
+    /// purges that follow an offscreen let go (one each, when no image was disposed).</summary>
     private sealed class SwapchainLines(TextWriter inner) : TextWriter
     {
         private static readonly System.Text.RegularExpressions.Regex Build = new(@"vulkan swapchain (\d+x\d+) x\d+");
-        public int Builds, OneToOne;
+        public int Builds, OneToOne, Purges;
         public string Last = "";
         public override System.Text.Encoding Encoding => inner.Encoding;
         public override void Write(char value) => inner.Write(value);
         public override void WriteLine(string? value)
         {
+            if (value is not null && value.Contains("vulkan scratch purged", StringComparison.Ordinal)) Purges++;
             if (value is not null && Build.Match(value) is { Success: true } m)
             {
                 Builds++;

@@ -18,7 +18,20 @@ namespace HultUI.Core.Rendering;
 /// in order to convert into it rather than assume it matches.</param>
 public readonly record struct VulkanFrameTarget(
     ulong Image, uint Format, uint Layout, int WidthPx, int HeightPx, int Index, uint Usage,
-    uint ColorSpace);
+    uint ColorSpace)
+{
+    /// <summary>
+    /// The size the swapchain's images were allocated at, when that is larger than the window: a
+    /// swapchain over-allocated for a drag and shown one-to-one, which the next steps of the drag
+    /// keep. Zero when the images are the window's size, <see cref="WidthPx"/> by
+    /// <see cref="HeightPx"/>. A renderer drawing through a surface of its own can make it this
+    /// size, and keep it while the swapchain is kept.
+    /// </summary>
+    public int AllocatedWidthPx { get; init; }
+
+    /// <inheritdoc cref="AllocatedWidthPx"/>
+    public int AllocatedHeightPx { get; init; }
+}
 
 /// <summary>
 /// What a Vulkan-backed window has to provide for Skia to draw on it.

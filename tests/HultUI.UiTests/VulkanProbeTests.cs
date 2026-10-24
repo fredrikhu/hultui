@@ -300,6 +300,41 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// While a drag keeps its over-allocated swapchain, the half-float offscreen the frame is drawn
+    /// through is kept too, made at the swapchain's size. Remade at every size, each kept step paid
+    /// a new F16 surface, a synchronous submit to free the old one and a scratch purge: an 80-step
+    /// drag made 82 offscreens for 5 swapchains (plan 17 round 4, vk-drag-kept-step-remakes). Each
+    /// freed offscreen is followed by one scratch purge, which HULTUI_STARTUP=1 reports; the white
+    /// scale is forced above 1 so the frame goes through the offscreen on any display. Only where
+    /// the surface shows a swapchain one-to-one (MAILBOX): elsewhere every size rebuilds anyway.
+    /// </summary>
+    [VulkanUiFact]
+    public void ADrag_KeepsTheHalfFloatOffscreen_WithItsSwapchain()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // Win32's size/move loop
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = "1",
+            ["HULTUI_VULKAN_PRESENT"] = "mailbox",
+            ["HULTUI_VULKAN_WHITE_SCALE"] = "2",
+            ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, "--drag");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        if (!run.Output.Contains("fixed extent available")) return;
+        var drag = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"probe: drag (\d+) steps, (\d+) builds \((\d+) one-to-one\), (\d+) frames, (\d+) offscreens freed");
+        Assert.True(drag.Success, run.Output);
+        int steps = int.Parse(drag.Groups[1].Value), builds = int.Parse(drag.Groups[2].Value);
+        int freed = int.Parse(drag.Groups[5].Value);
+        // One a swapchain at most: kept for the steps the swapchain is kept. Remade per size, 16.
+        Assert.True(freed <= builds, $"{freed} offscreens freed in {steps} steps with {builds} swapchain builds:\n{run.Output}");
+    }
+
+    /// <summary>
     /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
     /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
     /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217

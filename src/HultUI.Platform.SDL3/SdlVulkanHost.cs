@@ -1191,7 +1191,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // would have Skia skip a transition it still needs to make. A renderer that keeps a
         // render target over the image asks for TransitionAcquiredImage instead.
         Layout: 0,
-        _widthPx, _heightPx, (int)_acquiredIndex, _usage, (uint)_colorSpace);
+        _widthPx, _heightPx, (int)_acquiredIndex, _usage, (uint)_colorSpace)
+    {
+        // Only a one-to-one swapchain may outsize its window (MAILBOX, during a drag).
+        AllocatedWidthPx = _builtOneToOne && (_allocWidthPx > _widthPx || _allocHeightPx > _heightPx) ? _allocWidthPx : 0,
+        AllocatedHeightPx = _builtOneToOne && (_allocWidthPx > _widthPx || _allocHeightPx > _heightPx) ? _allocHeightPx : 0,
+    };
 
     public void PresentAcquiredImage()
     {
