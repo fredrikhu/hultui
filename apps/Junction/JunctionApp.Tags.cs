@@ -150,7 +150,7 @@ public partial class JunctionApp
     {
         _tagQuery = q;
         _tagSel = 0;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     // ── Table ────────────────────────────────────────────────────────────
@@ -420,7 +420,7 @@ public partial class JunctionApp
             _selectedCommitHash = t.Hash;
             _selectedCommitHashes.Clear();
         }
-        MarkDirty();
+        MarkViewDirty();
     }
 
     /// <summary>Moves the caret without touching the commit selection — what a folder row's

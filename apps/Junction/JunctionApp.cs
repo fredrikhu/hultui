@@ -416,14 +416,15 @@ public partial class JunctionApp : Component, IDisposable
         // The window's dialogs are the real ones on a desktop and the scriptable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;
-        // The diff's sideways offset is app state, so moving it has to rebuild the rows.
-        _diffPan = new HorizontalPan(MarkDirty);
+        // The diff's sideways offset is app state, so moving it has to rebuild the rows — the
+        // view's: the chrome shows none of this, and a drag rebuilds once a frame.
+        _diffPan = new HorizontalPan(MarkViewDirty);
         // Same for the two file-list widths: the panes are rebuilt at the current width, so
         // a drag marks dirty rather than writing to an element that the next build replaces.
         _toasts = new ToastHost(MarkDirty);
-        _commitSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
+        _commitSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.CommitFileListWidth);
-        _changesSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
+        _changesSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.ChangesFileListWidth);
         _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit);
         _diffFind.Selection = DiffFindSelection;
@@ -811,8 +812,9 @@ public partial class JunctionApp : Component, IDisposable
         // keys they reconcile by position — when one overlay disappears while another
         // appears at the same index, the framework would patch one subtree onto the
         // other, bleeding retained state (focus, caret, scroll) across kinds. Distinct
-        // keys make each overlay reconcile only against its own kind.
-        var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
+        // keys make each overlay reconcile only against its own kind. The title bar is a
+        // part of its own (see ChromePart), keyed by its host.
+        var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
@@ -853,12 +855,11 @@ public partial class JunctionApp : Component, IDisposable
     private Element BuildBody()
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        // Key the sidebar by collapsed-state so toggling replaces the subtree
-        // instead of patching the expanded layout into the rail — the two shapes
-        // share no meaningful retained state. Key the main column too so the two
-        // body children reconcile by key, not position.
-        var sidebar = BuildSidebar();
-        sidebar.Key = _sidebarCollapsed ? "sidebar-rail" : "sidebar-expanded";
+        // One part per shape of the sidebar, so toggling replaces the subtree instead of
+        // patching the expanded layout into the rail — the two shapes share no meaningful
+        // retained state. Each part's host has a key of its own; key the main column too so
+        // the two body children reconcile by key, not position.
+        var sidebar = SidebarPart.Mount().FlexShrink(0);
         var main = BuildMainColumn();
         main.Key = "main-column";
         body.AddChild(sidebar);
@@ -872,8 +873,7 @@ public partial class JunctionApp : Component, IDisposable
         // Without keys they reconcile by position, which patches one view's
         // elements onto another's when switching views, bleeding retained state
         // (focus, scroll positions) across unrelated views.
-        var toolbar = BuildToolbar();
-        toolbar.Key = "toolbar";
+        var toolbar = ToolbarPart.Mount().FlexShrink(0);
         var col = Flex.Column(gap: 0).FlexGrow(1).Children(toolbar);
 
         Element view = View switch
@@ -1012,8 +1012,18 @@ public partial class JunctionApp : Component, IDisposable
     }
 
     /// <summary>Force a rebuild through the reactive Effect (not the untracked
-    /// MarkDirty path), so a newly-activated per-repo loader gets subscribed.</summary>
-    private void Rerender() => _revision.Value++;
+    /// MarkDirty path), so a newly-activated per-repo loader gets subscribed. The chrome
+    /// is built again too; <see cref="RerenderView"/> is the selection moves' way, which
+    /// leaves it as it is.</summary>
+    private void Rerender()
+    {
+        _chromeRevision.Value++;
+        _revision.Value++;
+    }
+
+    /// <summary><see cref="Rerender"/> for a change the title bar, the sidebar and the toolbar
+    /// do not show — a selection or a cursor moving in the view on screen. See ChromePart.</summary>
+    private void RerenderView() => _revision.Value++;
 
     /// <summary>Automation hook for scripted perf captures (JUNCTION_BENCH in
     /// Program.cs): a view name switches tabs, "row:N" selects the Nth branch row

@@ -13,6 +13,81 @@ public partial class JunctionApp
 {
     private const string Brand = "Junction";
 
+    // ── Chrome parts ─────────────────────────────────────────────────────
+    //
+    // The title bar, the sidebar and the toolbar are child components of the app, kept from
+    // build to build. A key in History rebuilt all three with the view: 128 KB of the 182 KB
+    // the build made (128.6 KB in the NativeAOT app), for elements that show no selection. A
+    // part keeps its elements while the app rebuilds around it, and builds again when
+    // something it shows changes:
+    //
+    //  - a signal or a loader it reads — View; each repository's summary and worktrees; the
+    //    GitLab project, pipelines, merge requests and to-dos: its own build reads them, so its
+    //    own effect hears them, whether the app rebuilds or not;
+    //  - anything else — the active repository and workspace, the settings, the compact
+    //    breakpoint, the remote command running, the sidebar's drag, the theme, the display
+    //    scale: _chromeRevision, which every MarkDirty and Rerender in the app bumps.
+    //
+    // Safe by default, then: a rebuild builds the chrome too. Only paths that change nothing
+    // the chrome shows say so, with MarkViewDirty and RerenderView — the selection moves and
+    // cursors of History, Branches, Tags, Files and the Commit file list, the composer's
+    // fields and the search boxes. ChromePartTests holds every chrome input to what a full
+    // build of the chrome makes.
+
+    private readonly HultUI.Core.Reactivity.Signal<int> _chromeRevision = new(0);
+    private ChromePart? _titleBarPart, _toolbarPart, _sidebarExpandedPart, _sidebarRailPart;
+
+    /// <summary>Builds of the title bar, sidebar and toolbar so far, for tests.</summary>
+    internal int ChromeBuilds { get; private set; }
+
+    private sealed class ChromePart(JunctionApp app, Func<Element> build) : HultUI.Core.Components.Component
+    {
+        public override Element Build()
+        {
+            _ = app._chromeRevision.Value;
+            app.ChromeBuilds++;
+            return build();
+        }
+    }
+
+    // Each part's host is the flex item where the part's root used to be, so it takes the
+    // root's place in the layout: it never shrinks (Build gives it FlexShrink(0), as the title
+    // bar, the toolbar and the sidebar have), and a sidebar fills its host's height
+    // (BuildSidebar), as it filled the body row's.
+
+    private ChromePart TitleBarPart => _titleBarPart ??= new(this, () =>
+    {
+        var bar = BuildTitleBar();
+        bar.Key = "titlebar";
+        return bar;
+    });
+
+    private ChromePart ToolbarPart => _toolbarPart ??= new(this, () =>
+    {
+        var bar = BuildToolbar();
+        bar.Key = "toolbar";
+        return bar;
+    });
+
+    // One part per shape: the host is the sidebar's identity in the body, so a toggle replaces
+    // the expanded list with the rail instead of patching one into the other.
+    private ChromePart SidebarPart => _sidebarCollapsed
+        ? _sidebarRailPart ??= new(this, () => BuildSidebar(rail: true))
+        : _sidebarExpandedPart ??= new(this, () => BuildSidebar(rail: false));
+
+    /// <summary>Rebuilds the window, the chrome with it. Hides <c>Component.MarkDirty</c>, so
+    /// every rebuild this app asks for — and every helper it hands its MarkDirty to: the
+    /// toasts, the splitters, the find bars, the tree models — builds the chrome as well.</summary>
+    private new void MarkDirty()
+    {
+        _chromeRevision.Value++;
+        base.MarkDirty();
+    }
+
+    /// <summary><see cref="MarkDirty"/> for a change the chrome does not show: the view on
+    /// screen rebuilds, the title bar, sidebar and toolbar stay as they are.</summary>
+    private void MarkViewDirty() => base.MarkDirty();
+
     // ── Title bar ────────────────────────────────────────────────────────
 
     private Element BuildTitleBar()
