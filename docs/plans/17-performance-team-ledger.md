@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–13 landed, step 14 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); all 14 steps landed; full suite (`dotnet test HultUI.slnx -c Release`) next, then Phase `release`.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -133,7 +133,7 @@ Correctness first, then value per cost.
 13. ~~**Vesper**~~ LANDED 96cab2d5, 1a5ac7db, 18cdd285 (1/8): **layout-vesper-partner-row** (`VirtualListElement.InvalidateRow(int)`; same-name
     walk −42 %) and **vesper-grids-rebuild** (Thumbnails on item rows, Brief entries kept, resize rebuilds
     only when the grid's geometry changes: −55…−65 % per key, ≥ −90 % per resize step — e0b816f's cost).
-14. **Real-window test hygiene** (3): **sdl-hint-honoured-placement-and-uitests-guard** (the framework's
+14. ~~**Real-window test hygiene**~~ LANDED a193327e, 5f9259bf, b3df6aae, 5ab4e783 (3): **sdl-hint-honoured-placement-and-uitests-guard** (the framework's
     maximize/full-screen/restore under a CBT hook when the hint is set; SWP_NOACTIVATE on full-screen;
     ForegroundGuard on the 13 unguarded UiTest classes), **foreground UiTests opt-in** (approved: e.g. `HULTUI_UITESTS_FOREGROUND=1`).
 
@@ -165,6 +165,8 @@ Re-ranked by the round 5 survey.
 - **vesper-detail-resize-stale** (8, lead from step 13; not perf) — in Detail view a resize does not rebuild,
   so the path trail's truncation and a non-wrapped comparison or viewer's sideways-scroll range stay stale
   until the next key (old gap).
+- **sdl-hint-minimize-raise** (3, lead from step 14) — with the no-activate hint set, each Minimize
+  (`SW_MINIMIZE`) still asks for activation once, and a Default-frame Raise once (the guard refuses both).
 - **meridian-response-frame-flush** (2/3, lead) — the 18,884-line response frame flushes 86–152 ms;
   needs a trace.
 - **junction-commit-file-switch** (8, lead) — walking a large commit's files 2.72 MB per key; profile.
@@ -382,6 +384,10 @@ Re-ranked by the round 5 survey.
 | 4 | 96cab2d5 | layout-vesper-partner-row (API) | **Public `VirtualListElement.InvalidateRow(int)`** (API addition; ELEMENTS.md): drops one realized row and that item's kept label, keeps the rest. Suite rows `virtual/partner walk beside 1,000 item rows, every row told` vs `… two rows told`: 0.611 → 0.571 ms (−6.6 %), 105.2 → 39.4 KB/op, rows per step 23 → 6; AOT −9.6 %. 0 slower. |
 | 4 | 1a5ac7db | layout-vesper-partner-row | Vesper's F3 partner leaves the rows' shape; a move tells the old and new partner rows. Same-name walk −39 % KB JIT, −40 % AOT (target −42 %), rows made 31.6 → 3.5; real AOT app 479.9 → 261.1 KB/key (−46 %), frame 1.374 → 1.280 ms. |
 | 4 | 18cdd285 | vesper-grids-rebuild | Thumbnails on item rows (entries + cursor per row item; shape covers marks, cut, results, drop target, density, icon scale, `ThumbnailCache.Landed`); Brief hands back unchanged cells keyed by path (2 cells made per key, not ~140); a resize rebuilds only when a build would decide differently (trail cut, Brief rows/columns, tiles per row), else the live grid takes the new size (e0b816f holds). Per step: Brief key 759.9 → 237.8 KB (−69 %), Thumbnails Right −50 %, Down −42 % (whole-window build remains), Brief resize 755.5 → 12.5 KB (−98 %), Thumbnails resize 520.6 → 25.7 (−95 %), builds per resize step 1.00 → 0.03/0.05; real AOT app Brief −78 %, Thumbnails −68 % (frame 1.606 → 1.192 ms). 39 frames, layout and a11y dumps identical (A/A identical); WSL 10,435 pass. REACTIVITY.md: handing back elements a key does not change. |
+| 4 | a193327e | sdl-hint-honoured-placement | New `WindowsActivation`: with `SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0`, a thread CBT hook refuses activation during Maximize/Restore (SDL path), `SetFullscreen`, the `Placement` setter and the custom frame's maximize/restore syscommands; `SWP_NOACTIVATE` on all four full-screen `SetWindowPos` calls (both frames). Hint unset: no hook (real apps unchanged; requests 10 → 8 from SWP_NOACTIVATE). Activations reaching the guard per sequence 10 → 0 (8 refused by the framework). `WindowStateActivationTests` on both frames. |
+| 4 | 5f9259bf | uitests-guard | ForegroundGuard on 11 real-window UiTest classes (2 others gated, below); the guard sets the raise hint, passes hints to samples via env and gives their windows `WS_EX_NOACTIVATE`, watches child processes, logs with `HULTUI_UITESTS_GUARD_LOG`. Full `HULTUI_UITESTS=1` run: 122 pass, 0 fail, 14 skip, 0 hand-backs. One foreground take during the step's own run: WebView2's DevTools window (another process) took it ~100 ms before the guard handed it back; that test is now gated. |
+| 4 | b3df6aae | runtime-close-ends-run | Correctness (found by the step): since 1521f47 a pass that closed the last window then waited forever — an external `WM_CLOSE` (FlaUI, Task Manager) left an idle app running windowless until something woke it; released in junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0. `if (!IsRunning) break;` before the wait: posted WM_CLOSE never → 0 ms; a11y sample close 1,450 → 79 ms; VirtualList UiTests 5 s (killed) → 0.6 s. `RunLoopTests` assertions. |
+| 4 | 5ab4e783 | foreground-uitests-opt-in | Approved. `[UiForegroundFact]` needs `HULTUI_UITESTS_FOREGROUND=1` as well: WinFormsHostSampleTests (8), WebViewAccessibilityTests (4) and WebView2's two DevTools tests (one took the foreground, the other can't focus the page under the guard) — 14 facts; only ever run to prove they skip. Testing skill, ENVIRONMENT.md, PACKAGING.md, WINFORMS-INTEROP.md. |
 
 ## Examined, not worth it
 
@@ -840,3 +846,12 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   keyed, reuse only from the build just before, a `Ref` per element (it follows a patch to the live one),
   and everything shown in the comparison; window-sized builds record what they decided from the size and
   compare that on resize, writing plain sizes onto the live element.
+- 2026-10-25: step 14 landed (a193327e, 5f9259bf, b3df6aae, 5ab4e783): framework placement honours the
+  no-activate hint, every real-window UiTest runs guarded (122 pass, 0 hand-backs), foreground tests
+  opt-in; plus a run-loop correctness fix (an external WM_CLOSE now ends an idle app; the bug is in
+  every app released since 1521f47 — candidate for a hotfix release if the user wants one). One ~100 ms
+  foreground take by WebView2's DevTools window during the step (now gated). All 14 build steps landed.
+  Guideline notes: `ForegroundGuard.Begin()` first in any test that opens a window (`ForSamples()` +
+  `LaunchSample()` for sample exes); `SWP_NOACTIVATE` on every Win32 call in a test; windows owned by
+  another process can take the foreground, so such tests go behind `HULTUI_UITESTS_FOREGROUND`; pixel
+  read-back works from windows kept out of the foreground.
