@@ -123,6 +123,15 @@ button, and the button tests never saw it because they called `ApplyTheme` direc
 read the button, not the label. Test what the child resolves.) `ApplyTheme` must not read
 `ResolvedInherited` — it is not this pass's yet.
 
+A control that writes a *part's* inherited style (a child it made itself) marks that part
+for style, `part.MarkStyleDirty()`, as `ExpanderElement`, `ToastElement` and `TabsElement` do.
+Since plan 17 round 4 the style pass goes into an element's children only where they are
+marked or where what they inherit changed: a rebuild marks the elements it patched, not
+what is under them, and a part nothing patched (a control's own children, the rows a list
+keeps, a child component) is left as it was — Junction's History walk resolves 59 elements a
+key, down from 331. A write that depends only on the theme (`KbdElement`'s label size) needs
+no mark: a theme switch marks the whole tree.
+
 **Marking layout from the theme.** `ApplyTheme` runs on every style pass that reaches the
 element: each theme switch, and each rebuild that patches it. Mark layout there only when a
 size the element measures with changed — compare the new value with the one it had, as

@@ -649,6 +649,15 @@ layout alone for them. (Until 2026-10-06 the style pass never re-measured, and a
 change needed `MarkLayoutDirty()` as well; that call still does no harm. A theme whose
 font sizes differ from the last one's was laid out at the old sizes.)
 
+A rebuild does not do it for you on an element it did not patch. Each patch marks the
+element it patched; the style pass resolves a child when the child is marked or when what
+it inherits changed, and an element moved under another parent is resolved there. So a row
+a `VirtualList` kept, the elements of a child component, or a control's own parts, written
+through a `Ref` without `MarkStyleDirty()`, keep their old style however often the owner
+rebuilds. (Until plan 17 round 4 a patch marked everything under it, and an owner's rebuild
+re-resolved such an element by accident — and every one of the hundreds it did not change,
+on every key.)
+
 Auto-invalidating setters were considered and rejected: every style object would need a
 back-pointer to its element and every write would walk to the root, so static UI
 construction would pay for a problem it doesn't have.
