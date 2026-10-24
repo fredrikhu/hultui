@@ -76,7 +76,9 @@ same as leaving the variable unset. The few that ignore case or accept more say 
 
 | Variable | Value | Effect |
 |---|---|---|
-| `HULTUI_UITESTS` | non-empty, not `0`/`false` | Enables the real-window suite (`tests/HultUI.UiTests`): UI Automation, the GL sink, mpv's GL path, and the Vulkan renderer with its GL fallback. Otherwise those tests report skipped. |
+| `HULTUI_UITESTS` | non-empty, not `0`/`false` | Enables the real-window suite (`tests/HultUI.UiTests`): UI Automation, the GL sink, mpv's GL path, and the Vulkan renderer with its GL fallback. Otherwise those tests report skipped. Their windows never take the foreground (`ForegroundGuard`), so the suite can run while someone uses the machine. |
+| `HULTUI_UITESTS_FOREGROUND` | non-empty, not `0`/`false` | With `HULTUI_UITESTS`, also runs the few real-window tests that take the foreground on purpose: `WinFormsHostSampleTests` (Tab traversal), `WebViewAccessibilityTests` (focus inside a page) and the two WebView2 DevTools tests. Without it they report skipped, saying why. Only on a desktop nobody is using. |
+| `HULTUI_UITESTS_GUARD_LOG` | a file path | Each `ForegroundGuard` in the real-window suite appends a line there when disposed: the test, the activations it refused, the times it handed the foreground back, and the sample windows it held. |
 | `HULTUI_MPV_EXPECT_LGPL` | `1` | The mpv backend tests assert the loaded libmpv is the trimmed LGPL build rather than only reporting what they found. |
 
 ## Build-time defines

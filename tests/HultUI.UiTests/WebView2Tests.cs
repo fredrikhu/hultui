@@ -15,8 +15,9 @@ namespace HultUI.UiTests;
 /// visual and its pixels reach the sink, script and messages go both ways, a navigation
 /// the app refuses never happens, and pointer input sent to the page lands where it was
 /// aimed. Needs the WebView2 Runtime, and a desktop; the window is kept out of the foreground
-/// (<see cref="ForegroundGuard"/>), and a window of the browser's that takes it (DevTools) is
-/// handed back and fails the test.
+/// (<see cref="ForegroundGuard"/>), and a window of the browser's that takes it is handed back
+/// and fails the test. The two DevTools tests take it on purpose and run only with
+/// <c>HULTUI_UITESTS_FOREGROUND=1</c> as well.
 /// </summary>
 /// <remarks>
 /// xUnit runs tests on MTA threads, and WebView2 refuses them, so each test runs its body on
@@ -31,6 +32,21 @@ public sealed class WebView2Tests
         public WebView2UiFactAttribute()
         {
             if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
+            else if (!OperatingSystem.IsWindows()) Skip = "WebView2 is Windows-only.";
+            else if (new WebView2Engine().Availability is { IsAvailable: false } a) Skip = "WebView2 unavailable: " + a.Reason;
+        }
+    }
+
+    /// <summary>
+    /// A WebView2 test that takes the foreground on purpose — the browser activates its DevTools
+    /// window, and the page needs keyboard focus for F12 — so it runs only with
+    /// <c>HULTUI_UITESTS_FOREGROUND=1</c> as well (<see cref="UiTestGate.ForegroundSkip"/>).
+    /// </summary>
+    private sealed class WebView2ForegroundUiFactAttribute : FactAttribute
+    {
+        public WebView2ForegroundUiFactAttribute()
+        {
+            if (UiTestGate.ForegroundSkip is { } reason) Skip = reason;
             else if (!OperatingSystem.IsWindows()) Skip = "WebView2 is Windows-only.";
             else if (new WebView2Engine().Availability is { IsAvailable: false } a) Skip = "WebView2 unavailable: " + a.Reason;
         }
@@ -361,7 +377,9 @@ public sealed class WebView2Tests
         try { Directory.Delete(folder, recursive: true); } catch (IOException) { }
     });
 
-    [WebView2UiFact]
+    // The browser activates the DevTools window it opens: under the guard it took the foreground
+    // and was handed back (20 sightings in ~100 ms), so this runs only on a desktop nobody uses.
+    [WebView2ForegroundUiFact]
     public void DevTools_OpenFromTheApp_InANativeWindowOfTheirOwn() => OnSta(() =>
     {
         using var page = Open("<html><body>devtools</body></html>", devTools: true);
@@ -379,7 +397,10 @@ public sealed class WebView2Tests
         finally { CloseWindow(page, devTools); }
     });
 
-    [WebView2UiFact]
+    // The page takes F12 only with keyboard focus, which a window kept out of the foreground
+    // cannot give it (focusing it asks for activation, which the guard refuses); and the
+    // DevTools window it opens takes the foreground, as above.
+    [WebView2ForegroundUiFact]
     public void F12InThePage_OpensDevTools_OnlyWhereTheOptionsAllowThem() => OnSta(() =>
     {
         // On: the browser's own F12, which reaches the app first (a function key is a shortcut)

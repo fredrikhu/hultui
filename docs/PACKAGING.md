@@ -60,14 +60,16 @@ hosted control.
 **2. The suites CI does not run.**
 
 ```bash
-dotnet test tests/HultUI.UiTests/HultUI.UiTests.csproj -c Release -e HULTUI_UITESTS=1
+dotnet test tests/HultUI.UiTests/HultUI.UiTests.csproj -c Release -e HULTUI_UITESTS=1 -e HULTUI_UITESTS_FOREGROUND=1
 ```
 
 These launch real sample windows and drive them through UI Automation, exactly as a
-screen reader does. They take the foreground and cannot share a machine with someone
-using it — which is why they are gated, and why they are easy to forget. They are the
-only coverage of accessibility, of pointer and keyboard input reaching a hosted tree,
-and of Tab moving into, through and back out of one.
+screen reader does — which is why they are gated, and why they are easy to forget. They
+are the only coverage of accessibility, of pointer and keyboard input reaching a hosted
+tree, and of Tab moving into, through and back out of one. With `HULTUI_UITESTS=1` alone
+their windows stay out of the foreground; the hosted-control tests need it (Tab follows
+Win32 focus), so they also need `HULTUI_UITESTS_FOREGROUND=1`, and that run cannot share a
+machine with someone using it.
 
 **3. Drag and drop, by hand.** Run `samples/HultUI.Samples.WinFormsHost`, open its
 *Drag and drop* tab, and check both directions: drop files from Explorer onto the drop

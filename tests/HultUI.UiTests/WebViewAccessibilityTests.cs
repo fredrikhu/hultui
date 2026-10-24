@@ -26,6 +26,10 @@ using Window = FlaUI.Core.AutomationElements.Window;
 /// element empty, hit tests returning the element's box, rectangles left behind by a move.
 /// Focus worked before any of this — the browser's focus window reports it — and is here so
 /// that joining the trees does not take it away.</para>
+/// <para>The focus test makes the sample's window the foreground, and the hit test puts it
+/// above every window (<c>HWND_TOPMOST</c>), so these run only with
+/// <c>HULTUI_UITESTS_FOREGROUND=1</c> as well as <c>HULTUI_UITESTS=1</c>
+/// (<see cref="UiForegroundFactAttribute"/>), on a desktop nobody is using.</para>
 /// </remarks>
 [Collection("ui")]
 public sealed class WebViewAccessibilityTests : IDisposable
@@ -65,7 +69,7 @@ public sealed class WebViewAccessibilityTests : IDisposable
         return found.Result ?? throw new InvalidOperationException("the page's button never appeared under the web view element");
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void ThePagesTree_HangsUnderTheWebViewElement_AndNowhereElse()
     {
         var button = Button();
@@ -88,7 +92,7 @@ public sealed class WebViewAccessibilityTests : IDisposable
         Assert.True(box.Contains(button.BoundingRectangle), $"button {button.BoundingRectangle} outside the page {box}");
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void APointOverThePage_ResolvesToThePagesOwnElement()
     {
         var button = Button().BoundingRectangle;
@@ -106,7 +110,7 @@ public sealed class WebViewAccessibilityTests : IDisposable
         }
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void MovingTheWindow_TakesThePagesElementsWithIt()
     {
         var before = Button().BoundingRectangle;
@@ -133,7 +137,7 @@ public sealed class WebViewAccessibilityTests : IDisposable
         }
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void FocusInsideThePage_IsReportedAsThePagesElement()
     {
         var button = Button();

@@ -485,8 +485,9 @@ the escape hatch; not needed for the first cut.
    `TabControl` does not create a page's handle until it is first shown, so that control
    mounts long after the first.
 
-   `WinFormsHostSampleTests` (7 tests, behind the same `HULTUI_UITESTS` gate as the
-   other real-window suites) drives it as a UI Automation client: the tree is readable,
+   `WinFormsHostSampleTests` (behind the same `HULTUI_UITESTS` gate as the other
+   real-window suites, and since it makes the sample the foreground for Tab, also behind
+   `HULTUI_UITESTS_FOREGROUND`) drives it as a UI Automation client: the tree is readable,
    `Invoke` reaches the handler, bounds are real screen coordinates, the host's own
    `DataGridView` and `TabControl` are still in the tree beside it, typing lands,
    Backspace takes the key path rather than the text path, and Tab moves through the
