@@ -288,6 +288,27 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("text/page down through highlighted JSON in a TextArea",
+            $"Page down through the {JsonLines:N0}-line JSON response a screen at a time: every line drawn is drawn for the first time, its words shaped and its colour stretches made",
+            ctx =>
+            {
+                var text = Ui.JsonResponse(ctx.Rng, JsonLines);
+                var area = JsonViewer();
+                area.Text = text;
+                area.Spans = Ui.JsonSpans(text);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                float page = area.Layout.AbsoluteContentBox.Height;
+                // Each session starts at the top, with its own text caches: a step's screen has
+                // not been drawn in it before.
+                float At(int step) => (step + 1) * page;
+                return new Op
+                {
+                    Run = step => area.ScrollOffsetY = At(step),
+                    Check = step => Math.Abs(area.ScrollOffsetY - At(step)) < 0.5f ? JsonShown(ctx, area, text)
+                        : $"the TextArea is scrolled to {area.ScrollOffsetY:0}, not {At(step):0}",
+                };
+            });
+
         yield return new Scenario("text/rebuild around highlighted JSON in a TextArea",
             $"A keystroke elsewhere rebuilds the pane holding the {JsonLines:N0}-line JSON response, as Meridian's URL and body editors rebuild the app: the TextArea is patched with the same text and spans",
             ctx =>
