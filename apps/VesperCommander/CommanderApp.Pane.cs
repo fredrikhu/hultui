@@ -737,10 +737,22 @@ public partial class CommanderApp
         if (partnerPath is not null && IndexOfPath(list, partnerPath) < 0) partnerPath = null;
 
         // A kept row shows what it showed when it was made; everything it shows besides its
-        // entry and the cursor is in the shape, and a change makes the rows again. The mounted
-        // list is told before this build patches it.
-        if (PaneRows(side).Changed(this, side, partnerPath, marks) && VList(side).Current is { } mounted)
-            mounted.InvalidateRows();
+        // entry and the cursor is in the shape, and a change makes the rows again. The partner
+        // is the exception: in a folder of the same names it moves with every key, and only the
+        // row it leaves and the row it reaches show it, so those two are made again and the
+        // rest are kept. The mounted list is told before this build patches it.
+        var rowState = PaneRows(side);
+        bool shapeChanged = rowState.Changed(this, side, marks);
+        bool partnerMoved = rowState.PartnerMoved(partnerPath, out var partnerWas);
+        if (VList(side).Current is { } mounted)
+        {
+            if (shapeChanged) mounted.InvalidateRows();
+            else if (partnerMoved)
+            {
+                mounted.InvalidateRow(IndexOfPath(list, partnerWas));
+                mounted.InvalidateRow(IndexOfPath(list, partnerPath));
+            }
+        }
 
         return VirtualListElement<FileEntry>.New()
             .ItemHeight((int)RowHeight)
@@ -767,10 +779,11 @@ public partial class CommanderApp
 
     /// <summary>
     /// What a pane's Detail rows show besides their entry and whether the cursor is on it, as
-    /// the rows on screen were made with it: the F3 partner, the Size and Date columns, the
-    /// zebra tint, a fed-in result set's source folders, the scale the icons are cut at, a
-    /// folder a drag hovers, and the sets a row looks itself up in — the marks, the files cut
-    /// for a move, the folders measured with Space (whose totals count up while they walk).
+    /// the rows on screen were made with it: the Size and Date columns, the zebra tint, a
+    /// fed-in result set's source folders, the scale the icons are cut at, a folder a drag
+    /// hovers, and the sets a row looks itself up in — the marks, the files cut for a move, the
+    /// folders measured with Space (whose totals count up while they walk). And, apart from
+    /// that shape, the F3 partner, which only one row shows.
     /// <para>The rest comes with something the list already handles: another folder, an
     /// archive (and its ratio column) or a filter are other entries; the density is another
     /// row height, which makes every row again; another colour scheme is another Theme object,
@@ -783,12 +796,24 @@ public partial class CommanderApp
         private readonly HashSet<string> _cut = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, (long Bytes, bool Done)> _sizes = new(StringComparer.Ordinal);
         private bool _made;
+        private string? _partner;
+
+        /// <summary>Whether the F3 partner the rows were made with is another one now, and which it
+        /// was; takes the new one either way. Kept out of the shape because it moves with every key
+        /// in a folder of the same names, and it changes only the row it leaves and the row it
+        /// reaches: in the shape, every key made every row of the pane again.</summary>
+        public bool PartnerMoved(string? partnerPath, out string? was)
+        {
+            was = _partner;
+            _partner = partnerPath;
+            return !string.Equals(was, partnerPath, StringComparison.Ordinal);
+        }
 
         /// <summary>Whether anything the rows show changed since the last build asked; takes
         /// the new state either way.</summary>
-        public bool Changed(CommanderApp app, char side, string? partnerPath, HashSet<string> marks)
+        public bool Changed(CommanderApp app, char side, HashSet<string> marks)
         {
-            var shape = new PaneRowShape(partnerPath, app._settings.ShowSize, app._settings.ShowDate,
+            var shape = new PaneRowShape(app._settings.ShowSize, app._settings.ShowDate,
                 app._settings.Zebra, app.ResultsOf(side), Icons.DisplayScale, app._dropTarget);
             bool changed = !_made || shape != _shape;
             _made = true;
@@ -814,7 +839,7 @@ public partial class CommanderApp
     }
 
     private readonly record struct PaneRowShape(
-        string? PartnerPath, bool ShowSize, bool ShowDate, bool Zebra, ResultListing? Results,
+        bool ShowSize, bool ShowDate, bool Zebra, ResultListing? Results,
         float IconScale, (char Side, string Dir)? DropTarget);
 
     /// <summary>A row as a screen reader says it: the name, what it is, its size and date, and

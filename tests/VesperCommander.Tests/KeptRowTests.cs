@@ -143,6 +143,34 @@ public class KeptRowTests
         Assert.Equal(Color.Transparent, ((BoxElement)right[Name(2)]).BorderColor);
     }
 
+    /// <summary>The partner is not in the shape: a key that moves it makes the row it left and the
+    /// row it reached over here, and keeps every other row of the pane.</summary>
+    [Fact]
+    public void TheF3PartnerMoving_MakesOnlyTheRowItLeftAndTheRowItReached()
+    {
+        using var t = Open(sameNames: true);
+        t.PutCursorOn('L', Name(2));
+        var right = Rows(t, 'R');
+        Assert.Equal(Nocturne.Accent700, ((BoxElement)right[Name(2)]).BorderColor);
+
+        t.Press(KeyCode.Down);
+        t.Session.PumpFrames(1);
+
+        var after = Rows(t, 'R');
+        Assert.Equal(right.Keys, after.Keys);
+        foreach (var (name, row) in after)
+        {
+            if (name == Name(2) || name == Name(3)) Assert.NotSame(right[name], row);
+            else Assert.Same(right[name], row);
+        }
+        Assert.Equal(Nocturne.Accent700, ((BoxElement)after[Name(3)]).BorderColor);
+        Assert.Equal(Color.Transparent, ((BoxElement)after[Name(2)]).BorderColor);
+
+        // Off a file, nothing over here pairs with the cursor, and the ring goes.
+        t.PutCursorOn('L', "docs");
+        Assert.All(Rows(t, 'R').Values, r => Assert.NotEqual(Nocturne.Accent700, ((BoxElement)r).BorderColor));
+    }
+
     [Fact]
     public void TheSizeAndDateColumns_FollowTheSettings()
     {
