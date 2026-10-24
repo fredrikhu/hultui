@@ -196,11 +196,30 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     private IVulkanInteropHost? Interop => _host as IVulkanInteropHost;
 
-    /// <summary>The images lent out this frame, by the GL texture each is imported as, so that
-    /// <see cref="ISkiaExternalSurface.WrapFrame"/> knows what it is wrapping — the
+    /// <summary>The images lent out this frame, and to whom, by the GL texture each is imported
+    /// as, so that <see cref="ISkiaExternalSurface.WrapFrame"/> knows what it is wrapping — the
     /// <see cref="GpuFrame"/> itself carries GL names, which name nothing a Vulkan renderer can
     /// draw, but each source's image has a texture name of its own.</summary>
-    private readonly Dictionary<uint, VulkanInteropImage> _lent = [];
+    private readonly Dictionary<uint, (VulkanInteropImage Image, object Owner)> _lent = [];
+
+    /// <summary>
+    /// The image the canvas draws a source's frames through, made once for the shared image it
+    /// was lent and kept while that image lives: by owner (the source), and made again when the
+    /// <c>VkImage</c>, the size or what the wrapper declares changes (see
+    /// <see cref="ISkiaExternalSurface.WrapFrame"/>). Made every frame, it was a
+    /// <see cref="GRBackendTexture"/> (a finalizable object, never disposed) and an
+    /// <see cref="SKImage"/> with their handle-table entries: 216 of the 527 bytes a Reel video
+    /// frame allocated.
+    /// </summary>
+    private readonly Dictionary<object, KeptFrame> _keptFrames = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Sources that gave their image up, from any thread: their kept images go on the
+    /// render thread, when the next frame begins.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentQueue<object> _releasedOwners = new();
+
+    /// <summary>A kept wrapper and what it was made for.</summary>
+    private readonly record struct KeptFrame(ulong Image, int Width, int Height, bool BottomLeft, bool LinearSpace,
+        bool Opaque, SKImage Wrapper);
 
     /// <summary>
     /// Which sources have been lent their image in the frame now open, and at what size.
@@ -261,9 +280,17 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             _tracedResizeInFrame = true;
             return false;
         }
-        if (Interop?.LendInteropImage(owner, width, height) is not { } image) return false;
+        // At another size the host destroys the image and makes a new one: the wrapper over the old
+        // one goes first. And one the host could not lend may have gone too.
+        if (_keptFrames.TryGetValue(owner, out var kept) && (kept.Width != width || kept.Height != height))
+            DropKeptFrame(owner);
+        if (Interop?.LendInteropImage(owner, width, height) is not { } image)
+        {
+            DropKeptFrame(owner);
+            return false;
+        }
 
-        _lent[image.GlTexture] = image;
+        _lent[image.GlTexture] = (image, owner);
         _lentThisFrame[owner] = (width, height);
         // Linear light only where it can survive. An 8-bit sRGB swapchain has no room above
         // white, and the offscreen that carries the extra range exists only for scRGB — ask a
@@ -286,7 +313,17 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     }
 
     /// <inheritdoc />
-    public void ReleaseFrameTarget(object owner) => Interop?.ForgetInteropImage(owner);
+    public void ReleaseFrameTarget(object owner)
+    {
+        Interop?.ForgetInteropImage(owner);
+        _releasedOwners.Enqueue(owner);
+    }
+
+    /// <summary>Disposes the wrapper kept for <paramref name="owner"/>, if any. Render thread.</summary>
+    private void DropKeptFrame(object owner)
+    {
+        if (_keptFrames.Remove(owner, out var kept)) kept.Wrapper.Dispose();
+    }
 
     /// <summary>
     /// Whether the scRGB target is offered to the producer as wide-gamut:
@@ -304,14 +341,19 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         Environment.GetEnvironmentVariable("HULTUI_VIDEO_WIDE_GAMUT") != "0";
 
     /// <summary>
-    /// The lent image as something the canvas can draw.
+    /// The lent image as something the canvas can draw. The surface keeps it (see
+    /// <see cref="_keptFrames"/>): the caller draws it and neither disposes nor holds it.
     ///
-    /// <para>The layout declared here is the one the host's barrier left it in, and it is
-    /// declared afresh every frame — the render context never caches a renderer-owned
-    /// wrapper: Skia tracks layout inside the wrapper and moves it as it draws, so a reused one
-    /// describes an image that no longer exists in that state. A swapchain image's render
-    /// target is kept only because the host puts the image back in the layout Skia left it in
-    /// (<see cref="_kept"/>); nothing does that for this image.</para>
+    /// <para><b>Kept because the image is always handed back in the layout it declares.</b> Skia
+    /// tracks an image's layout and queue family inside the wrapper, which is why the swapchain's
+    /// render targets need the host's help (<see cref="_kept"/>). This image needs none: every
+    /// frame that draws it lends it first, and the host's acquire barrier
+    /// (<see cref="IVulkanInteropHost.FinishExternalFrame"/>) puts it in SHADER_READ_ONLY_OPTIMAL on
+    /// the graphics queue before Skia's work on it is submitted — the state declared here — and
+    /// Skia only samples it, which moves nothing. The release to GL at the present and the
+    /// acquire back happen outside Skia, and end where Skia's belief started. Made again when the
+    /// host could have replaced the image (a new size, a failed lend, the source let go: see
+    /// <see cref="TryAcquireFrameTarget"/>), and when what is declared here would change.</para>
     ///
     /// <para>The colour space is sRGB rather than the swapchain's. mpv writes ordinary
     /// sRGB-encoded values into the half-float target; saying so is what lets Skia convert
@@ -321,7 +363,28 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     SKImage? ISkiaExternalSurface.WrapFrame(in GpuFrame frame)
     {
         if (!frame.RendererOwned) return null;
-        if (!_lent.TryGetValue(frame.TextureId, out var image)) return null;
+        if (!_lent.TryGetValue(frame.TextureId, out var lent)) return null;
+        var (image, owner) = lent;
+
+        // Linear when the producer says it wrote light rather than an encoded picture. Get
+        // this wrong and Skia applies a transfer that is not there: an HDR frame declared sRGB
+        // is decoded a second time and comes out crushed and dark.
+        // Into an encoded offscreen, linear light is declared sRGB too so that Skia leaves it
+        // alone; FrameColorFilter then encodes it with the 2.2 the blit will undo.
+        bool linearSpace = frame.IsLinearLight && !_offscreenEncoded;
+        // Opaque for linear light, and not as a detail. Premultiplied colour is defined only
+        // up to its alpha, so a premul image whose channels exceed 1 is describing something
+        // invalid and Skia is entitled to clamp it — which is exactly what an HDR highlight
+        // is. Video is opaque anyway, so saying so costs nothing and keeps the range.
+        bool opaque = frame.IsLinearLight;
+
+        if (_keptFrames.TryGetValue(owner, out var kept))
+        {
+            if (kept.Image == image.Image && kept.Width == frame.Width && kept.Height == frame.Height
+                && kept.BottomLeft == frame.BottomLeftOrigin && kept.LinearSpace == linearSpace && kept.Opaque == opaque)
+                return kept.Wrapper;
+            DropKeptFrame(owner);
+        }
 
         var info = new GRVkImageInfo
         {
@@ -337,31 +400,19 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             SharingMode = VkSharingModeExclusive,
         };
 
-        var texture = new GRBackendTexture(frame.Width, frame.Height, info);
-        if (!texture.IsValid)
-        {
-            texture.Dispose();
-            return null;
-        }
+        // Skia copies what it needs out of the backend texture, so it goes as soon as the image
+        // exists. Left to the finalizer, it was one finalizable object per video frame.
+        using var texture = new GRBackendTexture(frame.Width, frame.Height, info);
+        if (!texture.IsValid) return null;
 
-        // Linear when the producer says it wrote light rather than an encoded picture. Get
-        // this wrong and Skia applies a transfer that is not there: an HDR frame declared sRGB
-        // is decoded a second time and comes out crushed and dark.
-        // Into an encoded offscreen, linear light is declared sRGB too so that Skia leaves it
-        // alone; FrameColorFilter then encodes it with the 2.2 the blit will undo.
-        var space = frame.IsLinearLight && !_offscreenEncoded
-            ? SKColorSpace.CreateSrgbLinear()
-            : SKColorSpace.CreateSrgb();
-
-        // Opaque for linear light, and not as a detail. Premultiplied colour is defined only
-        // up to its alpha, so a premul image whose channels exceed 1 is describing something
-        // invalid and Skia is entitled to clamp it — which is exactly what an HDR highlight
-        // is. Video is opaque anyway, so saying so costs nothing and keeps the range.
-        var alpha = frame.IsLinearLight ? SKAlphaType.Opaque : SKAlphaType.Premul;
-
-        return SKImage.FromTexture(_grContext, texture,
+        var wrapper = SKImage.FromTexture(_grContext, texture,
             frame.BottomLeftOrigin ? GRSurfaceOrigin.BottomLeft : GRSurfaceOrigin.TopLeft,
-            SKColorType.RgbaF16, alpha, space);
+            SKColorType.RgbaF16, opaque ? SKAlphaType.Opaque : SKAlphaType.Premul,
+            linearSpace ? SKColorSpace.CreateSrgbLinear() : SKColorSpace.CreateSrgb());
+        if (wrapper is null) return null;
+        _keptFrames[owner] = new KeptFrame(image.Image, frame.Width, frame.Height, frame.BottomLeftOrigin,
+            linearSpace, opaque, wrapper);
+        return wrapper;
     }
 
     /// <summary>
@@ -402,6 +453,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public bool BeginFrame()
     {
         if (_frameOpen) return true;
+        while (_releasedOwners.TryDequeue(out var released)) DropKeptFrame(released);
         if (_host.AcquireNextImage() is not { } frame) return false;
 
         var path = PathFor(frame);
@@ -917,6 +969,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         ReleaseOffscreen();
         _frameScale?.Dispose();
         _frameScale = null;
+        foreach (var kept in _keptFrames.Values) kept.Wrapper.Dispose();
+        _keptFrames.Clear();
         _renderContext.Dispose();
         _grContext.Dispose();
         _backend.Dispose();

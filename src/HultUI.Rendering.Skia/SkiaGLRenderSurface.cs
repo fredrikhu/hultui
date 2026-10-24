@@ -76,7 +76,8 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
     {
         const uint GL_TEXTURE_2D = 0x0DE1;
         var info = new GRGlTextureInfo(GL_TEXTURE_2D, frame.TextureId, frame.InternalFormat);
-        var texture = new GRBackendTexture(frame.Width, frame.Height, mipmapped: false, info);
+        // Skia copies what it needs out of the backend texture; left to the finalizer otherwise.
+        using var texture = new GRBackendTexture(frame.Width, frame.Height, mipmapped: false, info);
         return SKImage.FromTexture(_grContext, texture,
             frame.BottomLeftOrigin ? GRSurfaceOrigin.BottomLeft : GRSurfaceOrigin.TopLeft,
             SKColorType.Rgba8888, SKAlphaType.Premul);

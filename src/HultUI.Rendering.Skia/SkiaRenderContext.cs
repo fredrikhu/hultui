@@ -1238,23 +1238,33 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (!source.TryRenderFrame(gl, out var frame))
             return;
 
-        // A renderer-owned frame is re-wrapped every time, never cached. The wrapper holds
-        // the image's layout, and Skia moves that layout as it draws — the same lesson the
-        // swapchain render target taught, where caching one drew three good frames and then
-        // black for ever (it is kept now only because the host restores the layout Skia left
-        // it in). A source-owned GL texture has no layout and caches fine.
-        bool haveWrapper = _wrappedTextures.TryGetValue(source, out var wrapped);
-        if (frame.RendererOwned || !haveWrapper || wrapped.Frame != frame)
+        // A renderer-owned frame's image is the surface's: it knows when the storage under it is
+        // replaced, and keeps the wrapper until then (SkiaVulkanRenderSurface). A source-owned GL
+        // texture has no layout to go stale and is wrapped here, once per texture and size.
+        SKImage? image;
+        if (frame.RendererOwned)
         {
-            wrapped.Image?.Dispose();
-            var image = gl.WrapFrame(frame);
-            if (image is null)
+            // A source that drew into a texture of its own before the surface lent it one.
+            if (_wrappedTextures.Remove(source, out var stale)) stale.Image.Dispose();
+            image = gl.WrapFrame(frame);
+            if (image is null) return;
+        }
+        else
+        {
+            bool haveWrapper = _wrappedTextures.TryGetValue(source, out var wrapped);
+            if (!haveWrapper || wrapped.Frame != frame)
             {
-                _wrappedTextures.Remove(source);
-                return;
+                wrapped.Image?.Dispose();
+                var made = gl.WrapFrame(frame);
+                if (made is null)
+                {
+                    _wrappedTextures.Remove(source);
+                    return;
+                }
+                wrapped = (frame, made);
+                _wrappedTextures[source] = wrapped;
             }
-            wrapped = (frame, image);
-            _wrappedTextures[source] = wrapped;
+            image = wrapped.Image;
         }
 
         var (drawRect, srcRect) = ComputeImageFit(fit, frame.Width, frame.Height,
@@ -1265,7 +1275,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // A frame of linear light arrives in the producer's luminance units, not the canvas's.
         // The surface owns that conversion because only it knows what its own 1.0 is worth.
         _pooledPaint.ColorFilter = gl.FrameColorFilter(frame);
-        Canvas.DrawImage(wrapped.Image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
+        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
         _pooledPaint.ColorFilter = null;
     }
 

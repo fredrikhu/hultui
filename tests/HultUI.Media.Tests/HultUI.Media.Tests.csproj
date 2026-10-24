@@ -22,4 +22,16 @@
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <!-- No dynamic PGO in this test process: with it, tier-1 code can put a closure the code
+         makes (and makes in NativeAOT) on the stack, and an allocation test stops seeing it.
+         The allocation tests measure the code, not the profile. -->
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The measure every "allocates nothing" test uses: the least of a few rounds. -->
+    <Compile Include="..\Shared\Allocations.cs" Link="Shared\Allocations.cs" />
+  </ItemGroup>
+
 </Project>
