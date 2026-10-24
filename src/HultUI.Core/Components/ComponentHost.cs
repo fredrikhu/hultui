@@ -39,11 +39,18 @@ public sealed class ComponentHost : Element
     private void Rebuild()
     {
         _component.OnBeforeBuild();
-        var newTree = _component.Build();
+        // A persistent child component the build hands on is moved into the new tree without
+        // marking where it was; the reconcile below puts it back unmarked when it lands in the
+        // same place, and marks the old parent when it does not (Element.DetachSilently).
+        Element newTree;
+        Element.Building++;
+        try { newTree = _component.Build(); }
+        finally { Element.Building--; }
 
         if (Children.Count == 0)
         {
             AddChild(newTree);
+            if (!TreeDiffer.IsReconciling && Element.Building == 0) Element.FlushPendingMoves();
         }
         else
         {

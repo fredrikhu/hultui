@@ -1238,7 +1238,9 @@ public abstract class Element
     public void AddChild(Element child)
     {
         if (child.Parent is not null)
-            DetachSilently(child);
+            DetachSilently(child, this);
+        else if (_pendingMoves is { Count: > 0 } && _mounted)
+            SettleMove(child);
 
         child.Parent = this;
         var children = _children ??= new();
@@ -1255,7 +1257,9 @@ public abstract class Element
     public void InsertChild(int index, Element child)
     {
         if (child.Parent is not null)
-            DetachSilently(child);
+            DetachSilently(child, this);
+        else if (_pendingMoves is { Count: > 0 } && _mounted)
+            SettleMove(child);
 
         child.Parent = this;
         var children = _children ??= new();
@@ -1292,7 +1296,9 @@ public abstract class Element
         foreach (var child in children)
         {
             if (child.Parent is not null && !ReferenceEquals(child.Parent, this))
-                DetachSilently(child);
+                DetachSilently(child, this);
+            else if (child.Parent is null && _pendingMoves is { Count: > 0 } && _mounted)
+                SettleMove(child);
         }
 
         // Remove old children. Only unmount elements that are genuinely
@@ -1322,7 +1328,7 @@ public abstract class Element
         foreach (var child in children)
         {
             if (child.Parent is not null) // only an element listed twice
-                DetachSilently(child);
+                DetachSilently(child, this);
 
             child.Parent = this;
             list.Add(child);
@@ -1351,17 +1357,144 @@ public abstract class Element
     }
 
     /// <summary>
-    /// Removes <paramref name="child"/> from its current parent without
-    /// firing lifecycle events.  Used for element moves — the child is not
-    /// leaving the tree, just changing parents.
+    /// Removes <paramref name="child"/> from its current parent, on its way to
+    /// <paramref name="to"/>, without firing lifecycle events. Used for element moves — the
+    /// child is not leaving the tree, just changing parents.
+    ///
+    /// <para>A live child moved, during a component's build, into a tree that build is making
+    /// (a container not mounted yet) is a persistent child component handed to its parent's
+    /// next build, and nearly always goes back where it was. Its old parent is not marked for
+    /// that: the reconcile that
+    /// follows puts the child back without marking anything when it lands in the same place
+    /// among the same siblings (<see cref="TryRestoreMoved"/>), and the old parent is marked as
+    /// it always was when it does not (<see cref="SettleMove"/>, <see cref="FlushPendingMoves"/>).
+    /// Marked at once, every build of an app shell holding child components told the window
+    /// its structure had changed, and a listening screen reader got a whole new accessibility
+    /// tree for each key that moved a selection.</para>
     /// </summary>
-    private static void DetachSilently(Element child)
+    private static void DetachSilently(Element child, Element to)
     {
-        if (child.Parent?._children is { } siblings && siblings.Remove(child))
-            siblings.ZOrder = null;
-        child.Parent?.MarkLayoutDirty();
-        child.Parent?.MarkChildrenDirty();
+        var from = child.Parent!;
+        int index = from._children?.IndexOf(child) ?? -1;
+        if (index >= 0)
+        {
+            from._children!.RemoveAt(index);
+            from._children.ZOrder = null;
+        }
         child.Parent = null;
+        if (index >= 0 && Building > 0 && from._mounted && child._mounted && !to._mounted)
+        {
+            (_pendingMoves ??= []).Add(new PendingMove(from, child, index));
+            return;
+        }
+        from.MarkLayoutDirty();
+        from.MarkChildrenDirty();
+        if (_pendingMoves is { Count: > 0 } && to._mounted)
+            SettleMove(child);
+    }
+
+    /// <summary>A live child a build moved into its fresh tree, the parent it left and its
+    /// place there, until the reconcile puts it back or it lands somewhere else.</summary>
+    private readonly record struct PendingMove(Element From, Element Child, int Index);
+
+    [ThreadStatic] private static List<PendingMove>? _pendingMoves;
+
+    /// <summary>How many component builds are running on this thread (ComponentHost): only a
+    /// move made inside one waits for the reconcile that follows it.</summary>
+    [ThreadStatic] internal static int Building;
+
+    /// <summary><paramref name="child"/> joins a live parent the ordinary way: a move of it
+    /// still pending is over, and the parent it left is marked, as a move always marked it.</summary>
+    private static void SettleMove(Element child)
+    {
+        var moves = _pendingMoves!;
+        for (int i = moves.Count - 1; i >= 0; i--)
+        {
+            if (!ReferenceEquals(moves[i].Child, child)) continue;
+            moves[i].From.MarkLayoutDirty();
+            moves[i].From.MarkChildrenDirty();
+            moves.RemoveAt(i);
+        }
+    }
+
+    /// <summary>
+    /// Puts back the children a build moved out of <paramref name="parent"/> when
+    /// <paramref name="result"/> — what the reconcile made of its children — is the list it
+    /// had before the build: the same elements in the same order. Nothing about the parent
+    /// changed then, so nothing is marked for the move. False, with nothing done, otherwise.
+    ///
+    /// <para>A moved child's own marks are carried up from the parent it comes back to: a
+    /// child that changed while it sat in the build's tree (a part rebuilt in the middle of its
+    /// parent's build) marked that tree, not this one. The style marks the build's containers
+    /// give everything under them as they mount need nothing more: the parent being reconciled
+    /// was patched, which marked it and its ancestors for style.</para>
+    /// </summary>
+    internal static bool TryRestoreMoved(Element parent, List<Element> result)
+    {
+        var moves = _pendingMoves;
+        if (moves is null || moves.Count == 0) return false;
+        int moved = 0;
+        foreach (var m in moves)
+        {
+            if (!ReferenceEquals(m.From, parent)) continue;
+            if (ReferenceEquals(m.Child.Parent, parent)) return false;
+            moved++;
+        }
+        var current = parent._children;
+        int count = current?.Count ?? 0;
+        if (moved == 0 || count + moved != result.Count) return false;
+
+        // The children before the build: each moved one back at its place, the last moved
+        // first, as each removal shifted the places of the ones after it.
+        var before = new List<Element>(result.Count);
+        if (current is not null) before.AddRange(current);
+        for (int i = moves.Count - 1; i >= 0; i--)
+        {
+            var m = moves[i];
+            if (!ReferenceEquals(m.From, parent)) continue;
+            if (m.Index > before.Count) return false;
+            before.Insert(m.Index, m.Child);
+        }
+        for (int i = 0; i < before.Count; i++)
+            if (!ReferenceEquals(before[i], result[i])) return false;
+
+        var carried = DirtyFlags.None;
+        for (int i = moves.Count - 1; i >= 0; i--)
+        {
+            var m = moves[i];
+            if (!ReferenceEquals(m.From, parent)) continue;
+            // Out of the build's tree, which the reconcile is about to drop.
+            if (m.Child.Parent?._children is { } fresh && fresh.Remove(m.Child)) fresh.ZOrder = null;
+            m.Child.Parent = parent;
+            carried |= m.Child.DirtyFlags;
+            moves.RemoveAt(i);
+        }
+        var list = parent._children ??= new ChildList(result.Count);
+        list.Clear();
+        list.AddRange(result);
+        list.ZOrder = null;
+
+        if ((carried & DirtyFlags.Layout) != 0) parent.MarkLayoutDirty();
+        if ((carried & DirtyFlags.Children) != 0) parent.MarkChildrenDirty();
+        if ((carried & DirtyFlags.Paint) != 0) parent.MarkPaintDirty();
+        if ((carried & DirtyFlags.Style) != 0)
+            for (var e = parent; e is not null && (e.DirtyFlags & DirtyFlags.Style) == 0; e = e.Parent)
+                e.DirtyFlags |= DirtyFlags.Style;
+        return true;
+    }
+
+    /// <summary>Marks the old parent of every move no reconcile put back, as a move always
+    /// marked it. The reconciler calls this when its outermost pass ends.</summary>
+    internal static void FlushPendingMoves()
+    {
+        var moves = _pendingMoves;
+        if (moves is null || moves.Count == 0) return;
+        for (int i = 0; i < moves.Count; i++)
+        {
+            moves[i].From.MarkLayoutDirty();
+            moves[i].From.MarkChildrenDirty();
+        }
+        moves.Clear();
     }
 
     private void ClearFocusIfRemoved(Element removed)
