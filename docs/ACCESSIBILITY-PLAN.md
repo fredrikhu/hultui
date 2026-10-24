@@ -36,7 +36,8 @@ macOS (NSAccessibility) is deferred.
 2. **`ITextProvider` (UIA text pattern):** deferred at first; text inputs expose
    their value through `IValueProvider`. **Built 2026-10-04** as the terminal's seam
    A1 (below, *Text and announcements*): any element can offer text a reader moves
-   through by character, word and line. Text inputs and TextArea do not offer it yet.
+   through by character, word and line. `TextArea` offers it since 2026-10-24 (plan 17
+   round 4); single-line text inputs do not yet.
 3. **Project layout:** separate per-platform projects
    (`HultUI.Platform.Accessibility.Windows`, `.Linux`), matching the existing
    `HultUI.Platform.SDL3` pattern. No `#if` shared project.
@@ -387,8 +388,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   not send the value of a non-atomic text field, `ax_object.cc`; `ax_platform_node_win.cc` answers
   ValueValue only from that value, `browser_accessibility_manager_win.cc` raises it for
   `VALUE_IN_TEXT_FIELD_CHANGED`), and on Linux sends `accessible-value` only for a range value
-  (`ax_platform_node_auralinux.cc`, `OnValueChanged`). A multi-line `TextArea` offers no text
-  pattern yet, so its value change stays: it is the only change a reader hears from it.
+  (`ax_platform_node_auralinux.cc`, `OnValueChanged`). A multi-line `TextArea` offers text too
+  since 2026-10-24 (below), and its keystroke is a text change: it raised a UIA ValueValue and
+  an AT-SPI accessible-value carrying its whole text on every keystroke (121,744 characters at
+  2,000 lines), the rule the user approved for it in plan 17's round 3.
 - **IsPassword** — a `TextInputElement` with `Masked` set (2026-10-05). Its Value, through
   both the property and the value pattern, is the bullets on screen, never the text: any
   process in the session can ask UIA for it, not only a screen reader. On Linux the node
@@ -499,7 +502,17 @@ providers), a UIA `ItemContainer` on virtualized lists.
     cells in reading order, made on the UI thread from its layout. Its boxes follow
     scrolling without a new snapshot. Checked from outside with Windows' own UI Automation
     client on the Fluent sample: lines, paragraphs, words, boxes, a point to a word, and
-    the caret. Text inputs and TextArea are the next candidates.
+    the caret. And `TextArea` (2026-10-24, plan 17 round 4): its rows as lines, its
+    `'\n'`-separated runs as paragraphs, its caret and selection, each character's box from
+    where the area draws its caret, for the rows on screen and one either side (the rest
+    spaced at the average width there). Made on request from a version, as the editor's: the
+    string by identity, the caret, the anchor, the rows and the part on screen; a keystroke
+    is a text change (UIA `Text_TextChanged`, AT-SPI `text-changed` with what was inserted
+    and removed, from the strings the versions hold, no tables made for it), never a value
+    change; a caret move a patch with no tree built, which it never told before; its
+    read-only switch reaches the text a reader reads. In both, a character's box runs
+    between its two caret places, so where the direction changes a box can span a run.
+    Single-line text inputs are the next candidate.
 - **Announcements (A2).** `Element.Announce(text, politeness)`: a UIA notification
   (`UiaRaiseNotificationEvent`, activity `HultUI.Announcement`; polite is
   `NotificationProcessing_All`, assertive `ImportantAll`), an AT-SPI 2.46
@@ -516,7 +529,7 @@ providers), a UIA `ItemContainer` on virtualized lists.
 
 ## Out of scope (follow-ups)
 
-- `EditableText` for AT-SPI; the text pattern on text inputs and TextArea.
+- `EditableText` for AT-SPI; the text pattern on single-line text inputs.
 - macOS `NSAccessibility`.
 - UIA `LiveRegion` (`Element.Announce` covers what live regions were wanted for).
 - ~~Accessibility for overlays, tooltips, context menus.~~ **Done 2026-09-22.** The

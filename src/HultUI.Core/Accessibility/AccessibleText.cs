@@ -325,6 +325,12 @@ internal abstract class AccessibleTextVersion
     /// <summary>The text of this version, made on first ask; any thread.</summary>
     public abstract AccessibleText Text { get; }
 
+    /// <summary>The text's characters alone, as <see cref="Text"/>'s <see cref="AccessibleText.Text"/>
+    /// has them: what AT-SPI describes a text change from. By default the text made; a version that
+    /// holds its string (a text area's) hands it over without making the tables of its lines and
+    /// paragraphs. Any thread.</summary>
+    public virtual string Characters => Text.Text;
+
     /// <summary>The element's value with this text (UIA's ValueValue), made on first ask; any thread.</summary>
     public abstract string? Value { get; }
 }

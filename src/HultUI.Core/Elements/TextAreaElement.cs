@@ -9,7 +9,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
+public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 {
     private string _text = "";
     private int _cursorPos;
@@ -127,6 +127,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
             _history.Seal();
+            CaretMoved();
         }
     }
 
@@ -217,7 +218,20 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// <summary>When true the buffer can be selected, scrolled, and copied, but not
     /// edited (no typing / Enter / Backspace / Delete / Cut / Paste), and no caret is
     /// drawn — a selectable read-only viewer (e.g. a code preview).</summary>
-    public bool ReadOnly { get; set; }
+    public bool ReadOnly
+    {
+        get => _readOnly;
+        set
+        {
+            if (_readOnly == value) return;
+            _readOnly = value;
+            // The text a reader reads says whether it may be changed (UIA's IsReadOnly text
+            // attribute): its version holds it, and the window puts the new version on the applied
+            // tree, as for a caret move, telling nothing.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.TextSelection);
+        }
+    }
+    private bool _readOnly;
 
     /// <summary>Optional per-range text colors (syntax highlighting and similar), in
     /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
@@ -1223,6 +1237,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _selectionStart = 0;
         _cursorPos = _text.Length;
         _history.Seal();
+        CaretMoved();
     }
 
     private void Copy()
@@ -1270,6 +1285,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _needsScrollToCursor = true;
         _isDragging = true;
         MarkPaintDirty();
+        CaretMoved();
     }
 
     private void OnPointerMove(PointerMoveEvent evt)
@@ -1316,6 +1332,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _preferredX = -1;
         _needsScrollToCursor = true;
         MarkPaintDirty();
+        CaretMoved();
     }
 
     /// <summary>Vertical only, and handed on at either end — see
@@ -1498,6 +1515,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void MoveCursor(int delta, bool extendSelection)
     {
         _history.Seal();
+        CaretMoved();
         if (!extendSelection && HasSelection)
         {
             _cursorPos = delta < 0 ? SelectionStart : SelectionEnd;
@@ -1547,6 +1565,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void MoveCursorTo(int pos, bool extendSelection)
     {
         _history.Seal();
+        CaretMoved();
         _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
@@ -1784,6 +1803,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
                 _scrollOffsetY = cursorY + lh - contentBox.Height;
         }
         _scrollOffsetY = Math.Clamp(_scrollOffsetY, 0, maxScroll);
+        NoteAreaFrame(contentBox);
 
         ctx.PushClip(contentBox);
 

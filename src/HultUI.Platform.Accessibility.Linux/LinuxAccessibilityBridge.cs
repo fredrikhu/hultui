@@ -532,7 +532,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 return true;
             case AccessibilityProperties.Text:
             {
-                var (deleted, inserted) = AtSpiText.Difference(change.Previous?.Text?.Text ?? "", change.Node.Text?.Text ?? "");
+                // From the versions' characters where the text is made on request: a text area's
+                // version hands over its string, where making the text made the tables of its lines
+                // and paragraphs on every keystroke (the rich text editor's makes its text still).
+                var (deleted, inserted) = AtSpiText.Difference(CharactersOf(change.Previous) ?? "", CharactersOf(change.Node) ?? "");
                 if (deleted is { } d) _signals!.EmitTextChanged(path, insert: false, d.Offset, d.Text);
                 if (inserted is { } i) _signals!.EmitTextChanged(path, insert: true, i.Offset, i.Text);
                 return deleted is not null || inserted is not null;
@@ -561,6 +564,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         node?.TextVersion is { } version ? (version.Caret, version.SelectionStart, version.SelectionEnd)
         : node?.Text is { } text ? (text.Caret, text.SelectionStart, text.SelectionEnd)
         : null;
+
+    private static string? CharactersOf(AccessibilityNode? node) =>
+        node?.TextVersion is { } version ? version.Characters : node?.Text?.Text;
 
     /// <summary>An AT-SPI announcement from the element's object, or the application's.</summary>
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)
