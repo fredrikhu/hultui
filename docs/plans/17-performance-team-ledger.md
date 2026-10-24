@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–3 landed, step 4 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–4 landed, step 5 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -84,7 +84,7 @@ Correctness first, then value per cost.
    **a11y-uia-host-reads-off-thread** (UIA reads answer from the node, not a live-tree walk on a UIA
    thread — 1,500 visits per read on a 1,505-element page; RangeValue pattern and property agree;
    RaiseScrolled's walk; and the Linux status subscription before the first read).
-4. **a11y-text-caret-patch + a11y-text-caret-shares-text** (7) — a rich-text caret move patches the
+4. ~~**a11y-text-caret-patch + a11y-text-caret-shares-text**~~ LANDED 1e1948f9, 92beae04, 07ed97e3, 103ad672, 30d19928, a0221337 (incl. a11y-textarea-text-pattern) (7) — a rich-text caret move patches the
    applied tree instead of building it (beside 300 rows UIA 79.0 → ~0.5 KB/key, AT-SPI 319.1 → ~1); with a
    reading client the next text version shares the previous tables (5,000 blocks 474.5 → ~2 KB per
    move). Suite row (caret walk in rich text, bridge on and UIA). Then, if it fits,
@@ -140,9 +140,8 @@ Correctness first, then value per cost.
 
 Re-ranked by the round 5 survey.
 
-- **a11y-textarea-text-pattern** (7; approved rule) — after step 4, if step 4 did not take it.
-- **richtext-readonly-a11y** (7, from step 3, unverified) — `RichTextEditorElement.ReadOnly` marks paint only, so a
-  change may not reach the text version a reader sees until something else rebuilds the tree. Check.
+- **richtext-short-viewport-jitter** (5/editor, from step 4) — when the rich text editor's viewport is shorter than
+  one line, each caret move scrolls it between two offsets.
 - **terminal-noop-scrollback-wheel** (2/Terminal, from step 2) — Terminal raises ContentChanged (a frame) on a
   scrollback wheel notch at the top that scrolls nothing.
 - **a11y-virtual-items-and-selection** (7; added events approved) — lists over 2,000: AT-SPI ChildCount 0,
@@ -314,6 +313,11 @@ Re-ranked by the round 5 survey.
 | 4 | 1698b4a6 | atspi-reorder-signal | Approved. One children-changed:add per child out of place in the client's cached list (previous snapshot minus departed children), added children through the same pass, a trailing run keeps one signal. Live WSL: all 7 reorder shapes read the old order before; 17/17 insert and reorder cases match after. Apply after reversing 1,000 children 265.4 → 287.3 KB (999 signals). UIA unchanged. 15 tests on the `AtSpiClientCache` model. |
 | 4 | 9218026a | atspi-status-subscribe-first | `AtSpiStatusReader.Watch` subscribes to org.a11y.Status, then makes the first read through the same reader (a change during subscription or a slow first read is read again); live WSL 29/29. |
 | 4 | 78f3a22b | a11y-uia-host-reads-off-thread | Every UIA pattern read (value, toggle, range, item selected, list selection, find, scroll, on-demand items) and RaiseScrolled answer from the applied node; new rare node data `ScrollExtent` and `ItemSource` (API additions; `IUiaHostBridge` reads stay, unused). Visits per UIA read on a 1,533-element page 1,494–1,532 → 0; scroll refresh UI-thread reads 2 → 0. Events and trees identical in 18 scripts; pattern answers now match their properties (a switch's Toggle pattern said indeterminate). a11y/create +0.2 KB/op; 0 slower. |
+| 4 | 1e1948f9, 103ad672 | apps-scenario-text-caret | Suite rows: rich text caret walk beside 300 rows (recording, UIA), the walk in 5,000 blocks with a reader reading, typing and a caret walk in a 2,000-line TextArea (UIA); 103ad672 kept the walk's editor at 300 px (it had shrunk to 10 px). |
+| 4 | 92beae04 | a11y-text-caret-patch | A rich text caret/selection move swaps a new text version onto the applied tree and hands the bridges a TextSelection patch (no tree); AT-SPI reads offsets from the versions. Per key: beside 300 rows recording 78.8 → 1.0 KB, UIA 79.2 → 1.1, AT-SPI 319.3 → 1.2; 5,000 blocks AT-SPI 474.9 → 1.2; trees per move 1 → 0. Caret walk −17.5/−20.4 % JIT, −24.3/−27.6 % AOT. Streams identical in 22 scripts; live WSL 18/18. |
+| 4 | 07ed97e3 | richtext-readonly-a11y | Correctness (lead from step 3, confirmed): the editor's ReadOnly setter notifies and the patch swaps in the new version, so a reader's thread no longer answers the old read-only state until another rebuild. |
+| 4 | 30d19928 | a11y-text-caret-shares-text | When only the caret/selection moved (same document, width, theme stamp, scroll, read-only, blocks on screen), the next text shares the last one's text, tables and geometry (internal AccessibleText constructor; at most one share source, dropped once made). 5,000 blocks with a reader reading: 474 → 1.3 KB/key both bridges; walk 1.136 → 0.711 ms (−37.4 %) JIT, −47.6 % AOT. Every shared answer equals a fresh build. |
+| 4 | a0221337 | a11y-textarea-text-pattern | Approved rule. TextArea offers a versioned text source (lines = drawn rows; character boxes for visible rows ±1); a keystroke is told as UIA TextChanged / AT-SPI text-changed with the characters, never a whole-text Value (still readable on request); caret moves, read-only and re-wraps patched; caret moves with a reader share tables; `AccessibleTextVersion.Characters`. 2,000-line area, 40 keys: BSTR characters 4,869,780 → 0, AT-SPI signal characters 4,869,780 → 40; managed flat. Caret moves now told (0.4 → 1.0 KB/op). Live WSL: the area has a Text interface now, 11/11. BiDi limitation (boxes between caret positions) documented. |
 
 ## Examined, not worth it
 
@@ -706,3 +710,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-24: step 3 landed after the weekly reset (968bd8d1, 1698b4a6, 9218026a, 78f3a22b): button
   enabled state and AT-SPI reorders told; status subscribed before read; UIA reads from the node (0 visits).
   Windows suites and WSL pass.
+- 2026-10-24: step 4 landed (1e1948f9..a0221337): rich text caret moves patch the a11y tree (−99 % per
+  key), share text with a reader, read-only reaches readers, and the TextArea text pattern (no
+  whole-text Value per keystroke). All suites and WSL pass.
