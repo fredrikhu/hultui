@@ -1394,6 +1394,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) =>
         _pipeline?.MeasurePrefixes(text, style);
 
+    // A view in the pipeline's scratch, good until the next text call (IRenderContext's contract).
+    public ITextPrefixWidths? MeasureTextPrefixes(string text, int start, int length, ResolvedInheritedStyle style) =>
+        _pipeline?.MeasurePrefixes(text, start, length, style);
+
     public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style) =>
         text.IsEmpty || _pipeline is null ? 0f : _pipeline.MeasureWidth(text, style);
 

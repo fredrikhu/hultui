@@ -4,6 +4,7 @@ using System.Text;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Rendering;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
@@ -198,6 +199,37 @@ public class TextAreaWrapTests
             };
         }
         Assert.True(wrapped > 5_000, $"only {wrapped} wrapped lines");
+    }
+
+    /// <summary>
+    /// The break search reads each wrapped line's widths off a table of a range of the document
+    /// (<see cref="IRenderContext.MeasureTextPrefixes(string, int, int, Core.Styling.ResolvedInheritedStyle)"/>),
+    /// a view in the render context's scratch: wrapping every line again at a new width — a step
+    /// of a resize drag — allocates nothing once the words are known. A table of each range's own
+    /// (its string, an exact copy of its segments, its runs and the objects holding them) was
+    /// 1.3 MB a step over a 900-line document.
+    /// </summary>
+    [Fact]
+    public void WrappingAgainAtANewWidth_AllocatesNothing()
+    {
+        string[] vocabulary = ["the", "a", "wrap", "measure", "line", "of", "paragraph", "café", "naïve", "office",
+            "Wolf", "AVATAR", "1234", "—", "→", "x", "supercalifragilisticexpialidocious"];
+        using var session = HeadlessSession.Create(900, 700);
+        var area = TextArea.New(Document(new Random(5), 120, vocabulary)).FlexGrow(1);
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(area));
+        session.PumpFrame();   // the area takes its render context from the first frame
+        var style = area.ResolvedInherited;
+        int hardLines = area.Text.Count(c => c == '\n') + 1;
+
+        int rowsNarrow = area.GetLineStarts(233.3f, style).Count;
+        int rowsWide = area.GetLineStarts(612f, style).Count;
+        Assert.True(rowsNarrow > hardLines + 1_000 && rowsWide > hardLines + 200,
+            $"{hardLines} lines wrapped to {rowsNarrow} and {rowsWide} rows: too few to search");
+        Assert.Equal(0, Allocations.Least(() =>
+        {
+            area.GetLineStarts(233.3f, style);
+            area.GetLineStarts(612f, style);
+        }));
     }
 
     private static string Describe(string text, float width, List<int> expected, List<int> actual)

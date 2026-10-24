@@ -195,6 +195,11 @@ public sealed class TextPipeline
         _paragraph = text;
         _hanContextKnown = false;
         FollowCulture();
+        // Every public call that measures or lays text out begins here: the view of a range's
+        // prefix widths (MeasurePrefixes with a range) is good until the next one, and lets go
+        // of its text — a text area's whole document — here.
+        if (_prefixView is { Holding: true } view)
+            view.Release();
     }
 
     private void FollowCulture()
@@ -230,6 +235,29 @@ public sealed class TextPipeline
             _hanContextKnown = true;
         }
         return FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, _hanContext, into);
+    }
+
+    // The font runs of text[from..end), itemized as a string of those characters would be, into
+    // `into` (cleared first) as ranges of `text`: no string per run.
+    private void ItemizeRange(string text, int from, int end, ResolvedInheritedStyle style, List<RunRange> into)
+    {
+        if (!_hanContextKnown)
+        {
+            _hanContext = ScriptLanguage.CjkContextOf(_paragraph);
+            _hanContextKnown = true;
+        }
+        into.Clear();
+        var sink = new RangeRuns(from, into);
+        FontItemizer.Itemize(text.AsSpan(from, end - from), _fonts, style.FontFamily, style.FontWeight, style.FontSlant,
+            _hanContext, ref sink);
+    }
+
+    // A font run as where it starts and ends in the text it was itemized from.
+    private readonly record struct RunRange(int Start, int End, IResolvedFont Font);
+
+    private readonly struct RangeRuns(int offset, List<RunRange> runs) : FontItemizer.IRunSink
+    {
+        public void Add(int start, int end, IResolvedFont font) => runs.Add(new RunRange(offset + start, offset + end, font));
     }
 
     // ── Metric-affecting spans (stage 2 of docs/plans/12-rich-text-spans.md) ──
@@ -1708,36 +1736,11 @@ public sealed class TextPipeline
     private PrefixWidths? BuildPrefixWidths(string text, ResolvedInheritedStyle style)
     {
         if (text.Length == 0) return null;
-        var fontRuns = Itemize(text, style, _prefixRuns);
-        var runs = new PrefixRun[fontRuns.Count];
+        var runs = _prefixRuns;
         var segments = _prefixSegments;
-        segments.Clear();
-        float before = 0;
-        int runStart = 0;
-        for (int r = 0; r < fontRuns.Count; r++)
-        {
-            var fr = fontRuns[r];
-            int runEnd = runStart + fr.Text.Length;
-            runs[r] = new PrefixRun(runStart, runEnd, fr.Font, before, segments.Count);
-            float x = 0;
-            int glyphs = 0;
-            int fontHash = WordShapeKeyComparer.FontHash(fr.Font, style.FontSize);
-            for (int i = runStart; i < runEnd;)
-            {
-                bool isSpace = text[i] == ' ';
-                int start = i;
-                while (i < runEnd && (text[i] == ' ') == isSpace) i++;
-                var seg = ShapeSegment(text, start, i - start, fr.Font, style.FontSize, fontHash);
-                segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs));
-                x += seg.Width;
-                glyphs += seg.Glyphs;
-            }
-            // The run's width as ShapeWithSpacing gives it, added as MeasureString adds it.
-            before += style.LetterSpacing == 0f || glyphs == 0 ? x : x + style.LetterSpacing * glyphs;
-            runStart = runEnd;
-        }
-        fontRuns.Clear();   // the runs' text and faces are not kept alive by the scratch list
-        var table = new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs, segments.ToArray());
+        FillPrefixTable(text, 0, text.Length, style, runs, segments);
+        var table = new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs.ToArray(), segments.ToArray());
+        runs.Clear();   // the runs' faces are not kept alive by the scratch list
         // A whole document's single line can have a hundred thousand segments: its list is not kept.
         if (segments.Capacity > KeptPrefixSegments)
         {
@@ -1747,13 +1750,48 @@ public sealed class TextPipeline
         return table;
     }
 
-    // BuildPrefixWidths' font runs and segments while it builds a table, which gets exact arrays
+    // Fills `runs` and `segments` with the table of text[from..end), measured as a string of those
+    // characters: its font runs and their space / non-space segments, each start a place in text.
+    private void FillPrefixTable(string text, int from, int end, ResolvedInheritedStyle style,
+        List<PrefixRun> runs, List<PrefixSegment> segments)
+    {
+        var fontRuns = _runRanges;
+        ItemizeRange(text, from, end, style, fontRuns);
+        runs.Clear();
+        segments.Clear();
+        float before = 0;
+        for (int r = 0; r < fontRuns.Count; r++)
+        {
+            var (runStart, runEnd, font) = fontRuns[r];
+            runs.Add(new PrefixRun(runStart, runEnd, font, before, segments.Count));
+            float x = 0;
+            int glyphs = 0;
+            int fontHash = WordShapeKeyComparer.FontHash(font, style.FontSize);
+            for (int i = runStart; i < runEnd;)
+            {
+                bool isSpace = text[i] == ' ';
+                int start = i;
+                while (i < runEnd && (text[i] == ' ') == isSpace) i++;
+                var seg = ShapeSegment(text, start, i - start, font, style.FontSize, fontHash);
+                segments.Add(new PrefixSegment(start, x, seg.Width, glyphs, seg.Glyphs));
+                x += seg.Width;
+                glyphs += seg.Glyphs;
+            }
+            // The run's width as ShapeWithSpacing gives it, added as MeasureString adds it.
+            before += style.LetterSpacing == 0f || glyphs == 0 ? x : x + style.LetterSpacing * glyphs;
+        }
+        fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+    }
+
+    // BuildPrefixWidths' runs and segments while it builds a table, which gets exact arrays
     // copied out of them: lists grown anew for every table were most of what wrapping and
     // truncating allocated (a list doubles its way up: a line of 60 segments went through five
     // arrays before its own was copied out). Nothing BuildPrefixWidths calls builds a table, and a
-    // pipeline is used from one thread, as MeasureString's run list is.
-    private readonly List<FontRun> _prefixRuns = new();
+    // pipeline is used from one thread, as MeasureString's run list is. The font runs FillPrefixTable
+    // itemizes into are ranges of the text, not strings of their own.
+    private readonly List<PrefixRun> _prefixRuns = new();
     private readonly List<PrefixSegment> _prefixSegments = new();
+    private readonly List<RunRange> _runRanges = new();
 
     // The most segments the kept list holds room for between tables (20 bytes each): a line of
     // ~12,000 characters of prose.
@@ -1762,6 +1800,9 @@ public sealed class TextPipeline
     // The room the kept segment list holds, for the test that holds it to KeptPrefixSegments.
     internal int PrefixScratchCapacity => _prefixSegments.Capacity;
 
+    // The room the view of a range's prefix widths holds, for the same test.
+    internal int PrefixViewCapacity => _prefixView?.Segments.Capacity ?? 0;
+
     /// <summary>
     /// <c>MeasureString(p.Text[..length])</c>, to the bit: the same run and segment widths,
     /// added in the same order, letter spacing applied the same way. Complete runs and
@@ -1769,36 +1810,41 @@ public sealed class TextPipeline
     /// (through the word cache, as MeasureString would) — never its share of the whole word's
     /// glyph advances, which carry the kerning and ligatures of the letters cut off.
     /// </summary>
-    private float PrefixWidth(PrefixWidths p, int length, ResolvedInheritedStyle style)
+    private float PrefixWidth(PrefixWidths p, int length, ResolvedInheritedStyle style) =>
+        PrefixWidth(p.Text, 0, p.Text.Length, p.Runs, p.Segments, p.FontSize, p.LetterSpacing, length, style);
+
+    // The same for a table of text[from..from + tableLength), whose runs and segments start at
+    // places in text (FillPrefixTable): a view of a range (PrefixView), or a whole string's table.
+    private float PrefixWidth(string text, int from, int tableLength, ReadOnlySpan<PrefixRun> runs,
+        ReadOnlySpan<PrefixSegment> segments, float fontSize, float letterSpacing, int length,
+        ResolvedInheritedStyle style)
     {
-        string text = p.Text;
         if (length == 0) return 0;
+        int cut = from + length;
         // A cut inside a surrogate pair leaves a lone surrogate, which itemizes on its own
         // terms: that prefix is measured the long way. (Not reached today — a surrogate is
         // above U+0590, so its text takes the BiDi path — but this keeps the table honest.)
-        if (length < text.Length && char.IsLowSurrogate(text[length]) && char.IsHighSurrogate(text[length - 1]))
-            return MeasureString(text[..length], style);
+        if (length < tableLength && char.IsLowSurrogate(text[cut]) && char.IsHighSurrogate(text[cut - 1]))
+            return MeasureString(text.Substring(from, length), style);
 
         // The run the cut falls in: the last starting before it.
-        var runs = p.Runs;
         int lo = 0, hi = runs.Length - 1;
         while (lo < hi)
         {
             int mid = (lo + hi + 1) >> 1;
-            if (runs[mid].Start < length) lo = mid;
+            if (runs[mid].Start < cut) lo = mid;
             else hi = mid - 1;
         }
         var run = runs[lo];
 
         // Its last segment starting before the cut.
-        var segments = p.Segments;
         int runSegmentsEnd = lo + 1 < runs.Length ? runs[lo + 1].FirstSegment : segments.Length;
         lo = run.FirstSegment;
         hi = runSegmentsEnd - 1;
         while (lo < hi)
         {
             int mid = (lo + hi + 1) >> 1;
-            if (segments[mid].Start < length) lo = mid;
+            if (segments[mid].Start < cut) lo = mid;
             else hi = mid - 1;
         }
         var seg = segments[lo];
@@ -1806,15 +1852,15 @@ public sealed class TextPipeline
 
         float width;
         int glyphs;
-        if (length == end)
+        if (cut == end)
         {
             width = seg.Width;
             glyphs = seg.Glyphs;
         }
         else
         {
-            var part = ShapeSegment(text, seg.Start, length - seg.Start, run.Font, p.FontSize,
-                WordShapeKeyComparer.FontHash(run.Font, p.FontSize));
+            var part = ShapeSegment(text, seg.Start, cut - seg.Start, run.Font, fontSize,
+                WordShapeKeyComparer.FontHash(run.Font, fontSize));
             width = part.Width;
             glyphs = part.Glyphs;
         }
@@ -1823,7 +1869,7 @@ public sealed class TextPipeline
         // MeasureString's sum over the runs.
         float x = seg.X + width;
         int total = seg.GlyphsBefore + glyphs;
-        return run.Before + (p.LetterSpacing == 0f || total == 0 ? x : x + p.LetterSpacing * total);
+        return run.Before + (letterSpacing == 0f || total == 0 ? x : x + letterSpacing * total);
     }
 
     // The string's prefix widths, built the first time it is truncated and kept with its
@@ -1878,6 +1924,104 @@ public sealed class TextPipeline
             if (_contextVaries && ScriptLanguage.CjkContextOf(table.Text.AsSpan(0, length)) != _context)
                 return pipeline.Layout(table.Text[..length], style, float.PositiveInfinity, maxLines: 1).Size.Width;
             return pipeline.PrefixWidth(table, length, style);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="MeasurePrefixes(string, ResolvedInheritedStyle)"/> of
+    /// <c>text.Substring(start, length)</c>, the same widths to the bit, without the substring
+    /// and built in lists the pipeline keeps: the answer is a view, good until the next call into
+    /// this pipeline that measures or lays text out (this one included), and must not be kept.
+    /// Null where the substring's would be.
+    /// </summary>
+    public ITextPrefixWidths? MeasurePrefixes(string text, int start, int length, ResolvedInheritedStyle style)
+    {
+        var span = text.AsSpan(start, length);   // throws for a range outside the text
+        var view = _prefixView ??= new PrefixView(this);
+        view.Release();
+        if (!ReuseAcrossWidths || span.IsEmpty || span.Contains('\n') || NeedsBidi(span, style, PlainPathForLtr))
+            return null;
+
+        // The range is a paragraph of its own, as the substring would be (BeginParagraph): its Han
+        // characters take the face its own kana or Hangul call for, not the whole text's.
+        FollowCulture();
+        var chars = ScriptLanguage.CjkContextChars(span);
+        _paragraph = "";
+        _hanContext = ScriptLanguage.CjkContextOf(chars);
+        _hanContextKnown = true;
+        FillPrefixTable(text, start, start + length, style, view.Runs, view.Segments);
+        view.Hold(text, start, length, style, contextVaries: chars.Kana || chars.Hangul, _hanContext);
+        return view;
+    }
+
+    private PrefixView? _prefixView;
+
+    /// <summary>
+    /// The prefix widths of a range of a text
+    /// (<see cref="MeasurePrefixes(string, int, int, ResolvedInheritedStyle)"/>), in lists the
+    /// pipeline keeps from one range to the next: one view per pipeline, filled again by each call,
+    /// and let go of — the text with it — by the next call that measures or lays text out
+    /// (<see cref="BeginParagraph"/>). A text area's line-break search asks for one for every line
+    /// it wraps, and a table of its own each — a string of the range, an exact copy of its
+    /// segments, its runs and the objects holding them — was nearly all a wrapped document's line
+    /// pass allocated: 1.3 MB a step of a resize drag over a 900-line document.
+    /// </summary>
+    private sealed class PrefixView(TextPipeline pipeline) : ITextPrefixWidths
+    {
+        public readonly List<PrefixRun> Runs = new();
+        public readonly List<PrefixSegment> Segments = new();
+        private string? _text;
+        private int _start, _length;
+        private ResolvedInheritedStyle _style;
+        private bool _contextVaries;
+        private string? _context;
+
+        // While Width lays a prefix out the long way, which begins a paragraph of its own: the
+        // view is still in use.
+        private bool _layingOut;
+
+        public bool Holding => _text is not null;
+
+        public int Length => _length;
+
+        public void Hold(string text, int start, int length, ResolvedInheritedStyle style, bool contextVaries, string? context)
+        {
+            (_text, _start, _length, _style, _contextVaries, _context) = (text, start, length, style, contextVaries, context);
+        }
+
+        public void Release()
+        {
+            if (_layingOut) return;
+            _text = null;
+            Runs.Clear();   // their faces
+            // A whole document's single line can have a hundred thousand segments: its list is not kept.
+            if (Segments.Capacity > KeptPrefixSegments)
+            {
+                Segments.Clear();
+                Segments.TrimExcess();
+            }
+        }
+
+        public float Width(int length)
+        {
+            string text = _text ?? throw new InvalidOperationException(
+                "These prefix widths were good until the next call into their pipeline, which has been made.");
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(length, _length);
+            if (_contextVaries && ScriptLanguage.CjkContextOf(text.AsSpan(_start, length)) != _context)
+            {
+                _layingOut = true;
+                try
+                {
+                    return pipeline.Layout(text.Substring(_start, length), _style, float.PositiveInfinity, maxLines: 1).Size.Width;
+                }
+                finally
+                {
+                    _layingOut = false;
+                }
+            }
+            return pipeline.PrefixWidth(text, _start, _length, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(Runs),
+                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(Segments), _style.FontSize, _style.LetterSpacing, length, _style);
         }
     }
 

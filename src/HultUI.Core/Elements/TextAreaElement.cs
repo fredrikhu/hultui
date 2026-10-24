@@ -922,7 +922,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         // prefix widths (IRenderContext.MeasureTextPrefixes) — measured one at a time, each
         // was shaped whole and cached as a string of its own. The table covers half as much
         // again as the probe that asks for it, so the probes around that one land inside;
-        // one past it gets a longer table.
+        // one past it gets a longer table. A range of the document, not a string cut from it:
+        // the context answers in scratch it keeps, good until its next text call, and nothing
+        // here makes one before the search is done with the table.
         ITextPrefixWidths? prefixes = null;
         bool noPrefixes = _renderCtx is null;
         float Measure(int chars)
@@ -930,7 +932,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             if (!noPrefixes && (prefixes is null || chars > prefixes.Length))
             {
                 int window = Math.Min(hardEnd - start, chars + chars / 2 + 16);
-                prefixes = _renderCtx!.MeasureTextPrefixes(_text.Substring(start, window), style);
+                prefixes = _renderCtx!.MeasureTextPrefixes(_text, start, window, style);
                 noPrefixes = prefixes is null;
             }
             return prefixes is not null ? prefixes.Width(chars) : MeasureSubstring(start, chars, style);

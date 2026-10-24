@@ -214,6 +214,9 @@ public sealed class RecordingRenderContext : IRenderContext
     public ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style)
         => _inner.MeasureTextPrefixes(text, style);
 
+    public ITextPrefixWidths? MeasureTextPrefixes(string text, int start, int length, ResolvedInheritedStyle style)
+        => _inner.MeasureTextPrefixes(text, start, length, style);
+
     public float MeasureTextWidth(ReadOnlySpan<char> text, ResolvedInheritedStyle style)
         => _inner.MeasureTextWidth(text, style);
 

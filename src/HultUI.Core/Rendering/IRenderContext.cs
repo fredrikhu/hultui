@@ -89,6 +89,19 @@ public interface IRenderContext
     ITextPrefixWidths? MeasureTextPrefixes(string text, ResolvedInheritedStyle style) => null;
 
     /// <summary>
+    /// <see cref="MeasureTextPrefixes(string, ResolvedInheritedStyle)"/> of
+    /// <c>text.Substring(start, length)</c>: <c>Width(n)</c> is
+    /// <c>MeasureText(text.Substring(start, n), style).Width</c>, exactly. A context may answer
+    /// without the substring, in scratch it keeps and fills again: then the answer is good only
+    /// until the next call into this context that measures, lays out or draws text, this one
+    /// included, and must not be kept. A search that asks for one table after another as it goes —
+    /// a text area's line-break search, a table for each line it wraps — allocates nothing for
+    /// them. The default measures the substring.
+    /// </summary>
+    ITextPrefixWidths? MeasureTextPrefixes(string text, int start, int length, ResolvedInheritedStyle style)
+        => MeasureTextPrefixes(text.Substring(start, length), style);
+
+    /// <summary>
     /// <c>MeasureText(text, style).Width</c>, exactly, for text whose width is all the caller
     /// wants: a context that lays text out can add the widths up without laying it out, and
     /// without keeping a layout nobody draws. Something that measures many strings once each

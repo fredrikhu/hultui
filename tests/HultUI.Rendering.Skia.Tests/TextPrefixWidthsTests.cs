@@ -125,5 +125,76 @@ public class TextPrefixWidthsTests
         Assert.True(compared > 10_000, $"only {compared} prefixes");
     }
 
+    /// <summary>
+    /// A TextArea's line-break search asks for the prefix widths of a range of its document, one
+    /// range after another, each a view in the pipeline's scratch: every prefix of every range
+    /// measures what laying out its own string does, to the bit. Random documents of the plain
+    /// pieces, fallback faces and emoji that ask for the emoji face among them, ranges anywhere —
+    /// in the middle of a word, just before a variation selector or a kana the range does not
+    /// reach (the substring's itemizing and Han face are what count, not the document's).
+    /// </summary>
+    [Fact]
+    public void RangesOfADocument_EachMeasureWhatTheirSubstringsDo()
+    {
+        var fonts = new SkiaFontCollection();
+        var shaper = new SkiaTextShaper();
+        var ranges = new TextPipeline(fonts, shaper);
+        var reference = new TextPipeline(fonts, shaper);
+        string[] pieces =
+        [
+            "a", "word", "office", "fi", "AVAWAY", "To.", " ", "  ", "1234", "3.14", "-", C(0x2014), C(0x2192),
+            C(0x00E9), "東京", "に", "漢字", "한국어", "Ελληνικά", "кот", C(0x26A1), C(0x2705), C(0x2B50),
+            "#" + C(0xFE0F) + C(0x20E3), C(0x2764) + C(0xFE0F), "\n",
+        ];
+        var rng = new Random(23);
+        int compared = 0, views = 0, beforeSelector = 0, withFallback = 0;
+        for (int d = 0; d < 60; d++)
+        {
+            var document = new System.Text.StringBuilder();
+            for (int p = 0, count = 20 + rng.Next(80); p < count; p++)
+                document.Append(pieces[rng.Next(pieces.Length)]);
+            string text = document.ToString();
+            var style = Styles[rng.Next(Styles.Length)];
+            int selector = text.IndexOf((char)0xFE0F);
+            for (int r = 0; r < 21; r++)
+            {
+                int start = rng.Next(text.Length);
+                int length = Math.Min(text.Length - start, rng.Next(60));
+                if (r == 20)
+                {
+                    if (selector < 0) break;
+                    // Up to the selector, which a substring has no more of.
+                    start = text.LastIndexOf('\n', selector) + 1;
+                    start = Math.Max(start, selector - 1 - rng.Next(20));
+                    length = selector - start;
+                }
+                string sub = text.Substring(start, length);
+                var prefixes = ranges.MeasurePrefixes(text, start, length, style);
+                if (sub.Length == 0 || sub.Contains('\n') || sub.Any(TextPipeline.MayNeedBidi))
+                {
+                    Assert.Null(prefixes);
+                    continue;
+                }
+                Assert.True(prefixes is not null, $"no table for \"{sub}\"");
+                Assert.Equal(length, prefixes.Length);
+                views++;
+                if (start + length < text.Length && text[start + length] == (char)0xFE0F) beforeSelector++;
+                if (sub.Any(c => c >= 0x3000)) withFallback++;
+                for (int n = 0; n <= length; n++)
+                {
+                    float expected = reference.Layout(sub[..n], style, float.PositiveInfinity, maxLines: 1).Size.Width;
+                    float actual = prefixes.Width(n);
+                    Assert.True(BitConverter.SingleToInt32Bits(expected) == BitConverter.SingleToInt32Bits(actual),
+                        $"document {d}, range {start}+{length}, \"{sub[..n]}\" in {style.FontFamily} {style.FontSize} "
+                        + $"spaced {style.LetterSpacing}: laid out {expected}, from the range {actual}");
+                    compared++;
+                }
+            }
+        }
+        Assert.True(views > 150 && beforeSelector > 0 && withFallback > 50,
+            $"{views} ranges with a table, {beforeSelector} just before a variation selector, {withFallback} with fallback faces");
+        Assert.True(compared > 2_000, $"only {compared} prefixes");
+    }
+
     private static string C(int codePoint) => char.ConvertFromUtf32(codePoint);
 }
