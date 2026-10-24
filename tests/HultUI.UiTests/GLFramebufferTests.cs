@@ -19,6 +19,7 @@ public sealed class GLFramebufferTests
     [UiFact]
     public unsafe void TheWindowFramebuffer_HasAStencil_AndNoDepthBuffer()
     {
+        using var guard = ForegroundGuard.Begin();
         using var app = new Application(new SdlWindowingPlatform(), "framebuffer", 320, 200);
         app.SetRoot(Box.New().Width(200f).Height(100f).CornerRadius(12f).Background(Color.FromHex("#5b8def")));
         // Forced, as in PixelFrameGLTests: a second SDL application in one test process can

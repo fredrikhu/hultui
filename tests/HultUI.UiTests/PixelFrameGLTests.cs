@@ -18,6 +18,7 @@ public sealed class PixelFrameGLTests
     [UiFact]
     public void A1080pFrame_RendersThroughTheGLSurface()
     {
+        using var guard = ForegroundGuard.Begin();
         using var app = new Application(new SdlWindowingPlatform(), "frames", 320, 200);
         using var sink = new PixelFrameSink();
         var image = Image.New(sink).Width(300f).Height(180f);

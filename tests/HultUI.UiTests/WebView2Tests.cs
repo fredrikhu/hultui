@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using HultUI.Core.Builders;
 using HultUI.Core.Rendering;
@@ -13,7 +14,9 @@ namespace HultUI.UiTests;
 /// The WebView2 engine on a real window: the page renders offscreen into the captured
 /// visual and its pixels reach the sink, script and messages go both ways, a navigation
 /// the app refuses never happens, and pointer input sent to the page lands where it was
-/// aimed. Needs the WebView2 Runtime, and a desktop: the window takes the foreground.
+/// aimed. Needs the WebView2 Runtime, and a desktop; the window is kept out of the foreground
+/// (<see cref="ForegroundGuard"/>), and a window of the browser's that takes it (DevTools) is
+/// handed back and fails the test.
 /// </summary>
 /// <remarks>
 /// xUnit runs tests on MTA threads, and WebView2 refuses them, so each test runs its body on
@@ -35,13 +38,18 @@ public sealed class WebView2Tests
 
     private static readonly string Profile = Path.Combine(Path.GetTempPath(), "hultui-webview2-tests");
 
-    /// <summary>Runs <paramref name="body"/> on a fresh STA thread and rethrows what it threw.</summary>
-    private static void OnSta(Action body)
+    /// <summary>Runs <paramref name="body"/> on a fresh STA thread, its window under the guard, and
+    /// rethrows what it threw.</summary>
+    private static void OnSta(Action body, [CallerMemberName] string test = "")
     {
         ExceptionDispatchInfo? failure = null;
         var thread = new Thread(() =>
         {
-            try { body(); }
+            try
+            {
+                using var guard = ForegroundGuard.Begin(member: test);
+                body();
+            }
             catch (Exception ex) { failure = ExceptionDispatchInfo.Capture(ex); }
         });
         thread.SetApartmentState(ApartmentState.STA);

@@ -21,6 +21,7 @@ public sealed unsafe class PasswordInputMethodTests
     [UiFact]
     public void APasswordField_LeavesTheWindowWithNoInputContext_EvenAfterRegainingFocus()
     {
+        using var guard = ForegroundGuard.Begin();
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "ime", 320, 200);
         app.RunFrame(TimeSpan.Zero, forceRender: true);
@@ -64,6 +65,7 @@ public sealed unsafe class PasswordInputMethodTests
     [UiFact]
     public void AHostedControl_HasNoInputContextForAPassword_EvenOneNeverArmed()
     {
+        using var guard = ForegroundGuard.Begin();
         var hwnd = CreateWindowExW(0, "STATIC", null, unchecked((int)0x80000000) /* WS_POPUP */,
             0, 0, 10, 10, 0, 0, 0, 0);
         Assert.NotEqual(0, hwnd);

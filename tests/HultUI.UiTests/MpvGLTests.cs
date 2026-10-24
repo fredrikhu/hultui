@@ -33,6 +33,7 @@ public sealed class MpvGLTests
     [MpvUiFact]
     public void AClip_RendersThroughMpvsGLPath_TheRightWayUp()
     {
+        using var guard = ForegroundGuard.Begin();
         string clip = TestClip.WriteTempY4m(64, 36, fps: 10, frames: 20, splitHalves: true);
         try
         {
@@ -82,6 +83,7 @@ public sealed class MpvGLTests
     [MpvUiFact]
     public void Opening_AndReopening_TakesTheFirstFrameAtOnce()
     {
+        using var guard = ForegroundGuard.Begin();
         string clip = TestClip.WriteTempY4m(64, 36, fps: 10, frames: 20);
         try
         {
@@ -116,6 +118,7 @@ public sealed class MpvGLTests
     [MpvUiFact]
     public void Seeks_NeverWaitForMpvsCore()
     {
+        using var guard = ForegroundGuard.Begin();
         string clip = TestClip.WriteTempY4m(64, 36, fps: 10, frames: 20);
         try
         {

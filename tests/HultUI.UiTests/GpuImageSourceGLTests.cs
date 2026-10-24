@@ -20,6 +20,7 @@ public sealed class GpuImageSourceGLTests
     [UiFact]
     public void ATextureRenderedInsideTheFrame_IsComposited_AndSkiaStillDrawsAroundIt()
     {
+        using var guard = ForegroundGuard.Begin();
         using var app = new Application(new SdlWindowingPlatform(), "gpu", 320, 200);
         var source = new SplitClearSource();
         // A column: the image on top, a red strip under it. The strip is Skia drawing

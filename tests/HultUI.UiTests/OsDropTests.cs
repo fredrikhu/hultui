@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using HultUI.Core.Builders;
@@ -26,12 +27,17 @@ public sealed unsafe class OsDropTests
 {
     private const uint MK_LBUTTON = 1, DROPEFFECT_ALL = 1 | 2 | 4;
 
-    private static void OnSta(Action body)
+    /// <summary>Runs the test on an STA thread (OLE needs one), its window under the guard.</summary>
+    private static void OnSta(Action body, [CallerMemberName] string test = "")
     {
         ExceptionDispatchInfo? failure = null;
         var thread = new Thread(() =>
         {
-            try { body(); }
+            try
+            {
+                using var guard = ForegroundGuard.Begin(member: test);
+                body();
+            }
             catch (Exception ex) { failure = ExceptionDispatchInfo.Capture(ex); }
         });
         thread.SetApartmentState(ApartmentState.STA);
