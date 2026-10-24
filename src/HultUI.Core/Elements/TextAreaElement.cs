@@ -497,6 +497,9 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     private void WrapLines(List<int> into, int line, int pos, int endLine, float wrapWidth,
         ResolvedInheritedStyle style)
     {
+        // Asked once a pass, not kept: the context answers for the face the style resolves to
+        // now, which a font registered since may have changed.
+        float asciiAdvance = FitsByCount && _renderCtx is not null ? _renderCtx.MonospaceAsciiAdvance(style) : 0f;
         for (; line < endLine; line++)
         {
             into.Add(pos);
@@ -514,7 +517,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
 
             // A line that fits is one width, kept for the next time (_lineWidths), and only one
             // that does not is cut into clusters and searched, unless it was wrapped before.
-            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, ref charWidth)
+            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth)
                 && _replaced?.TryMove(_text, pos, hardEnd, into) != true)
                 WrapLine(into, pos, hardEnd, wrapWidth, style, ref charWidth);
             pos = hardEnd + 1;
@@ -703,14 +706,35 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         }
     }
 
-    // Whether hard line number `line`, [start..end), fits whole. Measured only when it is no
-    // longer than a line of average characters — a longer one goes to the search, which finds
-    // it fitting if it does — and then only if its width is not known from the last time.
+    /// <summary>
+    /// Whether a hard line of printable ASCII (U+0020 to U+007E) in a face the render context
+    /// proves monospace for those characters (<see cref="IRenderContext.MonospaceAsciiAdvance"/>)
+    /// is taken as fitting, without measuring it, when one character more would still fit: n of
+    /// them measure n times the advance, give or take rounding, which a character's room covers.
+    /// A 19,000-line JSON response measured every line it opened with (18,887 widths) to find
+    /// that they fit, and kept a 4 MB cache of them. A line with anything else in it — a tab, a
+    /// carriage return, a character outside printable ASCII — or one that fits by less than a
+    /// character is measured as before, and the rows are the ones measuring gives. False is the
+    /// reference path, every line measured, for the tests that hold the two to the same rows.
+    /// </summary>
+    internal bool FitsByCount { get; set; } = true;
+
+    // Every char from U+0020 to U+007E; one vectorized scan (as ushort: the char overload boxes
+    // its two bounds, see ClusterEnds).
+    private static bool IsPrintableAscii(ReadOnlySpan<char> text) =>
+        MemoryMarshal.Cast<char, ushort>(text).IndexOfAnyExceptInRange((ushort)0x20, (ushort)0x7E) < 0;
+
+    // Whether hard line number `line`, [start..end), fits whole: by its count (FitsByCount), or
+    // measured, only when it is no longer than a line of average characters — a longer one goes
+    // to the search, which finds it fitting if it does — and then only if its width is not known
+    // from the last time.
     private bool FitsWhole(int line, int start, int end, float wrapWidth, ResolvedInheritedStyle style,
-        ref float charWidth)
+        float asciiAdvance, ref float charWidth)
     {
         int length = end - start;
         if (length == 0) return true;
+        if (asciiAdvance > 0f && (length + 1) * asciiAdvance <= wrapWidth && IsPrintableAscii(_text.AsSpan(start, length)))
+            return true;
         if (length > wrapWidth / Math.Max(charWidth, 0.01f)) return false;
         float width = _lineWidths[line];
         if (float.IsNaN(width))

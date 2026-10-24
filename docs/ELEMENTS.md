@@ -1403,6 +1403,16 @@ and a rebuild that hands the area the text it already shows wraps nothing. The c
 is that there is never anything to the right to scroll to: `ScrollBy` ignores `dx`, and
 autoscroll is vertical.
 
+**Long documents open faster in a monospace face.** To wrap, the area needs to know which
+lines fit, and it measures each line it has no width for — every line, when a document
+opens. In a face the renderer proves monospace for printable ASCII (`FontFamilies.Monospace`
+on every platform, and any face whose 95 printable ASCII characters all advance alike, kern
+no pair and join none), a line of those characters that fits with a character to spare is
+taken as fitting without being measured. A 19,000-line JSON response opens in a tenth of the
+time, with 86 % fewer bytes, and keeps 4 MB less afterwards. Give logs, JSON, source code and
+other machine text a monospace face; letter spacing, a tab or any character outside printable
+ASCII on a line measures that line as before, and the rows are the same either way.
+
 **Revealing a position.** Two calls:
 
 ```csharp

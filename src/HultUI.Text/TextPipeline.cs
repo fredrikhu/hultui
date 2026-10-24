@@ -2253,6 +2253,107 @@ public sealed class TextPipeline
         }
     }
 
+    /// <summary>
+    /// The advance every printable ASCII character (U+0020 to U+007E) has in
+    /// <paramref name="style"/>'s face at its size, or 0 when that is not proven (see
+    /// <see cref="IRenderContext.MonospaceAsciiAdvance"/>). Proven once per face and size, with
+    /// the shaper: the face has its own glyph for each of the 95, so none is drawn from a fallback
+    /// face, whose advance says nothing about this one; each shaped alone is one glyph of the one
+    /// advance; and a string holding every ordered pair of them side by side
+    /// (<see cref="AllAsciiPairs"/>) shapes to one glyph a character, every one of that advance —
+    /// no pair kerned, no two joined into a ligature, whatever the face says of itself. A line of
+    /// them measures as its words' shapings added up (<see cref="MeasureString"/>), so it comes to
+    /// its count times the advance, within float rounding. 0 with letter spacing.
+    /// </summary>
+    public float MonospaceAsciiAdvance(ResolvedInheritedStyle style)
+    {
+        if (style.LetterSpacing != 0f || !(style.FontSize > 0f))
+            return 0f;
+        var font = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
+        var key = new DigitKey(font, style.FontSize);
+        var proven = _asciiAdvances ??= new();
+        if (!proven.TryGetValue(key, out float advance))
+        {
+            if (proven.Count >= AsciiAdvanceCacheMaxSize)
+                proven.Clear();
+            proven[key] = advance = ProveMonospaceAscii(font, style.FontSize);
+        }
+        return advance;
+    }
+
+    // MonospaceAsciiAdvance's answers by face and size, 0 for not monospace; a theme cycling
+    // through sizes cannot grow it past this.
+    private Dictionary<DigitKey, float>? _asciiAdvances;
+    private const int AsciiAdvanceCacheMaxSize = 64;
+
+    private float ProveMonospaceAscii(IResolvedFont font, float fontSize)
+    {
+        for (int c = ' '; c <= '~'; c++)
+            if (!font.HasGlyph(c))
+                return 0f;
+        float advance = 0f;
+        for (int c = ' '; c <= '~'; c++)
+        {
+            var alone = _shaper.Shape(AsciiChars[c - ' '], font, fontSize);
+            if (alone.Glyphs.Length != 1 || alone.Glyphs[0].Advance != alone.Width
+                || (c > ' ' && alone.Width != advance))
+                return 0f;
+            advance = alone.Width;
+        }
+        if (!(advance > 0f))
+            return 0f;
+        // Beside each other, each glyph advances by that much, but for the float rounding of the
+        // pen the shaper moves glyph by glyph (a 9,026-character run at 13.5 px rounded advances
+        // by 1/256 px): pieces short enough to keep it far below the tolerance, and a tolerance
+        // far below the least a face can kern or join by — one unit of its em (one of 2,048 is
+        // 1/1,200 of Cascadia Mono's advance, 8.3e-4 of it; this allows 2.4e-4).
+        float tolerance = advance * AsciiAdvanceTolerance;
+        foreach (var piece in AsciiPairPieces)
+        {
+            var run = _shaper.Shape(piece, font, fontSize);
+            if (run.Glyphs.Length != piece.Length)
+                return 0f;
+            foreach (var glyph in run.Glyphs)
+                if (!(Math.Abs(glyph.Advance - advance) <= tolerance))
+                    return 0f;
+        }
+        return advance;
+    }
+
+    internal const float AsciiAdvanceTolerance = 1f / 4096;
+
+    private static readonly string[] AsciiChars =
+        Enumerable.Range(' ', '~' - ' ' + 1).Select(c => ((char)c).ToString()).ToArray();
+
+
+    /// <summary>
+    /// Every ordered pair of printable ASCII characters side by side, each once: a de Bruijn
+    /// sequence of order 2 over the 95 — each character, then that character before each later
+    /// one in turn: their Lyndon words in order (9,025 characters, a cycle) — with its first
+    /// character again at the end for the pair that closes the cycle.
+    /// </summary>
+    internal static readonly string AllAsciiPairs = AsciiPairs();
+
+    // AllAsciiPairs in pieces of at most 256 characters, each starting with the last of the one
+    // before, so every pair is inside one. (Declared after it: static fields start in order.)
+    internal static readonly string[] AsciiPairPieces =
+        Enumerable.Range(0, (AllAsciiPairs.Length - 2) / 255 + 1)
+            .Select(p => AllAsciiPairs.Substring(255 * p, Math.Min(256, AllAsciiPairs.Length - 255 * p)))
+            .ToArray();
+
+    private static string AsciiPairs()
+    {
+        const int Count = '~' - ' ' + 1;
+        var pairs = new System.Text.StringBuilder(Count * Count + 1);
+        for (int i = 0; i < Count; i++)
+        {
+            pairs.Append((char)(' ' + i));
+            for (int j = i + 1; j < Count; j++)
+                pairs.Append((char)(' ' + i)).Append((char)(' ' + j));
+        }
+        return pairs.Append(' ').ToString();
+    }
+
     // Total advance width of a string, itemized and shaped the same way as a line. Internal
     // for the tests that hold it to the glyph runs it adds up.
     internal float MeasureString(string s, ResolvedInheritedStyle style)
