@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–5 landed, step 6 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–6 landed, step 7 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -96,7 +96,7 @@ Correctness first, then value per cost.
    key, ~1 MB/key → −65…−70 %), and settle Junction tests that read app state across frames against the
    git lock-file events (DiffItemLabelTests failed once in CI; `GIT_OPTIONAL_LOCKS=0` for read-only git in
    fixtures or 3be0dea's Settle). Suite row: a walk beside unchanged chrome.
-6. **Media frames** (3/4): **media-video-frame-bytes** (Vulkan video frame 527 → ~170–220 B: kept SKImage
+6. ~~**Media frames**~~ LANDED 8960cf36, 91b4e5a7, 0607f2f7, d9d465f2 (3/4): **media-video-frame-bytes** (Vulkan video frame 527 → ~170–220 B: kept SKImage
    over the interop image keyed by VkImage, a cached Action in GpuFrameSink, dispose the per-frame
    `GRBackendTexture` — one finalizable object per frame today), **media-modal-loop-video-rate** (inside
    the modal size/move loop, answer a GPU source's repaint with a frame, skipping within 20 ms of a size
@@ -158,6 +158,11 @@ Re-ranked by the round 5 survey.
   rule that a never-resolved element always resolves (a prototype drew an unresolved Text).
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
 - **vk-startup-preload** (3, low) — at the 10 ms edge; measure on AOT first.
+- **vk-sdr-video-frame-target-wrap** (3/4, lead from step 6) — an 8-bit swapchain still pays ~2.3 KB per
+  video frame (the target wrapped for one frame after a video frame, kept on purpose in 68424c2 for mpv
+  timing); SDR is most users. Also open: the swapchain target wraps per kept drag step (~86 per drag;
+  `VulkanFrameTarget.AllocatedWidthPx/HeightPx` now makes keeping them possible), and a video in a window
+  other than the dragged one still stalls during the drag.
 - **layout-ordered-children** (1, low) — suite rows only now.
 - **apps-tokenize-on-ui-thread** (5/8, low).
 - **paint-drawspannedline-overlap** (2, lowest).
@@ -324,6 +329,10 @@ Re-ranked by the round 5 survey.
 | 4 | 4f6e6fc2 | junction-review-rows-shape | Review mode keeps the woven list across caret moves (checked against everything the weave reads); caret and range in `DiffRow.Mark`; one stable label delegate. 1,011 → 156.7 KB/key (−84 %), bridge −82 %; rows made per key 31 → 2; time per key min 4.52 → 3.07 ms. |
 | 4 | 4076ddb0 | junction-fixture-quiet-git | `TempRepo` sets `GIT_OPTIONAL_LOCKS=0` and fixtures turn automatic maintenance off: the app rewrote the fixture index in 40/40 starts → 0/40 (0/100 twice); `FixtureQuietTests` 0 of 8 runs beside other classes. The writer behind the remaining 3/11 failures with locks alone is unproven (detached `git maintenance run --auto` is the best guess). `DiffItemLabelTests` reports whether the data generation moved. |
 | 4 | 098d0649, 77fd347f | apps-scenario-kept-chrome | Suite rows: list walk beside chrome built with it 173.5 vs in kept parts 35.2 KB/op; selection walk beside kept chrome parts with the bridge 1.0 → 0.6 trees/key (pins 59a11d7d). Full compare 0 slower (bar fade +15 % min = its 52/60 ms noise on rerun). REACTIVITY.md "Keep what a key does not change in a child component". |
+| 4 | 8960cf36 | media-video-frame-bytes | `GpuFrameSink` makes its GL delegates once, per-frame inputs in fields; Vulkan keeps the SKImage over each source's shared image (keyed by owner, checked against VkImage, size, origin, colour space, alpha; remade on resize, failed lend or `ReleaseFrameTarget`); `GRBackendTexture` disposed at once (GL too); the render context no longer holds renderer-owned wrappers (a dead sink stayed in its table). Reel 1080p24 F16 a11y off, UI-thread B/frame: JIT 454 → 96, AOT 447 → 103; 1080p120 395 → 143; finalizable objects per frame 1 → 0. Content proof (F16 brightness 18 → 142), validation layer loaded and clean. HDR.md "never cache" rule rewritten. 0 slower. |
+| 4 | 91b4e5a7 | apps-scenario-vulkan-steady-frame | No headless GPU source, so a gated real-window row: `VulkanProbe --video-frame-bytes` + `VulkanProbeTests.ASteadyVideoFrame_AllocatesAlmostNothing_AndThePictureKeepsChanging`. B/frame F16 395.2 → 35.2 (limit 100), 8-bit 2,820 → 2,331 (limit 2,500), GL 157.3 → 13.3 (limit 100); brightness must climb > 20. |
+| 4 | 0607f2f7 | media-modal-loop-video-rate | Internal `LiveFrameRequests`: in Win32's size/move loop, MediaPlayer's and WebViewController's off-thread repaint requests post a registered message; the subclass (now on GL windows too) draws a live frame, skipping within 20 ms of a size change; SDL's timer stops drawing duplicate frames for posted work meanwhile. Reel 1080p120 Vulkan, frames/drops: move 56/49 → 107/0, held drag 128/111 → 240/0, hold 170/115 → 274/3; drag phase 287/11 → 223/11 (duplicates gone, drops unchanged), step time flat. GL move 56/48 → 104/2. THREADING.md, MEDIA.md. |
+| 4 | d9d465f2 | vk-drag-kept-step-remakes | The F16 offscreen is made at the swapchain's allocated size (canvas clipped to the window) and kept with it; **`VulkanFrameTarget.AllocatedWidthPx/AllocatedHeightPx` public** (API addition). 80-step drag: offscreens made (each a sync submit + purge) 81 → 5; step median 5.4 → 4.4 ms (−20 %), drag CPU −17 %; Skia cache peak 52.7 → 55.7 MB. Reel drag step within noise, bytes per frame 2,437 → 1,408. 34 Vulkan UiTests pass under the layer. |
 
 ## Examined, not worth it
 
@@ -725,3 +734,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   Guideline notes: a child component's host is a flex item of its own (give it the root's FlexShrink/
   FlexGrow); kept hosts need keyed parents; persistent parts need a signal for the plain state they show,
   with "rebuild the chrome" the default and view-only paths opting out.
+- 2026-10-24: step 6 landed (8960cf36..d9d465f2): a Vulkan video frame allocates 96 B, not 454 (no
+  finalizable object per frame); video keeps its rate inside the modal move/size loop (120 fps clip: drops
+  49–115 → 0–3); a drag keeps the F16 offscreen (81 → 5 made, step −20 %). Focus guard 0 events over 36
+  launches; validation clean. Guideline note: a GPU producer raises repaints off the UI thread through
+  `IVideoSink.RequestRepaint`, not its own post, so it keeps its rate inside the modal loop.
