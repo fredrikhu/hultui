@@ -56,6 +56,7 @@ Console.WriteLine(doubled.Value); // 20
 - **`.Peek()`** -- reads the cached value without tracking and without forcing recomputation.
 - The factory function passed to the constructor runs inside a tracking scope. Any signals or other computeds read during that function become dependencies automatically.
 - Recomputation is **lazy**: it only happens when `.Value` is read after a dependency has changed, not immediately when the dependency changes.
+- A write upstream allocates nothing: the computed tells its readers through a pooled snapshot, as a signal does, so one that follows a fast value (a playhead read ten times a second, below) costs no garbage per write. It copied its readers into a new list, 64 bytes a time and twice a write that changed its value, until plan 17's round 4.
 
 ---
 
@@ -311,7 +312,8 @@ _chapterHere = new Computed<int>(() => CurrentChapterIndex(player.Position));
 int current = _chapterHere.Value;
 ```
 
-A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture).
+A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture), and 64 bytes less since the computed's
+own notify stopped allocating (plan 17's round 4: Reel's report 527 → 463 B, headless, JIT).
 
 ### `Build()` is not a clock
 
