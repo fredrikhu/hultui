@@ -23,14 +23,16 @@ public class VideoPreviewTests
         public VideoPlayer VideoPlayer { get; }
         public List<TimeSpan> Asked { get; } = [];
 
-        public Fixture(VideoPreviewFrame? frame)
+        public Fixture(VideoPreviewFrame? frame) : this(_ => frame) { }
+
+        public Fixture(Func<TimeSpan, VideoPreviewFrame?> frames)
         {
             Session = HeadlessSession.Create(640, 400);
             Player = new MediaPlayer(Backend);
             VideoPlayer = new VideoPlayer(Player)
             {
                 AutoHideControls = false,
-                PreviewFrame = at => { Asked.Add(at); return frame; },
+                PreviewFrame = at => { Asked.Add(at); return frames(at); },
             };
             Session.Application.SetRoot(Box.New().Children(VideoPlayer.Mount().Width(640f).Height(400f)));
             Player.Open(MediaSource.FromFile("clip.mp4"));
@@ -126,11 +128,12 @@ public class VideoPreviewTests
     }
 
     /// <summary>The scrubber reports the time under the pointer once per frame that may be drawn
-    /// (plan 17 round 3): the player is built again, and asked for a preview, once for all the
-    /// moves of a frame, at the last of them — a 1,000 Hz mouse built it about sixteen times a
-    /// frame.</summary>
+    /// (plan 17 round 3), and the card on screen takes it in place (round 4): the player is asked
+    /// for a preview once for all the moves of a frame, at the last of them, and is not built
+    /// again at all. A 1,000 Hz mouse built it about sixteen times a frame, then once a frame
+    /// (about 42 KB a frame, with a card or without).</summary>
     [Fact]
-    public void PointingAlongTheScrubber_BuildsThePlayerOnceAFrame_AtTheLastPosition()
+    public void PointingAlongTheScrubber_AsksOnceAFrame_AtTheLastPosition_AndBuildsNothing()
     {
         using var f = new Fixture(new VideoPreviewFrame(new StubImage(new Size(320, 180))));
         f.HoverScrubber(0.2);
@@ -142,15 +145,96 @@ public class VideoPreviewTests
 
         for (int i = 1; i <= 8; i++)
             f.Session.Window.MoveMouse(x = box.X + box.Width * (0.2f + 0.05f * i), y);
-        Assert.Equal(builds, f.VideoPlayer.Builds);
         Assert.Empty(f.Asked);
 
         f.Session.PumpFrame();
-        Assert.Equal(builds + 1, f.VideoPlayer.Builds);
+        Assert.Equal(builds, f.VideoPlayer.Builds);
         double expected = (x - box.X - seek.ThumbRadius) / (box.Width - 2 * seek.ThumbRadius)
             * f.Backend.Duration!.Value.TotalSeconds;
         var asked = Assert.Single(f.Asked);
         Assert.Equal(expected, asked.TotalSeconds, 0);
+        Assert.NotNull(f.Card);
+    }
+
+    /// <summary>A still for every minute of the ten: each its own picture, labelled with its minute.</summary>
+    private static (StubImage[] Stills, Func<TimeSpan, VideoPreviewFrame?> Frames) EveryMinute()
+    {
+        var stills = Enumerable.Range(0, 11).Select(_ => new StubImage(new Size(320, 180))).ToArray();
+        return (stills, at =>
+        {
+            int minute = Math.Clamp((int)Math.Round(at.TotalMinutes), 0, 10);
+            return new VideoPreviewFrame(stills[minute], null, TimeSpan.FromMinutes(minute));
+        });
+    }
+
+    [Fact]
+    public void MovingAlongTheTrack_MovesTheCardOnScreen_WithTheStillAndTimeForThePoint()
+    {
+        var (stills, frames) = EveryMinute();
+        using var f = new Fixture(frames);
+        f.HoverScrubber(0.2);
+        var card = f.Card!.Element;
+        int builds = f.VideoPlayer.Builds;
+
+        f.HoverScrubber(0.7);
+
+        // The same card, not one made again, and the player not built again either.
+        Assert.Same(card, f.Card!.Element);
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+        int minute = (int)Math.Round(f.Asked[^1].TotalMinutes);
+        Assert.InRange(minute, 6, 8);
+        var picture = card.Children.OfType<Core.Elements.ImageElement>().Single();
+        Assert.Same(stills[minute], picture.Source);
+        Assert.Equal($"{minute}:00", card.Children.OfType<Core.Elements.TextElement>().Single().Content);
+        Assert.True(Shows(f.Session, $"{minute}:00"), f.Session.Window.DumpAccessibilityTree());
+
+        // Over the new point, as a card built there would stand.
+        f.Session.PumpFrame();
+        var box = card.Layout.AbsoluteBorderBox;
+        var track = f.Session.Window.FindByAutomationId("video-seek")!.Element.Layout.AbsoluteContentBox;
+        float wanted = track.X + track.Width * 0.7f;
+        Assert.InRange(box.X + box.Width / 2f, wanted - 30f, wanted + 30f);
+    }
+
+    [Fact]
+    public void TheCardComesAndGoesWithTheStillsTheAppHas()
+    {
+        // Stills for the first half only: the card goes over the second half and comes back.
+        var (_, frames) = EveryMinute();
+        using var f = new Fixture(at => at < TimeSpan.FromMinutes(5) ? frames(at) : null);
+
+        f.HoverScrubber(0.2);
+        Assert.NotNull(f.Card);
+        Assert.True(Shows(f.Session, "2:00"), f.Session.Window.DumpAccessibilityTree());
+
+        f.HoverScrubber(0.8);
+        Assert.Null(f.Card);
+
+        f.HoverScrubber(0.3);
+        Assert.NotNull(f.Card);
+        Assert.True(Shows(f.Session, "3:00"), f.Session.Window.DumpAccessibilityTree());
+    }
+
+    [Fact]
+    public void AHiddenBarTakesTheCardWithIt_AndItsReturnBringsItBack()
+    {
+        var (_, frames) = EveryMinute();
+        using var f = new Fixture(frames);
+        f.VideoPlayer.AutoHideControls = true;
+        f.VideoPlayer.AutoHideDelay = TimeSpan.FromMilliseconds(100);
+        f.VideoPlayer.FadeDuration = TimeSpan.FromMilliseconds(50);
+        f.Player.Play();
+        f.HoverScrubber(0.4);
+        Assert.NotNull(f.Card);
+
+        // The pointer rests on the track; the bar fades out, and the card goes with it.
+        f.Session.PumpUntil(() => !f.VideoPlayer.ControlsVisible, TimeSpan.FromSeconds(5));
+        f.Session.PumpFrames(2);
+        Assert.Null(f.Card);
+
+        // A move brings the bar back, and the card with it.
+        f.HoverScrubber(0.45);
+        Assert.NotNull(f.Card);
     }
 
     [Fact]

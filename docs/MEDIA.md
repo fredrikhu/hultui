@@ -59,8 +59,12 @@ sprite sheets — a grid of small frames in one JPEG — and `ImageElement.Sourc
 cell of it without cropping a bitmap per hovered second. The `Time` is the still's own
 position, rounded to whatever interval the sheet was made at, because a still every ten
 seconds cannot honestly be labelled 4:57. Answer from a cache and start the fetch on a
-miss: the provider is called during a build, so it must not block, and returning null
-simply means no preview this frame.
+miss: the provider is called once per frame drawn while the pointer moves along the track,
+and during a build, so it must not block, and returning null simply means no preview this
+frame. The card on screen is moved, and given its new still and time, in place; only a card
+that comes or goes builds the player. A hover built the player on every frame the pointer
+moved (about 42 KB a frame, headless) until plan 17's round 4; it now costs about 2 KB a
+frame, most of it the pointer events themselves.
 
 **Chapters on the scrubber.** `VideoPlayer.ChapterMarks` is the list of positions where
 chapters start; the player cuts the scrubber into one piece per chapter and leaves it alone

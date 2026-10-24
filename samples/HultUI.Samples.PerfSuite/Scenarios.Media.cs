@@ -1,9 +1,7 @@
-using System.Reflection;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
-using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Media;
 using HultUI.Media.Testing;
@@ -113,9 +111,6 @@ static partial class Scenarios
             ctx =>
             {
                 var rig = new PlayerRig(ctx, autoHide: false);
-                // The time the player previews (what its Build reads), for the check.
-                var previewAt = (Signal<double?>)typeof(VideoPlayer)
-                    .GetField("_previewAt", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rig.Video)!;
                 int builds = 0, drawn = 0;
                 double expected = 0;
                 return new Op
@@ -141,8 +136,8 @@ static partial class Scenarios
                     Frames = 0,
                     Figure = () => builds / (double)Math.Max(1, drawn),
                     FigureUnit = "builds/frame",
-                    Check = _ => previewAt.Peek() is { } at && Math.Abs(at - expected) < 0.01 ? null
-                        : $"the player previews {previewAt.Peek():0.00} s, not {expected:0.00} s",
+                    Check = _ => rig.Video.PreviewAt is { } at && Math.Abs(at - expected) < 0.01 ? null
+                        : $"the player previews {rig.Video.PreviewAt:0.00} s, not {expected:0.00} s",
                 };
             }) { Width = 640, Height = 360 };
 

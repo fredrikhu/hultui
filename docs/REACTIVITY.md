@@ -285,6 +285,17 @@ thing it was started for (here the send's own cancellation source, not "any send
 Meridian's kept going when the next send started within one tick of the last one ending, so
 sends in a row stacked ticks.
 
+Something that follows the pointer is the same case. The `VideoPlayer`'s scrubber preview read
+the hovered position in `Build()`, so the player was built again on every frame the pointer
+moved along the track: about 42 KB a frame, with or without a card to show. The hover now
+writes the card on screen through `Ref`s (its `Position.Left` and the layout mark that goes
+with it, its picture's `Source`, its time label's `Content`), and only a card that has to come
+or go goes through a build, through a `Signal<int>` bumped for that alone: 1.9 KB a frame
+(headless, JIT and NativeAOT), most of it the pointer events themselves. When a build makes no
+such element, clear the refs that pointed at the last one: a `Ref` keeps the element it was
+given after the element leaves the tree, and a write would then land on an element nobody
+sees.
+
 When the build needs only something coarse derived from the value, read that through a
 `Computed<T>` instead. An effect that read a computed value runs again only when the value it
 computes changes, so a build reading it reruns a few times a film, not ten times a second.
