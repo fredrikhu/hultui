@@ -227,6 +227,21 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("text/resize a wrapped TextArea",
+            "Drag the window narrower with the 900-line notes file open in a TextArea: every line too long for the new width wrapped again",
+            ctx =>
+            {
+                var area = TextArea.New(Ui.Notes(ctx.Rng)).FlexGrow(1);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                return new Op
+                {
+                    Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760),
+                    // The rows are worked out for the width the TextArea is drawn at.
+                    Check = step => Math.Abs(area.WindowBorderBox.Width - (Ui.DragWidth(step) - 16)) < 0.5f ? null
+                        : $"the TextArea is {area.WindowBorderBox.Width:0} px wide, not the window's {Ui.DragWidth(step)} px less the padding",
+                };
+            });
+
         yield return new Scenario("text/open highlighted JSON in a TextArea",
             $"Meridian's response viewer handed a {JsonLines:N0}-line pretty-printed JSON response and its colour spans: a read-only monospace TextArea measures every line, then draws the first screen",
             ctx =>
