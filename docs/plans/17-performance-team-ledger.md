@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–9 landed, step 10 next.
+- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); steps 1–10 landed, step 11 next.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -117,7 +117,7 @@ Correctness first, then value per cost.
    (Cascadia Mono/Code, Segoe UI Variable, Bahnschrift): glyphs per frame −84…−92 % on viewer, JSON and
    terminal screens. Pixel A/B with an A/A control (DirectWrite regenerates glyph masks after strike
    purges) and on WSL Fedora. Watch expert 4's lead: 7.5 native blobs per newly drawn spanned line vs 1.1.
-10. **Small paint and controls** (2/1): **terminal-row-strings** (1.6–6.0 KB per terminal frame → 0) +
+10. ~~**Small paint and controls**~~ LANDED 0fcc8f5e, d52ac4bd, 321c93d8, c3c9d9fa (2/1): **terminal-row-strings** (1.6–6.0 KB per terminal frame → 0) +
     **richtext-viewframe-record** (24 B → 0), **aperture-hero-scrim-seam** (approved: end at 0 %),
     **paint-menu-rows-outside-window** (cull a context menu's off-window rows: 200-item dropdown 278 text
     items per frame, 173 outside). Suite row: terminal coloured screen, forced frame (added by step 9,
@@ -169,6 +169,9 @@ Re-ranked by the round 5 survey.
 - **paint-drawspannedline-overlap** (2, lowest).
 - **paint-subblob-trusted-face-bounds** (2, lead from step 9) — trusted faces' boxes are wide too (Segoe
   UI reaches 2.12 em right, DejaVu Serif 2.23 em), so per-run bounds could tighten their sub-blobs.
+- **controls-menu-max-height-scroll** (1/2, lead from step 10; not perf) — a long context menu or dropdown is
+  laid out at full height and placed at the window's top when it doesn't fit, so rows past the bottom can't
+  be reached by mouse; a max-height scrolling menu is the real fix (step 10 culls the drawing only).
 - **Suite scenarios** (8): document-switch, image-grid.
 - **Leads:** a VirtualList measured as a leaf (1–2 %); Vesper zebra tint O(n) per row made (off by
   default); one prefix table per hard line (after step 8: a wrap's last line still builds a durable
@@ -350,6 +353,10 @@ Re-ranked by the round 5 survey.
 | 4 | 9a5f6a2f | text-textarea-mono-ascii-fits | Approved. `IRenderContext.MonospaceAsciiAdvance(style)` (API addition, default 0) proven once per face and size with the shaper (own glyph for all 95 printable ASCII, single and every ordered pair one glyph at the same advance within 1/4096; none with letter spacing); a printable-ASCII line fits unmeasured when (n + 1) × advance ≤ width. Highlighted JSON open 6.23 → 0.57 ms JIT (−91 %), 8.02 → 0.73 AOT, 1,902 → 270 KB; retained 4.38 → 0.17 MB; JSON wheel 7.9 → 9.6 KB/op, +2 % (words shaped at first draw). Proof ~0.5 ms, 219 KB per face and size. ELEMENTS.md: give logs, JSON and code a monospace face. |
 | 4 | ca9a9ab7 | apps-scenario-terminal-json-page | Suite rows `terminal/coloured screen, forced frame` (Cascadia Mono on Windows, runs last) and `text/page down through highlighted JSON in a TextArea` (every step a first draw: the cost side of sub-blobs). |
 | 4 | 13c66d49 | paint-subblob-variable-fonts | An outline face whose box Skia marks as a guess takes each run's ink extent from its own glyphs (`GetGlyphWidths` at 2048 per 256 glyphs into kept buffers, face slack; map at the sub-blob bound, ~57 KB per context, starts over when full); a spanned line looks up extents once per line. Colour and bitmap faces still whole. Min JIT/AOT: terminal coloured screen −60.4/−60.9 %, selectable viewer hover −48.2/−49.3 %, wheel −47/−49 %, JSON rebuild −15 %, wheel −14 %, open −10/−8 %, page down (first draw) −5/−9 %. Glyphs per frame Cascadia viewer 34,374 → 4,268, terminal 42,445 → 3,549. First draw: 7.0 native blobs per new line vs 1.0, sub-blob map restarts 68× in 389 screens, still faster. Pixels: 160 in-process scenes identical with a 512 MB glyph cache (default cache: A/A itself differs in 12, sub-blobs match one draw), WSL identical; pixel tests accept either of two whole-run draws, up to 3 tries. 0 slower. |
+| 4 | 0fcc8f5e | terminal-row-strings | Each terminal row keeps its last drawn string while its text is the same (`StringBuilder.Equals(span)`); lone characters and the one under the block cursor come from a per-code-point table cleared on font change; `TextFrame` remade only when it moved. Per forced frame: coloured screen 6,048 → 0 B, Powerline 856 → 0, CJK/Hebrew/emoji 2,392 → 0 (2,496 with cursor → 0); suite row 5.9 → 0.0 KB/op JIT and AOT, time flat. 20/20 frames identical. |
+| 4 | d52ac4bd | richtext-viewframe-record | `NoteViewFrame` makes a record only when X or Y changed: 40 ticked tasks 24 → 0 B per frame (the editor's last render allocation). |
+| 4 | 321c93d8 | aperture-hero-scrim-seam | Approved visual fix: `Halide.BackdropScrim` horizontal ends at `Alpha(Bg, 0)` (item page and Discover heroes). Headless read across the scrim edge: a 9-level step → at most 1 (gradient rounding). |
+| 4 | c3c9d9fa | paint-menu-rows-outside-window | `ContextMenuElement.Render` skips rows and separators wholly outside `ctx.ClipBounds` (layout, hit-test, keys, submenu anchors and a11y unchanged; the edge row still drawn); label heights measured once per text style. 200-item dropdown: text items per frame 202 → 30, label measurements 200 → 0, hover step −13 %; suite `overlay/dropdown open 200 items` −8.4 % JIT, −10.0 % AOT, +0.8 KB per open (the heights array). 20/20 frames identical; WSL Fedora 10,365 pass. |
 
 ## Examined, not worth it
 
@@ -777,3 +784,11 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   face draw only what each stretch reaches; colour-emoji and bitmap-strike faces (Calibri, Courier New
   Regular) still draw the whole run per stretch — avoid them for coloured code, logs and terminals. A
   Windows pixel A/B needs an A/A control or a raised glyph cache (DirectWrite remakes masks by history).
+- 2026-10-24: step 10 landed (0fcc8f5e..c3c9d9fa): terminal frames allocate nothing (6 KB → 0), the rich
+  text editor's last render allocation gone, Aperture's hero scrim seam fixed, long menus draw only visible
+  rows (−8…−13 %). 20 frames identical (A/A identical); Windows suites and WSL (10,365) pass. Guideline
+  notes: no new strings in Render — keep the last drawn string and compare against the builder; compare
+  values before making a "where am I drawn" record for a bridge thread; for hundreds of choices use a
+  filtering list (palette, VirtualList), not a menu; a scrim ending inside a picture fades to 0 %. Test
+  traps: an overlay that doesn't fit moves to y = 0, so aim at the popup's `WindowBorderBox`; a stub
+  subclassing `NullRenderContext` must re-declare `IRenderContext` for a default-member override to apply.
