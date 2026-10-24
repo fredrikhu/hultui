@@ -45,12 +45,14 @@ public sealed partial class ReelApp
         if (_previews is null)
         {
             if (ScrubFrameSource() is not { } source) return;
-            _previews = new ScrubPreviewCache(
-                source,
-                DecodeStill,
-                // The worker has no business touching the window, and a still landing is
-                // exactly the kind of thing that should not repaint from a background thread.
-                onFrame: () => Application.InvokeOnMainThread(Rerender));
+            // A still landing changes nothing but the card over the scrubber, and only while the
+            // pointer is on it: the player asks again for the point it is hovered at. This rebuilt
+            // the whole app instead, 120 times a file, which never rebuilt the player that shows
+            // the card, so a pointer resting on the scrubber saw a new still only when it next
+            // moved. The worker has no business touching the window, so it is posted.
+            Action refresh = () => _videoPlayer?.RefreshPreview();
+            _previews = new ScrubPreviewCache(source, DecodeStill,
+                onFrame: () => Application.InvokeOnMainThread(refresh));
         }
 
         // Every file has a player of its own (OpenStream), so each is handed the stills; only

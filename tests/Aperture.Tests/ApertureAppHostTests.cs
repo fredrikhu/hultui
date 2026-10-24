@@ -136,9 +136,16 @@ public class ApertureAppHostTests
     {
         public List<string> Requested { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        /// <summary>When set, trickplay sheets wait for it: a test can rest the pointer on the
+        /// scrubber before the sheet under it arrives.</summary>
+        public TaskCompletionSource? HoldSheets { get; init; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            lock (Requested) Requested.Add(request.RequestUri!.PathAndQuery);
+            var path = request.RequestUri!.PathAndQuery;
+            lock (Requested) Requested.Add(path);
+            if (HoldSheets is { } hold && path.Contains("/Trickplay/", StringComparison.Ordinal))
+                await hold.Task.WaitAsync(ct).ConfigureAwait(false);
             using var bitmap = new SkiaSharp.SKBitmap(width, height);
             using var canvas = new SkiaSharp.SKCanvas(bitmap);
             canvas.Clear(new SkiaSharp.SKColor(40, 60, 90));
@@ -148,7 +155,7 @@ public class ApertureAppHostTests
                 Content = new ByteArrayContent(data.ToArray()),
             };
             response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-            return Task.FromResult(response);
+            return response;
         }
     }
 
@@ -1703,6 +1710,39 @@ public class ApertureAppHostTests
 
             // Past the end of the stills there is nothing to show rather than a wrong frame.
             Assert.Null(app.TrickplayFrame(TimeSpan.FromHours(4)));
+        }, () => backend, artwork);
+    }
+
+    [Fact]
+    public void ASheetLandingUnderAPointerRestingOnTheScrubber_ShowsItsStillAtOnce()
+    {
+        // The pointer stops on the scrubber before the sheet under it has downloaded. The card
+        // is the player's, which the app's build does not rebuild, so it used to wait for the
+        // pointer's next move; the landing now asks the player to look again.
+        var artwork = new PngArtworkHandler { HoldSheets = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(WithStills(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            app.Player!.Pause();                  // the bar stays up while paused
+            session.PumpFrames(2);
+
+            var track = session.Window.FindByAutomationId("video-seek")!.Element.Layout.AbsoluteContentBox;
+            session.Window.MoveMouse(track.X + track.Width / 2f, track.Y + track.Height / 2f);
+            session.PumpFrames(2);
+            session.PumpUntil(() => { lock (artwork.Requested) return artwork.Requested.Any(r => r.Contains("/Trickplay/", StringComparison.Ordinal)); },
+                TimeSpan.FromSeconds(5));
+            Assert.Null(session.Window.FindByAutomationId("video-preview-card"));
+
+            artwork.HoldSheets!.SetResult();
+            session.PumpUntil(() => session.Window.FindByAutomationId("video-preview-card") is not null,
+                TimeSpan.FromSeconds(5));
         }, () => backend, artwork);
     }
 

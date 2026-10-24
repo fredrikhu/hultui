@@ -66,6 +66,16 @@ that comes or goes builds the player. A hover built the player on every frame th
 moved (about 42 KB a frame, headless) until plan 17's round 4; it now costs about 2 KB a
 frame, most of it the pointer events themselves.
 
+**A still that arrives later.** A provider that answers from a cache has no answer at first
+for a point it has not made or fetched yet. When that still arrives, call
+`VideoPlayer.RefreshPreview()` on the UI thread (post it from the worker): the player asks
+again for the point being hovered and shows the answer without the pointer having to move,
+in the card already on screen where it can. It does nothing while nothing is hovered, so call
+it for every still. Do not rebuild your app for it: the card belongs to the player, which an
+app's build does not rebuild. Reel did that for each of a file's 120 stills (2 KB a still, 6 KB
+with a screen reader, headless), and a pointer resting on the scrubber still saw a new still
+only when it next moved; Aperture's sprite sheets had the same gap.
+
 **Chapters on the scrubber.** `VideoPlayer.ChapterMarks` is the list of positions where
 chapters start; the player cuts the scrubber into one piece per chapter and leaves it alone
 when the list is empty. It knows nothing else about chapters — the app hands over the marks
@@ -184,6 +194,9 @@ menu, full-screen button) that appears on pointer movement and fades out.
 | `FocusPicture()` | | hands the keyboard to the picture so the transport keys work without clicking it first. Takes effect on a later build when called before the player is mounted — a component's first build runs in its constructor, where there is no focus manager to ask |
 | `FullscreenRequested`, `IsFullscreen` | | the component knows no window: it raises the event and you set the flag once you have done whatever full screen means for the app. `Window.SetFullscreen` / `ToggleFullscreen` is the borderless kind — the window covers its display with no chrome and the display mode is left alone. An app that draws its own title bar must stop drawing it while `Window.IsFullscreen`; maximizing instead leaves the task bar over the picture |
 | `ControlsVisible` | | true whenever paused |
+| `PreviewFrame`, `PreviewWidth` | null, 176 | the still over the scrubber, asked for the hovered position (see Scrubber previews above) |
+| `RefreshPreview()` | | asks `PreviewFrame` again for the hovered position: call it when a still the provider had no answer for arrives, so a pointer resting on the scrubber sees it. Nothing while nothing is hovered; UI thread |
+| `ChapterMarks` | empty | where chapters start; cuts the scrubber into pieces |
 
 Keys: Space or K play/pause, Left/Right and J/L seek, Up/Down volume, M mute, F full
 screen, Home/End, 0–9 jump to that tenth. Theme through `VideoPlayerTheme`

@@ -9,6 +9,7 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 using HultUI.Icons;
 
 namespace HultUI.Media;
@@ -495,6 +496,23 @@ public sealed class VideoPlayer : Component
         float left = centre - cardWidth / 2f;
         if (rootWidth > cardWidth) left = Math.Clamp(left, 4f, rootWidth - cardWidth - 4f);
         return MathF.Max(0f, left);
+    }
+
+    /// <summary>
+    /// Asks <see cref="PreviewFrame"/> again for the point the scrubber is hovered at and shows
+    /// the answer without the pointer having to move: the card comes, takes a nearer still, or
+    /// goes. Call it when a still the provider had no answer for arrives — Reel makes its stills
+    /// in the background, Aperture downloads sprite sheets — or the card waits for the pointer's
+    /// next move. Rebuilding the app does not do it: the card is this component's.
+    ///
+    /// <para>Nothing happens while the scrubber is not hovered or the bar is hidden, so calling
+    /// it for every still that lands costs next to nothing. Call it on the UI thread.</para>
+    /// </summary>
+    public void RefreshPreview()
+    {
+        UIThread.VerifyAccess("VideoPlayer.RefreshPreview");
+        if (_previewAt is null) return;
+        ShowPreview();
     }
 
     /// <summary>The scrubber's report of the position under the pointer: once per frame drawn

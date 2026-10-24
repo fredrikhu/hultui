@@ -251,6 +251,76 @@ public class VideoPreviewTests
         Assert.Null(f.Card);
     }
 
+    /// <summary>A still the app had no answer for arrives while the pointer rests on the track:
+    /// nothing asks again until the pointer moves, unless the app says so. Reel's background
+    /// decoder and Aperture's sheet downloads land this way.</summary>
+    [Fact]
+    public void RefreshPreview_ShowsAStillThatArrivedUnderARestingPointer_AndTheNextOneInPlace()
+    {
+        StubImage? arrived = null;
+        using var f = new Fixture(_ => arrived is { } still ? new VideoPreviewFrame(still, null, TimeSpan.FromMinutes(1)) : null);
+        f.HoverScrubber(0.3);
+        Assert.Null(f.Card);
+
+        arrived = new StubImage(new Size(320, 180));
+        f.Session.PumpFrames(2);
+        Assert.Null(f.Card);              // nobody asked again
+
+        f.VideoPlayer.RefreshPreview();
+        f.Session.PumpFrame();
+        var card = f.Card?.Element;
+        Assert.NotNull(card);
+        Assert.True(Shows(f.Session, "1:00"), f.Session.Window.DumpAccessibilityTree());
+
+        // A nearer still: the card on screen takes it, without a build.
+        int builds = f.VideoPlayer.Builds;
+        var nearer = new StubImage(new Size(320, 180));
+        arrived = nearer;
+        f.VideoPlayer.RefreshPreview();
+        f.Session.PumpFrame();
+        Assert.Same(card, f.Card!.Element);
+        Assert.Same(nearer, card!.Children.OfType<Core.Elements.ImageElement>().Single().Source);
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+    }
+
+    [Fact]
+    public void RefreshPreview_WithNothingHovered_AsksNothingAndBuildsNothing()
+    {
+        var (_, frames) = EveryMinute();
+        using var f = new Fixture(frames);
+        int builds = f.VideoPlayer.Builds;
+
+        for (int i = 0; i < 120; i++) f.VideoPlayer.RefreshPreview();
+        f.Session.PumpFrames(2);
+
+        Assert.Empty(f.Asked);
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+        Assert.Null(f.Card);
+    }
+
+    [Fact]
+    public void RefreshPreview_UnderAHiddenBar_BuildsNothing()
+    {
+        // The bar has faded with the pointer resting on the track: a still arriving then has no
+        // card to go in, and is not a reason to build the player.
+        var (_, frames) = EveryMinute();
+        using var f = new Fixture(frames);
+        f.VideoPlayer.AutoHideControls = true;
+        f.VideoPlayer.AutoHideDelay = TimeSpan.FromMilliseconds(100);
+        f.VideoPlayer.FadeDuration = TimeSpan.FromMilliseconds(50);
+        f.Player.Play();
+        f.HoverScrubber(0.4);
+        f.Session.PumpUntil(() => !f.VideoPlayer.ControlsVisible, TimeSpan.FromSeconds(5));
+        f.Session.PumpFrames(2);
+        int builds = f.VideoPlayer.Builds;
+
+        for (int i = 0; i < 10; i++) f.VideoPlayer.RefreshPreview();
+        f.Session.PumpFrames(2);
+
+        Assert.Equal(builds, f.VideoPlayer.Builds);
+        Assert.Null(f.Card);
+    }
+
     private static bool Shows(HeadlessSession session, string text)
     {
         var dump = session.Window.DumpAccessibilityTree();

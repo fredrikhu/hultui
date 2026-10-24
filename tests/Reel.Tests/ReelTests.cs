@@ -788,4 +788,41 @@ public class ReelTests : IDisposable
         Assert.EndsWith("b.mkv", app.CurrentFile);
         Assert.Equal("12:00", CardTime(session));
     }
+
+    [Fact]
+    public void AStillLandingUnderAPointerRestingOnTheScrubber_ShowsAtOnce_AndRebuildsNothingElse()
+    {
+        // A still used to rebuild the whole app as it landed, which never rebuilt the player that
+        // shows the card: 120 app builds a file for nothing, and a pointer resting on the
+        // scrubber saw a new still only when it next moved. The player now asks again itself.
+        var path = File_("film.mkv");
+        var (session, app, _) = Host();
+        using var _s = session;
+        var stills = new HeldStills();
+        app.ScrubFrameSource = () => stills;
+        app.Open(path);
+        session.PumpFrames(4);
+        app.Player!.Pause();                  // the bar stays up while paused
+        session.PumpFrames(2);
+        RestOnTheScrubber(session);
+        Assert.Null(CardTime(session));       // no still yet: no card
+        int builds = app.Builds;
+
+        // The first three (0:00, 0:12, 0:24): the card comes with the nearest to 12:00.
+        stills.Let(3);
+        session.PumpUntil(() => CardTime(session) == "0:24", TimeSpan.FromSeconds(10));
+
+        // The one for 12:00 itself: the card on screen takes it, the pointer never having moved.
+        stills.Let(58);
+        session.PumpUntil(() => CardTime(session) == "12:00", TimeSpan.FromSeconds(10));
+
+        // And the rest of the file: 120 stills, not one build of the app.
+        stills.Let(59);
+        session.PumpUntil(() => app.VideoPlayer!.PreviewFrame?.Invoke(TimeSpan.FromMinutes(24))?.Time
+            == TimeSpan.FromSeconds(119 * 12), TimeSpan.FromSeconds(10));
+        session.PumpFrames(3);
+        Assert.Equal(120, stills.Made);
+        Assert.Equal(builds, app.Builds);
+        Assert.Equal("12:00", CardTime(session));
+    }
 }
