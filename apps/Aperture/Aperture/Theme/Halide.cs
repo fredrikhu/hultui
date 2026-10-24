@@ -84,10 +84,12 @@ public static class Halide
     public static readonly Color HoverAccent = Alpha(Hex("#E8A33D"), 0.10);
 
     /// <summary>The scrim under text laid over artwork — a hero backdrop, a card's caption.
-    /// Two stops of black so a bright still never eats its own title.</summary>
+    /// Two stops of black so a bright still never eats its own title. The horizontal one
+    /// covers only part of the hero, so it fades out to nothing where it ends: at 15 % it
+    /// left a seam down the picture.</summary>
     public static Gradient BackdropScrim(bool vertical = true) => vertical
         ? Gradient.Vertical(Alpha(Bg, 0.10), Alpha(Bg, 0.97))
-        : Gradient.Horizontal(Alpha(Bg, 0.96), Alpha(Bg, 0.15));
+        : Gradient.Horizontal(Alpha(Bg, 0.96), Alpha(Bg, 0));
 
     /// <summary>Maps Halide onto the framework theme: buttons, menus, inputs, toasts.</summary>
     public static HultUI.Core.Styling.Theme ToHultTheme() => new()

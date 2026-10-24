@@ -2080,6 +2080,46 @@ public class ApertureAppHostTests
         }, artwork: artwork);
     }
 
+    /// <summary>
+    /// The scrim in from the hero's left covers 70 % of it and fades out on the way: it ended at
+    /// 15 % of the ground's colour, so where it stopped the picture brightened at once, a seam
+    /// down the hero (luma 144 → 169 on a real film's backdrop). It ends at nothing.
+    /// </summary>
+    [Fact]
+    public void TheHerosLeftScrimFadesOutWithoutASeam()
+    {
+        var library = Library();
+        library.Update(library.Item("m1")! with { BackdropImageTag = "bd-m1" });
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: > 400f },
+                TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+
+            // A row across the scrim's right edge, high in the hero, where only the picture (one
+            // flat colour here) and the two scrims are.
+            var box = LayoutProbe.Painted(Hero(session)!);
+            float edge = box.X + box.Width * 0.7f;
+            int y = (int)(box.Y + box.Height * 0.2f);
+            using var image = session.Window.CapturePixels();
+            using var bitmap = SkiaSharp.SKBitmap.FromImage(image);
+            int largest = 0, at = 0;
+            for (int x = (int)edge - 12; x < (int)edge + 12; x++)
+            {
+                SkiaSharp.SKColor a = bitmap.GetPixel(x, y), b = bitmap.GetPixel(x + 1, y);
+                int step = Math.Max(Math.Abs(a.Red - b.Red), Math.Max(Math.Abs(a.Green - b.Green), Math.Abs(a.Blue - b.Blue)));
+                if (step > largest) (largest, at) = (step, x);
+            }
+            // Past the edge the hero is as at its far right: the scrim really ends here.
+            SkiaSharp.SKColor past = bitmap.GetPixel((int)edge + 20, y), far = bitmap.GetPixel((int)(box.X + box.Width) - 10, y);
+            Assert.True(Math.Abs(past.Red - far.Red) <= 1 && Math.Abs(past.Green - far.Green) <= 1,
+                $"past the scrim's edge the hero is {past}, at its far right {far}");
+            Assert.True(largest <= 2, $"the hero brightens by {largest} levels from {bitmap.GetPixel(at, y)} at x {at} to {bitmap.GetPixel(at + 1, y)} (the scrim ends at {edge:0.#})");
+        }, artwork: artwork);
+    }
+
     // ── Streaming quality ────────────────────────────────────────────────
 
     [Fact]
