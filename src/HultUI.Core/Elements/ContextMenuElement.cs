@@ -24,6 +24,12 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
     // Cached item layout (computed during Render, reused for hit-testing)
     private float[] _itemYOffsets = [];
     private float[] _itemHeights = [];
+
+    // Each label's height, measured on the first frame and again only when the text style
+    // changes: a hover frame of a long menu measured every row again.
+    private float[] _textHeights = [];
+    private ResolvedInheritedStyle _measuredStyle;
+    private bool _measured;
     private float _computedWidth;
 
     public ContextMenuElement(IReadOnlyList<ContextMenuItem> items, ContextMenuTheme theme, Action closeMenu)
@@ -309,13 +315,30 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         {
             _itemYOffsets = new float[_items.Count];
             _itemHeights = new float[_items.Count];
+            _textHeights = new float[_items.Count];
+            _measured = false;
         }
+        bool measure = !_measured || _measuredStyle != itemStyle;
+        _measured = true;
+        _measuredStyle = itemStyle;
 
         float y = _theme.Padding.Top;
         float contentWidth = box.Width;
         _computedWidth = contentWidth;
 
         ctx.PushClip(box);
+
+        // What the clips leave visible. A long menu runs past the window's edge (a dropdown of a
+        // few hundred branches is as tall as its rows): its rows out there are laid out, since
+        // hit-testing, keyboard moves, a flyout's anchor and the accessible items read every
+        // row's place, but not drawn. A 200-item dropdown drew all 200 labels every frame it was
+        // open, 172 of them below the window (plan 17, round 4).
+        float visibleTop = float.NegativeInfinity, visibleBottom = float.PositiveInfinity;
+        if (ctx.ClipBounds is { } clip)
+        {
+            visibleTop = clip.Y;
+            visibleBottom = clip.Bottom;
+        }
 
         for (int i = 0; i < _items.Count; i++)
         {
@@ -326,18 +349,27 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             {
                 float sepHeight = _theme.SeparatorMargin * 2 + 1;
                 _itemHeights[i] = sepHeight;
-                float lineY = box.Y + y + _theme.SeparatorMargin;
-                ctx.DrawLine(
-                    new Point(box.X + _theme.ItemPadding.Left, lineY),
-                    new Point(box.X + contentWidth - _theme.ItemPadding.Right, lineY),
-                    _theme.SeparatorColor, 1f);
+                if (box.Y + y + sepHeight > visibleTop && box.Y + y < visibleBottom)
+                {
+                    float lineY = box.Y + y + _theme.SeparatorMargin;
+                    ctx.DrawLine(
+                        new Point(box.X + _theme.ItemPadding.Left, lineY),
+                        new Point(box.X + contentWidth - _theme.ItemPadding.Right, lineY),
+                        _theme.SeparatorColor, 1f);
+                }
                 y += sepHeight;
                 continue;
             }
 
-            var textSize = ctx.MeasureText(item.Label, itemStyle);
-            float itemHeight = _theme.ItemPadding.Top + textSize.Height + _theme.ItemPadding.Bottom;
+            if (measure) _textHeights[i] = ctx.MeasureText(item.Label, itemStyle).Height;
+            float textHeight = _textHeights[i];
+            float itemHeight = _theme.ItemPadding.Top + textHeight + _theme.ItemPadding.Bottom;
             _itemHeights[i] = itemHeight;
+            if (box.Y + y + itemHeight <= visibleTop || box.Y + y >= visibleBottom)
+            {
+                y += itemHeight;
+                continue;
+            }
 
             // Hover highlight (the open submenu's parent stays highlighted). Inset by the
             // border at least: the menu's own 1px edge is drawn inside the box, and a theme
@@ -364,7 +396,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                     box.X + _theme.ItemPadding.Left,
                     box.Y + y + _theme.ItemPadding.Top,
                     iconCol - _theme.IconGap,
-                    textSize.Height);
+                    textHeight);
                 // Artwork wins over the text glyph; it is asked for the same colour the
                 // label resolved to, so disabled and danger items stay consistent.
                 if (item.Icon?.Invoke(labelStyle.TextColor) is { } icon)
@@ -378,7 +410,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 box.X + _theme.ItemPadding.Left + iconCol,
                 box.Y + y + _theme.ItemPadding.Top,
                 contentWidth - _theme.ItemPadding.Left - iconCol - _theme.ItemPadding.Right,
-                textSize.Height);
+                textHeight);
 
             ctx.DrawText(item.Label, labelRect, labelStyle, TextOverflow.Clip, 1);
 
@@ -392,7 +424,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 var hintSize = ctx.MeasureText(trailing, trailingStyle);
                 var hintRect = new Rect(
                     box.X + contentWidth - _theme.ItemPadding.Right - hintSize.Width,
-                    box.Y + y + _theme.ItemPadding.Top + (textSize.Height - hintSize.Height) / 2,
+                    box.Y + y + _theme.ItemPadding.Top + (textHeight - hintSize.Height) / 2,
                     hintSize.Width,
                     hintSize.Height);
                 ctx.DrawText(trailing, hintRect, trailingStyle, TextOverflow.Clip, 1);
