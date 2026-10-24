@@ -182,6 +182,30 @@ public sealed class A11yTextCaretPatchTests : IDisposable
     }
 
     [Fact]
+    public void AReadOnlySwitch_ReachesTheTextAReaderReads_WithNoTreeBuilt_AndTellsNothing()
+    {
+        // ReadOnly marked paint only: the applied tree kept the version taken before it, and a
+        // reader's thread was answered "editable" until something else rebuilt the tree.
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var (editor, _) = Mount(session);
+        int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
+
+        editor.ReadOnly = true;
+        session.PumpFrame();
+        Assert.True(Task.Run(() => editor.AccessibleTextSource!.AccessibleText!.IsReadOnly).Result);
+        Assert.True(NodeOf(bridge.CurrentTree!, editor).Text!.IsReadOnly);
+
+        editor.ReadOnly = false;
+        session.PumpFrame();
+        Assert.False(Task.Run(() => editor.AccessibleTextSource!.AccessibleText!.IsReadOnly).Result);
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Empty(bridge.Diffs);
+    }
+
+    [Fact]
     public void AListAndACaretMovedInOneFrame_AreToldInTreeOrder_InOnePatch()
     {
         using var session = HeadlessSession.Create(600, 600);
