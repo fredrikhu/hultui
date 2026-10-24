@@ -437,6 +437,12 @@ public partial class JunctionApp
     // of the outdated threads listed after the diff.
     private enum DiffRowType : byte { Hunk, Unified, Split, Thread, Composer, Section }
 
+    /// <summary>What the review's caret and range make of a line row: its gutter lit, its
+    /// background banded. Part of the row, so a caret move changes the two rows it moves
+    /// between and the list makes those again and keeps the rest.</summary>
+    [Flags]
+    private enum ReviewMark : byte { None = 0, Caret = 1, InRange = 2 }
+
     private sealed record DiffRow
     {
         public DiffRowType Type { get; init; }
@@ -449,6 +455,8 @@ public partial class JunctionApp
         /// <summary>Where this line sits for GitLab: side, numbers, line code. Only while reviewing.</summary>
         public ReviewLine? Review { get; init; }
         public ThreadView? Thread { get; init; }
+        /// <summary>The review's caret and range on this line row (see ReviewRowsFor).</summary>
+        public ReviewMark Mark { get; init; }
         public string Hunk { get; init; } = "";
         public GitDiffHunk? HunkRef { get; init; }   // set on Hunk rows, for hunk-level staging
         public GitDiffLine? Line { get; init; }   // unified
@@ -477,13 +485,13 @@ public partial class JunctionApp
         // cards need a row to follow.
         var review = ReviewRowsActive ? _review : null;
         var rows = FlattenedRows(diff, _diffSplit && review is null, hl);
+        // The review weaves its cards in and gives each line its position, into a list of its
+        // own (the flattened rows are kept as they are for the next build), and marks the caret
+        // and range on it. A caret or range move keeps that list and changes only the rows whose
+        // marks moved; anything else weaves again.
+        bool reviewMarksOnly = false;
         if (review is not null)
-        {
-            // The review weaves its cards in and gives each line its position, into a list of
-            // its own: the flattened rows are kept as they are for the next build.
-            rows = WithReviewRows(diff, new List<DiffRow>(rows), review);
-            for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
-        }
+            rows = ReviewRowsFor(diff, rows, review, out reviewMarksOnly);
         BindDiffSelection(diff, rows);
         BindDiffSearch(diff, rows);
 
@@ -528,13 +536,14 @@ public partial class JunctionApp
         // a keystroke elsewhere in the window makes no row again. Everything else a row shows is
         // gathered here, and when any of it moves the rows on screen are made again: the staging
         // marks, find's tints, wrapping, the sideways offset baked into the code cells, the code
-        // face, size and tab width, the colour scheme. The review's rows read its caret, range,
-        // composer and threads, so while reviewing they are made again on every build, as all
-        // rows were before.
+        // face, size and tab width, the colour scheme. The review's cards read its composer and
+        // threads, so while reviewing the rows are made again on every build that wove them
+        // again; a caret or range move only changes the marks of the line rows it moved
+        // between, which their items carry.
         var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
             Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
         // `|`, not `||`: the staging snapshot is brought up to date either way.
-        if (DiffStageSelectionChanged() | rowShape != _diffRowShape || review is not null)
+        if (DiffStageSelectionChanged() | rowShape != _diffRowShape || (review is not null && !reviewMarksOnly))
         {
             // Only the list this build patches: another file's list is replaced, rows and all.
             if (_diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } mounted && k == listKey)
@@ -549,7 +558,9 @@ public partial class JunctionApp
             .RenderWith((r, _) => RenderDiffRow(r, interact))
             // Named for assistive technology by what each row says ("added, line 12: …").
             // Unset, every row was read out as the DiffRow record's ToString().
-            .AccessibleItemLabel(review is null ? _diffRows!.Label : RowLabels(rows))
+            // The review's label reads its item alone: one delegate, so the list keeps each
+            // row's label while the row is the same (a new one each build dropped them all).
+            .AccessibleItemLabel(review is null ? _diffRows!.Label : _reviewRowLabel ??= DiffRowLabel)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Unwrapped every row is the same height and the list does its own arithmetic; only
@@ -932,15 +943,8 @@ public partial class JunctionApp
 
     // ── What a reader hears for a row ────────────────────────────────────
 
-    /// <summary>Item labels for the review's woven rows, which are new each build: made when
-    /// first asked for, kept for the build.</summary>
-    private static Func<DiffRow, string?> RowLabels(List<DiffRow> rows)
-    {
-        string?[]? labels = null;
-        return r => (uint)r.Index < (uint)rows.Count
-            ? (labels ??= new string?[rows.Count])[r.Index] ??= DiffRowLabel(r)
-            : DiffRowLabel(r);
-    }
+    /// <summary>The review's item label: a row as a reader hears it, from the row alone.</summary>
+    private Func<DiffRow, string?>? _reviewRowLabel;
 
     /// <summary>A row as a screen reader says it: what happened to the line, its number in
     /// the file it belongs to, and its text (the hunk header as git writes it; a thread by
@@ -1111,10 +1115,11 @@ public partial class JunctionApp
         bool selected = selectable && _stageSel.Contains(line);
         if (selected) bg = Nocturne.Alpha(Nocturne.Accent, 0.22);
 
-        // Reviewing: the range band takes the row, the caret lights its gutter.
+        // Reviewing: the range band takes the row, the caret lights its gutter — as the row's
+        // marks say, which is what lets the list keep a row the caret did not touch.
         var review = model?.Review is not null && ReviewRowsActive ? _review : null;
-        bool inRange = review?.Range is { } range && model!.LineIndex >= range.From && model.LineIndex <= range.To;
-        bool caret = review is not null && review.Caret == model!.LineIndex;
+        bool inRange = review is not null && (model!.Mark & ReviewMark.InRange) != 0;
+        bool caret = review is not null && (model!.Mark & ReviewMark.Caret) != 0;
         if (inRange) bg = Nocturne.Accent900;
 
         // Stretch, so the code label can fill the row's height. Centred, the label was only
