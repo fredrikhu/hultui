@@ -40,8 +40,14 @@ internal sealed class WindowsPlainFullscreen(IntPtr hwnd)
     private const int SW_RESTORE = 9;
 
     private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_NOOWNERZORDER = 0x0200;
     private const uint SWP_FRAMECHANGED = 0x0020;
+
+    /// <summary>Covering the monitor and coming back move and size the window, and leave its
+    /// activation as it was: an active window stays active, and one told not to activate (a
+    /// hidden one, or one shown with <c>SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN=0</c>) is not.</summary>
+    private const uint MoveFlags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED;
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
 
@@ -92,7 +98,7 @@ internal sealed class WindowsPlainFullscreen(IntPtr hwnd)
                 m.Left - FullscreenOverscan, m.Top - FullscreenOverscan,
                 m.Right - m.Left + FullscreenOverscan * 2,
                 m.Bottom - m.Top + FullscreenOverscan * 2,
-                SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                MoveFlags);
         }
         else
         {
@@ -101,7 +107,7 @@ internal sealed class WindowsPlainFullscreen(IntPtr hwnd)
 
             var r = _rectBeforeFullscreen;
             SetWindowPos(_hwnd, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top,
-                SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                MoveFlags);
             // The window was maximized when full screen took over, so put that back too.
             if (_zoomedBeforeFullscreen) ShowWindow(_hwnd, SW_MAXIMIZE);
         }

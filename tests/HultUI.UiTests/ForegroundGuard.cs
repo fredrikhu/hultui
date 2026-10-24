@@ -27,16 +27,29 @@ internal sealed unsafe class ForegroundGuard : IDisposable
     private static int _refused;
 
     private readonly Thread? _watcher;
+    private readonly bool _withoutTheHint;
     private volatile bool _stopped;
     private int _taken;
     private nint _previous;
 
     /// <summary>Starts guarding the calling thread's windows, before the test makes any.</summary>
-    public static ForegroundGuard Begin() => new();
+    public static ForegroundGuard Begin() => new(withoutTheHint: false);
 
-    private ForegroundGuard()
+    /// <summary>
+    /// The guard without the SDL hint: SDL and the framework act as they do in a real app, which
+    /// leaves the hint unset, and only the hook and the watcher keep the windows back. For a test
+    /// that shows what an app does without the hint; every other test uses <see cref="Begin"/>.
+    /// The hint is back to "0" when the guard is disposed.
+    /// </summary>
+    public static ForegroundGuard BeginWithoutTheHint() => new(withoutTheHint: true);
+
+    private ForegroundGuard(bool withoutTheHint)
     {
-        SDL.SDL3.SDL_SetHint(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+        _withoutTheHint = withoutTheHint;
+        // Override: an SDL_WINDOW_ACTIVATE_WHEN_SHOWN in the environment wins over a hint set at
+        // normal priority, and "1" is what SDL assumes when nothing is set.
+        SDL.SDL3.SDL_SetHintWithPriority(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN,
+            withoutTheHint ? "1" : "0", SDL.SDL_HintPriority.SDL_HINT_OVERRIDE);
         if (!OperatingSystem.IsWindows()) return;
         _previous = GetForegroundWindow();
         delegate* unmanaged[Stdcall]<int, nint, nint, nint> proc = &Proc;
@@ -71,6 +84,9 @@ internal sealed unsafe class ForegroundGuard : IDisposable
 
     public void Dispose()
     {
+        if (_withoutTheHint)
+            SDL.SDL3.SDL_SetHintWithPriority(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0",
+                SDL.SDL_HintPriority.SDL_HINT_OVERRIDE);
         if (!OperatingSystem.IsWindows()) return;
         _stopped = true;
         _watcher?.Join();

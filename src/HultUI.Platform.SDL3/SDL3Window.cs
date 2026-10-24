@@ -939,17 +939,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     // With the Windows custom frame installed, SDL_MaximizeWindow/SDL_RestoreWindow
     // only flip SDL's maximized flag without resizing the window, so route through
-    // the frame's native WM_SYSCOMMAND path instead.
+    // the frame's native WM_SYSCOMMAND path instead (posted; the frame refuses the
+    // activation when it runs). Both activate the window on Windows, which an app told
+    // not to activate when shown must not do (see WindowsActivation).
     public void Maximize()
     {
         if (OperatingSystem.IsWindows() && _customFrame is { } frame) frame.Maximize();
-        else SDL_MaximizeWindow(_window);
+        else
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            SDL_MaximizeWindow(_window);
+        }
     }
 
     public void Restore()
     {
         if (OperatingSystem.IsWindows() && _customFrame is { } frame) frame.Restore();
-        else SDL_RestoreWindow(_window);
+        else
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            SDL_RestoreWindow(_window);
+        }
     }
 
     public void Raise()
@@ -1007,6 +1017,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public void SetFullscreen(bool fullscreen)
     {
         if (_window == null || IsFullscreen == fullscreen) return;
+        // A maximized window is restored first and maximized again on the way out, and both
+        // activate it (see WindowsActivation).
+        using var quiet = WindowsActivation.RefuseIfUnwanted();
 
         // Windows: the custom frame owns this one. SDL's fullscreen makes the window a
         // popup exactly the size of the monitor, which is the shape the display driver
@@ -1121,6 +1134,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         set
         {
             if (_window == null || value is not { IsUsable: true }) return;
+            // Leaving maximized or full screen, and a maximized placement, activate the window
+            // (see WindowsActivation).
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
             var live = LiveResizeFrame;
             LiveResizeFrame = null;
             try

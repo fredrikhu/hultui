@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Platform.SDL3.Tests" />
+    <!-- WindowStateActivationTests reads WindowsActivation.Refused. -->
+    <InternalsVisibleTo Include="HultUI.UiTests" />
   </ItemGroup>
 
   <ItemGroup>

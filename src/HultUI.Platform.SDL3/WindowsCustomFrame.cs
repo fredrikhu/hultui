@@ -103,6 +103,10 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const uint InstallFlags =
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED;
 
+    /// <summary>Full screen's moves, over the monitor and back: activation left as it was, as
+    /// for the install (an active window stays active).</summary>
+    private const uint MoveFlags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED;
+
     private const uint TME_LEAVE = 0x0002;
     private const uint TME_NONCLIENT = 0x0010;
 
@@ -230,14 +234,14 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
                 m.Left - FullscreenOverscan, m.Top - FullscreenOverscan,
                 m.Right - m.Left + FullscreenOverscan * 2,
                 m.Bottom - m.Top + FullscreenOverscan * 2,
-                SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                MoveFlags);
         }
         else
         {
             IsFullscreen = false;
             var r = _rectBeforeFullscreen;
             SetWindowPos(_hwnd, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top,
-                SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                MoveFlags);
             // The window was maximized when full screen took over, so put that back too.
             if (_zoomedBeforeFullscreen) ShowWindow(_hwnd, SW_MAXIMIZE);
         }
@@ -343,6 +347,15 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
                 case WM_DWMCOMPOSITIONCHANGED:
                     frame.ExtendFrame();
                     break;
+
+                // Maximize and restore, posted by Maximize/Restore, the maximize button or the
+                // window menu, or sent by a caption double-click: DefWindowProc's ShowWindow
+                // activates the window, which one told not to activate when shown must not do.
+                case WM_SYSCOMMAND when IsMaximizeOrRestore(wParam) && WindowsActivation.Unwanted:
+                {
+                    using var quiet = WindowsActivation.RefuseIfUnwanted();
+                    return CallWindowProcW(frame._originalProc, hwnd, msg, wParam, lParam);
+                }
 
                 // The shell (when showing the Snap Layouts flyout) and assistive
                 // tech query the caption geometry through this; without WS_SYSMENU
@@ -597,6 +610,10 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     /// <inheritdoc cref="Maximize"/>
     public void Restore() => PostMessageW(_hwnd, WM_SYSCOMMAND, (UIntPtr)SC_RESTORE, IntPtr.Zero);
+
+    /// <summary>A system command's low four bits are Windows' own; the rest name it.</summary>
+    private static bool IsMaximizeOrRestore(UIntPtr wParam) =>
+        (wParam.ToUInt64() & 0xFFF0) is SC_MAXIMIZE or SC_RESTORE;
 
     private void ToggleMaximizeNative()
     {
