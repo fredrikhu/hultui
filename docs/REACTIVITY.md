@@ -343,6 +343,56 @@ the real loop, a position report every 100 ms) still builds each app 0 times; th
 allocates 22,130 → 22,158 B/s in Aperture (six reports) and 22,115 → 22,472 B/s in Reel (four
 settings writes), so a check that is not due costs nothing measurable.
 
+### Keep what a key does not change in a child component
+
+A rebuild makes everything its `Build()` makes. Junction's window was one component, so a key
+in History made the title bar, the sidebar and the toolbar again with the list: 128 KB of the
+182 KB a build made, for about 120 elements that show no selection. Put such parts in child
+components the parent makes once and hands to every build. A rebuild of the parent moves the
+kept host into its new tree and the reconciler puts it back; nothing inside it is built, and
+nothing around it is marked.
+
+```csharp
+private Part? _toolbar;
+private Part ToolbarPart => _toolbar ??= new Part(this, BuildToolbar);   // made once
+
+public override Element Build()
+{
+    var view = BuildView();
+    view.Key = "view";
+    // The host is the flex item where the toolbar's root used to be.
+    return Flex.Column(gap: 0).FlexGrow(1).Children(ToolbarPart.Mount().FlexShrink(0), view);
+}
+```
+
+Three things decide whether it stays right and stays cheap:
+
+- **What the part shows has to reach it.** A part rebuilds when a signal or loader its own
+  `Build()` read changes, not when its parent does. A plain field it reads (the active
+  repository, a setting, a width breakpoint) needs a signal the part reads and the parent
+  writes. Junction's parts read one `Signal<int>` that its `MarkDirty()` and `Rerender()`
+  bump, so every rebuild builds the chrome too, and only the paths that change nothing the
+  chrome shows — selection moves, cursors, typing in a field of the view, search boxes — call
+  `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a build;
+  forgetting to opt in shows a stale toolbar, so make the safe one the default.
+- **The host takes the root's place in the layout.** `Mount()` returns the `ComponentHost`, an
+  element between the parent and the part's root. Give it what the root had as a flex item
+  (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that
+  must fill its host `FlexGrow(1)` (the host is a column).
+- **Keep the parent's children keyed.** A keyed list puts a kept host back without marking the
+  parent (round 4, 59a11d7): no layout, and no structural change, which would make a window
+  with a listening screen reader build a whole new accessibility tree for the key. A host in an
+  unkeyed list, or alone in its parent, goes back the ordinary way and marks both.
+
+Junction with its chrome in three parts (5808d9f; headless, JIT, a 1,562-commit clone, a key
+and 8 frames): History 242.5 → 107.3 KB a key (−56 %), Branches 186.0 → 50.8 (−73 %), Tags
+230.3 → 95.2 (−59 %), Files 224.4 → 79.0 (−65 %), the Commit file list 230.3 → 95.1 (−59 %), a
+keystroke in the commit summary 201.9 → 66.7 (−67 %); the NativeAOT app −39…−68 % a key; the
+same accessibility trees a key with a reader. The perf suite pins the pattern:
+`component/list walk beside chrome built with it` (173.5 KB a step) against `… in kept parts`
+(35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
+as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
+
 ---
 
 ## Component Model
