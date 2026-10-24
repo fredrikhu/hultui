@@ -577,7 +577,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
   — so the mark is a state rather than a bullet inside the name. Any node with a toggle state
   now offers UIA's Toggle pattern whatever its role, and `Window.FindElement` searches open
   overlays, without which every accessibility action aimed at a menu or dialog was a silent
-  no-op.
+  no-op. **Fixed 2026-10-24 (plan 17 round 4):** opening or closing an overlay builds the tree in
+  the next frame. Nothing the frame looked at said it changed, so an overlay reached a reader only
+  when something else rebuilt the tree — usually the control's own expanded state (a dropdown's, a
+  date picker's), until a leaf's expanded state was patched without a rebuild, and never for a plain
+  overlay. Property changes inside an overlay still reach no observer (its content has no parent and
+  no observer of its own): an open menu or dialog is told again only by the next rebuild.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

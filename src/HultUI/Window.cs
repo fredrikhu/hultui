@@ -2994,7 +2994,21 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
         _overlays.Add(entry);
         _root?.MarkPaintDirty();
+        A11yOverlaysChanged(entry);
         return new OverlayHandle { Id = entry.Id };
+    }
+
+    /// <summary>
+    /// An overlay a reader sees (any but a tooltip, <see cref="BuildAccessibilityTreeWithOverlays"/>)
+    /// opened or closed: the accessibility tree's root has a child more or less, which no element's
+    /// flag says, so the next frame builds the tree. Opening one changed nothing the frame looked at:
+    /// the tree took it in when something else had it rebuilt, which was usually the control's own
+    /// expanded state (a dropdown's, a date picker's) — patched in place since plan 17's round 4, so
+    /// a dropdown's list never reached a reader; a plain overlay never did until then.
+    /// </summary>
+    private void A11yOverlaysChanged(OverlayEntry entry)
+    {
+        if (entry.IsHitTestable) _a11yPropertyDirty = true;
     }
 
     /// <summary>Puts an overlay at a point, and tells its tree where that is, so the window boxes
@@ -3038,6 +3052,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     {
         var entry = _overlays[index];
         _overlays.RemoveAt(index);
+        A11yOverlaysChanged(entry);
         if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
         _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);
 
