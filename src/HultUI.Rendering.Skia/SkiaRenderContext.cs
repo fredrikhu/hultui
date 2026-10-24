@@ -93,15 +93,27 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     internal long GlyphsDrawn { get; private set; }
 
     // How far each face's glyphs ink left and right of their origin, per unit of size: its
-    // bounding box and a slack (InkExtentOf). Null where the box cannot be trusted.
-    private readonly Dictionary<IResolvedFont, InkExtent?> _inkExtents = new(ReferenceEqualityComparer.Instance);
+    // bounding box and a slack (InkExtentOf), or, where Skia marks the box as a guess, each run's
+    // own glyphs (RunInkExtentOf); neither for a colour or bitmap face.
+    private readonly Dictionary<IResolvedFont, FaceInk> _inkExtents = new(ReferenceEqualityComparer.Instance);
     internal readonly record struct InkExtent(float Left, float Right);
+    private readonly record struct FaceInk(InkExtent? Box, bool FromGlyphs, float Slack);
     private readonly SKFont _boundsFont = new() { LinearMetrics = true };
 
-    // Per spanned line: whether each run's glyphs are in X order (0 not asked yet, 1 yes, 2 no),
-    // and the margin in layout units that covers two device pixels under the canvas matrix
-    // (NaN: stretches draw whole runs).
+    // The extents of runs in faces whose box is a guess, from their glyphs' bounds: kept per run,
+    // like the sub-blobs, in a map made at the same bound with the first (~57 KB, once per context
+    // that draws such a spanned line). The bounds are read in pieces of a fixed size.
+    private Dictionary<ShapedRun, InkExtent>? _runInkExtents;
+    internal int CachedRunInkExtentCount => _runInkExtents?.Count ?? 0;
+    private const int BoundsPiece = 256;
+    private ushort[]? _boundsGlyphs;
+    private SKRect[]? _glyphBounds;
+
+    // Per spanned line, for each run: whether its glyphs are in X order (0 not asked yet, 1 yes,
+    // 2 no, 3 drawn whole: no extent is known) and its ink extent; and the margin in layout units
+    // that covers two device pixels under the canvas matrix (NaN: stretches draw whole runs).
     private byte[] _runXOrder = new byte[16];
+    private InkExtent[] _runInk = new InkExtent[16];
     private float _stretchMargin;
 
     // The same runs as glyph outlines, for TextAsOutlines.
@@ -988,7 +1000,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // small). Under perspective, or a matrix that collapses x, stretches draw whole runs.
     private void PrepareStretches(int runCount)
     {
-        if (_runXOrder.Length < runCount) _runXOrder = new byte[Math.Max(runCount, 2 * _runXOrder.Length)];
+        if (_runXOrder.Length < runCount)
+        {
+            _runXOrder = new byte[Math.Max(runCount, 2 * _runXOrder.Length)];
+            _runInk = new InkExtent[_runXOrder.Length];
+        }
         else Array.Clear(_runXOrder, 0, runCount);
 
         _stretchMargin = float.NaN;
@@ -1007,19 +1023,35 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     /// run-relative: drawn from a kept sub-blob of only the glyphs whose ink can reach the clip.
     /// The rest would be clipped away whole, so leaving them out changes no pixel; drawing every
     /// run whole under every stretch handed Skia its glyphs once per stretch (plan 17, round 3:
-    /// Junction's diff, 24,527 glyphs a hover frame). A glyph at X inks inside its face's extent
-    /// around X (<see cref="InkExtentOf"/>) and the margin; a face without a trustworthy extent
-    /// (colour emoji, bitmap strikes) draws the run whole, as does a part that is the whole run.
+    /// Junction's diff, 24,527 glyphs a hover frame). A glyph at X inks inside its run's extent
+    /// around X (<see cref="RunInkExtentOf"/>: its face's, or its glyphs' own where the face's box
+    /// is a guess) and the margin; a face with no extent (colour emoji, bitmap strikes) draws the
+    /// run whole, as does a part that is the whole run.
     /// </summary>
     private void DrawRunPart(ShapedRun run, int runIndex, float x, float y, float x0, float x1)
     {
-        if (float.IsNaN(_stretchMargin) || InkExtentOf(run.Font) is not { } ink)
+        if (float.IsNaN(_stretchMargin))
         {
             DrawRun(run, x, y);
             return;
         }
         var glyphs = run.Glyphs;
-        if (_runXOrder[runIndex] == 0) _runXOrder[runIndex] = GlyphRange.XOrdered(glyphs) ? (byte)1 : (byte)2;
+        // Once a line for each run: its extent, and whether its glyphs are in X order.
+        if (_runXOrder[runIndex] == 0)
+        {
+            if (RunInkExtentOf(run) is { } extent)
+            {
+                _runInk[runIndex] = extent;
+                _runXOrder[runIndex] = GlyphRange.XOrdered(glyphs) ? (byte)1 : (byte)2;
+            }
+            else _runXOrder[runIndex] = 3;
+        }
+        if (_runXOrder[runIndex] == 3)
+        {
+            DrawRun(run, x, y);
+            return;
+        }
+        var ink = _runInk[runIndex];
         float left = ink.Left * run.FontSize - _stretchMargin, right = ink.Right * run.FontSize + _stretchMargin;
         var (start, end) = GlyphRange.Reaching(glyphs, _runXOrder[runIndex] == 1, left, right, x0, x1);
         if (end <= start) return;   // no glyph inks this stretch: the whole run would draw nothing here
@@ -1078,13 +1110,68 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     /// unit of font size: the face's bounding box — what Skia itself culls whole blobs by — plus
     /// a slack for what the box leaves out (an eighth of the size; a quarter more for a slanted
     /// face, whose synthetic slant the box may not include). Null for a face whose box Skia marks
-    /// untrustworthy or that is empty, and for colour and bitmap faces (COLR, CBDT, sbix, SVG,
-    /// EBDT): their glyphs are images whose bounds are their own.
+    /// untrustworthy or that is empty — every variable font, whose box is its default instance's;
+    /// its runs give their own (<see cref="RunInkExtentOf"/>) — and for colour and bitmap faces
+    /// (COLR, CBDT, sbix, SVG, EBDT): their glyphs are images whose bounds are their own.
     /// </summary>
-    internal InkExtent? InkExtentOf(IResolvedFont font)
+    internal InkExtent? InkExtentOf(IResolvedFont font) => FaceInkOf(font).Box;
+
+    /// <summary>
+    /// How far left and right of its origin any glyph of <paramref name="run"/> can ink, per unit
+    /// of font size: its face's extent (<see cref="InkExtentOf"/>) or, for an outline face whose
+    /// box Skia marks as a guess (Cascadia Mono and Code, Segoe UI Variable, Bahnschrift, Noto
+    /// Sans on Fedora: variable fonts), the union of its own glyphs' bounds as Skia gives them for
+    /// that face, with the same slack. Read once per run and kept (at most
+    /// <see cref="RunBlobCacheMaxSize"/> runs, then the map starts over). Null where neither is
+    /// known: a colour or bitmap face, whose runs are drawn whole.
+    /// </summary>
+    internal InkExtent? RunInkExtentOf(ShapedRun run)
+    {
+        var face = FaceInkOf(run.Font);
+        if (!face.FromGlyphs) return face.Box;
+
+        var map = _runInkExtents ??= new Dictionary<ShapedRun, InkExtent>(RunBlobCacheMaxSize, ReferenceEqualityComparer.Instance);
+        if (map.TryGetValue(run, out var known)) return known;
+
+        // The bounds at 2048, as the face's box is taken, in one call for each piece of the run:
+        // a glyph Skia has metrics for already costs a lookup.
+        const float Size = 2048f;
+        var ids = _boundsGlyphs ??= new ushort[BoundsPiece];
+        var bounds = _glyphBounds ??= new SKRect[BoundsPiece];
+        _boundsFont.Typeface = (SKTypeface)run.Font.NativeHandle;
+        _boundsFont.Size = Size;
+        var glyphs = run.Glyphs;
+        float left = 0f, right = 0f;
+        for (int at = 0; at < glyphs.Length; at += BoundsPiece)
+        {
+            int n = Math.Min(BoundsPiece, glyphs.Length - at);
+            for (int i = 0; i < n; i++) ids[i] = (ushort)glyphs[at + i].GlyphId;
+            _boundsFont.GetGlyphWidths(ids.AsSpan(0, n), Span<float>.Empty, bounds.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+            {
+                var b = bounds[i];
+                if (b.IsEmpty) continue;
+                left = MathF.Min(left, b.Left);
+                right = MathF.Max(right, b.Right);
+            }
+        }
+        // A bound that is not a number reaches everywhere: every stretch then draws the run whole.
+        var extent = float.IsFinite(left) && float.IsFinite(right)
+            ? new InkExtent(left / Size - face.Slack, right / Size + face.Slack)
+            : new InkExtent(float.NegativeInfinity, float.PositiveInfinity);
+
+        if (map.Count >= RunBlobCacheMaxSize)
+            map.Clear();
+        map[run] = extent;
+        return extent;
+    }
+
+    // What the face's ink is known by: its box, its runs' glyphs (an outline face whose box is a
+    // guess), or neither (a colour or bitmap face, or one without outlines).
+    private FaceInk FaceInkOf(IResolvedFont font)
     {
         if (_inkExtents.TryGetValue(font, out var known)) return known;
-        InkExtent? extent = null;
+        var face = default(FaceInk);
         var typeface = (SKTypeface)font.NativeHandle;
         bool outlines = typeface.GetTableSize(Tag('g', 'l', 'y', 'f')) > 0
             || typeface.GetTableSize(Tag('C', 'F', 'F', ' ')) > 0 || typeface.GetTableSize(Tag('C', 'F', 'F', '2')) > 0;
@@ -1103,14 +1190,13 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             _boundsFont.GetFontMetrics(out var metrics);
             uint flags = System.Runtime.CompilerServices.Unsafe.As<SKFontMetrics, uint>(ref metrics);
             float xMin = metrics.XMin / Size, xMax = metrics.XMax / Size;
-            if ((flags & BoundsInvalid) == 0 && float.IsFinite(xMin) && float.IsFinite(xMax) && xMax > xMin)
-            {
-                float slack = typeface.FontSlant == SKFontStyleSlant.Upright ? 0.125f : 0.375f;
-                extent = new InkExtent(MathF.Min(xMin, 0f) - slack, MathF.Max(xMax, 0f) + slack);
-            }
+            float slack = typeface.FontSlant == SKFontStyleSlant.Upright ? 0.125f : 0.375f;
+            face = (flags & BoundsInvalid) == 0 && float.IsFinite(xMin) && float.IsFinite(xMax) && xMax > xMin
+                ? new FaceInk(new InkExtent(MathF.Min(xMin, 0f) - slack, MathF.Max(xMax, 0f) + slack), false, slack)
+                : new FaceInk(null, true, slack);
         }
-        _inkExtents[font] = extent;
-        return extent;
+        _inkExtents[font] = face;
+        return face;
 
         static uint Tag(char a, char b, char c, char d) => (uint)(a << 24 | b << 16 | c << 8 | d);
     }
