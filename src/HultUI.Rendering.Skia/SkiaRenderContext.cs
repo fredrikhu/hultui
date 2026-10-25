@@ -1819,7 +1819,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (_runBlobCache.TryGetValue(run, out var cached))
             return cached;
 
-        if (run.Glyphs.Length == 0)
+        // Read once: a run of several words puts its glyph array together on the first read.
+        var glyphs = run.Glyphs;
+        if (glyphs.Length == 0)
             return 0;
 
         var typeface = (SKTypeface)run.Font.NativeHandle;
@@ -1829,14 +1831,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // The raw buffer is a struct. AllocatePositionedRun hands out the same two spans in a
         // class, 56 B more per new blob wherever the compiler does not keep it on the stack:
         // NativeAOT's build of the perf suite heap-allocated it (scroll/jump 9.1 -> 6.3 KB/op).
-        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, run.Glyphs.Length);
+        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, glyphs.Length);
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 
-        for (int i = 0; i < run.Glyphs.Length; i++)
+        for (int i = 0; i < glyphs.Length; i++)
         {
-            glyphSpan[i] = (ushort)run.Glyphs[i].GlyphId;
-            positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
+            glyphSpan[i] = (ushort)glyphs[i].GlyphId;
+            positionSpan[i] = new SKPoint(glyphs[i].X, glyphs[i].Y);
         }
 
         nint blob = NativeTextBlob.Make(_blobBuilder);

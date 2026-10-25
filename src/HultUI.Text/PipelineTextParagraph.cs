@@ -119,7 +119,7 @@ public sealed class PipelineTextParagraph : TextParagraph
         // Indexed: Runs is an interface, and a foreach over it boxes an enumerator per call.
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
-            if (runs[i].Glyphs.Length != runs[i].Text.Length)
+            if (runs[i].GlyphCount != runs[i].Text.Length)
                 return _pipeline.PrefixMeasurer(Style);
         return null;
     }

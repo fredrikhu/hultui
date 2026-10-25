@@ -503,7 +503,7 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         for (int i = 0; i < rows.Length; i++)
         {
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
-            rows[i] = ctx.LayoutParagraph(text, style, 780, Thirds(text));
+            rows[i] = TextDrawAllocationTests.WithGlyphs(ctx.LayoutParagraph(text, style, 780, Thirds(text)));
         }
         ctx.BeginFrame(800, 100, 1f, Color.White);
         // A few rows first, so the measured ones fill a map that has not grown yet: a map made
@@ -576,7 +576,7 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         for (int i = 0; i < rows.Length; i++)
         {
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
-            rows[i] = ctx.LayoutParagraph(text, style, 780, Thirds(text));
+            rows[i] = TextDrawAllocationTests.WithGlyphs(ctx.LayoutParagraph(text, style, 780, Thirds(text)));
         }
         ctx.BeginFrame(800, 100, 1f, Color.White);
         int next = 0;

@@ -106,7 +106,7 @@ public sealed class TextPipeline
         {
             var runs = lines[i].Runs;
             for (int r = 0; r < runs.Count; r++)
-                glyphs += runs[r].Glyphs.Length;
+                glyphs += runs[r].GlyphCount;
         }
         return 16 * glyphs;
     }
@@ -1020,7 +1020,7 @@ public sealed class TextPipeline
         int bytes = 180;
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
-            bytes += 104 + 2 * runs[i].Text.Length + 16 * runs[i].Glyphs.Length;
+            bytes += 104 + 2 * runs[i].Text.Length + 16 * runs[i].GlyphCount;
         return bytes;
     }
 
@@ -2418,9 +2418,10 @@ public sealed class TextPipeline
         // first, and the caches' space-split assumptions are unproven for RTL
         // (Arabic joining does not cross spaces, but "likely sound" is not proven —
         // docs/plans/14-bidi.md). LTR text keeps every cache untouched.
+        // Spacing moves every glyph, so a spaced run needs its glyphs now.
         var run = rtl
             ? _shaper.Shape(text, font, fontSize, rtl: true)
-            : ShapeByWords(text, font, fontSize);
+            : ShapeByWords(text, font, fontSize, composeNow: letterSpacing != 0f);
         if (letterSpacing == 0f || run.Glyphs.Length == 0)
             return run;
 
@@ -2442,7 +2443,14 @@ public sealed class TextPipeline
     // segments, shaping each through the word cache, and concatenating. Single
     // segments (no space) go straight through the cache. Internal for the tests that
     // hold it to the segments shaped apart, and to what it allocates.
-    internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize)
+    //
+    // A run of several segments gets its width and its glyph count here, and its glyph array
+    // only when something reads it (ShapedRun.Glyphs, ComposeGlyphs): a paragraph's lines off
+    // screen, the single line of a text that wraps, and the layouts at each width a resize drag
+    // passes through are laid out and never drawn. Their glyphs were 59 % of what wrapping 150
+    // paragraphs allocated at each width, and 37 % of opening a 5,000-block rich text document
+    // (plan 17, round 5). composeNow makes the array now (letter spacing moves every glyph).
+    internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize, bool composeNow = false)
     {
         int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
         if (text.IndexOf(' ') < 0)
@@ -2455,6 +2463,24 @@ public sealed class TextPipeline
             if (wordGlyphs is null)
                 ComposeDigits(text, 0, text.Length, word.Digits!, 0f, wordGlyphs = new GlyphPosition[text.Length], 0);
             return new ShapedRun(text, font, fontSize, word.Width, wordGlyphs);
+        }
+
+        if (ComposeGlyphsWhenRead && !composeNow)
+        {
+            // The width as the composing pass below adds it up: the segments' widths, in order.
+            float width = 0;
+            int glyphCount = 0;
+            for (int i = 0; i < text.Length;)
+            {
+                bool isSpace = text[i] == ' ';
+                int start = i;
+                while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+                var word = ShapeSegment(text, start, i - start, font, fontSize, fontHash);
+                width += word.Width;
+                glyphCount += word.Glyphs;
+            }
+            if (glyphCount <= ushort.MaxValue)
+                return new ShapedRun(text, font, fontSize, width, (ushort)glyphCount, this);
         }
 
         // The segments first, counting their glyphs, then one array of exactly that many:
@@ -2495,6 +2521,51 @@ public sealed class TextPipeline
     // ShapeByWords' segments, between its two passes (one list per pipeline, as a pipeline is
     // used from one thread; nothing ShapeByWords calls comes back to it).
     private readonly List<WordShape> _words = new();
+
+    /// <summary>
+    /// The glyph array of a run ShapeByWords made without one, the first time it is read: the
+    /// same segments looked up again — a segment the word cache has let go of since is shaped
+    /// again, to the same glyphs — each segment's glyphs at the widths of the segments before
+    /// it, added in the order ShapeByWords added the run's width. So the array is the one
+    /// ShapeByWords would have made, to the bit. It uses nothing a call into the pipeline holds
+    /// between two of its steps (no scratch list, no paragraph), so it may run between any two.
+    /// </summary>
+    internal GlyphPosition[] ComposeGlyphs(ShapedRun run, int glyphCount)
+    {
+        string text = run.Text;
+        var font = run.Font;
+        float fontSize = run.FontSize;
+        int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
+        var glyphs = new GlyphPosition[glyphCount];
+        float x = 0;
+        int at = 0;
+        for (int i = 0; i < text.Length;)
+        {
+            bool isSpace = text[i] == ' ';
+            int start = i;
+            while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+            var word = ShapeSegment(text, start, i - start, font, fontSize, fontHash);
+            if (word.Run is { } shaped)
+            {
+                foreach (var g in shaped.Glyphs)
+                    glyphs[at++] = g with { X = g.X + x };
+            }
+            else
+            {
+                at = ComposeDigits(text, word.Start, word.Glyphs, word.Digits!, x, glyphs, at);
+            }
+            x += word.Width;
+        }
+        return glyphs;
+    }
+
+    /// <summary>
+    /// When false, ShapeByWords makes every run's glyph array with the run — the reference: the
+    /// same runs, glyphs and widths, made whether anything draws them or not. When true (the
+    /// default), a run of several segments makes its array the first time it is read
+    /// (<see cref="ShapedRun.Glyphs"/>). Tests hold the two to the same output.
+    /// </summary>
+    internal bool ComposeGlyphsWhenRead { get; init; } = true;
 
     /// <summary>
     /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for an

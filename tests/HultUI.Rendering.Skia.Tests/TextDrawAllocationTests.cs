@@ -50,6 +50,17 @@ public class TextDrawAllocationTests
         return surface;
     }
 
+    /// <summary>The paragraph with its glyph arrays made. A run of several words makes its array
+    /// the first time its glyphs are read (ShapedRun.Glyphs): what laying it out allocates, not
+    /// drawing it, which these tests measure.</summary>
+    internal static TextParagraph WithGlyphs(TextParagraph paragraph)
+    {
+        foreach (var line in ((HultUI.Text.PipelineTextParagraph)paragraph).TextLines)
+            foreach (var run in line.Runs)
+                _ = run.Glyphs;
+        return paragraph;
+    }
+
     /// <summary>Bytes this thread allocated per frame of <paramref name="draw"/>, once the
     /// caches are warm: the least of a few rounds.</summary>
     private static double AllocatedPerFrame(SkiaRasterRenderSurface surface, Action<IRenderContext> draw)
@@ -198,7 +209,7 @@ public class TextDrawAllocationTests
         const int Round = 500;
         var paragraphs = new TextParagraph[SkiaRenderContext.RunBlobCacheMaxSize + 1_000 + Allocations.MaxRounds * Round];
         for (int i = 0; i < paragraphs.Length; i++)
-            paragraphs[i] = ctx.LayoutParagraph($"Row {i:D5} of the list", style, 400);
+            paragraphs[i] = WithGlyphs(ctx.LayoutParagraph($"Row {i:D5} of the list", style, 400));
 
         ctx.BeginFrame(600, 400, 1f, Color.White);
         // Draw until the blob cache reaches its bound and empties: an emptied dictionary keeps
