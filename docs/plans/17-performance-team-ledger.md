@@ -7,7 +7,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 5
 - **Phase:** **PAUSED (user, 2026-10-25, during round 5 step 3).** Steps 1–2 landed; step 3 partly landed
   (91d48601 glyphs on first read, cc6f8467 line scratch). **On resume, finish step 3 first:** text-last-line-view is
-  saved as scratchpad `r5b3/last-line-view-wip.patch` (applies on cc6f8467; bit compare and pixels identical, text/wrap
+  saved as local branch `plan17/last-line-view-wip` (91bb4762, one commit on cc6f8467; never push or merge it as is; also scratchpad `r5b3/last-line-view-wip.patch`; bit compare and pixels identical, text/wrap
   −17 %, richtext open/resize −12 %); still to do: a filtered rerun of `component/edit one of 1,000 unkeyed rows`
   (+5.2 % JIT, likely noise), the remaining test projects, WSL, then commit and update the 2026-10-24 DECISIONS row
   about a wrap's last line. Also not yet run for 91d48601/cc6f8467: **WSL Fedora CrossPlatform.slnf** (Linux text
