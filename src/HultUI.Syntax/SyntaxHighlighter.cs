@@ -94,16 +94,16 @@ public static class SyntaxHighlighter
     // oversized files skip highlighting entirely, and a file that tokenizes
     // slowly gets whatever lines fit in the budget (the rest stay uncolored).
     private const int MaxChars = 2_000_000;
-    private static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(250);
+    internal static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan FileBudget = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// The most lines <see cref="TokenizeLines(string, string)"/> colours: a text with more
     /// gets no spans at all. A caller that tokenizes on a worker and can stop a tokenize it
     /// no longer wants may pass its own cap to
-    /// <see cref="TokenizeLines(string, string, int, CancellationToken)"/>; texts are still
-    /// held to 2,000,000 characters and three seconds, after which the remaining lines stay
-    /// uncoloured.
+    /// <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>; texts
+    /// are still held to 2,000,000 characters and three seconds, after which the remaining lines
+    /// stay uncoloured.
     /// </summary>
     public const int DefaultMaxLines = 20_000;
 
@@ -140,16 +140,32 @@ public static class SyntaxHighlighter
     /// is checked before every line, so a tokenize nobody wants any more — a newer response,
     /// a closed tab — throws <see cref="OperationCanceledException"/> within a line and lets
     /// the next one have the gate. Tokenizes run one at a time.
+    ///
+    /// <para><paramref name="clock"/> is what the three-second budget is measured on, the system
+    /// clock when null. An app passes its <c>Application.Time</c>: under a headless session that
+    /// clock stands still inside a frame, so no budget runs out there, and a test sees the whole
+    /// text's colour on every run rather than however much of it a busy machine got through.
+    /// TextMateSharp times each line on the wall clock itself, so on any clock but the system's
+    /// a line has no budget of its own either.</para>
     /// </summary>
     public static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text, int maxLines,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, TimeProvider? clock = null) =>
+        TokenizeLines(path, text, maxLines, cancellationToken, clock, wrap: null);
+
+    /// <summary><see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>
+    /// through a wrapper of the grammar, which a test uses to make a line run out of its
+    /// budget.</summary>
+    internal static IReadOnlyList<TextSpan>[]? TokenizeLines(string path, string text, int maxLines,
+        CancellationToken cancellationToken, TimeProvider? clock, Func<IGrammar, IGrammar>? wrap)
     {
         if (text.Length > MaxChars) return null;
         cancellationToken.ThrowIfCancellationRequested();
         lock (Gate)
         {
             var grammar = GrammarFor(path);
-            return grammar == null ? null : Tokenize(grammar, text, maxLines, cancellationToken);
+            if (grammar == null) return null;
+            return Tokenize(wrap is null ? grammar : wrap(grammar), text, maxLines,
+                clock ?? TimeProvider.System, cancellationToken);
         }
     }
 
@@ -304,26 +320,37 @@ public static class SyntaxHighlighter
     // ── Tokenization ─────────────────────────────────────────────────────
 
     private static IReadOnlyList<TextSpan>[]? Tokenize(IGrammar grammar, string text, int maxLines,
-        CancellationToken cancellationToken)
+        TimeProvider clock, CancellationToken cancellationToken)
     {
         var lines = SplitLines(text);
         if (lines.Count > maxLines) return null;
 
         var result = new IReadOnlyList<TextSpan>[lines.Count];
         IStateStack? state = null;
-        var sw = Stopwatch.StartNew();
+        long started = clock.GetTimestamp();
+        // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
+        var lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
         var spans = new List<TextSpan>(32);
 
         for (int i = 0; i < lines.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             result[i] = [];
-            if (sw.Elapsed > FileBudget) continue;
+            if (clock.GetElapsedTime(started) > FileBudget) continue;
 
+            long lineStarted = Stopwatch.GetTimestamp();
             ITokenizeLineResult tokenized;
-            try { tokenized = grammar.TokenizeLine(new LineText(lines[i]), state, LineBudget); }
+            try { tokenized = grammar.TokenizeLine(new LineText(lines[i]), state, lineBudget); }
             catch { continue; }   // a broken grammar rule shouldn't kill the whole file
-            state = tokenized.RuleStack;
+            // A line stopped at its budget hands back the state it stopped in, part-way through
+            // the line, inside a string say, and every line after it used to be tokenized from
+            // there: a JSON body's keys and values swapped colours to its last line. The result
+            // does not say it stopped (StoppedEarly is on TextMateSharp's internal type), so a
+            // line that took its whole budget is taken to have, and the next line starts from the
+            // state this one started in, as VS Code does. The stopped line keeps the colour found
+            // before the stop.
+            if (lineBudget == TimeSpan.MaxValue || Stopwatch.GetElapsedTime(lineStarted) < lineBudget)
+                state = tokenized.RuleStack;
 
             int lineLength = lines[i].Length;
             spans.Clear();

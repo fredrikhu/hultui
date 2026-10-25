@@ -367,7 +367,8 @@ public partial class MeridianApp
     // its text is ready and, past ResponseView.ColourWithTextMaxLines lines, takes its colour
     // when the tokenize lands. A newer response, the other mode, another tab or a closed tab
     // stops the job that is no longer wanted (its token), and a result that lands for one is
-    // dropped.
+    // dropped. The tokenize's time budget runs on the application's clock, so under a headless
+    // session a body's colour does not depend on how busy the machine is.
 
     private readonly AsyncLoader<ResponseView?> _respViews = new(null);
     private readonly AsyncLoader<ResponseColour?> _respColours = new(null);
@@ -411,7 +412,8 @@ public partial class MeridianApp
             job?.Stop.Cancel();
             job = _respJob = new ResponseJob(tab, response, raw);
             var token = job.Stop.Token;
-            _respViews.Load(job, () => FormatOnWorker(response, raw, token));
+            var clock = _app.Time;
+            _respViews.Load(job, () => FormatOnWorker(response, raw, clock, token));
         }
 
         // Reactive reads: the view or its colour landing rebuilds.
@@ -428,7 +430,8 @@ public partial class MeridianApp
             {
                 job.Colouring = true;
                 var token = job.Stop.Token;
-                _respColours.Load(job, () => ColourOnWorker(view, token));
+                var clock = _app.Time;
+                _respColours.Load(job, () => ColourOnWorker(view, clock, token));
             }
         }
 
@@ -446,15 +449,16 @@ public partial class MeridianApp
         return (view, spans, false);
     }
 
-    private static ResponseView? FormatOnWorker(HttpResponseData response, bool raw, CancellationToken token)
+    private static ResponseView? FormatOnWorker(HttpResponseData response, bool raw, TimeProvider clock,
+        CancellationToken token)
     {
-        try { return ResponseView.Format(response, raw, token); }
+        try { return ResponseView.Format(response, raw, clock, token); }
         catch (OperationCanceledException) { return null; }
     }
 
-    private static ResponseColour? ColourOnWorker(ResponseView view, CancellationToken token)
+    private static ResponseColour? ColourOnWorker(ResponseView view, TimeProvider clock, CancellationToken token)
     {
-        try { return new ResponseColour(view, ResponseView.Highlight(view, token)); }
+        try { return new ResponseColour(view, ResponseView.Highlight(view, clock, token)); }
         catch (OperationCanceledException) { return null; }
     }
 

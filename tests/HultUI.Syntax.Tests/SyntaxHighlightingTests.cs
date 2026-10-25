@@ -75,11 +75,14 @@ public class SyntaxHighlightingTests
     {
         // .slnx really is XML, so it must colour identically to the same text in a
         // .xml file — an alias that resolved to some other grammar would still pass
-        // a bare "did it colour anything" check.
-        var viaAlias = SyntaxHighlighter.SpansForText("Solution.slnx", Xml);
-        var viaXml = SyntaxHighlighter.SpansForText("Solution.xml", Xml);
+        // a bare "did it colour anything" check. On a standing clock, so that no budget runs
+        // out in one of the two tokenizes and not the other.
+        var viaAlias = SyntaxHighlighter.TokenizeLines("Solution.slnx", Xml, int.MaxValue, CancellationToken.None,
+            SteppingClock.Standing)!;
+        var viaXml = SyntaxHighlighter.TokenizeLines("Solution.xml", Xml, int.MaxValue, CancellationToken.None,
+            SteppingClock.Standing)!;
 
-        Assert.NotEmpty(viaXml);
+        Assert.Contains(viaXml, line => line.Count > 0);
         Assert.Equal(viaXml, viaAlias);
     }
 
