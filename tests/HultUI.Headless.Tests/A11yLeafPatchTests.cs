@@ -105,7 +105,7 @@ public class A11yLeafPatchTests
         "typing", "password", "checkbox click", "checkbox by code, offscreen", "switch", "app toggle", "slider",
         "progress, toggle while pending", "number field", "leaf name", "leaf description", "leaf expanded",
         "canvas name", "label", "label in an explicitly named button", "two leaves, reverse order",
-        "selection and leaves",
+        "selection and leaves", "in an open overlay",
     };
 
     /// <summary>Cases the tree is rebuilt for, as before.</summary>
@@ -313,6 +313,27 @@ public class A11yLeafPatchTests
                 {
                     s.Settled("select 3", () => { list.SelectedIndex = 3; check.IsChecked = true; label.Content = "item 3"; });
                     s.Settled("select 4", () => { label.Content = "item 4"; list.SelectedIndex = 4; check.IsChecked = false; });
+                });
+            }
+            case "in an open overlay":
+            {
+                // A dialog's fields: the overlay's node is a child of the root node, and its leaves are
+                // found down from it (plan 17, round 5).
+                var check = Checkbox.New(false, "Remember me");
+                var input = TextInput.New("").Width(Dimension.Px(200));
+                var content = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Sign in"), input, check);
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    s.Steps.Add(("open, toggle", session =>
+                    {
+                        session.Window.Window.ShowOverlay(content, 300, 40);
+                        session.PumpFrame();
+                        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                    }, () => check.IsChecked = true, (session, force) => { force(); session.PumpFrame(); }));
+                    s.Steps.Add(("focus, a", session => { input.Focus(); session.PumpFrame(); }, () => input.Text += "a",
+                        (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("b", () => input.Text += "b");
+                    s.Step("toggle back", () => check.IsChecked = false);
                 });
             }
             case "box that gains a name" or "box whose name goes":

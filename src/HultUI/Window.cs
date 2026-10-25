@@ -881,10 +881,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// from the root, and its place there, the child index at each step, added to
     /// <see cref="_a11yPaths"/>: each ancestor that has a node of its own (a semantic one) has it among
     /// the children of the node above, and the rest pass theirs up. So it looks only at the children of
-    /// the nodes on the way, not at the whole tree. Null when the element has no node there: it is not
-    /// in the root's tree (an overlay's), or the tree was built otherwise than its ancestors say now (one
-    /// that became semantic since, a list whose items stand for its rows, a button whose name is the text
-    /// inside), and a rebuild makes what it makes.
+    /// the nodes on the way, not at the whole tree. An element in an open overlay is found down from the
+    /// overlay's node, a child of the root node after the root's own children (the overlay's content
+    /// always has a node). Null when the element has no node there: it is in neither tree (a closed
+    /// overlay's), or the tree was built otherwise than its ancestors say now (one that became semantic
+    /// since, a list whose items stand for its rows, a button whose name is the text inside, an overlay
+    /// opened since), and a rebuild makes what it makes.
     /// </summary>
     private AccessibilityNode? FindNodeDown(AccessibilityNode tree, Element element)
     {
@@ -897,8 +899,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 chain.Add(top);
                 top = parent;
             }
-            if (!ReferenceEquals(top, _root)) return null;
             var node = tree;
+            if (!ReferenceEquals(top, _root))
+            {
+                int at = OverlayNodeIndex(tree, top);
+                if (at < 0) return null;
+                _a11yPaths.Add(at);
+                node = tree.Children[at];
+            }
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 var step = chain[i];
@@ -922,6 +930,21 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             chain.Clear();
         }
+    }
+
+    /// <summary>Where, among the root node's children, the node of an open overlay a reader sees whose
+    /// content is <paramref name="content"/> is in <paramref name="tree"/>; -1 when there is none.
+    /// The overlays' nodes come last, in the order they opened, so the search starts at the end.</summary>
+    private int OverlayNodeIndex(AccessibilityNode tree, Element content)
+    {
+        bool open = false;
+        for (int i = _overlays.Count - 1; i >= 0 && !open; i--)
+            open = _overlays[i].IsHitTestable && ReferenceEquals(_overlays[i].Content, content);
+        if (!open) return -1;
+        var children = tree.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int c = children.Count - 1; c >= 0; c--)
+            if (children[c].ElementId == content.Id) return c;
+        return -1;
     }
 
     /// <summary>Sorts the targets into the order of their nodes in the tree (an insertion sort: a
@@ -2980,6 +3003,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // And the window's focus, as the root has it, so Focus() works inside: a dialog's field
         // can take the keyboard. (Style resolution hands it down to the content's children.)
         content.FocusManager = _focusManager;
+        // And the window's accessibility observer, as the root has it, when a reader sees the overlay
+        // (a tooltip is not in the tree): a change inside — a check box, a field's value, a menu's
+        // selection — is told as one in the main tree is. The content has no parent, so its elements
+        // found no observer, and such a change waited for the next rebuild, often the close.
+        if (entry.IsHitTestable) content.AccessibilityObserver = _a11yObserver;
 
         // Resolve style and layout immediately so we can clamp to viewport
         var theme = Application.Theme;
@@ -3064,6 +3092,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     {
         var entry = _overlays[index];
         _overlays.RemoveAt(index);
+        // What changes in it from now on is nothing a reader sees.
+        if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
+            entry.Content.AccessibilityObserver = null;
         A11yOverlaysChanged(entry);
         if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
         _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);

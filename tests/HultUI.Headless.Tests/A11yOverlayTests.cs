@@ -168,6 +168,96 @@ public class A11yOverlayTests
         AssertFresh(session, bridge);
     }
 
+    /// <summary>The recording bridge, counting the patches it is handed.</summary>
+    private sealed class Patching(HeadlessAccessibilityBridge inner) : IAccessibilityBridge
+    {
+        public int Patches;
+        public bool IsActive => true;
+        public void ApplyChanges(TreeDiff diff, AccessibilityNode root) => inner.ApplyChanges(diff, root);
+        public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root) { Patches++; inner.ApplyChanges(patch, root); }
+        public void NotifyFocusChanged(AccessibilityNode? focused) => inner.NotifyFocusChanged(focused);
+    }
+
+    private static (HeadlessSession, HeadlessAccessibilityBridge, Patching) MountPatching(Element root)
+    {
+        var session = HeadlessSession.Create(800, 600);
+        var recording = new HeadlessAccessibilityBridge();
+        var bridge = session.Window.InstallAccessibilityBridge(new Patching(recording));
+        session.Window.SetRoot(root);
+        session.PumpFrames(2);
+        for (int i = 0; i < 2; i++) session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        return (session, recording, bridge);
+    }
+
+    [Fact]
+    public void ALeafsOwnChangeInAnOpenOverlay_IsPatched_WithNoTreeBuilt()
+    {
+        var (session, bridge, patching) = MountPatching(Flex.Column().Children(TextB.New("Main"), Button.New("Open")));
+        using var _ = session;
+        var check = Checkbox.New(false, "Remember me");
+        var input = TextInput.New("").Width(Dimension.Px(200));
+        var menuish = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(24)).AccessibleName("Section");
+        menuish.AccessibleExpanded = false;
+        session.Window.Window.ShowOverlay(Flex.Column(gap: 4).Padding(8).Children(TextB.New("Sign in"), input, check, menuish), 50, 50);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        check.IsChecked = true;
+        session.PumpFrame();
+        Assert.True(Find(bridge.CurrentTree, n => n.ElementId == check.Id)!.IsToggled);
+        input.Focus();
+        session.Window.TypeText("ab");
+        session.PumpFrame();
+        Assert.Equal("ab", Find(bridge.CurrentTree, n => n.ElementId == input.Id)!.Value);
+        menuish.AccessibleExpanded = true;
+        session.PumpFrame();
+        Assert.True(Find(bridge.CurrentTree, n => n.ElementId == menuish.Id)!.Expanded);
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.True(patching.Patches >= 3, $"{patching.Patches} patches");
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void AnOverlayThatIsOneLeaf_IsPatchedInItsPlace()
+    {
+        var (session, bridge, patching) = MountPatching(Flex.Column().Children(TextB.New("Main")));
+        using var _ = session;
+        var badge = Canvas.New().Width(Dimension.Px(24)).Height(Dimension.Px(24));
+        badge.AccessibleName = "Recording";
+        session.Window.Window.ShowOverlay(badge, 10, 10);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        badge.AccessibleName = "Paused";
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(1, patching.Patches);
+        Assert.Equal("Paused", Find(bridge.CurrentTree, n => n.ElementId == badge.Id)!.Name);
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void AChangeInAClosedOverlay_IsNotTold()
+    {
+        var (session, _, patching) = MountPatching(Flex.Column().Children(TextB.New("Main")));
+        using var __ = session;
+        var check = Checkbox.New(false, "Remember me");
+        var handle = session.Window.Window.ShowOverlay(Flex.Column().Padding(8).Children(check), 50, 50);
+        session.PumpFrame();
+        session.Window.Window.CloseOverlay(handle);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        check.IsChecked = true;
+        Assert.False(session.PumpFrame());
+        Assert.Equal((trees, 0), (session.Window.AccessibilityTreesBuilt, patching.Patches));
+    }
+
     [Fact]
     public void AChangeInAnOverlayWhileMinimized_IsBuiltOnce()
     {

@@ -581,8 +581,18 @@ providers), a UIA `ItemContainer` on virtualized lists.
   the next frame. Nothing the frame looked at said it changed, so an overlay reached a reader only
   when something else rebuilt the tree — usually the control's own expanded state (a dropdown's, a
   date picker's), until a leaf's expanded state was patched without a rebuild, and never for a plain
-  overlay. Property changes inside an overlay still reach no observer (its content has no parent and
-  no observer of its own): an open menu or dialog is told again only by the next rebuild.
+  overlay. **Fixed 2026-10-25 (plan 17 round 5):** changes inside an open overlay reach a reader. An
+  overlay's tree is a root of its own, so no flag of its elements reaches the window's root, and it
+  was styled, laid out and placed while it was drawn, after the accessibility phase: a component that
+  changed its children in an open dialog or command palette, a label that moved others in a menu, a
+  popover that followed its anchor, a check box toggled or a field typed into in a dialog were told
+  only when something else rebuilt the tree, often the close. Now the window styles, lays out and
+  places its overlays before the phase (`PrepareOverlays`; still outside the style and layout timers)
+  and reads what changed in the ones a reader sees: children rebuild the tree in that frame, a layout
+  change or a move goes on the coalesced layout refresh, as in the main tree. Each such overlay's
+  content has the window's observer while it is open, so a leaf's own change inside is patched as in
+  the main tree, its node found down from the overlay's node, a child of the root node after the
+  root's own children. Tooltips stay out of both.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 
