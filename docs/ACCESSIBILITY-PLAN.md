@@ -438,7 +438,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   Expand/Collapse reuse the element's click-to-toggle. A change raises the
   ExpandCollapseState property event (2026-10-05), and on Linux the node carries AT-SPI's
   `expandable` state, plus `expanded` while open, with a `state-changed:expanded` signal —
-  before that, Orca read every expandable node as a plain button.
+  before that, Orca read every expandable node as a plain button. A node that stops being
+  expandable (`AccessibleExpanded` back to null) or starts sends `state-changed:expandable` as well
+  (2026-10-25, plan 17 round 5), and `expanded` only when that bit changes: only `expanded` was
+  sent, so a caching client (libatspi) kept "expandable" for good (seen live in WSL).
 - **Table column headers** — role `ColumnHeader` (UIA HeaderItem, AT-SPI table column header),
   Invoke/click sorts (`TableView<T>`, 2026-10-05).
 - **Tabs** — per W3C Core-AAM 1.1 (2026-10-05). Role `TabList` is the strip: UIA `Tab`,

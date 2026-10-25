@@ -292,7 +292,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
         if (!firstBuild)
             foreach (var change in diff.PropertyChanged)
-                if (EmitPropertyChange(change)) DebugSignalsEmitted++;
+            {
+                string path = PathOf(change.Node);
+                // An expanded state is told from the object as it was published: whether it was
+                // expandable at all is a state of its own.
+                var expandedBefore = change.PropertyName == AccessibilityProperties.IsExpanded
+                    && previous.ByPath.TryGetValue(path, out var before) ? (true, before.Expanded) : default;
+                if (EmitPropertyChange(change, path, expandedBefore)) DebugSignalsEmitted++;
+            }
     }
 
     // One children-changed:add per added child, in the order of its parent's children: each puts
@@ -479,6 +486,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             string path = PathOf(change.Node);
             var acc = snapshot.ByPath[path];
             var node = change.Node;
+            (bool, bool?) expandedBefore = (true, acc.Expanded);
             switch (change.PropertyName)
             {
                 case AccessibilityProperties.IsSelected: acc.Selected = node.IsSelected == true; break;
@@ -490,7 +498,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 case AccessibilityProperties.IsToggled: acc.Toggled = node.IsToggled; break;
                 case AccessibilityProperties.IsExpanded: acc.Expanded = node.Expanded; break;
             }
-            if (EmitPropertyChange(change, path)) DebugSignalsEmitted++;
+            if (EmitPropertyChange(change, path, expandedBefore)) DebugSignalsEmitted++;
         }
     }
 
@@ -504,9 +512,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     // ───────────────────────────────────────────────────────────── helpers
 
-    private bool EmitPropertyChange(PropertyChange change) => EmitPropertyChange(change, PathOf(change.Node));
-
-    private bool EmitPropertyChange(PropertyChange change, string path)
+    /// <param name="expandedBefore">For an expanded state's change: the object's expanded state as
+    /// it was published, when known.</param>
+    private bool EmitPropertyChange(PropertyChange change, string path, (bool Known, bool? Value) expandedBefore = default)
     {
         switch (change.PropertyName)
         {
@@ -545,8 +553,23 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 _signals!.EmitStateChanged(path, "focused", change.Node.IsFocused);
                 return true;
             case AccessibilityProperties.IsExpanded:
-                _signals!.EmitStateChanged(path, "expanded", change.Node.Expanded == true);
+            {
+                // Expandable (there is something to open) is a state of its own beside expanded. A
+                // node that stops being expandable, or starts, says so: a caching client (Orca's
+                // libatspi) went on reading "collapsed" for one that had nothing to open any more
+                // (seen live in WSL), as only expanded was ever sent.
+                bool? now = change.Node.Expanded;
+                if (expandedBefore.Known && (expandedBefore.Value is null) != (now is null))
+                {
+                    if (now is not null) _signals!.EmitStateChanged(path, "expandable", true);
+                    if ((expandedBefore.Value == true) != (now == true))
+                        _signals!.EmitStateChanged(path, "expanded", now == true);
+                    if (now is null) _signals!.EmitStateChanged(path, "expandable", false);
+                    return true;
+                }
+                _signals!.EmitStateChanged(path, "expanded", now == true);
                 return true;
+            }
             case AccessibilityProperties.IsEnabled:
                 _signals!.EmitStateChanged(path, "enabled", change.Node.IsEnabled);
                 _signals!.EmitStateChanged(path, "sensitive", change.Node.IsEnabled);

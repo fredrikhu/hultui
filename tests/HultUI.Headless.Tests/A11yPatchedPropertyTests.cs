@@ -103,7 +103,8 @@ public class A11yPatchedPropertyTests
 
     public static TheoryData<string> Cases => new()
     {
-        "name", "description", "expanded", "collapsed", "canvas name", "name from Name", "checkbox label",
+        "name", "description", "expanded", "collapsed", "no longer expandable", "becomes expandable", "canvas name",
+        "name from Name", "checkbox label",
         "radio label", "switch label", "patched name", "patched description", "patched expanded",
         "button disabled", "button enabled", "patched button disabled", "patched button enabled",
     };
@@ -132,6 +133,14 @@ public class A11yPatchedPropertyTests
                 var box = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(24))
                     .AccessibleName("Section").AccessibleExpanded(!open);
                 return new Scene(Column(box), box, () => box.AccessibleExpanded = open);
+            }
+            case "no longer expandable" or "becomes expandable":
+            {
+                // Expandable is a state of its own on AT-SPI: a caching client kept it (plan 17, round 5).
+                bool stops = which == "no longer expandable";
+                var box = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(24)).AccessibleName("Section");
+                box.AccessibleExpanded = stops ? false : null;
+                return new Scene(Column(box), box, () => box.AccessibleExpanded = stops ? null : true);
             }
             case "canvas name":
             {
@@ -207,7 +216,8 @@ public class A11yPatchedPropertyTests
     private static int UiaProperty(string which) => which switch
     {
         "description" or "patched description" => UiaInterop.UIA_HelpTextPropertyId,
-        "expanded" or "collapsed" or "patched expanded" => UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId,
+        "expanded" or "collapsed" or "patched expanded" or "no longer expandable" or "becomes expandable"
+            => UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId,
         "button disabled" or "button enabled" or "patched button disabled" or "patched button enabled"
             => UiaInterop.UIA_IsEnabledPropertyId,
         _ => UiaInterop.UIA_NamePropertyId,
@@ -220,6 +230,8 @@ public class A11yPatchedPropertyTests
             [$"state-changed:enabled {target.Value} 0", $"state-changed:sensitive {target.Value} 0"],
         "button enabled" or "patched button enabled" =>
             [$"state-changed:enabled {target.Value} 1", $"state-changed:sensitive {target.Value} 1"],
+        "no longer expandable" => [$"state-changed:expandable {target.Value} 0"],
+        "becomes expandable" => [$"state-changed:expandable {target.Value} 1", $"state-changed:expanded {target.Value} 1"],
         _ => [AtSpiLine(which, target)],
     };
 
