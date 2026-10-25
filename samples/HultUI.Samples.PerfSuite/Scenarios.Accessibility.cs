@@ -598,6 +598,64 @@ static partial class Scenarios
                 var area = MountLongTextArea(ctx);
                 return CaretWalk(ctx, area, _ => null);
             });
+
+        // What a reader is told inside an open overlay, which lies over a busy screen as it does in
+        // an app: the trees a key builds count the whole window's.
+        yield return new Scenario("a11y/context menu walk over 1,000 rows, UIA",
+            "Down through an open 20-item context menu over 1,000 rows with the UIA bridge: what a move of its selection tells, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                ctx.Mount(Busy(ctx, Text.New("Menus").FontSize(13f)));
+                var items = new ContextMenuItem[20];
+                for (int i = 0; i < items.Length; i++)
+                    items[i] = new ContextMenuItem { Label = Ui.Label(ctx.Rng), Action = () => { }, ShortcutHint = $"Ctrl+{i}" };
+                ctx.Window.Window.OpenContextMenu(items, new Point(40, 60));
+                ctx.Pump(2);
+                int treesBefore = 0;
+                return new Op
+                {
+                    Run = _ =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+                    },
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = _ => ctx.Window.OverlayContents.Count == 1 ? null : $"{ctx.Window.OverlayContents.Count} overlays open, not the menu alone",
+                };
+            });
+
+        yield return new Scenario("a11y/command palette typing over 2,000 commands, UIA",
+            "Type one letter into an open command palette over 2,000 commands and 1,000 rows with the UIA bridge (a Backspace between keys, untimed): the field's value and the new list told, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                var commands = new List<PaletteCommand>(2_000);
+                for (int i = 0; i < 2_000; i++) commands.Add(new PaletteCommand($"{Ui.Label(ctx.Rng)} {i}", () => { }));
+                var palette = new CommandPalette(() => commands);
+                ctx.Mount(Busy(ctx, Text.New("Palette").FontSize(13f)));
+                palette.Open(ctx.Window.Window);
+                ctx.Pump(2);
+                const string letters = "rblpzchgta";
+                int treesBefore = 0;
+                return new Op
+                {
+                    Reset = _ =>
+                    {
+                        if (palette.Query.Length > 0) ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+                    },
+                    Run = step =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        ctx.Window.TypeText(letters[step % letters.Length].ToString());
+                    },
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = _ => palette.IsOpen && palette.Query.Length == 1 && palette.Matches.Count is > 0 and < 2_000
+                        ? null : $"the palette's query is \"{palette.Query}\" with {palette.Matches.Count} matches",
+                };
+            });
     }
 
     /// <summary>A check that the bridge applied a diff since the last time it was asked.</summary>
