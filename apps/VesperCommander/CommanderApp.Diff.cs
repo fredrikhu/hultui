@@ -332,9 +332,11 @@ public partial class CommanderApp
 
         string leftPath = _diffLeftPath, rightPath = _diffRightPath;
         int generation = ++_diffGen;
+        var gate = DiffCompareGate;
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
+            if (gate is not null) await gate().ConfigureAwait(false);
             var outcome = CompareFiles(leftPath, rightPath);
             HultUI.Application.InvokeOnMainThread(() =>
             {
@@ -344,6 +346,12 @@ public partial class CommanderApp
             });
         });
     }
+
+    /// <summary>Awaited on the worker before the comparison reads either file, so a test can
+    /// hold the view on "Comparing…" for as long as it needs and then let it finish. Without
+    /// it, how long that state lasts is a race against the thread pool: on a 2-core CI runner
+    /// a 400-line pair finished inside the one frame after F3. Null in every shipped path.</summary>
+    internal Func<Task>? DiffCompareGate;
 
     private readonly record struct DiffOutcome(
         DiffViewState State, DiffEngine.Result? Result, string[]? Left, string[]? Right);
