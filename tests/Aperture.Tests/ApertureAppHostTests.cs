@@ -714,6 +714,61 @@ public class ApertureAppHostTests
         }, () => backend);
     }
 
+    [Fact]
+    public void TheNextEpisodeStaysInFullScreen()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-e1")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.True(session.Window.Window.IsFullscreen);
+
+            backend.Raise(new BackendEvent.EndReached());
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            app.PlayUpNext();                       // as the countdown would
+            for (int i = 0; i < 12; i++) session.PumpFrame();
+
+            // Moving on to the next episode is not leaving playback.
+            Assert.Equal("e5", app.PlayingItem?.Id);
+            Assert.True(session.Window.Window.IsFullscreen, "the next episode dropped out of full screen");
+            Assert.False(Shows(session, "APERTURE"), "the app's title bar came back over the next episode");
+            // The new stream's overlay offers the way out, not the way in.
+            Assert.Equal("Exit full screen", session.Window.FindByAutomationId("video-fullscreen")?.Name);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void ANextEpisodeThatWillNotStartLeavesFullScreenBehind()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-e1")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.True(session.Window.Window.IsFullscreen);
+
+            // Not in the library, so the server refuses it — after the sheet was kept for it.
+            app.Play(new MediaItem
+            {
+                Id = "gone", Name = "Gone", Kind = MediaKind.Episode,
+                SeriesId = "s1", SeriesName = "Bleach", RunTime = TimeSpan.FromMinutes(24),
+            }, TimeSpan.Zero, countsAsDeliberate: false, keepQueue: true);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.Null(app.PlayingItem);
+            Assert.False(session.Window.Window.IsFullscreen, "a failed start stranded the library in full screen");
+        }, () => backend);
+    }
+
     // ── Auto-play ────────────────────────────────────────────────────────
 
     /// <summary>Plays an episode and runs it to the end, the way the backend would.</summary>

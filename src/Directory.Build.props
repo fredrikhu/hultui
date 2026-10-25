@@ -10,7 +10,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/fredrikhu/hultui-revamped</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/fredrikhu/hultui</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>ui;gui;framework;flexbox;reactive;skia;sdl3;cross-platform</PackageTags>
     <!-- The XML docs the API reference will harvest; missing-comment noise is not

@@ -147,6 +147,9 @@ public sealed partial class ApertureApp
             if (!target.Ok)
             {
                 _playingItem = null;
+                // The sheet closes, so this is leaving playback after all — a next episode
+                // that would not start must not strand the library in full screen.
+                SetFullscreen(false);
                 FlashFailure(target.Failure!, item.Name);
                 Rerender();
                 return;
@@ -177,6 +180,9 @@ public sealed partial class ApertureApp
             JumpStep = TimeSpan.FromSeconds(10),
             PreviewWidth = PreviewWidth,
             PreviewFrame = TrickplayFrame,
+            // Each stream gets a new overlay, and the next episode opens in whatever the
+            // last one left the window in — so the glyph starts from the window.
+            IsFullscreen = _window.IsFullscreen,
         };
         _videoPlayer.FullscreenRequested += ToggleFullscreen;
         // The headless driver pumps frames far faster than wall time, so the transport bar
@@ -229,8 +235,9 @@ public sealed partial class ApertureApp
         if (!keepSheet) ClearQueue();
 
         // Full screen was for the film. Coming back to a library that fills the display
-        // with no way to reach the task bar is a trap, so leaving playback leaves it.
-        SetFullscreen(false);
+        // with no way to reach the task bar is a trap, so leaving playback leaves it. The
+        // next episode starting is not leaving: the sheet stays, and full screen with it.
+        if (!keepSheet) SetFullscreen(false);
 
         if (report && target is not null && _library is { } lib)
         {
