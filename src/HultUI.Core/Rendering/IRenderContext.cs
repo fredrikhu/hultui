@@ -167,6 +167,21 @@ public interface IRenderContext
             : MeasureText(lineText[..Math.Min(offset, lineText.Length)], style).Width;
 
     /// <summary>
+    /// <see cref="TextCaretX"/> at every offset of <paramref name="lineText"/> from 0 up to
+    /// <c>xs.Length - 1</c>, into <paramref name="xs"/>: <c>xs[k]</c> is
+    /// <c>TextCaretX(lineText, style, k)</c>, bit for bit. Something that wants where every
+    /// character boundary of a line is drawn — a text area's accessible text, which places each
+    /// character of the rows on screen — asks once a line, and a context that lays the line out
+    /// finds the layout once instead of once a boundary: a line's boundaries then cost its length,
+    /// not its length squared. The default asks <see cref="TextCaretX"/> for each.
+    /// </summary>
+    void TextCaretXs(string lineText, ResolvedInheritedStyle style, Span<float> xs)
+    {
+        for (int k = 0; k < xs.Length; k++)
+            xs[k] = TextCaretX(lineText, style, k);
+    }
+
+    /// <summary>
     /// The logical offset in <paramref name="lineText"/> whose caret sits nearest
     /// visual x <paramref name="x"/> — what a click at that x selects.
     /// </summary>

@@ -1522,6 +1522,20 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return line is null ? 0f : line.CaretXAt(offset, PrefixMeasurer(line, style));
     }
 
+    // The line and its measurer found once; each boundary is then what TextCaretX gives for it.
+    public void TextCaretXs(string lineText, ResolvedInheritedStyle style, Span<float> xs)
+    {
+        var line = SingleLine(lineText, style);
+        if (line is null)
+        {
+            xs.Clear();
+            return;
+        }
+        var measurer = PrefixMeasurer(line, style);
+        for (int k = 0; k < xs.Length; k++)
+            xs[k] = line.CaretXAt(k, measurer);
+    }
+
     public int TextOffsetAtX(string lineText, ResolvedInheritedStyle style, float x)
     {
         var line = SingleLine(lineText, style);

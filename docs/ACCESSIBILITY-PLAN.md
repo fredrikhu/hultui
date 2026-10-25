@@ -537,7 +537,7 @@ providers), a UIA `ItemContainer` on virtualized lists.
     the caret. And `TextArea` (2026-10-24, plan 17 round 4): its rows as lines, its
     `'\n'`-separated runs as paragraphs, its caret and selection, each character's box from
     where the area draws its caret, for the rows on screen and one either side (the rest
-    spaced at the average width there). Made on request from a version, as the editor's: the
+    spaced at the average width there; one ask of the render context a row, `IRenderContext.TextCaretXs`, since round 5: asked a character at a time, a keystroke with a reader reading cost 704 KB at 2,000 lines, now 309). Made on request from a version, as the editor's: the
     string by identity, the caret, the anchor, the rows and the part on screen; a keystroke
     is a text change (UIA `Text_TextChanged`, AT-SPI `text-changed` with what was inserted
     and removed, from the strings the versions hold, no tables made for it), never a value

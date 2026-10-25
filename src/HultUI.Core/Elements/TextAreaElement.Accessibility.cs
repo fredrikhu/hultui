@@ -230,8 +230,14 @@ public partial class TextAreaElement
         {
             var (lineStart, lineEnd) = VisualLineRange(starts, row);
             var x = xs[row - from] = new float[lineEnd - lineStart + 1];
-            for (int k = 1; k < x.Length; k++)
-                x[k] = CaretXOnLine(row, lineStart, lineEnd, lineStart + k, style);
+            // The row's string once, and every boundary from one layout of it: asked a character at
+            // a time, each ask cut a new string while a keystroke's rows were not drawn yet
+            // (CaretXOnLine → LineText) and looked the row's layout up again, O(length²) a row.
+            if (x.Length > 1)
+            {
+                _renderCtx.TextCaretXs(LineText(row, lineStart, lineEnd), style, x);
+                x[0] = 0f;   // the row's start, as it always was (right to left, the caret there is at the far end)
+            }
             width += x[^1];
             chars += x.Length - 1;
         }
