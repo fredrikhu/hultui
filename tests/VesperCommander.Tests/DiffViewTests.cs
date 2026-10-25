@@ -949,20 +949,26 @@ public class DiffViewTests
 
     // The comparison used to run inside the F3 handler, so a slow pair froze the window with
     // no way out. It opens on a "Comparing…" state now and the result arrives later.
+    //
+    // These two hold the comparison rather than counting on it being slow: a 400-line pair
+    // used to stand in for "still running one frame later", and on a 2-core CI runner it
+    // sometimes was not.
     [Fact]
     public void TheViewOpensBeforeTheComparisonHasFinished()
     {
         using var t = new Fixture();
-        t.WriteLeft("a.txt", Lines("left {0}", 400));
-        t.WriteRight("a.txt", Lines("right {0}", 400));
+        t.WriteLeft("a.txt", "left\n");
+        t.WriteRight("a.txt", "right\n");
         t.Open();
+        var release = t.HoldComparison();
 
         t.PutCursorOn('L', "a.txt");
-        t.Press(KeyCode.F3);   // one frame only — the diff cannot have run yet
+        t.Press(KeyCode.F3);
 
         Assert.True(t.DiffOpen);
         Assert.Equal("Comparing", t.DiffState);
 
+        release();
         t.Session.PumpUntil(() => t.DiffState != "Comparing", System.TimeSpan.FromSeconds(30));
         Assert.Equal("Ok", t.DiffState);
     }
@@ -971,9 +977,10 @@ public class DiffViewTests
     public void EscapeStillClosesTheViewWhileItIsComparing()
     {
         using var t = new Fixture();
-        t.WriteLeft("a.txt", Lines("left {0}", 400));
-        t.WriteRight("a.txt", Lines("right {0}", 400));
+        t.WriteLeft("a.txt", "left\n");
+        t.WriteRight("a.txt", "right\n");
         t.Open();
+        t.HoldComparison();   // never released: the view must close on a comparison still running
 
         t.PutCursorOn('L', "a.txt");
         t.Press(KeyCode.F3);
@@ -1204,6 +1211,17 @@ public class DiffViewTests
         {
             _session.Window.PressKey(key, modifiers);
             _session.PumpFrame();
+        }
+
+        /// <summary>Holds every comparison from now on at "Comparing…" until the returned
+        /// action is called. The gate completes off the test thread, so releasing it never
+        /// runs the comparison inline here.</summary>
+        public System.Action HoldComparison()
+        {
+            var gate = new System.Threading.Tasks.TaskCompletionSource(
+                System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+            _app.DiffCompareGate = () => gate.Task;
+            return () => gate.TrySetResult();
         }
 
         public void ClickFirstLine()
