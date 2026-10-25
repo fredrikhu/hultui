@@ -129,9 +129,68 @@ public sealed class WindowStateActivationTests(ITestOutputHelper output)
             Assert.Equal(normal with { Maximized = true }, window.Placement);
         });
         Do("normal placement", () => window.Placement = normal, () => Assert.Equal(normal, OuterRect(hwnd)));
+        AddMinimizeAndRaise(app, window, style, steps);
 
         window.Close();
         return steps;
+    }
+
+    /// <summary>Minimize, raise (which restores a minimized window first), and both again: a
+    /// minimize after a raise asks for the window's activation inside the call, even through
+    /// <c>SW_SHOWMINNOACTIVE</c>, and a raise asks for it unless SDL was told not to on a raise
+    /// (plan 17, round 5).</summary>
+    private void AddMinimizeAndRaise(Application app, Window window, WindowStyle style, List<Step> steps)
+    {
+        var hwnd = window.NativeHandle;
+        void Do(string name, Action change, Action check)
+        {
+            int guard = ForegroundGuard.Refused, framework = FrameworkRefused();
+            change();
+            app.RunFrame(TimeSpan.Zero, forceRender: true);
+            check();
+            var step = new Step(name, ForegroundGuard.Refused - guard, FrameworkRefused() - framework);
+            output.WriteLine($"{style} {name}: guard refused {step.Guard}, framework refused {step.Framework}");
+            steps.Add(step);
+        }
+
+        Do("minimize", window.Minimize, () => Assert.True(IsIconic(hwnd), $"{style}: not minimized"));
+        Do("raise", window.Raise, () => Assert.False(IsIconic(hwnd), $"{style}: still minimized"));
+        Do("minimize after a raise", window.Minimize, () => Assert.True(IsIconic(hwnd), $"{style}: not minimized again"));
+        Do("raise again", window.Raise, () => Assert.False(IsIconic(hwnd), $"{style}: still minimized"));
+    }
+
+    /// <summary>
+    /// A process that tells SDL not to activate a window when it shows one, and no more — the
+    /// shown hint without the raised one, as a probe sets it: its minimize and raise ask for no
+    /// activation either; the framework refuses them.
+    /// </summary>
+    [UiTheory]
+    [MemberData(nameof(Styles))]
+    public void WithTheShownHintOnly_MinimizeAndRaise_AskForNoActivation(WindowStyle style)
+    {
+        using var guard = ForegroundGuard.Begin();
+        // The guard also tells SDL not to activate on a raise; this process does not.
+        SDL.SDL3.SDL_SetHintWithPriority(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "1", SDL.SDL_HintPriority.SDL_HINT_OVERRIDE);
+        try
+        {
+            var area = WorkAreas()[0];
+            using var app = new Application(new SdlWindowingPlatform(), "minimize and raise", 640, 480, style);
+            app.SetRoot(Box.New().Background(new Color(40, 80, 120)).FlexGrow(1));
+            var window = app.PrimaryWindow;
+            window.Placement = new WindowPlacement((int)area.X + 80, (int)area.Y + 80, 800, 600, false);
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+            var steps = new List<Step>();
+            AddMinimizeAndRaise(app, window, style, steps);
+            window.Close();
+
+            foreach (var step in steps)
+                Assert.True(step.Guard == 0, $"{style} {step.Name}: {step.Guard} activation(s) reached the guard");
+            Assert.True(steps.Sum(s => s.Framework) > 0, $"{style}: the framework refused nothing");
+        }
+        finally
+        {
+            SDL.SDL3.SDL_SetHintWithPriority(SDL.SDL3.SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "0", SDL.SDL_HintPriority.SDL_HINT_OVERRIDE);
+        }
     }
 
     /// <summary>Activations the framework refused (<see cref="WindowsActivation"/>), on any thread.</summary>
@@ -186,5 +245,6 @@ public sealed class WindowStateActivationTests(ITestOutputHelper output)
     [DllImport("user32")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
     [DllImport("user32")] private static extern bool GetClientRect(nint hwnd, out RECT rect);
     [DllImport("user32")] private static extern bool IsZoomed(nint hwnd);
+    [DllImport("user32")] private static extern bool IsIconic(nint hwnd);
     [DllImport("user32")] private static extern bool IsWindowVisible(nint hwnd);
 }
