@@ -64,9 +64,18 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
     /// event-watcher lock; a frame drawn inside the watcher during a live resize holds it, and a
     /// frame must never wait for a thread that posts (docs/THREADING.md).
     /// </summary>
-    private void Wake(WakeSource source) =>
+    private void Wake(WakeSource source)
+    {
+        Interlocked.Increment(ref _wakesAsked);
         ThreadPool.UnsafeQueueUserWorkItem(static s => s.App.WakeLoop(s.Source), (App: _window.Application, Source: source),
             preferLocal: false);
+    }
+
+    /// <summary>How many wakes this router has asked for, counted as each is asked, before its pool
+    /// hop. For tests that a call asks for none: a wake that never comes cannot be waited for, and
+    /// the platform's own count also takes wakes from every other thread.</summary>
+    internal int WakesAsked => Volatile.Read(ref _wakesAsked);
+    private int _wakesAsked;
 
     public Element? FindElement(ElementId id) => _window.FindElement(id);
 

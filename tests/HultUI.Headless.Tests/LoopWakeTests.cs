@@ -498,15 +498,18 @@ public class LoopWakeTests
 
         // WM_GETOBJECT from a client that has just attached: no tree yet.
         host.RootRequested();
+        Assert.Equal(1, router.WakesAsked);
         Assert.True(Eventually(() => run.Platform.WakeCalls > before), "the first ask did not wake the loop");
 
         run.Session.Window.InstallAccessibilityBridge();
         run.Session.PumpFrame();
-        Thread.Sleep(50);
-        int built = run.Platform.WakeCalls;
         host.RootRequested();
-        Thread.Sleep(100);
-        Assert.Equal(built, run.Platform.WakeCalls);
+
+        // Counted where the wake is asked for, not where its pool hop lands: a wake that never
+        // comes cannot be waited for, and the platform counts every thread's. Counted there across
+        // a real 100 ms, this saw 3 wakes for 1: an earlier test's loader retrying into this
+        // session (DeferredAsyncLoadTests.ARetryOfAnEndedSession_EndsWithIt).
+        Assert.Equal(1, router.WakesAsked);
     }
 
     [Fact]

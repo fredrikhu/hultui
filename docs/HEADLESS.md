@@ -252,6 +252,8 @@ A session owns process-global state: `Application.Current`, the animation list, 
 
 `Dispose` resets everything — animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored.
 
+It does not stop work already on another thread. What the framework posts back for it — an `AsyncLoader` retry still waiting out its backoff, a pooled load — goes to the application that started it, so the next session neither wakes for it nor runs it (it once did: a failed load's retry, 0.5 s after its test ended, woke whichever test came next). A test's own `Task.Run` that posts with `Application.InvokeOnMainThread` reaches whichever session is current when it lands: wait for it before the test returns. For the same reason a session's wake count (`Platform.WakeCalls`) takes wakes from any thread: assert that a call asks for no wake where the wake is asked for (`AccessibilityActionRouter.WakesAsked`), never as an unchanged count across a real sleep.
+
 ## CI
 
 Headless tests need no display server, GPU, or GL — a stock `ubuntu-latest`/`windows-latest` runner works as-is, golden images included (they bring their own fonts). The repo's `test-linux` job in `.github/workflows/ci.yml` is the reference setup ([CI](CI.md)). A headless session never loads the SDL3 native library (there's a test asserting exactly that).

@@ -24,17 +24,21 @@ internal static class AsyncWork
     /// <summary>
     /// Runs <paramref name="work"/> off the calling code path — thread pool by default, or
     /// through the installed scheduler — then posts the action it returns, if any, to the
-    /// UI thread with <see cref="Application.InvokeOnMainThread"/>.
+    /// UI thread of the application that scheduled it (<see cref="Application.Post"/>): with none,
+    /// or one that has ended by then, the result is dropped, not handed to its successor.
     /// </summary>
     internal static void Schedule(Func<Action?> work)
     {
         var scheduler = _scheduler;
         if (scheduler is null)
+        {
+            var app = Application.Current;
             _ = Task.Run(() =>
             {
                 if (work() is { } apply)
-                    Application.InvokeOnMainThread(apply);
+                    app?.Post(apply);
             });
+        }
         else
             scheduler(work);
     }

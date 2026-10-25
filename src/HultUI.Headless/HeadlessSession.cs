@@ -231,7 +231,7 @@ public sealed class HeadlessSession : IDisposable
 
         foreach (var task in running)
             if (task.IsCompletedSuccessfully && task.Result is { } apply)
-                Application.InvokeOnMainThread(apply);
+                Application.Post(apply);
         foreach (var task in running)
             if (task.IsFaulted)
                 ExceptionDispatchInfo.Capture(task.Exception!.InnerException!).Throw();
