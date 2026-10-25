@@ -144,8 +144,6 @@ public class ApertureAppHostTests
         {
             var path = request.RequestUri!.PathAndQuery;
             lock (Requested) Requested.Add(path);
-            if (HoldSheets is { } hold && path.Contains("/Trickplay/", StringComparison.Ordinal))
-                await hold.Task.WaitAsync(ct).ConfigureAwait(false);
             using var bitmap = new SkiaSharp.SKBitmap(width, height);
             using var canvas = new SkiaSharp.SKCanvas(bitmap);
             canvas.Clear(new SkiaSharp.SKColor(40, 60, 90));
@@ -155,6 +153,13 @@ public class ApertureAppHostTests
                 Content = new ByteArrayContent(data.ToArray()),
             };
             response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            // Encoded before the hold, not after: a held sheet finishes on the thread pool once
+            // released, and there the encode was most of what a loaded runner made it wait for.
+            if (HoldSheets is { } hold && path.Contains("/Trickplay/", StringComparison.Ordinal))
+            {
+                try { await hold.Task.WaitAsync(ct).ConfigureAwait(false); }
+                catch { response.Dispose(); throw; }
+            }
             return response;
         }
     }
@@ -1795,11 +1800,20 @@ public class ApertureAppHostTests
                 TimeSpan.FromSeconds(5));
             Assert.Null(session.Window.FindByAutomationId("video-preview-card"));
 
+            // Released, the sheet lands from the thread pool (the download's end, the decode), which
+            // the session does not drive. The card follows one frame after the cache has it; the
+            // wait is for the pool. On a loaded two-core runner that took longer than five seconds,
+            // while this loop drew frame after frame of the whole window beside it.
             artwork.HoldSheets!.SetResult();
             session.PumpUntil(() => session.Window.FindByAutomationId("video-preview-card") is not null,
-                TimeSpan.FromSeconds(5));
+                SheetLands);
         }, () => backend, artwork);
     }
+
+    /// <summary>How long a held sheet may take to land once released, in real time: work on the
+    /// thread pool, which a loaded CI runner can starve for seconds. Generous, because an app that
+    /// never shows the still fails here either way.</summary>
+    private static readonly TimeSpan SheetLands = TimeSpan.FromSeconds(30);
 
     [Fact]
     public void AChapterShowsThePictureTheServerExtractedForIt()
