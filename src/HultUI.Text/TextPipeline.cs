@@ -222,8 +222,25 @@ public sealed class TextPipeline
         }
     }
 
+    // Into the pipeline's kept list (_fontRuns), good until the next call of this overload: every
+    // caller reads the runs before it itemizes again, and nothing it calls while it reads them
+    // itemizes into this list (a foreach over it would throw if anything did). A new list a call
+    // was 14–27 % of what styled, BiDi and fallback text allocated per layout (plan 17, round 5).
     private List<FontRun> Itemize(string text, ResolvedInheritedStyle style) =>
-        Itemize(text, style, new List<FontRun>());
+        Itemize(text, style, Kept(_fontRuns));
+
+    private readonly List<FontRun> _fontRuns = new();
+
+    // The most items a kept scratch list holds room for between uses: a line of a few thousand
+    // runs or BiDi pieces. One that grew past it for a long paragraph is let go of at its next use.
+    private const int KeptScratchItems = 4096;
+
+    private static List<T> Kept<T>(List<T> scratch)
+    {
+        scratch.Clear();
+        if (scratch.Capacity > KeptScratchItems) scratch.TrimExcess();
+        return scratch;
+    }
 
     // Into a list the caller owns, cleared first: MeasureString's, which needs the runs only
     // while it adds them up.
@@ -886,10 +903,13 @@ public sealed class TextPipeline
     /// paragraph-scoped, so a neutral character next to a cut would resolve
     /// against the cut instead of against the text that actually surrounds it —
     /// and it also meant one ICU round trip per break candidate per line.
+    /// <para>Into <paramref name="segments"/>, cleared first and returned: the pipeline's kept
+    /// list, which MeasureBidi and ShapeBidiLine each read before anything fills it again.</para>
     /// </remarks>
-    private static List<(int Start, int End, byte Level)> SegmentsIn(byte[] levels, int from, int to)
+    private static List<(int Start, int End, byte Level)> SegmentsIn(byte[] levels, int from, int to,
+        List<(int Start, int End, byte Level)> segments)
     {
-        var segments = new List<(int, int, byte)>();
+        Kept(segments);
         int i = from;
         while (i < to)
         {
@@ -906,17 +926,19 @@ public sealed class TextPipeline
     /// UAX #9 rule L2: from the highest embedding level down to the lowest odd one,
     /// reverse every contiguous run at that level or higher. Returns the visual
     /// sequence of logical segment indices. Implemented directly — it is a dozen
-    /// lines — so the reorder does not depend on a second ICU API surface.
+    /// lines — so the reorder does not depend on a second ICU API surface. Into
+    /// <paramref name="order"/>, cleared first and returned (ShapeBidiLine's kept list).
     /// </summary>
-    private static int[] VisualOrder(IReadOnlyList<byte> levels)
+    private static List<int> VisualOrder(List<byte> levels, List<int> order)
     {
         int n = levels.Count;
-        var order = new int[n];
-        for (int i = 0; i < n; i++) order[i] = i;
+        Kept(order);
+        for (int i = 0; i < n; i++) order.Add(i);
 
         byte max = 0, minOdd = byte.MaxValue;
-        foreach (var l in levels)
+        for (int i = 0; i < n; i++)
         {
+            byte l = levels[i];
             if (l > max) max = l;
             if ((l & 1) == 1 && l < minOdd) minOdd = l;
         }
@@ -931,7 +953,7 @@ public sealed class TextPipeline
                 {
                     int j = i;
                     while (j < n && levels[order[j]] >= level) j++;
-                    Array.Reverse(order, i, j - i);
+                    order.Reverse(i, j - i);
                     i = j;
                 }
                 else i++;
@@ -1264,7 +1286,7 @@ public sealed class TextPipeline
     {
         if (to <= from) return 0;
         float width = 0;
-        foreach (var (s, e, level) in SegmentsIn(levels, from, to))
+        foreach (var (s, e, level) in SegmentsIn(levels, from, to, _bidiSegments))
         {
             // One piece per style run of the direction run; with no spans, the whole run.
             for (int i = s, b; i < e; i = b)
@@ -1278,6 +1300,15 @@ public sealed class TextPipeline
         }
         return width;
     }
+
+    // MeasureBidi's and ShapeBidiLine's segments, and ShapeBidiLine's levels, runs and visual
+    // order while it builds a line: lists made anew for each line were 17 % of what laying out
+    // 2,000 emoji labels allocated (plan 17, round 5). Neither calls the other.
+    private readonly List<(int Start, int End, byte Level)> _bidiSegments = new();
+    private readonly List<byte> _bidiLevels = new();
+    private readonly List<int> _bidiFirstRuns = new();
+    private readonly List<ShapedRun> _bidiRuns = new();
+    private readonly List<int> _bidiOrder = new();
 
     /// <summary>
     /// One line, direction-aware: segments shaped with their resolved direction and
@@ -1294,16 +1325,19 @@ public sealed class TextPipeline
         int sourceLength = to - from + (appendEllipsis ? 1 : 0);
         while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
 
-        var segments = SegmentsIn(paraLevels, from, to);
-        var segRuns = new List<ShapedRun>[segments.Count];
-        var levels = new byte[segments.Count];
+        // Each segment's level, and where its runs start in the runs of the line, in logical
+        // order: kept lists, as the segments are (nothing below fills them again).
+        var segments = SegmentsIn(paraLevels, from, to, _bidiSegments);
+        var levels = Kept(_bidiLevels);
+        var firstRuns = Kept(_bidiFirstRuns);
+        var lineRuns = Kept(_bidiRuns);
         float maxAscent = 0, maxDescent = 0, maxLeading = 0;
 
         for (int s = 0; s < segments.Count; s++)
         {
             var (segStart, segEnd, level) = segments[s];
-            levels[s] = level;
-            var runs = new List<ShapedRun>();
+            levels.Add(level);
+            firstRuns.Add(lineRuns.Count);
             // One piece per style run of the segment; with no spans, the whole segment. A
             // larger-size piece raises the line, the max-across-runs rule fallback follows.
             for (int i = segStart, b; i < segEnd; i = b)
@@ -1315,31 +1349,32 @@ public sealed class TextPipeline
                     var shaped = ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing,
                         rtl: (level & 1) == 1);
                     shaped.Level = level;
-                    runs.Add(shaped);
+                    lineRuns.Add(shaped);
                     maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * eff.FontSize);
                     maxDescent = Math.Max(maxDescent, fr.Font.Descent * eff.FontSize);
                     maxLeading = Math.Max(maxLeading, fr.Font.Leading * eff.FontSize);
                 }
             }
-            segRuns[s] = runs;
         }
 
         // Place in visual order; within an RTL segment the fallback sub-runs flip too.
         float x = 0;
-        foreach (int logical in VisualOrder(levels))
+        foreach (int logical in VisualOrder(levels, _bidiOrder))
         {
-            var runs = segRuns[logical];
+            int first = firstRuns[logical];
+            int count = (logical + 1 < firstRuns.Count ? firstRuns[logical + 1] : lineRuns.Count) - first;
             bool rtl = (levels[logical] & 1) == 1;
-            for (int r = 0; r < runs.Count; r++)
+            for (int r = 0; r < count; r++)
             {
-                var run = runs[rtl ? runs.Count - 1 - r : r];
+                var run = lineRuns[first + (rtl ? count - 1 - r : r)];
                 run.OffsetX = x;
                 x += run.Width;
             }
         }
 
-        var logicalRuns = new List<ShapedRun>();
-        foreach (var runs in segRuns) logicalRuns.AddRange(runs);
+        var logicalRuns = new List<ShapedRun>(lineRuns.Count + (appendEllipsis ? 1 : 0));
+        logicalRuns.AddRange(lineRuns);
+        lineRuns.Clear();   // the line keeps its runs; the kept list does not
 
         if (appendEllipsis)
         {
@@ -2846,7 +2881,8 @@ public sealed class TextPipeline
         var trimmed = lineText.TrimEnd();
         var fontRuns = Itemize(trimmed, style);
 
-        var runs = new List<ShapedRun>();
+        // The line keeps this list: room for its runs and no more.
+        var runs = new List<ShapedRun>(fontRuns.Count);
         float width = 0;
 
         foreach (var fr in fontRuns)
