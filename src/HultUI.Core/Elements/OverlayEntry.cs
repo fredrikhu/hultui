@@ -28,4 +28,7 @@ internal sealed class OverlayEntry
     /// <summary>Set when the overlay is put somewhere else; the window's next frame takes it as a
     /// move of everything in it, for the accessibility tree's bounds, and clears it.</summary>
     public bool Moved { get; set; }
+    /// <summary>Set when something in the overlay changed that its part of the accessibility tree
+    /// does not have yet (its children, its layout, its place); cleared when that part is built.</summary>
+    public bool A11yStale { get; set; }
 }

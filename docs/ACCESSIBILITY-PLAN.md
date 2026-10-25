@@ -591,8 +591,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
   popover that followed its anchor, a check box toggled or a field typed into in a dialog were told
   only when something else rebuilt the tree, often the close. Now the window styles, lays out and
   places its overlays before the phase (`PrepareOverlays`; still outside the style and layout timers)
-  and reads what changed in the ones a reader sees: children rebuild the tree in that frame, a layout
-  change or a move goes on the coalesced layout refresh, as in the main tree. Each such overlay's
+  and reads what changed in the ones a reader sees: a change of children builds that overlay's part
+  of the tree again in that frame, a layout change, a move or a scroll inside on the coalesced layout
+  refresh, as in the main tree; only the part is built (`TryRebuildOverlays`), diffed against the
+  applied part and put in its place among the root node's children, and the rest of the applied tree
+  stays (a command palette's keystroke built the whole window's tree for the palette's few hundred
+  nodes). A frame that rebuilds anyway builds it whole, as before. Each such overlay's
   content has the window's observer while it is open, so a leaf's own change inside is patched as in
   the main tree, its node found down from the overlay's node, a child of the root node after the
   root's own children. Tooltips stay out of both. A context menu, a menu bar's menu and a dropdown's

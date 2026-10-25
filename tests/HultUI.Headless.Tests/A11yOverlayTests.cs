@@ -264,6 +264,65 @@ public class A11yOverlayTests
 
     private static Element? OverlayContent(HeadlessSession session) => session.Window.OverlayContents.LastOrDefault();
 
+    /// <summary>Whole trees and overlay parts built so far.</summary>
+    private static int Built(HeadlessSession session) =>
+        session.Window.AccessibilityTreesBuilt + session.Window.Window.AccessibilityOverlayPartsBuilt;
+
+    [Fact]
+    public void AChangeOfAnOpenOverlaysChildren_BuildsOnlyItsPart()
+    {
+        var rows = new Element[200];
+        for (int i = 0; i < rows.Length; i++) rows[i] = TextB.New($"row {i}");
+        var (session, bridge) = Mount(Flex.Column().Children(rows));
+        using var _ = session;
+        var choices = new Choices();
+        session.Window.Window.ShowOverlay(Flex.Column().Padding(8).Children(TextB.New("Pick"), choices.Mount()), 50, 50);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var applied = bridge.CurrentTree!;
+        var firstRow = applied.Children[0];
+        int trees = session.Window.AccessibilityTreesBuilt, parts = session.Window.Window.AccessibilityOverlayPartsBuilt;
+
+        choices.Count.Value = 5;
+        session.PumpFrame();
+
+        // The overlay's part was built again and put in the applied tree; the window's 200 rows were not.
+        Assert.Equal((trees, parts + 1), (session.Window.AccessibilityTreesBuilt, session.Window.Window.AccessibilityOverlayPartsBuilt));
+        Assert.Same(applied, bridge.CurrentTree);
+        Assert.Same(firstRow, bridge.CurrentTree!.Children[0]);
+        Assert.NotNull(Find(bridge.CurrentTree, n => n.Name == "Choice 4"));
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void APaletteKeystroke_BuildsOnlyThePalettesPart()
+    {
+        var rows = new Element[200];
+        for (int i = 0; i < rows.Length; i++) rows[i] = TextB.New($"row {i}");
+        var (session, bridge) = Mount(Flex.Column().Children(rows));
+        using var _ = session;
+        string[] words = ["Save", "Save all", "Open file", "Open folder", "Close", "Close all", "Settings", "Search", "Replace", "Run"];
+        var palette = new CommandPalette(() => words.Select(w => new PaletteCommand(w, () => { })));
+        palette.Open(session.Window.Window);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt, parts = session.Window.Window.AccessibilityOverlayPartsBuilt;
+
+        foreach (var key in new[] { "s", "a", "v" })
+        {
+            session.Window.TypeText(key);
+            session.PumpFrame();
+            AssertFresh(session, bridge);
+        }
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+        session.PumpFrame();
+        for (int i = 0; i < 2; i++) session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        AssertFresh(session, bridge);
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.True(session.Window.Window.AccessibilityOverlayPartsBuilt >= parts + 4);
+    }
+
     [Fact]
     public void AContextMenusSelection_IsToldAsItMoves_WithNoTreeBuilt()
     {
@@ -380,16 +439,16 @@ public class A11yOverlayTests
         session.PumpFrame();
         session.Window.Minimized = true;
         session.PumpFrames(2);
-        int trees = session.Window.AccessibilityTreesBuilt;
+        int built = Built(session);
 
         choices.Count.Value = 3;
         for (int i = 0; i < 20; i++)
             Assert.False(session.PumpFrame(), "a minimized window drew a frame");
 
-        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(built + 1, Built(session));
         Assert.NotNull(Find(bridge.CurrentTree, n => n.Name == "Choice 2"));
         session.Window.Minimized = false;
         Assert.True(session.PumpFrame(), "the restore drew nothing");
-        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(built + 1, Built(session));
     }
 }

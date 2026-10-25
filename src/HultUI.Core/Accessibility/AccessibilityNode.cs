@@ -355,7 +355,8 @@ public sealed class AccessibilityNode
     /// <summary>Puts <paramref name="child"/> in place of the child at <paramref name="index"/>, in
     /// a tree that is out (UI thread): a leaf's node made again for a change of its own properties
     /// (<see cref="AccessibilityTreeBuilder.RemakeLeaf"/>), with the id of the one it replaces and
-    /// no children. One reference write into the array readers on other threads walk.</summary>
+    /// no children; or an open overlay's part of the tree built again, under the root node. One
+    /// reference write into the array readers on other threads walk.</summary>
     internal void ReplaceChild(int index, AccessibilityNode child)
     {
         child.Parent = this;

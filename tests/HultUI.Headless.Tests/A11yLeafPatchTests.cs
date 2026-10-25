@@ -336,6 +336,67 @@ public class A11yLeafPatchTests
                     s.Step("toggle back", () => check.IsChecked = false);
                 });
             }
+            case "palette typing" or "palette list scrolled":
+            {
+                // An open overlay's part of the tree is built again on its own (plan 17, round 5): the
+                // field's value and the new list for a keystroke, the list's scroll for a move.
+                var words = Enumerable.Range(0, 40).Select(i => $"{(i % 3 == 0 ? "Save" : i % 3 == 1 ? "Open" : "Close")} item {i}").ToList();
+                var palette = new CommandPalette(() => words.Select(w => new PaletteCommand(w, () => { })));
+                HeadlessSession? live = null;
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    void Open(HeadlessSession session)
+                    {
+                        live = session;
+                        palette.Open(session.Window.Window);
+                        session.PumpFrame();
+                        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                    }
+                    if (which == "palette typing")
+                    {
+                        s.Steps.Add(("open, s", Open, () => live!.Window.TypeText("s"), (session, force) => { force(); session.PumpFrame(); }));
+                        s.Step("a", () => live!.Window.TypeText("a"));
+                        s.Step("backspace", () => live!.Window.PressKey(KeyCode.Backspace));
+                        s.Step("zz, no match", () => live!.Window.TypeText("zz"));
+                        s.Step("backspace x3", () => { for (int i = 0; i < 3; i++) live!.Window.PressKey(KeyCode.Backspace); });
+                    }
+                    else
+                    {
+                        s.Steps.Add(("open", Open, () => { }, (session, force) => { force(); session.PumpFrame(); }));
+                        for (int k = 1; k <= 3; k++)
+                            s.Settled($"down x10 ({k})", () => { for (int i = 0; i < 10; i++) live!.Window.PressKey(KeyCode.Down); });
+                        s.Settled("up x25", () => { for (int i = 0; i < 25; i++) live!.Window.PressKey(KeyCode.Up); });
+                    }
+                });
+            }
+            case "overlay children" or "move in an overlay":
+            {
+                var count = new HultUI.Core.Reactivity.Signal<int>(2);
+                var choices = new Picker(count);
+                var grow = Box.New().Width(Dimension.Px(20)).Height(Dimension.Px(10));
+                var content = Flex.Column(gap: 4).Padding(8).Children(Flex.Row(gap: 4).Children(grow, Button.New("After")), choices.Mount());
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    void Open(HeadlessSession session)
+                    {
+                        session.Window.Window.ShowOverlay(content, 300, 40);
+                        session.PumpFrame();
+                        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                    }
+                    if (which == "overlay children")
+                    {
+                        s.Steps.Add(("open, 4", Open, () => count.Value = 4, (session, force) => { force(); session.PumpFrame(); }));
+                        s.Step("1", () => count.Value = 1);
+                        s.Step("3", () => count.Value = 3);
+                    }
+                    else
+                    {
+                        s.Steps.Add(("open", Open, () => { }, (session, force) => { force(); session.PumpFrame(); }));
+                        s.Settled("grow", () => { grow.Box.Width = Dimension.Px(120); grow.MarkLayoutDirty(); });
+                        s.Settled("shrink", () => { grow.Box.Width = Dimension.Px(60); grow.MarkLayoutDirty(); });
+                    }
+                });
+            }
             case "box that gains a name" or "box whose name goes":
             {
                 var box = Box.New().Width(Dimension.Px(24)).Height(Dimension.Px(24));
@@ -370,6 +431,47 @@ public class A11yLeafPatchTests
             default:
                 throw new ArgumentOutOfRangeException(nameof(which));
         }
+    }
+
+    /// <summary>Buttons as many as <paramref name="count"/> says.</summary>
+    private sealed class Picker(HultUI.Core.Reactivity.Signal<int> count) : HultUI.Core.Components.Component
+    {
+        public override Element Build()
+        {
+            var column = Flex.Column(gap: 4);
+            for (int i = 0; i < count.Value; i++) column.AddChild(Button.New($"Choice {i}"));
+            return column;
+        }
+    }
+
+    /// <summary>Cases a change inside an open overlay builds that overlay's part of the tree again for,
+    /// and no tree (plan 17, round 5).</summary>
+    public static TheoryData<string> OverlayParts => new()
+    {
+        "palette typing", "palette list scrolled", "overlay children", "move in an overlay",
+    };
+
+    [Theory]
+    [MemberData(nameof(OverlayParts))]
+    public void ATSPI_AnOverlaysPartBuiltAgain_TellsWhatARebuildTells_AndBuildsNoTree(string which)
+    {
+        var parts = Play(which, forceRebuild: false, AtSpi);
+        var rebuilt = Play(which, forceRebuild: true, AtSpi);
+        Assert.Equal(rebuilt.Told, parts.Told);
+        Assert.Equal(rebuilt.Trees, parts.Trees);
+        Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
+    }
+
+    [WindowsTheory]
+    [MemberData(nameof(OverlayParts))]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AnOverlaysPartBuiltAgain_RaisesWhatARebuildRaises_AndBuildsNoTree(string which)
+    {
+        var parts = PlayUia(which, forceRebuild: false);
+        var rebuilt = PlayUia(which, forceRebuild: true);
+        Assert.Equal(rebuilt.Told, parts.Told);
+        Assert.Equal(rebuilt.Trees, parts.Trees);
+        Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
     }
 
     /// <summary>What a run told and built: the bridge's lines, a dump of the tree after each step,
