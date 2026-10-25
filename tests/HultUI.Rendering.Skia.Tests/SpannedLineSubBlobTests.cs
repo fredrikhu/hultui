@@ -267,7 +267,7 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         if (transform is not null) ctx.Pop();
         ctx.EndFrame();
         surface.Present();
-        return (surface.ReadPixels(out _, out _, out _), ctx.GlyphsDrawn, ctx.CachedSubBlobCount, ctx.CachedRunInkExtentCount);
+        return (surface.ReadPixels(out _, out _, out _), ctx.GlyphsDrawn, ctx.CachedSubBlobCount, (int)ctx.RunExtentsFromGlyphs);
     }
 
     [Theory]
@@ -385,8 +385,9 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
     }
 
     /// <summary>A variable face has no extent of its own; each of its runs has one, from its
-    /// glyphs: at least the slack either side of the origin, and kept (asked again, the same,
-    /// still one entry).</summary>
+    /// glyphs: at least the slack either side of the origin. Each glyph's bounds are read from
+    /// Skia once, for the face: asked again, or for another run of the same glyphs, the extent is
+    /// the same and nothing more is read.</summary>
     [VariableFontFact]
     public void AVariableFace_HasNoBox_SoEachRunGivesItsOwnExtent()
     {
@@ -400,9 +401,139 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         Assert.NotNull(extent);
         Assert.InRange(extent!.Value.Left, -1.5f, -0.125f);
         Assert.InRange(extent.Value.Right, 0.125f, 2.5f);
-        Assert.Equal(1, ctx.CachedRunInkExtentCount);
+        Assert.Equal(run.Glyphs.Select(g => (ushort)g.GlyphId).Distinct().Count(), ctx.GlyphInksRead);
+        long read = ctx.GlyphInksRead;
         Assert.Equal(extent, ctx.RunInkExtentOf(run));
-        Assert.Equal(1, ctx.CachedRunInkExtentCount);
+        var again = ((PipelineTextParagraph)ctx.LayoutParagraph(CodeLine + " ", Style(13f, family: VariableFonts.Family!), 780)).TextLines[0].Runs[0];
+        Assert.NotSame(run, again);
+        Assert.Equal(extent, ctx.RunInkExtentOf(again));
+        Assert.Equal(read, ctx.GlyphInksRead);
+    }
+
+    /// <summary>
+    /// A run's extent is the union of its glyphs' bounds, read from the face's table now rather
+    /// than kept per run: the same floats, to the bit, as reading the run's glyphs from Skia at
+    /// once (the extents were kept per run until plan 17 round 5). Runs are asked in an order that
+    /// fills the table from other runs first, some twice, longer than a piece of the reads, and
+    /// with glyphs repeated.
+    /// </summary>
+    [VariableFontFact]
+    public void ARunsExtent_IsItsGlyphsBoundsAsSkiaGivesThemForTheRun_ToTheBit()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(800, 100, 1f);
+        var ctx = (SkiaRenderContext)surface.RenderContext;
+        using var reference = new SKFont { LinearMetrics = true, Size = 2048f };
+        var rng = new Random(23);
+        string alphabet = string.Concat(Enumerable.Range(0x21, 0x5E).Select(c => (char)c))
+            + "áéíóúñçøåäöüßÀÉÎÕÜŁŒŠŽƒ ΑΒΓΔαβγδλπωЖЗИЙжзийя ─│┌┐└┘├┤┬┴┼═║╔╗ ←↑→↓ ‰€™ ﬁﬂ";
+        var texts = new List<string>(Corpus) { CodeLine, new string('.', 300) + "W" + new string('i', 40) };
+        for (int t = 0; t < 400; t++)
+        {
+            var chars = new char[1 + rng.Next(120)];
+            for (int i = 0; i < chars.Length; i++) chars[i] = alphabet[rng.Next(alphabet.Length)];
+            texts.Add(new string(chars));
+        }
+        var runs = new List<ShapedRun>();
+        foreach (var style in new[] { Style(12f, family: VariableFonts.Family!), Style(21f, FontWeight.Bold, FontSlant.Italic, VariableFonts.Family!) })
+            foreach (var text in texts)
+                runs.AddRange(((PipelineTextParagraph)ctx.LayoutParagraph(text, style, float.PositiveInfinity)).TextLines.SelectMany(l => l.Runs));
+        // Shuffled, and half of them asked twice.
+        var order = runs.Concat(runs.Where((_, i) => i % 2 == 0)).OrderBy(_ => rng.Next()).ToList();
+        int fromGlyphs = 0;
+        foreach (var run in order)
+        {
+            if (ctx.RunInkExtentOf(run) is not { } extent || ctx.InkExtentOf(run.Font) is not null) continue;
+            fromGlyphs++;
+            var expected = Reference(run);
+            Assert.True(Bits(expected.Left) == Bits(extent.Left) && Bits(expected.Right) == Bits(extent.Right),
+                $"'{run.Text}' in {((SKTypeface)run.Font.NativeHandle).FamilyName}: {extent.Left:R}..{extent.Right:R}, read whole {expected.Left:R}..{expected.Right:R}");
+        }
+        Assert.True(fromGlyphs > 500, $"only {fromGlyphs} runs took their extent from their glyphs");
+        output.WriteLine($"{fromGlyphs} runs, {ctx.GlyphInksRead} glyph bounds read");
+
+        // The old reading: all the run's glyphs from Skia at once, joined in order.
+        SkiaRenderContext.InkExtent Reference(ShapedRun run)
+        {
+            var typeface = (SKTypeface)run.Font.NativeHandle;
+            reference.Typeface = typeface;
+            var ids = run.Glyphs.Select(g => (ushort)g.GlyphId).ToArray();
+            var bounds = new SKRect[ids.Length];
+            reference.GetGlyphWidths(ids, null, bounds);
+            float left = 0f, right = 0f;
+            foreach (var b in bounds)
+            {
+                if (b.IsEmpty) continue;
+                left = MathF.Min(left, b.Left);
+                right = MathF.Max(right, b.Right);
+            }
+            float slack = typeface.FontSlant == SKFontStyleSlant.Upright ? 0.125f : 0.375f;
+            return float.IsFinite(left) && float.IsFinite(right)
+                ? new(left / 2048f - slack, right / 2048f + slack)
+                : new(float.NegativeInfinity, float.PositiveInfinity);
+        }
+
+        static int Bits(float f) => BitConverter.SingleToInt32Bits(f);
+    }
+
+    /// <summary>Whether a run's glyphs are in X order is found in the pass that takes its extent
+    /// from its glyphs, and must agree with <see cref="GlyphRange.XOrdered"/>: a run whose X goes
+    /// back searched as if in order would miss glyphs that reach a stretch.</summary>
+    [VariableFontFact]
+    public void ARunsGlyphOrder_FoundWithItsExtent_IsGlyphRangesOrder()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(800, 100, 1f);
+        var ctx = (SkiaRenderContext)surface.RenderContext;
+        var run = ((PipelineTextParagraph)ctx.LayoutParagraph(CodeLine, Style(13f, family: VariableFonts.Family!), 780)).TextLines[0].Runs[0];
+        Assert.Null(ctx.InkExtentOf(run.Font));
+        var glyphs = run.Glyphs.ToArray();
+        // A mark pulled back over the glyph before it, at the start, the middle and the end.
+        foreach (int at in new[] { 1, glyphs.Length / 2, glyphs.Length - 1 })
+        {
+            var pulled = (GlyphPosition[])glyphs.Clone();
+            pulled[at] = pulled[at] with { X = pulled[at - 1].X - 0.5f };
+            Check(new ShapedRun(run.Text, run.Font, run.FontSize, run.Width, pulled), false);
+        }
+        Check(new ShapedRun(run.Text, run.Font, run.FontSize, run.Width, glyphs), true);
+
+        void Check(ShapedRun r, bool expected)
+        {
+            Assert.Equal(expected, GlyphRange.XOrdered(r.Glyphs));
+            Assert.NotNull(ctx.RunInkExtentAndOrderOf(r, out bool ordered));
+            Assert.Equal(expected, ordered);
+        }
+    }
+
+    /// <summary>A run's extent keeps nothing of the run: once the text caches let a run go, it
+    /// is gone, however many lines the context drew from it (the extents kept per run held up to
+    /// 2,048 runs, 2.29 MB after a 20,000-line Cascadia document closed).</summary>
+    [VariableFontFact]
+    public void ARunsExtent_KeepsTheRunAlive_NoLonger()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(800, 100, 1f);
+        var ctx = (SkiaRenderContext)surface.RenderContext;
+        var gone = ExtentOfARunNobodyKeeps(ctx);
+        for (int i = 0; i < 3 && gone.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(gone.IsAlive, "the context kept a run alive after taking its extent");
+        GC.KeepAlive(ctx);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference ExtentOfARunNobodyKeeps(SkiaRenderContext ctx)
+    {
+        // A pipeline of its own, so no text cache keeps the run either.
+        var pipeline = new TextPipeline(new SkiaFontCollection(), new SkiaTextShaper());
+        var layout = pipeline.Layout(CodeLine, Style(13f, family: VariableFonts.Family!), 780, null, TextOverflow.Clip, null);
+        var run = layout.Lines[0].Runs[0];
+        Assert.NotNull(ctx.RunInkExtentOf(run));
+        Assert.Null(ctx.InkExtentOf(run.Font));
+        return new WeakReference(run);
     }
 
     /// <summary>A run longer than the pieces its bounds are read in takes every glyph's: a wide
@@ -561,9 +692,8 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         Assert.Equal(ctx.BlobsMade, ctx.BlobsReleased);
     }
 
-    /// <summary>A new row in a variable face reads its run's extent from Skia into kept buffers
-    /// and keeps it in a map the context sizes to its bound when it makes the first, as it does
-    /// the sub-blobs' map: the row allocates nothing.</summary>
+    /// <summary>A new row in a variable face takes its run's extent from the face's glyph table,
+    /// whose page for the row's glyphs the first rows made: the row allocates nothing.</summary>
     [VariableFontFact]
     public void ANewRowInAVariableFace_TakesItsRunsExtentWithoutAllocating()
     {
@@ -584,15 +714,15 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         // The run blobs' cache, which is not sized ahead, grown to its bound first.
         for (int i = 0; i <= SkiaRenderContext.RunBlobCacheMaxSize; i++)
             ctx.DrawText($"Row {i} of the list", new Rect(4, 40, 780, 30), style, TextOverflow.Clip, null);
-        Assert.True(ctx.CachedRunInkExtentCount > 0, "no run took its own extent");
+        Assert.True(ctx.RunExtentsFromGlyphs > 0, "no run took its own extent");
 
-        // A thousand new runs into the map the first ones made. Grown from a default capacity it
-        // is ~70 B a row over these; a one-off retired allocation context (see Allocations) is
-        // about 8 KB, 8 B a row.
+        // A thousand new runs. Kept per run in a map grown from a default capacity, their extents
+        // were ~70 B a row; a one-off retired allocation context (see Allocations) is about 8 KB,
+        // 8 B a row.
         long first = GC.GetAllocatedBytesForCurrentThread();
         for (int end = next + First; next < end; next++) ctx.DrawParagraph(rows[next], new Point(4, 4));
         double firstPerRow = (GC.GetAllocatedBytesForCurrentThread() - first) / (double)First;
-        Assert.True(firstPerRow < 30, $"the run extents' map grew: {firstPerRow:0.#} B a row");
+        Assert.True(firstPerRow < 30, $"the run extents grew something: {firstPerRow:0.#} B a row");
 
         long bytes = Allocations.Least(() =>
         {
@@ -602,28 +732,29 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         Assert.True(bytes / (double)Round < 1, $"a new row of three stretches in {VariableFonts.Family} allocated {bytes / (double)Round:0.#} B");
     }
 
-    /// <summary>The run extents are kept to the sub-blobs' bound: the map starts over when full.</summary>
+    /// <summary>What the extents keep grows with the face's glyphs, not with the runs drawn: six
+    /// thousand new rows read the bounds of the few dozen glyphs they hold, once each.</summary>
     [VariableFontFact]
-    public void RunExtents_AreKeptToTheirBound()
+    public void RunExtents_ReadEachGlyphOnce_HoweverManyRunsHoldIt()
     {
         using var surface = new SkiaRasterRenderSurface();
         surface.Resize(800, 100, 1f);
         var ctx = (SkiaRenderContext)surface.RenderContext;
         var style = Style(12f, family: VariableFonts.Family!);
-        int most = 0, startedOver = 0, was = 0;
+        var glyphs = new HashSet<(IResolvedFont, ushort)>();
         ctx.BeginFrame(800, 100, 1f, Color.White);
         for (int i = 0; i < 3 * SkiaRenderContext.RunBlobCacheMaxSize; i++)
         {
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
-            ctx.DrawText(text, new Rect(4, 4, 780, 30), style, TextOverflow.Clip, null, Thirds(text));
-            int count = ctx.CachedRunInkExtentCount;
-            Assert.InRange(count, 0, SkiaRenderContext.RunBlobCacheMaxSize);
-            most = Math.Max(most, count);
-            if (count < was) startedOver++;
-            was = count;
+            var paragraph = (PipelineTextParagraph)ctx.LayoutParagraph(text, style, 780, Thirds(text));
+            foreach (var run in paragraph.TextLines.SelectMany(l => l.Runs))
+                foreach (var g in run.Glyphs)
+                    glyphs.Add((run.Font, (ushort)g.GlyphId));
+            ctx.DrawParagraph(paragraph, new Point(4, 4));
         }
         ctx.EndFrame();
-        Assert.Equal(SkiaRenderContext.RunBlobCacheMaxSize, most);
-        Assert.True(startedOver >= 2, $"the map started over {startedOver} times");
+        Assert.True(ctx.RunExtentsFromGlyphs >= 3 * SkiaRenderContext.RunBlobCacheMaxSize, $"{ctx.RunExtentsFromGlyphs} runs took their own extent");
+        Assert.InRange(ctx.GlyphInksRead, 1, glyphs.Count);
+        output.WriteLine($"{ctx.RunExtentsFromGlyphs} run extents from {ctx.GlyphInksRead} glyph bounds read ({glyphs.Count} glyphs in the rows)");
     }
 }
