@@ -5,13 +5,19 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–2 landed, step 3 next (resumed 2026-10-25 after a pause; main merged as
-  fb01fecb). All four round 5 questions answered (1, 2, 4 yes; 3 threshold first, chunked document option B in
-  Waiting). History note: rewritten 2026-10-25 (fredrikhu/hultui recreated; every commit after 3353ce47 has a new
-  ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in this worktree:
-  `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls for, record it in the
-  ledger, and commit.` Before resuming, check whether main moved (`git fetch`) and merge it in if needed.
+- **Phase:** **PAUSED (user, 2026-10-25, during round 5 step 3).** Steps 1–2 landed; step 3 partly landed
+  (91d48601 glyphs on first read, cc6f8467 line scratch). **On resume, finish step 3 first:** text-last-line-view is
+  saved as scratchpad `r5b3/last-line-view-wip.patch` (applies on cc6f8467; bit compare and pixels identical, text/wrap
+  −17 %, richtext open/resize −12 %); still to do: a filtered rerun of `component/edit one of 1,000 unkeyed rows`
+  (+5.2 % JIT, likely noise), the remaining test projects, WSL, then commit and update the 2026-10-24 DECISIONS row
+  about a wrap's last line. Also not yet run for 91d48601/cc6f8467: **WSL Fedora CrossPlatform.slnf** (Linux text
+  identity unverified) and Junction.Tests at cc6f8467. The worktree's `bin/` held the WIP build (sources touched, so
+  the next build recompiles; don't run tests with `--no-build` first). Then step 4. History note: rewritten
+  2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history).
+  To resume, run in this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both, do the step
+  the ledger's Phase calls for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if
+  it moved.
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** 653971d3 (round 5 reviews round 4's build, 653971d3..643eb07b, plus the CI
@@ -83,7 +89,7 @@ Correctness and round 4 objections first, then value per cost.
    selection and has item geometry before the tree reads it (all menu items have zero-height rects today);
    AT-SPI `state-changed:expandable`. Today: label/check/text/children changes inside an open overlay build
    0 trees; command palette typing (932 → 924 nodes) never reaches a reader; menu/dropdown moves never told.
-3. **Text** (5): **text-glyphs-on-first-draw** (word-cache runs compose their glyph array on first read: text/wrap
+3. **Text** (5) — PARTLY LANDED 91d48601, cc6f8467; text-last-line-view WIP (see Phase): **text-glyphs-on-first-draw** (word-cache runs compose their glyph array on first read: text/wrap
    −59 %, ellipsis −59 %, richtext/resize −40 %, open −38 %, 12 rows −8…−59 %; retained rich text 5,000 blocks
    −57 % open, −61 % closed; 20,000 layouts bit-identical; scroll rows pay first draws), **text-line-temporaries-
    scratch** (Itemize's per-call `List<FontRun>` and BiDi temporaries into kept scratch: 7 rows −14…−27 %),
@@ -392,6 +398,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 02e17103, cb34eecc, 08c49d10, b23c9251 | a11y-overlay-live | Approved. `PrepareOverlays` styles and lays out overlays after root layout, before the a11y phase; overlay Children dirt builds, layout dirt/moves coalesce; hit-testable overlay content gets the observer while open; `FindNodeDown` starts at the overlay's node; a change inside an open overlay rebuilds, diffs and swaps in only that overlay's subtree (`TryRebuildOverlays`); the overlay refresh keeps its own clock (b23c9251: overlay churn had postponed the window's refresh indefinitely). Overlay toggle/keystroke patch 0.9–1.6 KB, no tree. Palette typing over 2,000 commands, UIA 811.7 → 553.4 KB/key (−32 %), min −13.3 %, trees/key 1 → 0 (at the base the reader heard nothing). Proof: 49/49 probe steps equal a fresh tree on recording/UIA/AT-SPI (base 13–15), FlaUI 24/24 (base 10), live WSL pyatspi 39/39 (base 15), Junction/Meridian palettes 0 stale (base 7/7); staleness audit 0 STALE over 2,660 audits; 50 frames byte-identical. 0 slower. |
 | 5 | 22021d66, 827f6ad5 | contextmenu-a11y-selection-geometry | Keyboard/hover selection told as IsSelected (a Down key 0.5–1.1 KB patch, no tree); items placed in `MeasureContent` (same sums as `Render`), so no zero-height boxes. |
 | 5 | cc028a7f | atspi-expandable-state | `state-changed:expandable` when expanded goes to/from null; `expanded` only when that bit changes. |
+| 5 | 91d48601 | text-glyphs-on-first-draw | A multi-word run keeps its width and glyph count and makes its glyph array on the first `ShapedRun.Glyphs` read (one field holds the array or the pipeline; count in existing padding, `ShapedRun` stays 56 B; letter-spaced and > 65,535-glyph runs compose at once; UI-thread contract on the property). Per step JIT = AOT: text/wrap 1,367 → 544 KB (−60 %), ellipsis 1,844 → 740 (−60 %), richtext/open 9,259 → 5,737 (−38 %), resize 2,016 → 1,207 (−40 %), 13 rows −8…−28 %; time 0 slower, 5 faster (richtext/open −11.4 %). Held: 5,000-block rich text 24.79 → 10.58 MB open, 10.45 → 4.04 closed. Scroll rows pay first draws (viewer wheel 2.7 → 10.5 KB, richtext/wheel 1.3 → 8.3, scroll/jump +6 % min, never past the bar on both); whole sessions never cost more; Junction walk 12.99 → 12.32 MB. 20,000 layouts bit-identical (10.5M glyphs), 180 frames identical. WSL not run yet. |
+| 5 | cc6f8467 | text-line-temporaries-scratch | `Itemize` and BiDi lines use kept lists (segments, levels, runs, visual order), let go past 4,096; `ShapeLineText` sizes its run list. On top of 91d48601: bidi wrap 534 → 239 KB (−55 %), styled bidi wrap −54 %, emoji labels 6,344 → 4,164 (−34 %), styled wrap −37 %, text/wrap −12 %, others −7…−31 %; flagged rows within ±1 % on rerun. Bit compare and pixels identical. WSL and Junction.Tests not run yet. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -934,3 +942,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   suites, guarded UiTests (2 known Borderless failures) and WSL pass. New bug found: the dialog scrim reads as a
   Button named from the dialog's text (Waiting). Guideline note: with a reader, a keystroke in a dialog or palette
   costs in proportion to the overlay — keep overlay content small. **Paused at the user's request** after this step.
+- 2026-10-25: round 5 step 3 stopped early at the user's request: glyphs on first read (91d48601: text/wrap −60 %,
+  rich text held −57 %) and line scratch (cc6f8467: BiDi wraps −55 %) landed; text-last-line-view saved as a patch.
+  WSL and Junction.Tests at cc6f8467 still to run. Guideline notes: glyph arrays now come with the first draw, so a
+  scroll into lines laid out ahead pays a few KB per step (a whole session never more); `ShapedRun.Glyphs` must be read
+  on the thread that lays the text out. **Paused** (user).
