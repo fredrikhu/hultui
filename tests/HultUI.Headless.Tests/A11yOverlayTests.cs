@@ -430,6 +430,62 @@ public class A11yOverlayTests
     }
 
     [Fact]
+    public void AStreamOfChangesInAnOverlay_DoesNotHoldOffTheWindowsOwnRefresh()
+    {
+        var grow = Box.New().Width(Dimension.Px(20)).Height(Dimension.Px(10));
+        var after = Button.New("After");
+        var marker = Box.New().Width(Dimension.Px(4)).Height(Dimension.Px(4)).AccessibleName("marker");
+        var (session, bridge) = Mount(Flex.Column().Children(Flex.Row(gap: 4).Children(grow, after), marker));
+        using var _ = session;
+        var choices = new Choices();
+        session.Window.Window.ShowOverlay(Flex.Column().Padding(8).Children(choices.Mount()), 300, 50);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+
+        // A tree built just now, then a move in the window that waits for its refresh...
+        marker.AutomationId = "rebuilt";
+        session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        grow.Box.Width = Dimension.Px(120);
+        grow.MarkLayoutDirty();
+        // ...while the overlay changes on every frame, its part built each time.
+        for (int i = 0; i < 20; i++)
+        {
+            choices.Count.Value = 2 + i % 3;
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        }
+
+        // The window's refresh came due in those 320 ms: each part built put it off.
+        float x = Find(session.Window.Window.BuildAccessibilityTree(), n => n.ElementId == after.Id)!.BoundingRect.X;
+        Assert.Equal(x, Find(bridge.CurrentTree, n => n.ElementId == after.Id)!.BoundingRect.X, 0.01);
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void AnOverlayMovingEveryFrame_HasItsPartBuiltOnTheCoalescedSchedule()
+    {
+        var (session, bridge) = Mount(Flex.Column().Children(TextB.New("Main")));
+        using var _ = session;
+        var grow = Box.New().Width(Dimension.Px(20)).Height(Dimension.Px(10));
+        session.Window.Window.ShowOverlay(Flex.Row(gap: 4).Padding(8).Children(grow, Button.New("After")), 300, 50);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int parts = session.Window.Window.AccessibilityOverlayPartsBuilt;
+
+        // An animation inside a dialog: 20 frames 16 ms apart, the layout changed in each.
+        for (int i = 1; i <= 20; i++)
+        {
+            grow.Box.Width = Dimension.Px(20 + i * 5);
+            grow.MarkLayoutDirty();
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+        }
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+
+        // The leading edge, about every 100 ms, the trailing edge: not 20.
+        Assert.InRange(session.Window.Window.AccessibilityOverlayPartsBuilt - parts, 3, 6);
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
     public void AChangeInAnOverlayWhileMinimized_IsBuiltOnce()
     {
         var (session, bridge) = Mount(Flex.Column().Children(TextB.New("Main")));

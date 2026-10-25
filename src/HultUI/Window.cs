@@ -197,6 +197,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     // the parts of the stale ones (OverlayEntry.A11yStale) are built again when it comes due.
     private bool _a11yOverlayRefreshPending;
     private long _lastA11yRebuildMs;
+    // When the overlays' parts were last built (a whole tree builds them too). Their refresh keeps
+    // its own clock: on the window's, a stream of changes in an open overlay (a part built every
+    // frame) put off the window's own refresh for as long as it lasted.
+    private long _lastA11yOverlayRebuildMs;
     private const long A11yCoalesceMs = 100;
     // A value in a range (a slider's, a progress bar's) can move on every frame: a drag, a
     // download, a playing video's scrubber, a key held down. Each refresh rebuilds the whole tree,
@@ -1239,7 +1243,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // A coalesced layout-driven a11y refresh is due — force the trailing frame
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
-        || ((_a11yLayoutRefreshPending || _a11yOverlayRefreshPending) && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        || (_a11yLayoutRefreshPending && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        || (_a11yOverlayRefreshPending && A11yClockMs - _lastA11yOverlayRebuildMs >= A11yCoalesceMs)
         // The same for a range value's trailing edge: the value it came to rest at.
         || (_a11yRangeRefreshPending && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs))
         // Asked last: on Windows it asks UI Automation whether a client listens.
@@ -1260,8 +1265,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // the loop would wake for nothing.
         if ((_a11yLayoutRefreshPending || _a11yOverlayRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
         {
-            if (_a11yLayoutRefreshPending || _a11yOverlayRefreshPending)
+            if (_a11yLayoutRefreshPending)
                 Application.Earliest(ref at, ref deadline, (_lastA11yRebuildMs + A11yCoalesceMs) * frequency / 1000,
+                    IdleDeadline.A11yLayout);
+            if (_a11yOverlayRefreshPending)
+                Application.Earliest(ref at, ref deadline, (_lastA11yOverlayRebuildMs + A11yCoalesceMs) * frequency / 1000,
                     IdleDeadline.A11yLayout);
             if (_a11yRangeRefreshPending)
                 Application.Earliest(ref at, ref deadline, (_lastA11yRangeMs + A11yRangeCoalesceMs) * frequency / 1000,
@@ -1469,7 +1477,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
         bool a11yRebuild = a11yImmediate || a11yLayoutDue;
         bool a11yOverlays = a11yActive && !a11yRebuild && ((overlayChanges & OverlayChanges.Structure) != 0
-            || (_a11yOverlayRefreshPending && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs));
+            || (_a11yOverlayRefreshPending && nowMs - _lastA11yOverlayRebuildMs >= A11yCoalesceMs));
         // What changed in an overlay whose part is built again is told by that part's diff.
         if (a11yOverlays) DropPatchTargetsInStaleOverlays();
         // A list's selection moved, a text's caret, a leaf's own property, or a range's refresh came
@@ -1497,7 +1505,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             if (!a11yRebuild)
             {
                 _a11yOverlayRefreshPending = false;
-                _lastA11yRebuildMs = nowMs;
+                _lastA11yOverlayRebuildMs = nowMs;
             }
         }
 
@@ -1525,6 +1533,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             _a11yOverlayRefreshPending = false;
             for (int i = 0; i < _overlays.Count; i++) _overlays[i].A11yStale = false;
             _lastA11yRebuildMs = nowMs;
+            _lastA11yOverlayRebuildMs = nowMs;
         }
         else if (!a11yActive && _a11yWasActive)
         {
