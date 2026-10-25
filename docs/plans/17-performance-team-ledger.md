@@ -8,7 +8,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Phase:** build — round 5 (resumed 2026-10-25 after the repository work: history rewritten for a
   third-party screenshot, fredrikhu/hultui recreated; every commit after 3353ce47 has a new ID, old IDs in
   this file remapped; a pre-push hook refuses pushes built on the old history). Round 5 questions 1, 2 and 4
-  answered yes; question 3 open (the user asked how the public `Text` would look). Step 1 next. To resume
+  answered yes; question 3: threshold first, chunked document option B added to Waiting. Step 1 next. To resume
   after a pause, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both, do
   the step the ledger's Phase calls for, record it in the ledger, and commit.`
@@ -161,6 +161,13 @@ Re-ranked by the round 6 survey.
 - **vesper-free-label-per-build** (8, lead) — `DriveInfo.AvailableFreeSpace` per pane per build: a disk query
   (or network round trip) per key on the UI thread; cache per folder.
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
+- **textarea-chunked-document** (5/4; user chose this option B, 2026-10-25, after step 6's LOH threshold) — store a
+  TextArea's text in chunks; keep `string Text { get; set; }` (built on read, cached per version) and
+  `OnTextChanged(Action<string>)`; add a read-only `TextAreaElement.Document` (`Length`, indexer,
+  `GetText(start, length)`, `CopyTo(Span<char>)`, `Version`) and `OnDocumentChanged(Action<TextChange>)`
+  (`Start`, `RemovedLength`, `InsertedText`, `Version`) so large-text editors stop copying the whole document per
+  keystroke. Medium–large: undo, find, the a11y text pattern, tests reading `Text`. Only worth it if documents
+  above ~256k characters matter once the threshold has landed.
 - **vk-startup-preload** (3, low) — the GL preload runs only with `HULTUI_GL_PRELOAD=1` and only Reel calls it.
 - **layout-ordered-children** (1, low) — suite rows only; every app list is virtual.
 - **apps-tokenize-on-ui-thread** (5/8, low).
@@ -470,8 +477,9 @@ Round 5 questions (asked 2026-10-25 on resume). Recommendations in brackets.
 3. **TextArea document as one string** (declined in rounds 3 and 4: a rope changes the public `Text`): new
    evidence — typing above 42,500 characters triggers a gen-2 GC every 14–17 keys at app-sized heaps. [Not
    now: take the LOH-threshold half of runtime-gc-gen0-budget-and-loh-threshold first; revisit chunked
-   storage only if documents above ~256k characters matter.] → **open**: the user asked how the new public
-   `Text` would look (2026-10-25); options written up for them, answer pending.
+   storage only if documents above ~256k characters matter.] → **threshold first; add option B to Waiting**
+   (2026-10-25: keep `Text`/`OnTextChanged`, add a read-only `Document` view and `OnDocumentChanged(TextChange)`;
+   options A same API / B additive / C breaking were written up for the user).
 4. **vesper-detail-resize-stale** (not perf): in Detail view a resize never rebuilds, so the path trail's
    truncation stays stale until the next key; e6a432fa's fit comparison runs only in grid views. Fix it in
    step 8? [Yes, small.] → **yes** (2026-10-25).
