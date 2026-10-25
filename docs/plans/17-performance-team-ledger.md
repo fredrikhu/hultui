@@ -8,7 +8,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Phase:** build — round 5 (resumed 2026-10-25 after the repository work: history rewritten for a
   third-party screenshot, fredrikhu/hultui recreated; every commit after 3353ce47 has a new ID, old IDs in
   this file remapped; a pre-push hook refuses pushes built on the old history). Round 5 questions 1, 2 and 4
-  answered yes; question 3: threshold first, chunked document option B added to Waiting. Step 1 next. To resume
+  answered yes; question 3: threshold first, chunked document option B added to Waiting. Steps 1 landed, step 2 next. To resume
   after a pause, run in this worktree: `/loop Run the next step of the performance team: follow
   docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both, do
   the step the ledger's Phase calls for, record it in the ledger, and commit.`
@@ -64,7 +64,7 @@ everything. A build step may bundle one expert's related small candidates as sep
 
 Correctness and round 4 objections first, then value per cost.
 
-1. **Round 4 objections, small framework fixes** (6/4/5/3):
+1. ~~**Round 4 objections, small framework fixes**~~ LANDED a52de219, 6388f868, 2a332218, 3dd5c97b, 6895ac2d, a18e70dd (6/4/5/3):
    **reconcile-restore-moved-into-empty** (`ReconcileChildren`'s no-old-children path, TreeDiffer.cs:142-147,
    tries `TryRestoreMoved` before adding: a container whose every child was handed back no longer marks its
    parent per child — Vesper Brief with a reader 300.7 → 234.0 KB/key, a11y trees 1.00 → 0; Reel app build
@@ -152,6 +152,15 @@ Re-ranked by the round 6 survey.
 - **apps-junction-highlight-prefetch** (5/8, app) — worker tokenizing 5.9 MB per History key at 500 ms (25× the
   UI thread), 92.8 MB at start-up; tokenize only to the last hunk line / after the selection rests.
 - **text-lazy-line-runs** (5, lead after step 3) — undrawn lines' strings and run objects (50 % of text/wrap).
+- **uitests-borderless-maximize-width** (3, from r5 step 1; pre-existing at a33bd6b0) — the two Borderless runs of
+  WindowStateActivationTests fail on this desk: the maximized client is 2,554 px wide against a 2,560 px work area.
+- **a11y-box-selected-patch** (7, lead from r5 step 1) — changing `AccessibleSelected` on a plain Box builds a whole a11y
+  tree instead of a patch.
+- **meridian-response-find-step** (8/5, lead from r5 step 1) — Meridian's response find step is still 1.7 MB per Enter
+  after the FindBar fix.
+- **live-frame-requests-public** (3/4, API decision for the user if ever needed) — a third-party GPU source that only
+  posts is now drawn at SDL's timer rate (~64 fps) in a move or held drag; its own rate would need `LiveFrameRequests`
+  public. No consumer today.
 - **richtext-short-viewport-jitter** (5/editor) — viewport shorter than a line: caret moves scroll between
   two offsets.
 - **terminal-noop-scrollback-wheel** (2/Terminal) — a no-op scrollback wheel notch raises ContentChanged.
@@ -370,6 +379,11 @@ apps-meridian/vesper-components (→ 11, 12).
 | 4 | 33c9ba34 | uitests-guard | ForegroundGuard on 11 real-window UiTest classes (2 others gated, below); the guard sets the raise hint, passes hints to samples via env and gives their windows `WS_EX_NOACTIVATE`, watches child processes, logs with `HULTUI_UITESTS_GUARD_LOG`. Full `HULTUI_UITESTS=1` run: 122 pass, 0 fail, 14 skip, 0 hand-backs. One foreground take during the step's own run: WebView2's DevTools window (another process) took it ~100 ms before the guard handed it back; that test is now gated. |
 | 4 | 3200a2a2 | runtime-close-ends-run | Correctness (found by the step): since aa11334 a pass that closed the last window then waited forever — an external `WM_CLOSE` (FlaUI, Task Manager) left an idle app running windowless until something woke it; released in junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0. `if (!IsRunning) break;` before the wait: posted WM_CLOSE never → 0 ms; a11y sample close 1,450 → 79 ms; VirtualList UiTests 5 s (killed) → 0.6 s. `RunLoopTests` assertions. |
 | 4 | c2ea7860 | foreground-uitests-opt-in | Approved. `[UiForegroundFact]` needs `HULTUI_UITESTS_FOREGROUND=1` as well: WinFormsHostSampleTests (8), WebViewAccessibilityTests (4) and WebView2's two DevTools tests (one took the foreground, the other can't focus the page under the guard) — 14 facts; only ever run to prove they skip. Testing skill, ENVIRONMENT.md, PACKAGING.md, WINFORMS-INTEROP.md. |
+| 5 | a52de219 | reconcile-restore-moved-into-empty | The no-old-children path tries `TryRestoreMoved` (span + per-thread scratch list; children taken from the build's tree from the end; the parent's pending moves dropped in one pass). Vesper Brief with a reader 300.6 → 230.2 KB/key (−23 %), a11y trees per key 1 → 0, min −5.4 %; Reel app rebuild with a reader 5.8 → 2.0 KB (−66 %); bridge off flat; pending-move searches 222/key (12,569 comparisons) → 0. Streams identical to a forced rebuild every step (UIA + AT-SPI). Declined: an O(1) per-element move-pending counter (+8 B per element, DECISIONS.md). |
+| 5 | 6388f868 | findbar-step-double-rebuild | A `FindBar` holds its own search's notices during a step and calls `onChanged` once, reveal set first; opening with a selection builds once, not three times. Per Enter: Vesper reader 518.9 → 416.7 KB (−19.7 %), Junction diff 538.0 → 440.5 (−18.1 %), Meridian response 2,017 → 1,715 (−15 %); builds per step 2 → 1. ELEMENTS.md. |
+| 5 | 2a332218 | live-frame-posted-work | Posted work stops being a reason to draw a live frame only for 100 ms after a frame was drawn for a source's request (platform clock): a source that only posts draws 56/124 frames in a move/held drag (0 since ee6d0bb0); Reel 1080p120 keeps 0 drops. THREADING.md, MEDIA.md; headless + guarded real-window tests. |
+| 5 | 3dd5c97b, 6895ac2d | text-textarea-a11y-row-xs | Suite row "a11y/type in a 2,000-line TextArea, a reader reading, bridge on"; each row's string cut once, and **default member `IRenderContext.TextCaretXs(lineText, style, Span<float>)`** (API addition; Skia finds the line once, then `CaretXAt` per boundary). 704 → 308.7 KB/op (−56 %), min −25 %; boxes bit-identical (all corpora; Skia 6 styles × 7 line kinds); one ask per row (was 570 per-character asks). |
+| 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
 
@@ -899,3 +913,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   f28e57be; four stale mentions of the round 4 merge remapped to 643eb07b). Round 5 answers: list selection
   highlight yes (opt in), popup a11y events yes, Vesper Detail resize fix yes; TextArea chunked text open
   (the user asked how the public `Text` would look). Step 1 starts.
+- 2026-10-25: round 5 step 1 landed (a52de219..a18e70dd): the round 4 objections fixed — kept children come back
+  unmarked into an empty container (Vesper Brief with a reader −23 %, 0 trees), one build per find step (−15…−20 %),
+  posting GPU sources draw during moves again, TextArea reader typing −56 % with `TextCaretXs`, minimize/raise
+  refuse activation. All Windows suites and WSL pass; guarded UiTests 120 pass, 2 Borderless maximize-width failures
+  pre-existing at a33bd6b0 (Waiting). Guideline notes: don't let a FindBar's own search call `MarkDirty` too; for every
+  caret position on a line call `TextCaretXs` once.
