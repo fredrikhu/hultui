@@ -1322,6 +1322,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // caption region tall enough to contain it (for Snap Layouts when restored).
         UpdateCaptionHeight();
 
+        // The overlays next, before the accessibility phase, which reads what changed in them.
+        // Outside the style and layout timers, as when the overlays were done with their drawing.
+        var overlayChanges = _overlays.Count > 0 ? PrepareOverlays(theme) : OverlayChanges.None;
+
         // Accessibility: rebuild + diff when the tree changed and something is
         // actually listening. The Null bridge's IsActive is false, so this is a
         // single boolean read for apps with no AT attached. The first frame after
@@ -1336,9 +1340,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // Structural (Children), property/focus, and first-attach changes refresh
         // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
         // continuous resize/scroll otherwise rebuilds the whole tree every frame.
+        // An overlay's tree is a child of the root node: its children changing is the tree's
+        // structure changing, its layout or its place the bounds of everything in it.
         bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
-            || (_root.DirtyFlags & DirtyFlags.Children) != 0);
-        if (a11yActive && layoutWasDirty)
+            || (_root.DirtyFlags & DirtyFlags.Children) != 0 || (overlayChanges & OverlayChanges.Structure) != 0);
+        if (a11yActive && (layoutWasDirty || (overlayChanges & OverlayChanges.Bounds) != 0))
             _a11yLayoutRefreshPending = true;
         long nowMs = A11yClockMs;
         bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
@@ -1446,9 +1452,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             // above, has had its answer; left set, it rebuilt the whole tree on every pass of the
             // loop until the restore — one element added to 2,016 while minimized, a UIA client
             // listening: a rebuild on each of 61 passes a second, 10.8 MB/s.
-            if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0)
+            if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0
+                || (overlayChanges & OverlayChanges.Work) != 0)
                 _root.MarkPaintDirty();
             ClearFlags(_root, DirtyFlags.Children);
+            // The overlays' too: they are styled and laid out in such a frame now, and left set,
+            // an overlay's structural flag would rebuild the tree on every pass.
+            for (int i = 0; i < _overlays.Count; i++)
+                ClearFlags(_overlays[i].Content, DirtyFlags.Children);
             ServiceUndrawnSources();
             return false;
         }
@@ -3015,6 +3026,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// of the elements in it (<see cref="Element.WindowBorderBox"/>) are where they are drawn.</summary>
     private static void MoveOverlay(OverlayEntry entry, float x, float y)
     {
+        if (entry.X != x || entry.Y != y) entry.Moved = true;
         entry.X = x;
         entry.Y = y;
         entry.Content.OverlayOrigin = new Point(x, y);
@@ -3173,6 +3185,70 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         }
     }
 
+    /// <summary>What a frame's overlays did before its accessibility phase (<see cref="PrepareOverlays"/>).</summary>
+    [Flags]
+    private enum OverlayChanges : byte
+    {
+        None = 0,
+        /// <summary>Children added, removed or replaced in an overlay a reader sees.</summary>
+        Structure = 1,
+        /// <summary>An overlay a reader sees was laid out again or put somewhere else.</summary>
+        Bounds = 2,
+        /// <summary>Some overlay, a tooltip too, was styled or laid out again.</summary>
+        Work = 4,
+    }
+
+    /// <summary>
+    /// Styles, lays out and places the open overlays, as the root is styled and laid out, before
+    /// the frame's accessibility phase; and says what changed in the ones a reader sees (any but a
+    /// tooltip, <see cref="BuildAccessibilityTreeWithOverlays"/>): children (the tree is built again)
+    /// or bounds (the coalesced layout refresh, as a scroll or a resize). Overlay trees are separate
+    /// roots, so no flag of theirs reaches the root's. This ran in <see cref="RenderOverlays"/>, after
+    /// the phase: a component that changed its children in an open dialog or command palette, a
+    /// label that moved others in a menu, built no tree until something else did, and a reader kept
+    /// the list it saw when the overlay opened. A window that draws nothing (minimized) runs it too.
+    /// </summary>
+    private OverlayChanges PrepareOverlays(Theme theme)
+    {
+        var changes = OverlayChanges.None;
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            var overlay = _overlays[i];
+            var content = overlay.Content;
+            bool seen = overlay.IsHitTestable;
+            if (seen && (content.DirtyFlags & DirtyFlags.Children) != 0)
+                changes |= OverlayChanges.Structure | OverlayChanges.Work;
+
+            if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
+            {
+                StyleResolver.Resolve(content, theme);
+                // As the root's: what the pass resolved is not resolved again under a list that
+                // realizes rows while it is drawn.
+                ClearFlags(content, DirtyFlags.Style | DirtyFlags.StyleSubtree);
+                overlay.StyleResolved = true;
+                changes |= OverlayChanges.Work;
+            }
+
+            if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
+            {
+                _layoutEngine.PerformLayout(content,
+                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+                overlay.LayoutDone = true;
+                changes |= OverlayChanges.Work | (seen ? OverlayChanges.Bounds : OverlayChanges.None);
+            }
+
+            // Every frame, not only on a relayout: the anchor moves with the page under it.
+            if (overlay.Place is not null)
+                PlaceOverlay(overlay);
+            if (overlay.Moved)
+            {
+                overlay.Moved = false;
+                if (seen) changes |= OverlayChanges.Bounds;
+            }
+        }
+        return changes;
+    }
+
     private void RenderOverlays(IRenderContext ctx)
     {
         var theme = Application.Theme;
@@ -3180,6 +3256,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             var content = overlay.Content;
 
+            // Done before the accessibility phase (PrepareOverlays); here for an overlay opened or
+            // changed since, while the root was drawn.
             if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(content, theme);
@@ -3193,7 +3271,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 overlay.LayoutDone = true;
             }
 
-            // Every frame, not only on a relayout: the anchor moves with the page under it.
+            // Again after the root is drawn: an anchor can be placed by its own drawing (a row
+            // realized as its list draws). The same place as before, when it is not.
             if (overlay.Place is not null)
                 PlaceOverlay(overlay);
 
