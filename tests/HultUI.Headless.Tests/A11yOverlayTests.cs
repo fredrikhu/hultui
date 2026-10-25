@@ -339,6 +339,38 @@ public class A11yOverlayTests
     }
 
     [Fact]
+    public void AMenusItems_HaveTheirBounds_InTheTreeBuiltAsItOpens()
+    {
+        var (session, bridge) = Mount(Flex.Column().Children(TextB.New("Main")));
+        using var _ = session;
+        var items = new List<ContextMenuItem>
+        {
+            new() { Label = "Copy", ShortcutHint = "Ctrl+C", Action = () => { } },
+            new() { IsSeparator = true },
+            new() { Label = "Paste", Action = () => { } },
+            new() { Label = "More", Children = [new() { Label = "Alpha", Action = () => { } }] },
+        };
+        session.Window.Window.OpenContextMenu(items, new Point(100, 80));
+        session.PumpFrame();
+
+        // The tree is built in the frame after the menu opened, before the menu is first drawn: its
+        // items' places were worked out only as it drew, and every item had a zero-height box.
+        var menu = OverlayContent(session)!;
+        var nodes = Find(bridge.CurrentTree, n => n.ElementId == menu.Id)!.Children;
+        Assert.Equal(3, nodes.Count);
+        var box = menu.WindowBorderBox;
+        float bottom = box.Y;
+        foreach (var node in nodes)
+        {
+            Assert.True(node.BoundingRect.Height > 10, $"'{node.Name}' is {node.BoundingRect.Height} high");
+            Assert.True(node.BoundingRect.Y >= bottom, $"'{node.Name}' overlaps the item above it");
+            bottom = node.BoundingRect.Bottom;
+        }
+        Assert.True(bottom <= box.Bottom);
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
     public void AChangeInAnOverlayWhileMinimized_IsBuiltOnce()
     {
         var (session, bridge) = Mount(Flex.Column().Children(TextB.New("Main")));

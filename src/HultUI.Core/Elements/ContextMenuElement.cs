@@ -264,6 +264,16 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         return -1;
     }
 
+    /// <summary>Sizes the item arrays for the items; new ones are measured again when drawn.</summary>
+    private void EnsureItemArrays()
+    {
+        if (_itemYOffsets.Length == _items.Count) return;
+        _itemYOffsets = new float[_items.Count];
+        _itemHeights = new float[_items.Count];
+        _textHeights = new float[_items.Count];
+        _measured = false;
+    }
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
         float maxLabelWidth = 0;
@@ -273,13 +283,21 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         var style = ResolvedInherited;
         var itemStyle = style with { FontSize = _theme.FontSize };
         var shortcutStyle = style with { FontSize = _theme.ShortcutFontSize };
+        EnsureItemArrays();
+        // Each item's place, worked out as Render works it out (from the drawing context's text
+        // heights, which are these): the tree reads them before the first frame is drawn.
+        float y = _theme.Padding.Top;
 
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
+            _itemYOffsets[i] = y;
             if (item.IsSeparator)
             {
-                totalHeight += _theme.SeparatorMargin * 2 + 1;
+                float sepHeight = _theme.SeparatorMargin * 2 + 1;
+                _itemHeights[i] = sepHeight;
+                y += sepHeight;
+                totalHeight += sepHeight;
                 continue;
             }
 
@@ -297,7 +315,10 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 maxShortcutWidth = Math.Max(maxShortcutWidth, arrowSize.Width);
             }
 
-            totalHeight += _theme.ItemPadding.Top + labelSize.Height + _theme.ItemPadding.Bottom;
+            float itemHeight = _theme.ItemPadding.Top + labelSize.Height + _theme.ItemPadding.Bottom;
+            _itemHeights[i] = itemHeight;
+            y += itemHeight;
+            totalHeight += itemHeight;
         }
 
         float shortcutExtra = maxShortcutWidth > 0 ? _theme.ShortcutGap + maxShortcutWidth : 0;
@@ -322,14 +343,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         ctx.DrawRoundedRect(box, new CornerRadius(_theme.CornerRadius),
             _theme.Background, _theme.BorderColor, new Thickness(_theme.BorderWidth));
 
-        // Build item layout arrays
-        if (_itemYOffsets.Length != _items.Count)
-        {
-            _itemYOffsets = new float[_items.Count];
-            _itemHeights = new float[_items.Count];
-            _textHeights = new float[_items.Count];
-            _measured = false;
-        }
+        EnsureItemArrays();
         bool measure = !_measured || _measuredStyle != itemStyle;
         _measured = true;
         _measuredStyle = itemStyle;
@@ -352,14 +366,19 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             visibleBottom = clip.Bottom;
         }
 
+        // Whether an item is not where measuring put it: a drawing context that measures text
+        // otherwise than the layout's (only a test's fixed metrics do). Its bounds are told then.
+        bool moved = false;
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
+            moved |= _itemYOffsets[i] != y;
             _itemYOffsets[i] = y;
 
             if (item.IsSeparator)
             {
                 float sepHeight = _theme.SeparatorMargin * 2 + 1;
+                moved |= _itemHeights[i] != sepHeight;
                 _itemHeights[i] = sepHeight;
                 if (box.Y + y + sepHeight > visibleTop && box.Y + y < visibleBottom)
                 {
@@ -376,6 +395,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             if (measure) _textHeights[i] = ctx.MeasureText(item.Label, itemStyle).Height;
             float textHeight = _textHeights[i];
             float itemHeight = _theme.ItemPadding.Top + textHeight + _theme.ItemPadding.Bottom;
+            moved |= _itemHeights[i] != itemHeight;
             _itemHeights[i] = itemHeight;
             if (box.Y + y + itemHeight <= visibleTop || box.Y + y >= visibleBottom)
             {
@@ -446,6 +466,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         }
 
         ctx.Pop(); // clip
+        if (moved) NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.BoundingRect);
     }
 
     public override bool HitTest(Point point) =>

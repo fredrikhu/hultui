@@ -592,7 +592,14 @@ providers), a UIA `ItemContainer` on virtualized lists.
   change or a move goes on the coalesced layout refresh, as in the main tree. Each such overlay's
   content has the window's observer while it is open, so a leaf's own change inside is patched as in
   the main tree, its node found down from the overlay's node, a child of the root node after the
-  root's own children. Tooltips stay out of both.
+  root's own children. Tooltips stay out of both. A context menu, a menu bar's menu and a dropdown's
+  list tell a move of their selection (the arrow keys, Home and End, the pointer): the two items'
+  selected state is patched with no rebuild, as a list's (UIA SelectionItem.IsSelected, AT-SPI
+  `state-changed:selected`); it only marked the paint before, and a reader walking a menu heard
+  nothing. Their items have their places from the menu's measure, before its first frame is drawn
+  (the tree is built in that frame, before the drawing, and gave every item a zero-height box for as
+  long as the menu was open); a drawing context that measures text otherwise moves them once, and
+  tells their bounds.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 
