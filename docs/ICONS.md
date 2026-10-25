@@ -115,7 +115,7 @@ If you are sizing fresh artwork with no legacy numbers to honour, just pick the 
 
 ## Adding artwork
 
-**Phosphor.** Add the name to [`scripts/phosphor-icons.txt`](https://github.com/fredrikhu/hultui-revamped/blob/main/scripts/phosphor-icons.txt) and regenerate:
+**Phosphor.** Add the name to [`scripts/phosphor-icons.txt`](https://github.com/fredrikhu/hultui/blob/main/scripts/phosphor-icons.txt) and regenerate:
 
 ```bash
 ./scripts/generate-phosphor-icons.ps1

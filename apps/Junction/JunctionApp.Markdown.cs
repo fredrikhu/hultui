@@ -587,7 +587,7 @@ public partial class JunctionApp
             var handler = _gitlab.HandlerFor(host);
             var client = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
             client.Timeout = TimeSpan.FromSeconds(20);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui-revamped)");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui)");
             return client;
         });
         using var response = Sync(http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead));

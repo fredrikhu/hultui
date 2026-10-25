@@ -251,6 +251,6 @@ Third-party code and assets in the tree keep their own licenses, noted beside th
 
 - `external/XTerm.NET/` -- MIT (upstream's `LICENSE`), HultUI's patches to it included
 - `src/HultUI.Headless/Fonts/` -- DejaVu fonts, Bitstream Vera / Arev license (`LICENSE-DejaVu.txt`)
-- `src/HultUI.Icons/Phosphor.Paths.g.cs` -- Phosphor Icons, MIT
+- `src/HultUI.Icons/Phosphor.Paths.g.cs` -- Phosphor Icons, MIT (`LICENSE-Phosphor.txt`)
 - `apps/Junction/Assets/` -- Octicons, MIT (`OCTICONS-LICENSE.txt`)
 - `native/mpv/` builds an LGPL-2.1-or-later libmpv (`src/HultUI.Media.Mpv.Natives/THIRD-PARTY-NOTICES.md`); `native/cef/` packages CEF, BSD-3-Clause

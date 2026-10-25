@@ -29,4 +29,10 @@
     <ProjectReference Include="..\HultUI.Syntax\HultUI.Syntax.csproj" />
   </ItemGroup>
 
+  <!-- Phosphor.Paths.g.cs is upstream artwork, MIT-licensed by Phosphor Icons; MIT asks
+       for the notice to travel with it. Copied verbatim from @phosphor-icons/core 2.1.1. -->
+  <ItemGroup>
+    <None Include="LICENSE-Phosphor.txt" Pack="true" PackagePath="licenses\" />
+  </ItemGroup>
+
 </Project>

@@ -18,7 +18,7 @@ AppId={{B3F1E7C2-6A94-4D0E-9C5B-1E8A2F4D7C90}
 AppName=Vesper Commander
 AppVersion={#AppVersion}
 AppPublisher=Fredrik Hult
-AppPublisherURL=https://github.com/fredrikhu/hultui-revamped
+AppPublisherURL=https://github.com/fredrikhu/hultui
 DefaultDirName={autopf}\Vesper Commander
 ; Per-user install by default (no UAC prompt — sensible for an unsigned
 ; installer; {autopf} then resolves to %LocalAppData%\Programs). The dialog

@@ -23,7 +23,7 @@ AppId={{B2E5C8D1-4F7A-4E63-9C21-7A6D3F9E5B84}
 AppName=Meridian
 AppVersion={#AppVersion}
 AppPublisher=Fredrik Hult
-AppPublisherURL=https://github.com/fredrikhu/hultui-revamped
+AppPublisherURL=https://github.com/fredrikhu/hultui
 DefaultDirName={autopf}\Meridian
 ; Per-user install by default (no UAC prompt — sensible for an unsigned
 ; installer; {autopf} then resolves to %LocalAppData%\Programs). The dialog

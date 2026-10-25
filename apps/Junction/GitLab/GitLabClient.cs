@@ -97,7 +97,7 @@ public sealed class GitLabClient : IDisposable
         _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
         _http.Timeout = timeout ?? TimeSpan.FromSeconds(20);
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui-revamped)");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui)");
         if (!string.IsNullOrEmpty(token))
         {
             if (kind == GitLabTokenKind.Pat) _http.DefaultRequestHeaders.Add("PRIVATE-TOKEN", token);
@@ -109,7 +109,7 @@ public sealed class GitLabClient : IDisposable
             ? new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
             : new HttpClient(handler, disposeHandler: false);
         _raw.Timeout = _http.Timeout;
-        _raw.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui-revamped)");
+        _raw.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hultui)");
     }
 
     /// <summary>
