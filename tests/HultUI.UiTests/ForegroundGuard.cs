@@ -10,7 +10,7 @@ namespace HultUI.UiTests;
 /// someone is using. <c>SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0</c> in the environment was not enough on
 /// its own (plan 17, 2026-10-11: a probe window took the foreground four times, and one with the
 /// hint set in process still did twice). The Vulkan probe's windows have been kept out of the
-/// foreground since b0ed204; this does the same for every other test that opens a window, in the
+/// foreground since 9084be9; this does the same for every other test that opens a window, in the
 /// test process or in a sample it launches:
 /// <list type="bullet">
 /// <item>SDL is told in process, before the window exists, not to activate a window when it shows

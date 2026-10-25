@@ -1,7 +1,7 @@
 {
-  "label": "Before the word lookups in place (plan 17): b277691, median of 3 idle-gated runs",
+  "label": "Before the word lookups in place (plan 17): 61e83a5, median of 3 idle-gated runs",
   "date": "2026-10-08 11:15 +02:00",
-  "commit": "b277691",
+  "commit": "61e83a5",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

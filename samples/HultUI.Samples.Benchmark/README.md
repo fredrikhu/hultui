@@ -110,7 +110,7 @@ Brave (Chromium 150) — the hand-written web baseline; medians, ms):
 > 4.4 → 2.6 vs the 2026-07-23 capture). Bulk creates moved less vs July
 > (`create 10,000` 165 → 177, `append` 18 → 20): a same-day run of the
 > pre-cache commit sat well *above* the July column (create-10k 232, swap 6.3).
-> Bisected 2026-08-13: that interim regression was f4389c3 ("Measure a flex
+> Bisected 2026-08-13: that interim regression was b969555 ("Measure a flex
 > item's cross size at the width it ends up with", 2026-08-11) — a correctness
 > fix for flex-basis-0 items measured at zero width, whose remeasure pass both
 > added measure work and thrashed the then-single-slot measure cache (swap
@@ -229,11 +229,11 @@ Reading it:
 
 ### Framework feature batch, before and after (2026-10-05, rechecked 2026-10-06)
 
-The 35 merges from e5a2206 (2026-10-04) to 90730ee (2026-10-05): undo, scroll
+The 35 merges from 42ef8de (2026-10-04) to c225eaa (2026-10-05): undo, scroll
 chaining, dialog Esc/focus, baseline alignment, find bar, settings, window
 placement, single instance, shortcuts, command palette, menu bar, expander,
 popover, table, aspect ratio, align-content, sticky, the single-line cross clamp,
-golden images. Then main at 449ecd0, after the evening's performance fixes
+golden images. Then main at 4d347d2, after the evening's performance fixes
 (opacity groups, z-order, truncation, BiDi/styled/multi-font memos).
 
 Measured on 2026-10-06 with the machine otherwise idle: all three built Release,
@@ -241,7 +241,7 @@ run in turn 6 times each on the 8 performance cores (see below), every run start
 only once the machine was under 8 % CPU with no test host or game running. Median
 of each run's minimum (median of each run's median), ms, a11y off:
 
-| Operation             |      e5a2206 |      90730ee |   449ecd0 | batch |  since |
+| Operation             |      42ef8de |      c225eaa |   4d347d2 | batch |  since |
 | --------------------- | -----------: | -----------: | --------: | ----: | -----: |
 | create 1,000          | 11.37 (15.6) |  9.59 (15.2) | 7.81 (13.7) | −16 % | −19 % |
 | update every 10th     |  1.08 (1.18) |  0.96 (1.20) | 0.97 (1.24) | −11 % |  +1 % |
@@ -267,25 +267,25 @@ lower after the batch. The evening table that stood here first agreed on the
 bulk rows but not on every small one; a game was open on the machine for part of
 that evening, so this quiet table replaces it.
 
-**Won back, 2026-10-06** (4f8a3fc, a leaf measured once per width instead of once
-per pass): against main at f586c39, 14 interleaved runs each, a11y off —
+**Won back, 2026-10-06** (f0bb7b8, a leaf measured once per width instead of once
+per pass): against main at 5a1afd4, 14 interleaved runs each, a11y off —
 create 10,000 141 → 131 ms (−7 %), append 7.6 → 6.5 ms (−15 %), remove row 1.77 →
 1.25 ms (−29 %), create 1,000 −7 %; the sub-millisecond rows unchanged on their
-minimums. Create 10,000 is back at its pre-batch e5a2206 level (130 ms).
+minimums. Create 10,000 is back at its pre-batch 42ef8de level (130 ms).
 
 ### A measurement holds for a range of heights (2026-10-06), and the harness fixed
 
 Container measurements are now shared between the measure and layout passes too
-(d6c0bd6, 5decd7f, 66e06f7 — see the scenario suite's README). Measuring them showed
-two flaws in this harness, both making a faster build read slower, fixed in f30d02c:
+(2686523, 379b0bd, 232ee44 — see the scenario suite's README). Measuring them showed
+two flaws in this harness, both making a faster build read slower, fixed in 5f740b3:
 the pre-warm was three fixed passes, so a faster build ran its first metrics on code
-still being JIT-promoted; and since the loop was paced to the display (b46e1cc,
+still being JIT-promoted; and since the loop was paced to the display (02a2496,
 2026-09-20) a measured frame waited for its display slot whenever the setup frame
-before it fitted inside one interval. **Numbers before f30d02c are not comparable
+before it fitted inside one interval. **Numbers before 5f740b3 are not comparable
 with numbers after it.** With the fixed harness in both builds, 8 interleaved runs
 each, a11y off, minimum (median), ms:
 
-| Operation             |  49a9b8b        |  c80711c        | min    |
+| Operation             |  06894f1        |  2856538        | min    |
 | --------------------- | --------------: | --------------: | -----: |
 | create 1,000          |   5.12 (9.39)   |   4.55 (4.96)   | −11 %  |
 | update every 10th     |   0.65 (0.72)   |   0.61 (0.66)   |  −6 %  |
@@ -305,7 +305,7 @@ append reads 6.30 → 5.14 ms (−18 %) and every other row's minimum is level o
 
 ### The layout pass takes the measure pass's flex resolution (2026-10-06)
 
-6df8757 and 0bf5823 (see the scenario suite's README), the same harness, 8 interleaved runs each,
+255d50d and 95f39bc (see the scenario suite's README), the same harness, 8 interleaved runs each,
 a11y off, minimum: append 1,000 → 1,000 6.04 → 5.44 ms (−10 %), create 10,000 105.6 → 103.4 ms
 (−2 %), every other row within ±4 %. These operations make rows, so most of their layout pass
 is measuring new text for the first time, which this does not touch: their layout phase is about
@@ -314,7 +314,7 @@ which only lays them out again, is −10 % overall.
 
 ### A measurement holds for a range of widths (2026-10-06)
 
-91f9e4b, 1b49032 and 98e0581 (see the scenario suite's README), 8 interleaved runs each, a11y off,
+a1a5ea4, f2521ad and eb4c68a (see the scenario suite's README), 8 interleaved runs each, a11y off,
 minimum: remove row 0.62 → 0.37 ms (−41 %), create 1,000 4.77 → 4.11 ms (−14 %), append 1,000 →
 1,000 5.54 → 4.79 ms (−14 %), create 10,000 100.2 → 99.4 ms (−1 %); update, swap, select and clear
 within two hundredths of a millisecond. A table row's 64 px id and 24 px remove button now hold
@@ -334,7 +334,7 @@ The `--auto` suite first runs a **global pre-warm** — every measured operation
 over large and small tables, in passes until at least three are done and three
 seconds have passed, then a 500 ms pause — so the shared framework code is
 JIT-tiered to steady state before any timing starts (by time, not by a count of
-passes: since f30d02c, see above). Scripted runs render **unpaced**, so a measured
+passes: since 5f740b3, see above). Scripted runs render **unpaced**, so a measured
 frame renders as soon as its mutation is made instead of waiting for its display
 slot. It then gives each measured operation its own dedicated frame,
 runs a couple of per-metric warm-up iterations, forces a GC between metrics, and

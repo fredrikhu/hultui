@@ -1,7 +1,7 @@
 {
-  "label": "before: the palette joins each unmatched command's text per keystroke and ranks through LINQ (713b83c), JIT, 2 runs",
+  "label": "before: the palette joins each unmatched command's text per keystroke and ranks through LINQ (6025e35), JIT, 2 runs",
   "date": "2026-10-10 07:11 +02:00",
-  "commit": "713b83c",
+  "commit": "6025e35",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

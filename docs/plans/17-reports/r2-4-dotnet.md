@@ -1,15 +1,15 @@
 # Round 2 survey: 4. .NET runtime
 
 Counting-platform probe around real SDL windows (GL and Vulkan, unfocused), perf suite JIT
-and AOT, headless retention probes; worktree clean at fc807ec. Probe source and captures in
+and AOT, headless retention probes; worktree clean at 6ba7e2d. Probe source and captures in
 the session scratchpad `r2rt/`.
 
 SATISFIED: no
 
 ## Review of round 1
 
-- **8aed816 "an idle pass allocates 0 B" holds only headless.** In a real SDL window every loop pass allocates 88 B (JIT) / 72 B (AOT) inside `SdlWindowingPlatform.PumpEvents`: `SdlWindowingPlatform.cs:84` wraps the callback again per call (`w => onWindowClose(w)`), so the delegate cached at `Application.cs:374` does not help. → runtime-sdl-pump-closure.
-- **f3a31d6 + 0178784: the shared caches are bounded by entries, not bytes,** and since f3a31d6 live as long as the application. After a TextArea closes, the heap keeps 4.3 MB (TODO.md) to 155 MB (17k × 1,000-char CSV). → text-shape-cache-byte-bound.
+- **6f42157 "an idle pass allocates 0 B" holds only headless.** In a real SDL window every loop pass allocates 88 B (JIT) / 72 B (AOT) inside `SdlWindowingPlatform.PumpEvents`: `SdlWindowingPlatform.cs:84` wraps the callback again per call (`w => onWindowClose(w)`), so the delegate cached at `Application.cs:374` does not help. → runtime-sdl-pump-closure.
+- **d5d0c50 + 0178784: the shared caches are bounded by entries, not bytes,** and since d5d0c50 live as long as the application. After a TextArea closes, the heap keeps 4.3 MB (TODO.md) to 155 MB (17k × 1,000-char CSV). → text-shape-cache-byte-bound.
 - Otherwise none: no suite row moved ≥ 10 % allocKB vs round 1's last captures (89 rows, JIT and AOT). Shared text services: every app `TextMeasure` caller is on the UI thread; workers only read files and post back.
 
 ## Candidates

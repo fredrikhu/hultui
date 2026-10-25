@@ -1,7 +1,7 @@
 {
-  "label": "bf5165f, JIT",
+  "label": "3b0bc6a, JIT",
   "date": "2026-10-24 09:48 +02:00 / 2026-10-24 09:54 +02:00",
-  "commit": "bf5165f",
+  "commit": "3b0bc6a",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

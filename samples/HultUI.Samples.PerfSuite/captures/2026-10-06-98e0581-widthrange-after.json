@@ -1,7 +1,7 @@
 {
-  "label": "after it, with the layout pass keeping a set-size box's layout and the cache entry packed back to 28 bytes: 98e0581; median of 3 runs interleaved with the other side, each started on an idle machine",
+  "label": "after it, with the layout pass keeping a set-size box's layout and the cache entry packed back to 28 bytes: eb4c68a; median of 3 runs interleaved with the other side, each started on an idle machine",
   "date": "2026-10-06 12:37 +02:00",
-  "commit": "98e0581",
+  "commit": "eb4c68a",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

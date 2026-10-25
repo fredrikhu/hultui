@@ -1,7 +1,7 @@
 {
-  "label": "before multi-font labels took the one-line ellipsis shortcut: 4ba5c4f (main with text/multi-font), text/ and layout/resize only, second of 2 runs interleaved with the after side",
+  "label": "before multi-font labels took the one-line ellipsis shortcut: 9783fd2 (main with text/multi-font), text/ and layout/resize only, second of 2 runs interleaved with the after side",
   "date": "2026-10-06 00:33 +02:00",
-  "commit": "4ba5c4f",
+  "commit": "9783fd2",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

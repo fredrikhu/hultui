@@ -776,7 +776,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// new version goes on its node), and a change of a leaf's own properties — a name, a description,
     /// an expanded state, a value, a toggle, a range — for which the leaf's node is made again and put
     /// in its place, all on the applied tree in place; then the bridge is handed those changes, which
-    /// are what the next rebuild's diff would have reported, in its order (0912a5e made every list move
+    /// are what the next rebuild's diff would have reported, in its order (7dc7e0e made every list move
     /// force that rebuild; the rich text editor asked for one on every caret move; a keystroke in a
     /// text input, a check box's click and a range's refresh each built and diffed the whole tree for
     /// one node). The next diff compares against the patched tree, so it does not report them again.

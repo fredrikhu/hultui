@@ -1,7 +1,7 @@
 {
-  "label": "after: dc028f9, the memos bounded by bytes too (JIT)",
+  "label": "after: bff5581, the memos bounded by bytes too (JIT)",
   "date": "2026-10-12 11:48 +02:00 / 2026-10-12 11:49 +02:00",
-  "commit": "dc028f9",
+  "commit": "bff5581",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

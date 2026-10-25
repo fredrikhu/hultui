@@ -1,7 +1,7 @@
 {
   "label": "a11y-scroll-bounds-event after, a11y/ and scroll/, median of 3 idle-gated alternated runs",
   "date": "2026-10-08 15:48 +02:00",
-  "commit": "70d68c1+scrollevent",
+  "commit": "f88efff+scrollevent",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

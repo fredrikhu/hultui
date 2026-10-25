@@ -2,12 +2,12 @@
   "label": "gl-vk-offscreen-scratch-pool, before: a disposed scRGB offscreen stays in Skia's scratch pool, keyed by its size",
   "kind": "real-window Vulkan probes, not a perf-suite capture (the suite never builds SkiaVulkanRenderSurface)",
   "date": "2026-10-08 13:00-14:10 +02:00",
-  "commit": "60e395d",
+  "commit": "a09e5b2",
   "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
   "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, P-cores, idle-gated before every run, before and after alternated (ABBA)",
   "probes": {
     "scratch": "a scratch-pad probe window (title, five shadowed cards, twelve text rows in a full-width box at opacity 0.85), resized with SetWindowPos NOACTIVATE on the UI thread, two forced frames after each. sizes = 28 resizes cycling 1500x940, 1400x880, 1700x1060, 1600x1000 window px; drag = 40 resizes, each a new size, +12 x +8 px a step from 1600x1000; toggle = 40 resizes between two sizes. Memory read in-process: Skia GetResourceCacheUsage (budgeted only), Skia DumpMemoryStatistics (every resource, live or purgeable), DXGI IDXGIAdapter3::QueryVideoMemoryInfo for the process (local), nvidia-smi memory.used for the whole GPU minus a reading before the window, Task Manager's GPU Process Memory dedicated counter",
-    "vulkanProbe": "tests/HultUI.UiTests.VulkanProbe --resizes=40 (7a827e9's probe: two red/blue boxes, two sizes) and --resizes=40 --new-sizes (each resize a new size); median time SetWindowPos took, the window procedure drawing the new size inside it"
+    "vulkanProbe": "tests/HultUI.UiTests.VulkanProbe --resizes=40 (8a38ef4's probe: two red/blue boxes, two sizes) and --resizes=40 --new-sizes (each resize a new size); median time SetWindowPos took, the window procedure drawing the new size inside it"
   },
   "results": {
     "memoryAfterResizes": {

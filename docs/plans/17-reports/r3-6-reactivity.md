@@ -1,13 +1,13 @@
 # Round 3 survey: 6. Reactivity and reconcile
 
 Release JIT, headless, per-phase counters and `GetAllocatedBytesForCurrentThread`, Junction on a
-1,456-commit clone, at 5d9be15. Probes and captures in the session scratchpad
+1,456-commit clone, at ac5d415. Probes and captures in the session scratchpad
 `probes/reactivity/r3/`; worktree clean.
 
 SATISFIED: no
 
-REVIEW: none. bd808d4, 65cdae0/e1d86a1/c583ef3, 495b0b4, 545d1b6/a96c185, 0912a5e, 94ba38d,
-c7dffaa hold: signal write → effect 0 B; real-loop tweens 1.00 rebuild per drawn frame (with and
+REVIEW: none. cc842ac, 883943f/e5d626e/b10d022, c2bf858, bff6de2/73b1c10, 7dc7e0e, 61aca67,
+e877766 hold: signal write → effect 0 B; real-loop tweens 1.00 rebuild per drawn frame (with and
 without 1 kHz posts); item rows 3 rows per step. **Note for runtime-idle-wakeups:**
 `AnimationManager.Tick` steps a tween started this pass by the whole gap since the last step
 (Application.cs:485-491, AnimationManager.cs:38-63); today ≤ one interval because idle passes keep
@@ -33,10 +33,10 @@ rows); Junction History per Down: a11y off 455 KB in the press frame + 236 KB la
 
 ## Examined, not worth it
 
-- reconcile-array-enumerator-boxing: none left (bd808d4 removed the last); two snapshot arrays per ReconcileChildren are 4.6–7 % of rebuild bytes — under the bar; P5a stands.
+- reconcile-array-enumerator-boxing: none left (cc842ac removed the last); two snapshot arrays per ReconcileChildren are 4.6–7 % of rebuild bytes — under the bar; P5a stands.
 - Fading the VideoPlayer bar in place: ~0.7 MB per rare fade.
 - MarkStyleDirtyDown O(n·depth) alone: 0 B; folded into restyle-on-change.
-- 495b0b4: a continuation running synchronously inside an effect would subscribe it; no code does this.
+- c2bf858: a continuation running synchronously inside an effect would subscribe it; no code does this.
 - Notes: Junction History rebuilds the a11y tree twice per press (expert 7). Reel's and Aperture's chapter panels read `Position` in the app Build (ReelApp.Chapters.cs:126, ApertureApp.Chapters.cs:149) → whole-app rebuild 10×/s while open (guideline example).
 
 ## Needs the user

@@ -1,7 +1,7 @@
 {
-  "label": "before: 08ebeab, the TextArea's line starts worked out whole on every edit (NativeAOT)",
+  "label": "before: a6e57bd, the TextArea's line starts worked out whole on every edit (NativeAOT)",
   "date": "2026-10-12 10:37 +02:00 / 2026-10-12 10:47 +02:00",
-  "commit": "08ebeab",
+  "commit": "a6e57bd",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

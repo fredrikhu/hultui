@@ -10,7 +10,7 @@ namespace HultUI.Platform.SDL3;
 /// clears it only at the next configure event that says the window is activated. A compositor
 /// that restores the window without one leaves the flag set for good. WSLg does: restored from
 /// the taskbar, the window got the keyboard back but never that configure, and since minimized
-/// windows stopped being drawn (82e382b) it showed its last frame for as long as it stayed open:
+/// windows stopped being drawn (ba79958) it showed its last frame for as long as it stayed open:
 /// 0 frames in the 15 s watched after the restore, with a change every 33 ms and a resize, on GL
 /// and Vulkan alike.</para>
 ///

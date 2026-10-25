@@ -1,7 +1,7 @@
 {
-  "label": "before: 8d30d31, 2 idle-gated runs alternated with after, min the lower and the rest their mean",
+  "label": "before: 1d61775, 2 idle-gated runs alternated with after, min the lower and the rest their mean",
   "date": "2026-10-09 18:35 +02:00",
-  "commit": "8d30d31",
+  "commit": "1d61775",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

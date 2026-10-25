@@ -1,7 +1,7 @@
 {
-  "label": "5c1ed2c (before reactivity-computed-pooled-notify), jit",
+  "label": "94fb317 (before reactivity-computed-pooled-notify), jit",
   "date": "2026-10-24 10:10 +02:00 / 2026-10-24 10:16 +02:00",
-  "commit": "5c1ed2c",
+  "commit": "94fb317",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

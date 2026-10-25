@@ -12,7 +12,7 @@ namespace VesperCommander.Tests;
 /// on patch and re-applied by <c>RefreshInteractionAfterPatch</c>, so the highlight both
 /// works after rebuilds AND survives a rebuild that lands mid-hover (a manual
 /// enter/leave handler would have its tint wiped by the patch until re-entry — the
-/// CI flake fixed in 4c0a4ee). Drives the real app end to end.
+/// CI flake fixed in 554080f). Drives the real app end to end.
 /// </summary>
 public class HoverAfterRebuildTests
 {

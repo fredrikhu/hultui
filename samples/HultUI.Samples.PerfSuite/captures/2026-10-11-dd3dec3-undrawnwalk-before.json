@@ -1,7 +1,7 @@
 {
-  "label": "before: dd3dec3, 2 idle-gated runs alternated with after, min the lower and the rest their mean",
+  "label": "before: c25f057, 2 idle-gated runs alternated with after, min the lower and the rest their mean",
   "date": "2026-10-11 01:09 +02:00 / 2026-10-11 01:31 +02:00",
-  "commit": "dd3dec3",
+  "commit": "c25f057",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

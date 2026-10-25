@@ -3,12 +3,12 @@
 Hand this to a Claude Code session on the Windows machine (RTX 4080, 150% HDR display). The Linux
 results it refers to are under **Results** in [HDR-LINUX-VERIFY-2.md](HDR-LINUX-VERIFY-2.md).
 
-## 1. The fix to test: `ffce665`, one swapchain at start-up instead of two
+## 1. The fix to test: `bb89283`, one swapchain at start-up instead of two
 
 ### What was wrong
 
 Round 2 asked Linux for "exactly ONE swapchain build in the trace at start-up" as the positive
-control for the window-creation reorder (`d1d7cd5`). **Linux saw two, both at the right size:**
+control for the window-creation reorder (`aa27007`). **Linux saw two, both at the right size:**
 
 ```
 vulkan swapchain 750x450 x3 R16G16B16A16Sfloat/ExtendedSrgbLinearEXT
@@ -97,7 +97,7 @@ Build Release, then run VideoPlayer on the Vulkan renderer on 2001 at 20:00 as i
 - **Playback advances.** A GL wait on a semaphore that is never signalled stalls GL. On Linux that
   meant no frames at all, so a frozen picture or a stall is the failure signature to look for. Use
   `HULTUI_VIDEO_HDR_PROBE=48`: six samples with changing level counts means frames kept coming.
-- **CPU against the parent commit** (`abeca08`), round-robin as before. Linux measured no
+- **CPU against the parent commit** (`f12aebb`), round-robin as before. Linux measured no
   difference (128–130 against 113–144 ms/s).
 - **Validation**, if you can get the layers to report on Windows (a debug messenger, or
   `VK_LAYER_LOG_FILENAME`). Linux was clean with synchronisation validation on, including controls.
@@ -124,7 +124,7 @@ trace lines. For GL, say that `first frame shown` appeared, not only that nothin
 ## Results
 
 Windows 11, RTX 4080, driver 610.62, two 2560x1440 monitors, the window on the 150% HDR one.
-Release, `HULTUI_A11Y=0`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`. Run at `184ae17`.
+Release, `HULTUI_A11Y=0`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`. Run at `6cf4123`.
 
 ### 1. One swapchain at start-up — pass, on both renderers
 
@@ -149,7 +149,7 @@ stderr was empty on both: no `No canvas set. Call BeginFrame first.`, no excepti
 
 **Your reading of the earlier one-line observation is right.** That trace was taken before the GL
 fix existed — the GL breakage was found afterwards and the explicit `Resize` added in response, and
-both went into `d1d7cd5` together. So the committed code did have two lines on Windows too, exactly
+both went into `aa27007` together. So the committed code did have two lines on Windows too, exactly
 as the code says it must. Nothing platform-specific, and nothing was ever seen that contradicted
 you.
 
@@ -203,8 +203,8 @@ against the parent commit built in a worktree, 4K HEVC HDR, 15 s window after a 
 
 | | CPU | |
 |---|---|---|
-| `abeca08` parent, nothing ordering the write | 52, 67, 68 ms/s | `cuda`, semaphore ordering |
-| `184ae17` HEAD, the new semaphore | 58, 73, 62 ms/s | `cuda`, semaphore ordering |
+| `f12aebb` parent, nothing ordering the write | 52, 67, 68 ms/s | `cuda`, semaphore ordering |
+| `6cf4123` HEAD, the new semaphore | 58, 73, 62 ms/s | `cuda`, semaphore ordering |
 | HEAD, `HULTUI_VULKAN_SEMAPHORE=0` | 186, 221, 198 ms/s | `cuda`, `glFinish` ordering |
 
 The first two ranges overlap; the difference is inside this machine's noise, which moves by a third

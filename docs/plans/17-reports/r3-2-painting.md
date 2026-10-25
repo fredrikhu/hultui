@@ -1,7 +1,7 @@
 # Round 3 survey: 2. SkiaSharp painting
 
 Round 2 re-measured with a render-pass probe (bytes per element type; glyph, blob, layer and path
-counters), JIT and AOT, at 5d9be15. Probe reverted; worktree clean. Probe patch, driver and scripts in
+counters), JIT and AOT, at ac5d415. Probe reverted; worktree clean. Probe patch, driver and scripts in
 the session scratchpad `r3paint/`.
 
 SATISFIED: no
@@ -14,13 +14,13 @@ REVIEW: none.
 - Wheel frames are list realization (layout's): Junction diff 12.2 KB/frame (AOT 12.0), realization
   12.2 KB, 1 new paragraph 0.31 KB; Vesper reader 16.8 KB/frame (AOT 16.4), realization 16.25 KB,
   1.65 paragraphs 0.53 KB.
-- 8d30d31: 0 shader or blur misses after the first frame.
-- 103f30e: correct as landed. AOT still pays 56 B more per new blob than JIT, as before 103f30e (see
+- 1d61775: 0 shader or blur misses after the first frame.
+- e9b76eb: correct as landed. AOT still pays 56 B more per new blob than JIT, as before e9b76eb (see
   paint-raw-run-buffer).
-- bf5adcc: 0 paragraphs laid out per hover frame.
-- ca59c6d / 545d1b6: paint side unchanged. The item-row walk does 34 text draws, 17 images and 2 new
+- db8f9f8: 0 paragraphs laid out per hover frame.
+- 91efc25 / bff6de2: paint side unchanged. The item-row walk does 34 text draws, 17 images and 2 new
   blobs per step; its 18.6 KB/step is 18.2 KB of realization.
-- 6cf4fe6 / 17e94b0: the hero draws at ~1.0 source px per device px, so Skia builds no mipmaps.
+- a9b6970 / e18b689: the hero draws at ~1.0 source px per device px, so Skia builds no mipmaps.
 
 ## Candidates
 
@@ -83,7 +83,7 @@ REVIEW: none.
   from 12 closures and 8 substrings; the measure calls allocate 0; every other steady frame measured is
   0 B. Caching the closure by reference fails (struct style): 2.9 KB. Fix: one measurer per line, cached
   by value; text side a span-based prefix measure (e.g. `MeasureTextWidth(ReadOnlySpan<char>)` from
-  b23b203). Removes ~1.1 KB per such line per steady frame → 0. Small; the TextTypes part is expert 5's.
+  fc00b75). Removes ~1.1 KB per such line per steady frame → 0. Small; the TextTypes part is expert 5's.
 
 ## Examined, not worth it
 

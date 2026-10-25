@@ -393,11 +393,11 @@ Three things decide whether it stays right and stays cheap:
   (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that
   must fill its host `FlexGrow(1)` (the host is a column).
 - **Keep the parent's children keyed.** A keyed list puts a kept host back without marking the
-  parent (round 4, 59a11d7): no layout, and no structural change, which would make a window
+  parent (round 4, 87698f1): no layout, and no structural change, which would make a window
   with a listening screen reader build a whole new accessibility tree for the key. A host in an
   unkeyed list, or alone in its parent, goes back the ordinary way and marks both.
 
-Junction with its chrome in three parts (5808d9f; headless, JIT, a 1,562-commit clone, a key
+Junction with its chrome in three parts (b35fc58; headless, JIT, a 1,562-commit clone, a key
 and 8 frames): History 242.5 → 107.3 KB a key (−56 %), Branches 186.0 → 50.8 (−73 %), Tags
 230.3 → 95.2 (−59 %), Files 224.4 → 79.0 (−65 %), the Commit file list 230.3 → 95.1 (−59 %), a
 keystroke in the commit summary 201.9 → 66.7 (−67 %); the NativeAOT app −39…−68 % a key; the

@@ -1,9 +1,9 @@
 # Round 3: Aperture resize diagnosis (user report)
 
 The user (2026-10-10): "resizing in the start screen of Aperture is a lot slower than other
-applications". Diagnosed by the app-workloads expert at ae10215 (src/apps identical to 5d9be15).
+applications". Diagnosed by the app-workloads expert at d6bc200 (src/apps identical to ac5d415).
 Probes reverted; worktree clean. Probe code, driver, runs and logs in the session scratchpad
-`aperture-resize/` (`probe/full-probe.diff` applies on ae10215).
+`aperture-resize/` (`probe/full-probe.diff` applies on d6bc200).
 
 **Bottom line.** Not the start screen: every live-resize step rebuilds Aperture's **Vulkan F16
 (scRGB) swapchain**, 92 % of the step. On GL, Aperture resizes as fast as Junction and Vesper; Reel
@@ -50,7 +50,7 @@ JIT, idle-gated, P-cores, two alternated runs per config; one AOT pair.
 4. Artwork: no effect on step time (Home: 2 fetches, 2 decodes, 2 uploads per 80 steps; item page 14
    fetches from hero 128-px re-asks), all off the UI thread.
 5. Harness artifact: growing steps draw a second frame (~0.8 ms) from a WM_PAINT when `SetWindowPos`
-   comes from another process (1.5 frames per step), equal for every app; b471108's same-thread
+   comes from another process (1.5 frames per step), equal for every app; f122cc9's same-thread
    harness saw 1 frame per step.
 
 ## Fixes
@@ -72,7 +72,7 @@ ends.
   returns SUBOPTIMAL, which forces a rebuild each step (57–58 ms, slower than default). Keeping a
   SUBOPTIMAL ONE_TO_ONE swapchain that the window still fits: 8.57 / 8.78 ms, one 157–163 ms
   outlier step per run.
-- Changes (lines at ae10215): `SdlVulkanHost.cs:493-495` enable maintenance1 by default;
+- Changes (lines at d6bc200): `SdlVulkanHost.cs:493-495` enable maintenance1 by default;
   `:613`, `:684`, `:1175` over-allocate when available AND (override OR live resize), remember
   whether the current swapchain was built with scaling; `:1113-1114` no rebuild on SUBOPTIMAL in
   that state; ENTER/EXIT from `WindowsCustomFrame.WndProc` (`:296`) to the host — on EXIT drop the

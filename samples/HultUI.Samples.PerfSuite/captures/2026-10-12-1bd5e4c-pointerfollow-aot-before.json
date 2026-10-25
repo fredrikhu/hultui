@@ -1,7 +1,7 @@
 {
-  "label": "before: 3f7eccd (NativeAOT)",
+  "label": "before: 8055fc2 (NativeAOT)",
   "date": "2026-10-12 06:03 +02:00 / 2026-10-12 06:09 +02:00",
-  "commit": "3f7eccd",
+  "commit": "8055fc2",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

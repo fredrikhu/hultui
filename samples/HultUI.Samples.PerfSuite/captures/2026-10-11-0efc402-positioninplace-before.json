@@ -1,7 +1,7 @@
 {
   "label": "before the position written in place (JIT, 2 runs merged)",
   "date": "2026-10-11 06:45 +02:00 / 2026-10-11 06:51 +02:00",
-  "commit": "0efc402",
+  "commit": "e019d7d",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

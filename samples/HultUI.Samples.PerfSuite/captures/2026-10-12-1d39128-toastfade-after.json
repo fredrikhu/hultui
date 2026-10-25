@@ -1,7 +1,7 @@
 {
-  "label": "after: 1d39128, a toast fades on the element (JIT)",
+  "label": "after: c3ed8ca, a toast fades on the element (JIT)",
   "date": "2026-10-12 06:49 +02:00 / 2026-10-12 06:51 +02:00",
-  "commit": "1d39128",
+  "commit": "c3ed8ca",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

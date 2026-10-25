@@ -2,7 +2,7 @@
   "label": "gl-vk-offscreen-scratch-pool, after: the scRGB offscreen let go is freed, by a scratch purge after the next frame is submitted",
   "kind": "real-window Vulkan probes, not a perf-suite capture (the suite never builds SkiaVulkanRenderSurface)",
   "date": "2026-10-08 13:00-14:10 +02:00",
-  "commit": "60e395d + this change",
+  "commit": "a09e5b2 + this change",
   "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
   "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, P-cores, idle-gated before every run, before and after alternated (ABBA)",
   "probes": "as in 2026-10-08-60e395d-offscreenpool-before.json",

@@ -1,7 +1,7 @@
 {
-  "label": "after the feature batch: 90730ee + the suite, median of 3 runs interleaved with e5a2206 (no layout/shrink rows yet)",
+  "label": "after the feature batch: c225eaa + the suite, median of 3 runs interleaved with 42ef8de (no layout/shrink rows yet)",
   "date": "2026-10-05 19:54 +02:00",
-  "commit": "90730ee",
+  "commit": "c225eaa",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

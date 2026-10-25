@@ -1,7 +1,7 @@
 {
   "label": "After one set of text services per application (median of 3 idle-gated runs, alternated with before)",
   "date": "2026-10-08 12:25 +02:00",
-  "commit": "e962738 + text services",
+  "commit": "aa80f11 + text services",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

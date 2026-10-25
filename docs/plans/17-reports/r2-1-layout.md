@@ -1,12 +1,12 @@
 # Round 2 survey: 1. Layout
 
 Probe counters across all 94 rows (JIT) plus AOT for the walk, sticky, grid and theme rows,
-at fc807ec; prototypes reverted. Probe patch in the session scratchpad `l1r2/`.
+at 6ba7e2d; prototypes reverted. Probe patch in the session scratchpad `l1r2/`.
 
 SATISFIED: no
 
-REVIEW: none. 6891682/322df92: text/ellipsis does 1 leaf measurement per label per step
-(was 2), the pinned entry never thrashes, rows flat. Frame-floor series, 9af7d75, 646139a: no
+REVIEW: none. 6891682/81be6ca: text/ellipsis does 1 leaf measurement per label per step
+(was 2), the pinned entry never thrashes, rows flat. Frame-floor series, bd72d97, b23dcfb: no
 new misses or bytes. Junction rebuilds only when a breakpoint flips; Meridian's pane resizes
 with flex minimums. Neutral: LayoutEngine.cs:1249 now heap-allocates `floors` for every
 shrinking line of > 64 items (no row or app hits it).
@@ -18,7 +18,7 @@ shrinking line of > 64 items (no row or app hits it).
 - **layout-leaves-ignore-offered-height** (new). Leaves whose MeasureContent ignores the offered height should say so (`IgnoresAvailableHeight` default true, VideoElement opts out — the only one that reads it, VideoElement.cs:113). Base Element (empty Box spacers, ~100 `Box.New().FlexGrow(1)` in apps), ChevronElement (ExpanderElement.cs:567), SortMark (TableView.Render.cs:376), Calendar, DatePicker, TimePicker, ContextMenu ignore it but are keyed on exact height (Element.cs:1399; LayoutEngine.cs:829-831), making parents exact-height too. controls/expander toggle: 31 leaf measurements and 188 MeasureSize per animation frame. Prototype: 0 and 55; per step MeasureSize 2,408 → 674 (−72 %), leaf measurements 456 → 30 (−93 %); other rows unchanged. Likely the time bar on that row; vertical resizes, splitter drags and expand animations stop re-measuring chrome rows. Small; identical sizes.
 - **layout-ordered-children** (narrowed: hit-test and cull). Per-container "in-flow, ordered" flag at layout time; hit-test binary-searches, render culling finds the visible range, base ScrollView stops re-scanning children every frame (ElementRenderer.cs:92 → ScrollViewElement.cs:178-200, already done in layout at LayoutEngine.cs:174). input/hover 1,000 rows 994 hit visits per move; click in 500 rows 1,493; scroll/wheel 5,000 rows 4,950 hit + 4,974 culled visits per step to draw 162; dense text 2,754 culled per frame; Junction Files tree (JunctionApp.Files.cs:232-233). O(n) → O(log n + visible). Medium; HitTest overrides must stay in the border box; render-cull half in painting's file.
 - **layout-applytheme-layout-on-change** (new). Seven controls mark layout on every ApplyTheme (NumericUpDownElement.cs:303, ProgressBarElement.cs:100, SplitterHandleElement.cs:90, ExpanderElement.cs:350, CalendarElement.cs:380, TimePickerElement.cs:492, ToastElement.cs:165); ApplyTheme runs on every resolve incl. every patch. theme/light-dark and named scheme cycle: the whole 8.92 KB/op is NumericUpDown re-measuring value strings + 78 layouts. Prototype: 0.20 KB/op, 0 layouts (−98 %). A patched SplitterHandle (Junction's two splits, JunctionApp.cs:424-426) re-dirties its ancestor chain on every whole-app rebuild. Low priority (theme switches rare). Small. Also the opposite gap (correctness): Checkbox takes `CheckboxSize` from the theme (CheckboxElement.cs:40) and never marks layout.
-- **layout-maxlines-setter-dirty** (correctness only). MaxLines and Overflow are auto-properties (TextElement.cs:37-38); no mounted-label setter use today, but round 1 made more cached results depend on MaxLines (6891682, 322df92, TextElement.cs:589). Small.
+- **layout-maxlines-setter-dirty** (correctness only). MaxLines and Overflow are auto-properties (TextElement.cs:37-38); no mounted-label setter use today, but round 1 made more cached results depend on MaxLines (6891682, 81be6ca, TextElement.cs:589). Small.
 
 ## Examined, not worth it
 

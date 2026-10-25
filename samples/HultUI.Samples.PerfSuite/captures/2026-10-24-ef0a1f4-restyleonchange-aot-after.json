@@ -1,7 +1,7 @@
 {
   "label": "reconcile-restyle-on-change (a), NativeAOT",
   "date": "2026-10-24 20:52 +02:00 / 2026-10-24 20:54 +02:00",
-  "commit": "ef0a1f49+restyle",
+  "commit": "a3aeabb2+restyle",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

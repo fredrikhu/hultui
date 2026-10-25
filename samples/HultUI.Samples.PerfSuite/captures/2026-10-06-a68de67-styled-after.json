@@ -1,7 +1,7 @@
 {
-  "label": "after it: a68de67, text/ and layout/resize only, second of 2 runs interleaved with the before side",
+  "label": "after it: e298528, text/ and layout/resize only, second of 2 runs interleaved with the before side",
   "date": "2026-10-06 00:02 +02:00",
-  "commit": "a68de67",
+  "commit": "e298528",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

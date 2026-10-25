@@ -1,7 +1,7 @@
 {
-  "label": "after: 5b71b4f, an edit wraps again only the lines it touched (JIT)",
+  "label": "after: dc6c047, an edit wraps again only the lines it touched (JIT)",
   "date": "2026-10-12 10:31 +02:00 / 2026-10-12 10:33 +02:00",
-  "commit": "5b71b4f",
+  "commit": "dc6c047",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

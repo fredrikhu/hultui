@@ -1,7 +1,7 @@
 {
-  "label": "4344dd3 (before text-prefix-table-transient), JIT",
+  "label": "a4a6f4a (before text-prefix-table-transient), JIT",
   "date": "2026-10-24 10:56 +02:00 / 2026-10-24 11:02 +02:00",
-  "commit": "4344dd3",
+  "commit": "a4a6f4a",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

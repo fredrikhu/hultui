@@ -1,7 +1,7 @@
 {
-  "label": "before the BiDi memo: 0091c80 (8dfbe29 with the text/bidi scenarios), text/ and layout/resize only, second of 2 runs interleaved with the after side",
+  "label": "before the BiDi memo: 261b86a (e4d838a with the text/bidi scenarios), text/ and layout/resize only, second of 2 runs interleaved with the after side",
   "date": "2026-10-05 23:26 +02:00",
-  "commit": "0091c80",
+  "commit": "261b86a",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

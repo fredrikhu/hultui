@@ -2,7 +2,7 @@
   "label": "gl-no-depth-buffer, before: the GL window takes SDL's default depth (16 asked, 24 granted) with its 8-bit stencil",
   "kind": "real-window GL probe, not a perf-suite capture (the suite never builds the GL surface)",
   "date": "2026-10-08 01:35 +02:00",
-  "commit": "e450afd",
+  "commit": "834b4c7",
   "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
   "configuration": "Release (JIT), HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_STARTUP=1, P-cores, idle-gated before every run, before and after alternating ABBA",
   "probes": {

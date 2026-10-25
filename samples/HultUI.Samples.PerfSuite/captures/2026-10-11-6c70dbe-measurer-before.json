@@ -1,7 +1,7 @@
 {
   "label": "before a line that merged clusters kept one prefix measurer per style (JIT, 2 runs merged)",
   "date": "2026-10-11 13:55 +02:00 / 2026-10-11 13:59 +02:00",
-  "commit": "6c70dbe",
+  "commit": "dbcdaef",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

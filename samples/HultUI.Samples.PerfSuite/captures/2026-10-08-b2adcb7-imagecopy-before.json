@@ -1,7 +1,7 @@
 {
-  "label": "image-zero-copy, before: b2adcb7, median of 3 idle-gated runs alternated with after",
+  "label": "image-zero-copy, before: 47c1ce5, median of 3 idle-gated runs alternated with after",
   "date": "2026-10-08 03:29 +02:00",
-  "commit": "b2adcb7",
+  "commit": "47c1ce5",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

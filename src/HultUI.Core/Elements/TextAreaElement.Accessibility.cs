@@ -14,7 +14,7 @@ public partial class TextAreaElement
     // tree takes a version — the string, the caret, the anchor and the layout as they were — which
     // the differ compares (the string by identity: every edit makes a new one), and a keystroke is
     // told as a text change only, never as the whole text in a value change (UIA ValueValue, AT-SPI
-    // accessible-value: 121,744 characters a keystroke at 2,000 lines), as 72a4f96's rule has it
+    // accessible-value: 121,744 characters a keystroke at 2,000 lines), as ff94faa's rule has it
     // for every node that offers text. A caret move is told with no tree built (TryPatchA11y). The
     // value is still read on request.
     //

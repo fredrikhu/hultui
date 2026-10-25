@@ -1,7 +1,7 @@
 {
-  "label": "text-draw-zero-alloc, before: 9ae8f9e, median of 3 idle-gated runs alternated with after",
+  "label": "text-draw-zero-alloc, before: cac5bf5, median of 3 idle-gated runs alternated with after",
   "date": "2026-10-08 02:17 +02:00",
-  "commit": "9ae8f9e",
+  "commit": "cac5bf5",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

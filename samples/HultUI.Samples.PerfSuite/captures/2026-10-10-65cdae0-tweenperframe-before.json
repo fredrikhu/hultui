@@ -1,7 +1,7 @@
 {
-  "label": "before: animations step on every pass of the loop (bd808d4), JIT, 2 runs",
+  "label": "before: animations step on every pass of the loop (cc842ac), JIT, 2 runs",
   "date": "2026-10-10 04:21 +02:00",
-  "commit": "bd808d4",
+  "commit": "cc842ac",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

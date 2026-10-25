@@ -80,7 +80,7 @@ public class TextLayoutPropertyTests
     /// not throw where the thread is checked (Debug builds): a new label is marked for layout and
     /// paint already, and marking it again — the only part that checks — is skipped. Once it is
     /// laid out, a change on the UI thread lays it out again, and the same change from another
-    /// thread still throws. The setters began marking in 19b94e9; until then building such a label
+    /// thread still throws. The setters began marking in d2ee688; until then building such a label
     /// anywhere touched no mark.
     /// </summary>
     [Fact]

@@ -2,7 +2,7 @@
 
 Release JIT, headless, counters and per-phase `GC.GetAllocatedBytesForCurrentThread`; Junction
 on a 1,456-commit clone with the a11y bridge on; prototypes measured and reverted. Probe patch,
-drivers and captures in the session scratchpad `probes/reactivity/r2/`. Worktree clean at fc807ec.
+drivers and captures in the session scratchpad `probes/reactivity/r2/`. Worktree clean at 6ba7e2d.
 
 SATISFIED: no
 
@@ -23,7 +23,7 @@ realization inside render 99.8 KB; 100 mounts, 95 unmounts, 41 ReplaceChildren; 
 
 ## Examined, not worth it
 
-- reconcile-persistent-child-in-place: now 87 KB per parent rebuild for a 1,206-element tree (165 before e3cff87); Reel's parent rebuilds rarely; Aperture's parent rebuild adds/removes a strip anyway; the MenuBar field pattern is only in the Fluent sample.
+- reconcile-persistent-child-in-place: now 87 KB per parent rebuild for a 1,206-element tree (165 before f47751a); Reel's parent rebuilds rarely; Aperture's parent rebuild adds/removes a strip anyway; the MenuBar field pattern is only in the Fluent sample.
 - reconcile-unkeyed-shrink-linear: no app or suite row shrinks an unkeyed list.
 - Themed control patches always mark layout (ButtonElement has no PatchMarksOwnLayout): Junction 20.5 marks per press; realized rows are laid out again anyway; layout 3.5–8.5 % of a frame.
 - Builder twins mount with MarkStyleDirty walks (6,412 down-visits per Junction press): flag writes, 0 B.

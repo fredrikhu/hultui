@@ -1,7 +1,7 @@
 {
   "label": "After the word lookups in place, NativeAOT, median of 3 idle-gated runs alternated with the before",
   "date": "2026-10-08 11:27 +02:00",
-  "commit": "b277691-dirty",
+  "commit": "61e83a5-dirty",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

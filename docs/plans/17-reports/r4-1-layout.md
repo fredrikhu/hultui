@@ -1,6 +1,6 @@
 # Round 4 survey: 1. Layout
 
-At ba817e8; counts and bytes only (JIT). Full suite probe of 122 rows; headless walks of Junction
+At 653971d; counts and bytes only (JIT). Full suite probe of 122 rows; headless walks of Junction
 (400 commits, 24 branches, 30 tags; 2,300-file search), Vesper (400 files a pane, same and other
 names) and Aperture (600 films); prototypes gated by environment variables. Probes reverted;
 worktree clean. Probe patch, driver and outputs in the session scratchpad `r4layout/`
@@ -8,13 +8,13 @@ worktree clean. Probe patch, driver and outputs in the session scratchpad `r4lay
 
 SATISFIED: no
 
-REVIEW: none. The 102 suite rows shared with round 3's baseline (5d9be15 = 0951288's code, warm 40 /
+REVIEW: none. The 102 suite rows shared with round 3's baseline (ac5d415 = 0951288's code, warm 40 /
 steps 20) make no more ComputeLayout, layouts, MeasureSize, leaf measures, MeasureContent, resolves,
-hit or render visits, z-order scans or rows made. Fell: theme rows layouts 78 → 0 (51f3126); anim/signal
+hit or render visits, z-order scans or rows made. Fell: theme rows layouts 78 → 0 (2af43b9); anim/signal
 tween 180 → 160 layouts per step; scroll/jump 11.5 → 5.7 KB. App walks confirm: style-pass layout marks
-0 in every walk (1e68166, dc4800d); Junction History hover and wheel 25 hit visits and 0.1 KB (5a98a32);
+0 in every walk (cfb9b01, 218f831); Junction History hover and wheel 25 hit visits and 0.1 KB (b7f2847);
 Files rows made 2.3 a key; persistent hosts, scale-change walks and pre-frame callbacks allocate nothing
-per move or frame, pre-frame callbacks 1 per frame (56046e4, 7016de4, 1bd5e4c); no app walk allocates in
+per move or frame, pre-frame callbacks 1 per frame (6c726ea, 697e73b, 3bbe2f9); no app walk allocates in
 the layout pass. text/styled bidi wrap read 59.9 → 842.8 KB in the 20-step probe but the suite captures
 hold it flat (745.1 → 741.4 KB) — not real.
 

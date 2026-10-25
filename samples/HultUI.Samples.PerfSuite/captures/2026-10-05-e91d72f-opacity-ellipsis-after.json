@@ -1,7 +1,7 @@
 {
-  "label": "after them: e91d72f (main), median of 3 runs interleaved with f184580, idle machine",
+  "label": "after them: e7e9e3b (main), median of 3 runs interleaved with 5d4aa0b, idle machine",
   "date": "2026-10-05 22:27 +02:00",
-  "commit": "e91d72f",
+  "commit": "e7e9e3b",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,6 +1,6 @@
 # Round 4 survey: 2. SkiaSharp painting
 
-At ba817e8; render-pass probe on all 122 suite rows (JIT), headless probes with env-gated
+At 653971d; render-pass probe on all 122 suite rows (JIT), headless probes with env-gated
 prototypes. Probes reverse-applied; worktree clean. Probe files in the session scratchpad `r4paint/`
 (`probe-r4.patch` with `PROTO_RUNINK`, `PROTO_ROWSTR`, `PROTO_VIEWFRAME`, `PROTO_MARGIN`; `probe/`
 R4Probe modes faces, varab, term, termtrace, tasks, viewer, fontcache; `suite-probe-jit.txt`).
@@ -11,11 +11,11 @@ REVIEW: none.
 
 - Render-pass bytes 0 on every steady or hover row that draws text (122 rows, JIT).
 - Effect caches: blur and gradient misses 0 after the first frame.
-- 27024f6 (native blobs): the finalizer touches only plain dictionaries and Skia's thread-safe unref.
-- 6c70dbe (kept path): every user of the kept SKPath finishes inside one call.
-- 5cc9892, b183aa0, b3e00b0 (sub-blobs): the map stays bounded (Examined).
-- 12c64b0 (colour emoji): emoji runs are 1–3 glyphs, drawn whole as designed.
-- 58f78dd (image textures): interaction with the idle loop bounded (Examined).
+- 3891499 (native blobs): the finalizer touches only plain dictionaries and Skia's thread-safe unref.
+- dbcdaef (kept path): every user of the kept SKPath finishes inside one call.
+- 8ddc3eb, ea6c48e, beed97f (sub-blobs): the map stays bounded (Examined).
+- dbcb7d8 (colour emoji): emoji runs are 1–3 glyphs, drawn whole as designed.
+- 5002e2f (image textures): interaction with the idle loop bounded (Examined).
 
 ## Candidates
 
@@ -85,13 +85,13 @@ REVIEW: none.
 - **Testing trap:** DirectWrite text is not byte-identical between two draws in one process. An A/A test
   (whole runs drawn twice) differed in 4–5 of 120 frames (3–46 bytes, max delta 35) on Consolas after
   many strikes with the default 2 MB cache; with a 512 MB cache 0 of 120 — strike purges regenerate some
-  glyph masks differently. Explains round 3's unexplained 1–4 pixel difference (max 51) and 12c64b0's
+  glyph masks differently. Explains round 3's unexplained 1–4 pixel difference (max 51) and dbcb7d8's
   first-render note. Any byte-identity A/B on system fonts needs an A/A control or a raised cache limit.
 - Pixel-path video frames (`DrawPixelFrame`): 248 B per frame on media/* rows (SKPixmap and SKImage
   wrappers); production GL keeps the wrapper (0 B); Vulkan's per-frame wrap (~530 B) is expert 3's
   surface code; only raster and non-interop Vulkan take this path, and removing it needs more native C
   functions than the four approved.
-- 58f78dd with the idle loop (1521f47): images disposed in the last second before idle wait for the next
+- 5002e2f with the idle loop (aa11334): images disposed in the last second before idle wait for the next
   frame — at most ~27 posters (~4–10 MB of spare textures) at Aperture's rate; same-size spares are
   reused by the next upload. Bounded.
 - Sub-blob map: keys can hold up to 2,048 stale runs after re-layouts; the 600-span paragraph makes ~224

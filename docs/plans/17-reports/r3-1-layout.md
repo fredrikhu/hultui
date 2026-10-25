@@ -1,7 +1,7 @@
 # Round 3 survey: 1. Layout
 
-Counts and bytes only, no timings. Probe counters on all 102 suite rows at 5d9be15 (JIT), compared
-with round 2's baseline at fc807ec on the 94 shared rows. Probe walks in headless Junction (synthetic
+Counts and bytes only, no timings. Probe counters on all 102 suite rows at ac5d415 (JIT), compared
+with round 2's baseline at 6ba7e2d on the 94 shared rows. Probe walks in headless Junction (synthetic
 400-commit repo, 24 branches, 30 tags, 2,300-file tree) and Vesper (400-file folder); an
 inherited-style diff logger over the Vesper (811), Aperture (254), Meridian (417), Reel (43), Fluent
 (34) and Headless (731) suites; pixel captures in Junction. Probes reverted; worktree clean. Probe
@@ -11,12 +11,12 @@ SATISFIED: no
 
 REVIEW: none. Layout counters held or fell on all 94 shared rows (no row makes more ComputeLayout,
 MeasureSize, leaf-measure or MeasureContent calls, hit-test or render visits). Grid rows: the 1.63 M
-loop steps a step are gone (0cfdbfc). controls/expander toggle: MeasureSize 2,408 → 674,
-MeasureContent 456 → 30 per step (d13fe82). Z-order (ca59c6d): per-frame scans gone; order redone
-only after a child list changes (scroll/jump 20 a step, Vesper key 56, 0 B each). 19b94e9/913204a/
-30cb978 add no layout marks; the only style-pass layout marks in the suite are the pre-existing theme
-rows. 545d1b6/a96c185: Junction History per key 2.8 rows made, 33 KB template bytes, 17.6 layouts;
-hover 25 hit visits. Allocation ff7a970-before → 545d1b6-after (JIT and AOT): no row rose ≥5 % except
+loop steps a step are gone (afbd13c). controls/expander toggle: MeasureSize 2,408 → 674,
+MeasureContent 456 → 30 per step (7856452). Z-order (91efc25): per-frame scans gone; order redone
+only after a child list changes (scroll/jump 20 a step, Vesper key 56, 0 B each). d2ee688/54a48c3/
+c135390 add no layout marks; the only style-pass layout marks in the suite are the pre-existing theme
+rows. bff6de2/73b1c10: Junction History per key 2.8 rows made, 33 KB template bytes, 17.6 layouts;
+hover 25 hit visits. Allocation 53604f3-before → bff6de2-after (JIT and AOT): no row rose ≥5 % except
 the known text/wheel JSON +3.4 KB. A 20-step probe showed component/counter 3.8 → 13.6 KB and
 richtext/type in a 40x5 table 23 → 61 KB; both vanish at 200–3,000 steps (3.6 and 25.9 KB) — caches
 growing inside a short window.

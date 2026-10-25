@@ -1,7 +1,7 @@
 {
   "label": "runtime-frame-floor, after: frame counters on rings, no delegate per loop pass, index loops in the tree walks, shrink floors on the stack, Tab without list or sort, hover without a set, no closure per move, slider and number field paint without allocating; median of 3 idle-gated runs alternated with before",
   "date": "2026-10-08 06:01 +02:00",
-  "commit": "2101bbf-dirty",
+  "commit": "50035b2-dirty",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 {
-  "label": "quiet recheck: after the feature batch; suite as of 449ecd0; median of 3 runs interleaved across e5a2206, 90730ee and 449ecd0, each started on an idle machine (under 8 % CPU, no test host, no game)",
+  "label": "quiet recheck: after the feature batch; suite as of 4d347d2; median of 3 runs interleaved across 42ef8de, c225eaa and 4d347d2, each started on an idle machine (under 8 % CPU, no test host, no game)",
   "date": "2026-10-06 00:59 +02:00",
-  "commit": "90730ee",
+  "commit": "c225eaa",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 16,

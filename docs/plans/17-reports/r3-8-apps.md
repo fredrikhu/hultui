@@ -1,18 +1,18 @@
 # Round 3 survey: 8. App workloads
 
-All five apps published NativeAOT at fc807ec (round 2's "after" baseline) and 5d9be15 (same src/apps
+All five apps published NativeAOT at 6ba7e2d (round 2's "after" baseline) and ac5d415 (same src/apps
 as 0951288, the released builds). Real windows that never took focus, a11y on unless noted, before
 and after alternated, two runs each; bytes and counts identical across repeats. Shares were taken
 under eight concurrent surveys sharing the GPU, so flush and present shares are inflated. The round 2
-probe needed two hand merges (VirtualListElement after 545d1b6, Application after 65cdae0) and a new
-wrap for `TextPipeline.MeasureWidth` (b23b203). Probe (with minimize, clickat and per-Build byte marks),
-scripts and CSVs in the session scratchpad `r3apps/`; worktree reverted and clean at 5d9be15.
+probe needed two hand merges (VirtualListElement after bff6de2, Application after 883943f) and a new
+wrap for `TextPipeline.MeasureWidth` (fc00b75). Probe (with minimize, clickat and per-Build byte marks),
+scripts and CSVs in the session scratchpad `r3apps/`; worktree reverted and clean at ac5d415.
 
 SATISFIED: no
 
 ## Review of round 2
 
-**0912a5e (a11y-virtual-item-selected): objection.** A selection move now forces a full a11y rebuild
+**7dc7e0e (a11y-virtual-item-selected): objection.** A selection move now forces a full a11y rebuild
 on the next frame: `VirtualListElement.cs:78` `NotifyAccessibilityPropertyChanged(IsSelected)` →
 `Window.cs:3301` `_a11yPropertyDirty`, which skips the 100 ms coalescer. Junction History walk (40 keys
 at 60 ms, UIA client listening): a11y rebuilds 25 (all "layout due") → 41 (40 "property"), 1,110 nodes
@@ -58,7 +58,7 @@ to first frame. Idle: 61 loop passes/s (65 before), 0 frames.
 
 - **a11y-selection-move-patch** (7). Mark IsSelected on the two item nodes of the applied tree and raise
   their events, as `MoveA11yFocus` (`Window.cs:676`) does for focus, instead of forcing a full rebuild.
-  Evidence: the 0912a5e objection; with a11y off the History walk frames allocate 1.68 MB, with a11y on
+  Evidence: the 7dc7e0e objection; with a11y off the History walk frames allocate 1.68 MB, with a11y on
   a11y adds 11.7 MB (87 % of the walk's frame bytes). Churn and time on the History walk: a11y rebuilds
   40 → ≤25 per 40 keys, a11y bytes ≥ −26 % per key, a11y share 30 % → ≤8 %; Branches alike. Small–medium;
   no API change; events unchanged.
@@ -115,7 +115,7 @@ to first frame. Idle: 61 loop passes/s (65 before), 0 frames.
   `marks.py`). Tooling; every app survey depends on it. Small.
 - **Suite coverage gaps** (8):
   - apps-scenario-selection-walk-real-loop-a11y: keys every 60 ms over a list plus a detail pane in the
-    real loop (virtual clock), bridge on, counting a11y rebuilds per key. Would have caught 0912a5e; the
+    real loop (virtual clock), bridge on, counting a11y rebuilds per key. Would have caught 7dc7e0e; the
     one-frame-per-step a11y rows cannot.
   - apps-scenario-type-beside-diff: typing beside a 150-row list of unlabelled records whose rows are
     derived in Build.
@@ -144,7 +144,7 @@ to first frame. Idle: 61 loop passes/s (65 before), 0 frames.
   position events, ~340 KB/s. Playing, not idle; small.
 - Style ≤1.8 % in every walk. Layout ≤11 % except the Commit walk (20–26 %), the no-op rebuild covered by
   the diff candidate.
-- Flush rose to 48 % in Vesper and 47–70 % in Meridian: time under a shared GPU; 61edb19 showed the driver
+- Flush rose to 48 % in Vesper and 47–70 % in Meridian: time under a shared GPU; 54c56d9 showed the driver
   wait only moves.
 - Working set and start-up: no new lever. GL driver load and Vulkan first-frame shader work examined in
   round 1 (no program cache).

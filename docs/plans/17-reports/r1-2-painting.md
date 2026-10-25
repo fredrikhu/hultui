@@ -2,7 +2,7 @@
 
 Measured with a temporary paint probe (render-pass allocation, per-element-type allocation,
 draw/glyph/path/shader/layer counts, image bytes copied) in worktree
-agent-a720f5935ea37cf7e at d47f737, then reverted. The probe patch, `PaintProbe.cs` and
+agent-a720f5935ea37cf7e at b9f80d0, then reverted. The probe patch, `PaintProbe.cs` and
 `probedriver.cs` are in the orchestrator's scratchpad as `painting-probes.patch` (session
 dc3c745c).
 

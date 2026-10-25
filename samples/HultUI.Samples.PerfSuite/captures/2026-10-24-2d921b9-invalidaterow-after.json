@@ -1,7 +1,7 @@
 {
   "label": "VirtualList InvalidateRow + Vesper partner row, JIT",
   "date": "2026-10-24 22:08 +02:00 / 2026-10-24 22:10 +02:00",
-  "commit": "2d921b9+invalidaterow",
+  "commit": "3ab1b95+invalidaterow",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

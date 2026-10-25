@@ -1,7 +1,7 @@
 {
-  "label": "NativeAOT runtime-frame-floor, before: 2101bbf published with PublishAot (win-x64); median of 2 idle-gated runs alternated with after",
+  "label": "NativeAOT runtime-frame-floor, before: 50035b2 published with PublishAot (win-x64); median of 2 idle-gated runs alternated with after",
   "date": "2026-10-08 06:09 +02:00",
-  "commit": "2101bbf",
+  "commit": "50035b2",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

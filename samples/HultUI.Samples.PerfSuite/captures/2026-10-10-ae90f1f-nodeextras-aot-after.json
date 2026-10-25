@@ -1,7 +1,7 @@
 {
-  "label": "after: a node keeps its rarely set fields aside (ae90f1f), NativeAOT, 2 runs",
+  "label": "after: a node keeps its rarely set fields aside (67c4c22), NativeAOT, 2 runs",
   "date": "2026-10-10 02:22 +02:00",
-  "commit": "ae90f1f",
+  "commit": "67c4c22",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

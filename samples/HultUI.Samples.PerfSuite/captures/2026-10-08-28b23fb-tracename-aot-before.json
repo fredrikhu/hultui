@@ -1,7 +1,7 @@
 {
-  "label": "NativeAOT trace-type-name, before: 28b23fb published with PublishAot (win-x64); median of 2 idle-gated runs alternated with after; allocation repeated to the byte on every row but richtext/open",
+  "label": "NativeAOT trace-type-name, before: 45650fd published with PublishAot (win-x64); median of 2 idle-gated runs alternated with after; allocation repeated to the byte on every row but richtext/open",
   "date": "2026-10-08 02:49 +02:00",
-  "commit": "28b23fb",
+  "commit": "45650fd",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 {
-  "label": "before the z-order closure fix: 16fc7f6 + the suite, median of 3 runs interleaved with f184580",
+  "label": "before the z-order closure fix: 2feacfa + the suite, median of 3 runs interleaved with 5d4aa0b",
   "date": "2026-10-05 20:59 +02:00",
-  "commit": "16fc7f6",
+  "commit": "2feacfa",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,6 +1,6 @@
 loaded  Porta.Pty                    2.2.3+0186b604bf40161f199823fe5cdb2dfa02c37bea
 loaded  XTerm.NET                    2.0.2+b2d78f89b58b495a82628f9630c7d5745b093305
-loaded  XtermNet                     0.1.0-preview+17882eef3233c7474e880c7469cfa97b452142f9
+loaded  XtermNet                     0.1.0-preview+2a681315870c956bc8122b5fa3dafd9c10aa6e5a
 
 sizeof(BufferCell)    24 B
 sizeof(AttributeData) 12 B

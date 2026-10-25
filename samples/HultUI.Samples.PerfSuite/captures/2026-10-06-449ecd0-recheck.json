@@ -1,7 +1,7 @@
 {
-  "label": "quiet recheck: main after the opacity, z-order, truncation, BiDi, styled and multi-font fixes; median of 3 runs interleaved across e5a2206, 90730ee and 449ecd0, each started on an idle machine (under 8 % CPU, no test host, no game)",
+  "label": "quiet recheck: main after the opacity, z-order, truncation, BiDi, styled and multi-font fixes; median of 3 runs interleaved across 42ef8de, c225eaa and 4d347d2, each started on an idle machine (under 8 % CPU, no test host, no game)",
   "date": "2026-10-06 01:00 +02:00",
-  "commit": "449ecd0",
+  "commit": "4d347d2",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 16,

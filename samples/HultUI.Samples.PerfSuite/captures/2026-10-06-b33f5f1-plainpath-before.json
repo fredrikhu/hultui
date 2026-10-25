@@ -1,7 +1,7 @@
 {
-  "label": "main at b33f5f1, before left-to-right text left the BiDi path",
+  "label": "main at 891df0b, before left-to-right text left the BiDi path",
   "date": "2026-10-06 20:58 +02:00",
-  "commit": "b33f5f1",
+  "commit": "891df0b",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

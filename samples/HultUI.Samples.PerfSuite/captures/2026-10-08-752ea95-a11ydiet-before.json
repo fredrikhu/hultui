@@ -1,7 +1,7 @@
 {
-  "label": "a11y-build-diff-garbage, before: 752ea95, median of 3 idle-gated runs alternated with after",
+  "label": "a11y-build-diff-garbage, before: 7ec0104, median of 3 idle-gated runs alternated with after",
   "date": "2026-10-08 14:19 +02:00",
-  "commit": "752ea95",
+  "commit": "7ec0104",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

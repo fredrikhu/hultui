@@ -1,7 +1,7 @@
 {
-  "label": "before: c0560e1, NativeAOT, 2 idle-gated runs (min the lower, the rest their mean)",
+  "label": "before: 5250e1f, NativeAOT, 2 idle-gated runs (min the lower, the rest their mean)",
   "date": "2026-10-13 20:05 +02:00",
-  "commit": "c0560e1",
+  "commit": "5250e1f",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

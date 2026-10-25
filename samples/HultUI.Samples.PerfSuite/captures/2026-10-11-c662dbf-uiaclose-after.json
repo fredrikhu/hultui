@@ -1,7 +1,7 @@
 {
-  "label": "1f294c4 (UIA value from the node; closed windows tell UIA), 2 idle-gated runs, alternated",
+  "label": "8ac5362 (UIA value from the node; closed windows tell UIA), 2 idle-gated runs, alternated",
   "date": "2026-10-11 03:33 +02:00 / 2026-10-11 03:35 +02:00",
-  "commit": "1f294c4",
+  "commit": "8ac5362",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

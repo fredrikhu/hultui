@@ -1,7 +1,7 @@
 {
-  "label": "before a patch that changes nothing about the layout left it standing: main at 4aa5653; median of 3 runs interleaved with the other side, each started on an idle machine",
+  "label": "before a patch that changes nothing about the layout left it standing: main at a70abde; median of 3 runs interleaved with the other side, each started on an idle machine",
   "date": "2026-10-06 15:18 +02:00",
-  "commit": "4aa5653",
+  "commit": "a70abde",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

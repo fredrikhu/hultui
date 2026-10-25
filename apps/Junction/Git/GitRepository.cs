@@ -1912,7 +1912,7 @@ public class GitRepository
 
     public List<GitStash> GetStashes()
     {
-        // %gd → "stash@{0}", %gs → "WIP on main: c8b05ce subject"
+        // %gd → "stash@{0}", %gs → "WIP on main: da9124f subject"
         var result = GitProcess.Run(Path, "stash", "list",
             $"--format=%gd{FieldSep}%gs");
         if (!result.Success) return [];

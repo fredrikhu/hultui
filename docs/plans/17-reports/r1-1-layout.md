@@ -1,6 +1,6 @@
 # Round 1 survey: 1. Layout
 
-Measured in worktree agent-a297addc38f0f7204 at d47f737 (counting probes, since reverted).
+Measured in worktree agent-a297addc38f0f7204 at b9f80d0 (counting probes, since reverted).
 
 SATISFIED: no
 REVIEW: none (round 1, nothing landed)

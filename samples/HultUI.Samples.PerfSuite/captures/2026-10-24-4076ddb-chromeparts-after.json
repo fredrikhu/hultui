@@ -1,7 +1,7 @@
 {
-  "label": "after: 4076ddb + the chrome rows (59a11d7's restore)",
+  "label": "after: 51ee152 + the chrome rows (87698f1's restore)",
   "date": "2026-10-24 06:38 +02:00 / 2026-10-24 06:40 +02:00",
-  "commit": "4076ddb",
+  "commit": "51ee152",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,
