@@ -158,11 +158,16 @@ public sealed class AsyncLoader<T>
     /// <summary>Waits out the backoff and tries the same key again, unless a newer
     /// <see cref="Load"/> has taken over meanwhile. The delay is wall-clock rather than
     /// frame-driven, so a headless session must settle over real time to see a retry —
-    /// the first attempt still lands deterministically, which is what tests key on.</summary>
+    /// the first attempt still lands deterministically, which is what tests key on.
+    /// The retry goes back to the application it was started under (<see cref="Application.Post"/>):
+    /// one that ended during the backoff takes it with it. Sent to whichever was current when the
+    /// delay ran out, a test's retry woke the next test's loop and ran its producer in that
+    /// test's frames, for as long as its backoffs lasted (6.5 s).</summary>
     private void RetryAfter(object key, Func<T> produce, Action<T>? onLoaded, int attempt, int gen)
     {
         var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(3, attempt));
-        _ = Task.Delay(delay).ContinueWith(_ => Application.InvokeOnMainThread(() =>
+        var app = Application.Current;
+        _ = Task.Delay(delay).ContinueWith(_ => app?.Post(() =>
         {
             if (gen != _generation) return;
             Start(key, produce, onLoaded, attempt + 1);

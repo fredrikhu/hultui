@@ -74,13 +74,21 @@ public sealed class Application : IDisposable
     /// starts now. Use this to safely update component state from background
     /// threads (e.g. filesystem watchers, async completions).
     /// </summary>
-    public static void InvokeOnMainThread(Action action)
+    public static void InvokeOnMainThread(Action action) => _current?.Post(action);
+
+    /// <summary>
+    /// <see cref="InvokeOnMainThread"/> for work that belongs to this application: it runs here or
+    /// nowhere. Work that waits on another thread and posts back later (a load's retry) takes the
+    /// application it was started under, not the one current when it lands: an application
+    /// disposed meanwhile and its successor (a test host's next session, a replaced WinForms host)
+    /// are different applications, and the successor's loop must neither wake for it nor run it.
+    /// A disposed application's queue is never drained again, so what it is sent there is dropped.
+    /// </summary>
+    internal void Post(Action action)
     {
-        var app = _current;
-        if (app is null) return;
-        app._mainThreadQueue.Enqueue(action);
+        _mainThreadQueue.Enqueue(action);
         if (FrameLog.On) FrameLog.Post();
-        app.WakeIfParked(WakeSource.Post);
+        WakeIfParked(WakeSource.Post);
     }
 
     /// <summary>
