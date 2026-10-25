@@ -1658,8 +1658,17 @@ _find.Service();
 | `RevealAfterLayout` (true) | false when `Reveal` defers itself (`ScrollRangeIntoView`) and can land on the same frame |
 | `Placeholder`, `FieldWidth` 280, `FieldHeight` 30, `Icon` | the field and the glyphs |
 
+**One build a step.** `onChanged` runs once for each step — a key, a button, opening, closing —
+however much of the search the step changed: the search the bar makes tells the owner through
+the bar, which holds it for the step's own notice. Until round 5 of plan 17 a step let the search
+call `onChanged` and then called it again, two builds for every Enter or F3 and three for Ctrl+F
+over a selection, the first before the step had asked for its reveal (Vesper's reader, find Enter:
+two builds a step → one). Don't make the bar's `TextSearch` call `MarkDirty` itself too.
+
 `new FindBar(search, onChanged)` puts a bar over a search something else owns — a terminal
-searches its own scrollback. The bar handles its own keys while its field has the keyboard, so
+searches its own scrollback. That search tells its owner through its own callback, which the bar
+cannot hold back, so give it one that does not rebuild what `onChanged` rebuilds (the terminal's
+repaints and raises an event). The bar handles its own keys while its field has the keyboard, so
 an owner with nothing else to route can skip `HandleKey`; routing it as well is harmless.
 Ctrl+F on an open bar puts the keyboard back in the field with the query selected whole. Keys
 match the letter on the key (`LayoutKey`), as the text fields' shortcuts do.

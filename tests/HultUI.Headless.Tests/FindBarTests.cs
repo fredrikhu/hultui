@@ -23,6 +23,7 @@ public class FindBarTests
         public readonly string[] Lines;
         private readonly int[] _starts;
         public int RootKeys;
+        public int Builds;
 
         public Viewer(int lineCount = 200)
         {
@@ -54,6 +55,7 @@ public class FindBarTests
 
         public override Element Build()
         {
+            Builds++;
             var root = Flex.Column().Width(500f).Height(300f);
             root.On<KeyDownEvent>(e =>
             {
@@ -206,6 +208,75 @@ public class FindBarTests
 
         Assert.Equal("needle", view.Find.Search.Query);
         Assert.Equal(2, view.Find.Search.Index);
+    }
+
+    /// <summary>
+    /// Every step of the bar builds its owner once, and that build reveals the match: the search the
+    /// bar made notifies the owner through the bar, which holds it for the step's own notice. A
+    /// step used to build twice — the search's notice, then the bar's — the first build before the
+    /// step had asked for its reveal; opening with a selection built three times.
+    /// </summary>
+    [Fact]
+    public void EachStepBuildsTheOwnerOnce_AndThatBuildRevealsTheMatch()
+    {
+        var (s, view) = Open();
+        using var _ = s;
+        var area = view.Body.Current!;
+        int third = string.Join('\n', view.Lines.Take(149)).Length + 1 + "line 149 has the ".Length;
+        area.CursorPosition = third;
+        for (int i = 0; i < "needle".Length; i++)
+            s.Window.PressKey(KeyCode.Right, KeyModifiers.Shift);
+        s.PumpFrame();
+        area.ScrollOffsetIntoView(0);
+        s.PumpFrame();
+
+        int StepBuilds(Action step)
+        {
+            int before = view.Builds;
+            step();
+            return view.Builds - before;
+        }
+
+        // Ctrl+F with "needle" selected: the query, the seek to the selection and the bar opening.
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl)));
+        s.PumpFrames(2);
+        Assert.Equal(2, view.Find.Search.Index);
+        float atThird = area.ScrollOffsetY;
+        Assert.True(atThird > 1000, $"opening did not reveal the selection's match ({atThird})");
+
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.Enter)));
+        s.PumpFrames(2);
+        Assert.Equal(3, view.Find.Search.Index);
+        float atFourth = area.ScrollOffsetY;
+        Assert.True(atFourth > atThird, $"Enter did not reveal the match ({atThird} → {atFourth})");
+
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.Enter, KeyModifiers.Shift)));
+        s.PumpFrames(2);
+        Assert.Equal(2, view.Find.Search.Index);
+        Assert.True(area.ScrollOffsetY < atFourth, $"Shift+Enter did not reveal the match ({atFourth} → {area.ScrollOffsetY})");
+
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.C, KeyModifiers.Alt)));
+        s.PumpFrames(2);
+        Assert.True(view.Find.Search.MatchCase);
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.R, KeyModifiers.Alt)));
+        s.PumpFrames(2);
+        Assert.True(view.Find.Search.UseRegex);
+        Assert.Equal(1, StepBuilds(() => s.Window.FindByAutomationId("find-next")!.Click()));
+        s.PumpFrames(2);
+
+        area.Focus();
+        s.PumpFrame();
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.N)));
+        s.PumpFrames(2);
+        Assert.Equal(1, StepBuilds(() => s.Window.PressKey(KeyCode.Escape)));
+        s.PumpFrames(2);
+        Assert.False(view.Find.IsOpen);
+        Assert.Same(area, s.Window.Window.FocusedElement);
+
+        // Typing still builds once a character: the search tells the owner through the bar.
+        s.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+        s.PumpFrames(2);
+        Assert.Equal(1, StepBuilds(() => s.Window.TypeText("x")));
     }
 
     /// <summary>Ctrl+F on an open bar puts the keyboard back in the field with the query selected

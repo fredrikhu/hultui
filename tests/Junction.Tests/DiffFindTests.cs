@@ -152,14 +152,20 @@ public class DiffFindTests
             Assert.True(count >= 3, $"expected several matches to walk, got {count}");
             Assert.Equal(0, Search(app).Index);
 
+            // One build a step: the bar's search tells the app through the bar, which holds it
+            // for the step's own notice (two builds a step before).
+            int builds = app.Builds;
             Press(session, KeyCode.Enter);
             Assert.Equal(1, Search(app).Index);
+            Assert.Equal(builds + 1, app.Builds);
 
             for (int i = 1; i < count; i++) Press(session, KeyCode.Enter);
             Assert.Equal(0, Search(app).Index);   // all the way round
+            Assert.Equal(builds + count, app.Builds);
 
             Press(session, KeyCode.Enter, KeyModifiers.Shift);
             Assert.Equal(count - 1, Search(app).Index);
+            Assert.Equal(builds + count + 1, app.Builds);
         }, content: string.Join("\n", Enumerable.Range(0, 40).Select(i => $"line {i}")) + "\n");
     }
 
