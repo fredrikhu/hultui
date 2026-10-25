@@ -56,21 +56,51 @@ public class SidebarWorktreeTests
         Descendants(app.Mount()).FirstOrDefault(e => KeyIs(e, key))
         ?? throw new Xunit.Sdk.XunitException($"no sidebar row keyed \"{key}\"");
 
+    /// <summary>The top-level repository rows on screen, in order, as paths.</summary>
+    private static List<string> RepoRows(JunctionApp app) =>
+        Descendants(app.Mount())
+            .Select(e => e.Key)
+            .Where(k => k?.StartsWith("repo:", StringComparison.Ordinal) ?? false)
+            .Select(k => k!["repo:".Length..].Split('#')[0])
+            .ToList();
+
     /// <summary>Worktrees load off the UI thread, so the nested rows are legitimately absent
     /// on the first frame; waiting for the row is what makes this deterministic.</summary>
-    private static void PumpUntilRow(HeadlessSession session, JunctionApp app, string key)
+    private static void PumpUntilRow(HeadlessSession session, JunctionApp app, string key) =>
+        PumpUntilSidebar(session, app, () => HasRow(app, key), $"no row keyed \"{key}\" appeared");
+
+    private static void PumpUntilSidebar(HeadlessSession session, JunctionApp app, Func<bool> condition, string failure)
     {
         try
         {
-            session.PumpUntil(() => HasRow(app, key), TimeSpan.FromSeconds(20));
+            session.PumpUntil(condition, TimeSpan.FromSeconds(20));
         }
         catch (TimeoutException)
         {
             var keys = Descendants(app.Mount())
                 .Select(e => e.Key).Where(k => k != null).Take(80);
             throw new Xunit.Sdk.XunitException(
-                $"no row keyed \"{key}\" appeared. Keys present:\n  " + string.Join("\n  ", keys));
+                $"{failure}. Keys present:\n  " + string.Join("\n  ", keys));
         }
+    }
+
+    /// <summary>Adds <paramref name="path"/> to the workspace as the app's own edits do, the list
+    /// and then a rebuild, and waits until the sidebar's repository rows are
+    /// <paramref name="onScreen"/>, in that order.
+    ///
+    /// <para>The list is plain data, so adding to it alone tells the app nothing. The worktrees
+    /// are warmed before the first frame, so the nested row was already up and waiting for it
+    /// waited for nothing. The new row came only with an unrelated rebuild: the repository
+    /// watcher's refresh, 300 ms of real time after the app's own git calls touched the index. On
+    /// a busy runner that landed after the shortcut, which read the sidebar from before the add:
+    /// one entry, so index 1 selected nothing.</para></summary>
+    private static void AddToWorkspace(HeadlessSession session, JunctionApp app, WorkspaceData ws,
+        string path, params string[] onScreen)
+    {
+        ws.RepoPaths.Add(path);
+        Invoke(app, "Rerender");
+        PumpUntilSidebar(session, app, () => RepoRows(app).SequenceEqual(onScreen),
+            $"the repository rows never became [{string.Join(", ", onScreen)}]: [{string.Join(", ", RepoRows(app))}]");
     }
 
     // ── Tests ────────────────────────────────────────────────────────────
@@ -144,9 +174,8 @@ public class SidebarWorktreeTests
         WithWorktree((repo, linked, session, app, ws) =>
         {
             // Stored order: repo, its worktree, other. On screen: repo, other.
-            ws.RepoPaths.Add(other.Path);
-            session.PumpFrames(2);
-            PumpUntilRow(session, app, "wtchild:" + linked);
+            AddToWorkspace(session, app, ws, other.Path, onScreen: [repo, other.Path]);
+            Assert.True(HasRow(app, "wtchild:" + linked), "the worktree is not nested under its repository");
 
             Invoke(app, "SelectRepoByIndex", 1);
             session.PumpFrames(2);
@@ -164,8 +193,7 @@ public class SidebarWorktreeTests
         using var other = TempRepo.CreateWithInitialCommit();
         WithWorktree((repo, linked, session, app, ws) =>
         {
-            ws.RepoPaths.Add(other.Path);
-            session.PumpFrames(2);
+            AddToWorkspace(session, app, ws, other.Path, onScreen: [repo, other.Path]);
             PumpUntilRow(session, app, "wtchild:" + linked);
 
             Invoke(app, "OpenWorktree", linked);
