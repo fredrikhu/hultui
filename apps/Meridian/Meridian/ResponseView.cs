@@ -62,8 +62,10 @@ internal sealed class ResponseView
     /// Formats <paramref name="response"/>'s text body: pretty (JSON re-indented) or as
     /// received, line endings made '\n', split, and coloured when it is short. Runs on a
     /// worker; throws <see cref="OperationCanceledException"/> when the pane stopped wanting it.
+    /// The tokenize's time budget runs on <paramref name="clock"/>, the application's.
     /// </summary>
-    public static ResponseView Format(HttpResponseData response, bool raw, CancellationToken cancellationToken)
+    public static ResponseView Format(HttpResponseData response, bool raw, TimeProvider clock,
+        CancellationToken cancellationToken)
     {
         string text = raw ? response.Body.Text : Prettify(response);
         text = text.ReplaceLineEndings("\n");
@@ -80,7 +82,7 @@ internal sealed class ResponseView
             Lines = lines,
             LineStarts = starts,
             GrammarPath = grammar,
-            Spans = now ? Tokenize(grammar!, text, starts, cancellationToken) : null,
+            Spans = now ? Tokenize(grammar!, text, starts, clock, cancellationToken) : null,
             ColourToCome = grammar != null && !now,
         };
     }
@@ -88,8 +90,9 @@ internal sealed class ResponseView
     /// <summary>The colour spans for a view that <see cref="ColourToCome"/>, in absolute
     /// offsets; null when the text gets none. Runs on a worker; throws
     /// <see cref="OperationCanceledException"/> when the pane stopped wanting it.</summary>
-    public static IReadOnlyList<TextSpan>? Highlight(ResponseView view, CancellationToken cancellationToken) =>
-        view.GrammarPath is { } grammar ? Tokenize(grammar, view.Text, view.LineStarts, cancellationToken) : null;
+    public static IReadOnlyList<TextSpan>? Highlight(ResponseView view, TimeProvider clock,
+        CancellationToken cancellationToken) =>
+        view.GrammarPath is { } grammar ? Tokenize(grammar, view.Text, view.LineStarts, clock, cancellationToken) : null;
 
     /// <summary>Pretty mode: JSON re-indented via a real parse; anything that isn't valid JSON
     /// (or isn't JSON at all) shows as received.</summary>
@@ -135,12 +138,12 @@ internal sealed class ResponseView
 
     /// <summary>The per-line tokenize flattened to absolute offsets into the joined text.</summary>
     private static IReadOnlyList<TextSpan>? Tokenize(string grammar, string text, int[] starts,
-        CancellationToken cancellationToken)
+        TimeProvider clock, CancellationToken cancellationToken)
     {
         IReadOnlyList<TextSpan>[]? perLine;
         try
         {
-            perLine = SyntaxHighlighter.TokenizeLines(grammar, text, MaxColouredLines, cancellationToken);
+            perLine = SyntaxHighlighter.TokenizeLines(grammar, text, MaxColouredLines, cancellationToken, clock);
         }
         catch (OperationCanceledException) { throw; }
         catch { return null; }   // highlight is best-effort

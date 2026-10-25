@@ -14,6 +14,9 @@ namespace Meridian.Tests;
 /// build that shows it. An 18,884-line JSON response used to hold the UI thread for ~110 ms
 /// before its first frame. Under a headless session the pool hop is deterministic: the text
 /// lands one frame after the build that asked for it, and a long body's colour one frame later.
+/// So is what lands: the tokenize's time budget runs on the session's clock, which stands still
+/// inside a frame. On the wall clock a busy runner cut it short, the worker's and this test's
+/// each at its own line, and the span counts compared came out apart in either direction.
 /// </summary>
 public class ResponseBodyWorkerTests : IDisposable
 {
@@ -60,10 +63,12 @@ public class ResponseBodyWorkerTests : IDisposable
         session.Window.FindByAutomationId("response-body")?.Element as TextAreaElement;
 
     /// <summary>The spans the build used to make on the UI thread: the tokenize of the shown
-    /// text, flattened by its '\n' line starts.</summary>
-    private static List<TextSpan> SynchronousSpans(string text, int maxLines = SyntaxHighlighter.DefaultMaxLines)
+    /// text on the session's clock, flattened by its '\n' line starts.</summary>
+    private static List<TextSpan> SynchronousSpans(HeadlessSession session, string text,
+        int maxLines = SyntaxHighlighter.DefaultMaxLines)
     {
-        var perLine = SyntaxHighlighter.TokenizeLines("response.json", text, maxLines, CancellationToken.None);
+        var perLine = SyntaxHighlighter.TokenizeLines("response.json", text, maxLines, CancellationToken.None,
+            session.Application.Time);
         Assert.NotNull(perLine);
         var lines = text.Split('\n');
         var flat = new List<TextSpan>();
@@ -117,7 +122,7 @@ public class ResponseBodyWorkerTests : IDisposable
 
             var body = Body(session)!;
             Assert.True(body.Text.Count(c => c == '\n') + 1 > (items == 10 ? 100 : 2_000), "pretty-printed");
-            AssertSameSpans(SynchronousSpans(body.Text), body.Spans);
+            AssertSameSpans(SynchronousSpans(session, body.Text), body.Spans);
         });
     }
 
@@ -156,7 +161,7 @@ public class ResponseBodyWorkerTests : IDisposable
             session.PumpFrames(2);
             var body = Body(session)!;
             Assert.Contains("\"id\": 40000", body.Text);
-            AssertSameSpans(SynchronousSpans(body.Text), body.Spans);
+            AssertSameSpans(SynchronousSpans(session, body.Text), body.Spans);
         });
     }
 
@@ -178,7 +183,7 @@ public class ResponseBodyWorkerTests : IDisposable
             Assert.Null(body.Spans);
 
             session.PumpFrame();
-            AssertSameSpans(SynchronousSpans(Body(session)!.Text), Body(session)!.Spans);
+            AssertSameSpans(SynchronousSpans(session, Body(session)!.Text), Body(session)!.Spans);
         });
     }
 
@@ -236,7 +241,7 @@ public class ResponseBodyWorkerTests : IDisposable
             string text = body.Text;
             int lines = text.Count(c => c == '\n') + 1;
             Assert.True(lines > SyntaxHighlighter.DefaultMaxLines, $"only {lines} lines");
-            AssertSameSpans(SynchronousSpans(text, int.MaxValue), body.Spans);
+            AssertSameSpans(SynchronousSpans(session, text, int.MaxValue), body.Spans);
             int lastItem = text.LastIndexOf("\"id\"", StringComparison.Ordinal);
             Assert.Contains(body.Spans!, s => s.Start >= lastItem);
         });
