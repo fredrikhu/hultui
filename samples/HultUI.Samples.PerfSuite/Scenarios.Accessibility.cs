@@ -195,6 +195,24 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("a11y/type in a 2,000-line TextArea, a reader reading, bridge on",
+            "Type one character into a 2,000-line text area (121,744 characters) while a reader reads the line at the caret after each key, from its own thread: the text, with where each character on screen is, made from the layout for each key",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var area = MountLongTextArea(ctx);
+                ReadLineAtCaret(bridge.CurrentTree, area);
+                return new Op
+                {
+                    // Untimed, between keys, on the reader's thread: asking marks the area as read,
+                    // so the key after it makes its text from the layout on the UI thread.
+                    Reset = _ => ReadLineAtCaret(bridge.CurrentTree, area),
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = _ => Find(bridge.CurrentTree, area)?.TextSource?.AccessibleText is { } text
+                        && text.Text.Length == area.Text.Length ? null : "the reader's text is not the area's",
+                };
+            });
+
         if (OperatingSystem.IsWindows())
             foreach (var scenario in UiaAccessibility())
                 yield return scenario;
