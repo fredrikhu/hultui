@@ -23,7 +23,7 @@ public class TokenizeBudgetTests
     /// <summary>The whole text's colour, on a clock that stands still: no budget runs out.</summary>
     private static IReadOnlyList<HultUI.Core.Rendering.TextSpan>[] Whole() =>
         SyntaxHighlighter.TokenizeLines("a.json", Json, int.MaxValue, CancellationToken.None,
-            new SteppingClock(TimeSpan.Zero))!;
+            SteppingClock.Standing)!;
 
     /// <summary>A line stopped part-way hands back the state it stopped in, here inside a key's
     /// quotes, and the lines after it were tokenized from there: keys and values swapped colours
@@ -59,17 +59,9 @@ public class TokenizeBudgetTests
 
         limits.Clear();
         SyntaxHighlighter.TokenizeLines("a.json", Json, int.MaxValue, CancellationToken.None,
-            new SteppingClock(TimeSpan.Zero), wrap: g => StopsPartWay.Around(g, line: -1, at: 0, limits));
+            SteppingClock.Standing, wrap: g => StopsPartWay.Around(g, line: -1, at: 0, limits));
         Assert.NotEmpty(limits);
         Assert.All(limits, limit => Assert.Equal(TimeSpan.MaxValue, limit));
-    }
-
-    /// <summary>Moves <c>step</c> on every reading.</summary>
-    private sealed class SteppingClock(TimeSpan step) : TimeProvider
-    {
-        private long _now;
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() => Interlocked.Add(ref _now, step.Ticks);
     }
 
     /// <summary>
