@@ -21,12 +21,48 @@ public sealed class AccessibilityNode
     /// </summary>
     public Point ScrollOffset
     {
-        get => _extras?.ScrollOffset ?? default;
+        get => _extras?.Scroll?.Offset ?? default;
         internal set
         {
-            if (_extras is null && value == default) return;
-            Extras.ScrollOffset = value;
+            if (_extras?.Scroll is null && value == default) return;
+            Scroll.Offset = value;
         }
+    }
+
+    /// <summary>
+    /// A scroll view's (a virtual list's) box its content scrolls in, on screen in layout units —
+    /// the scroll of the views above it applied, not its own — and the size of that content, as
+    /// this tree was built: what UI Automation's Scroll pattern answers, on the client's thread.
+    /// Null for anything that does not scroll.
+    /// </summary>
+    public AccessibleScrollExtent? ScrollExtent =>
+        _extras?.Scroll is { IsScrollView: true } s ? new AccessibleScrollExtent(s.Viewport, s.Content) : null;
+
+    /// <summary>
+    /// The list a node of a list stands for (<see cref="IAccessibleItemSource"/>): its items' nodes
+    /// are this node's children, or, for a list over <c>MaxEagerVirtualItems</c>
+    /// (<see cref="IsVirtualItemContainer"/>), a bridge asks it for them by index when a reader
+    /// does. Null for anything else. It is the live list, read on the bridge's thread: only what is
+    /// served on demand is read from it, never what the tree carries.
+    /// </summary>
+    public IAccessibleItemSource? ItemSource
+    {
+        get => _extras?.Scroll?.Items;
+        internal set
+        {
+            if (_extras?.Scroll is null && value is null) return;
+            Scroll.Items = value;
+        }
+    }
+
+    /// <summary>Gives the node its scroll view's geometry (<see cref="ScrollExtent"/>) and offset.</summary>
+    internal void SetScrollView(Point offset, Rect viewport, Size content)
+    {
+        var scroll = Scroll;
+        scroll.Offset = offset;
+        scroll.Viewport = viewport;
+        scroll.Content = content;
+        scroll.IsScrollView = true;
     }
 
     public bool IsFocusable => (_flags & FocusableBit) != 0;
@@ -104,7 +140,11 @@ public sealed class AccessibilityNode
 
     public AccessibilityNode? Parent { get; private set; }
 
-    /// <summary>The node's children, in order. Never changes once the tree is built.</summary>
+    /// <summary>The node's children, in order. Never changes once the tree is built, but for a
+    /// leaf whose own properties changed: the window makes its node again and puts it in its
+    /// place in the applied tree (<see cref="ReplaceChild"/>), one reference write, so a reader on
+    /// another thread finds the leaf's old node there or its new one, each whole, with the same id
+    /// and parent.</summary>
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
     /// <summary>
@@ -151,7 +191,11 @@ public sealed class AccessibilityNode
     }
 
     /// <summary>The text as this tree was built with it, not yet made (see <see cref="Text"/>);
-    /// null for a node whose text was made with the tree, or that has none.</summary>
+    /// null for a node whose text was made with the tree, or that has none. One of the properties
+    /// that change after the tree is built (with <see cref="IsFocused"/> and a list item's
+    /// <see cref="IsSelected"/>): a move of the caret or the selection rebuilds no tree, so the
+    /// window puts the text's new version on the applied tree's node in place
+    /// (<see cref="ReplaceTextVersion"/>), and the next diff does not report the move again.</summary>
     internal AccessibleTextVersion? TextVersion
     {
         get => _extras?.TextVersion;
@@ -161,6 +205,25 @@ public sealed class AccessibilityNode
             Extras.TextVersion = value;
         }
     }
+
+    /// <summary>Puts a newer version of the same text on a node of a tree that is out (UI thread),
+    /// one reference write: a bridge's thread reading the node meanwhile reads the old version or
+    /// the new, each whole.</summary>
+    internal void ReplaceTextVersion(AccessibleTextVersion version) =>
+        Volatile.Write(ref Extras.TextVersion, version);
+
+    /// <summary>
+    /// A node of no tree standing for this one as it was with <paramref name="previous"/>, an
+    /// earlier version of its text: what a patched caret move hands a bridge as the change's
+    /// previous node, which a diff takes from the previous tree. It carries what a bridge reads of
+    /// a previous node for a text change — the text and where to read it — and the id and role.
+    /// </summary>
+    internal AccessibilityNode TextStandIn(AccessibleTextVersion previous) =>
+        new(ElementId, Role, Name, description: null, BoundingRect)
+        {
+            TextSource = TextSource,
+            TextVersion = previous,
+        };
 
     /// <summary>Where a bridge reads the text as it is now, from its own thread, between
     /// rebuilds; null with <see cref="Text"/>.</summary>
@@ -198,7 +261,7 @@ public sealed class AccessibilityNode
         public string? Description;
         public string? Value;
         public string? AutomationId;
-        public Point ScrollOffset;
+        public ScrollFields? Scroll;
         public NativeAccessibleContent NativeContent;
         public AccessibleText? Text;
         public IAccessibleTextSource? TextSource;
@@ -206,9 +269,25 @@ public sealed class AccessibilityNode
         public AccessibleRange? Range;
     }
 
+    /// <summary>
+    /// A scroll view's or a list's fields, in an object of their own that only those nodes get: the
+    /// offset was the one of them a rare field had, and RareFields stays the size it was for every
+    /// other node that has one (a text field, a described control).
+    /// </summary>
+    private sealed class ScrollFields
+    {
+        public Point Offset;
+        public Rect Viewport;
+        public Size Content;
+        public bool IsScrollView;
+        public IAccessibleItemSource? Items;
+    }
+
     private RareFields? _extras;
 
     private RareFields Extras => _extras ??= new RareFields();
+
+    private ScrollFields Scroll => Extras.Scroll ??= new ScrollFields();
 
     /// <summary>Whether this node or <paramref name="other"/> carries any of the rarely set
     /// fields; when neither does, the differ has none of them to compare.</summary>
@@ -273,6 +352,16 @@ public sealed class AccessibilityNode
         _children = children;
     }
 
+    /// <summary>Puts <paramref name="child"/> in place of the child at <paramref name="index"/>, in
+    /// a tree that is out (UI thread): a leaf's node made again for a change of its own properties
+    /// (<see cref="AccessibilityTreeBuilder.RemakeLeaf"/>), with the id of the one it replaces and
+    /// no children. One reference write into the array readers on other threads walk.</summary>
+    internal void ReplaceChild(int index, AccessibilityNode child)
+    {
+        child.Parent = this;
+        Volatile.Write(ref _children[index], child);
+    }
+
     /// <summary>Adds one child after the others. Copies the children each time: for the odd
     /// node added after a build (an overlay's tree under the window's root), not for building.</summary>
     internal void AddChild(AccessibilityNode child)
@@ -284,3 +373,10 @@ public sealed class AccessibilityNode
         _children = children;
     }
 }
+
+/// <summary>A scroll view as an accessibility tree was built with it
+/// (<see cref="AccessibilityNode.ScrollExtent"/>).</summary>
+/// <param name="Viewport">The box its content scrolls in, on screen in layout units: the scroll of
+/// the views above it applied, not its own (<see cref="AccessibilityNode.ScrollOffset"/>).</param>
+/// <param name="Content">How big the content that scrolls in it is.</param>
+public readonly record struct AccessibleScrollExtent(Rect Viewport, Size Content);

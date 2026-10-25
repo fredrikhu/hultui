@@ -19,8 +19,11 @@ internal interface ISkiaExternalSurface : IExternalGLSurface
 {
     /// <summary>
     /// The frame as something the canvas can draw, or null when it cannot be wrapped. The
-    /// image reads the frame's storage as it is when the canvas flushes; the caller owns the
-    /// returned image and the storage stays the producer's.
+    /// image reads the frame's storage as it is when the canvas flushes. For a frame the
+    /// producer drew into a texture of its own the caller owns the returned image, and the
+    /// storage stays the producer's; for a <see cref="GpuFrame.RendererOwned"/> one the image is
+    /// the surface's, which knows when the storage it lent is replaced: the caller draws it in this
+    /// frame and neither disposes it nor keeps it.
     /// </summary>
     SKImage? WrapFrame(in GpuFrame frame);
 

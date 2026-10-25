@@ -241,18 +241,32 @@ public sealed partial class TableView<T>
         {
             Flex.FlexShrink = 0;
         }
+
+        // Its tracks are grid styles, compared by the base; it copies nothing else.
+        private protected override bool PatchMarksOwnLayout => GetType() == typeof(RowElement);
     }
 
     /// <summary>The header row: the grid, its rule underneath, its fill and its text style.</summary>
     internal sealed class HeaderElement : RowElement
     {
+        // Its height and rule are the theme's, compared on a themed twin.
+        private protected override bool PatchMarksOwnLayout => true;
+        private protected override bool PatchThemesTwin => true;
+
         protected internal override void ApplyTheme(Theme theme)
         {
             var t = theme.Table;
-            Box.Height = Dimension.Px(t.HeaderHeight);
+            var box = BoxRead;
+            var height = Dimension.Px(t.HeaderHeight);
+            var rule = new Thickness(0, 0, 1, 0);
+            if (box.Height != height || box.BorderWidth != rule)
+            {
+                Box.Height = height;
+                Box.BorderWidth = rule;
+                MarkLayoutDirty();
+            }
             BackgroundColor = t.HeaderBackground ?? Color.Transparent;
             BorderColor = t.Divider ?? theme.Border;
-            Box.BorderWidth = new Thickness(0, 0, 1, 0);
             Inherited.TextColor = t.HeaderText ?? theme.Secondary;
             Inherited.FontSize = t.HeaderFontSize;
             Inherited.FontWeight = t.HeaderFontWeight;
@@ -274,17 +288,27 @@ public sealed partial class TableView<T>
             Box.OverflowX = Overflow.Hidden;
         }
 
+        // Its padding and placement are the theme's and its alignment's, compared on a themed twin
+        // (which carries the incoming alignment).
+        private protected override bool PatchMarksOwnLayout => GetType() == typeof(CellElement);
+        private protected override bool PatchThemesTwin => GetType() == typeof(CellElement);
+
         protected internal override void ApplyTheme(Theme theme)
         {
             var t = theme.Table;
-            Box.Padding = t.CellPadding;
             if (t.CellFontSize is { } size && this is not HeaderCellElement) Inherited.FontSize = size;
-            Flex.JustifyContent = Align switch
+            var justify = Align switch
             {
                 ColumnAlign.Center => JustifyContent.Center,
                 ColumnAlign.End => JustifyContent.FlexEnd,
                 _ => JustifyContent.FlexStart,
             };
+            if (BoxRead.Padding != t.CellPadding || FlexRead.JustifyContent != justify)
+            {
+                Box.Padding = t.CellPadding;
+                Flex.JustifyContent = justify;
+                MarkLayoutDirty();
+            }
         }
 
         internal override void PatchFrom(Element source)
@@ -317,6 +341,10 @@ public sealed partial class TableView<T>
         {
             if (Sortable) BackgroundColor = _hover;
         }
+
+        // A cell's geometry, compared on a themed twin; what it copies below is paint and cursor.
+        private protected override bool PatchMarksOwnLayout => true;
+        private protected override bool PatchThemesTwin => true;
 
         protected internal override void ApplyTheme(Theme theme)
         {
@@ -359,6 +387,9 @@ public sealed partial class TableView<T>
         private Color _color;
 
         public SortMarkElement() => Flex.FlexShrink = 0;
+
+        // Its patch marks layout when the direction, all it measures, changes.
+        private protected override bool PatchMarksOwnLayout => true;
 
         protected internal override void ApplyTheme(Theme theme) =>
             _color = theme.Table.SortMark ?? theme.Table.HeaderText ?? theme.Secondary;
@@ -407,6 +438,11 @@ public sealed partial class TableView<T>
             Inherited.Cursor = CursorType.ColResize;
         }
 
+        // Its width and place are the theme's and its end's, compared on a themed twin (which
+        // carries the incoming end).
+        private protected override bool PatchMarksOwnLayout => true;
+        private protected override bool PatchThemesTwin => true;
+
         internal override void PatchFrom(Element source)
         {
             base.PatchFrom(source);
@@ -416,10 +452,15 @@ public sealed partial class TableView<T>
         protected internal override void ApplyTheme(Theme theme)
         {
             var t = theme.Table;
-            Box.Width = Dimension.Px(t.ResizeGrip);
+            var width = Dimension.Px(t.ResizeGrip);
+            var pos = PositionRead;
             // Placed from the cell's content box; out through its padding to the real edge.
-            if (AtStart) Position.Left = Dimension.Px(-t.CellPadding.Left);
-            else Position.Right = Dimension.Px(-t.CellPadding.Right);
+            var edge = Dimension.Px(AtStart ? -t.CellPadding.Left : -t.CellPadding.Right);
+            if (BoxRead.Width == width && (AtStart ? pos.Left : pos.Right) == edge) return;
+            Box.Width = width;
+            if (AtStart) Position.Left = edge;
+            else Position.Right = edge;
+            MarkLayoutDirty();
         }
     }
 }

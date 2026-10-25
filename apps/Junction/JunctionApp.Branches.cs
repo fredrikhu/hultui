@@ -208,7 +208,7 @@ public partial class JunctionApp
     {
         _branchQuery = q;
         _branchSel = 0;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     // ── Table ────────────────────────────────────────────────────────────
@@ -728,7 +728,7 @@ public partial class JunctionApp
     private void SelectBranch(int index)
     {
         _branchSel = index;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     /// <summary>Click on a branch row. Plain click single-selects the branch (its tip
@@ -805,7 +805,7 @@ public partial class JunctionApp
         // through one leaves the previous branch selection standing.
         if (!focusOnly && rows[_branchSel] is { IsFolder: false } leaf) BranchSelectSingle(leaf.Item);
         EnsureBranchVisible();
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private void EnsureBranchVisible()

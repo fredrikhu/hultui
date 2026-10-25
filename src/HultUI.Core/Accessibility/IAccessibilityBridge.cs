@@ -44,7 +44,14 @@ public interface IAccessibilityBridge
     /// Properties changed with no rebuild: the window has marked them in place on the most
     /// recently applied tree, <paramref name="root"/>, and the next diff will not report them.
     /// Today a move of a list's selection: <see cref="AccessibilityNode.IsSelected"/> on the item
-    /// that had the selection and the one that has it. <paramref name="patch"/> holds property
+    /// that had the selection and the one that has it; a move of a caret or a selection in text
+    /// made on request (the rich text editor's): <see cref="AccessibilityProperties.TextSelection"/>
+    /// on its node, which carries the text's new version, the change's previous node a stand-in for
+    /// it with the old one (no tree's); and a change of a leaf's own name, description, value, range,
+    /// toggle or expanded state: the window made the leaf's node again and put it in place of the old
+    /// one in its parent's children, so the change's node is the new one (with the old as a range's
+    /// previous node, as a diff gives it), and a bridge that holds the old one takes the new.
+    /// <paramref name="patch"/> holds property
     /// changes only, of nodes of that tree, in the order a diff would list them. A bridge that
     /// holds a node's state brings those nodes up to date and tells assistive technology as a diff
     /// would have. By default, applies the patch as a diff of that same tree.

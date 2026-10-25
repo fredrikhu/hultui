@@ -55,7 +55,10 @@ internal static class TreeDiffer
         }
         finally
         {
-            _depth--;
+            // A child a build moved that this pass did not put back marks its old parent now —
+            // unless this pass is a child's rebuild in the middle of its parent's build, whose
+            // own reconcile is still to come.
+            if (--_depth == 0 && Element.Building == 0) Element.FlushPendingMoves();
         }
     }
 
@@ -96,7 +99,7 @@ internal static class TreeDiffer
         if (!CanPatch(existing, incoming)) return false;
         _depth++;
         try { Patch(existing, incoming); }
-        finally { _depth--; }
+        finally { if (--_depth == 0 && Element.Building == 0) Element.FlushPendingMoves(); }
         return true;
     }
 
@@ -249,7 +252,9 @@ internal static class TreeDiffer
         // rebuilds the accessibility tree that frame. Junction keys the children of its root,
         // its sidebar rows and its overlays, so every rebuild did that: 0.7 ms of a 2 ms
         // frame for a move of the History selection. A child that did change marks itself.
-        if (!SameChildren(parent.Children, resultChildren))
+        // A persistent child the build moved out and this pass put back in its place is no
+        // change either (Element.TryRestoreMoved).
+        if (!SameChildren(parent.Children, resultChildren) && !Element.TryRestoreMoved(parent, resultChildren))
             parent.ReplaceChildren(resultChildren.ToArray());
     }
 

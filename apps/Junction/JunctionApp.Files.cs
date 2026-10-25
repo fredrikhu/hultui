@@ -425,7 +425,7 @@ public partial class JunctionApp
         // The cursor follows the query. The *selected* file is left alone: the content pane
         // should not flicker through every file that matches a half-typed query.
         _filesCursorToFirstMatch = true;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private void ClearFilesQuery()
@@ -535,11 +535,11 @@ public partial class JunctionApp
     private void SelectTreeFile(string path)
     {
         _filesSelPath = path;
-        // Rerender, not MarkDirty: this activates a NEW per-file content loader, and
-        // a MarkDirty rebuild is untracked — the Effect would never subscribe to that
-        // loader's signals, so its async completion goes unobserved and the pane sits
-        // on "Loading…" until some other tracked rebuild (e.g. switching tabs).
-        Rerender();
+        // A tracked rebuild, not MarkDirty: this activates a NEW per-file content loader,
+        // and the rebuild has to subscribe to it, or its async completion goes unobserved and
+        // the pane sits on "Loading…" until some other tracked rebuild (e.g. switching tabs).
+        // The view's alone: the file open is nothing the chrome shows.
+        RerenderView();
     }
 
     // ── Tree keyboard navigation ─────────────────────────────────────────
@@ -587,9 +587,9 @@ public partial class JunctionApp
         _filesCursorPath = node.Path;
         _pendingFilesTreeScroll = true;
         if (!node.IsFolder && node.Path != _filesSelPath)
-            SelectTreeFile(node.Path);   // Rerender: opens the file (tracked, see SelectTreeFile)
+            SelectTreeFile(node.Path);   // opens the file (tracked, see SelectTreeFile)
         else
-            MarkDirty();
+            MarkViewDirty();
     }
 
     /// <summary>←/→ via the model's tree step: expand/collapse happens in the model

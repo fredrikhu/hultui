@@ -94,11 +94,12 @@ public static class ScriptLanguage
     /// whole paragraph decides once. A paragraph of kanji alone ("東京都") says nothing, and
     /// the culture still decides it.</para>
     /// </summary>
-    public static string? CjkContextOf(ReadOnlySpan<char> text)
-    {
-        var (kana, hangul) = CjkContextChars(text);
-        return kana == hangul ? null : kana ? "ja" : "ko";
-    }
+    public static string? CjkContextOf(ReadOnlySpan<char> text) => CjkContextOf(CjkContextChars(text));
+
+    /// <summary><see cref="CjkContextOf(ReadOnlySpan{char})"/> from what
+    /// <see cref="CjkContextChars"/> found.</summary>
+    internal static string? CjkContextOf((bool Kana, bool Hangul) chars) =>
+        chars.Kana == chars.Hangul ? null : chars.Kana ? "ja" : "ko";
 
     /// <summary>Whether <paramref name="text"/> holds kana, and whether Hangul: all
     /// <see cref="CjkContextOf"/> reads of it.</summary>

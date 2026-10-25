@@ -99,7 +99,14 @@ public static class AccessibilityTreeBuilder
     private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager, float scrollX, float scrollY)
     {
         var box = element.Layout.AbsoluteBorderBox;
-        var onScreen = new Rect(box.X - scrollX, box.Y - scrollY, box.Width, box.Height);
+        return CreateNode(element, focusManager, new Rect(box.X - scrollX, box.Y - scrollY, box.Width, box.Height),
+            scrollX, scrollY);
+    }
+
+    /// <param name="onScreen">The node's box: the element's on screen, the scroll above it applied.</param>
+    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager, Rect onScreen,
+        float scrollX, float scrollY)
+    {
         var textSource = element.AccessibleTextSource;
         // A source that makes its text on request gives a version, and the value comes from it
         // too: a long document's text and value are made when a reader asks, not on every rebuild.
@@ -122,9 +129,16 @@ public static class AccessibilityTreeBuilder
         node.NativeContent = element.NativeAccessibleContent;
         if (element is IRangeValueElement range)
             node.Range = AccessibleRange.Of(range);
-        // What ChildScroll subtracts from everything under it.
+        // What ChildScroll subtracts from everything under it, and what UI Automation's Scroll
+        // pattern answers from: it read the live scroll view through a walk of the element tree on
+        // the client's thread.
         if (element is ScrollViewElement sv)
-            node.ScrollOffset = new Point(sv.ScrollOffsetX, sv.ScrollOffsetY);
+        {
+            var viewport = element.Layout.AbsoluteContentBox;
+            node.SetScrollView(new Point(sv.ScrollOffsetX, sv.ScrollOffsetY),
+                new Rect(viewport.X - scrollX, viewport.Y - scrollY, viewport.Width, viewport.Height),
+                new Size(sv.ContentWidth, sv.ContentHeight));
+        }
         if (textSource is not null)
         {
             node.TextSource = textSource;
@@ -254,6 +268,8 @@ public static class AccessibilityTreeBuilder
         // its own: its realized rows carry the real controls, and one node per row would
         // bury them.
         if (!source.PublishesItemNodes) return false;
+        // What a bridge asks for the items it serves on demand, without finding the list first.
+        node.ItemSource = source;
         if (source.ItemCount <= MaxEagerVirtualItems)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).
@@ -346,6 +362,100 @@ public static class AccessibilityTreeBuilder
                 changes.Add(new PropertyChange(item, AccessibilityProperties.IsSelected));
         }
         return true;
+    }
+
+    /// <summary>
+    /// What a move of the caret or the selection changes in an applied tree's node of text that is
+    /// made on request (<see cref="IVersionedAccessibleTextSource"/>: the rich text editor's),
+    /// without building the tree again: the version the source has now, in <paramref name="next"/>
+    /// (null when it is the node's own), and the <see cref="AccessibilityProperties.TextSelection"/>
+    /// change the differ would report when its caret or selection moved, added to
+    /// <paramref name="changes"/> with a stand-in for the node as it was
+    /// (<see cref="AccessibilityNode.TextStandIn"/>). A version that differs in what is not the text
+    /// (its layout, its scroll, read-only) is put in place with nothing to tell. The node is not
+    /// touched. False, adding nothing, when the tree has to be built again: the text itself
+    /// changed, or the node carries no version of this source's kind.
+    /// </summary>
+    internal static bool TextSelectionChange(AccessibilityNode node, IVersionedAccessibleTextSource source,
+        List<PropertyChange> changes, out AccessibleTextVersion? next)
+    {
+        next = null;
+        if (node.TextVersion is not { } previous) return false;
+        var current = source.CurrentVersion;
+        if (ReferenceEquals(current, previous)) return true;
+        if (current.GetType() != previous.GetType() || !current.SameText(previous)) return false;
+        next = current;
+        if (!current.SameSelection(previous))
+            changes.Add(new PropertyChange(node, AccessibilityProperties.TextSelection, node.TextStandIn(previous)));
+        return true;
+    }
+
+    /// <summary>
+    /// What a change of a leaf's own properties changes in an applied tree's node of it, without
+    /// building the tree again: the node made again from the element now, in
+    /// <paramref name="remade"/> (null when nothing a reader is told changed), and the changes the
+    /// differ reports between the two, added to <paramref name="changes"/> in its order, each on the
+    /// remade node (a range's with the applied node as the previous one). The applied node is not
+    /// touched. A leaf is an element with no children whose node has none: its node's properties are
+    /// its own, and no other node takes anything from them but an ancestor named from its content (a
+    /// button's, a tab's name is the text inside), so a change of a name, a description or an
+    /// expanded state under one is not patched. The remade node keeps the applied node's box and
+    /// offscreen state: whatever moved marked layout, and the coalesced layout refresh tells it, as it
+    /// tells every move.
+    /// <para>False, adding nothing, when the tree has to be built again: the element is not a leaf,
+    /// offers text, content, items or a scroll of its own, is not a node any more (no longer
+    /// semantic), is the tree's root, changed anything but its name, description, value, range, toggle
+    /// or expanded state, or (the first three) has an ancestor named from its content.</para>
+    /// </summary>
+    internal static bool RemakeLeaf(Element element, AccessibilityNode applied, FocusManager? focusManager,
+        List<PropertyChange> changes, out AccessibilityNode? remade)
+    {
+        remade = null;
+        if (applied.Parent is null || applied.Children.Count != 0 || element.Children.Count != 0
+            || applied.OffersText || applied.ScrollExtent is not null || applied.ItemSource is not null
+            || applied.IsVirtualItemContainer || !applied.NativeContent.IsEmpty
+            || element is ScrollViewElement or IAccessibleContentSource or IAccessibleItemSource
+            || element.AccessibleTextSource is not null || !element.NativeAccessibleContent.IsEmpty
+            || !IsSemantic(element))
+            return false;
+        var node = CreateNode(element, focusManager, applied.BoundingRect, 0f, 0f);
+        node.IsOffscreen = applied.IsOffscreen;
+        // Not compared by the differ, so not told; a bridge keeps it from the node it was made from.
+        if (node.IsFocusable != applied.IsFocusable) return false;
+        int start = changes.Count;
+        AccessibilityTreeDiffer.CompareNodes(changes, applied, node);
+        bool named = false;
+        for (int i = start; i < changes.Count; i++)
+        {
+            switch (changes[i].PropertyName)
+            {
+                case AccessibilityProperties.Name or AccessibilityProperties.Description or AccessibilityProperties.IsExpanded:
+                    named = true;
+                    break;
+                case AccessibilityProperties.Value or AccessibilityProperties.RangeValue or AccessibilityProperties.IsToggled:
+                    break;
+                default:
+                    changes.RemoveRange(start, changes.Count - start);
+                    return false;
+            }
+        }
+        if (named && NamedFromContentAbove(element))
+        {
+            changes.RemoveRange(start, changes.Count - start);
+            return false;
+        }
+        if (changes.Count > start) remade = node;
+        return true;
+    }
+
+    /// <summary>Whether an ancestor of <paramref name="element"/> takes its name from the text inside it
+    /// (<see cref="GetContentText"/>): a button or a tab with no name of its own.</summary>
+    private static bool NamedFromContentAbove(Element element)
+    {
+        for (var ancestor = element.Parent; ancestor is not null; ancestor = ancestor.Parent)
+            if (ancestor.AccessibleName is null && IsNameFromContentRole(ResolveRole(ancestor)))
+                return true;
+        return false;
     }
 
 

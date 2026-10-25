@@ -114,6 +114,38 @@ hover allocates nothing beyond the platform's own input record. A `PointerMoveEv
 handler makes an event on every move over its element or anything inside it — on a root,
 every move in the window — so attach a move handler to the element that needs it.
 
+**Which inputs draw a frame.** An input draws a frame when it changes something: an element
+marked itself dirty (a control's own state, a scroll, a hover or pressed style, an overlay),
+the hover moved to another element, a drag is under way or has just ended, or the focus ring
+moved, showed or hid. It also draws one when an app handler ran for an event the input
+dispatched — the key, the press and the focus and blur it caused, the release and its
+click, the wheel's `ScrollEvent` — on that event's way through the tree (`On<TEvent>`,
+`.OnClick` and the other fluent ones). A handler may change what is drawn without marking
+anything (see "Layout styles do not self-invalidate" in REACTIVITY.md; `HULTUI002` catches
+the common case), so the window repaints after one to be safe. Nothing else draws a frame: a
+key-up no handler hears, a wheel notch over a list that has nothing to scroll, a press on
+static text. Until plan 17's round 4 every input but a pointer move drew one, and a key-up's
+frame was 42–46 % of a key press's frame time in Junction and Vesper Commander.
+
+So a handler that runs often and usually does nothing — a move tracker on a root that acts
+only during a resize drag or a right-drag selection — belongs in `el.OnPassive<TEvent>(handler)`.
+A passive handler promises to mark what it changes (`MarkDirty()` on its component,
+`MarkPaintDirty()` or `MarkLayoutDirty()` on an element), and an input that ran only passive
+handlers draws no frame of its own. A move handler that acts only while something is under
+way can say so: `el.OnPassive<PointerMoveEvent>(handler, listening)` asks `listening` before a
+move is made, and a move that nothing on its way listens for makes no event at all (64 bytes
+a move otherwise, on every move over the element — over a root, over the window). Hand the
+same delegate to every build, from a field (`_listening ??= () => _resizing`), or each build
+makes one. Vesper Commander's two move handlers, the root's (the Find dialog's resize grip, a
+right-button hold) and each file row's (a right-drag marking rows), drew a full frame for
+every move over the panes as ordinary handlers: 60 idle moves along a row drew 60 frames.
+Passive and listening only during their gesture, the same moves draw 1 (where the hover left
+the file's name), and a move allocates 40 bytes instead of 104.
+A callback a control calls
+(`OnChanged`, `LinkActivated`, a toast's action) is not a handler: it shares the frame the
+control's own change asks for, so one that changes something on screen while the control
+itself changes nothing must mark it.
+
 **Pointer capture.** A `PointerDownEvent` handler can call `e.CapturePointer()`.
 From then until the button comes up, every `PointerMoveEvent` and the
 `PointerUpEvent` go to that element wherever the pointer is, in that element's
@@ -1161,6 +1193,7 @@ var list = VirtualListElement<FileEntry>.New()
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
+| — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 
 **How rows live.** With the one-argument template, the visible window plus a row or two of
 overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
@@ -1247,6 +1280,29 @@ nodes made again by every build (a tree flattened from a fresh filter) are new o
 every index, and every row is made again. Keep them while what they come from is the same.
 Junction's Files tree, moved from a scroll view of every row onto a virtual list this way,
 makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now).
+
+When the items are records the list is handed as they come (a folder's entries straight from
+the loader) and the highlight is one value that moves, the app can instead tell the list the
+rows it moved between: `InvalidateRow(index)` makes that one row again (and lets go of its kept
+label), and keeps every other. Call it for the row the highlight left and the row it reached,
+through the list's ref, before the rebuild patches the list — the same place `InvalidateRows()`
+goes:
+
+```csharp
+if (partner != _partnerWas && _listRef.Current is { } list)
+{
+    list.InvalidateRow(IndexOf(rows, _partnerWas));   // -1, or past the items, does nothing
+    list.InvalidateRow(IndexOf(rows, partner));
+}
+_partnerWas = partner;
+```
+
+Vesper rings the file the other pane's cursor would be compared with, and in two folders of the
+same names that ring moves with every key; in the shape it made every row of the pane again.
+With `InvalidateRow` a key makes about 3.5 rows across both panes instead of 31.6 (same-name
+walk, headless: 427 → 259 KB a key). The perf suite pins it: `virtual/partner walk beside 1,000 item
+rows, every row told` makes 23 rows a step and allocates 105 KB, `… two rows told` makes 6 and
+allocates 39 KB.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
@@ -1370,6 +1426,16 @@ they wrapped with, so a resize or another font size re-wraps with nothing for yo
 and a rebuild that hands the area the text it already shows wraps nothing. The corollary
 is that there is never anything to the right to scroll to: `ScrollBy` ignores `dx`, and
 autoscroll is vertical.
+
+**Long documents open faster in a monospace face.** To wrap, the area needs to know which
+lines fit, and it measures each line it has no width for — every line, when a document
+opens. In a face the renderer proves monospace for printable ASCII (`FontFamilies.Monospace`
+on every platform, and any face whose 95 printable ASCII characters all advance alike, kern
+no pair and join none), a line of those characters that fits with a character to spare is
+taken as fitting without being measured. A 19,000-line JSON response opens in a tenth of the
+time, with 86 % fewer bytes, and keeps 4 MB less afterwards. Give logs, JSON, source code and
+other machine text a monospace face; letter spacing, a tab or any character outside printable
+ASCII on a line measures that line as before, and the rows are the same either way.
 
 **Revealing a position.** Two calls:
 

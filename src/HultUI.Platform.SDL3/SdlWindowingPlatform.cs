@@ -18,9 +18,10 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
     // instance (one test session after another would otherwise leak a type each).
     private static uint _wakeEventType;
 
-    // 1 while a wake event is queued that PumpEvents has not yet drained. A chatty
-    // producer — a file-watcher storm, progress reported at 10 kHz — then costs one
-    // atomic exchange per call instead of one queued event each: SDL's queue is
+    // 1 from a Wake that pushed an event until the next PumpEvents has polled: until then
+    // the loop is sure to come round before it waits for good, so another Wake need not
+    // push. A chatty producer — a file-watcher storm, progress reported at 10 kHz — then
+    // costs one atomic exchange per call instead of one queued event each: SDL's queue is
     // finite, and every push also runs the event watchers on the pushing thread.
     private int _wakePending;
 
@@ -73,20 +74,40 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
         => new SDL3Window(title, width, height, style,
             _text ??= SDL3Window.TakePreloadedText() ?? new SkiaTextServices());
 
+    /// <remarks>
+    /// <para><b>The wake flag is cleared after the poll, not before.</b> Cleared before, a
+    /// <see cref="Wake"/> landing between the clear and the poll set it again and pushed an
+    /// event the poll then took: the flag said a wake event was queued with none queued, so
+    /// every later <see cref="Wake"/> returned without pushing one until the next pump. That
+    /// cost at most the 16 ms the idle wait used to last; since the idle loop waits with no
+    /// timeout when it owns no deadline, the post waited for the next input. The window is
+    /// wide: SDL's first poll pumps the OS (window messages, the event watchers that draw a live
+    /// resize, callbacks queued for the main thread) before it takes the queue.</para>
+    ///
+    /// <para>Cleared after, no wake is lost wherever it lands. Before the clear, its work was
+    /// put where the loop looks before it next waits (a post is queued before its wake), and
+    /// the loop drains and checks that after this returns. After the clear, it pushes an event
+    /// the next wait finds: SDL's wait only peeks. An event pushed during the poll that the
+    /// poll left queued (SDL takes, in one poll, only what was queued when it pumped) ends the
+    /// next wait at once: a spare pass, not a lost wake. So the work a wake announces must be
+    /// read after <see cref="PumpEvents"/> returns, as everything the loop drains is. And
+    /// cleared in a <c>finally</c>: a throwing handler must not leave the flag set.</para>
+    /// </remarks>
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose)
     {
-        // Cleared before polling, not after: a Wake that lands while the queue is
-        // being drained must push a fresh event, or its work would sit unnoticed
-        // until the next idle wait timed out. One that lands between the clear and
-        // the poll pushes an event the poll consumes at once, which is harmless —
-        // the queued work is drained later in the same frame regardless.
-        Interlocked.Exchange(ref _wakePending, 0);
-
-        // Passed straight through: an Action<IPlatformWindow> is an Action<SDL3Window>
-        // (Action is contravariant), so no adapter is needed. A lambda wrapping it here was
-        // a new closure and delegate on every pass of the loop, idle ones included: 88 B
-        // (72 B on NativeAOT), 5.7 KB/s in an idle window and 3–4 MB/s while animating.
-        return SDL3Window.PollAllEvents(onWindowClose);
+        try
+        {
+            // Passed straight through: an Action<IPlatformWindow> is an Action<SDL3Window>
+            // (Action is contravariant), so no adapter is needed. A lambda wrapping it here was
+            // a new closure and delegate on every pass of the loop, idle ones included: 88 B
+            // (72 B on NativeAOT), 5.7 KB/s in an idle window and 3–4 MB/s while animating.
+            return SDL3Window.PollAllEvents(onWindowClose);
+        }
+        finally
+        {
+            // A full fence: the loop's look at its queue after this cannot move before it.
+            Interlocked.Exchange(ref _wakePending, 0);
+        }
     }
 
     /// <summary>
@@ -124,8 +145,8 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
 
     /// <summary>
     /// Pushes a wake event so a <see cref="WaitForEvents"/> in progress returns at
-    /// once. Thread-safe; coalesced while one is already queued. The event carries no
-    /// window id, so the pump's routing ignores it.
+    /// once. Thread-safe; coalesced until the next <see cref="PumpEvents"/> has polled.
+    /// The event carries no window id, so the pump's routing ignores it.
     /// </summary>
     public void Wake()
     {
@@ -135,7 +156,7 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
         SDL_Event evt = default;
         evt.type = _wakeEventType;
         // Fails (returns false) only before SDL's event subsystem exists, in which
-        // case nothing can be waiting either; PumpEvents clears the flag next frame.
+        // case nothing can be waiting either; PumpEvents clears the flag next pass.
         SDL_PushEvent(&evt);
     }
 

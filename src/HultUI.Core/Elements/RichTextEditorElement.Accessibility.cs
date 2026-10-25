@@ -73,12 +73,14 @@ public partial class RichTextEditorElement
     // Called from Render: where the document is drawn now. A version taken before there was a
     // layout to read, or at another width or theme, has lines and boxes that are not these: the
     // tree is built again, which takes a new one. The tree is built before the frame is drawn,
-    // so the first version an editor gives is always taken without its layout.
+    // so the first version an editor gives is always taken without its layout. The place is a
+    // new record only when the editor moved or scrolled: one a frame was the editor's only
+    // render-pass allocation (24 B; plan 17, round 4).
     private void NoteViewFrame()
     {
         var box = WindowContentBox;
-        var frame = new ViewFrame(box.X, box.Y - _scrollY);
-        if (frame != _viewFrame) _viewFrame = frame;
+        float x = box.X, y = box.Y - _scrollY;
+        if (_viewFrame is not { } frame || frame.X != x || frame.Y != y) _viewFrame = new ViewFrame(x, y);
         if (_textVersion is { } version && AccessibilityClients.Active
             && (version.Key.Width != _laidOutWidth || version.Key.Stamp != _laidOutStamp || !version.LaidOut))
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.Text);
@@ -94,15 +96,13 @@ public partial class RichTextEditorElement
         var version = _textVersion;
         if (version is not null && version.Key == key) return version;
 
-        int first = -1, last = -1;
-        if (laidOut && _blocks.Length == key.Document.BlockCount)
+        var (first, last) = VisibleBlocks(key.Document, laidOut);
+        _textVersion = version = new EditorTextVersion(this, key, first, last)
         {
-            first = BlockAt(_scrollY);
-            last = BlockAt(_scrollY + Layout.AbsoluteContentBox.Height);
-            if (_blocks[first].Table is { } t) first = t.Range.Start;
-            if (_blocks[last].Table is { } u) last = u.Range.End - 1;
-        }
-        _textVersion = version = new EditorTextVersion(this, key, first, last);
+            // Only the caret or the selection moved since a version whose text was made: this
+            // one's is made from that one's (EditorTextVersion.MakeFromLayout).
+            ShareFrom = version?.MadeOrSharing is { } made && made.Key.DiffersOnlyInSelection(key) ? made : null,
+        };
         // A reader read the last one: make this one's now, while the layout is this one's.
         if (_readerAsked)
         {
@@ -133,7 +133,27 @@ public partial class RichTextEditorElement
     }
 
     private readonly record struct TextKey(RichDocument Document, RichSelection Selection, float Width, int Stamp,
-        float Scroll, bool ReadOnly);
+        float Scroll, bool ReadOnly)
+    {
+        /// <summary>Whether <paramref name="other"/> is the same document (the same instance) laid
+        /// out at the same width, theme and scroll, with the same read-only state: whether only the
+        /// caret or the selection can differ.</summary>
+        public bool DiffersOnlyInSelection(TextKey other) =>
+            ReferenceEquals(Document, other.Document) && Width == other.Width && Stamp == other.Stamp
+            && Scroll == other.Scroll && ReadOnly == other.ReadOnly;
+    }
+
+    /// <summary>The blocks on screen, a table's rows whole: what a text's part on screen and the
+    /// lines whose character boxes it measures are made from. (-1, -1) with no layout of
+    /// <paramref name="doc"/> to read. On the UI thread.</summary>
+    private (int First, int Last) VisibleBlocks(RichDocument doc, bool laidOut)
+    {
+        if (!laidOut || _blocks.Length != doc.BlockCount) return (-1, -1);
+        int first = BlockAt(_scrollY), last = BlockAt(_scrollY + Layout.AbsoluteContentBox.Height);
+        if (_blocks[first].Table is { } t) first = t.Range.Start;
+        if (_blocks[last].Table is { } u) last = u.Range.End - 1;
+        return (first, last);
+    }
 
     /// <summary>
     /// The text as one tree was built with it: cheap to take on every rebuild, compared by the
@@ -185,14 +205,34 @@ public partial class RichTextEditorElement
         /// <summary>Whether its text was made from the layout, with its drawn lines and boxes.</summary>
         public bool IsMadeFromLayout => _fromLayout;
 
+        /// <summary>
+        /// A version taken before this one, of the same document, layout, scroll and read-only
+        /// state, whose text was made from the layout: this one's text is made from that one's,
+        /// sharing its text, the tables of its lines and paragraphs and its geometry, when the
+        /// blocks on screen are those it was made with too (<see cref="MakeFromLayout"/>). With a
+        /// reader reading, each caret move made the whole text again from the layout: 474 KB a move
+        /// at 5,000 blocks. Dropped once this one is made, so a version holds at most the one it
+        /// came from, which holds none: no chain of versions stays alive. UI thread only.
+        /// </summary>
+        public EditorTextVersion? ShareFrom { get; set; }
+
+        /// <summary>What a version taken after this one may make its text from: this one, once its
+        /// text is made from the layout, or the one it would make its own from. UI thread.</summary>
+        public EditorTextVersion? MadeOrSharing => _fromLayout ? this : ShareFrom;
+
+        // The blocks on screen when the text was made from the layout: the visible part and the
+        // lines whose character boxes were measured. UI thread.
+        private (int First, int Last) _madeOn = (-1, -1);
+
         // As AccessibleText keeps them: the caret clamped into the text, a selection ordered and
         // clamped, none where the anchor is the caret.
-        private int Caret => _focus < 0 ? -1 : Math.Min(_focus, _length);
+        public override int Caret => _focus < 0 ? -1 : Math.Min(_focus, _length);
 
-        private (int Start, int End) Selection =>
-            _focus >= 0 && _anchor >= 0 && _focus != _anchor
-                ? (Math.Clamp(Math.Min(_focus, _anchor), 0, _length), Math.Clamp(Math.Max(_focus, _anchor), 0, _length))
-                : (0, 0);
+        public override int SelectionStart =>
+            _focus >= 0 && _anchor >= 0 && _focus != _anchor ? Math.Clamp(Math.Min(_focus, _anchor), 0, _length) : 0;
+
+        public override int SelectionEnd =>
+            _focus >= 0 && _anchor >= 0 && _focus != _anchor ? Math.Clamp(Math.Max(_focus, _anchor), 0, _length) : 0;
 
         public override bool SameText(AccessibleTextVersion other) =>
             other is EditorTextVersion o
@@ -200,9 +240,6 @@ public partial class RichTextEditorElement
                 // Another document with the same text, as a formatting change makes: only then is
                 // the text made and compared, as every text was before.
                 || (_length == o._length && string.Equals(PlainText, o.PlainText, StringComparison.Ordinal)));
-
-        public override bool SameSelection(AccessibleTextVersion other) =>
-            other is EditorTextVersion o && Caret == o.Caret && Selection == o.Selection;
 
         /// <summary>The document's plain text, the editor's value; any thread.</summary>
         public override string? Value => Key.Document.ToPlainText();
@@ -226,7 +263,17 @@ public partial class RichTextEditorElement
         {
             if (_fromLayout) return _text;
             if (!Owner.IsAsTaken(Key)) return null;
-            var text = Owner.BuildAccessibleText(Key.Document, LaidOut);
+            var visible = Owner.VisibleBlocks(Key.Document, LaidOut);
+            var from = ShareFrom;
+            ShareFrom = null;
+            // Only the caret or the selection moved since that one was made, with the same blocks
+            // on screen: everything but the caret and the selection is what a text made afresh
+            // would have (the same document laid out alike), so the new text is that one's with
+            // this one's caret and selection, its tables shared.
+            var text = from is { _fromLayout: true } && from._madeOn == visible && from.LaidOut == LaidOut
+                ? new AccessibleText(from._text!, _focus, _anchor, _focus)
+                : Owner.BuildAccessibleText(Key.Document, LaidOut);
+            _madeOn = visible;
             Volatile.Write(ref _text, text);
             _fromLayout = true;
             return text;
@@ -293,13 +340,11 @@ public partial class RichTextEditorElement
         List<int>? lineStarts = null;
         EditorGeometry? geometry = null;
 
-        if (laidOut && _blocks.Length == count)
+        var (first, last) = VisibleBlocks(doc, laidOut);
+        if (first >= 0)
         {
             // The lines as drawn, and where each is: from the layout, made now, read later.
             var lines = new LineGeometry(count * 2);
-            int first = BlockAt(_scrollY), last = BlockAt(_scrollY + Layout.AbsoluteContentBox.Height);
-            if (_blocks[first].Table is { } t) first = t.Range.Start;
-            if (_blocks[last].Table is { } u) last = u.Range.End - 1;
             visibleStart = starts[first];
             visibleEnd = starts[last] + (doc[last].Kind == BlockKind.Image ? PictureWords(doc[last].Image).Length : doc[last].Text.Length);
 

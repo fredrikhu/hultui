@@ -9,7 +9,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
+public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 {
     private string _text = "";
     private int _cursorPos;
@@ -127,6 +127,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
             _history.Seal();
+            CaretMoved();
         }
     }
 
@@ -217,7 +218,20 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// <summary>When true the buffer can be selected, scrolled, and copied, but not
     /// edited (no typing / Enter / Backspace / Delete / Cut / Paste), and no caret is
     /// drawn — a selectable read-only viewer (e.g. a code preview).</summary>
-    public bool ReadOnly { get; set; }
+    public bool ReadOnly
+    {
+        get => _readOnly;
+        set
+        {
+            if (_readOnly == value) return;
+            _readOnly = value;
+            // The text a reader reads says whether it may be changed (UIA's IsReadOnly text
+            // attribute): its version holds it, and the window puts the new version on the applied
+            // tree, as for a caret move, telling nothing.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.TextSelection);
+        }
+    }
+    private bool _readOnly;
 
     /// <summary>Optional per-range text colors (syntax highlighting and similar), in
     /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
@@ -483,6 +497,9 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void WrapLines(List<int> into, int line, int pos, int endLine, float wrapWidth,
         ResolvedInheritedStyle style)
     {
+        // Asked once a pass, not kept: the context answers for the face the style resolves to
+        // now, which a font registered since may have changed.
+        float asciiAdvance = FitsByCount && _renderCtx is not null ? _renderCtx.MonospaceAsciiAdvance(style) : 0f;
         for (; line < endLine; line++)
         {
             into.Add(pos);
@@ -500,7 +517,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
             // A line that fits is one width, kept for the next time (_lineWidths), and only one
             // that does not is cut into clusters and searched, unless it was wrapped before.
-            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, ref charWidth)
+            if (!FitsWhole(line, pos, hardEnd, wrapWidth, style, asciiAdvance, ref charWidth)
                 && _replaced?.TryMove(_text, pos, hardEnd, into) != true)
                 WrapLine(into, pos, hardEnd, wrapWidth, style, ref charWidth);
             pos = hardEnd + 1;
@@ -689,14 +706,35 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         }
     }
 
-    // Whether hard line number `line`, [start..end), fits whole. Measured only when it is no
-    // longer than a line of average characters — a longer one goes to the search, which finds
-    // it fitting if it does — and then only if its width is not known from the last time.
+    /// <summary>
+    /// Whether a hard line of printable ASCII (U+0020 to U+007E) in a face the render context
+    /// proves monospace for those characters (<see cref="IRenderContext.MonospaceAsciiAdvance"/>)
+    /// is taken as fitting, without measuring it, when one character more would still fit: n of
+    /// them measure n times the advance, give or take rounding, which a character's room covers.
+    /// A 19,000-line JSON response measured every line it opened with (18,887 widths) to find
+    /// that they fit, and kept a 4 MB cache of them. A line with anything else in it — a tab, a
+    /// carriage return, a character outside printable ASCII — or one that fits by less than a
+    /// character is measured as before, and the rows are the ones measuring gives. False is the
+    /// reference path, every line measured, for the tests that hold the two to the same rows.
+    /// </summary>
+    internal bool FitsByCount { get; set; } = true;
+
+    // Every char from U+0020 to U+007E; one vectorized scan (as ushort: the char overload boxes
+    // its two bounds, see ClusterEnds).
+    private static bool IsPrintableAscii(ReadOnlySpan<char> text) =>
+        MemoryMarshal.Cast<char, ushort>(text).IndexOfAnyExceptInRange((ushort)0x20, (ushort)0x7E) < 0;
+
+    // Whether hard line number `line`, [start..end), fits whole: by its count (FitsByCount), or
+    // measured, only when it is no longer than a line of average characters — a longer one goes
+    // to the search, which finds it fitting if it does — and then only if its width is not known
+    // from the last time.
     private bool FitsWhole(int line, int start, int end, float wrapWidth, ResolvedInheritedStyle style,
-        ref float charWidth)
+        float asciiAdvance, ref float charWidth)
     {
         int length = end - start;
         if (length == 0) return true;
+        if (asciiAdvance > 0f && (length + 1) * asciiAdvance <= wrapWidth && IsPrintableAscii(_text.AsSpan(start, length)))
+            return true;
         if (length > wrapWidth / Math.Max(charWidth, 0.01f)) return false;
         float width = _lineWidths[line];
         if (float.IsNaN(width))
@@ -908,7 +946,9 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         // prefix widths (IRenderContext.MeasureTextPrefixes) — measured one at a time, each
         // was shaped whole and cached as a string of its own. The table covers half as much
         // again as the probe that asks for it, so the probes around that one land inside;
-        // one past it gets a longer table.
+        // one past it gets a longer table. A range of the document, not a string cut from it:
+        // the context answers in scratch it keeps, good until its next text call, and nothing
+        // here makes one before the search is done with the table.
         ITextPrefixWidths? prefixes = null;
         bool noPrefixes = _renderCtx is null;
         float Measure(int chars)
@@ -916,7 +956,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             if (!noPrefixes && (prefixes is null || chars > prefixes.Length))
             {
                 int window = Math.Min(hardEnd - start, chars + chars / 2 + 16);
-                prefixes = _renderCtx!.MeasureTextPrefixes(_text.Substring(start, window), style);
+                prefixes = _renderCtx!.MeasureTextPrefixes(_text, start, window, style);
                 noPrefixes = prefixes is null;
             }
             return prefixes is not null ? prefixes.Width(chars) : MeasureSubstring(start, chars, style);
@@ -1223,6 +1263,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _selectionStart = 0;
         _cursorPos = _text.Length;
         _history.Seal();
+        CaretMoved();
     }
 
     private void Copy()
@@ -1270,6 +1311,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _needsScrollToCursor = true;
         _isDragging = true;
         MarkPaintDirty();
+        CaretMoved();
     }
 
     private void OnPointerMove(PointerMoveEvent evt)
@@ -1316,6 +1358,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         _preferredX = -1;
         _needsScrollToCursor = true;
         MarkPaintDirty();
+        CaretMoved();
     }
 
     /// <summary>Vertical only, and handed on at either end — see
@@ -1498,6 +1541,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void MoveCursor(int delta, bool extendSelection)
     {
         _history.Seal();
+        CaretMoved();
         if (!extendSelection && HasSelection)
         {
             _cursorPos = delta < 0 ? SelectionStart : SelectionEnd;
@@ -1547,6 +1591,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void MoveCursorTo(int pos, bool extendSelection)
     {
         _history.Seal();
+        CaretMoved();
         _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
@@ -1784,6 +1829,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
                 _scrollOffsetY = cursorY + lh - contentBox.Height;
         }
         _scrollOffsetY = Math.Clamp(_scrollOffsetY, 0, maxScroll);
+        NoteAreaFrame(contentBox);
 
         ctx.PushClip(contentBox);
 

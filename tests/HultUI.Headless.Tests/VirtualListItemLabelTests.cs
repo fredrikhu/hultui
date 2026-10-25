@@ -42,9 +42,9 @@ public class VirtualListItemLabelTests
                 .FlexGrow(1);
             if (itemRows) list.RenderWith((e, _) => Row(e));
             else list.RenderWith(e => Row(e));
-            // A label that says something new on every build, so every build changes the tree
-            // and has it built again.
-            return Flex.Column().FlexGrow(1).Children(TextB.New($"build {++Builds}"), list.WithRef(List));
+            // A label with a new automation id on every build, so every build changes the tree and
+            // has it built again (a new text alone is patched into the tree since plan 17's round 4).
+            return Flex.Column().FlexGrow(1).Children(TextB.New("build").AutomationId($"build-{++Builds}"), list.WithRef(List));
         }
 
         private static Element Row(Entry e) => Flex.Row().Children(TextB.New(e.Name).FontSize(12f));

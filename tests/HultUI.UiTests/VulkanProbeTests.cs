@@ -300,6 +300,41 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// While a drag keeps its over-allocated swapchain, the half-float offscreen the frame is drawn
+    /// through is kept too, made at the swapchain's size. Remade at every size, each kept step paid
+    /// a new F16 surface, a synchronous submit to free the old one and a scratch purge: an 80-step
+    /// drag made 82 offscreens for 5 swapchains (plan 17 round 4, vk-drag-kept-step-remakes). Each
+    /// freed offscreen is followed by one scratch purge, which HULTUI_STARTUP=1 reports; the white
+    /// scale is forced above 1 so the frame goes through the offscreen on any display. Only where
+    /// the surface shows a swapchain one-to-one (MAILBOX): elsewhere every size rebuilds anyway.
+    /// </summary>
+    [VulkanUiFact]
+    public void ADrag_KeepsTheHalfFloatOffscreen_WithItsSwapchain()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // Win32's size/move loop
+        var run = RunProbe(new()
+        {
+            ["HULTUI_VULKAN_F16"] = "1",
+            ["HULTUI_VULKAN_PRESENT"] = "mailbox",
+            ["HULTUI_VULKAN_WHITE_SCALE"] = "2",
+            ["HULTUI_VULKAN_SCALED_SPACE"] = null,
+            ["HULTUI_VULKAN_FIXED_EXTENT"] = null,
+            ["HULTUI_STARTUP"] = "1",
+        }, "--drag");
+
+        Assert.True(run.ExitCode == 0, run.Output);
+        Assert.Contains("probe: done", run.Output);
+        if (!run.Output.Contains("fixed extent available")) return;
+        var drag = System.Text.RegularExpressions.Regex.Match(run.Output,
+            @"probe: drag (\d+) steps, (\d+) builds \((\d+) one-to-one\), (\d+) frames, (\d+) offscreens freed");
+        Assert.True(drag.Success, run.Output);
+        int steps = int.Parse(drag.Groups[1].Value), builds = int.Parse(drag.Groups[2].Value);
+        int freed = int.Parse(drag.Groups[5].Value);
+        // One a swapchain at most: kept for the steps the swapchain is kept. Remade per size, 16.
+        Assert.True(freed <= builds, $"{freed} offscreens freed in {steps} steps with {builds} swapchain builds:\n{run.Output}");
+    }
+
+    /// <summary>
     /// Each step of a resize draws one frame, at its new size, before SetWindowPos returns. The
     /// event watch drew a whole frame for RESIZED and again for PIXEL_SIZE_CHANGED of the same
     /// size, and a growing step a third for the WM_PAINT of the area it exposed: 514 Skia and 217
@@ -477,6 +512,99 @@ public sealed class VulkanProbeTests
         Assert.True(bytes.Success, run.Output);
         double perFrame = double.Parse(bytes.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.True(perFrame < 100, $"a steady frame allocated {perFrame:0.0} bytes:\n{run.Output}");
+    }
+
+    /// <summary>
+    /// A steady video frame allocates next to nothing on the UI thread, and the picture keeps
+    /// changing. The headless perf suite draws no GPU source, so this is that row on a real window:
+    /// a 160×90 clip at 60 fps through mpv, nothing else on screen, the least of five rounds of 60
+    /// frames. On the half-float swapchain a frame cost 395 bytes, on GL 157 (plan 17 round 4): a
+    /// closure and its delegate in <c>GpuFrameSink.TryRenderFrame</c> (144 B, on both), and on
+    /// Vulkan a new <c>GRBackendTexture</c> (finalizable, never disposed) and <c>SKImage</c> over the
+    /// shared image every frame. The surface keeps that image now, so a wrapper gone stale would
+    /// show one picture for ever: the clip gets brighter frame by frame, and the capture of the
+    /// swapchain a resize builds after the rounds must be brighter than the one before them. An
+    /// 8-bit swapchain also wraps its image for the frame after one that drew a video (by design:
+    /// an earlier barrier slowed mpv's draw), about 2.3 KB; it was 2,820 bytes in all.
+    /// </summary>
+    [VulkanUiTheory]
+    [InlineData("f16-mailbox")]
+    [InlineData("8-bit")]
+    [InlineData("gl")]
+    public void ASteadyVideoFrame_AllocatesAlmostNothing_AndThePictureKeepsChanging(string variant)
+    {
+        if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
+        string clip = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.y4m");
+        string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.ppm");
+        try
+        {
+            WriteRampClip(clip);
+            var environment = new Dictionary<string, string?>
+            {
+                ["HULTUI_VULKAN_CAPTURE"] = capture,
+                // Past the frames drawn while the clip loads: the first capture shows the video.
+                ["HULTUI_VULKAN_CAPTURE_FRAME"] = "120",
+                ["HULTUI_A11Y"] = "0",
+                ["HULTUI_VULKAN_F16"] = null,
+                ["HULTUI_VULKAN_PRESENT"] = null,
+                ["HULTUI_VULKAN_WHITE_SCALE"] = null,
+            };
+            string arguments = $"--video-frame-bytes \"--clip={clip}\"";
+            switch (variant)
+            {
+                case "f16-mailbox": environment["HULTUI_VULKAN_F16"] = "1"; environment["HULTUI_VULKAN_PRESENT"] = "mailbox"; break;
+                case "8-bit": environment["HULTUI_VULKAN_F16"] = "0"; break;
+                case "gl": arguments += " --renderer=default"; break;
+            }
+
+            var run = RunProbe(environment, arguments);
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: done", run.Output);
+            Assert.Contains("Gpu mode", run.Output);
+            var bytes = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: ([\d.]+) bytes a video frame");
+            Assert.True(bytes.Success, run.Output);
+            double perFrame = double.Parse(bytes.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            // 35 on the half-float swapchain, 13 on GL, 2,331 on 8-bit (2026-10-24).
+            double most = variant == "8-bit" ? 2500 : 100;
+            Assert.True(perFrame < most, $"a steady video frame allocated {perFrame:0.0} bytes:\n{run.Output}");
+
+            if (variant == "gl") return;   // GL has no swapchain capture
+            Assert.Contains(" vulkan device=", run.Output);
+            var shown = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: video brightness (\d+) then (\d+)");
+            Assert.True(shown.Success, run.Output);
+            int before = int.Parse(shown.Groups[1].Value), after = int.Parse(shown.Groups[2].Value);
+            // Two seconds or more of a ramp that climbs 219 levels in 15 s: 18 then 142 here.
+            Assert.True(after > before + 20, $"the video's brightness went from {before} to {after}:\n{run.Output}");
+        }
+        finally
+        {
+            File.Delete(clip);
+            File.Delete(capture);
+        }
+    }
+
+    /// <summary>
+    /// Fifteen seconds of grey, 160x90 at 60 frames a second, as Y4M, from black (luma 16) to white
+    /// (235) in equal steps: longer than the probe runs, and every frame brighter than the last.
+    /// </summary>
+    private static void WriteRampClip(string path)
+    {
+        const int width = 160, height = 90, frames = 900;
+        using var file = File.Create(path);
+        file.Write(System.Text.Encoding.ASCII.GetBytes($"YUV4MPEG2 W{width} H{height} F60:1 Ip A1:1 C420jpeg\n"));
+        var luma = new byte[width * height];
+        var chroma = new byte[width * height / 4];
+        Array.Fill(chroma, (byte)128);
+        var marker = System.Text.Encoding.ASCII.GetBytes("FRAME\n");
+        for (int i = 0; i < frames; i++)
+        {
+            Array.Fill(luma, (byte)(16 + 219 * i / (frames - 1)));
+            file.Write(marker);
+            file.Write(luma);
+            file.Write(chroma);
+            file.Write(chroma);
+        }
     }
 
     /// <summary>

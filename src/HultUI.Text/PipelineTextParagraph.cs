@@ -16,7 +16,9 @@ public sealed class PipelineTextParagraph : TextParagraph
     private readonly TextLine[] _textLines;
     private readonly TextLineBox[] _boxes;
     private readonly float _alignFactor;
-    private readonly List<VisualRange> _visual = [];
+    // RangesInLine's scratch, made the first time a selection or a span background is drawn on
+    // this paragraph: most paragraphs never are.
+    private List<VisualRange>? _visual;
 
     internal PipelineTextParagraph(TextPipeline pipeline, string text, ResolvedInheritedStyle style, float maxWidth,
         IReadOnlyList<Core.Rendering.TextSpan>? spans, int? maxLines, TextOverflow overflow, TextLayout layout)
@@ -28,14 +30,21 @@ public sealed class PipelineTextParagraph : TextParagraph
 
         // The pipeline gives empty text no line, and puts none after a final newline: the
         // newline sits between lines and nothing follows it. A caret needs a line in both.
-        var lines = new List<TextLine>(layout.Lines);
-        if (lines.Count == 0 || (text.EndsWith('\n') && (maxLines is null || lines.Count < maxLines)))
+        // One array of exactly the lines, copied straight from the layout's (a list and then an
+        // array of it were 10 % of what opening a long rich text document allocated).
+        var laid = layout.Lines;
+        int count = laid.Count;
+        bool addEmpty = count == 0 || (text.EndsWith('\n') && (maxLines is null || count < maxLines));
+        var lines = new TextLine[count + (addEmpty ? 1 : 0)];
+        for (int i = 0; i < count; i++)   // indexed: Lines is an interface, and a foreach boxes
+            lines[i] = laid[i];
+        if (addEmpty)
         {
             var empty = pipeline.EmptyLine(style, text.Length);
             empty.OffsetY = layout.Size.Height;
-            lines.Add(empty);
+            lines[count] = empty;
         }
-        _textLines = [.. lines];
+        _textLines = lines;
 
         _boxes = new TextLineBox[_textLines.Length];
         float width = 0;
@@ -83,8 +92,9 @@ public sealed class PipelineTextParagraph : TextParagraph
     {
         into.Clear();
         var l = _textLines[line];
-        l.VisualRanges(from - l.Start, to - l.Start, _visual, PrefixMeasurer(l));
-        foreach (var r in _visual)
+        var visual = _visual ??= [];
+        l.VisualRanges(from - l.Start, to - l.Start, visual, PrefixMeasurer(l));
+        foreach (var r in visual)
             into.Add(new TextRangeBox(r.X0, r.X1));
     }
 

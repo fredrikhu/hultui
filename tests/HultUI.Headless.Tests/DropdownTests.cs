@@ -266,4 +266,48 @@ public class DropdownTests
         Assert.Equal(2, dropdown.SelectedIndex);
         Assert.Equal("Gamma", dropdown.SelectedItem);
     }
+
+    /// <summary>
+    /// A list longer than the window runs past its bottom edge. The rows out there are laid out
+    /// but not drawn: a 200-item list drew every row's text on every frame it was open, hover
+    /// included, most of them below the window (plan 17, round 4). They are still the list's:
+    /// the keyboard reaches the last, each is still an accessible item with its place, and the
+    /// row cut by the window's edge is drawn.
+    /// </summary>
+    [Fact]
+    public void ALongList_DrawsOnlyTheRowsInTheWindow_AndKeepsTheRest()
+    {
+        using var session = HeadlessSession.Create(400, 300, options: new HeadlessOptions { RecordDrawCalls = true });
+        var items = Enumerable.Range(0, 200).Select(i => $"Option {i:000}").ToArray();
+        var dropdown = Dropdown.New(items, -1);
+        session.Window.SetRoot(Box.New().Padding(new Thickness(40)).Children(dropdown));
+        session.PumpFrame();
+        dropdown.Focus();
+
+        session.Window.PressKey(KeyCode.Enter);
+        var popup = Assert.IsType<ContextMenuElement>(Assert.Single(session.Window.OverlayContents));
+        session.Window.RenderLog.Clear();
+        popup.MarkPaintDirty();
+        session.PumpFrame();
+
+        var drawn = session.Window.RenderLog.Named("DrawText")
+            .Select(o => o.Args).Where(a => a.StartsWith("\"Option ", StringComparison.Ordinal)).ToList();
+        float top = popup.WindowBorderBox.Y;
+        int inWindow = Enumerable.Range(0, items.Length).Count(i => top + popup.ItemTop(i) < 300);
+        Assert.InRange(inWindow, 5, 20);
+        Assert.InRange(drawn.Count, inWindow, inWindow + 1);
+        Assert.Contains(drawn, a => a.StartsWith($"\"Option {inWindow - 1:000}\"", StringComparison.Ordinal)); // cut by the edge
+
+        // Every row has its place, past the window too, and is an item a reader can find.
+        var source = (IAccessibleItemSource)popup;
+        Assert.Equal(items.Length, source.ItemCount);
+        Assert.True(popup.ItemTop(199) > popup.ItemTop(198) && popup.ItemTop(198) > 300);
+        Assert.Equal(popup.ItemTop(199), source.ItemBounds(199)!.Value.Top);
+
+        session.Window.PressKey(KeyCode.End);
+        Assert.Equal(199, popup.HoveredIndex);
+        session.Window.PressKey(KeyCode.Enter);
+        session.PumpFrame();
+        Assert.Equal(199, dropdown.SelectedIndex);
+    }
 }

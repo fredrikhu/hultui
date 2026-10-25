@@ -29,6 +29,11 @@ public sealed partial class ReelApp
     /// the decode width is chosen to match it.</summary>
     private const float PreviewWidth = 176f;
 
+    /// <summary>Where stills come from: a second, silent mpv, or null when there is no libmpv.
+    /// A test hands in its own.</summary>
+    internal Func<IScrubFrameSource?> ScrubFrameSource { get; set; } =
+        () => MpvFrameSource.IsAvailable ? new MpvFrameSource() : null;
+
     /// <summary>
     /// Starts making stills for the open file, if a decoder is available at all. Called once
     /// the duration is known — which is what says how far apart they should be.
@@ -39,18 +44,21 @@ public sealed partial class ReelApp
 
         if (_previews is null)
         {
-            if (!MpvFrameSource.IsAvailable) return;
-            _previews = new ScrubPreviewCache(
-                new MpvFrameSource(),
-                DecodeStill,
-                // The worker has no business touching the window, and a still landing is
-                // exactly the kind of thing that should not repaint from a background thread.
-                onFrame: () => Application.InvokeOnMainThread(Rerender));
-
-            video.PreviewWidth = PreviewWidth;
-            video.PreviewFrame = position => _previews?.Frame(position);
+            if (ScrubFrameSource() is not { } source) return;
+            // A still landing changes nothing but the card over the scrubber, and only while the
+            // pointer is on it: the player asks again for the point it is hovered at. This rebuilt
+            // the whole app instead, 120 times a file, which never rebuilt the player that shows
+            // the card, so a pointer resting on the scrubber saw a new still only when it next
+            // moved. The worker has no business touching the window, so it is posted.
+            Action refresh = () => _videoPlayer?.RefreshPreview();
+            _previews = new ScrubPreviewCache(source, DecodeStill,
+                onFrame: () => Application.InvokeOnMainThread(refresh));
         }
 
+        // Every file has a player of its own (OpenStream), so each is handed the stills; only
+        // the first file's used to be, and the next one in the folder had no preview at all.
+        video.PreviewWidth = PreviewWidth;
+        video.PreviewFrame = position => _previews?.Frame(position);
         _previews.Start(path, duration);
     }
 

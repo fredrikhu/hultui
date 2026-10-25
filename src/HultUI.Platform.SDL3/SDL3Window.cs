@@ -532,10 +532,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // drop (see WindowsDropTarget). Not on a thread that cannot host OLE: SDL's stays.
         if (OperatingSystem.IsWindows())
             _dropTarget = WindowsDropTarget.Install(GetWin32Hwnd(), e => InputReceived?.Invoke(e), () => DisplayScale);
-        // A drag over-allocates the swapchain and its end rebuilds it exact (SdlVulkanHost.
-        // FixedExtentOverride). After the custom frame, so it sees the messages first.
-        if (_vulkanHost is not null && OperatingSystem.IsWindows())
-            _sizeMoveWatch = WindowsSizeMoveWatch.Install(GetWin32Hwnd(), OnSizeMoveStarted, OnSizeMoveEnded);
+        // Win32's modal size/move loop: a drag over-allocates a Vulkan swapchain and its end
+        // rebuilds it exact (SdlVulkanHost.FixedExtentOverride), and on either renderer a GPU
+        // source's request for a frame is answered from inside the loop (LiveFrameRequests).
+        // After the custom frame, so it sees the messages first.
+        if (OperatingSystem.IsWindows())
+            _sizeMoveWatch = WindowsSizeMoveWatch.Install(GetWin32Hwnd(), OnSizeMoveStarted, OnSizeMoveEnded, OnLiveFrameMessage);
 
         // The DIP-to-pixel correction already happened, before the renderer was built. This
         // re-sync stays because installing a custom frame changes the non-client area, and so
@@ -713,6 +715,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     // nothing comes round again inside the modal loop.
                     if (changed || (evt->type == (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED && evt->window.data1 == 0))
                         window.ResizePending = true;
+                    if (changed) window._sizeChangedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                     long presented = window._presents;
                     window.LiveResizeFrame?.Invoke();
                     // A frame covers the whole client area, so it is painted; told so, Windows
@@ -732,8 +735,60 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     }
 
     /// <summary>Win32's modal size/move loop started: the Vulkan host over-allocates from the
-    /// first size change inside it, if it is a sizing loop.</summary>
-    private void OnSizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop) => _vulkanHost?.SizeMoveStarted(loop);
+    /// first size change inside it, if it is a sizing loop, and a GPU source's request for a frame
+    /// is posted to this window until the loop ends.</summary>
+    private void OnSizeMoveStarted(VulkanSwapchainChoice.SizeMoveLoop loop)
+    {
+        _vulkanHost?.SizeMoveStarted(loop);
+        if (!OperatingSystem.IsWindows()) return;
+        Volatile.Write(ref s_liveFramePosted, 0);
+        Volatile.Write(ref s_liveFrameWindow, GetWin32Hwnd());
+        LiveFrameRequests.SetPoster(s_postLiveFrame);
+    }
+
+    /// <summary>The window in Win32's modal size/move loop (one at a time: the loop holds its
+    /// thread), and whether a request for a frame is posted to it and not yet handled.</summary>
+    private static nint s_liveFrameWindow;
+    private static int s_liveFramePosted;
+    private static readonly Action s_postLiveFrame = PostLiveFrame;
+
+    /// <summary>When a frame was last drawn for a new size, in <see cref="System.Diagnostics.Stopwatch"/> ticks.</summary>
+    private long _sizeChangedAt;
+
+    /// <summary>
+    /// A GPU source's request for a frame, from its own thread: one message posted at a time. A
+    /// post never waits, so this is safe from a thread a frame waits for (docs/THREADING.md).
+    /// </summary>
+    private static void PostLiveFrame()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        nint hwnd = Volatile.Read(ref s_liveFrameWindow);
+        if (hwnd == 0 || Interlocked.Exchange(ref s_liveFramePosted, 1) == 1) return;
+        if (!WindowsSizeMoveWatch.PostMessageW(hwnd, WindowsSizeMoveWatch.LiveFrameMessage, 0, 0))
+            Volatile.Write(ref s_liveFramePosted, 0);
+    }
+
+    /// <summary>
+    /// The modal loop dispatched a request for a frame: drawn from here, as a step of a drag is,
+    /// because nothing else comes round until the loop returns. Not within 20 ms of a new size,
+    /// whose frame took the newest picture: drawn as well, they competed with the drag's own
+    /// frames (Reel, 1080p120, 80-step drag: mpv dropped 16 frames instead of 11). Never in place
+    /// of a resize frame, which always draws (the stretch otherwise). A request skipped here waits
+    /// for the next frame drawn.
+    /// </summary>
+    private void OnLiveFrameMessage()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Volatile.Write(ref s_liveFramePosted, 0);
+        if (!_shown || Volatile.Read(ref s_liveFrameWindow) != GetWin32Hwnd()) return;
+        if (System.Diagnostics.Stopwatch.GetElapsedTime(_sizeChangedAt) < LiveFrameAfterResize) return;
+        long presented = _presents;
+        LiveResizeFrame?.Invoke();
+        if (_presents != presented)
+            ValidateRect(GetWin32Hwnd(), 0);
+    }
+
+    private static readonly TimeSpan LiveFrameAfterResize = TimeSpan.FromMilliseconds(20);
 
     /// <summary>
     /// The loop ended. When the drag left the swapchain over-allocated, the host has just rebuilt
@@ -743,6 +798,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     private void OnSizeMoveEnded()
     {
+        if (OperatingSystem.IsWindows() && Volatile.Read(ref s_liveFrameWindow) == GetWin32Hwnd())
+        {
+            LiveFrameRequests.SetPoster(null);
+            Volatile.Write(ref s_liveFrameWindow, 0);
+        }
         if (_vulkanHost is not { } host || !host.SizeMoveEnded()) return;
         ResizePending = true;
         if (!_shown) return;
@@ -879,17 +939,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     // With the Windows custom frame installed, SDL_MaximizeWindow/SDL_RestoreWindow
     // only flip SDL's maximized flag without resizing the window, so route through
-    // the frame's native WM_SYSCOMMAND path instead.
+    // the frame's native WM_SYSCOMMAND path instead (posted; the frame refuses the
+    // activation when it runs). Both activate the window on Windows, which an app told
+    // not to activate when shown must not do (see WindowsActivation).
     public void Maximize()
     {
         if (OperatingSystem.IsWindows() && _customFrame is { } frame) frame.Maximize();
-        else SDL_MaximizeWindow(_window);
+        else
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            SDL_MaximizeWindow(_window);
+        }
     }
 
     public void Restore()
     {
         if (OperatingSystem.IsWindows() && _customFrame is { } frame) frame.Restore();
-        else SDL_RestoreWindow(_window);
+        else
+        {
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
+            SDL_RestoreWindow(_window);
+        }
     }
 
     public void Raise()
@@ -947,6 +1017,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public void SetFullscreen(bool fullscreen)
     {
         if (_window == null || IsFullscreen == fullscreen) return;
+        // A maximized window is restored first and maximized again on the way out, and both
+        // activate it (see WindowsActivation).
+        using var quiet = WindowsActivation.RefuseIfUnwanted();
 
         // Windows: the custom frame owns this one. SDL's fullscreen makes the window a
         // popup exactly the size of the monitor, which is the shape the display driver
@@ -1061,6 +1134,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         set
         {
             if (_window == null || value is not { IsUsable: true }) return;
+            // Leaving maximized or full screen, and a maximized placement, activate the window
+            // (see WindowsActivation).
+            using var quiet = WindowsActivation.RefuseIfUnwanted();
             var live = LiveResizeFrame;
             LiveResizeFrame = null;
             try
@@ -1981,6 +2057,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // hooked after the custom frame, so it goes before it.
         _sizeMoveWatch?.Dispose();
         _sizeMoveWatch = null;
+        if (OperatingSystem.IsWindows() && s_liveFrameWindow != 0 && Volatile.Read(ref s_liveFrameWindow) == GetWin32Hwnd())
+        {
+            LiveFrameRequests.SetPoster(null);
+            Volatile.Write(ref s_liveFrameWindow, 0);
+        }
         if (OperatingSystem.IsWindows())
         {
             _customFrame?.Dispose();

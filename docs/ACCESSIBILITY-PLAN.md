@@ -36,7 +36,8 @@ macOS (NSAccessibility) is deferred.
 2. **`ITextProvider` (UIA text pattern):** deferred at first; text inputs expose
    their value through `IValueProvider`. **Built 2026-10-04** as the terminal's seam
    A1 (below, *Text and announcements*): any element can offer text a reader moves
-   through by character, word and line. Text inputs and TextArea do not offer it yet.
+   through by character, word and line. `TextArea` offers it since 2026-10-24 (plan 17
+   round 4); single-line text inputs do not yet.
 3. **Project layout:** separate per-platform projects
    (`HultUI.Platform.Accessibility.Windows`, `.Linux`), matching the existing
    `HultUI.Platform.SDL3` pattern. No `#if` shared project.
@@ -193,10 +194,66 @@ as a diff would have. A frame that rebuilds anyway tells the move in its diff; a
 whose node is not there yet, or whose items changed in number, is rebuilt. What else
 the move changed (a scroll) is told by the coalesced layout refresh, as before.
 
+A move of the caret or the selection in text made on request (the rich text editor's,
+below) rebuilds no tree either (2026-10-24, plan 17 round 4). The editor asked for a
+rebuild on every caret move while a reader listened: each arrow key built and diffed the
+whole tree, 79 KB a key beside 300 rows, and the AT-SPI bridge made the whole document's
+text, its lines and its boxes to read the caret from it, 475 KB a key at 5,000 blocks.
+The frame takes the editor's new version of its text (`AccessibleTextVersion`, which
+holds the caret's and the selection's offsets), puts it on the applied tree's node in
+place and hands the bridges the move (`ApplyPatchedProperties`, a `TextSelection` change
+whose previous node is a stand-in carrying the old version): UIA raises
+Text_TextSelectionChanged, AT-SPI sends text-caret-moved and text-selection-changed,
+reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built. A
+move that comes with an edit is told by the edit's rebuild, as before.
+
+A change of a leaf's own properties rebuilds no tree either (2026-10-24, plan 17 round 4):
+a text input's value (a password field's bullets, never its text), a toggle (a check box,
+a switch, `AccessibleToggled`), a range (a slider, a progress bar, a number field, a
+playing video's scrubber, at its coalesced refresh), and a name, a description or an
+expanded state. A leaf is an element with no children whose node has none. The frame
+finds the leaf's node down its ancestors (each semantic one's node is a child of the one
+above), makes the node again from the element with the applied node's box and offscreen
+state, compares the two as the differ does, puts the new node in its place in its parent's
+children (one reference write; a reader on another thread finds the old node or the new,
+each whole) and hands the bridges the changes (`ApplyPatchedProperties`), in tree order
+with any list selection or caret move of the same frame. The UIA wrapper takes the new
+node and raises what a diff raises (ValueValue, ToggleState, RangeValue, Name, HelpText,
+ExpandCollapseState); the AT-SPI object sets its name, description, value, range, checked
+or expanded field (settable for these since this change) and sends the signal a diff
+sends. Ranges waiting for their refresh are told by a leaf's patch, as by the rebuild it
+stands for. Each change rebuilt and diffed the whole tree for one node: a keystroke beside
+200 rows was 53 KB with UIA, a check box's click among 500 rows 87 KB; now about 1 KB each.
+
+Anything else rebuilds, as before: a role, an enabled state, a radio button's or a tab's
+selection, a masked field revealed, an element with children (a button whose name is its
+text), a box that becomes a node or stops being one, a leaf whose node is not in the tree
+(inside a list that publishes its items, text a button takes for its name), a name,
+description or expanded state under an ancestor named from its content (a button or tab
+with no name of its own), more than 32 leaves in a frame, or a leaf's change while a focus
+move waits for its node. A label's change marks layout: its name is patched, and the bounds
+it moved (its own and its neighbours') are told by the coalesced layout refresh, as every
+move is — or by its leading edge at once, which rebuilds, when no rebuild came in the last
+100 ms. Two consequences, both of the coalescing: a reader asking within 100 ms reads the old
+bounds, and a node removed within the wait never had its new bounds told.
+
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
-access).
+access). Since 2026-10-24 (plan 17 round 4) every read a client makes answers
+from the element's node in the applied tree, which never changes once applied (a leaf
+whose own properties changed gets a new node, put in place of the old one, above):
+properties and patterns alike — a text input's value, a toggle, a range, a list
+item's selected state, a list's selection, a scroll view's percents (the node
+carries its viewport and content size, `AccessibilityNode.ScrollExtent`). Pattern
+reads went to the host (`IUiaHostBridge`), which found the element with a walk
+of the live element tree on the client's thread, unsynchronized with the UI
+thread (on a 1,533-element page a check box's toggle visited 1,532 elements),
+and answered what the element was now, not what the events had told: the
+RangeValue pattern and its Value property disagreed until the range's coalesced
+refresh, and a switch's Toggle pattern said indeterminate. A scroll refresh's
+percent event read the scroll view the same way on the UI thread. The host's
+read members stay, unused.
 
 ### Step 4 — Linux AT-SPI2 bridge
 
@@ -227,7 +284,9 @@ Files:
   - `IsActive` returns true once registration with the AT-SPI registry
     succeeds **and** `org.a11y.Status` says assistive technology is on
     (`IsEnabled` or `ScreenReaderEnabled`, which Orca and accerciser set; the
-    bridge watches the property), as Qt does (2026-10-10, plan 17). The bus is
+    bridge watches the property — subscribed before its first read since 2026-10-24, so a
+    change between the two is not lost, and the first read goes through the same one-at-a-time
+    reader as the changes'), as Qt does (2026-10-10, plan 17). The bus is
     reachable in every GNOME and KDE session, and an active bridge rebuilt the
     tree and sent AT-SPI every change with no reader running: a keystroke in a
     603-node form cost 385 KB against 3.2 KB with no bridge. When the status
@@ -252,8 +311,17 @@ Files:
       the cache-adds came first with one signal per parent, and an object added anywhere but at
       the end took a sibling's place: `[A, B, C]` with X after A read `[A, X, C]` in a live pyatspi
       client; with X and Y, `[A, X, Y]`. `AtSpiClientCache` in the Linux bridge tests models those
-      rules. A reorder still sends nothing, and a caching client keeps the old order (seen live;
-      a signal for it is not approved yet).
+      rules.
+    - **Reorders (2026-10-13, plan 17 round 4).** For each parent in `diff.Reordered`, one
+      `children-changed:add` per child that is not where a caching client's list has it, in the
+      order of the parent's children, each naming its index (the client's list is the previous
+      snapshot's children less those that left the parent); added children of that parent are put
+      the same way, and a run of added children that ends its children keeps one signal. `[A, B, C]`
+      reversed is two signals, a swap one, a rotation two, at most one per child but the last.
+      Before, a reorder sent nothing and libatspi kept the old order: all seven shapes checked live
+      in WSL (reverse, swap, rotate, last to front, and a reverse with an insert, a removal or an
+      append) read the old order; now all 17 insert and reorder cases match. UIA raises
+      `ChildrenReordered` on the parent, as it did.
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
@@ -303,8 +371,11 @@ navigate, and act on the whole list at any size. Built in increments, all done:
   `AccessibilityTreeBuilder.MaxEagerVirtualItems` a list is marked
   `IsVirtualItemContainer` and emits no child nodes; the bridge synthesizes a
   fresh `UiaVirtualItem` per navigation result (identity via the stable
-  `VirtualItemId` runtime id, so no caching), resolving name/bounds/count live
-  through `IUiaHostBridge`. Nothing is built eagerly and scrolling recomputes
+  `VirtualItemId` runtime id, so no caching), resolving name/count/selection
+  from the list itself, which the list's node carries (`AccessibilityNode.ItemSource`,
+  2026-10-24; it went through `IUiaHostBridge`, which first found the list with a
+  walk of the element tree), and bounds from the node's viewport and scroll at
+  the item height. Nothing is built eagerly and scrolling recomputes
   bounds on demand rather than re-emitting per-item events — verified with a
   100k-item list (navigate, hit-test, invoke all instant). The cap is now just a
   fast-path switch, not a ceiling.
@@ -331,6 +402,11 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   among the node's: UIA raises ControlType and LocalizedControlType property changes, AT-SPI sends
   `property-change:accessible-role` (not for the application's own object). The differ never
   compared roles before, and a caching AT-SPI client kept reading "panel" (seen live in WSL).
+  A button's `IsEnabled` tells the window too (2026-10-13, plan 17 round 4): UIA IsEnabled, AT-SPI
+  `state-changed:enabled` and `state-changed:sensitive`. It marked only the button's style, so set on
+  the live button (a `Ref` write) it was never told — a caching AT-SPI client kept it enabled (seen
+  live in WSL) — and through its owner's rebuild only when the layout refresh its patch brought came
+  due. No other control has an enabled state.
 - **Invoke** — buttons and list items (routes to click/activation).
 - **Toggle** — checkboxes.
 - **Value** — text inputs. A change of it is told as a UIA ValueValue property change and an
@@ -343,8 +419,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   not send the value of a non-atomic text field, `ax_object.cc`; `ax_platform_node_win.cc` answers
   ValueValue only from that value, `browser_accessibility_manager_win.cc` raises it for
   `VALUE_IN_TEXT_FIELD_CHANGED`), and on Linux sends `accessible-value` only for a range value
-  (`ax_platform_node_auralinux.cc`, `OnValueChanged`). A multi-line `TextArea` offers no text
-  pattern yet, so its value change stays: it is the only change a reader hears from it.
+  (`ax_platform_node_auralinux.cc`, `OnValueChanged`). A multi-line `TextArea` offers text too
+  since 2026-10-24 (below), and its keystroke is a text change: it raised a UIA ValueValue and
+  an AT-SPI accessible-value carrying its whole text on every keystroke (121,744 characters at
+  2,000 lines), the rule the user approved for it in plan 17's round 3.
 - **IsPassword** — a `TextInputElement` with `Masked` set (2026-10-05). Its Value, through
   both the property and the value pattern, is the bullets on screen, never the text: any
   process in the session can ask UIA for it, not only a screen reader. On Linux the node
@@ -392,8 +470,8 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   for every node on screen (133 per rebuild over 1,000 rows). A node that moved or
   resized within the view still raises its bounds change. AT-SPI sends nothing for a
   scroll, before and after, as Chromium (`browser_accessibility_manager_auralinux.cc`
-  ignores both scroll events) and GTK do. Bounds and the offscreen state are read
-  from the current tree when a client asks.
+  ignores both scroll events) and GTK do. Bounds, the offscreen state and the Scroll
+  pattern's percents and view sizes are read from the current tree when a client asks.
 - **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
   read/set the value and its bounds. Each node carries its range (`AccessibilityNode.Range`,
   2026-10-10), so a move is a `RangeValue` change: UIA raises a RangeValue.Value property change
@@ -406,9 +484,12 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   `OnValueChanged`). A number field's text change and its number change tell AT-SPI once, with the
   number. Before, a slider or a progress bar that moved told nothing on either platform, and AT-SPI
   had no Value interface: a keyboard user moving VideoPlayer's Seek slider heard nothing.
+  The RangeValue pattern answers from the node, as the RangeValue properties do (2026-10-24):
+  it read the live slider, ahead of what was told.
   A range can move on every frame — a drag, a download, a playing video, a key held down — and
-  each refresh rebuilds the whole tree, so the window tells a range's change on the leading edge,
+  each refresh rebuilt the whole tree, so the window tells a range's change on the leading edge,
   then at most every 250 ms, then once with the value it came to rest at (`Window.A11yRangeCoalesceMs`).
+  Since 2026-10-24 a refresh patches the range's node in place (above) instead of rebuilding.
   250 ms is how often Chromium moves a playing video's scrubber (`html_media_element.cc`,
   `kMaxTimeupdateEventFrequency`; `media_controls_impl.cc` leaves its aria-valuetext alone on
   `timeupdate`). A progress bar moved every frame for two seconds is told 8–10 times, not 120.
@@ -429,7 +510,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
     `AccessibleTextVersion` instead, which the differ compares without making the text, and the
     node's `Text` and `Value` are made from it on the first ask. The bridges read a node with a
     source through the source, its value on request (UIA's ValueValue property), so nothing makes
-    the text unless a reader asks or AT-SPI needs it to describe a change.
+    the text unless a reader asks or AT-SPI needs it to describe a change. A reader reading makes
+    each next version's text from the layout as it is taken; when only the caret or the selection
+    moved since a version whose text was made (the same document, width, theme, scroll, read-only
+    state and blocks on screen), the new text is that one's with the new caret and selection,
+    sharing its text, the tables of its lines and paragraphs and its geometry (2026-10-24, plan 17
+    round 4): a caret move in a 5,000-block document made 474 KB of text each time, now 1.3 KB.
   - **Lines and paragraphs (2026-10-07).** A paragraph is a `'\n'`-separated run. A line
     is a paragraph unless the element says where its text wraps (`lineStarts`), and then
     it is a line as drawn, which is what a word processor's reader means by one.
@@ -448,7 +534,17 @@ providers), a UIA `ItemContainer` on virtualized lists.
     cells in reading order, made on the UI thread from its layout. Its boxes follow
     scrolling without a new snapshot. Checked from outside with Windows' own UI Automation
     client on the Fluent sample: lines, paragraphs, words, boxes, a point to a word, and
-    the caret. Text inputs and TextArea are the next candidates.
+    the caret. And `TextArea` (2026-10-24, plan 17 round 4): its rows as lines, its
+    `'\n'`-separated runs as paragraphs, its caret and selection, each character's box from
+    where the area draws its caret, for the rows on screen and one either side (the rest
+    spaced at the average width there). Made on request from a version, as the editor's: the
+    string by identity, the caret, the anchor, the rows and the part on screen; a keystroke
+    is a text change (UIA `Text_TextChanged`, AT-SPI `text-changed` with what was inserted
+    and removed, from the strings the versions hold, no tables made for it), never a value
+    change; a caret move a patch with no tree built, which it never told before; its
+    read-only switch reaches the text a reader reads. In both, a character's box runs
+    between its two caret places, so where the direction changes a box can span a run.
+    Single-line text inputs are the next candidate.
 - **Announcements (A2).** `Element.Announce(text, politeness)`: a UIA notification
   (`UiaRaiseNotificationEvent`, activity `HultUI.Announcement`; polite is
   `NotificationProcessing_All`, assertive `ImportantAll`), an AT-SPI 2.46
@@ -465,7 +561,7 @@ providers), a UIA `ItemContainer` on virtualized lists.
 
 ## Out of scope (follow-ups)
 
-- `EditableText` for AT-SPI; the text pattern on text inputs and TextArea.
+- `EditableText` for AT-SPI; the text pattern on single-line text inputs.
 - macOS `NSAccessibility`.
 - UIA `LiveRegion` (`Element.Announce` covers what live regions were wanted for).
 - ~~Accessibility for overlays, tooltips, context menus.~~ **Done 2026-09-22.** The
@@ -481,7 +577,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
   — so the mark is a state rather than a bullet inside the name. Any node with a toggle state
   now offers UIA's Toggle pattern whatever its role, and `Window.FindElement` searches open
   overlays, without which every accessibility action aimed at a menu or dialog was a silent
-  no-op.
+  no-op. **Fixed 2026-10-24 (plan 17 round 4):** opening or closing an overlay builds the tree in
+  the next frame. Nothing the frame looked at said it changed, so an overlay reached a reader only
+  when something else rebuilt the tree — usually the control's own expanded state (a dropdown's, a
+  date picker's), until a leaf's expanded state was patched without a rebuild, and never for a plain
+  overlay. Property changes inside an overlay still reach no observer (its content has no parent and
+  no observer of its own): an open menu or dialog is told again only by the next rebuild.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

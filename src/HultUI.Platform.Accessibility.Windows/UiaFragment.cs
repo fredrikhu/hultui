@@ -54,8 +54,12 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     public bool? Expanded => _expanded;
 
     /// <summary>Snapshot selected state (null = not selectable that way), read by the
-    /// SelectionItem provider for anything that is not a list item.</summary>
+    /// SelectionItem provider.</summary>
     public bool? Selected => _isSelected;
+
+    /// <summary>Snapshot toggle state (null = not a toggle), read by the Toggle provider, as the
+    /// ToggleState property is.</summary>
+    public bool? Toggled => _isToggled;
 
     public UiaFragment(WindowsAccessibilityBridge bridge, AccessibilityNode node)
     {

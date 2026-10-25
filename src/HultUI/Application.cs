@@ -337,11 +337,16 @@ public sealed class Application : IDisposable
     /// <para>A resize, when the platform flagged one (a new size, or an area Windows asked to
     /// have painted): laid out again, Resized raised, drawn. Anything else — the second event
     /// of a step, SDL's live-resize timer every ~10 ms while an edge is held or the window is
-    /// moved — draws only a window with something new to show: one that is dirty, or one whose
-    /// posted work is waiting, which the held loop cannot run. That is how a video keeps
-    /// playing while its window is moved: its next frame is posted, and the draw takes it from
-    /// the decoder. Each of those events was a whole resize frame before, three to a step of a
-    /// drag at one size, and one every ~10 ms of the same picture while the mouse held still.</para>
+    /// moved — draws only a window with something new to show: one that is dirty, or one a GPU
+    /// source asked to draw. Each of those events was a whole resize frame before, three to a
+    /// step of a drag at one size, and one every ~10 ms of the same picture while the mouse held
+    /// still.</para>
+    ///
+    /// <para>A GPU source's request (<see cref="LiveFrameRequests"/>) is answered by the platform,
+    /// which calls this for it, so a video keeps its own frame rate while its window is moved or a
+    /// drag is held. Before, the source's post waited in the queue the held loop cannot run, and
+    /// the timer drew for that post: about 64 frames a second, whatever the video's rate. A
+    /// platform that does not answer requests still draws for posted work.</para>
     /// </summary>
     private void RenderLiveResizeFrame(Window window)
     {
@@ -358,6 +363,12 @@ public sealed class Application : IDisposable
         try
         {
             var platform = window.PlatformWindow;
+            // Taken whichever frame draws: any frame takes the newest picture.
+            bool requested = LiveFrameRequests.TakeWaiting();
+            // Posted work no frame can run: a reason to draw only where GPU sources' requests are
+            // not answered on their own, since it is their next frame that waits. Where they are,
+            // SDL's timer drew the same picture again some 64 times a second beside them.
+            bool posted = !_mainThreadQueue.IsEmpty && !LiveFrameRequests.Answering;
             if (platform.ResizePending)
             {
                 long now = Environment.TickCount64;
@@ -367,10 +378,10 @@ public sealed class Application : IDisposable
                 platform.LastResizeRenderTick = now;
                 platform.ResizePending = false;
             }
-            else if (window.NeedsRender || !_mainThreadQueue.IsEmpty)
+            else if (requested || posted || window.NeedsRender)
             {
                 platform.MakeCurrent();
-                window.RenderFrame(drawClean: !_mainThreadQueue.IsEmpty);
+                window.RenderFrame(drawClean: requested || posted);
             }
         }
         finally
@@ -583,6 +594,12 @@ public sealed class Application : IDisposable
                     : nextRenderAt + interval;
                 continue;
             }
+
+            // A pass that closed the last window or took a quit ends the loop here. The wait below
+            // owns no deadline with no window open, and nothing may be left to send it anything:
+            // closed by a WM_CLOSE another process posted, the app stayed running, windowless,
+            // until some unrelated wake.
+            if (!IsRunning) break;
 
             if (tick)
             {

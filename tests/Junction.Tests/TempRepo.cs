@@ -49,11 +49,15 @@ internal sealed class TempRepo : IDisposable
         repo.Git("init", "-b", "main");
         // Written straight into the repository's config rather than with four `git config`
         // calls: the suite's time is mostly git process starts, and these were four of the
-        // five an empty fixture used to make.
+        // five an empty fixture used to make. No automatic maintenance: every commit started
+        // a detached `git maintenance run --auto` beside the test, one more process working in
+        // the fixture's .git while the app under test reads and watches it.
         File.AppendAllText(System.IO.Path.Combine(repo.Path, ".git", "config"),
             "[user]\n\tname = Junction Tests\n\temail = tests@example.invalid\n" +
             "[commit]\n\tgpgsign = false\n" +
-            "[core]\n\tautocrlf = false\n");
+            "[core]\n\tautocrlf = false\n" +
+            "[maintenance]\n\tauto = false\n" +
+            "[gc]\n\tauto = 0\n");
         return repo;
     }
 
@@ -168,6 +172,14 @@ internal sealed class TempRepo : IDisposable
             Environment.SetEnvironmentVariable("GIT_CONFIG_SYSTEM", empty);
             // Keeps a stale credential helper or a slow network prompt out of the run.
             Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0");
+            // A fixture is a copy, so every file in it has a new time, and the first `git status`
+            // the app runs on one — the sidebar's summary, the Changes view — finds the index's
+            // stat data stale and writes the index back. The app's watcher cannot tell that
+            // write from another program's: it reloads the repository 300 ms later, rebuilding
+            // the window in the middle of whatever a test measures across frames (the "made
+            // once" label test, the motion that builds nothing). Optional locks off, a read-only
+            // git call writes nothing. Commands that have to write still take their locks.
+            Environment.SetEnvironmentVariable("GIT_OPTIONAL_LOCKS", "0");
             _envPrepared = true;
         }
     }

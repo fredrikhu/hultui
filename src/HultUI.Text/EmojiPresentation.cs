@@ -91,7 +91,7 @@ internal static class EmojiPresentation
     /// <paramref name="index"/> of <paramref name="text"/>, asks to be drawn from an emoji face: by
     /// itself or by what follows it in <paramref name="text"/> (see the class).
     /// </summary>
-    internal static bool AsksForEmoji(string text, int index, int codepoint, int length)
+    internal static bool AsksForEmoji(ReadOnlySpan<char> text, int index, int codepoint, int length)
     {
         int after = index + length;
         // Below ©, only a keycap base can, and only with the selector after it; then nothing
@@ -114,7 +114,7 @@ internal static class EmojiPresentation
         return next == ZeroWidthJoiner && IsExtendedPictographic(CodePointAt(text, after + 1)); // 👁‍🗨
     }
 
-    private static int CodePointAt(string text, int index)
+    private static int CodePointAt(ReadOnlySpan<char> text, int index)
     {
         if ((uint)index >= (uint)text.Length) return -1;
         char c = text[index];

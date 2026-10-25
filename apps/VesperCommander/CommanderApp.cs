@@ -688,8 +688,14 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     // ── Build ────────────────────────────────────────────────────────────
+    // How many builds have run. The Brief grid keeps its cells only from the build just before,
+    // a resize asks whether the panes the latest build built would come out the same, and the
+    // tests count what rebuilds.
+    private int _builds;
+
     public override Element Build()
     {
+        _builds++;
         SyncWindowTitle();
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
 
@@ -742,13 +748,17 @@ public partial class CommanderApp : Component, IDisposable
         // to the root even when the release lands off the rows (empty list, footer, …).
         // The Find dialog's corner-grip resize tracks the same way: move updates the size,
         // up ends the drag, both regardless of where the pointer wandered.
-        root.On<PointerMoveEvent>(ev =>
+        // Passive, and heard only during one of the two: every other move over the window is a
+        // move over idle panes, which drew a full frame each while this was an ordinary handler
+        // (a handler might have changed something without saying so) and made a move event for
+        // it. Both mark what they change: the resize rebuilds, the hold changes nothing on screen.
+        root.OnPassive<PointerMoveEvent>(ev =>
         {
             if (_findResizing) UpdateFindResize(ev.Position.X, ev.Position.Y);
             // Watched at the root, not on the row: a drag that leaves the row it started on
             // is exactly the case that must not still count as holding still.
             UpdateContextHold(ev.Position.X, ev.Position.Y);
-        });
+        }, _rootMoveListening ??= () => _findResizing || _holdArmed);
         root.On<PointerUpEvent>(ev =>
         {
             if (ev.Button == 2) { CancelContextHold(); EndRightMark(); }
@@ -1352,6 +1362,9 @@ public partial class CommanderApp : Component, IDisposable
     // it uniform, matching Total Commander. Rows recycle, so we track by path and
     // handle each row once per drag; the release is caught at the root (below).
     private bool _rmarkActive;
+    // When the move handlers on the root and on each row act (see OnPassive): made once, so a
+    // build hands every row the same one.
+    private Func<bool>? _rootMoveListening, _rowMoveListening;
     private char _rmarkSide;
     private bool _rmarkAdd;
     private readonly HashSet<string> _rmarkSeen = PathSet();
@@ -3089,12 +3102,25 @@ public partial class CommanderApp : Component, IDisposable
         // build is what corrects it once the frame has been laid out at the new size. Without
         // this call nothing rebuilds at all on a resize, so the settle is never registered
         // and never runs — it is only ever scheduled from a build.
-        // The Brief and Thumbnail grids are sized in the build too (tiles per row, rows per
-        // column, an explicit width from the window), so without a build they keep the old
-        // window's geometry until something else happens to rebuild — a key press, a decode.
+        if (scaleChanged || (_settings.DiffWrap && (_diffOpen || _viewerOpen)))
+        {
+            MarkDirty();
+            return;
+        }
+        // The Brief and Thumbnail grids are sized from the window too: tiles per row, rows per
+        // column and the columns realized are decided in the build, and the grid's width (and
+        // Brief's height) is given explicitly. Left alone, a grid keeps the old window's geometry
+        // until something else rebuilds — a key press, a decode. Most resize steps change only
+        // the size, though, and a build of the whole window for it made every cell of the grid
+        // again (750 KB a step in Brief): so a build only when one would make something the last
+        // one did not — the grid's rows, columns or tiles per row, or a pane's path trail, which
+        // a grid view has always followed — and otherwise the live grid takes the new size.
+        // Behind a full-shell view the panes are not shown, and a resize rebuilds as it did.
         bool gridView = ViewOf('L') is ViewMode.Brief or ViewMode.Thumbnails
                      || ViewOf('R') is ViewMode.Brief or ViewMode.Thumbnails;
-        if (scaleChanged || gridView || (_settings.DiffWrap && (_diffOpen || _viewerOpen))) MarkDirty();
+        if (!gridView) return;
+        if (FullShellOpen || WindowFitChanged()) MarkDirty();
+        else FitGridsInPlace();
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ it must pay what it paid before.
 dotnet run -c Release --project samples/HultUI.Samples.TextBench
 ```
 
-`--csv` prints the same numbers as CSV.
+`--csv` prints the same numbers as CSV (and the JIT line on stderr).
 
 ## Reading the output
 
@@ -30,18 +30,40 @@ against their `warm` twins**: they run identical work, so if a pair disagrees th
 capture is measuring position in the run and neither number can be compared with
 another capture.
 
-Two things the harness does that a naive one does not, both because getting them
+**And read the JIT line under the table.** It says how long the warm-up took and how
+many methods the JIT compiled while the rows were being measured:
+
+```
+JIT: warm-up 152 passes in 6.9 s compiled 1,874 methods; 126 compiled during measurement
+```
+
+About 130 is normal: rarely called methods (a cache growing, a font object made for a
+pipeline) reaching their call count. Near 1,000 means the warm-up missed the paths the
+rows are measured on, and their numbers include code that was still at tier 0.
+
+Three things the harness does that a naive one does not, all because getting them
 wrong invents regressions that are not there:
 
 - **Global pre-warm across every scenario before any measurement.** Shared code
   reaches tier-1 and dynamic PGO gets data first. Without it the same LRU cache
   hit reads 250 ns early in a run and 60 ns late in it — the comparer calls
   devirtualize only once PGO has data — and whichever scenario ran first looks
-  four times slower than its own twin. **For at least 3 s, in passes**, not one
-  pass: a method goes tier 0, instrumented tier 0, tier 1, and the second step needs
-  calls after the first. After one pass the caret rows sat at instrumented tier 0
+  four times slower than its own twin. **In passes until the JIT has finished**, not
+  one pass: a method goes tier 0, instrumented tier 0, tier 1, and each step needs
+  calls after the last. After one pass the caret rows sat at instrumented tier 0
   for whole runs once the background compiler had a long queue — ten times their
-  cost (2026-10-06; `DOTNET_TC_CallCountingDelayMs=0` put them back).
+  cost (2026-10-06; `DOTNET_TC_CallCountingDelayMs=0` put them back). The passes run
+  for at least 3 s and then until `JitInfo.GetCompiledMethodCount` has not risen for
+  a second (30 s at most).
+- **The warm-up runs the paths that are measured.** It runs on a second set of the
+  scenarios, with pipelines of their own, following the measurement's own index
+  sequence — a resize row meets a new width every batch, a caret row its real
+  offsets — and handing a cold row a new string on every call. Then each measured
+  row is called once with indices it is never measured with, so it starts from the
+  state it always did. Until 2026-10-13 the warm-up called the measured rows with the
+  same indices every pass: the cold and resize rows met new strings and widths in the
+  first pass only, hit warm caches from then on, and ~1,000 methods were compiled while
+  the rows were measured.
 - **Round-robin sampling.** Sample *n* of every scenario before sample *n+1* of
   any, so residual drift lands on all rows equally instead of on the first ones.
 
@@ -272,3 +294,37 @@ captures above: run with only the cold and warm rows, it is within noise.
   width and metrics, no glyphs) and then ApplyEllipsis as it is. `LineMetrics` is the one
   source of a line's metrics for both kinds of line. A layout ApplyEllipsis would have kept
   unchanged takes the reference path instead.
+
+## Capture: a warm-up that waits for the JIT (2026-10-13)
+
+`i7-14700K, Windows 11, .NET 10, Release`, pinned to the performance cores, each run behind
+`scripts/perf/idle-gate.ps1`. Before = the old warm-up (3 s of passes with the same indices)
+with only the JIT line added; after = the warm-up above. Alternated, two runs each; the lower
+min of each side (plan 17, round 4, tooling-textbench-warmup).
+
+| | before | after |
+|---|---:|---:|
+| methods compiled during measurement | 960, 914 | 126, 126 |
+| warm-up | 3.5 s, 680 methods | 6.8–6.9 s, 1,874–1,884 methods |
+
+| scenario | before (min) | after (min) | |
+|---|---:|---:|---|
+| `cold/latin-67` | 1.85 µs | 1.74 µs | −6 % |
+| `cold/mixed-38` | 12.83 µs | 12.23 µs | −5 % |
+| `resize/ellipsis-1line` | 1.48 µs | 1.23 µs | −17 % |
+| `resize/clip-1line` | 1.57 µs | 1.14 µs | −27 % |
+| `resize/bidi-ellipsis-1line` | 8.46 µs | 6.41 µs | −24 % |
+| `resize/multifont-ellipsis-1line` | 3.80 µs | 1.78 µs | −53 % |
+| `resize/styled-wrap` | 4.69 µs | 2.38 µs | −49 % |
+| `resize/styled-ellipsis-1line` | 3.46 µs | 1.38 µs | −60 % |
+| `caret/latin-x` | 4 ns | 3 ns | warmed on real offsets now |
+| `caret/rtl-x` | 5 ns | 3 ns | |
+
+The code is the same on both sides: the "before" column measured the cold and resize rows
+partly at tier 0, and every other cold and resize row reads lower the same way (−1…−20 %).
+The warm, recheck and other caret rows are within ±4 %, and allocation per call is the same
+on every row (within 1.5 %), since each measured row starts from the state it always did.
+Two runs of the old warm-up also disagreed with each other by up to 2×
+(`resize/bidi-fit` 1.02 and 0.48 µs, `resize/styled-wrap` 6.69 and 4.69 µs); two of the new
+by at most 12 % (`resize/bidi-wrap`). **Captures above this one were taken with the old
+warm-up**: compare a row with them only across a change that kept the warm-up.

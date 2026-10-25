@@ -56,6 +56,7 @@ Console.WriteLine(doubled.Value); // 20
 - **`.Peek()`** -- reads the cached value without tracking and without forcing recomputation.
 - The factory function passed to the constructor runs inside a tracking scope. Any signals or other computeds read during that function become dependencies automatically.
 - Recomputation is **lazy**: it only happens when `.Value` is read after a dependency has changed, not immediately when the dependency changes.
+- A write upstream allocates nothing: the computed tells its readers through a pooled snapshot, as a signal does, so one that follows a fast value (a playhead read ten times a second, below) costs no garbage per write. It copied its readers into a new list, 64 bytes a time and twice a write that changed its value, until plan 17's round 4.
 
 ---
 
@@ -285,6 +286,17 @@ thing it was started for (here the send's own cancellation source, not "any send
 Meridian's kept going when the next send started within one tick of the last one ending, so
 sends in a row stacked ticks.
 
+Something that follows the pointer is the same case. The `VideoPlayer`'s scrubber preview read
+the hovered position in `Build()`, so the player was built again on every frame the pointer
+moved along the track: about 42 KB a frame, with or without a card to show. The hover now
+writes the card on screen through `Ref`s (its `Position.Left` and the layout mark that goes
+with it, its picture's `Source`, its time label's `Content`), and only a card that has to come
+or go goes through a build, through a `Signal<int>` bumped for that alone: 1.9 KB a frame
+(headless, JIT and NativeAOT), most of it the pointer events themselves. When a build makes no
+such element, clear the refs that pointed at the last one: a `Ref` keeps the element it was
+given after the element leaves the tree, and a write would then land on an element nobody
+sees.
+
 When the build needs only something coarse derived from the value, read that through a
 `Computed<T>` instead. An effect that read a computed value runs again only when the value it
 computes changes, so a build reading it reruns a few times a film, not ten times a second.
@@ -300,7 +312,8 @@ _chapterHere = new Computed<int>(() => CurrentChapterIndex(player.Position));
 int current = _chapterHere.Value;
 ```
 
-A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture).
+A report then costs 0.6 KB (Reel) and 1.8 KB (Aperture), and 64 bytes less since the computed's
+own notify stopped allocating (plan 17's round 4: Reel's report 527 → 463 B, headless, JIT).
 
 ### `Build()` is not a clock
 
@@ -342,6 +355,83 @@ Neither effect rebuilds anything. A minute of quiet playback once the bar has go
 the real loop, a position report every 100 ms) still builds each app 0 times; the UI thread
 allocates 22,130 → 22,158 B/s in Aperture (six reports) and 22,115 → 22,472 B/s in Reel (four
 settings writes), so a check that is not due costs nothing measurable.
+
+### Keep what a key does not change in a child component
+
+A rebuild makes everything its `Build()` makes. Junction's window was one component, so a key
+in History made the title bar, the sidebar and the toolbar again with the list: 128 KB of the
+182 KB a build made, for about 120 elements that show no selection. Put such parts in child
+components the parent makes once and hands to every build. A rebuild of the parent moves the
+kept host into its new tree and the reconciler puts it back; nothing inside it is built, and
+nothing around it is marked.
+
+```csharp
+private Part? _toolbar;
+private Part ToolbarPart => _toolbar ??= new Part(this, BuildToolbar);   // made once
+
+public override Element Build()
+{
+    var view = BuildView();
+    view.Key = "view";
+    // The host is the flex item where the toolbar's root used to be.
+    return Flex.Column(gap: 0).FlexGrow(1).Children(ToolbarPart.Mount().FlexShrink(0), view);
+}
+```
+
+Three things decide whether it stays right and stays cheap:
+
+- **What the part shows has to reach it.** A part rebuilds when a signal or loader its own
+  `Build()` read changes, not when its parent does. A plain field it reads (the active
+  repository, a setting, a width breakpoint) needs a signal the part reads and the parent
+  writes. Junction's parts read one `Signal<int>` that its `MarkDirty()` and `Rerender()`
+  bump, so every rebuild builds the chrome too, and only the paths that change nothing the
+  chrome shows — selection moves, cursors, typing in a field of the view, search boxes — call
+  `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a build;
+  forgetting to opt in shows a stale toolbar, so make the safe one the default.
+- **The host takes the root's place in the layout.** `Mount()` returns the `ComponentHost`, an
+  element between the parent and the part's root. Give it what the root had as a flex item
+  (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that
+  must fill its host `FlexGrow(1)` (the host is a column).
+- **Keep the parent's children keyed.** A keyed list puts a kept host back without marking the
+  parent (round 4, 59a11d7): no layout, and no structural change, which would make a window
+  with a listening screen reader build a whole new accessibility tree for the key. A host in an
+  unkeyed list, or alone in its parent, goes back the ordinary way and marks both.
+
+Junction with its chrome in three parts (5808d9f; headless, JIT, a 1,562-commit clone, a key
+and 8 frames): History 242.5 → 107.3 KB a key (−56 %), Branches 186.0 → 50.8 (−73 %), Tags
+230.3 → 95.2 (−59 %), Files 224.4 → 79.0 (−65 %), the Commit file list 230.3 → 95.1 (−59 %), a
+keystroke in the commit summary 201.9 → 66.7 (−67 %); the NativeAOT app −39…−68 % a key; the
+same accessibility trees a key with a reader. The perf suite pins the pattern:
+`component/list walk beside chrome built with it` (173.5 KB a step) against `… in kept parts`
+(35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
+as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
+
+### Hand back the elements a key does not change
+
+What the reconciler does for a kept host it does for any live element a build hands back: it
+moves the element into the new tree and puts it back where it was, untouched — no patch, no
+layout mark. A grid of many small cells that a virtual list cannot hold (Vesper's Brief view:
+columns of names, scrolled sideways) can keep its cells that way: remember each cell with what
+it was made from, and when a build would make it from the same things, add the live element
+instead of a new one. Only the cells that changed are made, and patched into the ones they
+replace. Four things keep it right:
+
+- **Key the cells, and key every child of their parent.** A kept element comes back through
+  the keyed reconcile, which matches the rest by key and puts the kept ones back in place. In
+  an unkeyed parent the old children are matched by position, and the ones the build moved out
+  are missing from it: the reconciler would patch one cell from another.
+- **Only from the build just before.** A cell another build dropped is out of the tree (its
+  column scrolled away, the view changed); handing it back is mounting a removed element again.
+  Count builds and keep the cells for the next one only.
+- **Keep the live element, not the one you built.** A changed cell is patched into the old one,
+  and the element the build made is thrown away; keep a `Ref` on it, which follows the patch.
+- **Everything the cell shows is in what you compare.** The entry, the cursor, and a shape of
+  the rest (the marks, the theme, the row height, the scale) as kept rows need one.
+
+Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 300 files): a
+key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
+real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
+moves to its new column (755.8 → 229.4 KB a step).
 
 ---
 
@@ -585,6 +675,15 @@ label.MarkStyleDirty();     // re-resolves, and re-measures because the size cha
 layout alone for them. (Until 2026-10-06 the style pass never re-measured, and a metric
 change needed `MarkLayoutDirty()` as well; that call still does no harm. A theme whose
 font sizes differ from the last one's was laid out at the old sizes.)
+
+A rebuild does not do it for you on an element it did not patch. Each patch marks the
+element it patched; the style pass resolves a child when the child is marked or when what
+it inherits changed, and an element moved under another parent is resolved there. So a row
+a `VirtualList` kept, the elements of a child component, or a control's own parts, written
+through a `Ref` without `MarkStyleDirty()`, keep their old style however often the owner
+rebuilds. (Until plan 17 round 4 a patch marked everything under it, and an owner's rebuild
+re-resolved such an element by accident — and every one of the hundreds it did not change,
+on every key.)
 
 Auto-invalidating setters were considered and rejected: every style object would need a
 back-pointer to its element and every write would walk to the root, so static UI

@@ -210,18 +210,53 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (index < 0 || !_wrappers.TryGetValue(listId, out var w)) return IntPtr.Zero;
         var node = w.Node; // immutable per-frame snapshot
         if (node.IsVirtualItemContainer)
-            return index < _host.GetItemCount(listId) ? NativeVirtualItemSimple(listId, index) : IntPtr.Zero;
+            return index < GetVirtualItemCount(listId) ? NativeVirtualItemSimple(listId, index) : IntPtr.Zero;
         return index < node.Children.Count ? NativeFragmentSimple(node.Children[index].ElementId) : IntPtr.Zero;
     }
 
-    /// <summary>The list's selected item index (-1 for none), for the Selection pattern.</summary>
-    internal int GetSelectedIndex(ElementId listId) => _host.GetSelectedIndex(listId);
+    // ── Reads (plan 17, round 4) ──
+    //
+    // Every read a client makes answers from the element's node in the current tree, which never
+    // changes once applied: what the tree was built with, which is what the events told. They went
+    // to the host (IUiaHostBridge), which found the element with a walk of the live element tree on
+    // the client's thread, unsynchronized with the UI thread that changes it: on a 1,533-element
+    // page a checkbox's toggle visited 1,532 elements, a text input's value 1,530, a slider's range
+    // 1,531, a gone element's id all of them; and the RangeValue pattern read the live slider while
+    // its property read the node, so the two disagreed until the range's coalesced refresh (up to
+    // 250 ms). The host's read members stay, unused. What a list serves on demand (its items over
+    // MaxEagerVirtualItems) is read from the list itself, reached through its node
+    // (AccessibilityNode.ItemSource), not found.
 
-    /// <summary>All selected item indices of a list, ascending, for container Selection.</summary>
-    internal IReadOnlyList<int> GetSelectedIndices(ElementId listId) => _host.GetSelectedIndices(listId);
+    /// <summary>The element's node in the current tree, or null when it has none.</summary>
+    private AccessibilityNode? NodeOf(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Node : null;
+
+    /// <summary>The list a list's node stands for, read for what it serves on demand.</summary>
+    private IAccessibleItemSource? ItemsOf(ElementId listId) => NodeOf(listId)?.ItemSource;
+
+    /// <summary>All selected item indices of a list, ascending, for container Selection: an eager
+    /// list's from its item nodes (each carries its selected state, marked on the applied tree when
+    /// the selection moves), an on-demand list's from the list.</summary>
+    internal IReadOnlyList<int> GetSelectedIndices(ElementId listId)
+    {
+        if (NodeOf(listId) is not { } node) return [];
+        if (node.IsVirtualItemContainer)
+        {
+            try { return node.ItemSource?.SelectedIndices ?? []; }
+            catch { return []; }
+        }
+        List<int>? selected = null;
+        var items = node.Children;
+        for (int i = 0; i < items.Count; i++)
+            if (items[i].IsSelected == true) (selected ??= []).Add(i);
+        return selected ?? (IReadOnlyList<int>)[];
+    }
 
     /// <summary>Whether a list allows multi-selection, for container Selection.</summary>
-    internal bool GetCanSelectMultiple(ElementId listId) => _host.GetCanSelectMultiple(listId);
+    internal bool GetCanSelectMultiple(ElementId listId)
+    {
+        try { return ItemsOf(listId)?.CanSelectMultiple == true; }
+        catch { return false; }
+    }
 
     /// <summary>
     /// Resolves an item provider's element id to its owning list and index — for
@@ -262,16 +297,24 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         return true;
     }
 
-    /// <summary>Whether a list item is selected; false (not handled) if it isn't a list item.</summary>
+    /// <summary>Whether a list item is selected; false (not handled) if it isn't a list item. An
+    /// item with a node answers from it, as its IsSelected property does; one served on demand
+    /// from its list.</summary>
     internal bool TryGetItemSelected(ElementId itemId, out bool selected)
     {
-        if (TryResolveItem(itemId, out var listId, out var index))
+        if (!TryResolveItem(itemId, out var listId, out var index))
         {
-            selected = _host.GetItemSelected(listId, index);
-            return true;
+            selected = false;
+            return false;
         }
-        selected = false;
-        return false;
+        if (_wrappers.TryGetValue(itemId, out var item))
+            selected = item.Selected == true;
+        else
+        {
+            try { selected = ItemsOf(listId)?.IsItemSelected(index) == true; }
+            catch { selected = false; }
+        }
+        return true;
     }
 
     /// <summary>The selection container (as Simple) of a list item — its list — or of a tab —
@@ -337,22 +380,130 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             default:
                 return IntPtr.Zero; // unsupported property — no match
         }
-        int idx = _host.FindItemIndex(listId, startIndex, query);
+        int idx = FindItemIndex(listId, startIndex, query);
         return idx >= 0 ? ItemSimpleProvider(listId, idx) : IntPtr.Zero;
     }
 
-    internal int GetVirtualItemCount(ElementId listId) => _host.GetItemCount(listId);
+    /// <summary>The first item after <paramref name="startAfter"/> that matches: an eager list's
+    /// among its item nodes, an on-demand list's by the list (which may keep an index).</summary>
+    private int FindItemIndex(ElementId listId, int startAfter, AccessibleItemQuery query)
+    {
+        if (NodeOf(listId) is not { } node) return -1;
+        if (node.IsVirtualItemContainer)
+        {
+            try { return node.ItemSource?.FindItem(startAfter, query) ?? -1; }
+            catch { return -1; }
+        }
+        var items = node.Children;
+        for (int i = Math.Max(startAfter + 1, 0); i < items.Count; i++)
+        {
+            bool match = query.Property switch
+            {
+                AccessibleItemProperty.Any => true,
+                AccessibleItemProperty.Name => query.Name is not null && items[i].Name == query.Name,
+                AccessibleItemProperty.Selected => items[i].IsSelected == true,
+                _ => false,
+            };
+            if (match) return i;
+        }
+        return -1;
+    }
 
-    internal string? GetVirtualItemLabel(ElementId listId, int index) => _host.GetItemLabel(listId, index);
+    internal int GetVirtualItemCount(ElementId listId)
+    {
+        try { return ItemsOf(listId)?.ItemCount ?? 0; }
+        catch { return 0; }
+    }
 
+    internal string? GetVirtualItemLabel(ElementId listId, int index)
+    {
+        try { return ItemsOf(listId)?.GetItemLabel(index); }
+        catch { return null; }
+    }
 
-    internal bool GetVirtualItemOffscreen(ElementId listId, int index) => _host.GetItemOffscreen(listId, index);
+    /// <summary>Whether an on-demand item sits outside its list's viewport, at the scroll the tree
+    /// was built with.</summary>
+    internal bool GetVirtualItemOffscreen(ElementId listId, int index)
+    {
+        if (!TryGetItemPlace(listId, index, out var scroll, out var offset, out float top, out float height)) return true;
+        float y = top - offset.Y;
+        return y + height <= 0f || y >= scroll.Viewport.Height;
+    }
 
-    internal bool TryGetScrollInfo(ElementId id, out ScrollInfo info) => _host.TryGetScrollInfo(id, out info);
+    /// <summary>
+    /// An on-demand item's box in layout units: in its list's viewport at its index, moved by the
+    /// list's scroll, as the builder places an eager list's item nodes. The viewport and the scroll
+    /// are the list node's, as the tree was built; the item height and count the list's.
+    /// </summary>
+    private bool TryGetItemLayout(ElementId listId, int index, out Rect layout)
+    {
+        if (!TryGetItemPlace(listId, index, out var scroll, out var offset, out float top, out float height))
+        {
+            layout = default;
+            return false;
+        }
+        var viewport = scroll.Viewport;
+        layout = new Rect(viewport.X - offset.X, viewport.Y - offset.Y + top, viewport.Width, height);
+        return true;
+    }
+
+    private bool TryGetItemPlace(ElementId listId, int index, out AccessibleScrollExtent scroll, out Point offset,
+        out float top, out float height)
+    {
+        scroll = default;
+        offset = default;
+        top = height = 0f;
+        if (NodeOf(listId) is not { ItemSource: { } source, ScrollExtent: { } extent } node) return false;
+        try
+        {
+            if (index < 0 || index >= source.ItemCount) return false;
+            height = source.ItemHeight;
+        }
+        catch { return false; }
+        scroll = extent;
+        offset = node.ScrollOffset;
+        top = index * height;
+        return true;
+    }
+
+    /// <summary>Scroll pattern state of a scroll view, from its node.</summary>
+    internal bool TryGetScrollInfo(ElementId id, out ScrollInfo info) => TryGetScrollInfo(NodeOf(id), out info);
+
+    /// <summary>What the host worked out from the live scroll view, from its node: the percents
+    /// (0..100, or -1 when it cannot scroll that way), the view sizes and whether it scrolls.</summary>
+    private static bool TryGetScrollInfo(AccessibilityNode? node, out ScrollInfo info)
+    {
+        info = default;
+        if (node?.ScrollExtent is not { } extent) return false;
+        var offset = node.ScrollOffset;
+        var (vp, content) = (extent.Viewport, extent.Content);
+        double maxY = Math.Max(0, content.Height - vp.Height);
+        double maxX = Math.Max(0, content.Width - vp.Width);
+        double vPercent = maxY > 0 ? offset.Y / maxY * 100 : NoScroll;
+        double hPercent = maxX > 0 ? offset.X / maxX * 100 : NoScroll;
+        double vView = content.Height > 0 ? Math.Min(100, vp.Height / content.Height * 100) : 100;
+        double hView = content.Width > 0 ? Math.Min(100, vp.Width / content.Width * 100) : 100;
+        info = new ScrollInfo(hPercent, vPercent, hView, vView, maxX > 0, maxY > 0);
+        return true;
+    }
+
+    private const double NoScroll = -1.0;
+
     internal void SetScrollPercent(ElementId id, double h, double v) => _host.SetScrollPercent(id, h, v);
     internal void ScrollByAmount(ElementId id, int h, int v) => _host.ScrollByAmount(id, h, v);
 
-    internal bool TryGetRangeValue(ElementId id, out RangeValueInfo info) => _host.TryGetRangeValue(id, out info);
+    /// <summary>RangeValue pattern state, from the node, as its RangeValue properties read it.</summary>
+    internal bool TryGetRangeValue(ElementId id, out RangeValueInfo info)
+    {
+        if (NodeOf(id)?.Range is { } r)
+        {
+            info = new RangeValueInfo(r.Value, r.Minimum, r.Maximum, r.SmallChange, r.LargeChange, r.IsReadOnly);
+            return true;
+        }
+        info = default;
+        return false;
+    }
+
     internal void SetRangeValue(ElementId id, double value) => _host.SetRangeValue(id, value);
 
     /// <summary>Snapshot expand state of a node (null = not expandable), for ExpandCollapse.</summary>
@@ -360,7 +511,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     internal bool TryGetVirtualItemScreenRect(ElementId listId, int index, out Rect screen)
     {
-        if (_host.TryGetItemLayout(listId, index, out var layout))
+        if (TryGetItemLayout(listId, index, out var layout))
         {
             screen = ToScreen(layout);
             return true;
@@ -372,9 +523,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     /// <summary>The item index under a point (in layout space) of a virtual list, or -1.</summary>
     internal int VirtualItemIndexAt(ElementId listId, Point local)
     {
-        if (!_host.TryGetItemLayout(listId, 0, out var first) || first.Height <= 0) return -1;
+        if (!TryGetItemLayout(listId, 0, out var first) || first.Height <= 0) return -1;
         if (local.X < first.X || local.X > first.X + first.Width) return -1;
-        int count = _host.GetItemCount(listId);
+        int count = GetVirtualItemCount(listId);
         int i = (int)Math.Floor((local.Y - first.Y) / first.Height);
         return i >= 0 && i < count ? i : -1;
     }
@@ -462,10 +613,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
-    /// item that had the selection and the one that has it. Their wrappers already point at those
-    /// nodes; they take the new state and raise what a diff would have (SelectionItem.IsSelected
-    /// property events), with no walk of the tree. Anything but property changes is applied as a
-    /// diff.
+    /// item that had the selection and the one that has it; a caret or selection move in text made
+    /// on request (the rich text editor's); a leaf's change of its own name, description, value,
+    /// range, toggle or expanded state, whose node the window made again and put in place of the
+    /// old one. Their wrappers take the change's node and its state and raise what a diff would have
+    /// (SelectionItem.IsSelected property events, Text_TextSelectionChanged, Name, HelpText,
+    /// ValueValue, RangeValue, ToggleState, ExpandCollapseState), with no walk of the tree. Anything
+    /// but property changes is applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {
@@ -682,7 +836,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         if (!RaiseEvents) return;
         var before = previous?.ScrollOffset ?? default;
         var after = node.ScrollOffset;
-        bool known = _host.TryGetScrollInfo(wrapper.ElementId, out var info);
+        // From the node the change carries: it read the live scroll view through a walk of the
+        // element tree, on the UI thread, every scroll refresh.
+        bool known = TryGetScrollInfo(node, out var info);
         if (before.X != after.X)
             RaiseProperty(wrapper, UiaInterop.UIA_ScrollHorizontalScrollPercentPropertyId,
                 known ? UiaVariant.FromDouble(info.HorizontalPercent) : UiaVariant.Empty);
@@ -796,13 +952,17 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal void SelectElement(ElementId id) => _host.SelectElement(id);
     internal void SetValue(ElementId id, string value) => _host.SetValue(id, value);
     /// <summary>
-    /// A node's value for the Value pattern. A node that offers text answers from its node, as its
-    /// ValueValue property does (<see cref="UiaFragment.GetPropertyValue"/>): the version its text
-    /// events describe, on any thread. Anything else is read from its element, as it is now.
+    /// A node's value for the Value pattern, from its node, as its ValueValue property answers
+    /// (<see cref="UiaFragment.GetPropertyValue"/>): for a node that offers text, the version its
+    /// text events describe, on any thread; for a text input, the text (the bullets, masked) the
+    /// tree was built with and its last ValueValue event carried.
     /// </summary>
-    internal string? GetValue(ElementId id) =>
-        _wrappers.TryGetValue(id, out var wrapper) && wrapper.OffersText ? wrapper.Node.Value : _host.GetValue(id);
-    internal bool? GetToggleState(ElementId id) => _host.GetToggleState(id);
+    internal string? GetValue(ElementId id) => NodeOf(id)?.Value;
+
+    /// <summary>A node's toggle state for the Toggle pattern, as its ToggleState property answers:
+    /// a check box's, a switch's (which the element read gave as indeterminate), a toolbar toggle's,
+    /// a menu choice's.</summary>
+    internal bool? GetToggleState(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Toggled : null;
     internal void RequestFocus(ElementId id) => _host.RequestFocus(id);
 
     /// <summary>For tests: told of the window when the bridge tells UI Automation its providers

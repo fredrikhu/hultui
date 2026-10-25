@@ -1,5 +1,6 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using VesperCommander;
 using Xunit;
@@ -60,7 +61,7 @@ public class ViewModesTests
         t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
         t.Session.PumpFrames(2);
 
-        var list = t.Field<Ref<VirtualListElement<int>>>("_thumbVListL");
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL");
         float before = list.Current!.Layout.AbsoluteBorderBox.Width;
         int perRowBefore = t.Field<int[]>("_thumbCols")[0];
 
@@ -86,6 +87,173 @@ public class ViewModesTests
         t.Session.PumpFrames(2);
 
         Assert.True(t.Field<int[]>("_briefRows")[0] < rowsBefore, "rows per column kept the taller window's count");
+    }
+
+    // ── …and only a resize that changes the grid builds ──────────────────
+    // A build of the whole window on every resize step made every cell of a grid again (Brief
+    // 750 KB a step). Most steps change only the grid's size, which the live grid takes; a
+    // build comes when the tiles per row, the rows per column or the columns realized change.
+
+    [Fact]
+    public void AResizeThatKeepsTheTilesPerRow_DoesNotRebuild_AndTheGridStillFollowsTheWindow()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 40; i++) t.WriteLeft($"f{i:00}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        t.Session.PumpFrames(2);
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL");
+        int perRow = t.Field<int[]>("_thumbCols")[0];
+        float width = list.Current!.Layout.AbsoluteBorderBox.Width;
+        var rows = list.Current!.Children.ToList();
+        int builds = t.Field<int>("_builds");
+
+        t.Session.Window.SetClientSize(1248, 830);   // each pane 4 px wider: the same tiles per row
+        t.Session.PumpFrames(2);
+
+        Assert.Equal(builds, t.Field<int>("_builds"));
+        Assert.Equal(perRow, t.Field<int[]>("_thumbCols")[0]);
+        Assert.Equal(width + 4, list.Current!.Layout.AbsoluteBorderBox.Width, 0.01f);
+        Assert.Equal(rows, list.Current!.Children);
+
+        t.Session.Window.SetClientSize(1800, 830);   // more tiles per row: a build
+        t.Session.PumpFrames(2);
+
+        Assert.True(t.Field<int>("_builds") > builds, "a resize that changes the tiles per row did not build");
+        Assert.True(t.Field<int[]>("_thumbCols")[0] > perRow, "no more tiles per row");
+    }
+
+    [Fact]
+    public void AResizeThatKeepsBriefsColumns_DoesNotRebuild_AndTheGridStillFollowsTheWindow()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 80; i++) t.WriteLeft($"f{i:00}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);   // view: Brief
+        t.Session.PumpFrames(2);
+        var scroll = t.Field<Ref<ScrollViewElement>>("_briefScrollL");
+        int rowsPerColumn = t.Field<int[]>("_briefRows")[0];
+        var box = scroll.Current!.Layout.AbsoluteBorderBox;
+        int builds = t.Field<int>("_builds");
+
+        t.Session.Window.SetClientSize(1248, 830);   // 4 px wider panes, 10 px taller: the same rows
+        t.Session.PumpFrames(2);
+
+        Assert.Equal(builds, t.Field<int>("_builds"));
+        Assert.Equal(rowsPerColumn, t.Field<int[]>("_briefRows")[0]);
+        var after = scroll.Current!.Layout.AbsoluteBorderBox;
+        Assert.Equal(box.Width + 4, after.Width, 0.01f);
+        Assert.Equal(box.Height + 10, after.Height, 0.01f);
+
+        t.Session.Window.SetClientSize(1248, 500);   // fewer rows per column: a build
+        t.Session.PumpFrames(2);
+
+        Assert.True(t.Field<int>("_builds") > builds, "a resize that changes the rows per column did not build");
+        Assert.True(t.Field<int[]>("_briefRows")[0] < rowsPerColumn);
+    }
+
+    /// <summary>A resize step that does not build must leave the window as a build would have
+    /// made it: the path trails (which a grid view has always followed) and the grid, cell by
+    /// cell. Each step is compared with a forced build at the same size; the folder is deep
+    /// enough that the trail drops a segment somewhere in the sweep, on any platform.</summary>
+    [Theory]
+    [InlineData(KeyCode.F2)]   // Brief
+    [InlineData(KeyCode.F3)]   // Thumbnails
+    public void EveryResizeStep_ShowsWhatABuildWould(KeyCode view)
+    {
+        using var t = new DiffViewTests.Fixture();
+        var deep = Path.Combine(t.Left, "first-long-name", "second-long-name", "third-long-name",
+            "fourth-long-name", "fifth-long-name", "sixth-long-name");
+        Directory.CreateDirectory(deep);
+        for (int i = 0; i < 80; i++) File.WriteAllText(Path.Combine(deep, $"f{i:00}.txt"), "x");
+        t.Open();
+        t.Invoke("NavigateTo", 'L', deep);
+        t.Session.PumpUntil(() => t.Rows('L').Count > 80);
+        t.Press(view, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+
+        int builds = t.Field<int>("_builds"), trailChanges = 0;
+        string? trail = null;
+        for (int width = 1240; width <= 1560; width += 6)
+        {
+            t.Session.Window.SetClientSize(width, 820);
+            t.Session.PumpFrames(2);
+            string shown = Snapshot(t, view);
+
+            t.MarkDirty();
+            t.Session.PumpFrames(2);
+            Assert.Equal(Snapshot(t, view), shown);
+
+            string now = Trail(t.Root, "crumb-strip-L");
+            if (trail is not null && now != trail) trailChanges++;
+            trail = now;
+        }
+        Assert.True(trailChanges > 0, "no step of the sweep changed the path trail");
+        // The forced builds are 54; the steps themselves built only where something changed.
+        Assert.True(t.Field<int>("_builds") - builds < 54 + 20, "most resize steps still built");
+    }
+
+    /// <summary>The texts and boxes of both path trails and of the left pane's grid.</summary>
+    private static string Snapshot(DiffViewTests.Fixture t, KeyCode view)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var id in new[] { "crumb-strip-L", "crumb-strip-R" })
+            Dump(FindById(t.Root, id) ?? throw new Xunit.Sdk.XunitException($"no {id}"), sb);
+        Element grid = view == KeyCode.F2
+            ? t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!
+            : t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL").Current!;
+        Dump(grid, sb);
+        return sb.ToString();
+
+        static void Dump(Element e, System.Text.StringBuilder sb)
+        {
+            var b = e.Layout.AbsoluteBorderBox;
+            sb.Append(e.GetType().Name).Append(' ').Append((e as TextElement)?.Content)
+              .Append($" {b.X} {b.Y} {b.Width} {b.Height}\n");
+            foreach (var c in e.Children) Dump(c, sb);
+        }
+    }
+
+    private static string Trail(Element root, string id)
+    {
+        var sb = new System.Text.StringBuilder();
+        Walk(FindById(root, id)!);
+        return sb.ToString();
+
+        void Walk(Element e)
+        {
+            if (e is TextElement text) sb.Append(text.Content).Append('|');
+            foreach (var c in e.Children) Walk(c);
+        }
+    }
+
+    private static Element? FindById(Element e, string id)
+    {
+        if (e.AutomationId == id) return e;
+        foreach (var c in e.Children)
+            if (FindById(c, id) is { } found) return found;
+        return null;
+    }
+
+    /// <summary>The grid keeps its rows of tiles across builds, and a tile is made with a
+    /// placeholder while its picture decodes: the decode landing has to reach it all the same.</summary>
+    [Fact]
+    public void ADecodeThatLands_ReachesItsTileInAKeptRow()
+    {
+        using var t = new DiffViewTests.Fixture();
+        WritePng(Path.Combine(t.Left, "a-picture.png"), 200, 150);
+        for (int i = 0; i < 20; i++) t.WriteLeft($"f{i:00}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL");
+
+        t.Session.PumpUntil(() => list.Current is { } l && HasThumbnail(l), System.TimeSpan.FromSeconds(10));
+
+        Assert.True(HasThumbnail(list.Current!), "the decoded picture never reached its tile");
+
+        // The thumbnail fills its image area; the kind icons and the placeholder are drawn at a size.
+        static bool HasThumbnail(Element e) =>
+            (e is ImageElement && e.Box.Width == Dimension.Percent(100)) || e.Children.Any(HasThumbnail);
     }
 
     // ── ThumbnailCache ───────────────────────────────────────────────────

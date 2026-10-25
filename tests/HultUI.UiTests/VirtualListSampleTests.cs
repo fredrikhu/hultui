@@ -21,13 +21,15 @@ using Window = FlaUI.Core.AutomationElements.Window;
 [Collection("ui")]
 public sealed class VirtualListSampleTests : IDisposable
 {
+    private readonly ForegroundGuard _guard;
     private readonly Application _app;
     private readonly UIA3Automation _automation;
     private readonly Window _window;
 
     public VirtualListSampleTests()
     {
-        _app = Application.Launch(SamplePath.VirtualList());
+        _guard = ForegroundGuard.ForSamples();
+        _app = _guard.LaunchSample(SamplePath.VirtualList());
         _automation = new UIA3Automation();
         _window = _app.GetMainWindow(_automation, TimeSpan.FromSeconds(15))
             ?? throw new InvalidOperationException("sample window did not appear");
@@ -131,5 +133,6 @@ public sealed class VirtualListSampleTests : IDisposable
         _automation.Dispose();
         try { _app.Close(); } catch { /* best effort */ }
         _app.Dispose();
+        _guard.Dispose();
     }
 }

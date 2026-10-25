@@ -364,7 +364,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// The contract: a row that shows anything else — the owner's state, data that arrives
     /// later for an unchanged item, a window width, a setting — must be told when that changes,
     /// with <see cref="InvalidateRows"/> on the mounted list (before the owner's rebuild, through
-    /// its ref, or after it). Otherwise the kept rows go on showing what they showed when they
+    /// its ref, or after it), or with <see cref="InvalidateRow"/> for the rows it changed when it
+    /// changes only a few. Otherwise the kept rows go on showing what they showed when they
     /// were made, until they scroll out and back in. A switch to another <see cref="Theme"/>
     /// object makes the rows again by itself, and so does a change of the window's display scale
     /// (<see cref="Element.OnDisplayScaleChanged"/>); a theme changed in place does not. Handlers in a
@@ -429,6 +430,28 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// accessible labels, which it keeps the same way.
     /// </summary>
     public void InvalidateRows() => InvalidateItems();
+
+    /// <summary>
+    /// <see cref="InvalidateRows"/> for one item: throws away the realized row at
+    /// <paramref name="index"/>, and the item's kept accessible label, so the next frame makes
+    /// them again from the latest template and label; every other row stays as it is. For item
+    /// rows (<see cref="ItemRowTemplate"/>) that show something beside their item and selected
+    /// state which only a row or two show at a time and which moves — a second highlight that
+    /// follows another list's cursor, say — when the app knows which rows it left and reached:
+    /// told through <see cref="InvalidateRows"/>, each move made every row on screen again.
+    /// An index whose row is not realized lets go of its label only; one outside the items the
+    /// list holds now does nothing (no row is realized there). The scroll position is kept. Like
+    /// <see cref="InvalidateRows"/> it can be called through the list's ref at the top of the
+    /// owner's build, before the list is patched, or after it.
+    /// </summary>
+    public void InvalidateRow(int index)
+    {
+        if ((uint)index >= (uint)_items.Count) return;
+        if (_labels is { } labels && index < labels.Length) labels[index] = default;
+        if (!_activeElements.ContainsKey(index)) return;
+        _dropping.Add(index);
+        DropGathered();
+    }
 
     private void InvalidateItems()
     {
@@ -780,8 +803,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return true;
     }
 
+    // Of what it copies below, the rows and their heights reach layout, and every path that
+    // changes them marks it: InvalidateItems, DropGathered, and the height check in
+    // KeepUnchangedRows. An item-rows list patched by a rebuild that changed none of them keeps
+    // its layout, and so do the boxes around it.
+    private protected override bool PatchMarksOwnLayout => true;
+
     internal override void PatchFrom(Element source)
     {
+        var offsetsBefore = _offsets;
         base.PatchFrom(source);
         if (source is VirtualListElement<T> vl)
         {
@@ -824,7 +854,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
             if (keepRows)
             {
-                KeepUnchangedRows(vl._items, heightsFromFunction);
+                KeepUnchangedRows(vl._items, heightsFromFunction, offsetsBefore);
                 return;
             }
 
@@ -853,7 +883,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     /// <param name="heightsFromFunction">Whether row heights came, or now come, from
     /// <see cref="ItemHeightFor"/>: then they are worked out again.</param>
-    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction)
+    /// <param name="offsetsBefore">The row offsets before the patch, to tell whether they moved.</param>
+    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction, float[]? offsetsBefore)
     {
         _items = items;
         var comparer = EqualityComparer<T>.Default;
@@ -865,14 +896,23 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         DropGathered();
 
         // A height function closes over the rebuilt rows, so its heights are worked out again,
-        // as every patch has always done; the window is realized again so the spacer and the
-        // kept rows take them (without re-making a row whose item did not change). The same when
-        // a list stops using one and every row goes back to ItemHeight.
+        // as every patch has always done. When one moved, the window is realized again so the
+        // spacer and the kept rows take them (without re-making a row whose item did not change),
+        // and the list is laid out again; the same when a list stops using one and every row goes
+        // back to ItemHeight. When none moved there is nothing to redo: a diff list patched by a
+        // rebuild for something beside it laid out itself and everything around it on every key.
         if (heightsFromFunction)
         {
             _offsets = null;
-            _visibleStart = -1;
-            _visibleEnd = -1;
+            EnsureOffsets();
+            if (offsetsBefore is null || _offsets is not { } now || !offsetsBefore.AsSpan().SequenceEqual(now))
+            {
+                _offsets = null;
+                _visibleStart = -1;
+                _visibleEnd = -1;
+                MarkLayoutDirty();
+                MarkPaintDirty();
+            }
         }
     }
 }

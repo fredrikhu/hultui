@@ -25,6 +25,9 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     {
         _pixels = pixels;
         _renderer = renderer;
+        _renderInFrame = RenderInFrame;
+        _prepareInFrame = PrepareInFrame;
+        _skipInFrame = SkipInFrame;
         Interlocked.Increment(ref s_live);
     }
 
@@ -70,7 +73,18 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
 
     // ──── GPU path ────
 
+    /// <summary>The surface of the frame being drawn or served, and the one the target it lent
+    /// is given back to when the sink goes.</summary>
     private IExternalGLSurface? _surface;
+
+    // The frame's GL work runs through three delegates made once, with its inputs and results in
+    // the fields below, so a video frame allocates nothing here. Lambdas over the method's locals
+    // cost a closure and a delegate every frame (144 bytes), made as the method was entered, so a
+    // frame with nothing to draw paid for them too.
+    private readonly Action _renderInFrame, _prepareInFrame, _skipInFrame;
+    private int _frameWidth, _frameHeight;
+    private bool _frameDrew, _frameRendererOwned;
+    private uint _frameFramebuffer, _frameTexture, _frameFormat;
 
     public bool TryRenderFrame(IExternalGLSurface surface, out GpuFrame frame)
     {
@@ -83,62 +97,74 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             Decide(GpuSinkMode.Gpu);
             // The renderer sets up inside the frame, before there is anything to draw:
             // that is what lets a decoder create its GL context ahead of loading.
-            surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
+            surface.RunExternalGL(_prepareInFrame);
         }
         if (!_renderer.TryGetFrameSize(out int width, out int height) || width <= 0 || height <= 0)
         {
             // Nothing to draw at, but possibly a frame to hand over: a producer that waits for
             // it would otherwise wait out its own timeout before it can tell anyone the size.
             if (_renderer.FrameMayBeWaiting)
-                surface.RunExternalGL(() => _renderer.SkipFrame(surface.GetProcAddress));
+                surface.RunExternalGL(_skipInFrame);
             return false;
         }
 
-        bool drew = false;
-        uint framebuffer = 0, texture = 0, format = GpuFrame.Rgba8;
-        bool rendererOwned = false;
-        GpuFrameTarget lentTarget = default;
-
-        surface.RunExternalGL(() =>
-        {
-            // The renderer first: one that cannot composite a plain GL texture lends its own
-            // target, and rendering into that is what keeps the frame on the GPU.
-            //
-            // The sink's own GL entry points are resolved only on the branch that uses them.
-            // A renderer that lends a target needs none of them — and on a Vulkan surface
-            // there is no guarantee the nine functions a texture needs are even reachable
-            // through its resolver.
-            if (surface.TryAcquireFrameTarget(this, width, height, out var lent))
-            {
-                rendererOwned = true;
-                lentTarget = lent;
-                framebuffer = lent.Framebuffer;
-                texture = lent.TextureId;
-                format = lent.InternalFormat;
-                ReleaseTarget();
-            }
-            else
-            {
-                _gl ??= new GLFunctions(surface.GetProcAddress);
-                EnsureTarget(width, height);
-                framebuffer = _framebuffer;
-                texture = _texture;
-                // The sink's own texture is an ordinary 8-bit encoded one, and saying so
-                // explicitly keeps the renderer from being handed a default that claims more.
-                lentTarget = new GpuFrameTarget(framebuffer, texture, GpuFrame.Rgba8);
-            }
-
-            drew = _renderer.Render(surface.GetProcAddress, lentTarget, width, height);
-        });
+        _frameWidth = width;
+        _frameHeight = height;
+        _frameDrew = _frameRendererOwned = false;
+        _frameFramebuffer = _frameTexture = 0;
+        _frameFormat = GpuFrame.Rgba8;
+        surface.RunExternalGL(_renderInFrame);
 
         // A renderer with nothing new keeps the last frame: the target still holds it.
-        if (!drew && !rendererOwned && _texture == 0) return false;
-        if (framebuffer == 0 && texture == 0) return false;
+        if (!_frameDrew && !_frameRendererOwned && _texture == 0) return false;
+        if (_frameFramebuffer == 0 && _frameTexture == 0) return false;
 
-        frame = new GpuFrame(texture, width, height, _renderer.RendersBottomUp, format, rendererOwned,
-            _renderer.ReferenceWhiteNits);
+        frame = new GpuFrame(_frameTexture, width, height, _renderer.RendersBottomUp, _frameFormat,
+            _frameRendererOwned, _renderer.ReferenceWhiteNits);
         return true;
     }
+
+    /// <summary>One frame's GL work, inside <see cref="IExternalGLSurface.RunExternalGL"/>: the
+    /// target, then the renderer's draw into it.</summary>
+    private void RenderInFrame()
+    {
+        var surface = _surface!;
+        int width = _frameWidth, height = _frameHeight;
+        GpuFrameTarget target;
+
+        // The renderer first: one that cannot composite a plain GL texture lends its own
+        // target, and rendering into that is what keeps the frame on the GPU.
+        //
+        // The sink's own GL entry points are resolved only on the branch that uses them.
+        // A renderer that lends a target needs none of them — and on a Vulkan surface
+        // there is no guarantee the nine functions a texture needs are even reachable
+        // through its resolver.
+        if (surface.TryAcquireFrameTarget(this, width, height, out var lent))
+        {
+            _frameRendererOwned = true;
+            target = lent;
+            _frameFramebuffer = lent.Framebuffer;
+            _frameTexture = lent.TextureId;
+            _frameFormat = lent.InternalFormat;
+            ReleaseTarget();
+        }
+        else
+        {
+            _gl ??= new GLFunctions(surface.GetProcAddress);
+            EnsureTarget(width, height);
+            _frameFramebuffer = _framebuffer;
+            _frameTexture = _texture;
+            // The sink's own texture is an ordinary 8-bit encoded one, and saying so
+            // explicitly keeps the renderer from being handed a default that claims more.
+            target = new GpuFrameTarget(_framebuffer, _texture, GpuFrame.Rgba8);
+        }
+
+        _frameDrew = _renderer.Render(surface.GetProcAddress, target, width, height);
+    }
+
+    private void PrepareInFrame() => _renderer.PrepareGL(_surface!.GetProcAddress);
+
+    private void SkipInFrame() => _renderer.SkipFrame(_surface!.GetProcAddress);
 
     /// <summary>
     /// What a draw would do, less the drawing, for a window that is not being drawn: decides
@@ -158,10 +184,10 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         if (_mode == GpuSinkMode.Undecided)
         {
             Decide(GpuSinkMode.Gpu);
-            surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
+            surface.RunExternalGL(_prepareInFrame);
         }
         if (_mode == GpuSinkMode.Gpu && _renderer.FrameMayBeWaiting)
-            surface.RunExternalGL(() => _renderer.SkipFrame(surface.GetProcAddress));
+            surface.RunExternalGL(_skipInFrame);
     }
 
     /// <summary>Drops the sink's own texture and framebuffer, for when the renderer started

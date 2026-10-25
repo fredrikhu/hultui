@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Generic;
 
 namespace HultUI.Core.Reactivity;
@@ -89,11 +90,27 @@ public sealed class Computed<T> : IReactiveSource, IReactiveNode, IDependencyTra
 
     private void NotifySubscribers()
     {
-        if (_subscribers is null) return;
+        // Snapshot before notifying: a subscriber can unsubscribe, subscribe or be disposed while
+        // it is told, and an effect that runs at once reads this computed again, recomputes it
+        // and notifies from inside the walk that told it — the inner notify rents a buffer of its
+        // own. Rented, as Signal's is: a write upstream comes through here, twice when the value
+        // changes (the dirty mark, then the new value), and a List copy cost 64 bytes each time.
+        int count = _subscribers?.Count ?? 0;
+        if (count == 0) return;
 
-        var snapshot = new List<IReactiveNode>(_subscribers);
-        foreach (var subscriber in snapshot)
-            subscriber.NotifyDirty();
+        var snapshot = ArrayPool<IReactiveNode>.Shared.Rent(count);
+        try
+        {
+            _subscribers!.CopyTo(snapshot, 0);
+            for (int i = 0; i < count; i++)
+                snapshot[i].NotifyDirty();
+        }
+        finally
+        {
+            // Cleared on return: a pooled buffer holding the last notified nodes would keep
+            // whole component trees alive until the buffer was next rented.
+            ArrayPool<IReactiveNode>.Shared.Return(snapshot, clearArray: true);
+        }
     }
 
     void IReactiveSource.Subscribe(IReactiveNode subscriber)

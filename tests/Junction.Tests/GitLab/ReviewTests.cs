@@ -319,6 +319,48 @@ public class ReviewTests
         }, handler);
     }
 
+    /// <summary>The rows hear the pointer only while a range is dragged (plan 17, round 4: their
+    /// move handler is passive and listens only then). A move along an idle row draws no frame;
+    /// a drag from the + still grows the range over every row it crosses, and the release opens
+    /// the composer.</summary>
+    [Fact]
+    public void DraggingFromThePlusGrowsTheRangeOverTheRowsCrossed_AndAnIdleMoveDrawsNoFrame()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+
+            var plus = ById(session, "review-plus")!;
+            var box = plus.WindowBorderBox;
+            float x = box.X + box.Width / 2, y = box.Y + box.Height / 2;
+            float rowHeight = plus.Parent!.Parent!.WindowBorderBox.Height;
+
+            // Along the code of a line, nothing pressed: nothing changes, so nothing is drawn.
+            session.Window.MoveMouse(x + 200, y);
+            session.PumpFrames(2);
+            session.Window.MoveMouse(x + 203, y);
+            Assert.False(session.PumpFrame(), "a move along an idle review row drew a frame");
+
+            session.Window.MoveMouse(x, y);
+            session.PumpFrame();
+            session.Window.MouseDown(x, y);
+            session.PumpFrame();
+            int first = app.ReviewCaret;
+            Assert.True(first >= 0, "the press on the + placed no caret");
+            session.Window.MoveMouse(x, y + rowHeight);
+            session.PumpFrame();
+            session.Window.MoveMouse(x, y + 2 * rowHeight);
+            session.PumpFrame();
+            Assert.Equal((first, first + 2), app.ReviewRange);
+
+            session.Window.MouseUp(x, y + 2 * rowHeight);
+            session.PumpUntil(() => ById(session, "review-composer") is not null, TimeSpan.FromSeconds(10));
+            Assert.True(TreeHas(session, "New comment on lines 19–21 (new)"));
+        });
+    }
+
     [Fact]
     public void ARangeStopsWhereTheSideChanges()
     {
@@ -425,6 +467,75 @@ public class ReviewTests
             Assert.Equal($"{Api}/projects/7781/merge_requests/412/discussions/{Thread1}", put.Request.RequestUri!.AbsolutePath);
             Assert.Equal("true", HttpUtility.ParseQueryString(put.Body!)["resolved"]);
         }, handler);
+    }
+
+    /// <summary>A caret or range move keeps the woven rows: the list makes again only the rows
+    /// whose caret or range marks changed — two per key — and keeps every other row and its
+    /// label. Anything else (here: expanding the threads) still makes them all again.</summary>
+    [Fact]
+    public void ACaretMove_MakesTheRowsItMovedBetween_AndKeepsTheRest()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+            session.PumpFrames(4);
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            Assert.Equal(1, app.ReviewCaret);
+
+            // Lines 1-3 are context (19-21, new side), 4 on are deletions: two Shift+Down band the
+            // three, then a plain move clears the band onto line 4, and another moves on.
+            void Step(KeyModifiers mods, int expected, string what)
+            {
+                var before = Rows(session);
+                var caretBefore = ById(session, "review-caret-row");
+                var label = Label(session);
+                int made = app.DiffRowsMade;
+
+                session.Window.PressKey(KeyCode.Down, mods);
+                session.PumpFrames(2);
+
+                Assert.True(app.DiffRowsMade - made == expected,
+                    $"{what}: {app.DiffRowsMade - made} rows made, caret {app.ReviewCaret}, range {app.ReviewRange}");
+                var after = Rows(session);
+                Assert.Equal(before.Count, after.Count);
+                Assert.Equal(before.Count - expected, before.Zip(after).Count(p => ReferenceEquals(p.First, p.Second)));
+                var caret = ById(session, "review-caret-row");
+                Assert.NotNull(caret);
+                Assert.NotSame(caretBefore, caret);
+                Assert.Same(label, Label(session));
+            }
+
+            Step(KeyModifiers.Shift, 2, "Shift+Down from line 1");
+            Step(KeyModifiers.Shift, 2, "Shift+Down from line 2");
+            Assert.Equal((1, 3), app.ReviewRange);
+            Assert.Equal(3, Rows(session).Count(r => r is BoxElement { BackgroundColor: var c } && c == Junction.Theme.Nocturne.Accent900));
+            Step(KeyModifiers.None, 4, "Down out of the band");
+            Assert.Null(app.ReviewRange);
+            Assert.Equal(0, Rows(session).Count(r => r is BoxElement { BackgroundColor: var c } && c == Junction.Theme.Nocturne.Accent900));
+            Step(KeyModifiers.None, 2, "Down");
+            Assert.Equal(5, app.ReviewCaret);
+
+            // Expanding the threads changes what the cards show: the rows are made again.
+            int beforeExpand = app.DiffRowsMade;
+            session.Window.PressKey(KeyCode.E);
+            session.PumpFrames(2);
+            Assert.True(app.DiffRowsMade - beforeExpand > 10, $"{app.DiffRowsMade - beforeExpand} rows made after expanding");
+        });
+    }
+
+    /// <summary>The diff list's realized rows, top to bottom (its first child is the spacer).</summary>
+    private static List<Element> Rows(HeadlessSession session) =>
+        Root(session) is { } root
+            ? LayoutProbe.Descendants<Element>(root, e => e.Key == "diff:" + File).Single().Children.Skip(1).ToList()
+            : [];
+
+    /// <summary>The diff list's item label delegate.</summary>
+    private static object? Label(HeadlessSession session)
+    {
+        var list = LayoutProbe.Descendants<Element>(Root(session)!, e => e.Key == "diff:" + File).Single();
+        return list.GetType().GetProperty("AccessibleLabel")!.GetValue(list);
     }
 
     // ── Hosting ──────────────────────────────────────────────────────────────────────

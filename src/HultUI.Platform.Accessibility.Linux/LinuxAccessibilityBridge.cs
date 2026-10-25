@@ -19,7 +19,8 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
 /// focused state of its two objects in it, and a list's selection move
 /// (<see cref="ApplyPatchedProperties"/>) the selected state of its two items, all on the UI
-/// thread. The
+/// thread; a caret move in text made on request is told through the same call, with nothing in
+/// the snapshot to change. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
@@ -58,6 +59,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     // status, which is always on. Written on the watcher's thread, read on the UI thread.
     private readonly IAtSpiStatus? _status;
     private volatile bool _statusOn;
+    // Set once the watch is set up: the first status, read while the bridge is made, wakes nobody.
+    private volatile bool _statusWatched;
     private volatile Snapshot _snapshot = Snapshot.Empty;
     private bool _hasBuilt;
     private string? _focusedPath;
@@ -127,19 +130,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (status is not null) WatchStatus(_status = status);
     }
 
+    // The watch subscribes first and then reads (AtSpiStatusReader.Watch). The status was read
+    // here and the watch subscribed after it: a change in between was never read.
     private void WatchStatus(IAtSpiStatus status)
     {
-        _statusOn = status.ReadStatus();
-        AccessibilityClients.Report(_statusOn);
         status.WatchStatus(on =>
         {
             _statusOn = on;
             AccessibilityClients.Report(on);
-            // On a thread-pool thread (AtSpiStatusReader): the window's loop, which reads
-            // IsActive in its frames, is waiting for a deadline or a wake, and turning on is
+            // A change, on a thread-pool thread (AtSpiStatusReader): the window's loop, which
+            // reads IsActive in its frames, is waiting for a deadline or a wake, and turning on is
             // what builds and publishes the whole tree.
-            _actionHost?.ActiveChanged();
+            if (_statusWatched) _actionHost?.ActiveChanged();
         });
+        _statusWatched = true;
     }
 
     /// <summary>A childless application root, valid from Embed until the first build.</summary>
@@ -242,7 +246,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // order matters. The cache-adds came first and one children-changed:add per parent after
         // them, and an object added anywhere but at the end took a sibling's place: [A, B, C] with
         // X inserted after A read [A, X, C]; with X and Y, [A, X, Y]. Now the gone objects go
-        // first, then each added object is put in its place, then the cache-adds fill those places.
+        // first, then each added object is put in its place, and each child of a reordered parent
+        // that is out of place (plan 17, round 4: a reorder sent nothing, and the client kept the
+        // old order), then the cache-adds fill those places.
 
         // Gone objects only. One the new snapshot still has moved to another parent (a box
         // that gained a name takes its children): the diff removes it from the old parent and
@@ -263,7 +269,12 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!firstBuild)
         {
             EmitRemovedChildNudges(diff.BoundaryRemoved());
-            EmitAddedChildNudges(diff.BoundaryAdded());
+            // A reordered parent's children are all put in place by its own pass, added ones with
+            // them; every other parent's added children by theirs.
+            HashSet<ElementId>? reordered = null;
+            foreach (var parent in diff.Reordered) (reordered ??= []).Add(parent.ElementId);
+            EmitAddedChildNudges(diff.BoundaryAdded(), reordered);
+            foreach (var parent in diff.Reordered) EmitReorderNudges(previous, parent);
         }
 
         // Cache-add is genuinely per-node: it populates the AT client's object cache (the first
@@ -279,11 +290,6 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             DebugSignalsEmitted++;
         }
 
-        // diff.Reordered (same children, new order) sends nothing: a client that reads the
-        // children from the bus gets the new order, but a caching one keeps the old order until
-        // something else changes the list (seen live, plan 17 round 3 step 15; not approved as an
-        // added signal yet).
-
         if (!firstBuild)
             foreach (var change in diff.PropertyChanged)
                 if (EmitPropertyChange(change)) DebugSignalsEmitted++;
@@ -296,7 +302,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     // end, where the client grows the list. A bulk append stays one signal; a run inserted at the
     // front or in the middle is one signal per child. The gone children have left the client's
     // list already (above), so each index is the child's place among those there before it.
-    private void EmitAddedChildNudges(List<AddedNode> boundary)
+    // A reordered parent's added children are left to EmitReorderNudges, which puts them with the rest.
+    private void EmitAddedChildNudges(List<AddedNode> boundary, HashSet<ElementId>? reordered)
     {
         if (boundary.Count == 0) return;
         var added = new HashSet<ElementId>(boundary.Count);
@@ -305,7 +312,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         Dictionary<ElementId, int>? runStarts = null;
         foreach (var entry in boundary)
         {
-            if (entry.Parent is not { } parent) continue;
+            if (entry.Parent is not { } parent || reordered?.Contains(parent.ElementId) == true) continue;
             string childPath = PathOf(entry.Node);
             if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
             runStarts ??= [];
@@ -318,6 +325,64 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             }
             if (acc.IndexInParent > runStart) continue;
             _signals!.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
+            DebugSignalsEmitted++;
+        }
+    }
+
+    /// <summary>
+    /// A parent whose children changed order (added and gone ones besides, maybe): one
+    /// children-changed:add per child that is not where a caching client's list has it, in the
+    /// order of the parent's children, each naming its index, so the list ends in the new order. A
+    /// reorder sent nothing, and libatspi kept the old order until something else changed the list
+    /// (seen live in WSL: all seven reorder shapes read the old order). What the client holds is the
+    /// previous snapshot's children less those that left this parent (their cache-remove or
+    /// children-changed:remove went first); each signal moves its child to its index, so the
+    /// children before it are in place and the rest keep their old order: a child is in place when
+    /// it is the first of the old order not yet put. At most one signal per child but the last;
+    /// [A, B, C] reversed is two. Added children are put the same way, except the run that ends the
+    /// parent's children: one signal for its first, as in <see cref="EmitAddedChildNudges"/>, and
+    /// the cache-adds of the rest land past the end.
+    /// </summary>
+    private void EmitReorderNudges(Snapshot previous, AccessibilityNode parent)
+    {
+        string parentPath = PathOf(parent);
+        if (!previous.ByPath.TryGetValue(parentPath, out var before)
+            || !_snapshot.ByPath.TryGetValue(parentPath, out var now)) return;
+        var kids = now.ChildPaths;
+
+        // The client's list is the old order less the children that left this parent. Those still
+        // waiting to be put, as each is put the set loses it: one set, no list.
+        var old = before.ChildPaths;
+        var waiting = new HashSet<string>(old.Count);
+        foreach (var path in old)
+            if (_snapshot.ByPath.TryGetValue(path, out var child) && child.ParentPath == parentPath)
+                waiting.Add(path);
+        // Where the run of children new to this parent that ends its children starts.
+        int runStart = kids.Count;
+        while (runStart > 0 && !waiting.Contains(kids[runStart - 1])) runStart--;
+
+        int next = 0;   // the first child of the client's list not yet put
+        for (int i = 0; i < kids.Count; i++)
+        {
+            string path = kids[i];
+            if (i >= runStart)
+            {
+                if (i == runStart) Emit(path, i);
+                break;
+            }
+            while (next < old.Count && !waiting.Contains(old[next])) next++;
+            if (next < old.Count && old[next] == path)
+            {
+                next++;   // already there
+                continue;
+            }
+            waiting.Remove(path);
+            Emit(path, i);
+        }
+
+        void Emit(string path, int index)
+        {
+            _signals!.EmitChildrenChanged(parentPath, path, index, isAdd: true);
             DebugSignalsEmitted++;
         }
     }
@@ -376,9 +441,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
-    /// item that had the selection and the one that has it. Their objects in the published
-    /// snapshot take the new state and the bridge sends what a diff would have
-    /// (state-changed:selected), with no new snapshot. Anything else is applied as a diff.
+    /// item that had the selection and the one that has it; a caret or selection move in text made
+    /// on request (the rich text editor's); a leaf's change of its own name, description, value,
+    /// range, toggle or expanded state, whose node the window made again and put in its place. Their
+    /// objects in the published snapshot take the new state (a text's object reads its text through
+    /// its source, so it has none to take) and the bridge sends what a diff would have
+    /// (state-changed:selected; text-caret-moved and text-selection-changed; accessible-name,
+    /// accessible-description, accessible-value, state-changed:checked or expanded), with no new
+    /// snapshot. Anything else is applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {
@@ -386,8 +456,19 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         var snapshot = _snapshot;
         bool inPlace = _hasBuilt && patch.Added.Count == 0 && patch.Removed.Count == 0 && patch.Reordered.Count == 0;
         foreach (var change in patch.PropertyChanged)
-            inPlace &= change.PropertyName == AccessibilityProperties.IsSelected
-                && snapshot.ByPath.ContainsKey(PathOf(change.Node));
+        {
+            inPlace &= snapshot.ByPath.ContainsKey(PathOf(change.Node))
+                && change.PropertyName switch
+                {
+                    AccessibilityProperties.IsSelected => true,
+                    AccessibilityProperties.TextSelection => change.Node.TextSource is not null,
+                    // Not the application's own object, which is named as the application.
+                    AccessibilityProperties.Name or AccessibilityProperties.Description or AccessibilityProperties.Value
+                        or AccessibilityProperties.RangeValue or AccessibilityProperties.IsToggled
+                        or AccessibilityProperties.IsExpanded => change.Node.Parent is not null && change.Node.TextSource is null,
+                    _ => false,
+                };
+        }
         if (!inPlace)
         {
             ApplyChanges(patch, root);
@@ -396,7 +477,19 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         foreach (var change in patch.PropertyChanged)
         {
             string path = PathOf(change.Node);
-            snapshot.ByPath[path].Selected = change.Node.IsSelected == true;
+            var acc = snapshot.ByPath[path];
+            var node = change.Node;
+            switch (change.PropertyName)
+            {
+                case AccessibilityProperties.IsSelected: acc.Selected = node.IsSelected == true; break;
+                case AccessibilityProperties.Name: acc.Name = node.Name ?? ""; break;
+                case AccessibilityProperties.Description: acc.Description = node.Description ?? ""; break;
+                // As the snapshot takes them (AtSpiAccessible.From): a password's bullets, never its text.
+                case AccessibilityProperties.Value: acc.Value = node.Value; break;
+                case AccessibilityProperties.RangeValue: acc.Range = node.Range; break;
+                case AccessibilityProperties.IsToggled: acc.Toggled = node.IsToggled; break;
+                case AccessibilityProperties.IsExpanded: acc.Expanded = node.Expanded; break;
+            }
             if (EmitPropertyChange(change, path)) DebugSignalsEmitted++;
         }
     }
@@ -463,17 +556,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 return true;
             case AccessibilityProperties.Text:
             {
-                var (deleted, inserted) = AtSpiText.Difference(change.Previous?.Text?.Text ?? "", change.Node.Text?.Text ?? "");
+                // From the versions' characters where the text is made on request: a text area's
+                // version hands over its string, where making the text made the tables of its lines
+                // and paragraphs on every keystroke (the rich text editor's makes its text still).
+                var (deleted, inserted) = AtSpiText.Difference(CharactersOf(change.Previous) ?? "", CharactersOf(change.Node) ?? "");
                 if (deleted is { } d) _signals!.EmitTextChanged(path, insert: false, d.Offset, d.Text);
                 if (inserted is { } i) _signals!.EmitTextChanged(path, insert: true, i.Offset, i.Text);
                 return deleted is not null || inserted is not null;
             }
             case AccessibilityProperties.TextSelection:
             {
-                var (before, after) = (change.Previous?.Text, change.Node.Text);
-                if (after is not null && after.Caret >= 0 && before?.Caret != after.Caret)
-                    _signals!.EmitTextCaretMoved(path, after.Caret);
-                if (before?.SelectionStart != after?.SelectionStart || before?.SelectionEnd != after?.SelectionEnd)
+                var (before, after) = (SelectionOf(change.Previous), SelectionOf(change.Node));
+                if (after is { Caret: >= 0 } now && before?.Caret != now.Caret)
+                    _signals!.EmitTextCaretMoved(path, now.Caret);
+                if (before?.Start != after?.Start || before?.End != after?.End)
                     _signals!.EmitTextSelectionChanged(path);
                 return true;
             }
@@ -481,6 +577,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 return false;
         }
     }
+
+    /// <summary>
+    /// A node's caret and selection as its text has them. From the version of a text made on
+    /// request (the rich text editor's), which holds the offsets: making the text to read them made
+    /// the whole document's text, its lines and its boxes on every caret move (475 KB at 5,000
+    /// blocks), for two numbers. Null for a node with no text.
+    /// </summary>
+    private static (int Caret, int Start, int End)? SelectionOf(AccessibilityNode? node) =>
+        node?.TextVersion is { } version ? (version.Caret, version.SelectionStart, version.SelectionEnd)
+        : node?.Text is { } text ? (text.Caret, text.SelectionStart, text.SelectionEnd)
+        : null;
+
+    private static string? CharactersOf(AccessibilityNode? node) =>
+        node?.TextVersion is { } version ? version.Characters : node?.Text?.Text;
 
     /// <summary>An AT-SPI announcement from the element's object, or the application's.</summary>
     public void Announce(AccessibilityNode? source, string text, AnnouncementPoliteness politeness)

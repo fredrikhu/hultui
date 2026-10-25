@@ -48,7 +48,7 @@ public class StyleMarkOnceTests
         e.Children.SelectMany(All).Prepend(e);
 
     [Fact]
-    public void ARebuild_WalksEachElementOnce_EveryPatchBelowTheTopFindsItsSubtreeMarked()
+    public void ARebuild_MarksEachElementItPatches_AndWalksNoSubtree()
     {
         var root = Box.New();
         var existing = Tree(depth: 7);
@@ -59,12 +59,15 @@ public class StyleMarkOnceTests
         ProbeBox.Patched = ProbeBox.FoundMarked = 0;
         TreeDiffer.Reconcile(root, existing, Tree(depth: 7));
 
-        // The top patch walks all 382 elements; the 254 box patches below it find their
-        // subtrees walked already and stop where they start. Before, each walked its own again.
+        // Each patch marks the element it patched, and its ancestors so the style pass reaches it
+        // (a walk that stops at the first one marked): all 382 are marked, each by its own patch,
+        // and none claims a marked subtree. Until plan 17 round 4 the top patch walked all 382
+        // and the 254 box patches below it found their subtrees walked already; the style pass
+        // then resolved every element under a patched one, patched or not.
         Assert.Equal(255, elements);
         Assert.Equal(elements, ProbeBox.Patched);
-        Assert.Equal(elements - 1, ProbeBox.FoundMarked);
-        Assert.All(All(existing), e => Assert.Equal(DirtyFlags.Style | DirtyFlags.StyleSubtree,
+        Assert.Equal(0, ProbeBox.FoundMarked);
+        Assert.All(All(existing), e => Assert.Equal(DirtyFlags.Style,
             e.DirtyFlags & (DirtyFlags.Style | DirtyFlags.StyleSubtree)));
     }
 
@@ -102,12 +105,13 @@ public class StyleMarkOnceTests
         ClearAll(elsewhere);
         Assert.Equal(10f, c.Children[0].ResolvedInherited.FontSize);
 
-        // A patch at the root marks it with everything under it; then C, unmarked, is moved in
-        // under A. Moving never marked an element, and still does not; but A's claim is over,
-        // and so is the root's, so the next mark from either comes down to C.
+        // A mark at the root marks it with everything under it; then C, unmarked, is moved in
+        // under A. Under another parent it is marked for style itself (plan 17 round 4: a patch
+        // no longer marks the subtree it lands in), not its subtree; A's claim is over, and so is
+        // the root's, so the next mark from either comes down to C's children.
         root.MarkStyleDirty();
         Move(a, c, how);
-        Assert.Equal(DirtyFlags.None, c.DirtyFlags & DirtyFlags.Style);
+        Assert.Equal(DirtyFlags.Style, c.DirtyFlags & (DirtyFlags.Style | DirtyFlags.StyleSubtree));
         Assert.Equal(DirtyFlags.None, a.DirtyFlags & DirtyFlags.StyleSubtree);
         Assert.Equal(DirtyFlags.None, root.DirtyFlags & DirtyFlags.StyleSubtree);
         Assert.NotEqual(DirtyFlags.None, root.Children[1].DirtyFlags & DirtyFlags.StyleSubtree);

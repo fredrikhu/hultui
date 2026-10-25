@@ -71,11 +71,19 @@ internal static unsafe class WindowsSizeMoveWatch
     private const uint WM_NCDESTROY = 0x0082;
     private const nuint SubclassId = 0x48554C53; // "HULS"
 
-    private sealed class Watch(nint hwnd, Action<SizeMoveLoop> entered, Action exited) : IDisposable
+    /// <summary>
+    /// The message a GPU source's request for a frame is posted as while the window is in the loop
+    /// (<see cref="Core.Rendering.LiveFrameRequests"/>): the loop dispatches it, and the window draws.
+    /// Registered, so no other code's private message can be taken for it.
+    /// </summary>
+    public static readonly uint LiveFrameMessage = RegisterWindowMessageW("HultUI.LiveFrame") is var m and not 0 ? m : 0x8000 + 0x3A1;
+
+    private sealed class Watch(nint hwnd, Action<SizeMoveLoop> entered, Action exited, Action? liveFrame) : IDisposable
     {
         public readonly SizeMoveTracker Tracker = new();
         public readonly Action<SizeMoveLoop> Entered = entered;
         public readonly Action Exited = exited;
+        public readonly Action? LiveFrame = liveFrame;
         private GCHandle _self;
 
         public bool Hook()
@@ -96,17 +104,25 @@ internal static unsafe class WindowsSizeMoveWatch
     }
 
     /// <summary>Calls <paramref name="entered"/> when a loop starts and <paramref name="exited"/>
-    /// when it ends, after SDL has seen each. Null when the window could not be subclassed.</summary>
-    public static IDisposable? Install(nint hwnd, Action<SizeMoveLoop> entered, Action exited)
+    /// when it ends, after SDL has seen each, and <paramref name="liveFrame"/> for each
+    /// <see cref="LiveFrameMessage"/>. Null when the window could not be subclassed.</summary>
+    public static IDisposable? Install(nint hwnd, Action<SizeMoveLoop> entered, Action exited, Action? liveFrame = null)
     {
         if (hwnd == 0) return null;
-        var watch = new Watch(hwnd, entered, exited);
+        var watch = new Watch(hwnd, entered, exited, liveFrame);
         return watch.Hook() ? watch : null;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static nint Proc(nint hwnd, uint message, nint wParam, nint lParam, nuint id, nuint data)
     {
+        if (message == LiveFrameMessage)
+        {
+            // Ours alone: nothing below needs to see it.
+            try { (GCHandle.FromIntPtr((nint)data).Target as Watch)?.LiveFrame?.Invoke(); }
+            catch (Exception ex) { Console.Error.WriteLine($"[HultUI] live frame failed: {ex}"); }
+            return 0;
+        }
         if (message is not (WM_SYSCOMMAND or WM_ENTERSIZEMOVE or WM_EXITSIZEMOVE or WM_NCDESTROY)
             || GCHandle.FromIntPtr((nint)data).Target is not Watch watch)
             return DefSubclassProc(hwnd, message, wParam, lParam);
@@ -156,4 +172,12 @@ internal static unsafe class WindowsSizeMoveWatch
 
     [DllImport("comctl32.dll", ExactSpelling = true)]
     private static extern nint DefSubclassProc(nint hwnd, uint message, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+    private static extern uint RegisterWindowMessageW(string name);
+
+    /// <summary>Posts <see cref="LiveFrameMessage"/>: returns at once, from any thread.</summary>
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessageW(nint hwnd, uint message, nint wParam, nint lParam);
 }

@@ -435,11 +435,12 @@ public partial class JunctionApp
             SetCommitSelection(commits[i].Hash);
         }
         _pendingScrollToSelected = true;
-        // Rerender, not MarkDirty: changing the selected commit changes the Files
+        // A tracked rebuild, not MarkDirty: changing the selected commit changes the Files
         // view's per-commit tree/content loader KEYS, so the next build activates new
         // AsyncLoader instances — an untracked rebuild would leave them unsubscribed
-        // and the browser stuck on "Loading…" (see OnExternalChange).
-        Rerender();
+        // and the browser stuck on "Loading…" (see OnExternalChange). The view's alone: a
+        // selection is nothing the chrome shows.
+        RerenderView();
     }
 
     /// <summary>Ctrl+Space: toggles the focused commit in/out of the selection
@@ -779,7 +780,7 @@ public partial class JunctionApp
         input.PlaceholderText(_contentRegex
                 ? "Find commits whose diff matches this regex… (Enter)"
                 : "Find commits that added or removed this text… (Enter)")
-            .OnTextChanged(q => { _contentQuery = q; MarkDirty(); })
+            .OnTextChanged(q => { _contentQuery = q; MarkViewDirty(); })
             .Height(Dimension.Px(32)).FlexGrow(1).MaxWidth(460)
             .TextColor(Nocturne.Text).WithRef(_contentSearchRef);
         input.On<KeyDownEvent>(ContentSearchKey);
@@ -852,7 +853,7 @@ public partial class JunctionApp
     {
         _historyQuery = q;
         _pendingScrollToSelected = true;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private void HistorySearchKey(KeyDownEvent e)

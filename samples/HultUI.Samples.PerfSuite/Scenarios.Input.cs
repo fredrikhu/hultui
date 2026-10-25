@@ -198,6 +198,85 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("input/key press, down and up 70 ms apart, real loop",
+            "Down pressed and let go 70 ms later, as a keyboard sends them, in a 1,000-commit list on item rows beside a details pane the same Build makes again, an app key-down handler on the window's root moving the selection: Application.Run's own loop on the virtual clock from the press until 70 ms after the release (all under build); reports the frames a key press draws",
+            ctx =>
+            {
+                var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows: true, details: true);
+                int frames = 0;
+                var root = Flex.Column().FlexGrow(1).Children(
+                    pane.Mount().FlexGrow(1),
+                    Canvas.New(_ => frames++).Width(Dimension.Px(1)).Height(Dimension.Px(1)));
+                root.On<KeyDownEvent>(e =>
+                {
+                    if (e.Key == KeyCode.Down) { pane.Move(1); e.StopPropagation = true; }
+                });
+                ctx.Mount(root);
+                pane.Select(pane.LastWholeRow());
+                pane.Open(pane.Selected);
+                ctx.Session.PumpFrame(TimeSpan.FromMilliseconds(120));
+                int first = pane.Selected, drawn = 0;
+                var apart = TimeSpan.FromMilliseconds(70);
+                return new Op
+                {
+                    Run = _ =>
+                    {
+                        int f0 = frames, events = 0;
+                        ctx.Window.KeyDown(KeyCode.Down);
+                        // The release arrives 70 ms after the press; the run ends 70 ms after it.
+                        ctx.Session.RunLoop(() => events >= 2, eventEvery: apart, onEvent: () =>
+                        {
+                            if (++events == 1) HultUI.Application.InvokeOnMainThread(() => ctx.Window.KeyUp(KeyCode.Down));
+                        });
+                        drawn = frames - f0;
+                    },
+                    Frames = 0,
+                    Figure = () => drawn,
+                    FigureUnit = "frames/press",
+                    Check = step => drawn < 1 ? "the key press drew no frame" : pane.Verify(first + step + 1),
+                };
+            });
+
+        yield return new Scenario("input/wheel over a list that cannot scroll, real loop",
+            "Twenty wheel notches 16 ms apart over a pane of 8 rows that has nothing to scroll, beside a 1,000-row pane, as over a short folder in a two-pane file manager: Application.Run's own loop on the virtual clock (all under build); reports the frames a notch draws",
+            ctx =>
+            {
+                var shortPane = VirtualListElement<RowItem>.New().ItemHeight(30).RenderWith(RenderVirtualRow)
+                    .Items(Models(ctx.Rng, 8)).FlexGrow(1);
+                int heard = 0, frames = 0;
+                // Passive: counting the notches must not itself ask for a frame.
+                shortPane.OnPassive<ScrollEvent>(_ => heard++);
+                ctx.Mount(Flex.Column().FlexGrow(1).Children(
+                    Flex.Row().FlexGrow(1).AlignItems(AlignItems.Stretch).Children(
+                        shortPane,
+                        VirtualRows(ctx.Rng, 1_000).FlexGrow(1)),
+                    Canvas.New(_ => frames++).Width(Dimension.Px(1)).Height(Dimension.Px(1))));
+                double perNotch = 0;
+                int heardInStep = 0;
+                return new Op
+                {
+                    Run = _ =>
+                    {
+                        var box = shortPane.WindowBorderBox;
+                        float x = box.X + box.Width / 2, y = box.Y + 45;
+                        int f0 = frames, h0 = heard, events = 0;
+                        // The 21st event only ends the run, 16 ms after the last notch: time for its frame.
+                        ctx.Session.RunLoop(() => events > 20, eventEvery: TimeSpan.FromMilliseconds(16), onEvent: () =>
+                        {
+                            float delta = ++events % 2 == 0 ? 1 : -1;
+                            if (events <= 20) HultUI.Application.InvokeOnMainThread(() => ctx.Window.Wheel(x, y, 0, delta));
+                        });
+                        perNotch = (frames - f0) / 20.0;
+                        heardInStep = heard - h0;
+                    },
+                    Frames = 0,
+                    Figure = () => perNotch,
+                    FigureUnit = "frames/notch",
+                    Check = _ => heardInStep < 19 ? $"the pane heard {heardInStep} notches of 20"
+                        : shortPane.ScrollOffsetY != 0 ? "the short pane scrolled" : null,
+                };
+            });
+
         yield return new Scenario("input/splitter drag, 1 kHz mouse, real loop",
             "Drag a PaneSplitter between two lists of 40 rows its owner rebuilds at the new size, the pointer moving every millisecond as a 1,000 Hz mouse does: Application.Run's own loop on the virtual clock for 10 frames, press to release (all under build); reports the owner's rebuilds per frame drawn",
             ctx =>

@@ -70,6 +70,11 @@ public static class StyleResolver
         // elements, kept it for good. A colour or decoration changes nothing measured.
         if (!SameMetrics(element.ResolvedInherited, resolved))
             element.MarkLayoutDirty();
+        // The children inherit what this resolved to: when it changed, each is resolved again;
+        // when it did not, only the ones marked for style are. A rebuild marks only the elements
+        // it patched (Element.MarkStyleDirtySelf), so a kept list row, a persistent part or a
+        // child component under an unchanged parent is left as it was.
+        bool changed = !element.ResolvedInherited.Equals(resolved);
         element.ResolvedInherited = resolved;
 
         // By index: foreach over the Children interface boxes an enumerator per container.
@@ -81,7 +86,7 @@ public static class StyleResolver
             child.OverlayHost = element.OverlayHost;
             child.FocusManager = element.FocusManager;
 
-            if ((child.DirtyFlags & DirtyFlags.Style) != 0)
+            if (changed || (child.DirtyFlags & DirtyFlags.Style) != 0)
                 ResolveRecursive(child, resolved, theme);
         }
     }

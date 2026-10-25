@@ -24,13 +24,15 @@ using Window = FlaUI.Core.AutomationElements.Window;
 [Collection("ui")] // never run UI automation tests in parallel
 public sealed class AccessibilitySampleTests : IDisposable
 {
+    private readonly ForegroundGuard _guard;
     private readonly Application _app;
     private readonly UIA3Automation _automation;
     private readonly Window _window;
 
     public AccessibilitySampleTests()
     {
-        _app = Application.Launch(SamplePath.Accessibility());
+        _guard = ForegroundGuard.ForSamples();
+        _app = _guard.LaunchSample(SamplePath.Accessibility());
         _automation = new UIA3Automation();
         _window = _app.GetMainWindow(_automation, TimeSpan.FromSeconds(15))
             ?? throw new InvalidOperationException("sample window did not appear");
@@ -192,9 +194,9 @@ public sealed class AccessibilitySampleTests : IDisposable
 
         // Shrink the width by 200px from the right (SWP_NOMOVE keeps the top-left
         // corner fixed). The custom-frame window exposes no Transform pattern, so
-        // drive the resize through Win32 directly.
+        // drive the resize through Win32 directly — without activating the window.
         Assert.True(
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, width - 200, height, SWP_NOMOVE | SWP_NOZORDER),
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, width - 200, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE),
             "SetWindowPos failed");
 
         Retry.WhileFalse(
@@ -208,6 +210,7 @@ public sealed class AccessibilitySampleTests : IDisposable
         _automation.Dispose();
         try { _app.Close(); } catch { /* best effort */ }
         _app.Dispose();
+        _guard.Dispose();
     }
 
     // ── Win32 window resize (the custom frame has no UIA Transform pattern) ──
@@ -217,6 +220,7 @@ public sealed class AccessibilitySampleTests : IDisposable
 
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

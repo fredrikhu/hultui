@@ -26,7 +26,8 @@ public partial class JunctionApp
         _ => _diffFull ? _diffFind : null,
     };
 
-    private FindBar NewFindBar(string placeholder, Func<Element?> body, Action reveal) => new(MarkDirty)
+    // The view's: a find bar searches the text on screen, which is nothing the chrome shows.
+    private FindBar NewFindBar(string placeholder, Func<Element?> body, Action reveal) => new(MarkViewDirty)
     {
         Placeholder = placeholder,
         Body = body,

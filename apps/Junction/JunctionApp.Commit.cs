@@ -546,10 +546,10 @@ public partial class JunctionApp
         var node = _commitFileRows[index];
         _commitCursorPath = node.Path;
         _pendingScrollToSelected = true;
-        if (node.IsFolder || node.Path == _selectedFilePath) { MarkDirty(); return true; }
+        if (node.IsFolder || node.Path == _selectedFilePath) { MarkViewDirty(); return true; }
         _selectedFilePath = node.Path;
-        // Rerender: selecting an image file activates a new per-file image-diff loader.
-        Rerender();
+        // Tracked: selecting an image file activates a new per-file image-diff loader.
+        RerenderView();
         return true;
     }
 

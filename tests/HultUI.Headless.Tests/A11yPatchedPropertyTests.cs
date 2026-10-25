@@ -25,7 +25,10 @@ namespace HultUI.Headless.Tests;
 /// Play/Pause canvas. A control's label (a check box's, a radio button's, a switch's) was told only
 /// by the layout refresh its new size happened to bring, up to 100 ms late, and never when the
 /// size did not change. Each now tells the window when it changes, as a check box's toggle does,
-/// and the next frame tells the reader: exactly that change, on both bridges.
+/// and the next frame tells the reader: exactly that change, on both bridges. A button's
+/// <see cref="ButtonElement.IsEnabled"/> marked only its style: set on the live button (a Ref write)
+/// it was never told, and through its owner's rebuild only by the layout refresh its patch happened
+/// to bring (plan 17, round 4).
 /// </summary>
 public class A11yPatchedPropertyTests
 {
@@ -77,6 +80,19 @@ public class A11yPatchedPropertyTests
         public void Rebuild() => MarkDirty();
     }
 
+    /// <summary>A component whose build turns its button on or off from a field.</summary>
+    private sealed class Toolbar : Component
+    {
+        public string Status = "Draft";
+        public bool Enabled = true;
+        public readonly Ref<ButtonElement> Save = new();
+
+        public override Element Build() =>
+            Flex.Column().Children(TextB.New(Status), Button.New("Save").Enabled(Enabled).WithRef(Save));
+
+        public void Rebuild() => MarkDirty();
+    }
+
     /// <summary>One property changed on its own: what to mount, what changes, and which element's
     /// node tells it.</summary>
     private sealed record Scene(Element Root, Element Target, Action Change)
@@ -89,6 +105,7 @@ public class A11yPatchedPropertyTests
     {
         "name", "description", "expanded", "collapsed", "canvas name", "name from Name", "checkbox label",
         "radio label", "switch label", "patched name", "patched description", "patched expanded",
+        "button disabled", "button enabled", "patched button disabled", "patched button enabled",
     };
 
     private static Scene Make(string which)
@@ -160,6 +177,27 @@ public class A11yPatchedPropertyTests
                     Bump = () => { panel.Status += "!"; panel.Rebuild(); },
                 };
             }
+            case "button disabled" or "button enabled":
+            {
+                // Set on the live button, as an app holding it in a Ref does.
+                bool on = which == "button enabled";
+                var button = Button.New("Save").Enabled(!on);
+                return new Scene(Column(button), button, () => button.IsEnabled = on);
+            }
+            case "patched button disabled" or "patched button enabled":
+            {
+                bool on = which == "patched button enabled";
+                var toolbar = new Toolbar { Enabled = !on };
+                var root = toolbar.Mount();
+                return new Scene(root, toolbar.Save.Current!, () =>
+                {
+                    toolbar.Enabled = on;
+                    toolbar.Rebuild();
+                })
+                {
+                    Bump = () => { toolbar.Status += "!"; toolbar.Rebuild(); },
+                };
+            }
             default:
                 throw new ArgumentOutOfRangeException(nameof(which));
         }
@@ -170,10 +208,21 @@ public class A11yPatchedPropertyTests
     {
         "description" or "patched description" => UiaInterop.UIA_HelpTextPropertyId,
         "expanded" or "collapsed" or "patched expanded" => UiaInterop.UIA_ExpandCollapseExpandCollapseStatePropertyId,
+        "button disabled" or "button enabled" or "patched button disabled" or "patched button enabled"
+            => UiaInterop.UIA_IsEnabledPropertyId,
         _ => UiaInterop.UIA_NamePropertyId,
     };
 
     /// <summary>What AT-SPI sends for the change, on the target's object.</summary>
+    private static string[] AtSpiLines(string which, ElementId target) => which switch
+    {
+        "button disabled" or "patched button disabled" =>
+            [$"state-changed:enabled {target.Value} 0", $"state-changed:sensitive {target.Value} 0"],
+        "button enabled" or "patched button enabled" =>
+            [$"state-changed:enabled {target.Value} 1", $"state-changed:sensitive {target.Value} 1"],
+        _ => [AtSpiLine(which, target)],
+    };
+
     private static string AtSpiLine(string which, ElementId target) => which switch
     {
         "name" => $"property-change:accessible-name {target.Value} Inbox (1)",
@@ -228,7 +277,7 @@ public class A11yPatchedPropertyTests
         scene.Change();
         session.PumpFrame();
 
-        Assert.Equal([AtSpiLine(which, scene.Target.Id)], signals.Lines);
+        Assert.Equal(AtSpiLines(which, scene.Target.Id), signals.Lines);
     }
 
     [WindowsTheory]
@@ -276,15 +325,16 @@ public class A11yPatchedPropertyTests
     }
 
     [Fact]
-    public void AChangeOnItsOwn_BuildsOneTree_AndANoChangeSetBuildsNone()
+    public void AChangeOnItsOwn_IsToldOnce_AndANoChangeSetTellsNothing()
     {
         using var session = HeadlessSession.Create(800, 600);
-        session.Window.InstallAccessibilityBridge();
+        var bridge = session.Window.InstallAccessibilityBridge();
         var box = Box.New().Width(Dimension.Px(120)).Height(Dimension.Px(24)).AccessibleName("Inbox (0)").AutomationId("inbox");
         Mount(session, new Scene(Flex.Column().Children(TextB.New("Status"), box), box, () => { }));
         int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
 
-        // The same values again: nothing changed, and nothing is built.
+        // The same values again: nothing changed, and nothing is built or told.
         box.AccessibleName = "Inbox (0)";
         box.AutomationId = "inbox";
         box.Role = AccessibilityRole.None;
@@ -292,8 +342,17 @@ public class A11yPatchedPropertyTests
         box.AccessibleExpanded = null;
         session.PumpFrame();
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Empty(bridge.Diffs);
 
+        // A leaf's own name: its node is made again and patched in (plan 17, round 4), no tree built.
         box.AccessibleName = "Inbox (1)";
+        session.PumpFrame();
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        var change = Assert.Single(Assert.Single(bridge.Diffs).PropertyChanged);
+        Assert.Equal((box.Id, AccessibilityProperties.Name, "Inbox (1)"), (change.Node.ElementId, change.PropertyName, change.Node.Name));
+
+        // Its automation id is not a leaf property: the tree is built for it.
+        box.AutomationId = "inbox-1";
         session.PumpFrame();
         Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
     }

@@ -32,10 +32,9 @@ internal interface IAtSpiSignals
 [SupportedOSPlatform("linux")]
 internal interface IAtSpiStatus
 {
-    /// <summary>The status now.</summary>
-    bool ReadStatus();
-
-    /// <summary>Calls <paramref name="changed"/> with the status, on any thread, whenever it changes.</summary>
+    /// <summary>Calls <paramref name="changed"/> with the status now and then whenever it changes,
+    /// on any thread: it watches for changes first, then reads the status, so a change between the
+    /// two is not lost. The first read normally reports before this returns.</summary>
     void WatchStatus(Action<bool> changed);
 }
 
@@ -52,6 +51,29 @@ internal sealed class AtSpiStatusReader(Func<bool> read, Action<bool> changed)
     // Changes since the running read began, and whether a read is running (1) or not (0).
     private int _changes;
     private int _reading;
+
+    /// <summary>
+    /// Watches the status: <paramref name="subscribe"/> hands the reader's change handler to the
+    /// change signal first, and then the first read goes through the reader, on this thread unless a
+    /// change's read is already out. The bridge read the status and subscribed after: a change
+    /// between the two (Orca starting as the window opens) was never read, and the bridge stayed
+    /// off until the next change; its own read also ran beside the reader's, unserialized.
+    /// </summary>
+    public static AtSpiStatusReader Watch(Action<Action> subscribe, Func<bool> read, Action<bool> changed)
+    {
+        var reader = new AtSpiStatusReader(read, changed);
+        subscribe(reader.Changed);
+        reader.ReadFirst();
+        return reader;
+    }
+
+    /// <summary>The first read, on the calling thread; when a change's read is out already, that
+    /// one reads again once it is done, so the last read still begins after the last change.</summary>
+    private void ReadFirst()
+    {
+        Interlocked.Increment(ref _changes);
+        if (Interlocked.CompareExchange(ref _reading, 1, 0) == 0) ReadUntilQuiet();
+    }
 
     /// <summary>The status changed: read it, unless a read is out, which then reads again.</summary>
     public void Changed()
@@ -189,10 +211,14 @@ internal sealed class AtSpiBus : IAtSpiSignals, IAtSpiStatus, IDisposable
         }
     }
 
-    /// <summary>Calls <paramref name="changed"/> with the status, on a thread-pool thread,
-    /// whenever <c>org.a11y.Status</c>'s properties change: one read at a time, the last one
-    /// begun after the last change (<see cref="AtSpiStatusReader"/>).</summary>
-    public void WatchStatus(Action<bool> changed)
+    /// <summary>Calls <paramref name="changed"/> with the status now, then, on a thread-pool
+    /// thread, whenever <c>org.a11y.Status</c>'s properties change: subscribed before the first
+    /// read, one read at a time, the last one begun after the last change
+    /// (<see cref="AtSpiStatusReader"/>).</summary>
+    public void WatchStatus(Action<bool> changed) =>
+        AtSpiStatusReader.Watch(SubscribeToStatus, ReadStatus, changed);
+
+    private void SubscribeToStatus(Action onChange)
     {
         try
         {
@@ -203,12 +229,11 @@ internal sealed class AtSpiBus : IAtSpiSignals, IAtSpiStatus, IDisposable
                 Member = "PropertiesChanged",
                 Path = AtSpiConstants.A11yBusPath,
             };
-            var reader = new AtSpiStatusReader(ReadStatus, changed);
             _session.AddMatchAsync(rule,
                 static (Message _, object? _) => true,
                 (Exception? ex, bool _, object? _, object? _) =>
                 {
-                    if (ex is null) reader.Changed();
+                    if (ex is null) onChange();
                 },
                 ObserverFlags.None, null, null, false).GetAwaiter().GetResult();
         }

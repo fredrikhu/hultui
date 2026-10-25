@@ -320,11 +320,14 @@ public sealed class WebViewController : IDisposable
 
     // A GPU renderer asks from a thread of the engine's. Posting from there could deadlock
     // with a live-resize frame (docs/THREADING.md: a thread the frame waits for must never
-    // post), so the request flips a flag and a thread-pool item posts — as MediaPlayer does.
+    // post), so the request flips a flag and a thread-pool item posts — as MediaPlayer does,
+    // and, as it does, also asks for a frame drawn inside Win32's size/move loop, where the
+    // post waits for the loop to end.
     private void OnRepaintRequested()
     {
         if (_disposed) return;
         if (UIThread.IsCurrent) { FrameArrived?.Invoke(); return; }
+        LiveFrameRequests.Request();
         if (Interlocked.Exchange(ref _repaintPending, 1) == 0)
             ThreadPool.UnsafeQueueUserWorkItem(static c => c.PostRepaint(), this, preferLocal: false);
     }

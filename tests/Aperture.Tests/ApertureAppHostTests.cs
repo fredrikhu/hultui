@@ -136,9 +136,16 @@ public class ApertureAppHostTests
     {
         public List<string> Requested { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        /// <summary>When set, trickplay sheets wait for it: a test can rest the pointer on the
+        /// scrubber before the sheet under it arrives.</summary>
+        public TaskCompletionSource? HoldSheets { get; init; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            lock (Requested) Requested.Add(request.RequestUri!.PathAndQuery);
+            var path = request.RequestUri!.PathAndQuery;
+            lock (Requested) Requested.Add(path);
+            if (HoldSheets is { } hold && path.Contains("/Trickplay/", StringComparison.Ordinal))
+                await hold.Task.WaitAsync(ct).ConfigureAwait(false);
             using var bitmap = new SkiaSharp.SKBitmap(width, height);
             using var canvas = new SkiaSharp.SKCanvas(bitmap);
             canvas.Clear(new SkiaSharp.SKColor(40, 60, 90));
@@ -148,7 +155,7 @@ public class ApertureAppHostTests
                 Content = new ByteArrayContent(data.ToArray()),
             };
             response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-            return Task.FromResult(response);
+            return response;
         }
     }
 
@@ -1707,6 +1714,39 @@ public class ApertureAppHostTests
     }
 
     [Fact]
+    public void ASheetLandingUnderAPointerRestingOnTheScrubber_ShowsItsStillAtOnce()
+    {
+        // The pointer stops on the scrubber before the sheet under it has downloaded. The card
+        // is the player's, which the app's build does not rebuild, so it used to wait for the
+        // pointer's next move; the landing now asks the player to look again.
+        var artwork = new PngArtworkHandler { HoldSheets = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(WithStills(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            app.Player!.Pause();                  // the bar stays up while paused
+            session.PumpFrames(2);
+
+            var track = session.Window.FindByAutomationId("video-seek")!.Element.Layout.AbsoluteContentBox;
+            session.Window.MoveMouse(track.X + track.Width / 2f, track.Y + track.Height / 2f);
+            session.PumpFrames(2);
+            session.PumpUntil(() => { lock (artwork.Requested) return artwork.Requested.Any(r => r.Contains("/Trickplay/", StringComparison.Ordinal)); },
+                TimeSpan.FromSeconds(5));
+            Assert.Null(session.Window.FindByAutomationId("video-preview-card"));
+
+            artwork.HoldSheets!.SetResult();
+            session.PumpUntil(() => session.Window.FindByAutomationId("video-preview-card") is not null,
+                TimeSpan.FromSeconds(5));
+        }, () => backend, artwork);
+    }
+
+    [Fact]
     public void AChapterShowsThePictureTheServerExtractedForIt()
     {
         var artwork = new PngArtworkHandler(320, 180);
@@ -2037,6 +2077,46 @@ public class ApertureAppHostTests
             Assert.Equal(396f, LayoutProbe.Painted(Hero(session)!).Height);
             Assert.True(artwork.Asked("/Items/m1/Images/Backdrop?tag=bd-m1&fillHeight=512"), artwork.Log());
             Assert.False(artwork.Asked("/Items/m1/Images/Backdrop?tag=bd-m1&fillWidth"), artwork.Log());
+        }, artwork: artwork);
+    }
+
+    /// <summary>
+    /// The scrim in from the hero's left covers 70 % of it and fades out on the way: it ended at
+    /// 15 % of the ground's colour, so where it stopped the picture brightened at once, a seam
+    /// down the hero (luma 144 → 169 on a real film's backdrop). It ends at nothing.
+    /// </summary>
+    [Fact]
+    public void TheHerosLeftScrimFadesOutWithoutASeam()
+    {
+        var library = Library();
+        library.Update(library.Item("m1")! with { BackdropImageTag = "bd-m1" });
+        var artwork = new SizedArtworkHandler();
+        Host(library, (session, app) =>
+        {
+            app.Navigate(new Route(ApertureView.Detail, "m1", "Stalker"));
+            session.PumpUntil(() => Hero(session)?.Source is { IsLoaded: true, IntrinsicSize.Width: > 400f },
+                TimeSpan.FromSeconds(5));
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+
+            // A row across the scrim's right edge, high in the hero, where only the picture (one
+            // flat colour here) and the two scrims are.
+            var box = LayoutProbe.Painted(Hero(session)!);
+            float edge = box.X + box.Width * 0.7f;
+            int y = (int)(box.Y + box.Height * 0.2f);
+            using var image = session.Window.CapturePixels();
+            using var bitmap = SkiaSharp.SKBitmap.FromImage(image);
+            int largest = 0, at = 0;
+            for (int x = (int)edge - 12; x < (int)edge + 12; x++)
+            {
+                SkiaSharp.SKColor a = bitmap.GetPixel(x, y), b = bitmap.GetPixel(x + 1, y);
+                int step = Math.Max(Math.Abs(a.Red - b.Red), Math.Max(Math.Abs(a.Green - b.Green), Math.Abs(a.Blue - b.Blue)));
+                if (step > largest) (largest, at) = (step, x);
+            }
+            // Past the edge the hero is as at its far right: the scrim really ends here.
+            SkiaSharp.SKColor past = bitmap.GetPixel((int)edge + 20, y), far = bitmap.GetPixel((int)(box.X + box.Width) - 10, y);
+            Assert.True(Math.Abs(past.Red - far.Red) <= 1 && Math.Abs(past.Green - far.Green) <= 1,
+                $"past the scrim's edge the hero is {past}, at its far right {far}");
+            Assert.True(largest <= 2, $"the hero brightens by {largest} levels from {bitmap.GetPixel(at, y)} at x {at} to {bitmap.GetPixel(at + 1, y)} (the scrim ends at {edge:0.#})");
         }, artwork: artwork);
     }
 

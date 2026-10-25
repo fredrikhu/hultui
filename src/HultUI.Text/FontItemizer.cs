@@ -16,6 +16,37 @@ internal static class FontItemizer
         runs.Clear();
         if (string.IsNullOrEmpty(text))
             return runs;
+        var sink = new StringRuns(text, runs);
+        Itemize(text, fonts, familyName, weight, slant, hanContext, ref sink);
+        return runs;
+    }
+
+    /// <summary>Where <see cref="Itemize(string, IFontCollection, string, FontWeight, FontSlant, string?, List{FontRun})"/>'s
+    /// runs go: each run of <c>text[start..end)</c> in one font, in order.</summary>
+    internal interface IRunSink
+    {
+        void Add(int start, int end, IResolvedFont font);
+    }
+
+    // The runs as strings of their own (the text itself for a run that is all of it).
+    private readonly struct StringRuns(string text, List<FontRun> runs) : IRunSink
+    {
+        public void Add(int start, int end, IResolvedFont font) => runs.Add(new FontRun(text[start..end], font));
+    }
+
+    /// <summary>
+    /// The font runs of <paramref name="text"/>, told to <paramref name="sink"/> as the ranges of
+    /// it they cover: the runs the string overload makes strings of, given a string of the same
+    /// characters — so a span of a longer text itemizes as a string of its own would, looking
+    /// ahead (for a variation selector after a character) no further than the span's end. A
+    /// struct sink, so each kind gets its own compiled loop.
+    /// </summary>
+    internal static void Itemize<TSink>(ReadOnlySpan<char> text, IFontCollection fonts,
+        string familyName, FontWeight weight, FontSlant slant, string? hanContext, ref TSink sink)
+        where TSink : struct, IRunSink
+    {
+        if (text.IsEmpty)
+            return;
 
         var primaryFont = fonts.Resolve(familyName, weight, slant);
         IResolvedFont? currentFont = null;
@@ -74,7 +105,7 @@ internal static class FontItemizer
             // If font changed, emit the current run and start a new one
             if (currentFont is not null && !ReferenceEquals(resolvedFont, currentFont))
             {
-                runs.Add(new FontRun(text[runStart..i], currentFont));
+                sink.Add(runStart, i, currentFont);
                 runStart = i;
             }
 
@@ -84,9 +115,7 @@ internal static class FontItemizer
 
         // Emit final run
         if (currentFont is not null && runStart < text.Length)
-            runs.Add(new FontRun(text[runStart..], currentFont));
-
-        return runs;
+            sink.Add(runStart, text.Length, currentFont);
     }
 
     private const int ZeroWidthJoiner = 0x200D;
@@ -104,10 +133,10 @@ internal static class FontItemizer
     /// and quotes — and in any text, nothing before the character just ahead of the first such
     /// one does. One vectorized pass.
     /// </summary>
-    internal static int FirstThatMayAskForEmoji(string text)
+    internal static int FirstThatMayAskForEmoji(ReadOnlySpan<char> text)
     {
         // As NeedsBidi: the ushort search, because the char one boxes its bounds.
-        int first = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(text.AsSpan())
+        int first = System.Runtime.InteropServices.MemoryMarshal.Cast<char, ushort>(text)
             .IndexOfAnyExceptInRange((ushort)0, (ushort)0x203B);
         return first < 0 ? int.MaxValue : Math.Max(0, first - 1);
     }
@@ -119,7 +148,7 @@ internal static class FontItemizer
     /// test; nothing from U+3300 (past ㊙) to U+1F000 (the Mahjong tiles) does.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    internal static bool AsksForEmoji(string text, int i, int codepoint) =>
+    internal static bool AsksForEmoji(ReadOnlySpan<char> text, int i, int codepoint) =>
         codepoint < 0x203C
             ? i + 1 < text.Length && text[i + 1] == (char)EmojiPresentation.VariationSelector16
               && codepoint is '#' or '*' or (>= '0' and <= '9') or 0xA9 or 0xAE

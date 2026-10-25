@@ -54,6 +54,11 @@ public partial class JunctionApp
         public (int Anchor, int From, int To)? Range;
         public bool RangeStopped;
         public bool Dragging;
+        /// <summary>Whether the rows' move handler listens: only during a range drag (see
+        /// <see cref="Element.OnPassive{TEvent}(Action{TEvent}, Func{bool})"/>). One for the
+        /// session, so a build hands every row the same one.</summary>
+        public Func<bool> DragListening => _dragListening ??= () => Dragging;
+        private Func<bool>? _dragListening;
         public readonly HashSet<string> Expanded = new(StringComparer.Ordinal);
         public bool ExpandAll;
         public string? FocusThread;
@@ -150,6 +155,14 @@ public partial class JunctionApp
     internal (int From, int To)? ReviewRange => _review?.Range is { } r ? (r.From, r.To) : null;
 
     private bool ReviewRowsActive => _review is { Ready: true } && View == JunctionView.Commit;
+
+    /// <summary>A move of the caret or the range and nothing else: the next build keeps the
+    /// woven rows and re-marks them (see ReviewRowsFor), and the chrome stays as it is.</summary>
+    private void ReviewCaretMoved()
+    {
+        _reviewCaretMove = true;
+        MarkViewDirty();
+    }
 
     // ── Entry and exit ───────────────────────────────────────────────────────────────
 
@@ -282,6 +295,7 @@ public partial class JunctionApp
     {
         if (!ReferenceEquals(_review, rv)) return;
         _review = null;
+        _woven = null;
         _pendingReviewFocus = 0;
         _reviewFocusTarget = null;
         if (backToRequest) OpenMergeRequest(rv.Path, rv.Iid);
@@ -419,6 +433,85 @@ public partial class JunctionApp
     /// <summary>GitLab's line code: the SHA-1 of the path, then the old and new counters.</summary>
     internal static string LineCode(string path, int oldPos, int newPos) =>
         $"{Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(path)))}_{oldPos}_{newPos}";
+
+    // ── Kept rows ────────────────────────────────────────────────────────────────────
+
+    /// <summary>The rows of the file on screen as last woven, what they were woven from, and
+    /// the list the diff shows: those rows with the caret and range marked.</summary>
+    private sealed class WovenReviewRows(object key, List<DiffRow> rows)
+    {
+        public object Key { get; } = key;
+        /// <summary>As woven: no marks.</summary>
+        public List<DiffRow> Rows { get; } = rows;
+        /// <summary>What the list shows — the same list from build to build while the weave is
+        /// kept, so the list compares its rows and makes again only the ones re-marked.</summary>
+        public List<DiffRow> Shown { get; } = new(rows);
+        /// <summary>The indices in <see cref="Shown"/> carrying a mark.</summary>
+        public List<int> Marked { get; } = [];
+    }
+
+    private WovenReviewRows? _woven;
+    private bool _reviewCaretMove;
+
+    /// <summary>
+    /// The rows the diff shows while reviewing. A caret or range move (ReviewCaretMoved) keeps
+    /// the woven rows — weaving makes a record and a SHA-1 line code per line, about 300 KB for
+    /// a 400-line file — and only moves the marks, when everything the weave read is as it was:
+    /// the flattened rows, the session, its file and composer, the threads and drafts as loaded,
+    /// the cards' heights and pictures. Any other build weaves again.
+    /// </summary>
+    /// <param name="marksOnly">True when the rows were kept: only marks moved, and the list's
+    /// rows need no making again beyond the ones whose marks did.</param>
+    private List<DiffRow> ReviewRowsFor(GitFileDiff diff, List<DiffRow> flat, ReviewSession rv, out bool marksOnly)
+    {
+        bool caretMove = _reviewCaretMove;
+        _reviewCaretMove = false;
+        var key = WeaveKey(diff, flat, rv);
+        if (caretMove && _woven is { } kept && kept.Key.Equals(key))
+        {
+            MarkReviewRows(kept, rv);
+            marksOnly = true;
+            return kept.Shown;
+        }
+        var rows = WithReviewRows(diff, new List<DiffRow>(flat), rv);
+        for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
+        // After the weave: a file switch inside it resets the caret, the range and the composer.
+        _woven = new WovenReviewRows(WeaveKey(diff, flat, rv), rows);
+        MarkReviewRows(_woven, rv);
+        marksOnly = false;
+        return _woven.Shown;
+    }
+
+    /// <summary>Everything the weave reads, compared by identity: a new list or a new value from
+    /// a loader is a new object.</summary>
+    private object WeaveKey(GitFileDiff diff, List<DiffRow> flat, ReviewSession rv)
+    {
+        var drafts = DraftNotesFor(rv.Path, rv.Iid);
+        return (flat, rv, rv.File == diff.Path, rv.Composer, DiscussionsFor(rv.Path, rv.Iid).Value,
+            drafts.Value, drafts.AsOf > rv.DraftsSettledAt, rv.HeightVersion, _mdLayoutGen);
+    }
+
+    /// <summary>Puts the caret and range marks on the shown rows: the rows marked before go
+    /// back to their woven selves, and each line row in the range, and the caret's, gets its
+    /// marks. Hunk headers carry none; they never drew the caret or the band.</summary>
+    private static void MarkReviewRows(WovenReviewRows w, ReviewSession rv)
+    {
+        foreach (var i in w.Marked) w.Shown[i] = w.Rows[i];
+        w.Marked.Clear();
+        if (rv.Range is { } range)
+            for (int line = range.From; line <= range.To; line++) Mark(line, ReviewMark.InRange);
+        if (rv.Caret >= 0) Mark(rv.Caret, ReviewMark.Caret);
+
+        void Mark(int line, ReviewMark mark)
+        {
+            if ((uint)line >= (uint)rv.RowOfLine.Length) return;
+            int row = rv.RowOfLine[line];
+            if (row >= w.Rows.Count || w.Rows[row].Review is null) return;
+            var shown = w.Shown[row];
+            if (shown.Mark == ReviewMark.None) w.Marked.Add(row);
+            w.Shown[row] = w.Rows[row] with { Mark = shown.Mark | mark };
+        }
+    }
 
     /// <summary>
     /// The flattened unified rows with the review's rows woven in: every line row learns its
@@ -673,7 +766,7 @@ public partial class JunctionApp
                 if (e.Modifiers.HasFlag(KeyModifiers.Shift) && rv.Caret >= 0) ExtendRangeTo(rv, line);
                 else { rv.Caret = line; rv.Range = (line, line, line); rv.RangeStopped = false; }
                 rv.Dragging = true;
-                MarkDirty();
+                ReviewCaretMoved();
             });
         }
         cell.AddChild(mark);
@@ -684,13 +777,16 @@ public partial class JunctionApp
     /// composer, and places the caret on a plain click.</summary>
     private void WireReviewRow(ReviewSession rv, BoxElement row, int line)
     {
-        row.On<PointerMoveEvent>(_ =>
+        // Passive, and heard only during a range drag: it rebuilds for what it changes, and a
+        // move over a row otherwise changes nothing — as an ordinary handler it drew a full
+        // frame for every move along the diff.
+        row.OnPassive<PointerMoveEvent>(_ =>
         {
             if (!rv.Dragging) return;
             if (rv.Range is { } r && r.To == line) return;
             ExtendRangeTo(rv, line);
-            MarkDirty();
-        });
+            ReviewCaretMoved();
+        }, rv.DragListening);
         row.On<PointerUpEvent>(e =>
         {
             if (!rv.Dragging) return;
@@ -704,7 +800,7 @@ public partial class JunctionApp
             if (e.Modifiers.HasFlag(KeyModifiers.Shift) && rv.Caret >= 0) { ExtendRangeTo(rv, line); OpenComposer(rv); return; }
             if (rv.Caret == line) return;
             rv.Caret = line;
-            MarkDirty();
+            ReviewCaretMoved();
         });
     }
 
@@ -1459,7 +1555,7 @@ public partial class JunctionApp
         {
             case KeyCode.Escape:
                 if (rv.Composer != null) CloseComposer(rv);
-                else if (rv.Range != null) { rv.Range = null; rv.RangeStopped = false; MarkDirty(); }
+                else if (rv.Range != null) { rv.Range = null; rv.RangeStopped = false; ReviewCaretMoved(); }
                 else EndReview(backToRequest: true);
                 return true;
             case KeyCode.Down or KeyCode.Up when rv.Lines.Count > 0:
@@ -1491,7 +1587,7 @@ public partial class JunctionApp
             rv.RangeStopped = false;
         }
         if (rv.Caret >= 0 && rv.Caret < rv.RowOfLine.Length) RevealDiffLine(rv.RowOfLine[rv.Caret]);
-        MarkDirty();
+        ReviewCaretMoved();
     }
 
     /// <summary>After a build: the editor asked for focus — the composer's or a reply's —

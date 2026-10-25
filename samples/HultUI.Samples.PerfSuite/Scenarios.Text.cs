@@ -227,6 +227,21 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("text/resize a wrapped TextArea",
+            "Drag the window narrower with the 900-line notes file open in a TextArea: every line too long for the new width wrapped again",
+            ctx =>
+            {
+                var area = TextArea.New(Ui.Notes(ctx.Rng)).FlexGrow(1);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                return new Op
+                {
+                    Run = step => ctx.Window.SetClientSize(Ui.DragWidth(step), 760),
+                    // The rows are worked out for the width the TextArea is drawn at.
+                    Check = step => Math.Abs(area.WindowBorderBox.Width - (Ui.DragWidth(step) - 16)) < 0.5f ? null
+                        : $"the TextArea is {area.WindowBorderBox.Width:0} px wide, not the window's {Ui.DragWidth(step)} px less the padding",
+                };
+            });
+
         yield return new Scenario("text/open highlighted JSON in a TextArea",
             $"Meridian's response viewer handed a {JsonLines:N0}-line pretty-printed JSON response and its colour spans: a read-only monospace TextArea measures every line, then draws the first screen",
             ctx =>
@@ -270,6 +285,27 @@ static partial class Scenarios
                 {
                     Run = step => ctx.Window.Wheel(box.X + box.Width / 2, box.Y + box.Height / 2, 0, WheelDirection(step) * 3),
                     Check = ScrolledTo(() => area.ScrollOffsetY),
+                };
+            });
+
+        yield return new Scenario("text/page down through highlighted JSON in a TextArea",
+            $"Page down through the {JsonLines:N0}-line JSON response a screen at a time: every line drawn is drawn for the first time, its words shaped and its colour stretches made",
+            ctx =>
+            {
+                var text = Ui.JsonResponse(ctx.Rng, JsonLines);
+                var area = JsonViewer();
+                area.Text = text;
+                area.Spans = Ui.JsonSpans(text);
+                ctx.Mount(Flex.Column().FlexGrow(1).Padding(8).Children(area));
+                float page = area.Layout.AbsoluteContentBox.Height;
+                // Each session starts at the top, with its own text caches: a step's screen has
+                // not been drawn in it before.
+                float At(int step) => (step + 1) * page;
+                return new Op
+                {
+                    Run = step => area.ScrollOffsetY = At(step),
+                    Check = step => Math.Abs(area.ScrollOffsetY - At(step)) < 0.5f ? JsonShown(ctx, area, text)
+                        : $"the TextArea is scrolled to {area.ScrollOffsetY:0}, not {At(step):0}",
                 };
             });
 

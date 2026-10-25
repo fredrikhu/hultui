@@ -22,6 +22,7 @@ public sealed class GpuFrameSinkGLTests
     [UiFact]
     public void TheFirstDraw_DecidesGpu_AndTheRenderersFramebufferIsComposited()
     {
+        using var guard = ForegroundGuard.Begin();
         using var app = new Application(new SdlWindowingPlatform(), "gpu-sink", 320, 200);
         var backend = new ClearingRenderer();
         using var player = new MediaPlayer(new FakeMediaBackend { GpuRenderer = backend });

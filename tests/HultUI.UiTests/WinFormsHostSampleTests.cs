@@ -23,6 +23,10 @@ using Window = FlaUI.Core.AutomationElements.Window;
 /// only a test that reads the tree from outside the process notices. The same goes for
 /// the keyboard path, which no unit test can reach because it starts at a Win32
 /// message.</para>
+///
+/// <para>The fixture makes the sample's window the foreground (<see cref="HostedInput.EnsureForeground"/>),
+/// so these run only with <c>HULTUI_UITESTS_FOREGROUND=1</c> as well as <c>HULTUI_UITESTS=1</c>
+/// (<see cref="UiForegroundFactAttribute"/>), on a desktop nobody is using.</para>
 /// </summary>
 [Collection("ui")] // never run UI automation tests in parallel
 public sealed class WinFormsHostSampleTests : IDisposable
@@ -58,7 +62,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
 
     // ──── accessibility ────
 
-    [UiFact]
+    [UiForegroundFact]
     public void HostedTree_IsExposedToAutomation()
     {
         var button = Find("click-me");
@@ -67,7 +71,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
         Assert.Equal("clicked 0 times", Find("click-count").Name);
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void HostedTree_RespondsToInvoke()
     {
         Find("click-me").AsButton().Invoke();
@@ -79,7 +83,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
             timeoutMessage: "Invoke did not reach the click handler");
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void HostedElements_ReportScreenBounds_InsideTheHostingControl()
     {
         // The bridge converts with ClientToScreen against the handle it was given, so a
@@ -95,7 +99,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
             $"button at {bounds} is outside the window at {_window.BoundingRectangle}");
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void TheHostsOwnControls_AreStillThere()
     {
         // The point of the control is coexistence: if HultUI's provider had replaced the
@@ -106,7 +110,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
 
     // ──── keyboard ────
 
-    [UiFact]
+    [UiForegroundFact]
     public void Typing_ReachesAFocusedTextField()
     {
         var field = Find("field-one");
@@ -123,7 +127,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
             timeoutMessage: $"typed text never arrived (field reads '{HostedInput.Read(Find("field-one"))}')");
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void EditingKeys_TakeTheKeyPath_NotTheTextPath()
     {
         // Backspace arrives as WM_CHAR too, as a control character. If the translator
@@ -143,7 +147,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
             timeoutMessage: "Backspace did not edit the field");
     }
 
-    [UiFact]
+    [UiForegroundFact]
     public void Tab_MovesThroughTheTree_ThenLeavesIt()
     {
         var field = Find("field-one");
@@ -186,7 +190,7 @@ public sealed class WinFormsHostSampleTests : IDisposable
     /// loudly — and that a lazily created page mounts at all. The drop <em>path</em>
     /// itself (payload translation, position, effect) is exercised by hand.
     /// </remarks>
-    [UiFact]
+    [UiForegroundFact]
     public void ALazyTabPage_MountsAndReportsItsDragCapability()
     {
         // The page's control has no handle until the tab is first shown, so this also

@@ -109,6 +109,10 @@ public class SplitterHandleElement : Element
             ctx.DrawRoundedRect(box, new CornerRadius(2f), Color.Transparent, _focusRingColor, new Thickness(1.5f));
     }
 
+    // What it copies below is paint and behaviour; its thickness is the theme's, and ApplyTheme
+    // marks layout when that changes.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(SplitterHandleElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

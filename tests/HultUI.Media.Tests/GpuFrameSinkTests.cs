@@ -266,15 +266,45 @@ public class GpuFrameSinkTests
         Assert.Equal(GpuSinkMode.Pixels, renderer.DecidedMode);
     }
 
+    /// <summary>
+    /// A video frame drawn through a lent target allocates nothing in the sink, and nor does a
+    /// frame with nothing to draw. The frame's GL work ran in a lambda over the method's locals:
+    /// a closure and its delegate every frame, 144 bytes, made as the method was entered, so the
+    /// early returns paid them too (plan 17 round 4, media-video-frame-bytes).
+    /// </summary>
+    [Fact]
+    public void AFrame_AllocatesNothing_DrawnOrNot()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A, record: false);
+        for (int i = 0; i < 100; i++) sink.TryRenderFrame(surface, out _);
+
+        long drawn = HultUI.Testing.Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++) sink.TryRenderFrame(surface, out _);
+        });
+        Assert.True(renderer.GLRenders > 100, "the frames were not drawn");
+        Assert.Equal(0, drawn);
+
+        renderer.HasSize = false;
+        renderer.Waiting = false;
+        long sizeless = HultUI.Testing.Allocations.Least(() =>
+        {
+            for (int i = 0; i < 100; i++) sink.TryRenderFrame(surface, out _);
+        });
+        Assert.Equal(0, sizeless);
+    }
+
     /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
     private sealed class LendingSurface : IExternalGLSurface
     {
         private readonly uint _framebuffer, _texture, _internalFormat;
-        private readonly bool _lends, _linear;
+        private readonly bool _lends, _linear, _record;
         private readonly float _peakNits;
 
         public LendingSurface(uint framebuffer, uint texture, uint internalFormat, bool lends = true,
-            bool linear = false, float peakNits = 0f)
+            bool linear = false, float peakNits = 0f, bool record = true)
         {
             _framebuffer = framebuffer;
             _texture = texture;
@@ -282,6 +312,7 @@ public class GpuFrameSinkTests
             _lends = lends;
             _linear = linear;
             _peakNits = peakNits;
+            _record = record;
         }
 
         public Func<string, nint> GetProcAddress => _ => 0;
@@ -300,7 +331,7 @@ public class GpuFrameSinkTests
 
         public bool TryAcquireFrameTarget(object owner, int width, int height, out GpuFrameTarget target)
         {
-            Owners.Add(owner);
+            if (_record) Owners.Add(owner);
             target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat, _linear, _peakNits);
             return _lends;
         }
@@ -320,7 +351,7 @@ public class GpuFrameSinkTests
         public GpuSinkMode? DecidedMode { get; private set; }
         public int GLRenders { get; private set; }
 
-        public bool HasSize { get; init; } = true;
+        public bool HasSize { get; set; } = true;
         public bool Waiting { get; set; }
         public int Skips { get; private set; }
 

@@ -988,7 +988,7 @@ public partial class JunctionApp
         // Summary
         var summary = TextInput.New(_commitSummary).Style(Ui.Field());
         summary.PlaceholderText("Summary (required)")
-            .OnTextChanged(q => { _commitSummary = q; NoteComposerTyping(summary: true, _summaryRef.Current?.CursorPosition ?? q.Length); MarkDirty(); })
+            .OnTextChanged(q => { _commitSummary = q; NoteComposerTyping(summary: true, _summaryRef.Current?.CursorPosition ?? q.Length); MarkViewDirty(); })
             .Height(Dimension.Px(34)).FlexShrink(0)
             .TextColor(Nocturne.Text).WithRef(_summaryRef);
         // Every child of the composer is keyed, and that is all-or-nothing: a keyed child
@@ -1002,7 +1002,7 @@ public partial class JunctionApp
         // The wrapper's 6px and the theme's 6px of vertical inset, and its 56px of lines.
         var desc = TextArea.New(_commitDescription).Style(Ui.Field(verticalPadding: 12f));
         desc.PlaceholderText("Description")
-            .OnTextChanged(q => { _commitDescription = q; NoteComposerTyping(summary: false, _descRef.Current?.CursorPosition ?? q.Length); MarkDirty(); })
+            .OnTextChanged(q => { _commitDescription = q; NoteComposerTyping(summary: false, _descRef.Current?.CursorPosition ?? q.Length); MarkViewDirty(); })
             .Height(Dimension.Px(82))
             .TextColor(Nocturne.Text).WithRef(_descRef);
         desc.Key = "composer-description";

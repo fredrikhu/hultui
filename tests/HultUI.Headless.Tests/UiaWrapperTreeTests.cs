@@ -106,10 +106,13 @@ public class UiaWrapperTreeTests
         var (boxes, root) = CheckboxRows(40);
         rig.Mount(root);
 
-        // Each toggle is a diff that names one node; 30 of them used to leave 31 trees behind.
+        // Each change is a diff that names one node; 30 of them used to leave 31 trees behind. A
+        // toggle is patched into the applied tree (plan 17, round 4: the box's node made again and
+        // put in its place), an automation id rebuilds the tree: half of each.
         for (int i = 0; i < 30; i++)
         {
-            boxes[i].IsChecked = !boxes[i].IsChecked;
+            if (i % 2 == 0) boxes[i].IsChecked = !boxes[i].IsChecked;
+            else boxes[i].AutomationId = $"box-{i}";
             rig.Session.PumpFrame();
         }
 
@@ -138,9 +141,10 @@ public class UiaWrapperTreeTests
         rig.Mount(root);
         var first = WeakTree(rig);
 
+        // Changes the tree is rebuilt for: a toggle is patched into the tree it was mounted with.
         for (int i = 0; i < 10; i++)
         {
-            boxes[i].IsChecked = !boxes[i].IsChecked;
+            boxes[i].AutomationId = $"box-{i}";
             rig.Session.PumpFrame();
         }
         GC.Collect();

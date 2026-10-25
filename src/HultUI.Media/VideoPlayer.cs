@@ -9,6 +9,7 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 using HultUI.Icons;
 
 namespace HultUI.Media;
@@ -46,8 +47,27 @@ public sealed class VideoPlayer : Component
     private float _barOpacity = 1f;
     private readonly Signal<bool> _fullscreen = new(false);
     private readonly Signal<VideoPlayerTheme> _theme = new(VideoPlayerTheme.CreateDefault(Theme.Light));
-    /// <summary>Where the pointer is on the scrubber, in seconds, while it is over it.</summary>
-    private readonly Signal<double?> _previewAt = new(null);
+    /// <summary>Where the pointer is on the scrubber, in seconds, while it is over it. A plain
+    /// field: a move along the track writes the preview card in place (<see cref="ShowPreview"/>).</summary>
+    private double? _previewAt;
+    /// <summary>
+    /// Bumped when the preview card is to come or go — the pointer reaching or leaving the
+    /// track, a still arriving for a point that had none — which a build does. The one thing
+    /// about the preview <see cref="Build"/> reads. It read the hovered position itself, so the
+    /// player was built again on every frame the pointer moved along the track (about 42 KB a
+    /// frame, with or without a card).
+    /// </summary>
+    private readonly Signal<int> _previewComesOrGoes = new(0);
+    /// <summary>The card on screen and the two things in it a move changes, or null while no
+    /// card shows: <see cref="Build"/> points them at the card it makes and clears them when it
+    /// makes none.</summary>
+    private readonly Ref<BoxElement> _card = new();
+    private readonly Ref<ImageElement> _cardPicture = new();
+    private readonly Ref<TextElement> _cardTime = new();
+    /// <summary>The time the card reads, so a move that stays on one still formats nothing.</summary>
+    private TimeSpan _cardTimeShown;
+    /// <summary>Made once: the scrubber is handed the same delegate by every build.</summary>
+    private readonly Action<double?> _hoverAt;
     /// <summary>The scrubber itself, so the preview can be placed over the point being
     /// hovered rather than over the middle of the bar.</summary>
     private readonly Ref<SliderElement> _scrubber = new();
@@ -63,6 +83,7 @@ public sealed class VideoPlayer : Component
     public VideoPlayer(MediaPlayer player)
     {
         Player = player ?? throw new ArgumentNullException(nameof(player));
+        _hoverAt = HoverAt;
     }
 
     public MediaPlayer Player { get; }
@@ -110,9 +131,10 @@ public sealed class VideoPlayer : Component
     /// under the pointer. Null — the default, or a null answer — means no preview: the
     /// player shows the time alone, which is what it always did.
     ///
-    /// <para>Called during a build, so it must be cheap and must not block. An app backed
-    /// by a server answers from a cache and starts the fetch on a miss, so the picture
-    /// appears a frame or two later rather than holding the frame.</para>
+    /// <para>Called once per frame drawn while the pointer moves along the track, and during
+    /// a build, so it must be cheap and must not block. An app backed by a server answers from
+    /// a cache and starts the fetch on a miss, so the picture appears a frame or two later
+    /// rather than holding the frame.</para>
     /// </summary>
     public Func<TimeSpan, VideoPreviewFrame?>? PreviewFrame { get; set; }
 
@@ -328,8 +350,11 @@ public sealed class VideoPlayer : Component
     }
 
     /// <summary>How many times <see cref="Build"/> has run: what the tests and the perf suite
-    /// count when they check what a position report or a fade frame costs.</summary>
+    /// count when they check what a position report, a fade frame or a scrubber hover costs.</summary>
     internal int Builds { get; private set; }
+
+    /// <summary>The position the scrubber is hovered at, for the tests and the perf suite.</summary>
+    internal double? PreviewAt => _previewAt;
 
     public override Element Build()
     {
@@ -379,6 +404,10 @@ public sealed class VideoPlayer : Component
     /// and centred on that point. Empty when nothing is hovered, when the bar is hidden,
     /// or when the app has no frame for that second yet — a preview that popped up blank
     /// while its tile downloaded would flicker on every pass along the track.
+    ///
+    /// <para>Built when the card comes or goes. While the pointer moves along the track the
+    /// card on screen is moved and given its new still and time in place
+    /// (<see cref="ShowPreview"/>).</para>
     /// </summary>
     private Element Preview(VideoPlayerTheme theme, bool controls, Rect? trackBox, Rect? rootBox,
         TimeSpan? duration)
@@ -392,17 +421,22 @@ public sealed class VideoPlayer : Component
         host.Position.Bottom = Dimension.Px(theme.BarHeight + 8f);
         host.IsHitTestVisible = false;
 
-        if (!controls || _previewAt.Value is not { } seconds || PreviewFrame is null) return host;
-        var at = TimeSpan.FromSeconds(seconds);
-        if (PreviewFrame(at) is not { } frame || !frame.Image.IsLoaded) return host;
+        // Read so that a card coming or going rebuilds the player; the hovered position is not.
+        _ = _previewComesOrGoes.Value;
+        if (PreviewFor(_previewAt, controls) is not { } shown)
+        {
+            _card.Current = null;
+            _cardPicture.Current = null;
+            _cardTime.Current = null;
+            return host;
+        }
+        var (frame, seconds) = shown;
 
-        var size = frame.Source is { } crop ? new Size(crop.Width, crop.Height) : frame.Image.IntrinsicSize;
         float width = PreviewWidth;
-
         // The frame's own shape at the preview's width; 16:9 for a frame that has not said.
-        var picture = HultUI.Core.Builders.Image.New(frame.Image).Width(width)
-            .AspectRatio(size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 16f / 9f);
+        var picture = HultUI.Core.Builders.Image.New(frame.Image).Width(width).AspectRatio(PreviewShape(frame));
         picture.SourceRect = frame.Source;
+        picture.WithRef(_cardPicture);
 
         var card = Flex.Column(gap: 2)
             .Width(width + 8f)
@@ -414,16 +448,46 @@ public sealed class VideoPlayer : Component
             .AccessibleName("Preview")
             .AutomationId("video-preview-card");
         card.AddChild(picture);
-        card.AddChild(Text.New(FormatTime(frame.Time ?? at, frame.Time ?? at))
-            .FontSize(theme.FontSize).TextColor(theme.Foreground).MaxLines(1));
+        _cardTimeShown = frame.Time ?? TimeSpan.FromSeconds(seconds);
+        card.AddChild(Text.New(FormatTime(_cardTimeShown, _cardTimeShown))
+            .FontSize(theme.FontSize).TextColor(theme.Foreground).MaxLines(1).WithRef(_cardTime));
 
-        // Centred on the hovered point, kept inside the picture: a preview half off the
-        // left edge is the one place a scrubber preview is always looked at (the start).
+        card.Position.Type = PositionType.Absolute;
+        card.Position.Left = Dimension.Px(PreviewLeft(seconds, width + 8f, trackBox, rootBox, duration));
+        card.Position.Bottom = Dimension.Px(0);
+        card.WithRef(_card);
+        host.AddChild(card);
+        return host;
+    }
+
+    /// <summary>The still to show for a hovered position, or null when there is none to show:
+    /// nothing hovered, the bar hidden, no <see cref="PreviewFrame"/>, or no loaded frame from it.</summary>
+    private (VideoPreviewFrame Frame, double Seconds)? PreviewFor(double? hovered, bool controls)
+    {
+        if (!controls || hovered is not { } seconds || PreviewFrame is not { } ask) return null;
+        if (ask(TimeSpan.FromSeconds(seconds)) is not { } frame || !frame.Image.IsLoaded) return null;
+        return (frame, seconds);
+    }
+
+    /// <summary>The still's own width to height, its crop's under a sprite sheet; 16:9 for a
+    /// frame that has not said.</summary>
+    private static float PreviewShape(VideoPreviewFrame frame)
+    {
+        var size = frame.Source is { } crop ? new Size(crop.Width, crop.Height) : frame.Image.IntrinsicSize;
+        return size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 16f / 9f;
+    }
+
+    /// <summary>
+    /// Where the card's left edge goes: centred on the hovered point, kept inside the picture —
+    /// a preview half off the left edge is the one place a scrubber preview is always looked at
+    /// (the start). The scrubber's and the root's boxes are the last laid-out frame's.
+    /// </summary>
+    private static float PreviewLeft(double seconds, float cardWidth, Rect? trackBox, Rect? rootBox, TimeSpan? duration)
+    {
         float track = trackBox?.Width ?? 0f;
         float rootWidth = rootBox?.Width ?? 0f;
         double total = duration?.TotalSeconds ?? 0;
         double t = total > 0 ? Math.Clamp(seconds / total, 0, 1) : 0;
-        float cardWidth = width + 8f;
         // Before the first frame has laid the track out there is nothing to follow, so the
         // card starts in the middle rather than in the corner.
         float centre = track > 0
@@ -431,12 +495,103 @@ public sealed class VideoPlayer : Component
             : rootWidth / 2f;
         float left = centre - cardWidth / 2f;
         if (rootWidth > cardWidth) left = Math.Clamp(left, 4f, rootWidth - cardWidth - 4f);
+        return MathF.Max(0f, left);
+    }
 
-        card.Position.Type = PositionType.Absolute;
-        card.Position.Left = Dimension.Px(MathF.Max(0f, left));
-        card.Position.Bottom = Dimension.Px(0);
-        host.AddChild(card);
-        return host;
+    /// <summary>
+    /// Asks <see cref="PreviewFrame"/> again for the point the scrubber is hovered at and shows
+    /// the answer without the pointer having to move: the card comes, takes a nearer still, or
+    /// goes. Call it when a still the provider had no answer for arrives — Reel makes its stills
+    /// in the background, Aperture downloads sprite sheets — or the card waits for the pointer's
+    /// next move. Rebuilding the app does not do it: the card is this component's.
+    ///
+    /// <para>Nothing happens while the scrubber is not hovered or the bar is hidden, so calling
+    /// it for every still that lands costs next to nothing. Call it on the UI thread.</para>
+    /// </summary>
+    public void RefreshPreview()
+    {
+        UIThread.VerifyAccess("VideoPlayer.RefreshPreview");
+        if (_previewAt is null) return;
+        ShowPreview();
+    }
+
+    /// <summary>The scrubber's report of the position under the pointer: once per frame drawn
+    /// while it moves along the track (or drags), and null when it leaves.</summary>
+    private void HoverAt(double? seconds)
+    {
+        _previewAt = seconds;
+        ShowPreview();
+    }
+
+    /// <summary>
+    /// The card for the hovered position, without building the player: a card already on
+    /// screen is moved and given its new still and time in place. Only a card that has to come
+    /// or go goes through a build, which reads the same position. A hidden bar shows no card,
+    /// and its return is a build of its own.
+    /// </summary>
+    private void ShowPreview()
+    {
+        // Untracked: the provider and the player's state are read here outside any build, and
+        // an effect that ends up calling this must not come to depend on them.
+        var previous = ReactiveScope.SetSubscriber(null);
+        try
+        {
+            bool controls = _controlsVisible.Peek() || !Player.IsPlaying;
+            var shown = PreviewFor(_previewAt, controls);
+            if (shown.HasValue != _card.Current is not null)
+            {
+                _previewComesOrGoes.Value++;
+                return;
+            }
+            if (shown is { } card) WriteCard(card.Frame, card.Seconds);
+        }
+        finally
+        {
+            ReactiveScope.SetSubscriber(previous);
+        }
+    }
+
+    /// <summary>What a build would have made of the card, written on the one on screen: each
+    /// setter marks only what it changes, and nothing changes while the pointer stays on one
+    /// still but the card's place.</summary>
+    private void WriteCard(VideoPreviewFrame frame, double seconds)
+    {
+        if (_card.Current is not { } card || _cardPicture.Current is not { } picture || _cardTime.Current is not { } time)
+            return;
+
+        float width = PreviewWidth;
+        var pictureWidth = Dimension.Px(width);
+        var cardWidth = Dimension.Px(width + 8f);
+        if (picture.Box.Width != pictureWidth || card.Box.Width != cardWidth)
+        {
+            picture.Box.Width = pictureWidth;
+            card.Box.Width = cardWidth;
+            picture.MarkLayoutDirty();
+            card.MarkLayoutDirty();
+        }
+        picture.Source = frame.Image;
+        picture.SourceRect = frame.Source;
+        float shape = PreviewShape(frame);
+        if (picture.Box.AspectRatio != shape)
+        {
+            picture.Box.AspectRatio = shape;
+            picture.MarkLayoutDirty();
+        }
+
+        var at = frame.Time ?? TimeSpan.FromSeconds(seconds);
+        if (at != _cardTimeShown)
+        {
+            _cardTimeShown = at;
+            time.Content = FormatTime(at, at);
+        }
+
+        var left = Dimension.Px(PreviewLeft(seconds, width + 8f, _scrubber.Current?.Layout.AbsoluteContentBox,
+            _root.Current?.Layout.AbsoluteContentBox, Player.Duration));
+        if (card.Position.Left != left)
+        {
+            card.Position.Left = left;
+            card.MarkLayoutDirty();
+        }
     }
 
     /// <summary>Buffering or failure, over the picture.</summary>
@@ -506,7 +661,7 @@ public sealed class VideoPlayer : Component
                 .FlexGrow(1)
                 .AccessibleName("Seek").AutomationId("video-seek")
                 .OnValueChanged(seconds => player.Seek(TimeSpan.FromSeconds(seconds)));
-            scrubber.OnHoverValue = at => _previewAt.Value = at;
+            scrubber.OnHoverValue = _hoverAt;
             scrubber.Step = 0.5;
             // Pointing at a scrubber is asking "what is there" — so the track fills to the
             // pointer, and the chapters cut it into the pieces being aimed at.

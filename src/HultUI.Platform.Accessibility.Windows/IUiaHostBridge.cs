@@ -31,7 +31,11 @@ public interface IUiaHostBridge
     float ContentScale { get; }
 
     // Reads from UIA. Should be safe to call from worker threads — hosts
-    // either snapshot or marshal internally.
+    // either snapshot or marshal internally. The bridge no longer calls them
+    // (plan 17, round 4): it answers every read from the accessibility tree it
+    // applied, and a list's on-demand items from the list its node carries
+    // (AccessibilityNode.ItemSource). They stay so a host's implementation of
+    // this interface still compiles.
     string? GetValue(ElementId id);
     bool? GetToggleState(ElementId id);
 

@@ -899,12 +899,16 @@ public abstract class Element
 
     /// <summary>
     /// <see cref="OnPassive{TEvent}(Action{TEvent})"/> for a tracker that acts only while
-    /// <paramref name="listening"/> says so — a splitter's or a pan's drag, heard on a root. A
-    /// pointer move that nothing else on its way listens for is then not made at all: on a root,
-    /// such a tracker made one on every move in the window, 64 bytes each, to do nothing. A move
-    /// that is made still runs the handler, which decides for itself as before.
+    /// <paramref name="listening"/> says so — a splitter's or a pan's drag heard on a root, a row
+    /// that extends a right-drag selection. It is asked before a <see cref="PointerMoveEvent"/>
+    /// is made: a move that no handler on its way listens for is not made at all. On a root, a
+    /// tracker without the condition made one on every move in the window, 64 bytes each, to do
+    /// nothing. A move that is made still runs the handler, which decides for itself as before;
+    /// any other event is made and runs it as for <see cref="OnPassive{TEvent}(Action{TEvent})"/>.
+    /// Hand the same delegate to every build (a field, as <c>_listening ??= () => _dragging</c>),
+    /// or each build makes one.
     /// </summary>
-    internal void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
+    public void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
         ListForMutation(typeof(TEvent)).Add(new EventHandlerEntry(EventPhase.Bubble,
             new ListeningHandler<TEvent>(handler, listening).Invoke, Owned: false, Passive: true));
 
@@ -1147,6 +1151,21 @@ public abstract class Element
     }
 
     /// <summary>
+    /// Marks this element for style, and its ancestors so the style pass reaches it, but not what
+    /// is under it: the pass resolves the children too when this element's resolved style comes
+    /// out different (StyleResolver), as they inherit it. For a change that is this element's own
+    /// — a patch — and for an element mounting (every element that mounts marks itself). A change
+    /// that reaches the subtree in another way (an ApplyTheme writing a part's inherited style, a
+    /// style set on a live element) marks with <see cref="MarkStyleDirty"/>.
+    /// </summary>
+    internal void MarkStyleDirtySelf()
+    {
+        DirtyFlags |= DirtyFlags.Style;
+        for (var e = Parent; e is not null && (e.DirtyFlags & DirtyFlags.Style) == 0; e = e.Parent)
+            e.DirtyFlags |= DirtyFlags.Style;
+    }
+
+    /// <summary>
     /// <paramref name="child"/> has just been added here, and mounted if it was new. A new child
     /// comes out of mounting marked for style; one that was moved here keeps what it had, as it
     /// always has. If it has unmarked elements, this element no longer has a marked subtree, and
@@ -1154,11 +1173,28 @@ public abstract class Element
     /// </summary>
     private void NoteChildJoined(Element child)
     {
+        // A child marked for style — one moved here from another parent (MovedUnder), or one
+        // marked before it joined — is resolved only if the pass can reach it.
+        if ((child.DirtyFlags & DirtyFlags.Style) != 0 && (DirtyFlags & DirtyFlags.Style) == 0)
+            for (var e = this; e is not null && (e.DirtyFlags & DirtyFlags.Style) == 0; e = e.Parent)
+                e.DirtyFlags |= DirtyFlags.Style;
         if ((DirtyFlags & DirtyFlags.StyleSubtree) == 0
             || (child.DirtyFlags & DirtyFlags.StyleSubtree) != 0)
             return;
         for (var e = this; e is not null && (e.DirtyFlags & DirtyFlags.StyleSubtree) != 0; e = e.Parent)
             e.DirtyFlags &= ~DirtyFlags.StyleSubtree;
+    }
+
+    /// <summary>
+    /// <paramref name="child"/>, which was under <paramref name="from"/>, is joining
+    /// <paramref name="to"/>. Under another parent it inherits from that parent, so it is resolved
+    /// there: once, and its subtree only if its resolved style comes out different. A patch no
+    /// longer marks the subtree it lands in, and nothing else would. Back under the parent it left
+    /// (a build moved it out and the reconcile put it back) it inherits what it had.
+    /// </summary>
+    private static void MovedUnder(Element child, Element from, Element to)
+    {
+        if (!ReferenceEquals(from, to)) child.DirtyFlags |= DirtyFlags.Style;
     }
 
     // ──── Lifecycle ────
@@ -1187,11 +1223,27 @@ public abstract class Element
         }
         _mounted = true;
         OnMounted();
-        // A freshly mounted subtree has no resolved inherited style yet, so it would
-        // measure with a zero font size (zero-height text) until some later restyle. Flag
-        // it so the next frame's style pass resolves it before layout. Structural ops
-        // otherwise mark only layout/children.
-        MarkStyleDirty();
+        // A freshly mounted element has no resolved inherited style yet, so it would measure
+        // with a zero font size (zero-height text) until some later restyle. Flag it so the next
+        // frame's style pass resolves it before layout. Structural ops otherwise mark only
+        // layout/children. Its children that mounted with it have flagged themselves above. A
+        // child that was mounted already is one moved here — a persistent part a build placed
+        // in this new container — and is not walked into: it is marked where it lands under
+        // another live parent (MovedUnder), and in a container the reconcile adds whole it is
+        // reached by that container's first resolve, which reaches every child. Marking this
+        // subtree re-resolved the whole of every persistent child component on every rebuild of
+        // its parent (Junction's chrome: 70 elements a key). When every child is claimed (all
+        // fresh), so is this subtree, as a walk down would have left it.
+        MarkStyleDirtySelf();
+        if (EveryChildClaimed()) DirtyFlags |= DirtyFlags.StyleSubtree;
+    }
+
+    private bool EveryChildClaimed()
+    {
+        if (_children is null) return true;
+        for (int i = 0; i < _children.Count; i++)
+            if ((_children[i].DirtyFlags & DirtyFlags.StyleSubtree) == 0) return false;
+        return true;
     }
 
     /// <summary>
@@ -1234,7 +1286,9 @@ public abstract class Element
     public void AddChild(Element child)
     {
         if (child.Parent is not null)
-            DetachSilently(child);
+            DetachSilently(child, this);
+        else if (_pendingMoves is { Count: > 0 } && _mounted)
+            SettleMove(child, this);
 
         child.Parent = this;
         var children = _children ??= new();
@@ -1251,7 +1305,9 @@ public abstract class Element
     public void InsertChild(int index, Element child)
     {
         if (child.Parent is not null)
-            DetachSilently(child);
+            DetachSilently(child, this);
+        else if (_pendingMoves is { Count: > 0 } && _mounted)
+            SettleMove(child, this);
 
         child.Parent = this;
         var children = _children ??= new();
@@ -1288,7 +1344,9 @@ public abstract class Element
         foreach (var child in children)
         {
             if (child.Parent is not null && !ReferenceEquals(child.Parent, this))
-                DetachSilently(child);
+                DetachSilently(child, this);
+            else if (child.Parent is null && _pendingMoves is { Count: > 0 } && _mounted)
+                SettleMove(child, this);
         }
 
         // Remove old children. Only unmount elements that are genuinely
@@ -1318,7 +1376,7 @@ public abstract class Element
         foreach (var child in children)
         {
             if (child.Parent is not null) // only an element listed twice
-                DetachSilently(child);
+                DetachSilently(child, this);
 
             child.Parent = this;
             list.Add(child);
@@ -1347,17 +1405,151 @@ public abstract class Element
     }
 
     /// <summary>
-    /// Removes <paramref name="child"/> from its current parent without
-    /// firing lifecycle events.  Used for element moves — the child is not
-    /// leaving the tree, just changing parents.
+    /// Removes <paramref name="child"/> from its current parent, on its way to
+    /// <paramref name="to"/>, without firing lifecycle events. Used for element moves — the
+    /// child is not leaving the tree, just changing parents.
+    ///
+    /// <para>A live child moved, during a component's build, into a tree that build is making
+    /// (a container not mounted yet) is a persistent child component handed to its parent's
+    /// next build, and nearly always goes back where it was. Its old parent is not marked for
+    /// that: the reconcile that
+    /// follows puts the child back without marking anything when it lands in the same place
+    /// among the same siblings (<see cref="TryRestoreMoved"/>), and the old parent is marked as
+    /// it always was when it does not (<see cref="SettleMove"/>, <see cref="FlushPendingMoves"/>).
+    /// Marked at once, every build of an app shell holding child components told the window
+    /// its structure had changed, and a listening screen reader got a whole new accessibility
+    /// tree for each key that moved a selection.</para>
     /// </summary>
-    private static void DetachSilently(Element child)
+    private static void DetachSilently(Element child, Element to)
     {
-        if (child.Parent?._children is { } siblings && siblings.Remove(child))
-            siblings.ZOrder = null;
-        child.Parent?.MarkLayoutDirty();
-        child.Parent?.MarkChildrenDirty();
+        var from = child.Parent!;
+        int index = from._children?.IndexOf(child) ?? -1;
+        if (index >= 0)
+        {
+            from._children!.RemoveAt(index);
+            from._children.ZOrder = null;
+        }
         child.Parent = null;
+        if (index >= 0 && Building > 0 && from._mounted && child._mounted && !to._mounted)
+        {
+            (_pendingMoves ??= []).Add(new PendingMove(from, child, index));
+            return;
+        }
+        from.MarkLayoutDirty();
+        from.MarkChildrenDirty();
+        if (!(_pendingMoves is { Count: > 0 } && to._mounted && SettleMove(child, to)))
+            MovedUnder(child, from, to);
+    }
+
+    /// <summary>A live child a build moved into its fresh tree, the parent it left and its
+    /// place there, until the reconcile puts it back or it lands somewhere else.</summary>
+    private readonly record struct PendingMove(Element From, Element Child, int Index);
+
+    [ThreadStatic] private static List<PendingMove>? _pendingMoves;
+
+    /// <summary>How many component builds are running on this thread (ComponentHost): only a
+    /// move made inside one waits for the reconcile that follows it.</summary>
+    [ThreadStatic] internal static int Building;
+
+    /// <summary><paramref name="child"/> joins a live parent the ordinary way: a move of it
+    /// still pending is over, and the parent it left is marked, as a move always marked it.</summary>
+    private static bool SettleMove(Element child, Element to)
+    {
+        var moves = _pendingMoves!;
+        bool settled = false;
+        for (int i = moves.Count - 1; i >= 0; i--)
+        {
+            if (!ReferenceEquals(moves[i].Child, child)) continue;
+            moves[i].From.MarkLayoutDirty();
+            moves[i].From.MarkChildrenDirty();
+            MovedUnder(child, moves[i].From, to);
+            moves.RemoveAt(i);
+            settled = true;
+        }
+        return settled;
+    }
+
+    /// <summary>
+    /// Puts back the children a build moved out of <paramref name="parent"/> when
+    /// <paramref name="result"/> — what the reconcile made of its children — is the list it
+    /// had before the build: the same elements in the same order. Nothing about the parent
+    /// changed then, so nothing is marked for the move. False, with nothing done, otherwise.
+    ///
+    /// <para>A moved child's own marks are carried up from the parent it comes back to: a
+    /// child that changed while it sat in the build's tree (a part rebuilt in the middle of its
+    /// parent's build) marked that tree, not this one. Its style needs nothing more: back under
+    /// the parent it left it inherits what it had, and the parent being reconciled was patched,
+    /// which marked it and its ancestors for style.</para>
+    /// </summary>
+    internal static bool TryRestoreMoved(Element parent, List<Element> result)
+    {
+        var moves = _pendingMoves;
+        if (moves is null || moves.Count == 0) return false;
+        int moved = 0;
+        foreach (var m in moves)
+        {
+            if (!ReferenceEquals(m.From, parent)) continue;
+            if (ReferenceEquals(m.Child.Parent, parent)) return false;
+            moved++;
+        }
+        var current = parent._children;
+        int count = current?.Count ?? 0;
+        if (moved == 0 || count + moved != result.Count) return false;
+
+        // The children before the build: each moved one back at its place, the last moved
+        // first, as each removal shifted the places of the ones after it.
+        var before = new List<Element>(result.Count);
+        if (current is not null) before.AddRange(current);
+        for (int i = moves.Count - 1; i >= 0; i--)
+        {
+            var m = moves[i];
+            if (!ReferenceEquals(m.From, parent)) continue;
+            if (m.Index > before.Count) return false;
+            before.Insert(m.Index, m.Child);
+        }
+        for (int i = 0; i < before.Count; i++)
+            if (!ReferenceEquals(before[i], result[i])) return false;
+
+        var carried = DirtyFlags.None;
+        for (int i = moves.Count - 1; i >= 0; i--)
+        {
+            var m = moves[i];
+            if (!ReferenceEquals(m.From, parent)) continue;
+            // Out of the build's tree, which the reconcile is about to drop.
+            if (m.Child.Parent?._children is { } fresh && fresh.Remove(m.Child)) fresh.ZOrder = null;
+            m.Child.Parent = parent;
+            carried |= m.Child.DirtyFlags;
+            moves.RemoveAt(i);
+        }
+        var list = parent._children ??= new ChildList(result.Count);
+        list.Clear();
+        list.AddRange(result);
+        list.ZOrder = null;
+
+        if ((carried & DirtyFlags.Layout) != 0) parent.MarkLayoutDirty();
+        if ((carried & DirtyFlags.Children) != 0) parent.MarkChildrenDirty();
+        if ((carried & DirtyFlags.Paint) != 0) parent.MarkPaintDirty();
+        if ((carried & DirtyFlags.Style) != 0)
+            for (var e = parent; e is not null && (e.DirtyFlags & DirtyFlags.Style) == 0; e = e.Parent)
+                e.DirtyFlags |= DirtyFlags.Style;
+        return true;
+    }
+
+    /// <summary>Marks the old parent of every move no reconcile put back, as a move always
+    /// marked it. The reconciler calls this when its outermost pass ends.</summary>
+    internal static void FlushPendingMoves()
+    {
+        var moves = _pendingMoves;
+        if (moves is null || moves.Count == 0) return;
+        for (int i = 0; i < moves.Count; i++)
+        {
+            moves[i].From.MarkLayoutDirty();
+            moves[i].From.MarkChildrenDirty();
+            // Its style needs nothing: a child no reconcile moved again sits in a container the
+            // reconcile added whole, which the style pass resolves for the first time, and so goes
+            // on to resolve everything under it.
+        }
+        moves.Clear();
     }
 
     private void ClearFocusIfRemoved(Element removed)
@@ -1380,6 +1572,17 @@ public abstract class Element
     // ──── Patching (used by TreeDiffer) ────
     internal virtual void PatchFrom(Element source)
     {
+        // A themed control's look is written by the theme on every style pass, and the twin a
+        // build hands over has never had one: its padding and border were the builder's, so the
+        // copy below changed the live element's layout styles on every rebuild and the next style
+        // pass changed them back. Themed the way the style pass will theme the live element, the
+        // twin compares as what it is (PatchThemesTwin). With no window theme to hand the twin
+        // keeps the builder's values, the copy finds them different, and the patch marks layout
+        // as it always did.
+        if (PatchThemesTwin && !ReferenceEquals(source, this) && source.GetType() == GetType()
+            && OverlayHost?.ActiveTheme is { } theme)
+            source.ApplyTheme(theme);
+
         Key = source.Key;
         Name = source.Name;
         CopyOriginFrom(source);
@@ -1451,7 +1654,12 @@ public abstract class Element
         if (layoutChanged || !PatchMarksOwnLayout)
             MarkLayoutDirty();
         MarkPaintDirty();
-        MarkStyleDirty();
+        // What a patch changes is this element's own: its inherited style, and what its
+        // ApplyTheme reads. The style pass goes on to its children when its resolved style comes
+        // out different, and every child the rebuild patched marks itself. Marking the subtree
+        // re-resolved every kept row of a list, every persistent part and every element the
+        // rebuild patched, on every key (Junction History: 314 of 314 resolves a key unchanged).
+        MarkStyleDirtySelf();
     }
 
     /// <summary>
@@ -1462,6 +1670,18 @@ public abstract class Element
     /// (<c>GetType() == typeof(...)</c>): a subclass copies more, and has to be checked on its own.
     /// </summary>
     private protected virtual bool PatchMarksOwnLayout => false;
+
+    /// <summary>
+    /// Whether <see cref="PatchFrom"/> themes the incoming twin before comparing it: for a kind
+    /// whose <see cref="ApplyTheme"/> writes layout styles (padding, border, size) that the twin,
+    /// fresh from a builder, does not have. The theme is the window's
+    /// (<see cref="IOverlayHost.ActiveTheme"/>), the one the style pass applies. Such an
+    /// ApplyTheme must touch nothing but the element and its own children, since it then runs
+    /// on twins too, and must mark layout itself when it changes a size it writes — the patch
+    /// no longer does it for every rebuild. Answers for its own type only, as
+    /// <see cref="PatchMarksOwnLayout"/> does.
+    /// </summary>
+    private protected virtual bool PatchThemesTwin => false;
 
     /// <summary>
     /// Drop this element's app handlers and adopt the incoming build's, preserving

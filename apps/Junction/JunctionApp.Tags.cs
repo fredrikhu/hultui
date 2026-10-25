@@ -150,7 +150,7 @@ public partial class JunctionApp
     {
         _tagQuery = q;
         _tagSel = 0;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     // ── Table ────────────────────────────────────────────────────────────
@@ -420,7 +420,7 @@ public partial class JunctionApp
             _selectedCommitHash = t.Hash;
             _selectedCommitHashes.Clear();
         }
-        MarkDirty();
+        MarkViewDirty();
     }
 
     /// <summary>Moves the caret without touching the commit selection — what a folder row's
@@ -436,9 +436,10 @@ public partial class JunctionApp
         var rows = TagRows();
         if (rows.Count == 0) return;
         _tagSel = Math.Clamp(_tagSel + delta, 0, rows.Count - 1);
+        // SelectTag rebuilds; the scroll goes to the list that rebuild left on screen. A second
+        // MarkDirty here rebuilt the whole window again for nothing, on every key.
         SelectTag(_tagSel);
         _tagScrollRef.Current?.ScrollRangeIntoView(_tagSel * TagRowHeight, TagRowHeight);
-        MarkDirty();
     }
 
     // ── Actions ──────────────────────────────────────────────────────────

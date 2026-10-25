@@ -42,12 +42,7 @@ public sealed class AccessibleText
     {
         ArgumentNullException.ThrowIfNull(text);
         Text = text;
-        Caret = caret < 0 ? -1 : Math.Min(caret, text.Length);
-        if (selectionStart >= 0 && selectionEnd >= 0 && selectionStart != selectionEnd)
-        {
-            SelectionStart = Math.Clamp(Math.Min(selectionStart, selectionEnd), 0, text.Length);
-            SelectionEnd = Math.Clamp(Math.Max(selectionStart, selectionEnd), 0, text.Length);
-        }
+        (Caret, SelectionStart, SelectionEnd) = Offsets(text.Length, caret, selectionStart, selectionEnd);
         Geometry = geometry;
         VisibleStart = Math.Clamp(visibleStart, 0, text.Length);
         VisibleEnd = visibleEnd < 0 ? text.Length : Math.Clamp(visibleEnd, VisibleStart, text.Length);
@@ -60,6 +55,36 @@ public sealed class AccessibleText
         for (int at = 0, p = 1, i; (i = span[at..].IndexOf('\n')) >= 0; at += i + 1)
             _paragraphStarts[p++] = at + i + 1;
         _lineStarts = lineStarts is { Count: > 0 } ? Merge(_paragraphStarts, lineStarts, text.Length) : _paragraphStarts;
+    }
+
+    /// <summary>
+    /// The text of <paramref name="source"/>, with its lines, paragraphs, part on screen,
+    /// read-only state and geometry, and the caret and the selection elsewhere, kept as the public
+    /// constructor keeps them. What a caret move makes of a long document's text for a reader: the
+    /// tables of its lines and paragraphs and where each line is drawn are a third of a megabyte
+    /// at 5,000 blocks, and a move changes none of them. They never change once made, so the two
+    /// texts share them.
+    /// </summary>
+    internal AccessibleText(AccessibleText source, int caret, int selectionStart, int selectionEnd)
+    {
+        Text = source.Text;
+        (Caret, SelectionStart, SelectionEnd) = Offsets(Text.Length, caret, selectionStart, selectionEnd);
+        Geometry = source.Geometry;
+        VisibleStart = source.VisibleStart;
+        VisibleEnd = source.VisibleEnd;
+        IsReadOnly = source.IsReadOnly;
+        _paragraphStarts = source._paragraphStarts;
+        _lineStarts = source._lineStarts;
+    }
+
+    // The caret clamped into the text, -1 for none; a selection ordered and clamped into it, none
+    // (0, 0) where its ends meet or either is missing.
+    private static (int Caret, int Start, int End) Offsets(int length, int caret, int selectionStart, int selectionEnd)
+    {
+        int at = caret < 0 ? -1 : Math.Min(caret, length);
+        return selectionStart >= 0 && selectionEnd >= 0 && selectionStart != selectionEnd
+            ? (at, Math.Clamp(Math.Min(selectionStart, selectionEnd), 0, length), Math.Clamp(Math.Max(selectionStart, selectionEnd), 0, length))
+            : (at, 0, 0);
     }
 
     // The paragraph starts and the given line starts, in order, each once, inside the text.
@@ -283,11 +308,28 @@ internal abstract class AccessibleTextVersion
     /// text: what comparing the two snapshots' <see cref="AccessibleText.Text"/> would answer.</summary>
     public abstract bool SameText(AccessibleTextVersion other);
 
+    /// <summary>The caret's offset, or -1 when there is none: what <see cref="Text"/>'s
+    /// <see cref="AccessibleText.Caret"/> is, without making the text. Any thread.</summary>
+    public abstract int Caret { get; }
+
+    /// <summary>The selection, as <see cref="Text"/>'s <see cref="AccessibleText.SelectionStart"/>
+    /// and <see cref="AccessibleText.SelectionEnd"/> are (both 0 for none), without making the
+    /// text. Any thread.</summary>
+    public abstract int SelectionStart { get; }
+    public abstract int SelectionEnd { get; }
+
     /// <summary>Whether <paramref name="other"/> has the caret and the selection at the same offsets.</summary>
-    public abstract bool SameSelection(AccessibleTextVersion other);
+    public bool SameSelection(AccessibleTextVersion other) =>
+        Caret == other.Caret && SelectionStart == other.SelectionStart && SelectionEnd == other.SelectionEnd;
 
     /// <summary>The text of this version, made on first ask; any thread.</summary>
     public abstract AccessibleText Text { get; }
+
+    /// <summary>The text's characters alone, as <see cref="Text"/>'s <see cref="AccessibleText.Text"/>
+    /// has them: what AT-SPI describes a text change from. By default the text made; a version that
+    /// holds its string (a text area's) hands it over without making the tables of its lines and
+    /// paragraphs. Any thread.</summary>
+    public virtual string Characters => Text.Text;
 
     /// <summary>The element's value with this text (UIA's ValueValue), made on first ask; any thread.</summary>
     public abstract string? Value { get; }

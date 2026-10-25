@@ -59,7 +59,10 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   compositor's direct path). A title-bar move runs the same loop and builds nothing; snap,
   maximize and a program's resize rebuild for every size. Only under MAILBOX: under FIFO a
   one-to-one swapchain stalled for good, and under IMMEDIATE a drag's first one cost about 180 ms.
-  `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates always, `=0` never.
+  `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates always, `=0` never. The half-float offscreen is
+  made at the over-allocated size too (`VulkanFrameTarget.AllocatedWidthPx`), clipped to the
+  window, and kept with the swapchain: remade at every size, an 80-step drag made 81 offscreens,
+  each with a synchronous submit and a scratch purge, against 5 swapchains.
 - **Rebuild:** the old swapchain is handed to the new one as `oldSwapchain`, except the scRGB one
   under MAILBOX on Windows, which is destroyed first. Handed over, it made the next present wait
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
@@ -238,8 +241,12 @@ The rules the design depends on. Each one was broken once, and most failed silen
 - **A render target kept over a swapchain image needs the image back in the layout Skia left it
   in** before any of Skia's work on it is submitted, and has to go before its image does: the
   host's `TransitionAcquiredImage` and its call before the images go, both promised through
-  `SetSwapchainReleasing`. Without them, wrap the image every frame. **Never cache** a wrapped
-  renderer-owned image (the shared video image): nothing restores its layout.
+  `SetSwapchainReleasing`. Without them, wrap the image every frame.
+- **The wrapper over a shared video image is kept only while every frame lends the image first.**
+  The lend's acquire barrier (`FinishExternalFrame`) puts it in `SHADER_READ_ONLY_OPTIMAL` on the
+  graphics queue, the state the wrapper declares, before Skia's work on it is submitted, and Skia
+  only samples it. The surface makes it again when the host may have replaced the image (a new
+  size, a failed lend, the source let go) or what it declares changes.
 - **Swapchain images need `TRANSFER_SRC`.** Without it Skia returns a null surface and says
   nothing.
 - **scRGB only with `VK_EXT_swapchain_colorspace` enabled.** Drivers list the colour space either
@@ -415,8 +422,12 @@ Anything holding a handle to something Skia or a driver also tracks goes stale, 
   the validation layer loaded and silent (`VulkanProbeTests`). **The captures alone could not have
   failed**: with the barrier left out, NVIDIA 610 drew every captured frame right, and only the
   layer said what was wrong (`VUID-vkCmdDraw-None-09600`, an image in `UNDEFINED` or
-  `PRESENT_SRC_KHR` where the target expects `COLOR_ATTACHMENT_OPTIMAL`). **Never cache a
-  renderer-owned `SKImage`**: nothing restores its layout.
+  `PRESENT_SRC_KHR` where the target expects `COLOR_ATTACHMENT_OPTIMAL`). The `SKImage` over a
+  shared video image is kept too (2026-10-24), because the host's acquire barrier hands the image
+  back in `SHADER_READ_ONLY_OPTIMAL` on every frame that draws it: Reel playing a 120 fps clip
+  through a drag, a move and a held drag, the layer loaded (its deliberate faults reported) and
+  silent; a clip that brightens frame by frame shows a brighter picture in each later capture
+  (`VulkanProbeTests`).
 - **Do not read the shared image through Vulkan.** Guessing its layout returned 0.000 from an image
   with a picture in it. Read it through GL, as `HULTUI_VIDEO_HDR_PROBE` does.
 - **Layouts Skia owns are assumed, not known.** The present barrier assumes

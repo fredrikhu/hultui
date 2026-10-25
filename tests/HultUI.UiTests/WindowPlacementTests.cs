@@ -24,6 +24,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [UiFact]
     public void APlacementOnEveryMonitor_LandsExactly()
     {
+        using var guard = ForegroundGuard.Begin();
         foreach (var style in Styles)
         foreach (var area in WorkAreas())
         {
@@ -46,6 +47,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [UiFact]
     public void AMaximizedPlacement_IsMaximizedBeforeTheFirstFrame_WhichRevealsIt()
     {
+        using var guard = ForegroundGuard.Begin();
         foreach (var style in Styles)
         foreach (var area in WorkAreas())
         {
@@ -75,6 +77,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [UiFact]
     public void TheRestoredBounds_AreWhatIsReported_MaximizedMinimizedOrFullScreen()
     {
+        using var guard = ForegroundGuard.Begin();
         foreach (var style in Styles)
         {
             var area = WorkAreas()[0];
@@ -114,6 +117,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [UiFact]
     public void Raise_UnMinimizes_ButLeavesAMaximizedWindowMaximized()
     {
+        using var guard = ForegroundGuard.Begin();
         // Raise restored unconditionally, and a restore is what takes a window out of
         // maximized: every file handed over from a second launch shrank the player.
         foreach (var style in Styles)
@@ -153,6 +157,7 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [UiFact]
     public void BoundsOnAMonitorThatIsGone_ComeBackOnOne()
     {
+        using var guard = ForegroundGuard.Begin();
         using var app = Open(WindowStyle.Borderless);
         var window = app.PrimaryWindow;
 

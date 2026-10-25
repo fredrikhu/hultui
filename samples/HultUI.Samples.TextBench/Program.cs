@@ -37,24 +37,37 @@ var scenarios = Scenarios.All().ToList();
 // with nothing to do with the code under test, and it is enough to invent
 // regressions that are not there.
 //
-// Passes for a length of time, not one pass. With tiered PGO a method goes tier 0,
-// then instrumented tier 0, then tier 1, and the second step needs calls after the
-// first: one pass left the caret rows (3 ns of work) at instrumented tier 0 for the
+// Passes until the JIT has finished, not for a fixed time. With tiered PGO a method
+// goes tier 0, then instrumented tier 0, then tier 1, and each step needs calls after
+// the last: one pass left the caret rows (3 ns of work) at instrumented tier 0 for the
 // whole measurement whenever the background compiler had a long queue — ten times
-// their cost, in run after run, gone with DOTNET_TC_CallCountingDelayMs=0. The
-// passes reuse the warm-up's own indices, so the cold rows' strings stay unseen.
+// their cost, in run after run, gone with DOTNET_TC_CallCountingDelayMs=0. So the
+// passes go on for at least 3 s and then until the count of compiled methods has not
+// risen for a second, or for 30 s at most. The JIT line under the table says how many
+// methods were still compiled while the rows were measured: ~130 when this was written,
+// rarely called ones (a cache's growth, a font object made) reaching their call count.
+//
+// And on the paths the rows are measured on. The passes used to call each row with the
+// same few indices, every pass: a cold row's strings and a resize row's widths were
+// new to its caches in the first pass only, so from the second on it measured cache
+// hits, and its own path (shaping, the memo of a string's widths, the ellipsis search)
+// was compiled while the rows were measured — ~1,000 methods. Now the passes run on a
+// second set of the scenarios, with pipelines of their own, so they can follow the
+// measurement's index sequence (a new width every batch, the caret's real offsets)
+// without touching what is measured; a cold row gets a new string on every call.
 var warm = Stopwatch.StartNew();
-int passes = 0;
-do
-{
-    foreach (var s in scenarios)
-        for (int i = 0; i < s.Batch; i++) s.Op(-1 - i);
-    passes++;
-}
-while (passes < 2 || warm.Elapsed < TimeSpan.FromSeconds(3));
-Thread.Sleep(500);   // let the background JIT publish the tier-1 bodies
+long compiledAtStart = System.Runtime.JitInfo.GetCompiledMethodCount();
+int passes = WarmUpJit(warm);
+long compiledInWarmUp = System.Runtime.JitInfo.GetCompiledMethodCount() - compiledAtStart;
+double warmSeconds = warm.Elapsed.TotalSeconds;
 
-var results = Bench.RunAll(scenarios);
+// Then each measured row once with indices the measurement never uses, so it starts from
+// the state it always started from: a cold row's caches holding a batch of strings it is
+// not measured on, a resize row's labels already shaped at a width it is not measured at.
+foreach (var s in scenarios)
+    for (int i = 0; i < s.Batch; i++) s.Op(-1 - i);
+
+var results = Bench.RunAll(scenarios, out long compiledInMeasurement);
 
 if (csv)
 {
@@ -77,13 +90,51 @@ else
     Console.WriteLine();
 }
 
+(csv ? Console.Error : Console.Out).WriteLine(
+    $"JIT: warm-up {passes} passes in {warmSeconds:F1} s compiled {compiledInWarmUp:N0} methods; " +
+    $"{compiledInMeasurement:N0} compiled during measurement");
+
 static string Fmt(double ns) => ns < 1_000 ? $"{ns:F0} ns" : $"{ns / 1000:F2} µs";
+
+// The JIT warm-up's passes, on scenarios of its own (their pipelines are garbage once this
+// returns, before the measurement's collection). A row is called with the indices it is
+// measured with, pass after pass; a cold row, whose strings are numbered, with a new
+// negative one every call instead, a string it has not met.
+static int WarmUpJit(Stopwatch warm)
+{
+    var scenarios = Scenarios.All().ToList();
+    long compiled = System.Runtime.JitInfo.GetCompiledMethodCount();
+    var lastCompiled = warm.Elapsed;
+    int passes = 0;
+    do
+    {
+        foreach (var s in scenarios)
+            for (int i = 0; i < s.Batch; i++)
+            {
+                int index = passes * s.Batch + i;
+                s.Op(s.Cold ? -1 - index : index);
+            }
+        passes++;
+        long now = System.Runtime.JitInfo.GetCompiledMethodCount();
+        if (now != compiled)
+        {
+            compiled = now;
+            lastCompiled = warm.Elapsed;
+        }
+    }
+    while (warm.Elapsed < TimeSpan.FromSeconds(30)
+        && (passes < 2 || warm.Elapsed < TimeSpan.FromSeconds(3) || warm.Elapsed - lastCompiled < TimeSpan.FromSeconds(1)));
+    return passes;
+}
 
 readonly record struct Result(string Name, double MedianNs, double MinNs, double BytesPerOp);
 
 /// <summary>One measured operation: <paramref name="Op"/> is called with a
-/// monotonically increasing index so scenarios can drive unique inputs.</summary>
-sealed record Scenario(string Name, int Batch, Action<int> Op);
+/// monotonically increasing index so scenarios can drive unique inputs, and with negative
+/// ones before the measurement. <paramref name="Cold"/>: every index is an input never seen
+/// before, and only so many are made for the measurement, so the JIT warm-up hands it a new
+/// negative one on every call.</summary>
+sealed record Scenario(string Name, int Batch, Action<int> Op, bool Cold = false);
 
 static class Bench
 {
@@ -96,7 +147,7 @@ static class Bench
     /// scenarios ran first. Interleaving spreads it across all of them, and the
     /// paired warm/recheck rows below make the residual visible.
     /// </summary>
-    public static List<Result> RunAll(List<Scenario> scenarios)
+    public static List<Result> RunAll(List<Scenario> scenarios, out long compiledMethods)
     {
         var times = new double[scenarios.Count][];
         var indices = new int[scenarios.Count];
@@ -107,6 +158,7 @@ static class Bench
         var allocBefore = new long[scenarios.Count];
         var allocated = new long[scenarios.Count];
 
+        long compiledBefore = System.Runtime.JitInfo.GetCompiledMethodCount();
         for (int sample = 0; sample < Samples; sample++)
         {
             for (int i = 0; i < scenarios.Count; i++)
@@ -120,6 +172,7 @@ static class Bench
                 times[i][sample] = (end - start) * 1_000_000_000.0 / Stopwatch.Frequency / s.Batch;
             }
         }
+        compiledMethods = System.Runtime.JitInfo.GetCompiledMethodCount() - compiledBefore;
 
         var results = new List<Result>(scenarios.Count);
         for (int i = 0; i < scenarios.Count; i++)
@@ -161,18 +214,28 @@ static class Scenarios
         return sb.ToString();
     }
 
-    // Unique strings, letters only — no digits, so the digit fast path is not
-    // what is being measured, and no allocation happens inside the timed region.
-    // One per measured call plus a batch of slack, which the warm-up consumes
-    // from the far end: if the sequence ever wrapped, a "cold" scenario would
-    // quietly start hitting the layout cache and report a fraction of its cost.
-    private static string[] Unique(string template, int batch)
+    /// <summary>
+    /// The strings a cold row lays out, each one the pipeline has not seen. Letters only —
+    /// no digits, so the digit fast path is not what is being measured. From index 0, one per
+    /// measured call, made in advance so nothing is allocated inside the timed region; past
+    /// the end it throws rather than wrap, since a "cold" row that wrapped would quietly start
+    /// hitting the layout cache and report a fraction of its cost. A negative index is the
+    /// warm-up's: a string made there and then, new for every index and never one of the
+    /// measured ones.
+    /// </summary>
+    private sealed class ColdTexts(string template, int batch)
     {
-        int count = batch * (Bench.Samples + 1);
-        var result = new string[count];
-        for (int i = 0; i < count; i++)
-            result[i] = template + ' ' + Alpha(i);
-        return result;
+        private readonly string[] _measured = Unique(template, batch * Bench.Samples);
+
+        public string this[int i] => i >= 0 ? _measured[i] : template + ' ' + Alpha(_measured.Length - 1 - i);
+
+        private static string[] Unique(string template, int count)
+        {
+            var result = new string[count];
+            for (int i = 0; i < count; i++)
+                result[i] = template + ' ' + Alpha(i);
+            return result;
+        }
     }
 
     private static string Alpha(int n)
@@ -208,23 +271,23 @@ static class Scenarios
         // BiDi path's real cost shows.
         {
             var p = Pipeline();
-            var texts = Unique(Latin, batch: 200);
-            yield return new("cold/latin-67", 200, i => p.Layout(texts[Idx(i, texts.Length)], ltr, 10_000, null));
+            var texts = new ColdTexts(Latin, batch: 200);
+            yield return new("cold/latin-67", 200, i => p.Layout(texts[i], ltr, 10_000, null), Cold: true);
         }
         {
             var p = Pipeline();
-            var texts = Unique(Paragraph(60), batch: 40);
-            yield return new("cold/latin-wrapped", 40, i => p.Layout(texts[Idx(i, texts.Length)], ltr, 300, null));
+            var texts = new ColdTexts(Paragraph(60), batch: 40);
+            yield return new("cold/latin-wrapped", 40, i => p.Layout(texts[i], ltr, 300, null), Cold: true);
         }
         {
             var p = Pipeline();
-            var texts = Unique(Mixed, batch: 200);
-            yield return new("cold/mixed-38", 200, i => p.Layout(texts[Idx(i, texts.Length)], ltr, 10_000, null));
+            var texts = new ColdTexts(Mixed, batch: 200);
+            yield return new("cold/mixed-38", 200, i => p.Layout(texts[i], ltr, 10_000, null), Cold: true);
         }
         {
             var p = Pipeline();
-            var texts = Unique(Hebrew, batch: 200);
-            yield return new("cold/hebrew-25", 200, i => p.Layout(texts[Idx(i, texts.Length)], rtl, 10_000, null));
+            var texts = new ColdTexts(Hebrew, batch: 200);
+            yield return new("cold/hebrew-25", 200, i => p.Layout(texts[i], rtl, 10_000, null), Cold: true);
         }
 
         // Auto direction (stage 3): Latin text must not notice it exists — the
@@ -232,10 +295,10 @@ static class Scenarios
         // analysis it already paid, now also reporting what it resolved to.
         {
             var p = Pipeline();
-            var latinTexts = Unique(Latin, batch: 200);
-            var mixedTexts = Unique(Mixed, batch: 200);
-            yield return new("auto/latin-cold", 200, i => p.Layout(latinTexts[Idx(i, latinTexts.Length)], auto, 10_000, null));
-            yield return new("auto/mixed-cold", 200, i => p.Layout(mixedTexts[Idx(i, mixedTexts.Length)], auto, 10_000, null));
+            var latinTexts = new ColdTexts(Latin, batch: 200);
+            var mixedTexts = new ColdTexts(Mixed, batch: 200);
+            yield return new("auto/latin-cold", 200, i => p.Layout(latinTexts[i], auto, 10_000, null), Cold: true);
+            yield return new("auto/mixed-cold", 200, i => p.Layout(mixedTexts[i], auto, 10_000, null), Cold: true);
         }
 
         // ── resize: strings already shaped, laid out at a width the layout cache

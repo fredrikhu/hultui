@@ -100,9 +100,37 @@ public class RunLoopTests
     {
         using var run = new Counted();
         Animate.Value(0f, 1f, _ => { }).Duration(0.2f).OnComplete(() => run.Session.Window.Window.Close()).Start();
+        long start = run.Session.Time.GetTimestamp();
 
         run.Session.RunLoop(() => false);
 
         Assert.False(run.Session.Application.IsRunning);
+        // As the app's own close button does, in a pass: the run ends with it, rather than
+        // parking to the end of the run's 60 s first.
+        Assert.InRange(run.MillisecondsSince(start), 200, 240);
+    }
+
+    [Fact]
+    public void AWindowClosedByAnEvent_EndsTheRunAtOnce_WithoutParkingFirst()
+    {
+        // An event that closes the window — a posted WM_CLOSE, the task bar's Close — is handled
+        // by the next pass. That pass must end the loop before the loop waits: with no window
+        // left, nothing would end the wait, and the app stayed running, parked, windowless, until
+        // some unrelated wake (plan 17, round 4: FlaUI killed the VirtualList sample after its
+        // 5 s close timeout; a second WM_CLOSE ended it at once).
+        using var run = new Counted();
+        bool posted = false;
+        long start = run.Session.Time.GetTimestamp();
+
+        run.Session.RunLoop(() => false, eventEvery: TimeSpan.FromSeconds(10), onEvent: () =>
+        {
+            if (posted) return;
+            posted = true;
+            Application.InvokeOnMainThread(() => run.Session.Window.Window.Close());
+        });
+
+        Assert.False(run.Session.Application.IsRunning);
+        // The close arrived at 10 s; the next event, which used to end the wait, at 20 s.
+        Assert.InRange(run.MillisecondsSince(start), 10_000, 10_001);
     }
 }

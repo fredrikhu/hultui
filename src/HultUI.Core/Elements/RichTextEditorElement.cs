@@ -126,6 +126,11 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
             if (_readOnly == value) return;
             _readOnly = value;
             MarkPaintDirty();
+            // The text a reader reads says whether it may be changed (UIA's IsReadOnly text
+            // attribute): its version holds it, and the window puts the new version on the applied
+            // tree, as for a caret move, telling nothing. This marked paint only, so a reader was
+            // answered the old state until something else rebuilt the tree.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.TextSelection);
         }
     }
     private bool _readOnly;
@@ -225,7 +230,8 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
     {
         _needsScrollToCaret = true;
         MarkPaintDirty();
-        // A reader follows the caret: the tree is built again and the bridge tells it moved.
+        // A reader follows the caret: the window puts the text's new version on the applied tree,
+        // and the bridge tells it moved. No tree is built for it (plan 17, round 4).
         if (AccessibilityClients.Active) NotifyAccessibilityPropertyChanged(AccessibilityProperties.TextSelection);
         SelectionChanged?.Invoke();
     }

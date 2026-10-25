@@ -7,7 +7,9 @@ namespace HultUI.Platform.Accessibility.Windows;
 
 /// <summary>
 /// Pattern providers look up their target element via the bridge each time a
-/// UIA client invokes them, so they don't become stale across tree rebuilds.
+/// UIA client invokes them, so they don't become stale across tree rebuilds. What
+/// they read is its node's in the current tree, as its properties are; what they
+/// do is routed to the element on the UI thread.
 /// The actual element mutation routes through the same event/handler path as
 /// pointer clicks — behavior is identical whether a human or an AT triggered it.
 /// Exposed to UIA as native objects (see <see cref="NativeProvider"/>).
@@ -202,8 +204,8 @@ internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridg
 }
 
 /// <summary>
-/// Scroll pattern for a scroll view / virtualized list. State is read live from
-/// the element; Scroll and SetScrollPercent marshal onto the UI thread. The
+/// Scroll pattern for a scroll view / virtualized list. State is read from its
+/// node, as the tree was built; Scroll and SetScrollPercent marshal onto the UI thread. The
 /// BOOL out-params use VARIANT_BOOL (-1 = true).
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -241,8 +243,9 @@ internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, Eleme
 }
 
 /// <summary>
-/// RangeValue for a slider. State is read live from the element; SetValue
-/// marshals onto the UI thread. BOOL out-params use VARIANT_BOOL (-1 = true).
+/// RangeValue for a slider. State is read from its node, as the RangeValue
+/// properties are (it read the live element, and the two disagreed until the
+/// range's coalesced refresh); SetValue marshals onto the UI thread. BOOL out-params use VARIANT_BOOL (-1 = true).
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaRangeValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeRangeValue

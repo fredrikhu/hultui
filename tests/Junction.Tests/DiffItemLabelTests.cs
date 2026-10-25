@@ -55,6 +55,7 @@ public class DiffItemLabelTests
         Hosted((session, app) =>
         {
             var before = ItemNames(session).First(n => n.StartsWith("added, line 4:", StringComparison.Ordinal));
+            int gen = DataGeneration(app);
 
             var summary = Get<Ref<TextInputElement>>(app, "_summaryRef").Current!;
             session.Window.Click(summary);
@@ -62,7 +63,10 @@ public class DiffItemLabelTests
             session.PumpFrames(2);
 
             var after = ItemNames(session).First(n => n.StartsWith("added, line 4:", StringComparison.Ordinal));
-            Assert.Same(before, after);
+            // A reload between the two reads makes new rows and new labels; say so if one came
+            // (the fixture's git writes no longer start one: FixtureQuietTests).
+            Assert.True(ReferenceEquals(before, after),
+                $"the label was made again (the repository's data generation moved by {DataGeneration(app) - gen})");
         });
     }
 
@@ -79,6 +83,9 @@ public class DiffItemLabelTests
 
     private static IEnumerable<AccessibilityNode> Walk(AccessibilityNode node) =>
         node.Children.SelectMany(Walk).Prepend(node);
+
+    /// <summary>The data generations of the app's repositories, summed: a reload bumps it.</summary>
+    private static int DataGeneration(JunctionApp app) => Get<Dictionary<string, int>>(app, "_dataGen").Values.Sum();
 
     private static T Get<T>(JunctionApp app, string field) =>
         (T)typeof(JunctionApp).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;

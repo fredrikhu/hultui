@@ -17,7 +17,7 @@ The framework has three test layers plus ad-hoc verification. Pick the lowest la
 | `tests/Junction.Tests` | app | `apps/Junction`: pure logic (diff/conflict/patch/graph parsing), `GitRepository` against real temp repos, plus the whole app hosted headless |
 | `tests/VesperCommander.Tests` | app | `apps/VesperCommander`: engines (find/sync/rename/diff/archive) plus headless hosting |
 | `tests/HultUI.Text.Tests`, `HultUI.Rendering.Skia.Tests`, `HultUI.Platform.SDL3.Tests`, `HultUI.SourceGenerators.Tests`, `HultUI.Platform.Accessibility.Linux.Tests` | subsystem unit | text pipeline, Skia surfaces and scRGB frame paths, Vulkan swapchain choices, reactive generator, AT-SPI constants |
-| `tests/HultUI.UiTests` | real window (Windows-only, **opt-in**) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients; also the GPU paths the headless driver never reaches (GL sink, mpv's GL path, the Vulkan renderer and its GL fallback). Skipped unless `HULTUI_UITESTS=1` |
+| `tests/HultUI.UiTests` | real window (Windows-only, **opt-in**) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients; also the GPU paths the headless driver never reaches (GL sink, mpv's GL path, the Vulkan renderer and its GL fallback). Skipped unless `HULTUI_UITESTS=1`; the few that take the foreground also need `HULTUI_UITESTS_FOREGROUND=1` |
 
 ## Running tests
 
@@ -32,8 +32,11 @@ dotnet test HultUI.CrossPlatform.slnf
 dotnet test tests/HultUI.Headless.Tests
 dotnet test tests/HultUI.Core.Tests --filter "FullyQualifiedName~PatchFrom_Preserves"
 
-# The real-window UiTests, which take over the foreground (Windows, desktop session):
+# The real-window UiTests (Windows, desktop session). Their windows stay out of the foreground:
 $env:HULTUI_UITESTS = "1"; dotnet test tests/HultUI.UiTests
+
+# Plus the few that take the foreground on purpose — only on a desktop nobody is using:
+$env:HULTUI_UITESTS = "1"; $env:HULTUI_UITESTS_FOREGROUND = "1"; dotnet test tests/HultUI.UiTests
 ```
 
 **`HULTUI_UITESTS` is the gate for the real-window suite.** Without it every UiTest
@@ -41,6 +44,24 @@ reports as *skipped* — deliberately visible, rather than silently absent the w
 `--filter "FullyQualifiedName!~HultUI.UiTests"` left them. Don't reintroduce that filter:
 the gate is the one mechanism, and a name filter also swallows any future test whose name
 happens to contain the string.
+
+**Every window a UiTest opens goes through `ForegroundGuard`**, so a `HULTUI_UITESTS=1` run
+never takes focus from someone at the desk. In process, `ForegroundGuard.Begin()` first thing
+in the test (on the thread that makes the window: inside `OnSta` for the STA tests): it sets
+SDL's no-activate hints, makes the thread's top-level windows `WS_EX_NOACTIVATE` and refuses
+their activations with a CBT hook. For a sample exe, `ForegroundGuard.ForSamples()` and
+`guard.LaunchSample(exe)`: the hints go in the sample's environment and its windows get
+`WS_EX_NOACTIVATE` from outside. Either way a watcher hands the foreground straight back if
+this process, a sample or any process it started (WebView2's browser) ever takes it, and the
+test fails. `HULTUI_UITESTS_GUARD_LOG=<file>` appends a line per guard: activations refused,
+hand-backs, sample windows held. Win32 calls in a test pass `SWP_NOACTIVATE`.
+
+**`HULTUI_UITESTS_FOREGROUND=1` is the second gate**, for tests that need the foreground
+itself and cannot keep out of it: `WinFormsHostSampleTests` (Tab traversal needs Win32 focus;
+the fixture calls `HostedInput.EnsureForeground`), `WebViewAccessibilityTests` (focus inside the
+page; `HWND_TOPMOST` hit tests) and WebView2Tests' two DevTools tests (the browser activates its
+DevTools window; F12 needs keyboard focus). They use `[UiForegroundFact]` and skip, saying why,
+unless both variables are set. Never set it on a machine someone is using.
 
 - `dotnet build`/`dotnet test` take **one** project per invocation (MSB1008) — run them separately or use the solution.
 - MSB3027 "file locked" usually means a previously launched sample app still holds its exe — find and `Stop-Process` it.
@@ -88,7 +109,7 @@ Fedora's minimal image differs from CI's Ubuntu runner in what it has installed:
 - **Element/layout/event logic** → Core.Tests. Build elements directly, dispatch with `EventDispatcher.Dispatch(new ClickEvent(), target)`, measure text with `StubMeasureContext` (7px/char, 14px lines). Target-phase dispatch runs *all* handlers in registration order; `StopPropagation` breaks the loop.
 - **Anything needing a laid-out frame, focus, input funnel, scrolling, animations, or a11y queries** → HultUI.Headless. Full guide: `docs/HEADLESS.md`. Runs on any CI runner, no display.
 - **Sample-app behavior** → host the whole app headlessly (below), or tree-walk like TodoList tests if no layout is needed.
-- **"Does a real screen reader / UIA client see it?"** → HultUI.UiTests with FlaUI. Windows only, launches real windows that take the foreground — run locally with `HULTUI_UITESTS=1`, never in CI.
+- **"Does a real screen reader / UIA client see it?"** → HultUI.UiTests with FlaUI. Windows only, launches real windows (kept out of the foreground by `ForegroundGuard`) — run locally with `HULTUI_UITESTS=1`, never in CI.
 - **Does the GPU renderer draw, or fall back?** → HultUI.UiTests. `VulkanProbeTests` runs `tests/HultUI.UiTests.VulkanProbe` as its own process (the renderer is chosen once per process, and the Vulkan loader reads `VK_*` fault-injection variables at start) and checks a `HULTUI_VULKAN_CAPTURE` frame; `MpvGLTests` covers mpv on a window, where the UI thread renders. The headless driver draws through a raster surface, and mpv's headless path renders on its own thread, so neither can see these.
 - **Perf/GL** → real window with tracing (`HULTUI_TRACE=<path>`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`), or `samples/HultUI.Samples.Benchmark --auto|--profile`, or the live **F12 HUD** (below). Never use the real window for *correctness* checks, except of the GPU paths above.
 

@@ -39,9 +39,15 @@ public class VirtualListItemRowTests
         public int SelectedId;
         /// <summary>Something a row shows that is neither its item nor its selection.</summary>
         public string Suffix = "";
+        /// <summary>Something only one row shows beside its item and selection, as a second
+        /// highlight does: the row of this id is starred, in its text and its label.</summary>
+        public int StarredId = -1;
         /// <summary>Rows made by the template.</summary>
         public int Made;
+        /// <summary>Labels made by the label delegate.</summary>
+        public int LabelsMade;
         public readonly Ref<VirtualListElement<Entry>> List = new();
+        private Func<Entry, string?>? _label;
 
         public override Element Build()
         {
@@ -49,7 +55,8 @@ public class VirtualListItemRowTests
             var list = VirtualListElement<Entry>.New()
                 .ItemHeight(RowHeight)
                 .Items(Items)
-                .AccessibleItemLabel(e => e.Name)
+                // One delegate every build, reading the star live: the list keeps the labels.
+                .AccessibleItemLabel(_label ??= e => { LabelsMade++; return e.Id == StarredId ? e.Name + ", starred" : e.Name; })
                 .SelectedIndex(Items.FindIndex(e => e.Id == selectedId))
                 .FlexGrow(1);
             if (itemRows) list.RenderWith((e, selected) => Row(e, selected));
@@ -62,7 +69,7 @@ public class VirtualListItemRowTests
             Made++;
             var row = Flex.Row().Padding(new Thickness(2, 8))
                 .Background(selected ? Selected : Color.Transparent)
-                .Children(TextB.New(e.Name + Suffix).FontSize(12f));
+                .Children(TextB.New(e.Name + Suffix + (e.Id == StarredId ? " ★" : "")).FontSize(12f));
             if (!selected) row.OnHover(b => b.BackgroundColor = Hovered);
             return row;
         }
@@ -245,6 +252,81 @@ public class VirtualListItemRowTests
         session.PumpFrames(2);
 
         Assert.All(Rows(pane), r => Assert.EndsWith(" !", r.Name));
+    }
+
+    /// <summary>A highlight only one row shows moves from one row to another: the app tells the
+    /// list those two rows, before the rebuild, and only they are made again — from the new
+    /// build's template — while every other row is kept.</summary>
+    [Fact]
+    public void InvalidateRow_MakesOnlyTheRowsItNames_FromTheNewBuild()
+    {
+        var (session, pane) = Mount(itemRows: true);
+        using var _ = session;
+        pane.StarredId = 3;
+        pane.List.Current!.InvalidateRows();
+        pane.Rebuild();
+        session.PumpFrames(2);
+        Assert.Equal("entry 3 ★", ((TextElement)pane.List.Current!.Children[1 + 3].Children[0]).Content);
+        var before = Rows(pane);
+        pane.Made = 0;
+
+        pane.StarredId = 7;
+        pane.List.Current!.InvalidateRow(3);
+        pane.List.Current!.InvalidateRow(7);
+        pane.Rebuild();
+        session.PumpFrames(2);
+
+        Assert.Equal(2, pane.Made);
+        var after = Rows(pane);
+        Assert.Equal(before.Count, after.Count);
+        for (int i = 0; i < after.Count; i++)
+        {
+            if (i == 3 || i == 7) Assert.NotSame(before[i].Row, after[i].Row);
+            else Assert.Same(before[i].Row, after[i].Row);
+        }
+        Assert.Equal("entry 3", after[3].Name);
+        Assert.Equal("entry 7 ★", after[7].Name);
+    }
+
+    /// <summary>The row's kept label goes with it, and only that label: the others are still the
+    /// ones the list kept.</summary>
+    [Fact]
+    public void InvalidateRow_LetsGoOfThatItemsLabel_AndKeepsTheOthers()
+    {
+        var (session, pane) = Mount(itemRows: true);
+        using var _ = session;
+        var items = (IAccessibleItemSource)pane.List.Current!;
+        for (int i = 0; i < 20; i++) items.GetItemLabel(i);   // every label made and kept
+        pane.LabelsMade = 0;
+
+        pane.StarredId = 12;
+        pane.List.Current!.InvalidateRow(12);   // not realized: a label alone
+        pane.List.Current!.InvalidateRow(2);    // realized: the row and its label
+
+        Assert.Equal("entry 12, starred", items.GetItemLabel(12));
+        Assert.Equal("entry 2", items.GetItemLabel(2));
+        Assert.Equal("entry 5", items.GetItemLabel(5));
+        Assert.Equal(2, pane.LabelsMade);
+    }
+
+    /// <summary>Indices the list does not hold are ignored, and a row that is not realized costs no
+    /// row.</summary>
+    [Fact]
+    public void InvalidateRow_OutsideTheItemsOrTheWindow_MakesNoRow()
+    {
+        var (session, pane) = Mount(itemRows: true);
+        using var _ = session;
+        var before = Rows(pane);
+        pane.Made = 0;
+
+        pane.List.Current!.InvalidateRow(-1);
+        pane.List.Current!.InvalidateRow(pane.Items.Count);
+        pane.List.Current!.InvalidateRow(150);   // far below the window
+        pane.Rebuild();
+        session.PumpFrames(2);
+
+        Assert.Equal(0, pane.Made);
+        Assert.Equal(before.Select(r => r.Row), Rows(pane).Select(r => r.Row));
     }
 
     [Fact]

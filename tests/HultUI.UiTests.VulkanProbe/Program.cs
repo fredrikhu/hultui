@@ -62,6 +62,12 @@ using HultUI.WebView.WebView2;
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
 //
+// --video-frame-bytes --clip=<file> plays the clip through MpvBackend in the real loop and prints
+// the managed bytes the UI thread allocates per drawn frame, the least of five rounds of 60 frames,
+// then the brightness of the video in two captures of the swapchain (HULTUI_VULKAN_CAPTURE, one
+// per swapchain: the window is resized between them), two seconds or more apart (Windows). Exits 4
+// when there is no libmpv.
+//
 // No window made here may become the foreground, whatever it does (Windows): see Foreground.
 
 internal static class Program
@@ -75,6 +81,8 @@ internal static class Program
         if (args.Contains("--disposed-images")) return DisposedImages(renderer);
         if (args.Contains("--frame-counter")) return FrameCounter(renderer);
         if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
+        if (args.Contains("--video-frame-bytes"))
+            return VideoFrameBytes(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
         if (args.Contains("--minimized-video"))
             return MinimizedVideo(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
@@ -257,12 +265,12 @@ internal static class Program
 
         nint hwnd = app.PrimaryWindow.NativeHandle;
         const int steps = 16;
-        int builds = trace.Builds, oneToOne = trace.OneToOne, before = frames;
+        int builds = trace.Builds, oneToOne = trace.OneToOne, before = frames, purges = trace.Purges;
         SendMessageW(hwnd, EnterSizeMove, 0, 0);
         for (int i = 0; i < steps; i++)
             SetWindowPos(hwnd, 0, 0, 0, 1000 + 24 * (i + 1), 700 + 16 * (i + 1), NoMove | NoZOrder | NoActivate);
         Console.WriteLine($"probe: drag {steps} steps, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one), " +
-            $"{frames - before} frames");
+            $"{frames - before} frames, {trace.Purges - purges} offscreens freed");
         builds = trace.Builds; oneToOne = trace.OneToOne; before = frames;
         SendMessageW(hwnd, ExitSizeMove, 0, 0);
         GetClientRect(hwnd, out var client);
@@ -281,16 +289,18 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>stderr, counting the swapchain builds HULTUI_STARTUP=1 reports.</summary>
+    /// <summary>stderr, counting the swapchain builds HULTUI_STARTUP=1 reports, and the scratch
+    /// purges that follow an offscreen let go (one each, when no image was disposed).</summary>
     private sealed class SwapchainLines(TextWriter inner) : TextWriter
     {
         private static readonly System.Text.RegularExpressions.Regex Build = new(@"vulkan swapchain (\d+x\d+) x\d+");
-        public int Builds, OneToOne;
+        public int Builds, OneToOne, Purges;
         public string Last = "";
         public override System.Text.Encoding Encoding => inner.Encoding;
         public override void Write(char value) => inner.Write(value);
         public override void WriteLine(string? value)
         {
+            if (value is not null && value.Contains("vulkan scratch purged", StringComparison.Ordinal)) Purges++;
             if (value is not null && Build.Match(value) is { Success: true } m)
             {
                 Builds++;
@@ -620,6 +630,111 @@ internal static class Program
         }
         Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"probe: {least:0.0} bytes a frame"));
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    /// <summary>
+    /// What a steady video frame allocates on the UI thread, and whether the picture keeps
+    /// changing. A canvas drawn with every frame reads the thread's allocation count, so a round
+    /// counts everything the thread did from the frame before it to its last: the draw, the
+    /// player's posts, the loop. The Vulkan renderer keeps its wrapper over a video's shared image
+    /// from frame to frame, and a wrapper that went stale would keep showing one picture: the clip
+    /// the test writes gets brighter frame by frame, and a capture taken after the rounds, on the
+    /// swapchain a resize builds, must be brighter than the one taken before them. Without a
+    /// capture (or on GL, which has none) the rounds start after two seconds of playback.
+    /// </summary>
+    private static int VideoFrameBytes(RendererKind renderer, string clip)
+    {
+        if (!MpvBackend.IsAvailable) { Console.WriteLine("probe: no libmpv"); return 4; }
+        string? capture = renderer == RendererKind.Vulkan ? Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE") : null;
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 480, 270, renderer: renderer,
+            displayColorEvents: true));
+        var allocated = new long[4096];
+        int frames = 0;
+        using var player = new MediaPlayer(new MpvBackend());
+        app.SetRoot(Flex.Row().FlexGrow(1).Children(
+            VideoElement.New(player).FlexGrow(1),
+            Canvas.New(_ =>
+            {
+                int i = Volatile.Read(ref frames);
+                if (i < allocated.Length) allocated[i] = GC.GetAllocatedBytesForCurrentThread();
+                Volatile.Write(ref frames, i + 1);
+            }).Width(1f).Height(1f)));
+        player.Open(MediaSource.FromFile(clip), autoPlay: true);
+
+        const int round = 60, rounds = 5;
+        int measureFrom = -1;
+        var brightness = new List<int>();
+        string? failure = null;
+        nint hwnd = app.PrimaryWindow.NativeHandle;
+
+        // The video's brightness in the capture, once it has been written; the file is read again
+        // until it is whole, and deleted.
+        bool TakeCapture()
+        {
+            if (capture is null || !File.Exists(capture)) return false;
+            try
+            {
+                var (width, height, pixels) = ReadPpm(capture);
+                int i = ((height / 2) * width + width / 2) * 3;
+                brightness.Add((pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3);
+                File.Delete(capture);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or IndexOutOfRangeException or ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        static bool WaitFor(Func<bool> done, double seconds)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!done())
+            {
+                if (clock.Elapsed.TotalSeconds > seconds) return false;
+                Thread.Sleep(10);
+            }
+            return true;
+        }
+
+        new Thread(() =>
+        {
+            try
+            {
+                if (!WaitFor(() => Volatile.Read(ref frames) > 0, 20)) { failure = "nothing was drawn"; return; }
+                if (capture is null) Thread.Sleep(2000);
+                else if (!WaitFor(TakeCapture, 20)) { failure = "the first capture never came"; return; }
+                int from = Volatile.Read(ref frames) + 5;
+                Volatile.Write(ref measureFrom, from);
+                if (!WaitFor(() => Volatile.Read(ref frames) > from + round * rounds, 30))
+                {
+                    failure = $"the video stopped drawing ({player.State}, {player.Error})";
+                    return;
+                }
+                if (capture is null) return;
+                // A new swapchain, which captures again.
+                Application.InvokeOnMainThread(() => SetWindowPos(hwnd, 0, 0, 0, 560, 315, NoMove | NoZOrder | NoActivate));
+                if (!WaitFor(TakeCapture, 20)) failure = "the second capture never came";
+            }
+            catch (Exception ex) { failure = ex.ToString(); }
+            finally { Application.InvokeOnMainThread(() => app.PrimaryWindow.Close()); }
+        }) { IsBackground = true }.Start();
+        app.Run();
+
+        if (failure is not null) { Console.WriteLine("probe: " + failure); return 2; }
+        int drawn = Math.Min(frames, allocated.Length);
+        double least = double.MaxValue;
+        for (int r = 0; r < rounds; r++)
+        {
+            int a = measureFrom + r * round, b = a + round;
+            if (a >= 0 && b < drawn) least = Math.Min(least, (allocated[b] - allocated[a]) / (double)round);
+        }
+        Console.WriteLine($"probe: video {player.VideoSize}, {player.SinkMode} mode, {drawn} frames");
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: {least:0.0} bytes a video frame"));
+        if (brightness.Count == 2) Console.WriteLine($"probe: video brightness {brightness[0]} then {brightness[1]}");
         Console.WriteLine("probe: done");
         return 0;
     }

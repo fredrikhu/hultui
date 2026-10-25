@@ -199,6 +199,11 @@ public partial class CommanderApp
     }
 
     // ── Breadcrumb ───────────────────────────────────────────────────────
+    /// <summary>The search root as the results breadcrumb shows it, collapsed the way the path
+    /// trail collapses to the width the window leaves it.</summary>
+    private string ResultsRootLabel(ResultListing v) =>
+        CollapsePath(v.Root, Math.Max(60f, BreadcrumbBudget() - 130f - EstTextWidth(v.Query, mono: true)));
+
     /// <summary>The breadcrumb a fed-in pane shows in place of the path trail: a pinned teal
     /// results pill, then the folder the search ran under — clicking either leaves.</summary>
     private Element BuildResultsBreadcrumb(char side, bool active, ResultListing v)
@@ -227,11 +232,12 @@ public partial class CommanderApp
 
         // The search root, collapsed the way the path trail collapses — it is the way out,
         // so it says where "back" goes rather than merely decorating the pill.
-        float budget = Math.Max(60f, BreadcrumbBudget() - 130f - EstTextWidth(v.Query, mono: true));
+        string rootLabel = ResultsRootLabel(v);
+        NoteFitCrumbs(side, -1, rootLabel);
         var back = Box.New().FlexShrink(1).Overflow(Overflow.Hidden)
             .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f).Cursor(CursorType.Pointer)
             .Tooltip(v.Root)
-            .Children(Ui.Mono(CollapsePath(v.Root, budget), 11.5f, Nocturne.Neutral400)
+            .Children(Ui.Mono(rootLabel, 11.5f, Nocturne.Neutral400)
                 .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         back.OnClick(_ => { _active = side; ExitResults(side); MarkDirty(); });
         row.AddChild(back.HoverBg(Nocturne.Neutral900, Color.Transparent));

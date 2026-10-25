@@ -11,13 +11,19 @@ namespace Junction;
 
 public partial class JunctionApp
 {
-    private Element BuildSidebar()
+    /// <summary>One shape of the sidebar, the rail or the expanded list — each the build of a
+    /// chrome part of its own (see ChromePart), so toggling replaces one with the other.</summary>
+    private Element BuildSidebar(bool rail)
     {
-        // One walk per frame, shared by both shapes of the sidebar and by the keyboard
+        // One walk per sidebar build, shared by both shapes of the sidebar and by the keyboard
         // handlers afterwards — see _sidebarRepos for why the order has to be this one.
         var groups = SidebarRepoGroups();
         _sidebarRepos = groups.Select(g => g.Path).ToList();
-        return _sidebarCollapsed ? BuildSidebarRail(groups) : BuildSidebarExpanded(groups);
+        var sidebar = rail ? BuildSidebarRail(groups) : BuildSidebarExpanded(groups);
+        sidebar.Key = rail ? "sidebar-rail" : "sidebar-expanded";
+        // The full height of its part's host, which the body row stretches.
+        sidebar.FlexGrow(1);
+        return sidebar;
     }
 
     // ── Expanded (266px) ─────────────────────────────────────────────────
