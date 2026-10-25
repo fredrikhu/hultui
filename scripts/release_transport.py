@@ -8,16 +8,16 @@
                                                            but <keep>: a rolling release's
                                                            older builds, whose names differ
 
-Nothing but the standard library: both GitHub-provided transports failed on the
-self-hosted runners (artifact storage is a small quota; actions/cache's cross-OS
-archive breaks on a Windows tar path with a space), and the Linux runner has no
-curl. A release asset has none of those problems and is useful to a person
-afterwards.
+Nothing but the standard library. It was written for the self-hosted runners CI
+used before (docs/CI.md), where both GitHub-provided transports failed (artifact
+storage is a small quota; actions/cache's cross-OS archive broke on a Windows tar
+path with a space) and the Linux runner had no curl. A release asset has none of
+those problems, is how the installers of Aperture and Reel get libmpv, and is
+useful to a person afterwards.
 
-This is a plain file rather than a heredoc inside release-transport.sh because the
-Windows runners have no bash on PATH — only MSYS2's, at a path you have to know.
-A pwsh step can run this directly; release-transport.sh is now a wrapper around it
-for the Linux jobs that were already calling the shell name.
+This is a plain file rather than a heredoc inside release-transport.sh so that a
+pwsh step can run it directly, with no bash; release-transport.sh is a wrapper
+around it for the jobs that call the shell name.
 
 Needs GH_TOKEN and GITHUB_REPOSITORY (both set in Actions); GITHUB_SHA for ensure.
 """

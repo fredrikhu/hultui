@@ -44,7 +44,7 @@ happens to contain the string.
 
 - `dotnet build`/`dotnet test` take **one** project per invocation (MSB1008) — run them separately or use the solution.
 - MSB3027 "file locked" usually means a previously launched sample app still holds its exe — find and `Stop-Process` it.
-- Reference CI: `.github/workflows/junction-installer.yml` (`test` on windows-latest runs the whole slnx and lets the UiTests skip themselves; `test-linux` on ubuntu-latest with the slnf).
+- Reference CI: `.github/workflows/ci.yml` (`test` on hosted windows-2025 runs the whole slnx and lets the UiTests skip themselves; `test-linux` on hosted ubuntu-24.04 with the slnf). GitHub-hosted runners only, never self-hosted: `docs/CI.md`.
 
 ### On Linux, from this Windows machine (WSL)
 
@@ -78,8 +78,9 @@ Fedora's minimal image differs from CI's Ubuntu runner in what it has installed:
 - **Fonts:** it has no monospace face (`monospace` resolves to Noto Sans) and nothing for
   Hebrew. Install DejaVu (`dejavu-sans-fonts dejavu-sans-mono-fonts dejavu-serif-fonts`), which
   Ubuntu gets with fontconfig, plus `google-noto-sans-cjk-fonts` for `[HanFontsFact]`.
-  Otherwise about nine Skia, Headless and Terminal font tests fail.
-- **7-Zip:** Fedora ships `7zip`, the runner has none, so Vesper's 7-Zip paths run only here.
+  Otherwise about nine Skia, Headless and Terminal font tests fail. CI's `test-linux` also
+  installs Noto (core, CJK, colour emoji), so its Devanagari and emoji tests run there.
+- **7-Zip:** Fedora ships `7zip`, and CI's `test-linux` installs it, so Vesper's 7-Zip paths run in both.
 - **No `awk`** in the minimal image.
 
 ## Choosing a layer

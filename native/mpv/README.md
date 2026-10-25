@@ -84,7 +84,7 @@ To use the result: `HULTUI_MPV_PATH=out/win-x64/libmpv-2.dll dotnet test
 tests/HultUI.Media.Backends.Tests`, or pack it — `src/HultUI.Media.Mpv.Natives` picks up
 whatever `out/` holds and puts it under `runtimes/<rid>/native/`.
 
-In CI, `.github/workflows/mpv-natives.yml` runs this on both self-hosted runners,
+In CI, `.github/workflows/mpv-natives.yml` runs this on GitHub-hosted Windows and Ubuntu runners,
 proves each library with the backend tests (`HULTUI_MPV_EXPECT_LGPL=1`), and packs.
 Binaries move between jobs as assets of a GitHub release through
 `scripts/release-transport.sh` (shared with the CEF helper workflow) — a dispatch run fills the rolling `mpv-natives-ci`

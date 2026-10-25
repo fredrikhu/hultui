@@ -50,8 +50,8 @@
       href: PACKAGING.md
     - name: Accessibility plan
       href: ACCESSIBILITY-PLAN.md
-    - name: Self-hosted runners
-      href: SELF-HOSTED-RUNNERS.md
+    - name: Continuous integration
+      href: CI.md
     - name: WinForms interop
       href: design/WINFORMS-INTEROP.md
     - name: Media (video player)

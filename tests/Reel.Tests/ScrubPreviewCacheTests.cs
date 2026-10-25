@@ -49,7 +49,10 @@ public class ScrubPreviewCacheTests
         lock (source.Grabbed) return source.Grabbed.Count;
     }
 
-    private static void WaitFor(Func<bool> done, int ms = 5000)
+    /// <summary>The fake answers at once, so a run is done in microseconds once its Task.Run is
+    /// scheduled; what can take seconds is that scheduling, on a two-core CI runner with the other
+    /// test classes busy (five seconds was missed there once). The deadline only bounds a failure.</summary>
+    private static void WaitFor(Func<bool> done, int ms = 30_000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(ms);
         while (!done() && DateTime.UtcNow < deadline) Thread.Sleep(5);
