@@ -5,18 +5,16 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** **PAUSED (user, 2026-10-25: repository work that the performance work would affect).** Round 5
-  survey complete (8 reports, `17-reports/r5-*`, all not satisfied); merged into the Round 5 build order
-  below (14 steps; 4 questions in Needs the user). On resume: ask the 4 round 5 questions, then start build
-  step 1 (Phase `build`). Round 4 was released 2026-10-25 (merge 05593445 on fredrikhu/hultui main, CI
-  green on hosted runners). To resume, run in this worktree: `/loop Run the next step of the performance
-  team: follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
-  Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.` Before
-  resuming, check what the repository work changed (main's history, remote, branch) and rebase or merge
-  this branch as needed.
+- **Phase:** build — round 5 (resumed 2026-10-25 after the repository work: history rewritten for a
+  third-party screenshot, fredrikhu/hultui recreated; every commit after 3353ce47 has a new ID, old IDs in
+  this file remapped; a pre-push hook refuses pushes built on the old history). Round 5 questions 1, 2 and 4
+  answered yes; question 3 open (the user asked how the public `Text` would look). Step 1 next. To resume
+  after a pause, run in this worktree: `/loop Run the next step of the performance team: follow
+  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both, do
+  the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
-- **Review commits since:** 653971d3 (round 5 reviews round 4's build, 653971d3..05593445, plus the CI
+- **Review commits since:** 653971d3 (round 5 reviews round 4's build, 653971d3..643eb07b, plus the CI
   branch merged with it)
 - **Probe code kept for the build phase** (session scratchpad): round 5 surveys `r5layout/`, `r5paint/`
   (PROTO_SUBGEN, PROTO_TIGHT), `r5gl/` (R5_KEEPALLOC, R5_LAZY), `r5rt/`, `r5text/` (R5_LAZY, R5_SCRATCH, R5_HOIST),
@@ -58,7 +56,7 @@ memory `release-tagging` (≤3 tags per push).
 ## Queued candidates
 
 Rounds 1–4's build orders all landed (see Landed; round 3's step 15 change 4 reverted, d38564a; round 4's
-14 steps, 671cf74..c2ea7860, released in 05593445). Round 5's surveys (reports `17-reports/r5-*`) re-ranked
+14 steps, 671cf74..c2ea7860, released in 643eb07b). Round 5's surveys (reports `17-reports/r5-*`) re-ranked
 everything. A build step may bundle one expert's related small candidates as separate commits. Items marked
 **(user)** wait for a decision in Needs the user; the rest of their step goes ahead.
 
@@ -80,7 +78,7 @@ Correctness and round 4 objections first, then value per cost.
    string, then a default-member `IRenderContext.TextCaretXs` (API addition) for O(rows × length); suite row
    "a11y/type in a 2,000-line TextArea, a reader reading"), **sdl-hint-minimize-raise** (Minimize/Raise under
    `WindowsActivation.RefuseIfUnwanted`, or the raise hint; test hygiene).
-2. **a11y-overlay-live (user)** (7, correctness) — overlay content gets the window's observer; overlay style
+2. **a11y-overlay-live** (approved 2026-10-25) (7, correctness) — overlay content gets the window's observer; overlay style
    and layout run before the a11y phase; patches find nodes under overlays; ContextMenuElement tells its
    selection and has item geometry before the tree reads it (all menu items have zero-height rects today);
    AT-SPI `state-changed:expandable`. Today: label/check/text/children changes inside an open overlay build
@@ -122,8 +120,8 @@ Correctness and round 4 objections first, then value per cost.
    tree is a plain ScrollView built whole per key: 2,616 KB/key on a 382-row commit → O(visible rows),
    −60…−70 %; Changes list same shape; highlight landing uses `MarkViewDirty`), **apps-junction-view-parts**
    (History include bar + footer as parts, no `Commits.ToList()` per build: −20…−25 %), and
-   **vesper-detail-resize-stale (user)** (not perf: run e6a432fa's fit comparison in Detail too).
-9. **layout-virtuallist-selection-highlight (user)** (1/8) — an opt-in highlight the VirtualList draws under the
+   **vesper-detail-resize-stale** (approved) (not perf: run e6a432fa's fit comparison in Detail too).
+9. **layout-virtuallist-selection-highlight** (approved 2026-10-25: opt in) (1/8) — an opt-in highlight the VirtualList draws under the
    selected rows, so a move makes no rows: Junction History −30 %, Tags −54 %, suite item-row walk −36 %;
    visual API (fill, ring, radius), adopted one list at a time.
 10. **events-handler-churn** (4/1/6; re-opens P4's inline half with new evidence: rebuild churn, not events) —
@@ -460,22 +458,23 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-Round 5 questions (2026-10-25, open; asked when the work resumes). Recommendations in brackets.
+Round 5 questions (asked 2026-10-25 on resume). Recommendations in brackets.
 
 1. **layout-virtuallist-selection-highlight:** may a VirtualList draw the selected row's highlight itself, opt
    in per list, so an app's rows no longer show the selection and a selection move makes no rows again? A
    visual API: fill, optional ring, corner radius, drawn under the row. Junction History −30 % bytes per key,
-   Tags −54 %, suite item-row walk −36 %. [Yes, opt in, adopted one list at a time like item rows.]
+   Tags −54 %, suite item-row walk −36 %. [Yes, opt in, adopted one list at a time like item rows.] → **yes, opt in** (2026-10-25).
 2. **a11y-overlay-live:** may the bridges tell changes inside open context menus, dropdown lists, dialogs and
    the command palette (selection moves, name/value and children changes; menu items get real bounds)? New
-   UIA and AT-SPI events for changes that are silent today. [Yes.]
+   UIA and AT-SPI events for changes that are silent today. [Yes.] → **yes** (2026-10-25).
 3. **TextArea document as one string** (declined in rounds 3 and 4: a rope changes the public `Text`): new
    evidence — typing above 42,500 characters triggers a gen-2 GC every 14–17 keys at app-sized heaps. [Not
    now: take the LOH-threshold half of runtime-gc-gen0-budget-and-loh-threshold first; revisit chunked
-   storage only if documents above ~256k characters matter.]
+   storage only if documents above ~256k characters matter.] → **open**: the user asked how the new public
+   `Text` would look (2026-10-25); options written up for them, answer pending.
 4. **vesper-detail-resize-stale** (not perf): in Detail view a resize never rebuilds, so the path trail's
    truncation stays stale until the next key; e6a432fa's fit comparison runs only in grid views. Fix it in
-   step 8? [Yes, small.]
+   step 8? [Yes, small.] → **yes** (2026-10-25).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home 3 more times this round as device
 "aperture-survey"; the user should remove those devices and revoke the API key when the work is done.
@@ -878,7 +877,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   read-back works from windows kept out of the foreground.
 - 2026-10-25: full suite passed on e65e2d23 (30 projects, 12,401 passed, 0 failed). Phase `release`: shared
   origin switched to fredrikhu/hultui; the user chose to merge `ci/github-hosted-runners` first.
-- 2026-10-25: round 4 released: merge 05593445 pushed to fredrikhu/hultui main after the full suite passed
+- 2026-10-25: round 4 released: merge 643eb07b pushed to fredrikhu/hultui main after the full suite passed
   on the combined tree (CI branch + round 4: 12,401 passed, 0 failed); primary checkout fast-forwarded behind
   the guard; CI run 40147356739 green on hosted runners. Round 5 survey starts. No app releases (not asked);
   candidates for one: the external-WM_CLOSE fix (3200a2a2) and Reel's next-file stills (2bfa69c2).
@@ -888,3 +887,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   drag targets) coincided with two `nvlddmkm` 153 GPU errors and a > 1 s stall at 02:35; stopped, not
   repeated (the same event appears once on 2026-10-23 with no probe). 14-step build order, 4 questions.
   **Paused at the user's request** for repository work; survey worktrees removed.
+- 2026-10-25: resumed after the repository work (history rewrite; this branch rebased, main merged as
+  f28e57be; four stale mentions of the round 4 merge remapped to 643eb07b). Round 5 answers: list selection
+  highlight yes (opt in), popup a11y events yes, Vesper Detail resize fix yes; TextArea chunked text open
+  (the user asked how the public `Text` would look). Step 1 starts.
