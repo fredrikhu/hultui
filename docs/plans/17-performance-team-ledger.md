@@ -5,13 +5,13 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** **PAUSED (user, 2026-10-25, after round 5 step 2).** Round 5: steps 1–2 landed, step 3 next (text).
-  All four round 5 questions answered (1, 2, 4 yes; 3 threshold first, chunked document option B in Waiting).
-  History note: rewritten 2026-10-25 (fredrikhu/hultui recreated; every commit after 3353ce47 has a new ID; a
-  pre-push hook refuses pushes built on the old history). To resume, run in this worktree: `/loop Run the next
-  step of the performance team: follow docs/plans/17-performance-team.md, with state in
-  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls for, record it in
-  the ledger, and commit.` Before resuming, check whether main moved (`git fetch`) and merge it in if needed.
+- **Phase:** build — round 5; steps 1–2 landed, step 3 next (resumed 2026-10-25 after a pause; main merged as
+  fb01fecb). All four round 5 questions answered (1, 2, 4 yes; 3 threshold first, chunked document option B in
+  Waiting). History note: rewritten 2026-10-25 (fredrikhu/hultui recreated; every commit after 3353ce47 has a new
+  ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in this worktree:
+  `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with state in
+  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls for, record it in the
+  ledger, and commit.` Before resuming, check whether main moved (`git fetch`) and merge it in if needed.
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** 653971d3 (round 5 reviews round 4's build, 653971d3..643eb07b, plus the CI
