@@ -394,8 +394,10 @@ Three things decide whether it stays right and stays cheap:
   must fill its host `FlexGrow(1)` (the host is a column).
 - **Keep the parent's children keyed.** A keyed list puts a kept host back without marking the
   parent (round 4, 87698f1): no layout, and no structural change, which would make a window
-  with a listening screen reader build a whole new accessibility tree for the key. A host in an
-  unkeyed list, or alone in its parent, goes back the ordinary way and marks both.
+  with a listening screen reader build a whole new accessibility tree for the key. So does a
+  parent whose children are all handed back, a host alone in its parent among them (round 5):
+  the build moved every child out, and they come back as they were. A host in an unkeyed list
+  beside children the build made goes back the ordinary way and marks both.
 
 Junction with its chrome in three parts (b35fc58; headless, JIT, a 1,562-commit clone, a key
 and 8 frames): History 242.5 → 107.3 KB a key (−56 %), Branches 186.0 → 50.8 (−73 %), Tags
@@ -432,6 +434,14 @@ Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 
 key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
 real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
 moves to its new column (755.8 → 229.4 KB a step).
+
+A column whose cells are all kept is left with no children by the time the reconciler reaches
+it, since the build moved every one into its new tree. Until round 5 those came back one by one,
+each marking the column's structure, so with a reader listening every key built the whole
+accessibility tree; now they come back as they were and mark nothing (Brief with a reader, 400
+files: 300.6 → 230.2 KB a key, 1.00 → 0 trees; Reel's player, alone in its container, 5.8 → 2.0
+KB a build). The same elements in the same order is the rule: a column handed back in another
+order, or with a new cell, marks its structure as any change does.
 
 ---
 

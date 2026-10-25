@@ -1447,6 +1447,9 @@ public abstract class Element
 
     [ThreadStatic] private static List<PendingMove>? _pendingMoves;
 
+    // TryRestoreMoved's list of a parent's children before the build; empty between calls.
+    [ThreadStatic] private static List<Element>? _restoreScratch;
+
     /// <summary>How many component builds are running on this thread (ComponentHost): only a
     /// move made inside one waits for the reconcile that follows it.</summary>
     [ThreadStatic] internal static int Building;
@@ -1481,10 +1484,12 @@ public abstract class Element
     /// the parent it left it inherits what it had, and the parent being reconciled was patched,
     /// which marked it and its ancestors for style.</para>
     /// </summary>
-    internal static bool TryRestoreMoved(Element parent, List<Element> result)
+    internal static bool TryRestoreMoved(Element parent, ReadOnlySpan<Element> result)
     {
         var moves = _pendingMoves;
-        if (moves is null || moves.Count == 0) return false;
+        if (moves is null || moves.Count == 0 || result.IsEmpty) return false;
+        var current = parent._children;
+        int count = current?.Count ?? 0;
         int moved = 0;
         foreach (var m in moves)
         {
@@ -1492,36 +1497,52 @@ public abstract class Element
             if (ReferenceEquals(m.Child.Parent, parent)) return false;
             moved++;
         }
-        var current = parent._children;
-        int count = current?.Count ?? 0;
-        if (moved == 0 || count + moved != result.Count) return false;
+        if (moved == 0 || count + moved != result.Length) return false;
 
         // The children before the build: each moved one back at its place, the last moved
-        // first, as each removal shifted the places of the ones after it.
-        var before = new List<Element>(result.Count);
-        if (current is not null) before.AddRange(current);
-        for (int i = moves.Count - 1; i >= 0; i--)
+        // first, as each removal shifted the places of the ones after it. In a list kept for
+        // the purpose, emptied after: a pass may ask this for every container it reconciles.
+        var before = _restoreScratch ??= [];
+        try
         {
-            var m = moves[i];
-            if (!ReferenceEquals(m.From, parent)) continue;
-            if (m.Index > before.Count) return false;
-            before.Insert(m.Index, m.Child);
+            if (current is not null) before.AddRange(current);
+            for (int i = moves.Count - 1; i >= 0; i--)
+            {
+                var m = moves[i];
+                if (!ReferenceEquals(m.From, parent)) continue;
+                if (m.Index > before.Count) return false;
+                before.Insert(m.Index, m.Child);
+            }
+            for (int i = 0; i < before.Count; i++)
+                if (!ReferenceEquals(before[i], result[i])) return false;
         }
-        for (int i = 0; i < before.Count; i++)
-            if (!ReferenceEquals(before[i], result[i])) return false;
+        finally
+        {
+            before.Clear();
+        }
 
         var carried = DirtyFlags.None;
         for (int i = moves.Count - 1; i >= 0; i--)
         {
             var m = moves[i];
             if (!ReferenceEquals(m.From, parent)) continue;
-            // Out of the build's tree, which the reconcile is about to drop.
-            if (m.Child.Parent?._children is { } fresh && fresh.Remove(m.Child)) fresh.ZOrder = null;
+            // Out of the build's tree, which the reconcile is about to drop. From its end when it
+            // is the last there, as it is when the build added the children in their order.
+            if (m.Child.Parent?._children is { } fresh)
+            {
+                if (fresh.Count > 0 && ReferenceEquals(fresh[^1], m.Child)) fresh.RemoveAt(fresh.Count - 1);
+                else fresh.Remove(m.Child);
+                fresh.ZOrder = null;
+            }
             m.Child.Parent = parent;
             carried |= m.Child.DirtyFlags;
-            moves.RemoveAt(i);
         }
-        var list = parent._children ??= new ChildList(result.Count);
+        // The moves out of this parent are over: dropped in one pass, keeping the others' order.
+        int kept = 0;
+        for (int i = 0; i < moves.Count; i++)
+            if (!ReferenceEquals(moves[i].From, parent)) moves[kept++] = moves[i];
+        moves.RemoveRange(kept, moves.Count - kept);
+        var list = parent._children ??= new ChildList(result.Length);
         list.Clear();
         list.AddRange(result);
         list.ZOrder = null;

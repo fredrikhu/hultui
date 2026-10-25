@@ -283,6 +283,26 @@ costs 107 ns over a 10-row table and ~5 µs over a 1,000-row column (~5 ns per
 child), with enter/leave allocating 528 B vs 1,016 B. That linear hit test is
 the lever if pointer cost ever matters; none of the review's items touch it.
 
+### A per-element "move pending" mark: measured and declined
+
+A child a component's build moves out of a live parent waits in a list of pending moves until the
+reconcile puts it back or it lands elsewhere (`Element.TryRestoreMoved`, `SettleMove`). Any child
+that joins a live parent while moves wait searches that list for its own. Plan 17's round 5 survey
+counted 6,284 comparisons a key in Vesper's Brief view and suggested a counter on each element, so
+a child with no move of its own would skip the search. Built and counted (round 5, step 1;
+headless, a key and two frames):
+
+| | Searches a key | Comparisons a key | `BoxElement` |
+|---|---|---|---|
+| Brief, before the reconciler put back containers whose children were all handed back | 222 | 12,569 | 584 B |
+| Brief, Detail, Reel, three apps' find bars, after it | 0 | 0 | 584 B |
+| With the counter | 0 | 0 | 592 B |
+
+The searches were the handed-back cells themselves, settling one by one; once their columns come
+back whole, nothing searches. The counter would cost 8 B on every element (the fields fill their
+padding) and +1.0–1.4 KB a key in Vesper for no work saved. Declined; revisit if a profile shows
+`SettleMove` again.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

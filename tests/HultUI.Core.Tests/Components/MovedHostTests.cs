@@ -257,6 +257,130 @@ public class MovedHostTests
         }
     }
 
+    /// <summary>A container whose only child is the part: the build moves it out, so by the time
+    /// the container is reconciled it has no children at all. Put back, it marks nothing either.</summary>
+    [Fact]
+    public void AContainerWhoseOnlyChildIsAKeptHost_GetsItBackUnmarked()
+    {
+        var part = new Part();
+        var shell = new OnlyChildShell(part);
+        var top = Box.New().Children(shell.Mount());
+        var live = shell.Mount().Children[0];
+        Clear(top);
+        var host = part.Mount();
+        var holder = live.Children.Single(c => c.Key == "holder");
+
+        shell.Rebuild();
+
+        Assert.Same(holder, host.Parent);
+        Assert.Same(host, Assert.Single(holder.Children));
+        Assert.Equal(DirtyFlags.None, holder.DirtyFlags & (DirtyFlags.Layout | DirtyFlags.Children));
+        Assert.Equal(DirtyFlags.None, top.DirtyFlags & (DirtyFlags.Layout | DirtyFlags.Children));
+        Assert.Equal(1, part.Builds);
+        part.Set(2);
+        Assert.Equal("part 2", ((TextElement)host.Children[0]).Content);
+    }
+
+    private sealed class OnlyChildShell(Part part) : Component
+    {
+        public void Rebuild() => MarkDirty();
+
+        public override Element Build()
+        {
+            var holder = Flex.Row();
+            holder.Key = "holder";
+            holder.AddChild(part.Mount());
+            var label = Text.New("label"); label.Key = "label";
+            return Flex.Column().Children(holder, label);
+        }
+    }
+
+    /// <summary>
+    /// An owner that keeps live elements between builds — Vesper's Brief cells — and hands every
+    /// one of a container's children back: they come back in place, the same elements, not mounted
+    /// again, and the build's own container keeps none of them.
+    /// </summary>
+    [Fact]
+    public void ElementsAllHandedBackInTheirOrder_MarkNothing()
+    {
+        var shell = new KeepingShell(5);
+        var top = Box.New().Children(shell.Mount());
+        var column = shell.Mount().Children[0].Children[0];
+        var cells = column.Children.ToArray();
+        Clear(top);
+        int mounts = KeepingShell.Mounts;
+
+        shell.Rebuild();
+
+        Assert.Equal(cells, column.Children);
+        Assert.All(cells, c => Assert.Same(column, c.Parent));
+        Assert.Equal(mounts, KeepingShell.Mounts);
+        Assert.Empty(shell.LastColumn!.Children);
+        Assert.Equal(DirtyFlags.None, column.DirtyFlags & (DirtyFlags.Layout | DirtyFlags.Children));
+        Assert.Equal(DirtyFlags.None, top.DirtyFlags & (DirtyFlags.Layout | DirtyFlags.Children));
+    }
+
+    [Fact]
+    public void ElementsAllHandedBackInAnotherOrder_MarkTheStructure()
+    {
+        var shell = new KeepingShell(5);
+        var top = Box.New().Children(shell.Mount());
+        var column = shell.Mount().Children[0].Children[0];
+        var cells = column.Children.ToArray();
+        Clear(top);
+
+        shell.Reverse = true;
+        shell.Rebuild();
+
+        Assert.Equal(cells.Reverse(), column.Children);
+        Assert.Equal(DirtyFlags.Layout | DirtyFlags.Children, column.DirtyFlags & (DirtyFlags.Layout | DirtyFlags.Children));
+        Assert.Equal(DirtyFlags.Children, top.DirtyFlags & DirtyFlags.Children);
+    }
+
+    [Fact]
+    public void ElementsAllHandedBackWithANewOne_MarkTheStructure()
+    {
+        var shell = new KeepingShell(5);
+        var top = Box.New().Children(shell.Mount());
+        var column = shell.Mount().Children[0].Children[0];
+        var cells = column.Children.ToArray();
+        Clear(top);
+
+        shell.Extra = true;
+        shell.Rebuild();
+
+        Assert.Equal(6, column.Children.Count);
+        Assert.Equal(cells, column.Children.Take(5));
+        Assert.Equal(DirtyFlags.Layout | DirtyFlags.Children, column.DirtyFlags & (DirtyFlags.Layout | DirtyFlags.Children));
+    }
+
+    /// <summary>A column of cells made once and handed back by every build, in order or reversed,
+    /// with or without one new cell after them.</summary>
+    private sealed class KeepingShell(int count) : Component
+    {
+        [ThreadStatic] public static int Mounts;
+        private Element[]? _cells;
+        public bool Reverse, Extra;
+        public Element? LastColumn;
+
+        public void Rebuild() => MarkDirty();
+
+        public override Element Build()
+        {
+            _cells ??= Enumerable.Range(0, count).Select(i => (Element)new CountingBox { Key = $"cell{i}" }).ToArray();
+            var column = Flex.Column();
+            foreach (var cell in Reverse ? _cells.Reverse() : _cells) column.AddChild(cell);
+            if (Extra) column.AddChild(Text.New("new"));
+            LastColumn = column;
+            return Flex.Row().Children(column);
+        }
+
+        private sealed class CountingBox : BoxElement
+        {
+            protected override void OnMounted() => Mounts++;
+        }
+    }
+
     /// <summary>Outside a build a move is marked at once, as it always was: only a build's own
     /// reconcile is there to put anything back.</summary>
     [Fact]
