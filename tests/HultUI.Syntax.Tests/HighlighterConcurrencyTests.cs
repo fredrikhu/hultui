@@ -111,14 +111,18 @@ public class HighlighterConcurrencyTests
             SyntaxHighlighter.TokenizeLines("a.json", overDefault, SyntaxHighlighter.DefaultMaxLines + 1, CancellationToken.None)!.Length);
     }
 
+    /// <summary>On a clock that stands still, so that what differs is the gate's doing and not
+    /// a budget running out on a busy machine.</summary>
     [Fact]
     public void ConcurrentTokenizesStillProduceTheSameSpans()
     {
         var text = CSharp(200);
-        int expected = SyntaxHighlighter.SpansForText("a.cs", text).Count;
+        int Spans(string path) => SyntaxHighlighter.TokenizeLines(path, text, int.MaxValue, CancellationToken.None,
+            SteppingClock.Standing)!.Sum(line => line.Count);
+        int expected = Spans("a.cs");
 
         var counts = new int[8];
-        Parallel.For(0, counts.Length, i => counts[i] = SyntaxHighlighter.SpansForText($"a{i}.cs", text).Count);
+        Parallel.For(0, counts.Length, i => counts[i] = Spans($"a{i}.cs"));
 
         Assert.All(counts, c => Assert.Equal(expected, c));
     }
