@@ -73,6 +73,23 @@ public class ParagraphAllocationTests
     }
 
     [Fact]
+    public void AWrapsLastLine_IsSearchedWithoutATableOfItsOwn()
+    {
+        // The same paragraph but for its last line: four words of a letter each, or one word of the
+        // same seven characters. A table of the last line's prefix widths made for its search — the
+        // line cut out as a string, exact arrays of its runs and segments — cost 20 B more for each
+        // segment; read out of the lists the pipeline keeps, seven segments cost what one does.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        string one = Lines(10) + " abcdefg", seven = Lines(10) + " a b c d";
+        float width = 60f;
+        Assert.Equal(11, pipeline.Layout(one, Style, width, null).Lines.Count);
+        Assert.Equal(11, pipeline.Layout(seven, Style, width, null).Lines.Count);
+        long a = Allocations.Least(() => pipeline.Layout(one, Style, width += 0.001f, null));
+        long b = Allocations.Least(() => pipeline.Layout(seven, Style, width += 0.001f, null));
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
     public void ASelectionDrawnOnAParagraph_IsCutIntoAListMadeOnce()
     {
         var pipeline = new TextPipeline(new Fonts(), new Shaper());

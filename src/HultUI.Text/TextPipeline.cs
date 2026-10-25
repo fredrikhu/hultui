@@ -496,10 +496,12 @@ public sealed class TextPipeline
     /// twice the answer. Bisecting the whole range instead would start by shaping half of what
     /// may be a 25,000-character line to discover that ~200 of them fit.
     /// <para><paramref name="prefixes"/>, when given, is the prefix widths of
-    /// <c>text[from..to]</c> (or of more of the text from <paramref name="from"/> on).</para>
+    /// <c>text[from..to]</c> (or of more of the text from <paramref name="from"/> on);
+    /// <paramref name="keptTable"/> says the kept lists hold those of <c>text[from..to]</c>
+    /// (<see cref="FillPrefixTable"/>, a wrap's last line).</para>
     /// </remarks>
     private int FitPrefix(string text, int from, int to, ResolvedInheritedStyle style, float maxWidth,
-        PrefixWidths? prefixes = null)
+        PrefixWidths? prefixes = null, bool keptTable = false)
     {
         int span = 1;
         while (from + span < to && Measure(from + span) <= maxWidth)
@@ -516,9 +518,13 @@ public sealed class TextPipeline
         }
         return SnapPrefix(text, best);   // never split a surrogate pair
 
-        float Measure(int end) => prefixes is null
-            ? MeasureString(text[from..end], style)
-            : PrefixWidth(prefixes, end - from, style);
+        float Measure(int end) => keptTable
+            ? PrefixWidth(text, from, to - from, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_prefixRuns),
+                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_prefixSegments), style.FontSize,
+                style.LetterSpacing, end - from, style)
+            : prefixes is null
+                ? MeasureString(text[from..end], style)
+                : PrefixWidth(prefixes, end - from, style);
     }
 
     /// <summary>
@@ -529,17 +535,17 @@ public sealed class TextPipeline
     /// no separators — this is the only thing that can make it fit. Without it the run is
     /// emitted as a single line wider than the box, and simply runs out of it.</para>
     ///
-    /// <para><paramref name="prefixes"/>, when given, is the prefix widths of
+    /// <para><paramref name="keptTable"/> says the kept lists hold the prefix widths of
     /// <c>text[from..to]</c>, for the first cut only.</para>
     /// </summary>
     private int SplitByCharacter(string text, int from, int to, ResolvedInheritedStyle style,
-        float maxWidth, List<TextLine> lines, int? maxLines, PrefixWidths? prefixes = null,
+        float maxWidth, List<TextLine> lines, int? maxLines, bool keptTable = false,
         PrefixWidths? measureOnly = null)
     {
         while (from < to && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
-            int fit = FitPrefix(text, from, to, style, maxWidth, prefixes);
-            prefixes = null;
+            int fit = FitPrefix(text, from, to, style, maxWidth, keptTable: keptTable);
+            keptTable = false;
             // A box too narrow for even one character would otherwise never advance. One
             // character per line is the sane floor, and what a browser does.
             if (fit <= from) fit = NextCodePoint(text, from);
@@ -1787,14 +1793,19 @@ public sealed class TextPipeline
         var segments = _prefixSegments;
         FillPrefixTable(text, 0, text.Length, style, runs, segments);
         var table = new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs.ToArray(), segments.ToArray());
-        runs.Clear();   // the runs' faces are not kept alive by the scratch list
-        // A whole document's single line can have a hundred thousand segments: its list is not kept.
-        if (segments.Capacity > KeptPrefixSegments)
-        {
-            segments.Clear();
-            segments.TrimExcess();
-        }
+        ReleasePrefixScratch();
         return table;
+    }
+
+    private void ReleasePrefixScratch()
+    {
+        _prefixRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        // A whole document's single line can have a hundred thousand segments: its list is not kept.
+        if (_prefixSegments.Capacity > KeptPrefixSegments)
+        {
+            _prefixSegments.Clear();
+            _prefixSegments.TrimExcess();
+        }
     }
 
     // Fills `runs` and `segments` with the table of text[from..end), measured as a string of those
@@ -1835,7 +1846,9 @@ public sealed class TextPipeline
     // truncating allocated (a list doubles its way up: a line of 60 segments went through five
     // arrays before its own was copied out). Nothing BuildPrefixWidths calls builds a table, and a
     // pipeline is used from one thread, as MeasureString's run list is. The font runs FillPrefixTable
-    // itemizes into are ranges of the text, not strings of their own.
+    // itemizes into are ranges of the text, not strings of their own. A wrap's last line reads its
+    // table straight out of them for the one search it is made for (BreakIntoLines), which builds
+    // no table either.
     private readonly List<PrefixRun> _prefixRuns = new();
     private readonly List<PrefixSegment> _prefixSegments = new();
     private readonly List<RunRange> _runRanges = new();
@@ -2834,11 +2847,18 @@ public sealed class TextPipeline
             // several prefixes over: from the line's own segments, that is one measure, and
             // the probes cost a word-cache lookup each. Not for a line that does not fit —
             // possibly a 25,000-character token, which the gallop exists not to measure whole.
-            var lastLine = segments is not null && lineWidth <= maxWidth
-                ? BuildPrefixWidths(text[textOffset..], style)
-                : null;
-            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLine,
+            // The table is read for that one search, so it goes into the lists the pipeline keeps,
+            // itemized in the paragraph's own Han context as a string of the line would be: one
+            // of its own — the line cut out as a string, exact arrays of its runs and segments —
+            // was 7 % of what wrapping a paragraph allocated, and more once glyphs were made only
+            // where they are read (plan 17, round 5).
+            bool lastLineTable = segments is not null && lineWidth <= maxWidth;
+            if (lastLineTable)
+                FillPrefixTable(text, textOffset, text.Length, style, _prefixRuns, _prefixSegments);
+            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLineTable,
                 measureOnly);
+            if (lastLineTable)
+                ReleasePrefixScratch();
             if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 lines.Add(NewLine(textOffset, text.Length));
         }
