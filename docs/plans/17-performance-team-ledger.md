@@ -4,17 +4,17 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 4
-- **Phase:** release — round 4; all 14 steps landed; full suite passed on 788c3222 (30 projects, 12,401
-  passed, 206 skipped, 0 failed). The user chose (2026-10-25) to merge `ci/github-hosted-runners` into main
-  first, then round 4, testing the combined tree before one push; then wait for CI on hosted runners.
-  All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
-  resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
+- **Round:** 5
+- **Phase:** survey — round 5 (eight experts in parallel; reports to `17-reports/r5-*`). Round 4 released
+  2026-10-25: merge 05593445 on fredrikhu/hultui main (with `ci/github-hosted-runners` merged first,
+  0f970007), CI run 40147356739 green on GitHub-hosted runners (Windows test 18 min, Linux 6.5, docs 2).
+  To resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
   Read both, do the step the ledger's Phase calls for, record it in the ledger, and commit.`
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
-- **Review commits since:** b3e00b0 (round 5 reviews all of round 4's build)
+- **Review commits since:** ba817e80 (round 5 reviews round 4's build, ba817e80..05593445, plus the CI
+  branch merged with it)
 - **Probe code kept for the build phase** (session scratchpad): round 4 surveys `r4layout/`,
   `r4paint/` (`probe-r4.patch` with PROTO_RUNINK/ROWSTR/VIEWFRAME), `r4gl/`, `r4rt/` (wakerace,
   latency host, blobprobe), `r4text/`, `r4react/` (R4_PARTS chrome split, R4_REVIEW_SHAPE,
@@ -855,3 +855,7 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   read-back works from windows kept out of the foreground.
 - 2026-10-25: full suite passed on 788c3222 (30 projects, 12,401 passed, 0 failed). Phase `release`: shared
   origin switched to fredrikhu/hultui; the user chose to merge `ci/github-hosted-runners` first.
+- 2026-10-25: round 4 released: merge 05593445 pushed to fredrikhu/hultui main after the full suite passed
+  on the combined tree (CI branch + round 4: 12,401 passed, 0 failed); primary checkout fast-forwarded behind
+  the guard; CI run 40147356739 green on hosted runners. Round 5 survey starts. No app releases (not asked);
+  candidates for one: the external-WM_CLOSE fix (b3df6aae) and Reel's next-file stills (211e3245).
