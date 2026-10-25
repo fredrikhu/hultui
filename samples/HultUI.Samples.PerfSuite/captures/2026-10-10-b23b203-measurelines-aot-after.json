@@ -1,7 +1,7 @@
 {
-  "label": "NativeAOT, after (28fbeb8), median of 2",
+  "label": "NativeAOT, after (46a1219), median of 2",
   "date": "2026-10-10 10:55 +02:00",
-  "commit": "28fbeb8",
+  "commit": "46a1219",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

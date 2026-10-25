@@ -7,7 +7,7 @@ self-hosted runner on this repository**, not even for one job.
 
 Until 2026-10-24, when the project lived in the private `fredrikhu/hultui-revamped`, CI ran on
 two self-hosted runners: the development machine and an Ubuntu container on Proxmox. That
-setup guide is in the history: `git show a9081035:docs/SELF-HOSTED-RUNNERS.md`.
+setup guide is in the history: `git show d2bc157b:docs/SELF-HOSTED-RUNNERS.md`.
 
 ## The workflows
 

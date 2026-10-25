@@ -1,6 +1,6 @@
 # Round 4 survey: 4. .NET runtime
 
-At ba817e8; JIT and NativeAOT; real windows never focused; a per-phase byte probe and a dummy-driver
+At 653971d; JIT and NativeAOT; real windows never focused; a per-phase byte probe and a dummy-driver
 lost-wake harness. Probes reverted; worktree clean. Probe code in the session scratchpad `r4rt/`
 (`host/` real-window host with latency, wakerace, wakerace2 modes; `run.ps1`, `build.ps1`; `wakerace/`
 dummy-driver lost-wake proof; `blobprobe/`; `cmp.py`, `jitaot.py`, `jit-head-1.json`, `aot-head-1.json`,
@@ -10,22 +10,22 @@ SATISFIED: no
 
 ## Review
 
-- **1521f47 (with 3a539f8's wake coalescing, from before plan 17): a wake can be lost, and the post then
+- **aa11334 (with eba3197's wake coalescing, from before plan 17): a wake can be lost, and the post then
   waits for the next SDL event.** `SdlWindowingPlatform.PumpEvents` clears `_wakePending` before polling
   (SdlWindowingPlatform.cs:83); `SDL3Window.PollAllEvents` (SDL3Window.cs:760) ignores the wake event
   type, and input handlers run inside that poll loop (:834). A `Wake` landing between the clear and the
   poll's last `SDL_PollEvent` pushes an event the poll then consumes: the flag stays 1 with no event
   queued, and every later `Wake` returns early (:132) until the next `PumpEvents`. Under the old 16 ms
-  idle cap that cost ≤16 ms; since 1521f47 an idle loop with no deadline waits `Timeout.Infinite`, so a
+  idle cap that cost ≤16 ms; since aa11334 an idle loop with no deadline waits `Timeout.Infinite`, so a
   swallowed post waits for the next input or window event. Dummy driver, that interleaving: a wake posted
   50 ms into the wait ran to the full 2,000 ms cap in 3 of 3 runs; with the flag cleared after the poll,
   51 ms. Real never-focused GL window: 0 lost in 7,000 posted pairs and 600 pairs with a 2 ms input
   handler (any drawn frame's next pass clears the flag; only a pass that ends idle is exposed). The
   comment at :78-82 calling it harmless is stale.
 - No other objections: all 122 suite rows JIT and AOT inside round 3's ranges and within 0.8 KB JIT of
-  the 12c64b0 capture; all five apps 0.0 loop passes/s idle, JIT and AOT; no blob leaks (27024f6,
-  5cc9892); thread safety holds (3788a33, 4eeec65, 757a79b, `UIThread` parking, the WinForms kick);
-  56046e4 walks only on a display-scale change, 0 B; Reel, Aperture and VideoPlayer effects disposed on
+  the dbcb7d8 capture; all five apps 0.0 loop passes/s idle, JIT and AOT; no blob leaks (3891499,
+  8ddc3eb); thread safety holds (7ab0ba7, f878ec4, 6af2d0a, `UIThread` parking, the WinForms kick);
+  6c726ea walks only on a display-scale change, 0 B; Reel, Aperture and VideoPlayer effects disposed on
   close and unmount; `ActiveChanged` unsubscribed in `Dispose`.
 
 ## Candidates
@@ -90,7 +90,7 @@ SATISFIED: no
   Fluent sample uses TableView.
 - **Lead for expert 7:** with a UIA client listening, Reel quiet playback spends 517 B per frame on a11y
   (13 KB/s, half the playback bytes): 3.0 full tree builds per second from the scrubber's 250 ms range
-  refresh; a range-value patch like 40b1e97's would remove it.
+  refresh; a range-value patch like 3730052's would remove it.
 
 ## Needs the user
 

@@ -1,6 +1,6 @@
 # Round 3 survey: 4. .NET runtime
 
-At 5d9be15, JIT and NativeAOT; real windows never focused; an env-gated per-loop log probe (passes,
+At ac5d415, JIT and NativeAOT; real windows never focused; an env-gated per-loop log probe (passes,
 frames, waits, posts, wakes, input events, UI-thread bytes, GCs, heap, private bytes) and heap dumps.
 Probes reverted; worktree clean. Probe code, logs and heap stats in the session scratchpad `r3rt/`
 (probe/Program.cs, LoopLogProbe.cs, looplog-probe.patch, logs/, dumps/*.stat.txt, jit-1.json,
@@ -23,21 +23,21 @@ SATISFIED: no
   150 cycles, private 139–143 MB. Round 2's survey read this flat over 400 cycles; unclear whether a
   round 2 change caused it or a different client listens today. → a11y-uia-disconnect-on-close.
 - **Notes for runtime-idle-wakeups (no objection).** Three round 2 additions are noticed only because
-  the loop polls every 16 ms and must become deadlines or wakes: 6b8bbe4's range-value trailing refresh,
-  250 ms (Window.cs:827-828); 6b8bbe4's AT-SPI `SetRangeValue` queues its action without a wake
+  the loop polls every 16 ms and must become deadlines or wakes: 444ba70's range-value trailing refresh,
+  250 ms (Window.cs:827-828); 444ba70's AT-SPI `SetRangeValue` queues its action without a wake
   (AccessibilityActionRouter.cs:124); 2170222's AT-SPI status flip only sets a flag from the watcher
   thread (LinuxAccessibilityBridge.cs:131).
-- **No allocation regressions.** Perf suite at 5d9be15, JIT and AOT, 102 rows: no row outside round 2's
+- **No allocation regressions.** Perf suite at ac5d415, JIT and AOT, 102 rows: no row outside round 2's
   captures by ≥10 % and ≥1 KB; AOT within 1 KB of JIT on 80 of 102 rows, the other 22 within 4 % or known
   AOT gaps (scroll/jump 6.3 vs 9.1). Caches bounded: 450 real-window mount/unmount cycles (unique 3,000-line
   JSON TextArea with spans, a 1,000-item `RenderWith` list with selection, gradients and shadows at moving
   sizes, z-indexed children, a 200-paragraph rich text editor) plateau at 15.9–16.3 MB (a11y off) or
   16.4–16.7 MB (a11y on) from cycle 150, within the text caches' 20 MB of bounds; handles flat. Thread
-  safety holds: 9c8bf91's versions are read on bridge threads, their lazy fields (`_plain`,
+  safety holds: 240d468's versions are read on bridge threads, their lazy fields (`_plain`,
   `RichDocument._plainText`, `_starts`) idempotent, `ToPlainText` memoized per document (a UIA ValueValue
-  read copies nothing new); 466dce0's worker touches no TextPipeline, takes the tokenizer only under the
-  highlighter's `Gate`, its `CancellationTokenSource` has no registrations to dispose; 495b0b4, ca59c6d
-  and 545d1b6 are UI-thread only.
+  read copies nothing new); 12d9742's worker touches no TextPipeline, takes the tokenizer only under the
+  highlighter's `Gate`, its `CancellationTokenSource` has no registrations to dispose; c2bf858, 91efc25
+  and bff6de2 are UI-thread only.
 
 ## Candidates
 
@@ -76,7 +76,7 @@ SATISFIED: no
   idle and paced waits with early returns, posts, wakes, input events, UI-thread bytes per
   pass/frame/input, GCs, heap and private bytes. Tooling. Small.
 - **tooling-textbench-warmup** (4; re-ranked lower). Warm until `JitInfo.GetCompiledMethodCount` stops
-  rising; print the methods compiled while measuring. At 5d9be15 TextBench compiled 990 methods during
+  rising; print the methods compiled while measuring. At ac5d415 TextBench compiled 990 methods during
   measurement (1,288 before), despite its 3 s time-based warm-up (Program.cs:46-55). Tooling. Small.
 - **test-frame-pacing-event-precondition** (4; last). Make the storm thread's cadence independent of
   `Sleep(1)` granularity. At 120 Hz the precondition needs >363 events and the storm raises ~510; it
@@ -92,18 +92,18 @@ SATISFIED: no
   events (`FindTarget` arrays and string marshalling 2–3 times per poll, WindowsDisplayColor.cs:153-154,
   SDL3Window.cs:1277-1294). Aperture and Reel use events (0 B). Only `HULTUI_RENDERER=vulkan`; becomes a
   100 ms deadline under idle-wakeups.
-- 7e52ff5 `ServiceUndrawnSources`: whole-tree walk every pass while a minimized window is dirty
+- cfe2691 `ServiceUndrawnSources`: whole-tree walk every pass while a minimized window is dirty
   (Window.cs:860-886), O(n) at ~38 passes/s, 0 B; can fold into idle-wakeups (also gl-vk-undrawn-sources-walk).
 - `GpuFrameSink.TryRenderFrame` closures: a display class, an `Action` and a `GetProcAddress` delegate per
   drawn video frame, ~190 B (GpuFrameSink.cs:78-107); <1 % of Reel's playback bytes per frame.
-- 8d30d31 gradient cache keyed by snapped rect: a gradient whose size changes every frame misses every
+- 1d61775 gradient cache keyed by snapped rect: a gradient whose size changes every frame misses every
   time and now also copies its stops (+40–56 B per miss). No app animates a gradient's size.
-- 48823d5 `LruCache.Counted` (MeasurementCache.cs:227) counts an entry at most at half the bound; two
+- 898a65e `LruCache.Counted` (MeasurementCache.cs:227) counts an entry at most at half the bound; two
   layouts over 2 MB could outlive the 4 MB layout bound until the next wrapped layouts evict them. Needs a
   single label over 2 MB; none in the apps.
-- 545d1b6 keyed item rows build a new `_retained` dictionary per selection move; small next to the row's
+- bff6de2 keyed item rows build a new `_retained` dictionary per selection move; small next to the row's
   25.7 KB/op.
-- 466dce0 keeps the last response (text, lines, starts, spans) after its tab closes, as before; bounded at
+- 12d9742 keeps the last response (text, lines, starts, spans) after its tab closes, as before; bounded at
   1–2 bodies.
 - Minimized-window passes: 37–38/s, 0 B, GL; Vulkan adds 266–272 B per pass from the colour poll.
 - Live-repo Junction "idle": 2.2–2.6 posts/s from other sessions' git activity (GitWatcher), ~440–860 KB

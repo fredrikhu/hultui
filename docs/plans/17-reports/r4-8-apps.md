@@ -1,11 +1,11 @@
 # Round 4 survey: 8. App workloads
 
-All five apps published NativeAOT at 0951288 and b3e00b0, same probe on both (round 3's probe plus
+All five apps published NativeAOT at 0951288 and beed97f, same probe on both (round 3's probe plus
 anchor edits). 73 real windows: SDL hint as env var and in process, a CBT hook on the UI thread
 (`WS_EX_NOACTIVATE` at creation, activation refused), `WS_EX_NOACTIVATE` set again once the window
 existed, a 5 ms foreground guard; graceful close; no clicks, no OS input. **Foreground-guard events:
 0.** The CBT hook refused 17 activations — exactly one per custom-frame launch at 0951288, 0 at
-b3e00b0 (confirms 2e3083b). Shares taken while eight surveys ran. Bytes and counts identical across
+beed97f (confirms 48527ac). Shares taken while eight surveys ran. Bytes and counts identical across
 repeats. Probe code, scripts, CSVs and logs in the session scratchpad `r4apps/` (`probe/BenchHook.cs`,
 `probe/BenchCounters.cs`, `appprobe.py`, `*-session.ps1`, `an4.py`, `chrome.py`, `undrawn.py`,
 `keyup.py`, `lat.py`, `runs/`); scratch repo `r4apps/jrepo` (pushes disabled). The user's own Aperture
@@ -29,8 +29,8 @@ None made worse. Yes in four of five; Meridian flat.
 Per key or action (UI-thread bytes, before → after):
 
 - Junction (UIA on): History walk (60 ms keys) 560 → 321 KB (−43 %), a11y 294 → 60 KB per key, 41 full
-  rebuilds → 24 rebuilds + 39 patches per 40 keys (40b1e97 works); History at 500 ms builds per key 2 → 1
-  (88fa622); Commit no-op walk 638 → 285 (−55 %); Branches 696 → 243 (−65 %); Files 671 → 486 (−27 %);
+  rebuilds → 24 rebuilds + 39 patches per 40 keys (3730052 works); History at 500 ms builds per key 2 → 1
+  (b985e74); Commit no-op walk 638 → 285 (−55 %); Branches 696 → 243 (−65 %); Files 671 → 486 (−27 %);
   wheel 101 → 46.5 KB per notch; Changes typing 1,964 → 267 KB per keystroke (−86 %; a11y off 1,219 → 235).
 - Vesper: pane walk 571 → 262 KB (−54 %), rows made per key 35 → 0.7; first code folder 898 → 739 KB;
   viewer PageDown flat (212 → 211).
@@ -68,10 +68,10 @@ Aperture 3 swapchains; Vulkan first frame 35–38 %).
 - **a11y-layout-refresh-bounds-only** (owner 7; expert 1's layout-themed-patch-keeps-layout covers
   part). With a reader, every frame with layout dirt (Window.cs:1179) schedules a whole a11y tree
   rebuild; re-snapshot the applied tree's bounds instead, or rebuild only subtrees whose layout changed.
-  b3e00b0, UIA listening: Junction History 60 ms keys — 24 layout-due rebuilds of 1,110 nodes (~100 KB
+  beed97f, UIA listening: Junction History 60 ms keys — 24 layout-due rebuilds of 1,110 nodes (~100 KB
   each, 23 in undrawn a11y-only frames) = 2.29 of the walk's 2.41 MB a11y bytes, 57 KB per key (18 % of
   321); History at 500 ms (a reader's pace) — 16 rebuilds and 0 patches per 16 keys (the leading edge
-  fires on every key, so 40b1e97's patch never runs), 113 KB per key (30 % of 379); Aperture posters
+  fires on every key, so 3730052's patch never runs), 113 KB per key (30 % of 379); Aperture posters
   18–19 rebuilds per 20 keys, 28 KB per key (18 %); Commit no-op and Branches 15–16 per 20 keys (~5 %);
   Vesper 27 per 45 keys (3 %). In History the details pane really moves. Churn −18 % / −30 % / −18 % per
   key with a reader; O(nodes) → O(moved nodes). Medium; events identical; a11y-property-patch family.
@@ -89,10 +89,10 @@ Aperture 3 swapchains; Vulkan first frame 35–38 %).
   other Meridian frame flushes under 1 ms) — the worst single frame in the five apps. The CPU side is
   text-open-measures-every-line (expert 5). Unknown until traced.
 - **junction-commit-file-switch** (owner 8, then 5/2; lead, needs a profile). Walking the files of a
-  large commit: 2.72 MB per key at b3e00b0 (4.84 at 0951288), 2.15 builds per key; the view's Build 1.84
+  large commit: 2.72 MB per key at beed97f (4.84 at 0951288), 2.15 builds per key; the view's Build 1.84
   MB per key (each new file's diff flattened and highlighted); a11y 211 KB per key (one Children rebuild
   per file); realize 301 KB (23 rows). The most expensive key walk in any app, ~8× History.
-- **Evidence for experts 3 and 7:** Reel quiet playback at b3e00b0, 35 s, UIA listening: 1.4 KB of
+- **Evidence for experts 3 and 7:** Reel quiet playback at beed97f, 35 s, UIA listening: 1.4 KB of
   UI-thread bytes per video frame — render 371 B (media-vulkan-video-frame-bytes), a11y 491 B, between
   frames 503 B; the a11y part is 3.0 full tree rebuilds per second (4.3 KB each) from the scrubber's
   range refresh (supports a11y-leaf-property-patch).

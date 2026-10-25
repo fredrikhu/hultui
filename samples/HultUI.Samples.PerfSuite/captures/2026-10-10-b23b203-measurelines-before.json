@@ -1,7 +1,7 @@
 {
-  "label": "before the TextArea kept its line widths (83c6309), median of 2",
+  "label": "before the TextArea kept its line widths (7c3dcf1), median of 2",
   "date": "2026-10-10 10:47 +02:00",
-  "commit": "83c6309",
+  "commit": "7c3dcf1",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

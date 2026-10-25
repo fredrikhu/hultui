@@ -1,5 +1,5 @@
 {
-  "kind": "real-window probes (scratchpad S14Probe and the SwapProbe of 7a827e9), not a perf-suite capture: the suite never runs a live resize",
+  "kind": "real-window probes (scratchpad S14Probe and the SwapProbe of 8a38ef4), not a perf-suite capture: the suite never runs a live resize",
   "date": "2026-10-10 12:40-13:20 +01:00",
   "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200; S14Probe on the 4K display at 150 %, SwapProbe at (100,100) on the 1440p display at 100 % with a 300 px bar",
   "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, P-cores; resize runs idle-gated; before and after alternated (before, after, before, after), JIT; AOT drag pair alternated once (results.AOT)",
@@ -8,10 +8,10 @@
     "invalidate": "InvalidateRect + UpdateWindow 20 times: a WM_PAINT each (EXPOSED, data1 0)",
     "exposed held": "SDL's live-resize timer simulated: EXPOSED with data1 1 pushed every 10 ms for 3 s while the loop is held (as in Win32's modal size/move loop)",
     "heldvideo": "the same for 2 s with mpv playing a 30 fps clip (libmpv-2.dll from native/mpv), frames drawn, frames mpv dropped, seconds played",
-    "stretch sampling": "7a827e9's harness: 60 resizes of a TOPMOST, never-activated window while a second thread samples the screen for a 300 px white bar; frames = frames drawn in the 60 resizes"
+    "stretch sampling": "8a38ef4's harness: 60 resizes of a TOPMOST, never-activated window while a second thread samples the screen for a 300 px white bar; frames = frames drawn in the 60 resizes"
   },
   "label": "gl-vk-resize-duplicate-frames, after: the watch draws a resize for a new size or a WM_PAINT, validates the client area after a frame, and otherwise draws only a dirty window or one with posted work waiting",
-  "commit": "61edb19 + this change",
+  "commit": "54c56d9 + this change",
   "results": {
     "JIT": {
       "GL: exposed": [

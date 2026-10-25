@@ -1,6 +1,6 @@
 # Round 4 survey: 5. Text pipeline
 
-At ba817e8; allocations, call counts and complexity only. Probes reverted; worktree clean. Probe code
+At 653971d; allocations, call counts and complexity only. Probes reverted; worktree clean. Probe code
 in the session scratchpad `r4text/` (`probe_on.py`, `probe2.py`, `proto_mono.py`, `proto_rich.py`,
 `soak.py`, `probe/` with an allocation-by-type sampler `AllocListener.cs`). Linux not checked.
 
@@ -8,20 +8,20 @@ SATISFIED: no
 
 REVIEW: none.
 
-- Allocation, full suite (122 rows, HEAD vs the 12c64b0 capture): run 2 moved no row; run 1 had one
+- Allocation, full suite (122 rows, HEAD vs the dbcb7d8 capture): run 2 moved no row; run 1 had one
   one-off (richtext/select all 0.4 → 2.3 KB, back to 0.4 in run 2 and two filtered reruns).
 - Round 3 on text rows: −4…−60 %; only richtext/wheel up (+0.7 KB, the known sub-blob map growth).
-- 5b71b4f equivalence soak after 12c64b0: 12 seeds × 2,500 edits + the 1,500 standard, with plain-path
+- dc6c047 equivalence soak after dbcb7d8: 12 seeds × 2,500 edits + the 1,500 standard, with plain-path
   emoji symbols (⚡ ✅ ⌚ ☕ ⭐) and VS16/keycap/skin-tone pieces added: 31,500 edits, 0 line-start lists
   differing from a fresh area.
-- 12c64b0: the itemizer looks ahead (VS16, modifiers, ZWJ); prefix tables assume a prefix itemizes
+- dbcb7d8: the itemizer looks ahead (VS16, modifiers, ZWJ); prefix tables assume a prefix itemizes
   like the run cut short — still holds, every look-ahead character sends the text to the BiDi path
   (no table). 3,000 random plain-path strings with emoji-presentation symbols, 4 styles, Segoe UI
   Emoji: 242,584 prefixes, table width = laid-out width to the bit.
-- dc028f9/2808caf: retained after close equal over 2 open/close cycles (TODO.md 2.66 MB, 18,884-line
+- bff5581/896e99a: retained after close equal over 2 open/close cycles (TODO.md 2.66 MB, 18,884-line
   JSON 4.38 MB, 20,000-line log 3.66 MB). No leak.
-- 7a8f516: no text measuring off the UI thread in any app (TextMeasure only from Build).
-- 4e85cdd: measurer cache keyed by the whole style incl. colour; a colour tween makes at most 64
+- 7d6cc85: no text measuring off the UI thread in any app (TextMeasure only from Build).
+- f0238b2: measurer cache keyed by the whole style incl. colour; a colour tween makes at most 64
   measurers of 64 B, then clears.
 
 ## Candidates

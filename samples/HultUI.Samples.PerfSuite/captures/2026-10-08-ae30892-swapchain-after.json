@@ -2,7 +2,7 @@
   "label": "gl-vk-swapchain-rebuild-leak, after: the scRGB MAILBOX swapchain on Windows is destroyed before its replacement",
   "kind": "real-window Vulkan probe, not a perf-suite capture (the suite never builds SdlVulkanHost)",
   "date": "2026-10-07 23:58 +02:00",
-  "commit": "ae30892 + this change",
+  "commit": "b618289 + this change",
   "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, HDR display 4K at 150%, 120 Hz",
   "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, HULTUI_VULKAN_F16=1, HULTUI_VULKAN_PRESENT=mailbox, idle-gated, alternating with the before build",
   "probes": "as in 2026-10-08-ae30892-swapchain-before.json",

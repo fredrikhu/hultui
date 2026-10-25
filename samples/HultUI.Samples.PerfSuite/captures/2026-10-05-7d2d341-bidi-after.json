@@ -1,7 +1,7 @@
 {
-  "label": "after it: 7d2d341, text/ and layout/resize only, second of 2 runs interleaved with the before side",
+  "label": "after it: bcd74ca, text/ and layout/resize only, second of 2 runs interleaved with the before side",
   "date": "2026-10-05 23:26 +02:00",
-  "commit": "7d2d341",
+  "commit": "bcd74ca",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 {
   "label": "a style mark walks each subtree once (JIT, 2 runs merged)",
   "date": "2026-10-11 11:31 +02:00 / 2026-10-11 11:33 +02:00",
-  "commit": "aeb8905+style mark once",
+  "commit": "c91a748+style mark once",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

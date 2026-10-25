@@ -1,6 +1,6 @@
 # Round 2 survey: 5. Text pipeline
 
-Counters and env-gated prototypes on fc807ec, reverted. Probe and prototype patch in the
+Counters and env-gated prototypes on 6ba7e2d, reverted. Probe and prototype patch in the
 session scratchpad `r2-text/` (direct shaper with compare mode, width-only measure, span scan,
 counters; PerfProbe.cs, ProbeJsonViewer.cs).
 
@@ -10,8 +10,8 @@ REVIEW: none. A full 5×5 suite run matches the latest captures row for row (a 2
 high on cold rows: harness artifact). Word cache text/wrap 21,126 hits / 2 misses; ellipsis
 27,185 / 3 after 6891682 halved the measuring; bidi ellipsis shaper calls 3,004 → 2,353 per
 step. 0178784's kept lists cannot be re-entered; every TextMeasure caller is on the UI thread.
-f3a31d6's shared caches matter only for DevTools and multi-control WinForms; what empties the
-shared shape cache is a TextArea open. 322df92 measures only boxes < 2× font size, cached.
+d5d0c50's shared caches matter only for DevTools and multi-control WinForms; what empties the
+shared shape cache is a TextArea open. 81be6ca measures only boxes < 2× font size, cached.
 
 ## Candidates
 
@@ -26,7 +26,7 @@ shared shape cache is a TextArea open. 322df92 measures only boxes < 2× font si
 
 - Skipping shaping for "provably short" lines: no proven advance bound without shaping (kerning, fallback); the width-only path gets the bytes safely.
 - ComputeShaping's List wrappers: ~128 B per cold label (~5.6 % of text/create).
-- f3a31d6 cross-window competition: no app has a second window; caches bounded.
+- d5d0c50 cross-window competition: no app has a second window; caches bounded.
 - syntax-maxlines-uncoloured as perf: the TextArea side stops depending on span count once span-scan lands; the remaining cost is tokenizing on the UI thread (Needs the user).
 
 ## Needs the user

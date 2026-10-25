@@ -11,12 +11,12 @@ written, including the ones later work overturned. The main ones:
 - **"Validation never ran."** It ran on Windows with the Vulkan SDK and on Linux: core and
   synchronisation validation, 0 messages, with a fault injection proving the checks fire. It cannot
   see the GL/Vulkan seam; see Traps in HDR.md.
-- **"Zero-copy on Windows is incompatible with this architecture."** It shipped (38da446): NVDEC
+- **"Zero-copy on Windows is incompatible with this architecture."** It shipped (e0578c0): NVDEC
   with CUDA interop in the trimmed LGPL build, 4K CPU from 323 to 156 ms/s on Vulkan and from 382
   to 58 on GL.
 - **Nothing ordered GL's write of the shared image after Vulkan's last read of it.** A second
-  semaphore now runs from Vulkan to GL (184ae17).
-- **"The swapchain is built twice at start-up."** Fixed (ffce665): the surface starts from the
+  semaphore now runs from Vulkan to GL (6cf4123).
+- **"The swapchain is built twice at start-up."** Fixed (bb89283): the surface starts from the
   size the host built for.
 - **"lcms has to come back."** It did not: libplacebo tone-maps and converts primaries without it.
   lcms is only for ICC profiles, which nothing here uses.

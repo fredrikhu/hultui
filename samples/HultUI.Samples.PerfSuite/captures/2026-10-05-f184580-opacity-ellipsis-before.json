@@ -1,7 +1,7 @@
 {
-  "label": "before the opacity and truncation fixes: f184580 + the suite, median of 3 runs interleaved with e91d72f, idle machine",
+  "label": "before the opacity and truncation fixes: 5d4aa0b + the suite, median of 3 runs interleaved with e7e9e3b, idle machine",
   "date": "2026-10-05 22:25 +02:00",
-  "commit": "f184580",
+  "commit": "5d4aa0b",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 {
-  "label": "main at 58f0abd with input/type in a wrapped 900-line TextArea added, before a TextArea read a line's widths off a table of its prefixes",
+  "label": "main at 428ce3b with input/type in a wrapped 900-line TextArea added, before a TextArea read a line's widths off a table of its prefixes",
   "date": "2026-10-06 22:35 +02:00",
-  "commit": "58f0abd",
+  "commit": "428ce3b",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

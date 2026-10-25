@@ -1,7 +1,7 @@
 {
-  "label": "after: c667032 + the loop rows (NativeAOT)",
+  "label": "after: 9740353 + the loop rows (NativeAOT)",
   "date": "2026-10-12 02:59 +02:00 / 2026-10-12 03:01 +02:00",
-  "commit": "c667032",
+  "commit": "9740353",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

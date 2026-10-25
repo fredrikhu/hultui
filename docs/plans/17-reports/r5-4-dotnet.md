@@ -12,23 +12,23 @@ SATISFIED: no
 
 ## Review
 
-- **0607f2f7 (owner 3, minor; an extension point, not perf): posted work no longer draws in any Windows size/move loop.** `OnSizeMoveStarted` sets the poster for every window (SDL3Window.cs:746). From then on, `posted = !_mainThreadQueue.IsEmpty && !LiveFrameRequests.Answering` is false (Application.cs:371).
+- **ee6d0bb0 (owner 3, minor; an extension point, not perf): posted work no longer draws in any Windows size/move loop.** `OnSizeMoveStarted` sets the poster for every window (SDL3Window.cs:746). From then on, `posted = !_mainThreadQueue.IsEmpty && !LiveFrameRequests.Answering` is false (Application.cs:371).
   - **Who is affected:** a GPU source outside HultUI.Media and WebView. `IGpuImageSource`, `GpuFrameSink` and `IGpuFrameRenderer` are public, but `LiveFrameRequests` is internal. Such a source signals through a post, which the modal loop never runs.
   - **What changed:** before, SDL's live-resize timer drew it for that post about 64 times a second. Now it freezes until the move or held drag ends.
   - **Fix:** suppress the posted-work draw only while requests have arrived recently (for example in the last 100 ms), or make the request public. Small.
   - **Thread safety holds:** a message posted just after the loop ends is ignored (`s_liveFrameWindow` is 0). A stale waiting flag costs at most one extra frame.
 - **No other objections:**
-  - **ec4ced5, b3df6aae:** a wake can no longer be lost. `NeedsRender` checks a11y actions and attach after `PumpEvents`. `IsRunning` (LINQ `Any` over a `List`) now runs twice per idle pass and allocates 0 B: Reel on AOT, 0.0–1.8 B per non-render pass, amortized.
-  - **ee779b45:** the rented buffer is returned cleared, and a nested notify rents its own.
-  - **1333083b:** using a view after the next text call throws (tested). The document is released at the next call. Scratch segments are trimmed above 4,096.
-  - **9a5f6a2f:** the 219 KB is transient; the cache holds at most 64 face/size pairs.
-  - **e2fafa31:** the UI thread is the only writer, and `Value`/`Range` are replaced as one object.
-  - **a0221337:** `AccessibleText` copies the line starts into its own `int[]`, so a UIA thread never reads the TextArea's list that is patched in place.
-  - **f14bc82d, ef0a1f49:** no new allocation paths.
-  - **8960cf36:** the kept SKImage is released through `ReleaseFrameTarget`, called from `GpuFrameSink.Dispose`.
-  - **a193327e:** the CBT hook uses an `UnmanagedCallersOnly` function pointer with a nested ref-struct scope.
-  - **13c66d49:** one retention gap, see candidate 2.
-  - **18cdd285:** see Examined.
+  - **671cf74, 3200a2a2:** a wake can no longer be lost. `NeedsRender` checks a11y actions and attach after `PumpEvents`. `IsRunning` (LINQ `Any` over a `List`) now runs twice per idle pass and allocates 0 B: Reel on AOT, 0.0–1.8 B per non-render pass, amortized.
+  - **418f25a6:** the rented buffer is returned cleared, and a nested notify rents its own.
+  - **d7c0c046:** using a view after the next text call throws (tested). The document is released at the next call. Scratch segments are trimmed above 4,096.
+  - **a476866c:** the 219 KB is transient; the cache holds at most 64 face/size pairs.
+  - **dddaac36:** the UI thread is the only writer, and `Value`/`Range` are replaced as one object.
+  - **5e6ef9a2:** `AccessibleText` copies the line starts into its own `int[]`, so a UIA thread never reads the TextArea's list that is patched in place.
+  - **fbec1130, a3aeabb2:** no new allocation paths.
+  - **f9980647:** the kept SKImage is released through `ReleaseFrameTarget`, called from `GpuFrameSink.Dispose`.
+  - **445b34c8:** the CBT hook uses an `UnmanagedCallersOnly` function pointer with a nested ref-struct scope.
+  - **b52ca178:** one retention gap, see candidate 2.
+  - **e6a432fa:** see Examined.
 
 ## Candidates
 
@@ -73,7 +73,7 @@ SATISFIED: no
   - **cost:** small. Two runtime options per app, plus a PERFORMANCE.md note. No API or pixel impact. Process-wide: more gen-0/gen-1 GCs, and large arrays under 512 KB are allocated in gen 0.
 
 - **id: paint-run-ink-extents-dead-keys** (owner 2, code in SkiaRenderContext; retention found by 4)
-  - **what:** the run ink-extent map (13c66d49) keys on `ShapedRun` by reference and holds up to 2,048 runs (SkiaRenderContext.cs:106, :1133, :1164). Once the text caches drop a run, no lookup can hit it again, yet the map keeps it alive. Replace the map with a per-face table of glyph x-extents, filled lazily by the same `GetGlyphWidths` call at size 2048. Then compute each run's union per drawn line. Storing the extent on the run itself (+8 B per run) would also work.
+  - **what:** the run ink-extent map (b52ca178) keys on `ShapedRun` by reference and holds up to 2,048 runs (SkiaRenderContext.cs:106, :1133, :1164). Once the text caches drop a run, no lookup can hit it again, yet the map keeps it alive. Replace the map with a per-face table of glyph x-extents, filled lazily by the same `GetGlyphWidths` call at size 2048. Then compute each run's union per drawn line. Storing the extent on the run itself (+8 B per run) would also work.
   - **evidence:** blob probe, 20,000 spanned lines in Cascadia Mono, 397 screens scrolled, then the document closed:
     - The map still holds 1,592 runs (136,661 glyphs); 1,460 of them are held by no blob cache.
     - After the text caches empty (a UI-culture switch), the map alone holds 2.29 MB: heap 12.46 → 10.17 MB, 18 % of what remains. The blob caches hold 0.20 MB more.
@@ -90,7 +90,7 @@ SATISFIED: no
 - **Idle on AOT (20 s, UIA client listening):** Junction, Vesper, Meridian, Aperture (lab Jellyfin), Reel and the GL probe all 0.0 passes/s.
 - **Private bytes since round 4:** up about 72 MB, but the machine changed, not the code. Round 4's own AOT exe today reads 169.9 MB for Junction (98.1 then) and 97.6 for the probe. On the same day, r5 vs r4: Junction 170.1 vs 169.9 MB (heap 7.54 vs 7.90); Aperture 200.7 vs 199.6 MB (heap 10.87 vs 10.68).
 - **Steady video frame:** Reel 1080p24 on AOT, 90–111 B/frame with a11y off, at the 0.1 KB target. With UIA, 315–333 B/frame at 1.1 trees/s; that is the elapsed label's layout refresh, already waiting as a11y-layout-refresh-bounds-only.
-- **18cdd285 (Vesper kept cells):** after leaving Brief, 140 cells per pane stay referenced but hold 0 KB the tree does not already hold. 30 Brief/Thumbnails/Detail cycles plateau at 6.15 MB from cycle 19: bounded caches, not a leak.
+- **e6a432fa (Vesper kept cells):** after leaving Brief, 140 cells per pane stay referenced but hold 0 KB the tree does not already hold. 30 Brief/Thumbnails/Detail cycles plateau at 6.15 MB from cycle 19: bounded caches, not a leak.
 - **Two loop passes per drawn frame** (Reel 48 passes/s at 24 fps; 4.08 per key in Junction): a pass with no frame allocates 0 B. This is the loop's design, and does not count against the idle bar.
 
 ## Needs the user

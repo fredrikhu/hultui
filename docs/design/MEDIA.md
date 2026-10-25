@@ -168,7 +168,7 @@ public interface IWindowingPlatform
   while one is already queued; `WaitForEvents` is `SDL_WaitEventTimeout(null, …)`,
   which peeks without popping and which SDL3 interrupts on a push from any thread.
   The hand-written `MsgWaitForMultipleObjectsEx` it replaced existed so that UI
-  Automation queries arriving as Win32 sent messages would wake the wait (fad106c);
+  Automation queries arriving as Win32 sent messages would wake the wait (1244fe5);
   SDL's own Windows wait is the same call with the same mask, and the real-window
   accessibility suite passes unchanged over the new path.
 - Headless and the WinForms host: no-op; neither has a wait to cut short.
@@ -368,7 +368,7 @@ stuck" line:
   the core, which is waiting for the frame. `SkipFrame` takes the frame with
   `MPV_RENDER_PARAM_SKIP_RENDERING`, and the first render with a size draws it.
   Reopening a file went from about 600 ms to 3–8 ms.
-- **The minimized window.** A minimized window is not drawn (plan 17, 82e382b), so
+- **The minimized window.** A minimized window is not drawn (plan 17, ba79958), so
   nothing took mpv's frames: each waited out the timeout and was dropped, and a file
   opened meanwhile never loaded, the render context being made by a draw. In Reel the
   next file in a folder stayed silent until the restore. The window now serves its

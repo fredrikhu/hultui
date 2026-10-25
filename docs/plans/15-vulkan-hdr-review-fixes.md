@@ -1,6 +1,6 @@
 # Vulkan and HDR — review fixes
 
-From the 2026-09-28 review of the Vulkan renderer and HDR video work (commits 8858b89..33708b8).
+From the 2026-09-28 review of the Vulkan renderer and HDR video work (commits 057ef18..dd40ece).
 The design was judged sound; the fixes below are implementation bugs, gaps the design never
 addressed, drifted docs, and missing tests. Everything here is meant to be done eventually. The
 phases are the order to do it in: highest user impact first, with Reel and Aperture now shipping on
@@ -12,8 +12,8 @@ need a person at an HDR display; items marked **Linux** need the Linux machine.
 
 ## Status
 
-Committed one phase at a time on the branch `vulkan-hdr-review-fixes`: phase 1 `a2533b1`,
-phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`.
+Committed one phase at a time on the branch `vulkan-hdr-review-fixes`: phase 1 `ef66665`,
+phase 2 `1c5f7ca` (which also carries 7.1), phase 3 `f3343e6`, phase 4 `b6306ec`.
 
 | # | Item | Phase | Status |
 |---|------|-------|--------|
@@ -587,8 +587,8 @@ manual check.
   variable; `HULTUI_MPV_HWDEC` under Media.
 - **10.3 HDR.md.** Split into a short current-state design (architecture, invariants, variables,
   known gaps, Traps) and a dated log. Corrections to carry: Vulkan chosen per app in code;
-  validation ran on both platforms; Windows zero-copy shipped (38da446); the reverse semaphore
-  (184ae17); the start-up double swapchain fixed (ffce665); lcms not needed; one value per
+  validation ran on both platforms; Windows zero-copy shipped (e0578c0); the reverse semaphore
+  (6cf4123); the start-up double swapchain fixed (bb89283); lcms not needed; one value per
   quantity for the numbers that disagree; Traps gain "layouts Skia owns are assumed" and "a
   fallback that was never exercised".
 - **10.4 MEDIA.md, Mpv README, Natives README.** `RendererKind`, the Vulkan video path, NVIDIA

@@ -1,7 +1,7 @@
 # Round 5 survey: 1. Layout
 
 At 969f3308 (the worktree was detached there; it is clean). Everything was measured as counts and bytes only, JIT Release, with no timings. Two probes:
-- **Suite probe:** all 140 rows at warm 40 / steps 20, compared row by row with round 4's probe at ba817e8 on the 122 rows both have.
+- **Suite probe:** all 140 rows at warm 40 / steps 20, compared row by row with round 4's probe at 653971d on the 122 rows both have.
 - **Headless app walks:** Junction (400 commits, 24 branches, 30 tags; a 2,300-file search), Vesper (400 files a pane, same and other names; viewer on a 20,000-line log), Aperture (600 films). New this round: resize walks across 40 widths in Junction History, Commit, Branches and Tags, in Vesper and in Aperture.
 
 Prototypes were gated by environment variables. All probe edits were removed by a reverse `git apply -R`. Probe code and outputs are in the session scratchpad `r5layout/`:
@@ -22,8 +22,8 @@ None. Round 4's build caused no regression in my area.
 - hit visits and render visits, z-order scans, rows made
 
 No row's allocKB rose more than 2 %, with two known exceptions:
-- `overlay/dropdown open 200 items` +0.9 KB: c3c9d9fa's label-heights array, as its commit says.
-- `anim/signal tween` 368.8 → 372.7 KB (+1 %): ef0a1f49's themed twins.
+- `overlay/dropdown open 200 items` +0.9 KB: 0ea667cf's label-heights array, as its commit says.
+- `anim/signal tween` 368.8 → 372.7 KB (+1 %): a3aeabb2's themed twins.
 
 Only calls to MarkLayoutDirty rose, never new marks:
 - TableView sort and resize column 541 → 656
@@ -33,10 +33,10 @@ Only calls to MarkLayoutDirty rose, never new marks:
 
 These are themed controls' ApplyTheme marking a fresh element that is already dirty, which stops at the first step. New marks (LayoutMarkNew) stayed level or fell.
 
-**One shift that is not a regression.** In the two "type beside a 150-line diff, rows kept" rows, the render pass went 0 → 1,472 B and the layout pass 2,208 → 736 B. The field's new text is now shaped when it is drawn, not in layout, because ef0a1f49 no longer lays the field out. Net bytes are the same.
+**One shift that is not a regression.** In the two "type beside a 150-line diff, rows kept" rows, the render pass went 0 → 1,472 B and the layout pass 2,208 → 736 B. The field's new text is now shaped when it is drawn, not in layout, because a3aeabb2 no longer lays the field out. Net bytes are the same.
 
 **What fell:**
-- Style marks down the tree went to about 0 everywhere (f14bc82d), for example component/edit 18,004 → 0.
+- Style marks down the tree went to about 0 everywhere (fbec1130), for example component/edit 18,004 → 0.
 - anim/signal tween: 160 → 0 laid out per step.
 - type beside the diff, rows kept: MeasureSize 159 → 5.
 - menu bar open: 18 → 0 laid out.
@@ -59,7 +59,7 @@ These are themed controls' ApplyTheme marking a fresh element that is already di
 - Hover and wheel cost 0.1 KB and about 25 hit visits.
 - Resize steps allocate 2.2 KB in Junction History, Branches and Tags and in Vesper, and 7.2 KB in Junction Commit.
 
-**The CI branch** (0f970007^2) touches workflows, docs/CI.md, an mpv link flag and test timeouts. Nothing in layout.
+**The CI branch** (6a089ebd^2) touches workflows, docs/CI.md, an mpv link flag and test timeouts. Nothing in layout.
 
 ## Candidates
 
@@ -140,7 +140,7 @@ Every app list is virtual (about 25 visits a move in Junction). Medium cost.
   - The basis probe becomes a constant zero-width measure, which stays cached.
   - Resize misses 1,204 → 964 (−20 %); leaf measures 1,969 → 1,635.
   - Vesper's Quick View already does it (CommanderApp.cs:724).
-- **Bytes for themed twins** (ef0a1f49): 2–5 twins a key at 72–216 B each, 144 B (History) to 1,080 B (Vesper) per key, at most 0.9 % of a key.
+- **Bytes for themed twins** (a3aeabb2): 2–5 twins a key at 72–216 B each, 144 B (History) to 1,080 B (Vesper) per key, at most 0.9 % of a key.
 - **Relayout of every sibling on a leaf edit:**
   - `a11y/edit 1 label of 1,000 rows` lays out 4 elements but visits 1,004 ComputeLayout (1,001 clean) and makes 1,001 MeasureSize hits per edit; component/edit is the same (1,007 / 1,001).
   - Stopping at an element whose size comes out unchanged (a relayout boundary) is a large engine change.
@@ -151,7 +151,7 @@ Every app list is virtual (about 25 visits a move in Junction). Medium cost.
 - **layout-virtuallist-spacer-stale:** still invisible and still free. The fix is a one-line mark on the spacer; it belongs with an audit, not with performance.
 - **Leads for expert 8, and for 5 if TextSearch is theirs:**
   - Vesper viewer find typing on a 20,000-line log costs 1,702 KB per keystroke. The key handler and build take 1,352 KB (the search over 20,000 lines plus the whole-window build). The frames take 360 KB: 35 rows made again per keystroke (280 KB, because the find look invalidates every row) plus the offsets above.
-  - Aperture rebuilds on every resize step (`OnWindowResize` → `MarkDirty`, ApertureApp.cs:149–162): 92 KB, 63 patches and 77 resolves per step in the grid. Building only when the column count changes would fix it, as 18cdd285 did for Vesper.
+  - Aperture rebuilds on every resize step (`OnWindowResize` → `MarkDirty`, ApertureApp.cs:149–162): 92 KB, 63 patches and 77 resolves per step in the grid. Building only when the column count changes would fix it, as e6a432fa did for Vesper.
 
 ## Needs the user
 

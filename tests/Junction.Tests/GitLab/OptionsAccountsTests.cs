@@ -88,7 +88,7 @@ public class OptionsAccountsTests
             session.Window.Click(Named(session, "Test"));
             session.PumpUntil(() => ById(session, "gitlab-host-verified") is not null, TimeSpan.FromSeconds(10));
             // The Add account button comes with the verified row, and found in the tree is a frame
-            // short of laid out: clicked now, it has no bounds yet (CI, 255627a).
+            // short of laid out: clicked now, it has no bounds yet (CI, 57b7cd5).
             session.PumpFrame();
             Assert.True(TreeHas(session, "Dana Osei"));
             Assert.True(TreeHas(session, "scopes api, write_repository"));

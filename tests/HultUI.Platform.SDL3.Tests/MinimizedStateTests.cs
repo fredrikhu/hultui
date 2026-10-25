@@ -27,7 +27,7 @@ public class MinimizedStateTests
     public void Elsewhere_TheFlagIsTheAnswer_FocusOrNot()
     {
         // Windows reports a minimized window's state itself, and a minimized window there has
-        // no area to draw on (82e382b): a stray focus event must not bring the drawing back.
+        // no area to draw on (ba79958): a stray focus event must not bring the drawing back.
         Assert.True(IsMinimized(sdlSaysMinimized: true, wayland: false, focusedSinceMinimize: true));
         Assert.True(IsMinimized(sdlSaysMinimized: true, wayland: false, focusedSinceMinimize: false));
         Assert.False(IsMinimized(sdlSaysMinimized: false, wayland: false, focusedSinceMinimize: true));

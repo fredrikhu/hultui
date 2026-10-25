@@ -3,17 +3,17 @@
 Real windows that never took focus, `HULTUI_A11Y=0`, Borderless 1200×781 px on the 100 % HDR
 display (Vulkan picks F16 MAILBOX); call counts from wrappers on Skia's GL and Vulkan proc
 resolvers; GPU memory from DXGI `QueryVideoMemoryInfo`, nvidia-smi and Skia
-`DumpMemoryStatistics`. Worktree clean at fc807ec. Probe, run script and patch in the session
+`DumpMemoryStatistics`. Worktree clean at 6ba7e2d. Probe, run script and patch in the session
 scratchpad `r2-gl/`.
 
 SATISFIED: no
 
 ## Review of round 1
 
-- **8aed816 (objection): an idle pass is not 0 B on a real window.** `SdlWindowingPlatform.cs:84` wraps the callback in a new lambda per pump: 88 B per pass (idle 5.7 KB/s GL, 11.9 KB/s Vulkan), every frame too. FrameAllocationTests runs headless. → sdl-pump-closure-per-pass (= runtime-sdl-pump-closure).
+- **6f42157 (objection): an idle pass is not 0 B on a real window.** `SdlWindowingPlatform.cs:84` wraps the callback in a new lambda per pump: 88 B per pass (idle 5.7 KB/s GL, 11.9 KB/s Vulkan), every frame too. FrameAllocationTests runs headless. → sdl-pump-closure-per-pass (= runtime-sdl-pump-closure).
 - Note: real-window steady frames are 608 B on GL (88 pump + ~520 from 5 box shadows, `SKMaskFilter.CreateBlur` per draw) and 2,658 B on Vulkan (vk-swapchain-target-per-frame). The suite draws on a raster surface and sees none of it.
-- 7a827e9: nothing found (82 builds for 80 resizes + 2 at start-up; minimize/restore without a frame: no rebuild, DXGI flat). The zero-extent skip path orphans the swapchain — older than 7a827e9, see the first candidate.
-- 1785d16 working (Skia purgeable 0.0 MB after an 80-step drag). 0f5816a working (GL 1200×781: 28.7 MB DXGI). 12d1480 on Vulkan now checked: shared-pixel PNG reads back exact from a reused-frame capture on F16 and 8-bit. f3a31d6: nothing in this area.
+- 8a38ef4: nothing found (82 builds for 80 resizes + 2 at start-up; minimize/restore without a frame: no rebuild, DXGI flat). The zero-extent skip path orphans the swapchain — older than 8a38ef4, see the first candidate.
+- 7e6fd57 working (Skia purgeable 0.0 MB after an 80-step drag). 4315c4b working (GL 1200×781: 28.7 MB DXGI). 615d75d on Vulkan now checked: shared-pixel PNG reads back exact from a reused-frame capture on F16 and 8-bit. d5d0c50: nothing in this area.
 
 ## Candidates
 
@@ -37,5 +37,5 @@ SATISFIED: no
 
 ## Needs the user
 
-1. **Install Mesa in WSL Fedora** (mesa-dri-drivers, mesa-libEGL, mesa-vulkan-drivers; passwordless sudo works) so 0f5816a's depth-0 config runs on Mesa EGL (llvmpipe, d3d12) and lavapipe? Software or D3D12-layered, not AMD/Intel hardware. Only an RTX 4080 is visible here. 7a827e9 is Windows-only by construction.
+1. **Install Mesa in WSL Fedora** (mesa-dri-drivers, mesa-libEGL, mesa-vulkan-drivers; passwordless sudo works) so 4315c4b's depth-0 config runs on Mesa EGL (llvmpipe, d3d12) and lavapipe? Software or D3D12-layered, not AMD/Intel hardware. Only an RTX 4080 is visible here. 8a38ef4 is Windows-only by construction.
 2. **GL error checks** (later): a no-op glGetError for Skia removes the last driver round trip per frame, but Skia would no longer detect GL out-of-memory. Only if the build phase shows that round trip still costs time.

@@ -4,8 +4,8 @@
   "machine": "SPELDATOR, i7-14700K, RTX 4080 driver 610.62, Windows 11 26200, window on the 4K display at 150 % (1800x1170 px), 200 Hz HDR",
   "configuration": "Release, HULTUI_A11Y=0, SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0, Borderless 1200x750 DIP, P-cores, idle-gated before every run, before and after alternated, 2 runs each; 5 s warm-up of forced frames, then 4,000 forced frames unpaced or 1,500 paced at 5 ms; phases from Window.Performance (the HULTUI_TRACE phases), UI-thread cycles from QueryThreadCycleTime around each RunFrame; glGetError and vkQueueSubmit counted by wrapping the resolvers handed to Skia",
   "scenes": "junction: sidebar of 28 rows, 40 history rows of 5 text columns, 44 monospace diff lines. aperture: 1600x600 hero under a gradient, 16 posters with shadows, a 320x180 pixel-frame video rewritten every frame",
-  "label": "gl-vk-one-submit-per-frame, after: f8e449e + the change (reverted): EndFrame issues without submitting, the surface submits once in Present and then returns the borrowed frames",
-  "commit": "f8e449e + change (scratchpad item1.patch), not kept",
+  "label": "gl-vk-one-submit-per-frame, after: e385c3a + the change (reverted): EndFrame issues without submitting, the surface submits once in Present and then returns the borrowed frames",
+  "commit": "e385c3a + change (scratchpad item1.patch), not kept",
   "results": {
     "AOT": {
       "GL, junction-like, paced 5 ms": [

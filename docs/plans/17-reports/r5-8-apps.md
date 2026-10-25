@@ -1,6 +1,6 @@
 # Round 5 survey: 8. App workloads
 
-**Setup.** Compared 969f3308 (after round 4) with ba817e80 (before; same code as b3e00b0). Both were NativeAOT publishes with the same probe: round 4's, plus counts of laid-out elements, MeasureSize calls, content measures, resolves and a11y patches, plus `clickid:`, `hoverid:` and `size:` script steps. Covered: all five apps, and the Fluent sample, which is the only host of the rich text editor that needs no GitLab.
+**Setup.** Compared 969f3308 (after round 4) with 653971d3 (before; same code as beed97f). Both were NativeAOT publishes with the same probe: round 4's, plus counts of laid-out elements, MeasureSize calls, content measures, resolves and a11y patches, plus `clickid:`, `hoverid:` and `size:` script steps. Covered: all five apps, and the Fluent sample, which is the only host of the rich text editor that needs no GitLab.
 
 **Windows.** 62 real windows. Each had the SDL hint as an env var and in process, a CBT hook on the UI thread (`WS_EX_NOACTIVATE` at creation, every activation refused), `WS_EX_NOACTIVATE` set again on the window, and a 5 ms foreground guard. All closed by script. No OS input: keys, moves, wheel and three clicks went in process through `Window.HandleInputEvent`; clicks used button 0, and only after a hit test confirmed the target.
 - **Foreground-guard events: 0. CBT refusals: 0.**
@@ -111,7 +111,7 @@ Per key or action, UI-thread bytes, before → after:
     - Layout is 8.5–10 % of those typing frames.
     - With a reader, each such frame also schedules an a11y refresh: 0.86–0.87 trees/key, 20–27 KB/key.
   - **Expected:** laid out per keystroke → 0–1. Typing frames −8…−10 % (time bar). With a reader, −20…−27 KB/key (Junction Changes about −22 %).
-  - **Cost:** small–medium: each kind checks what it copies, as in ef0a1f49. No API or pixel change.
+  - **Cost:** small–medium: each kind checks what it copies, as in a3aeabb2. No API or pixel change.
 
 - **apps-vesper-components** (owner 6/8; was Waiting, covered by "one app at a time")
   - **Evidence:** in the partner walk (296 KB/key), the CommanderApp build is 237.7 KB per key (80 %).
@@ -169,7 +169,7 @@ Per key or action, UI-thread bytes, before → after:
 ## Examined, not worth it
 
 - **Junction LOH at session end, with UIA** (gcheap 93.0 vs 81.6 MB): live data is equal (68.0 vs 68.1 MB). All-thread allocations across the Commit switch are equal too (61.2 vs 61.3 MB off the UI thread). The difference is LOH free space, depending on GC timing. Not a leak.
-- **Fluent's Rich text page first draw:** render bytes 21.6 → 169.4 KB (+15 % on the page open). This is 13c66d49's accepted first-draw cost. Junction's Files walk render bytes fell 173.7 → 95.8.
+- **Fluent's Rich text page first draw:** render bytes 21.6 → 169.4 KB (+15 % on the page open). This is b52ca178's accepted first-draw cost. Junction's Files walk render bytes fell 173.7 → 95.8.
 - **Fluent sample rebuilding the whole app on every caret move** (`OnSelectionChanged(app.Refresh)`, 230 KB per caret key): sample code. Guideline material.
 - **Junction History realize** (42.2 KB/key, about 16 KB per row): unchanged. The row template is app code; keep-rows was examined in round 2.
 - **Vesper viewer PageDown:** 207 KB per page (18.3 new rows), unchanged.
@@ -179,6 +179,6 @@ Per key or action, UI-thread bytes, before → after:
 
 ## Needs the user
 
-- **Vesper Detail resize (vesper-detail-resize-stale, not perf):** still open. 18cdd285 added the path-trail comparison (`WindowFitChanged`/`PaneFit`), but only behind `if (!gridView) return;` (CommanderApp.cs:3121). In Detail, 10 resize steps cause 0 builds, so the trail stays stale. Running the same comparison in Detail would now be a small fix.
+- **Vesper Detail resize (vesper-detail-resize-stale, not perf):** still open. e6a432fa added the path-trail comparison (`WindowFitChanged`/`PaneFit`), but only behind `if (!gridView) return;` (CommanderApp.cs:3121). In Detail, 10 resize steps cause 0 builds, so the trail stays stale. Running the same comparison in Detail would now be a small fix.
 - **Other non-perf leads:** no round 4 commit touched junction-narrow-gitlab-glyphs, meridian-pane-choice-not-persisted, meridian-min-width-wraps, aperture-poster-as-hero or aperture-tmdb-size-fallback. Round 4 left the Meridian app untouched; in Aperture it changed only the scrim and trickplay `RefreshPreview`.
 - **Reminder:** Aperture signed in to jellyfin.home 3 more times this round as device "aperture-survey". The API key was read from its file by path, never printed. Remove those devices and revoke the key when the work is done.

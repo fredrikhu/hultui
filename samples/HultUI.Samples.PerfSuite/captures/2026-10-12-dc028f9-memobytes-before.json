@@ -1,7 +1,7 @@
 {
-  "label": "before: d98cca3, the BiDi and styled memos bounded by counts (JIT)",
+  "label": "before: 6cb96e1, the BiDi and styled memos bounded by counts (JIT)",
   "date": "2026-10-12 11:47 +02:00 / 2026-10-12 11:51 +02:00",
-  "commit": "d98cca3",
+  "commit": "6cb96e1",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

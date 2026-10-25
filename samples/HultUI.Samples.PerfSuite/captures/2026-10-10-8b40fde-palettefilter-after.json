@@ -1,7 +1,7 @@
 {
-  "label": "after: the palette keeps each command's joined text while open and sorts an array (8b40fde), JIT, 2 runs",
+  "label": "after: the palette keeps each command's joined text while open and sorts an array (2317632), JIT, 2 runs",
   "date": "2026-10-10 07:13 +02:00",
-  "commit": "8b40fde",
+  "commit": "2317632",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

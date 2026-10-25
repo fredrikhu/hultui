@@ -1,6 +1,6 @@
 # Round 2 survey: 8. App workloads
 
-All five apps published with NativeAOT at fc0f4f7 (before round 1) and fc807ec (after), real
+All five apps published with NativeAOT at 520002e (before round 1) and 6ba7e2d (after), real
 windows that never took focus, a11y on unless noted, before/after alternated 2 runs each, a
 rewritten frame-log probe driving scripted input (round 1's was lost with its worktree).
 Aperture signed in to jellyfin.home with the key file read in-process (never printed); this
@@ -26,10 +26,10 @@ Shares after round 1 [round 1's table]; bytes before → after in the same A/B.
 | Aperture real library | 28.4 % (4.9, 1.4) | 35 % | 4.0 % | 25.7 % | 2.6 % | 0.4 % | 111 → 75 KB (−33 %) |
 
 - Junction: History key walk a11y 17–18 → 8–11 %, 461 → 329 KB/frame; History wheel a11y 13 → 4 %, 210 → 131 KB; hover sweep 40 → 15 KB; Files walk 549 → 371 KB.
-- Vesper: viewer PageDown a11y 49 → 6.7 % (ab8917b), 810 → 568 KB; pane walk a11y 12 → 3.7 %, 367 → 290 KB; pane wheel 30 → 0 KB.
+- Vesper: viewer PageDown a11y 49 → 6.7 % (57f09d6), 810 → 568 KB; pane walk a11y 12 → 3.7 %, 367 → 290 KB; pane wheel 30 → 0 KB.
 - Meridian: response frame 15.4 → 12.6 MB (TextPipeline calls still ~24,200); response wheel 28 → 4.6 KB.
 - UI-thread allocation per session: Junction 140 → 111 MB (−21 %), Vesper 79 → 65 (−17 %), Meridian 51 → 44 (−13 %), Aperture 17.8 → 14.4 (−19 %), Reel 165 → 132–147.
-- Working set / private: Junction 241/233 → 227/221 MB; Vesper 159/159 → 155/147; Meridian 138/137 → 131/124; Aperture 204/258 → 158/190 (−23 %/−27 %; f84893d + 12d1480); Reel flat ~319/661.
+- Working set / private: Junction 241/233 → 227/221 MB; Vesper 159/159 → 155/147; Meridian 138/137 → 131/124; Aperture 204/258 → 158/190 (−23 %/−27 %; ebefa29 + 615d75d); Reel flat ~319/661.
 - Retained managed heap after a full GC unchanged (Junction 55 MB at 34 s). Start-up unchanged (GL driver load 52–68 % of time to first frame; Vulkan FP16 first present 36–38 %; Aperture still 3 swapchains).
 - Realize bytes did not move: Junction History walk realize 167–174 KB/frame.
 

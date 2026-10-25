@@ -1,7 +1,7 @@
 {
-  "label": "before: every rebuild makes every visible row again (06d2d86), JIT, 2 runs",
+  "label": "before: every rebuild makes every visible row again (2b70ff6), JIT, 2 runs",
   "date": "2026-10-10 17:51 +02:00",
-  "commit": "06d2d86",
+  "commit": "2b70ff6",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

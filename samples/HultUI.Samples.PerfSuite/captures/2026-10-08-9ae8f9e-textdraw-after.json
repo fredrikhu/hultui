@@ -1,7 +1,7 @@
 {
   "label": "text-draw-zero-alloc, after: index loops in the text draw path, measurer in its own method, pooled corner path; median of 3 idle-gated runs alternated with before",
   "date": "2026-10-08 02:19 +02:00",
-  "commit": "9ae8f9e-dirty",
+  "commit": "cac5bf5-dirty",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

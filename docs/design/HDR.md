@@ -179,7 +179,7 @@ there Skia freed 211 MB and DXGI read 303.7 MB before and 312.0 after, the drive
    `MPV_RENDER_PARAM_DEPTH=16`. Skia then draws the image. There is no copy through main memory.
 4. **Ordering, both ways.** GL signals a semaphore after mpv draws, which the Vulkan hand-back
    barrier waits on. A second semaphore runs back: the present releases the image to the external
-   queue and signals it, and GL waits on it before the next write (184ae17). The barrier command
+   queue and signals it, and GL waits on it before the next write (6cf4123). The barrier command
    buffers are a ring of three with a fence each, so nothing blocks the CPU. Each image has its
    own pair, and one barrier submit hands back every image drawn in the frame.
    `HULTUI_VULKAN_SEMAPHORE=0` goes back to `glFinish` and a queue wait.
@@ -211,7 +211,7 @@ a change is confirmed. `HULTUI_VIDEO_HDR=0` turns all of this off.
 ### Decode
 
 `hwdec=auto-safe`. **On NVIDIA it is zero-copy on both platforms**: the trimmed LGPL libmpv has
-NVDEC with CUDA interop (38da446 on Windows), and mpv registers its own plane textures with CUDA and
+NVDEC with CUDA interop (e0578c0 on Windows), and mpv registers its own plane textures with CUDA and
 renders from them into the shared framebuffer. The VO line reads `cuda[p010]`. The DirectX interops
 stay off, because they bridge at 8 bits. So AMD and Intel on Windows decode on the GPU and copy
 (`d3d11va-copy`). The natives build refuses to link `nvcuda` at load time, so the DLL still loads on

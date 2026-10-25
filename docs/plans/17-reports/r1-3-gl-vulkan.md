@@ -2,10 +2,10 @@
 
 Real windows that never took focus (resizes via SetWindowPos NOACTIVATE), HDR display,
 2160×1395 px; GPU dedicated memory per process, Skia cache usage, GL/Vulkan call counts
-from temporary probes (worktree agent-ae3e1938c91127c3c at d47f737).
+from temporary probes (worktree agent-ae3e1938c91127c3c at b9f80d0).
 
 SATISFIED: no
-REVIEW: none (only docs changed since d47f737)
+REVIEW: none (only docs changed since b9f80d0)
 
 ## Candidates
 

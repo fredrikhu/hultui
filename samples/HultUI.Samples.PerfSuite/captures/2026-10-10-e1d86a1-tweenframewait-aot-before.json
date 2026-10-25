@@ -1,7 +1,7 @@
 {
-  "label": "before: a tween on screen waits 16 ms between frames (495b0b4), NativeAOT, 2 runs",
+  "label": "before: a tween on screen waits 16 ms between frames (c2bf858), NativeAOT, 2 runs",
   "date": "2026-10-10 05:12 +02:00",
-  "commit": "495b0b4",
+  "commit": "c2bf858",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -14,9 +14,9 @@ No objections.
 
 - **Render-pass bytes against round 4's probe (122 shared rows).** Every steady or hover row that draws text allocates 0 B. The changes all trace to a known commit:
   - Text open/typing rows fell with step 8: long document 1,373 → 372 KB, JSON open 1,902 → 269 KB, wrapped typing 26.9 → 12.4 KB, undo-redo 8.6 → 5.2 KB.
-  - c3c9d9fa's heights array, as its commit says: dropdown 1.61 → 2.41 KB and menu bar 0.2 → 0.3 KB per open.
+  - 0ea667cf's heights array, as its commit says: dropdown 1.61 → 2.41 KB and menu bar 0.2 → 0.3 KB per open.
   - `input/type beside a 150-line diff, rows kept` rose 0 → 0.73 KB in render. This is the TextInput's 744 B per keystroke moving from layout into render, since step 12 keeps layout across the patch. The row's total stays at 19 KB/op in both rounds.
-- **13c66d49 (variable-font run extents).** Glyphs per frame match the round 4 prediction:
+- **b52ca178 (variable-font run extents).** Glyphs per frame match the round 4 prediction:
   - selectable viewer hover 3,702 (77 whole-run + 3,625 sub-blob glyphs)
   - viewer wheel 3,784
   - JSON wheel 1,255
@@ -24,12 +24,12 @@ No objections.
 
   Steady frames allocate 0 B. Run extents are read only for new runs: JSON page down 27.8 per step, viewer wheel 6.8.
 
-  One observation, not an objection: all four apps draw code in **Consolas** on Windows (`apps/*/Fonts.cs:12-14`). Consolas is a trusted face, so 13c66d49 changes nothing in Junction, Vesper, Meridian or Aperture diffs on Windows. It helps HultUI.Terminal (Cascadia by default), `FontFamilies.Monospace` users and Linux variable faces. Expert 8 should not look for an app diff gain on Windows. Its extra first-draw blobs also move Cascadia onto the path with the restart cliff in the candidate below.
-- **0fcc8f5e (terminal row strings).** The terminal row allocates 0 B per forced frame. `_codePointTexts` (TerminalElement.Render.cs:73, :387) keeps one string per distinct code point drawn on its own until the font changes, about 50 B each. That matches the glyph tables beside it and is bounded by what has been on screen.
-- **d52ac4bd (rich text ViewFrame).** Rich text rows unchanged (0.06 KB).
-- **c3c9d9fa (menu cull).** Dropdown text items per frame 278 → 104; off-window lines 173 → 0. Items are read-only, so the kept heights cannot go stale.
-- **321c93d8 (hero scrim).** Gradient and blur caches miss 0 times after the first frame on all 140 rows.
-- **8960cf36 and d9d465f2 (video frame, kept F16 offscreen), paint side.**
+  One observation, not an objection: all four apps draw code in **Consolas** on Windows (`apps/*/Fonts.cs:12-14`). Consolas is a trusted face, so b52ca178 changes nothing in Junction, Vesper, Meridian or Aperture diffs on Windows. It helps HultUI.Terminal (Cascadia by default), `FontFamilies.Monospace` users and Linux variable faces. Expert 8 should not look for an app diff gain on Windows. Its extra first-draw blobs also move Cascadia onto the path with the restart cliff in the candidate below.
+- **1207c8b3 (terminal row strings).** The terminal row allocates 0 B per forced frame. `_codePointTexts` (TerminalElement.Render.cs:73, :387) keeps one string per distinct code point drawn on its own until the font changes, about 50 B each. That matches the glyph tables beside it and is bounded by what has been on screen.
+- **b0a62174 (rich text ViewFrame).** Rich text rows unchanged (0.06 KB).
+- **0ea667cf (menu cull).** Dropdown text items per frame 278 → 104; off-window lines 173 → 0. Items are read-only, so the kept heights cannot go stale.
+- **0b992365 (hero scrim).** Gradient and blur caches miss 0 times after the first frame on all 140 rows.
+- **f9980647 and 1b11aeda (video frame, kept F16 offscreen), paint side.**
   - A renderer-owned frame costs one dictionary `Remove` and no allocation.
   - The kept F16 offscreen clips its canvas to the frame, so `ClipBounds` (menu cull, paragraph cull) still sees the window.
   - Pixel-path video frames are unchanged at about 250 B per frame on media rows (examined in round 4).
@@ -60,7 +60,7 @@ No objections.
     - Each build copies glyphs through `SKTextBlobBuilder` with a native malloc and free (10,417–47,810 glyphs per frame on the dense terminal). On a GPU surface a remade blob also has a new ID, so Ganesh regenerates its cached text vertex data for those glyphs every frame. Headless runs cannot show that part.
     - Managed bytes are 0 either way.
     - With the prototype, every text/, terminal/ and richtext/ suite row keeps the same misses, restarts, glyphs and allocKB; no suite row reaches 2,048.
-    - The cliff has existed for trusted faces since 5cc9892 (round 3). 13c66d49 put Cascadia (the terminal's default) and Segoe UI Variable on the same path.
+    - The cliff has existed for trusted faces since 8ddc3eb (round 3). b52ca178 put Cascadia (the terminal's default) and Segoe UI Variable on the same path.
   - **expected:** Clears the Scaling bar: per steady frame, O(blobs on screen) native builds → 0 once a screen needs more than 2,048. That happens on a dense-colour terminal at 1200×900, a Chinese terminal at 1080p, and big or 4K screens. Time likely ≥5 % on such a screen. That needs a suite row from expert 8: `terminal/dense colour screen, unique rows, forced frame` at about 1600×1000 (~3,000 sub-blobs per frame).
   - **cost:** Small. No API or pixel change (the same blobs are drawn).
     - **Retained memory:** up to two frames' blobs under the cap. On the dense 4K terminal that is about 12.5k sub-blobs, roughly 1.6 MB native at an estimated ~130 B each. The managed map grows past 2,048 entries (~40 B each) only on such screens.

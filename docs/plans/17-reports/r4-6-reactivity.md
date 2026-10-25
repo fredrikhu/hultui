@@ -1,7 +1,7 @@
 # Round 4 survey: 6. Reactivity and reconcile
 
-At ba817e8; headless JIT allocation counts and call counts, no timings. Probes reverted; worktree
-clean. Probe code in the session scratchpad `r4react/` (`probe/`, `tracked-ba817e8.patch` with counters,
+At 653971d; headless JIT allocation counts and call counts, no timings. Probes reverted; worktree
+clean. Probe code in the session scratchpad `r4react/` (`probe/`, `tracked-653971d.patch` with counters,
 Junction section bytes and env switches R4_PARTS (chrome split), R4_REVIEW_SHAPE, R4_TAGS_ONCE;
 `RrProbe.cs`, `R4ReviewProbe.cs`, `R4ResizeProbe.cs`, `junction-walks.txt`, `review.sh`, `vesper.sh`).
 
@@ -9,11 +9,11 @@ SATISFIED: no
 
 ## Review
 
-- **e0b816f (Vesper grids on resize):** right, but it rebuilds the whole app on every resize step while
+- **d3d81ee (Vesper grids on resize):** right, but it rebuilds the whole app on every resize step while
   a Brief or Thumbnails view shows. Per +4 px step (1240×820, 300 files): Full 2.3 KB (0 rebuilds),
   Thumbnails 520.1 KB, Brief 749.5 KB (1 rebuild each). → vesper-grids-rebuild.
-- No regressions in aad602a/91893ba, 1e3edff, 133bd8a/7bfc1e7/5e28b9a, 1d39128/8042e8e, 2894d98,
-  9c43337/7cfd0c9, 1bd5e4c, 88fa622: effects disposed with their player or mount (Reel's Ended path
+- No regressions in fb5d935/f80d57a, f5fafaf, 2316a4d/f553732/3ffa5ac, c3ed8ca/d2630a5, 518f90b,
+  173fc89/6a18847, 3bbe2f9, b985e74: effects disposed with their player or mount (Reel's Ended path
   disposes its own effect mid-run inside an untracked block — safe); the chapter Computed tracks
   `Chapters` (a signal), so late marks reach it; the ToastHost Ref is cleared when no toast shows;
   PointerFollow flushes on release and keys; History 1.00 rebuild per key.
@@ -44,7 +44,7 @@ SATISFIED: no
   three hosts per app build adds Children marks (Branches 0 → 4 per key), no extra a11y rebuild today.
   Churn −40…−75 % per key on six real walks. Medium, app only.
 - **apps-junction-tags-double-rebuild.** A Tags key rebuilds the whole app twice: MoveTagSel calls
-  SelectTag (MarkDirty, JunctionApp.Tags.cs:423) then MarkDirty again (:441); since a27320fd, not round
+  SelectTag (MarkDirty, JunctionApp.Tags.cs:423) then MarkDirty again (:441); since 0ffce10b, not round
   3. Prototype: 2.0 → 1.0 rebuilds per key, 415.9 → 237.8 KB/key (−43 %), bridge on 436.8 → 258.6
   (−41 %). Small (test that ScrollRangeIntoView still follows).
 - **junction-review-rows-shape.** In review mode, keep the woven rows across builds and remake only
@@ -87,7 +87,7 @@ SATISFIED: no
 - **reactivity-computed-pooled-notify.** Computed notifies through a rented snapshot like Signal, not
   `new List<IReactiveNode>(_subscribers)`. Signal→Computed→Effect 64.0 B per upstream write vs
   Signal→Effect 0.0 B; REACTIVITY.md now routes fast values through Computed; Reel's panel-open report
-  591 B (1e3edff) → ~527 (−11 %, borderline); 0 B per write for every Computed. Small.
+  591 B (f5fafaf) → ~527 (−11 %, borderline); 0 B per write for every Computed. Small.
 
 ## Examined, not worth it
 
@@ -99,7 +99,7 @@ SATISFIED: no
 - componenthost-patch-keeps-layout (owner 1): a persistent host is re-added (AddChild/ReplaceChildren),
   never patched; ComponentHost never appears in layout-from-patch in Reel or the Junction split — opting
   it in changes nothing measured.
-- 1e3edff's Computed beyond its notify snapshot: the effect's version check costs 0 B per report.
+- f5fafaf's Computed beyond its notify snapshot: the effect's version check costs 0 B per report.
 
 ## Needs the user
 

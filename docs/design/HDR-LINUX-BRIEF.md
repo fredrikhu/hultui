@@ -85,7 +85,7 @@ X11 cannot do HDR at all. If `SDL_VIDEODRIVER=x11` reports HDR formats, distrust
 
 ## 2. Phase 4 — the shared image, which is the interesting one
 
-This is the newest work (commit `212e106`) and the half most likely to behave differently here,
+This is the newest work (commit `faf8cc3`) and the half most likely to behave differently here,
 because **the handle is a file descriptor rather than a Win32 handle**. Everything else is the
 same code.
 

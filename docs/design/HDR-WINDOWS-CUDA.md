@@ -32,7 +32,7 @@ Nothing in that is Linux-specific, which was checked in mpv v0.41.0's source:
   the MIT-licensed nv-codec-headers; the nonfree CUDA options (`cuda-nvcc`, `libnpp`) are for
   CUDA filters and are not needed.
 
-The default is already `hwdec=auto` (commit `e1924ca`). In mpv's autoprobe order the zero-copy
+The default is already `hwdec=auto` (commit `d41deb8`). In mpv's autoprobe order the zero-copy
 entries ahead of `nvdec` are `d3d11va` and `vulkan`, whose interops the Windows build disables,
 and `dxva2`, which `auto` skips as not whitelisted. So once the library has CUDA, **NVIDIA should
 land on `nvdec` with no code change**, and AMD/Intel on `d3d11va-copy` exactly as today.

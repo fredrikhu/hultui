@@ -4,14 +4,14 @@ The first round is [HDR-LINUX-VERIFY.md](HDR-LINUX-VERIFY.md) and every check in
 answered; its Results sections are yours. This is a separate file so that new asks are not mixed
 in with resolved ones.
 
-Four commits landed on Windows after that file was last touched (`4808f17`):
+Four commits landed on Windows after that file was last touched (`3133df8`):
 
 | | |
 |---|---|
-| `ea498a5` | Re-benchmarked both renderers; recorded the default-renderer decision |
-| `429cfa8` | **Fixed the resize stretch** — a live-resize frame that was never drawn, plus `IMMEDIATE` |
-| `d1d7cd5` | Established that Vulkan's remaining costs are the F16 swapchain; **reordered window creation** |
-| `e53b681` | Over-allocated swapchain via `swapchain_maintenance1`, opt-in and off by default |
+| `af1891e` | Re-benchmarked both renderers; recorded the default-renderer decision |
+| `f53a702` | **Fixed the resize stretch** — a live-resize frame that was never drawn, plus `IMMEDIATE` |
+| `aa27007` | Established that Vulkan's remaining costs are the F16 swapchain; **reordered window creation** |
+| `9ecfc28` | Over-allocated swapchain via `swapchain_maintenance1`, opt-in and off by default |
 
 **Two of these need Linux specifically, and one of them is a risk I introduced.** The rest is worth
 numbers but nothing depends on it.
@@ -269,7 +269,7 @@ And say which of these you did **not** get to, rather than leaving it to be infe
 
 ## Results
 
-Run 2026-09-27/28 on the Linux machine by a Claude Code session, base commit `ec56ee0`, **with no
+Run 2026-09-27/28 on the Linux machine by a Claude Code session, base commit `3d47e78`, **with no
 code changed** (the controls below were temporary, env-gated patches, reverted before the real
 runs). Fedora 44 KDE Plasma 6 Wayland, RTX 4080 on NVIDIA **615.71.09**, Vulkan loader and
 validation layers **1.4.341**, system `mpv-libs` 0.41.0. `kscreen-doctor -o`: DP-2 2560x1440 scale

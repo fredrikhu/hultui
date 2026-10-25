@@ -2,7 +2,7 @@
 
 Allocation probes under JIT and an AOT-published headless probe; 600 headless window
 open/close cycles and 2,000-cycle overlay loops for leaks (worktree
-agent-ab604730a092dd98b at d47f737, probes reverted).
+agent-ab604730a092dd98b at b9f80d0, probes reverted).
 
 SATISFIED: no
 REVIEW: none (round 1)

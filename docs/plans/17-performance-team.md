@@ -325,7 +325,7 @@ round, with CI waited for.
   closed or minimized; a real app's window can be given it from the driver process with
   `SetWindowLongPtr(GWL_EXSTYLE)` as soon as it exists), and runs a guard that hands the
   foreground straight back and stops the run if it is ever taken (probes in the scratchpad
-  `r3b8/gpu8`, `r3b9/probe`; the Vulkan UiTests since b0ed204).
+  `r3b8/gpu8`, `r3b9/probe`; the Vulkan UiTests since 9084be9).
 - **Disturb the desktop as little as possible.** When step 9a's probe hit its guard and stopped
   mid-frame, the user's browser videos paused for a while. Close real windows gracefully
   (WM_CLOSE, then wait), never kill one mid-frame unless it hangs; batch measurements per

@@ -1,7 +1,7 @@
 {
   "label": "NativeAOT text-draw-zero-alloc, after: the change published the same way; allocation repeated to the byte over 2 runs on every row but richtext/open (within 2 %)",
   "date": "2026-10-08 02:36 +02:00",
-  "commit": "9ae8f9e-dirty",
+  "commit": "cac5bf5-dirty",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

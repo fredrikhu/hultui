@@ -2,7 +2,7 @@
 
 allocKB per op and call counts from perf-suite runs with temporary counters; "prototype"
 figures from an env-gated prototype. All reverted; worktree agent-a7d393bd2c7bbc234 clean
-at 7f8e846. No timings.
+at d4b7abf. No timings.
 
 SATISFIED: no
 REVIEW: none (round 1)

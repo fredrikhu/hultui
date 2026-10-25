@@ -1,6 +1,6 @@
 # Round 4 survey: 3. GL and Vulkan
 
-At ba817e8 (all of round 3); real windows that never take focus (in-process hint, WS_EX_NOACTIVATE /
+At 653971d (all of round 3); real windows that never take focus (in-process hint, WS_EX_NOACTIVATE /
 CBT hook, foreground guard — 0 guard events over 18 launches; the CBT hook refused 3 activation
 requests in the maximize/restore/snap sequence; no screen captures). Probes reverse-applied; worktree
 clean. Probe code in the session scratchpad `r4gl/` (host with fault controls, element count and
@@ -19,13 +19,13 @@ SATISFIED: no
 - **Validation trap:** a probe run that ends with WM_CLOSE never reaches vkDestroyDevice (Run returns
   on SDL's quit before the closed window is disposed), so leak checks at device destroy stay silent.
   Probes must dispose the Application, as the apps do with `using`.
-- dd3dec3/8cd854f: as designed; while minimized the walk still runs each pass while a video sink exists
+- c25f057/351e309: as designed; while minimized the walk still runs each pass while a video sink exists
   (negligible, Examined).
-- 68424c2 + c6bc336/3be8ce1/31500ab/939bf33: 5 swapchain builds per 80-step drag, 0 per move. A leftover
+- 4c3c1af + 6458cc8/7864f5c/aefd2d7/16f81bc: 5 swapchain builds per 80-step drag, 0 per move. A leftover
   cost per kept F16 step predates round 3 (candidate 1).
-- 1521f47: the colour-poll deadline applies only to Vulkan windows without colour events and not
+- aa11334: the colour-poll deadline applies only to Vulkan windows without colour events and not
   minimized; Aperture and Reel use events.
-- 2e3083b: no issue.
+- 48527ac: no issue.
 
 ## Candidates
 
@@ -61,7 +61,7 @@ SATISFIED: no
   bytes per playback frame: HEAD 488–654; wrapper kept 273–316 (interop wraps 2,645–3,260 per run → 1);
   with the delegate 209–244. Validation clean through drag/move/hold. Code: SkiaRenderContext.cs:1246-1258
   re-wraps every renderer-owned frame; GpuFrameSink.cs:102-132 builds a closure per frame. Round 3's
-  "closures <1 % of Reel's frame bytes" is stale (frame fell to ~500 B after 68424c2). ~200 B per frame
+  "closures <1 % of Reel's frame bytes" is stale (frame fell to ~500 B after 4c3c1af). ~200 B per frame
   remain unattributed (position reports ~25 B). Churn ~500 → ~220 B per playback frame (−55 %), ~33 KB/s
   less at 120 fps. Small–medium; key the kept image by VkImage handle, drop it on slot recreation or
   ForgetGpuSource; needs a reused-frame capture with changing video content.
@@ -89,14 +89,14 @@ SATISFIED: no
   under the bar for medium complexity.
 - HasInstanceExtension / HasDeviceExtension enumerating on every call (4–7 calls at start-up, up to
   ~1,800 names): driver stays loaded; one-off, far under the bar.
-- A minimized window with video walking its tree each pass (8cd854f keeps the walk while a sink
+- A minimized window with video walking its tree each pass (351e309 keeps the walk while a sink
   exists): Aperture Home with the player sheet 205 elements, ≤12k visits/s at 60 fps.
-- Disposed-image purge waiting for the next frame while parked (58f78dd with 1521f47): only images
+- Disposed-image purge waiting for the next frame while parked (5002e2f with aa11334): only images
   disposed in the last 1 s interval wait; posters ~0.5 MB; not worth a deadline.
 - F16 first swapchain replacement after show: once per window, F16 only; later F16 and every 8-bit
   replacement ~10× cheaper; the cost is in the driver's vkCreateSwapchainKHR; a same-size rebuild after
   the first show only moves the hitch into start-up.
-- Extra F16 submits per frame (68424c2's acquire barrier; offscreen.Flush): 61edb19 showed the driver
+- Extra F16 submits per frame (4c3c1af's acquire barrier; offscreen.Flush): 54c56d9 showed the driver
   wait only moves.
 - WebView interop image rebuilt on every resize step: no app uses WebView.
 - Display-colour poll deadline: only for Vulkan windows without colour events (neither Aperture nor

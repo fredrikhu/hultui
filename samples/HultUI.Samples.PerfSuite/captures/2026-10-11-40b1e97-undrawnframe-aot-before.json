@@ -1,7 +1,7 @@
 {
-  "label": "40b1e97, NativeAOT, 2 idle-gated runs, alternated",
+  "label": "3730052, NativeAOT, 2 idle-gated runs, alternated",
   "date": "2026-10-11 03:03 +02:00 / 2026-10-11 03:09 +02:00",
-  "commit": "40b1e97",
+  "commit": "3730052",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

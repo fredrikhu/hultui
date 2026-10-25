@@ -1,7 +1,7 @@
 {
-  "label": "df6441c, before the type-beside-diff rows (NativeAOT, 2 runs merged)",
+  "label": "8a3fa9b, before the type-beside-diff rows (NativeAOT, 2 runs merged)",
   "date": "2026-10-11 05:35 +02:00 / 2026-10-11 05:39 +02:00",
-  "commit": "df6441c",
+  "commit": "8a3fa9b",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

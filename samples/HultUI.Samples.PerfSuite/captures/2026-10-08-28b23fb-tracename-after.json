@@ -1,7 +1,7 @@
 {
   "label": "trace-type-name, after: the layout and render passes leave the element's type name to the tracer, which looks it up only while recording; median of 3 idle-gated runs alternated with before",
   "date": "2026-10-08 02:59 +02:00",
-  "commit": "28b23fb-dirty",
+  "commit": "45650fd-dirty",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

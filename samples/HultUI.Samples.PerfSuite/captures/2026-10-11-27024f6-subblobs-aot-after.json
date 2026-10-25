@@ -1,7 +1,7 @@
 {
   "label": "a colour stretch draws only the glyphs that reach it (NativeAOT, 2 runs merged)",
   "date": "2026-10-11 16:07 +02:00 / 2026-10-11 16:09 +02:00",
-  "commit": "27024f6+sub-blobs",
+  "commit": "3891499+sub-blobs",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

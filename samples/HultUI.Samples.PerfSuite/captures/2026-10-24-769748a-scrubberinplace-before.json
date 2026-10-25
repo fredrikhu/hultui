@@ -1,7 +1,7 @@
 {
-  "label": "62ffcb2 + suite row 769748a (before reactivity-scrubber-preview-in-place), JIT",
+  "label": "79c4376 + suite row c34d766 (before reactivity-scrubber-preview-in-place), JIT",
   "date": "2026-10-24 09:22 +02:00 / 2026-10-24 09:29 +02:00",
-  "commit": "769748a",
+  "commit": "c34d766",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -425,7 +425,7 @@ public class VirtualListItemRowTests
     /// <summary>
     /// Kept rows were not made again on a display scale change, so an owner that left the scale out
     /// of what it invalidates the rows on kept rasters cut for the old scale, and after a second
-    /// change freed ones: Junction's icons vanished after a move to 150 % and back (11ced00 fixed
+    /// change freed ones: Junction's icons vanished after a move to 150 % and back (b10a34c fixed
     /// it there by putting the scale in its shapes). A scale change makes every row again, as a
     /// theme switch does, and a round trip draws exactly what a fresh list draws.
     /// </summary>

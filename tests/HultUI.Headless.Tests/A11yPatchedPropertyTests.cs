@@ -20,7 +20,7 @@ namespace HultUI.Headless.Tests;
 /// <summary>
 /// An element's accessible name, description, expanded state and automation id were plain
 /// properties. A component's rebuild patches them onto the elements it keeps, and since patching
-/// a box, a text, an image, a scroll view or a canvas marks no layout (2688a99, 7016de4), a rebuild
+/// a box, a text, an image, a scroll view or a canvas marks no layout (785e698, 697e73b), a rebuild
 /// that changed only one of them was never told: Aperture's "Quality: …" box, VideoPlayer's
 /// Play/Pause canvas. A control's label (a check box's, a radio button's, a switch's) was told only
 /// by the layout refresh its new size happened to bring, up to 100 ms late, and never when the

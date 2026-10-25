@@ -1011,7 +1011,7 @@ Built after step 8.**
     that keep every other line.
 - **Real-window UI tests,** for IME placement and the drag-resize cost.
 - **Linux CI** runs the four terminal test projects (the cross-platform filter). Its first run, on
-  2026-10-04 (run 37194792589, `main` at `a743ad5`), passed all of them: 162 in
+  2026-10-04 (run 37194792589, `main` at `4032125`), passed all of them: 162 in
   `HultUI.Terminal.Tests` with fontconfig's faces, 48 in `HultUI.Terminal.Ssh.Tests` with the
   agent on a Unix socket, 21 in `HultUI.Terminal.Pty.Tests` through forkpty (the other 6 are
   Windows-only: ConPTY's keys, Git for Windows' programs, the pwsh prompt, OpenConsole), and the

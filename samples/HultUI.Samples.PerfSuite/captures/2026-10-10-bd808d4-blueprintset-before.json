@@ -1,7 +1,7 @@
 {
-  "label": "before: ReplaceChildren builds a set on every call (c7dffaa), JIT, 2 runs",
+  "label": "before: ReplaceChildren builds a set on every call (e877766), JIT, 2 runs",
   "date": "2026-10-10 04:03 +02:00",
-  "commit": "c7dffaa",
+  "commit": "e877766",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

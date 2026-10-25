@@ -1,7 +1,7 @@
 {
-  "label": "0567c1c (before text-textarea-mono-ascii-fits), NativeAOT",
+  "label": "eb5a6ec (before text-textarea-mono-ascii-fits), NativeAOT",
   "date": "2026-10-24 12:16 +02:00 / 2026-10-24 12:22 +02:00",
-  "commit": "0567c1c",
+  "commit": "eb5a6ec",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

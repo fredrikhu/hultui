@@ -1,7 +1,7 @@
 {
   "label": "with the type-beside-diff rows (JIT, 2 runs merged)",
   "date": "2026-10-11 05:31 +02:00 / 2026-10-11 05:31 +02:00",
-  "commit": "df6441c+rows",
+  "commit": "8a3fa9b+rows",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

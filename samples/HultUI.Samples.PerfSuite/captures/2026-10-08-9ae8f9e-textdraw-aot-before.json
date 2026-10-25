@@ -1,7 +1,7 @@
 {
-  "label": "NativeAOT text-draw-zero-alloc, before: 9ae8f9e published with PublishAot (win-x64); allocation is the point, it repeated to the byte over 2 runs on every row but richtext/open (within 2 %)",
+  "label": "NativeAOT text-draw-zero-alloc, before: cac5bf5 published with PublishAot (win-x64); allocation is the point, it repeated to the byte over 2 runs on every row but richtext/open (within 2 %)",
   "date": "2026-10-08 02:35 +02:00",
-  "commit": "9ae8f9e",
+  "commit": "cac5bf5",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

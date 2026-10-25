@@ -1,7 +1,7 @@
 {
-  "label": "before: 30d1992 (NativeAOT, merge of 2)",
+  "label": "before: 2ca6306 (NativeAOT, merge of 2)",
   "date": "2026-10-24 03:08 +02:00 / 2026-10-24 03:14 +02:00",
-  "commit": "30d1992",
+  "commit": "2ca6306",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

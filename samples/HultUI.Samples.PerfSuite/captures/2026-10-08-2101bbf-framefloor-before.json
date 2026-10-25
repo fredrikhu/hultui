@@ -1,7 +1,7 @@
 {
-  "label": "runtime-frame-floor, before: 2101bbf; median of 3 idle-gated runs alternated with after",
+  "label": "runtime-frame-floor, before: 50035b2; median of 3 idle-gated runs alternated with after",
   "date": "2026-10-08 05:59 +02:00",
-  "commit": "2101bbf",
+  "commit": "50035b2",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

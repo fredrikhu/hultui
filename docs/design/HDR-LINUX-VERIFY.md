@@ -8,7 +8,7 @@
 > at it as the first thing to do.
 
 Four findings from `docs/design/HDR-LINUX-BRIEF.md` were fixed on the Windows machine in commit
-`00e9a24`. **Three of them are on code paths that Windows cannot execute at all** — two Wayland,
+`590cc20`. **Three of them are on code paths that Windows cannot execute at all** — two Wayland,
 one X11 — so nothing about them has been run. This is how to find out whether they work.
 
 Hand this file to a Claude Code session on the Linux machine. It assumes the same setup as the
@@ -19,7 +19,7 @@ not only in the results below.
 brief: NVIDIA proprietary driver, KDE Plasma, two monitors at scale 1.0 and 1.5, both HDR-capable.
 
 ```bash
-git pull && git log --oneline -1     # expect 00e9a24 or later
+git pull && git log --oneline -1     # expect 590cc20 or later
 dotnet build src/HultUI.Platform.SDL3 samples/HultUI.Samples.Minimal samples/HultUI.Samples.VideoPlayer
 ```
 
@@ -402,7 +402,7 @@ were is the specific mistake this whole exercise has already made once.
 ## Results
 
 Run 2026-09-25 on the Linux machine by a Claude Code session, with Fredrik at the screens for
-every by-eye item; each one below names him. Base commit `2f78046` (includes `00e9a24`), plus
+every by-eye item; each one below names him. Base commit `96f9962` (includes `590cc20`), plus
 the X11 GL fix described under **New finding**, which went in mid-run: everything before it
 was run without it, and it touches only the GL proc resolver.
 
@@ -483,7 +483,7 @@ the output KWin says the window was on at that moment.
 
 `SDL_VIDEODRIVER=x11` with the GL renderer died with SIGSEGV 3/3, right after `gl context`, in
 `GrGLExtensions::init` ← `GrGLMakeAssembledGLInterface` (coredump backtrace). It predates the
-four fixes: the resolver involved is unchanged since `da7c019` (Phase 3), and `00e9a24`'s
+four fixes: the resolver involved is unchanged since `da7c019` (Phase 3), and `590cc20`'s
 `SDL3Window` changes do not run before this point.
 
 Cause, confirmed with a temporary probe: Skia resolves `eglQueryString` and
@@ -556,7 +556,7 @@ on Windows is proven here.
 ## Results — Phase 5
 
 Run 2026-09-26 on the Linux machine by a Claude Code session, with Fredrik at the screens for
-every by-eye item; each one below names him. Base commit `20b9eb6`, plus `804c188` (below),
+every by-eye item; each one below names him. Base commit `825761f`, plus `a586367` (below),
 without which none of this could run. Same machine and outputs as above; `kscreen-doctor -o`
 at the start: both outputs HDR on, **DP-2 SDR brightness 408 against a peak of 409 nits,
 DP-3 455 against 456**. That matters for 5b and is the subject of a note at the end.
@@ -567,7 +567,7 @@ script as before; every by-eye item below was on **DP-2**, Wayland, unless it sa
 hand (`mount -t cifs //proxmox.home/Media`). `--probe`: `pq`, `bt.2020`, 3840x1746 p010,
 colormatrix `dolbyvision`, max luma 1000.603 nits, max CLL 992 — the same file Windows used.
 
-### Found first — every 4K video was black in a Vulkan window (fixed, `804c188`)
+### Found first — every 4K video was black in a Vulkan window (fixed, `a586367`)
 
 The first 5a run gave six samples of **max 0.000** and a black video area in the capture,
 at 20:00 and with `HULTUI_VIDEO_HDR=0` alike, so not phase 5. Ruled out in turn, each by a

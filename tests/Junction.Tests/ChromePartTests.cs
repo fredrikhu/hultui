@@ -375,7 +375,7 @@ public class ChromePartTests
     }
 
     /// <summary>A display scale change retires the icon rasters cut for the old scale, so the
-    /// chrome has to be built again at the new one (see 11ced00).</summary>
+    /// chrome has to be built again at the new one (see b10a34c).</summary>
     [Fact]
     public void ADisplayScaleChange_BuildsTheChromeAgain()
     {

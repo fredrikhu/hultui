@@ -1,7 +1,7 @@
 {
-  "label": "after AT-SPI added-child order (dd75acd), NativeAOT",
+  "label": "after AT-SPI added-child order (ba2f8a1), NativeAOT",
   "date": "2026-10-12 18:48 +02:00 / 2026-10-12 18:49 +02:00",
-  "commit": "dd75acd",
+  "commit": "ba2f8a1",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 {
   "label": "before media-modal-loop-video-rate (JIT, 2 runs)",
   "date": "2026-10-24 08:04 +02:00 / 2026-10-24 08:10 +02:00",
-  "commit": "91b4e5a",
+  "commit": "f81f310",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

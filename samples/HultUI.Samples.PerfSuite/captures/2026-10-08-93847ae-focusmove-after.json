@@ -1,7 +1,7 @@
 {
   "label": "a11y-focus-state-on-tab after, a11y/ and input/tab, median of 3 idle-gated alternated runs",
   "date": "2026-10-08 15:25 +02:00",
-  "commit": "93847ae+focusmove",
+  "commit": "9f500be+focusmove",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 {
-  "label": "before a measurement held for a range of widths: main at 4b4c733; median of 3 runs interleaved with the other side, each started on an idle machine",
+  "label": "before a measurement held for a range of widths: main at 87a4f50; median of 3 runs interleaved with the other side, each started on an idle machine",
   "date": "2026-10-06 12:35 +02:00",
-  "commit": "4b4c733",
+  "commit": "87a4f50",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

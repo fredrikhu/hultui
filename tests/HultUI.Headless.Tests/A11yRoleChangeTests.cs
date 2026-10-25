@@ -17,7 +17,7 @@ namespace HultUI.Headless.Tests;
 
 /// <summary>
 /// The differ never compared a node's role, so a group that became a dialog was told nothing:
-/// UIA raised nothing (since 7def7b1 it answered the new control type when asked, once some other
+/// UIA raised nothing (since 2235e4a it answered the new control type when asked, once some other
 /// change had the tree applied), and on Linux a caching client (Orca, libatspi) kept reading
 /// "panel" — seen live in WSL. A role change is now told as Chromium tells ROLE_CHANGED on
 /// Windows, a ControlType and a LocalizedControlType property change, and as AT-SPI tells a role

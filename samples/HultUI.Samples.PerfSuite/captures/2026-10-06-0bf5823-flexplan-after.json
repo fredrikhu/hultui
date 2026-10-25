@@ -1,7 +1,7 @@
 {
-  "label": "after it (6df8757), with the min-content width kept until it changes: 0bf5823; median of 3 runs interleaved with the other side, each started on an idle machine",
+  "label": "after it (255d50d), with the min-content width kept until it changes: 95f39bc; median of 3 runs interleaved with the other side, each started on an idle machine",
   "date": "2026-10-06 11:24 +02:00",
-  "commit": "0bf5823",
+  "commit": "95f39bc",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

@@ -1,7 +1,7 @@
 # Round 5 survey: 5. Text pipeline
 
 At 969f3308. I measured allocations, call counts and complexity only, never timings. Sources:
-- a full perf-suite capture (`r5text/full-head.json`), compared with round 4's survey capture at ba817e8 (`r4text/full-head.json`);
+- a full perf-suite capture (`r5text/full-head.json`), compared with round 4's survey capture at 653971d (`r4text/full-head.json`);
 - a headless probe that runs the suite's own scenarios (8 warm-up steps, then 16–30 measured), with allocation-by-type sampling;
 - temporary counters in HultUI.Text and Skia (glyph arrays composed versus drawn, layouts, last-line tables, TextCaretX calls);
 - three prototypes switched by environment variables: `R5_LAZY`, `R5_SCRATCH` and `R5_HOIST`.
@@ -18,24 +18,24 @@ SATISFIED: no
 
 ## Review
 
-**Full suite, allocation (ba817e8 → 969f3308).**
+**Full suite, allocation (653971d → 969f3308).**
 - Text rows went down: a long document opened in a TextArea −72.9 %, highlighted JSON open −85.9 %, wrapped 900-line typing −5.4 %, richtext/open −7.2 %, richtext/resize −7.0 %, richtext/select all −87 %, styled wrap −3.8 %.
 - Two rows went up, both already explained:
-  - The JSON wheel went 7.9 → 8.5 KB/op. It was 9.6 after 9a5f6a2f (words are now shaped when a line is first drawn) and fell to 8.5 at 13c66d49.
-  - The selectable viewer wheel went 2.2 → 2.7 KB/op. It was 1.6 after 0567c1ce; 13c66d49 added 1.1 KB, which its commit explains as a one-off growth of the run-blob map landing inside the timed steps. That is painting, not text.
+  - The JSON wheel went 7.9 → 8.5 KB/op. It was 9.6 after a476866c (words are now shaped when a line is first drawn) and fell to 8.5 at b52ca178.
+  - The selectable viewer wheel went 2.2 → 2.7 KB/op. It was 1.6 after eb5a6ecd; b52ca178 added 1.1 KB, which its commit explains as a one-off growth of the run-blob map landing inside the timed steps. That is painting, not text.
 
-**1333083b:** no objection. The view's lifetime holds.
+**d7c0c046:** no objection. The view's lifetime holds.
 - `FindLineBreak` makes no text call between asking for the view and reading it.
 - A `MeasureWidth` hit leaves the view held, which is harmless; a miss releases it through `BeginParagraph`.
 - The range's Han context stays in force until the next `BeginParagraph`. Only `PrefixWidth`'s surrogate fallback could itemize under it, and that path is unreachable.
 
-**9a5f6a2f:** no objection.
+**a476866c:** no objection.
 - The proof is sound.
 - The (n + 1) × advance margin covers the worst drift (n × advance / 4096) up to 4,096 characters per line, which is a wrap width of about 30,000 px.
 
-**0567c1ce, 13c66d49, 0fcc8f5e, 4344dd3a:** nothing for the text pipeline.
+**eb5a6ecd, b52ca178, 1207c8b3, a4a6f4a7:** nothing for the text pipeline.
 
-**Objection, a0221337 (TextArea text pattern).** With a reader reading, every keystroke rebuilds the accessible text from the layout.
+**Objection, 5e6ef9a2 (TextArea text pattern).** With a reader reading, every keystroke rebuilds the accessible text from the layout.
 - `BuildAccessibleText` (TextAreaElement.Accessibility.cs:174-186) asks `TextCaretX` for every character of the rows on screen ±1.
 - Each call goes through `CaretXOnLine` → `LineText` (TextAreaElement.cs:1743, :2009). During a keystroke the drawn strings are stale until Render, so each call cuts a new substring and does a layout-cache lookup that hashes the whole row.
 - 2,000-line area, 10-word lines: 709 KB per key with a reader against 260 KB without (+449 KB, +173 %); 2,724 TextCaretX calls and 174k characters hashed per key.
@@ -124,14 +124,14 @@ SATISFIED: no
   - cost: small, no API change.
 
 - **id: text-last-line-view** (the Waiting prefix-table lead, measured)
-  - what: `BreakIntoLines` builds a durable `PrefixWidths` for a wrap's last line on every layout miss (TextPipeline.cs:2731-2733): a substring, exact run and segment arrays, and an object. It is used only for that call's first cut. Fill the kept scratch lists instead, with the paragraph's own Han context (`FillPrefixTable` over a range, which landed in 1333083b), and measure with the span overload of `PrefixWidth`.
+  - what: `BreakIntoLines` builds a durable `PrefixWidths` for a wrap's last line on every layout miss (TextPipeline.cs:2731-2733): a substring, exact run and segment arrays, and an object. It is used only for that call's first cut. Fill the kept scratch lists instead, with the paragraph's own Han context (`FillPrefixTable` over a range, which landed in d7c0c046), and measure with the span overload of `PrefixWidth`.
   - evidence:
     - text/wrap: 150 tables, 3,230 segments and 10,642 characters per step, about 100 KB = 7 % today. After the two candidates above it is 15–19 % (PrefixSegment[] 13.1 %, PrefixWidths 2.0 %, plus the substrings).
     - richtext/open: 1,065 tables per open, 18,721 segments, 61,840 characters, about 0.68 MB = 7 % today, about 12 % after text-glyphs-on-first-draw.
   - expected: churn bar on text/wrap only after text-glyphs-on-first-draw.
   - cost: small, bit-identical by construction.
 
-- **id: text-textarea-a11y-row-xs** (owned by 5, a11y expert 7 to comment; fixes the a0221337 objection)
+- **id: text-textarea-a11y-row-xs** (owned by 5, a11y expert 7 to comment; fixes the 5e6ef9a2 objection)
   - what: cut each row's string once, and ask for the caret x of every boundary in one call.
   - evidence:
     - Hoisting only the string (prototype): 709 → 310 KB per key (−56 %) on 10-word lines, 1,945 → 826 (−58 %) on 30-word lines.
@@ -149,7 +149,7 @@ SATISFIED: no
 - **apps-tokenize-on-ui-thread:** SyntaxHighlighter.cs and JunctionApp.Markdown.cs have not changed since round 4 apart from a licence header. Latency only; stays low.
 - **text-open-measures-every-line (full):** no new evidence. The user said not now.
 - **JSON wheel 8.5 KB/op:** the accepted monospace trade; words are shaped when first drawn.
-- **Selectable viewer wheel 2.7 KB:** the timing of the sub-blob map's growth (13c66d49, painting).
+- **Selectable viewer wheel 2.7 KB:** the timing of the sub-blob map's growth (b52ca178, painting).
 - **TextArea caret walk with a reader:** 1.1–1.2 KB per key; tables are shared.
 
 ## Needs the user

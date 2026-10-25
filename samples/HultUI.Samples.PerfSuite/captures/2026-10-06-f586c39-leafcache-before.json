@@ -1,7 +1,7 @@
 {
   "label": "main before the leaf measure cache was shared between passes; median of 3 runs interleaved with the other side, each started on an idle machine",
   "date": "2026-10-06 02:16 +02:00",
-  "commit": "f586c39",
+  "commit": "5a1afd4",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

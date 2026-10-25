@@ -1,7 +1,7 @@
 {
-  "label": "paint-menu-rows-outside-window before (321c93d), AOT",
+  "label": "paint-menu-rows-outside-window before (0b99236), AOT",
   "date": "2026-10-24 16:00 +02:00 / 2026-10-24 16:06 +02:00",
-  "commit": "321c93d",
+  "commit": "0b99236",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

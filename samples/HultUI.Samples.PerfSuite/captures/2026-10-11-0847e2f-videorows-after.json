@@ -1,7 +1,7 @@
 {
   "label": "with the media rows (JIT, 2 runs merged)",
   "date": "2026-10-11 06:23 +02:00 / 2026-10-11 06:24 +02:00",
-  "commit": "0847e2f+media rows",
+  "commit": "76536ff+media rows",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

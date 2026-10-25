@@ -1,17 +1,17 @@
 # Round 2 survey: 2. SkiaSharp: painting
 
 Paint probes (render-pass bytes per element type; paragraph, blob, glyph, stretch, shader,
-mask-filter counters) JIT and AOT on fc807ec, reverted; a real GL window for the image-memory
+mask-filter counters) JIT and AOT on 6ba7e2d, reverted; a real GL window for the image-memory
 lead. Probes in the session scratchpad `r2paint/`.
 
 SATISFIED: no
 
-REVIEW: none. 17e3de4's pooled corner SKPath is safe (Skia's clip copies the path); steady
-paint frames allocate 0 B in the render pass on JIT and AOT. 12d1480: GL texture bytes per
-photo unchanged (35.16 MB plain, 46.88 MB mipped for 3840×2400). Aperture artwork (f84893d,
-6cf4fe6, 17e94b0) is drawn at 0.9–1.0 device px per source px, so Skia builds no mips.
-1785d16 Vulkan-only; 0f5816a keeps the stencil. 322df92's narrow-label check: 0–1 cached
-measures per frame. 480b141 slider: same pieces, same order, 0 B.
+REVIEW: none. a2f6051's pooled corner SKPath is safe (Skia's clip copies the path); steady
+paint frames allocate 0 B in the render pass on JIT and AOT. 615d75d: GL texture bytes per
+photo unchanged (35.16 MB plain, 46.88 MB mipped for 3840×2400). Aperture artwork (ebefa29,
+a9b6970, e18b689) is drawn at 0.9–1.0 device px per source px, so Skia builds no mips.
+7e6fd57 Vulkan-only; 4315c4b keeps the stencil. 81be6ca's narrow-label check: 0–1 cached
+measures per frame. 4030012 slider: same pieces, same order, 0 B.
 
 ## Candidates
 

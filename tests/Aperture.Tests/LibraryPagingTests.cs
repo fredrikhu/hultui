@@ -13,7 +13,7 @@ namespace Aperture.Tests;
 /// <summary>
 /// A library loads a page of 100 at a time. The grid asked for pages by the window's height
 /// alone, so at 1440×900 a library of 250 films loaded 100 and End, the arrows and the wheel all
-/// stopped at the 100th (since the grid first paged, 01e5bd7); and once the total was known, a
+/// stopped at the 100th (since the grid first paged, f7b3f0a); and once the total was known, a
 /// page that landed did not rebuild the view. The next page is now asked for when the rows
 /// scrolled to or the cursor come within a page of what has loaded, End asks for the rest, and
 /// a landed page shows by itself.

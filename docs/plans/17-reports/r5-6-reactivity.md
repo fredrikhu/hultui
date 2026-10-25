@@ -16,23 +16,23 @@ SATISFIED: no
 
 ## Review
 
-- **59a11d7d with 18cdd285 (objection).** `TryRestoreMoved` runs only at the end of `ReconcileKeyed` (TreeDiffer.cs:257).
-  - When a build hands back every child of a container, the live parent has no children left at reconcile time. `ReconcileChildren` then takes its `oldSnapshot.Length == 0` path (TreeDiffer.cs:142-147). That path calls `AddChild`, and `DetachSilently` → `SettleMove` marks the parent layout + Children dirty for each child, which is exactly the marking 59a11d7d set out to avoid.
+- **87698f16 with e6a432fa (objection).** `TryRestoreMoved` runs only at the end of `ReconcileKeyed` (TreeDiffer.cs:257).
+  - When a build hands back every child of a container, the live parent has no children left at reconcile time. `ReconcileChildren` then takes its `oldSnapshot.Length == 0` path (TreeDiffer.cs:142-147). That path calls `AddChild`, and `DetachSilently` → `SettleMove` marks the parent layout + Children dirty for each child, which is exactly the marking 87698f16 set out to avoid.
   - Vesper Brief: 138 cells handed back per key, 111 of them settled this way (only the 1.03 columns per key that hold a remade cell restore). With a reader that is a full a11y tree every key (1.00/key, 70.2 KB). It also costs 6,284 pending-move comparisons per key in the linear `SettleMove` scan.
   - Reel: the VideoPlayer host is its container's only child, so every app build with a reader rebuilds the a11y tree (1 tree, 3.8 KB per build).
   - → reconcile-restore-moved-into-empty.
-- **5808d9f1 / 4f6e6fc2 (objection, app).** Typing in a review comment rebuilds the whole app twice and the three chrome parts once per character, and weaves the review again each time: 1,367 KB per character. → junction-review-composer-typing.
-- **f14bc82d: correct.** The style phase allocates 0 B in every walk; resolves per key now equal elements patched plus elements made.
+- **b35fc587 / 3135de73 (objection, app).** Typing in a review comment rebuilds the whole app twice and the three chrome parts once per character, and weaves the review again each time: 1,367 KB per character. → junction-review-composer-typing.
+- **fbec1130: correct.** The style phase allocates 0 B in every walk; resolves per key now equal elements patched plus elements made.
   - The Log's guideline holds: "a write through a `Ref` into kept rows (or any live element) needs `MarkStyleDirty()`". Inherited setters mark nothing, and a patch now resolves only what it patched.
   - The framework's live inherited writes (Terminal link cursor, WebView cursor, Button text colour in `ApplyTheme`) mark style. A grep finds no app writing inherited style through a Ref.
   - Part (b) is examined, below.
-- **18cdd285: correct otherwise.** A column holding a remade cell restores unmarked: `restoreMoved` 1.03/key, `pendingMove` 138/key. Only all-kept columns miss (above).
-- **ef0a1f49: fine.** The cost of theming the twin was accepted in the commit. Patched themed controls keep layout (Meridian URL typing: layout 0 B, 0 rows remade).
-- **bf5165f4 / 5c1ed2cf: correct.**
+- **e6a432fa: correct otherwise.** A column holding a remade cell restores unmarked: `restoreMoved` 1.03/key, `pendingMove` 138/key. Only all-kept columns miss (above).
+- **a3aeabb2: fine.** The cost of theming the twin was accepted in the commit. Patched themed controls keep layout (Meridian URL typing: layout 0 B, 0 rows remade).
+- **3b0bc6a5 / 94fb3179: correct.**
   - The card writes go through Refs to Left, width, aspect ratio (each marks layout only on change) and Source, SourceRect and time `Content` (paint/layout). There are no inherited-style writes, so no `MarkStyleDirty` is needed.
   - `ShowPreview` reads untracked, and a card coming or going goes through `_previewComesOrGoes`.
-- **ee779b45: correct.** Rented snapshot; re-entrant notify rents its own buffer. `ReactiveList` still copies a `List` per mutation (examined).
-- **39e3fbb1:** Tags walk 1.00 build/key. **c0560e1:** nothing in my area; a signal write from any handler still marks dirty, so it still gets a frame.
+- **418f25a6: correct.** Rented snapshot; re-entrant notify rents its own buffer. `ReactiveList` still copies a `List` per mutation (examined).
+- **79a34897:** Tags walk 1.00 build/key. **5250e1f:** nothing in my area; a signal write from any handler still marks dirty, so it still gets a frame.
 - **Minor (no candidate):** a `Build()` that throws restores `Element.Building` in `finally` but leaves `_pendingMoves` unflushed. The old parent then stays unmarked until the next outermost reconcile. Harmless unless an app catches build exceptions.
 - **Current per-key bytes, a11y off:**
   - Junction: History 80.0, Commit 78.8, Branches 104.2, Tags 86.1, Files search 65.7, summary typing 95.8 KB. Chrome parts built per key: 0 (they restore 3/key).
@@ -136,7 +136,7 @@ SATISFIED: no
 
 - **reconcile-restyle-on-change (b)** (waiting): close it.
   - The style phase allocates 0 B in every walk; resolves per key equal patches + made (Meridian URL 214 = 213 patched + 1, 0 changed).
-  - It is time only, in a phase that is 1–2 % of a frame (f14bc82d), and it does not change the complexity class (O(patched) is O(build)).
+  - It is time only, in a phase that is 1–2 % of a frame (fbec1130), and it does not change the complexity class (O(patched) is O(build)).
   - The component splits remove the patches themselves (Meridian URL 213 → ~60).
 - **Reconcile pooling (P5a) stands:** reconcile bytes per key, with handler copy measured apart, are Vesper 8.8, Meridian 12.0, Junction 5.6, Aperture 2.8 KB (≤5 % of a key).
 - **`TryRestoreMoved`'s `before` list and pending-move list:** ≤6 restores per key outside Brief. Covered by the first candidate where it matters.

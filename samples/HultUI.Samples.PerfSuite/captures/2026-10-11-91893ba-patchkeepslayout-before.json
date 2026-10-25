@@ -1,7 +1,7 @@
 {
   "label": "before canvas, slider and video patches keep their layout (JIT, 2 runs merged)",
   "date": "2026-10-11 07:47 +02:00 / 2026-10-11 07:52 +02:00",
-  "commit": "91893ba",
+  "commit": "f80d57a",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

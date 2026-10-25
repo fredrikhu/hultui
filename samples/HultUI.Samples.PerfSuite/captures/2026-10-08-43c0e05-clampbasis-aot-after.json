@@ -1,7 +1,7 @@
 {
   "label": "11d clamp basis after (NativeAOT, median of 3)",
   "date": "2026-10-08 17:04 +02:00",
-  "commit": "43c0e05+11d",
+  "commit": "78ce22c+11d",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,

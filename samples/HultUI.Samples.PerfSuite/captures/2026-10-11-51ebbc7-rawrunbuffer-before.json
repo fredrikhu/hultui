@@ -1,7 +1,7 @@
 {
   "label": "before new blobs took a raw run buffer (JIT, 2 runs merged)",
   "date": "2026-10-11 12:46 +02:00 / 2026-10-11 12:51 +02:00",
-  "commit": "51ebbc7",
+  "commit": "64ee327",
   "machine": "SPELDATOR",
   "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
   "cores": 28,
