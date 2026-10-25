@@ -242,6 +242,70 @@ public sealed class LiveResizeFrameTests(ITestOutputHelper output)
         Assert.True(drawn <= requests + 5, $"{drawn} frames in {seconds:0.00} s for {requests} requests");
     }
 
+    /// <summary>
+    /// Inside the modal size/move loop, a GPU source that signals only by posting — an
+    /// <c>IGpuImageSource</c> outside HultUI.Media and WebView, which never asks for a frame — is
+    /// drawn on each of SDL's live-resize timer ticks for its waiting post, as before requests were
+    /// answered: it froze for the whole move once a window answering requests stopped drawing for
+    /// posted work (plan 17 round 5). Posted work is no reason to draw only while a source asks: for
+    /// 100 ms after a frame drawn for a request.
+    /// </summary>
+    [UiFact]
+    public void InsideTheModalLoop_ASourceThatOnlyPosts_IsDrawnOnTheTimersTicks()
+    {
+        using var guard = ForegroundGuard.Begin();
+        var (app, hwnd, counter) = Open(Plain);
+        using var _ = app;
+        var window = (SDL3Window)typeof(Window).GetProperty("PlatformWindow", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app.PrimaryWindow)!;
+        var backend = new HultUI.Media.Testing.FakeMediaBackend();
+        using var player = new HultUI.Media.MediaPlayer(backend);
+        var sink = backend.Sink ?? throw new InvalidOperationException("the player attached no sink");
+
+        int Tick(int times)
+        {
+            int before = counter.Frames;
+            for (int i = 0; i < times; i++) PushLiveResizeExpose(window.WindowId);
+            return counter.Frames - before;
+        }
+
+        bool ran = false;
+        int idle, posted, asked, afterAsking, afterQuiet;
+        SendMessageW(hwnd, EnterSizeMove, 0, 0);
+        try
+        {
+            idle = Tick(10);
+            // The source's post, from its own thread: it waits for the loop to end.
+            var source = new Thread(() => Application.InvokeOnMainThread(() => ran = true)) { IsBackground = true };
+            source.Start();
+            source.Join();
+            posted = Tick(10);
+            // A video asks for its frame (from the decoder's thread): drawn once, and the post is
+            // then no reason to draw for 100 ms.
+            var decoder = new Thread(sink.RequestRepaint) { IsBackground = true };
+            decoder.Start();
+            decoder.Join();
+            asked = Tick(1);
+            afterAsking = Tick(9);
+            Thread.Sleep(150);
+            afterQuiet = Tick(10);
+        }
+        finally
+        {
+            SendMessageW(hwnd, ExitSizeMove, 0, 0);
+        }
+        app.RunFrame(TimeSpan.FromMilliseconds(16));   // the posts, held by the loop
+
+        output.WriteLine($"timer ticks inside the loop drew: idle {idle}, with a post waiting {posted}, for a request {asked}, " +
+            $"after it {afterAsking}, 150 ms later {afterQuiet}");
+        Assert.True(ran);
+        Assert.Equal(0, idle);
+        Assert.Equal(10, posted);
+        Assert.Equal(1, asked);
+        Assert.Equal(0, afterAsking);
+        Assert.Equal(10, afterQuiet);
+    }
+
     private const uint EnterSizeMove = 0x0231, ExitSizeMove = 0x0232, StopLoop = 0x8000 + 0x3B9;
 
     [StructLayout(LayoutKind.Sequential)]
