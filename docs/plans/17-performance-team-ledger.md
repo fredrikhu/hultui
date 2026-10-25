@@ -5,13 +5,13 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5 (resumed 2026-10-25 after the repository work: history rewritten for a
-  third-party screenshot, fredrikhu/hultui recreated; every commit after 3353ce47 has a new ID, old IDs in
-  this file remapped; a pre-push hook refuses pushes built on the old history). Round 5 questions 1, 2 and 4
-  answered yes; question 3: threshold first, chunked document option B added to Waiting. Steps 1 landed, step 2 next. To resume
-  after a pause, run in this worktree: `/loop Run the next step of the performance team: follow
-  docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md. Read both, do
-  the step the ledger's Phase calls for, record it in the ledger, and commit.`
+- **Phase:** **PAUSED (user, 2026-10-25, after round 5 step 2).** Round 5: steps 1–2 landed, step 3 next (text).
+  All four round 5 questions answered (1, 2, 4 yes; 3 threshold first, chunked document option B in Waiting).
+  History note: rewritten 2026-10-25 (fredrikhu/hultui recreated; every commit after 3353ce47 has a new ID; a
+  pre-push hook refuses pushes built on the old history). To resume, run in this worktree: `/loop Run the next
+  step of the performance team: follow docs/plans/17-performance-team.md, with state in
+  docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls for, record it in
+  the ledger, and commit.` Before resuming, check whether main moved (`git fetch`) and merge it in if needed.
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`; the session
   moved here from `claude/ui-framework-performance-a2cca6` after a restart)
 - **Review commits since:** 653971d3 (round 5 reviews round 4's build, 653971d3..643eb07b, plus the CI
@@ -78,7 +78,7 @@ Correctness and round 4 objections first, then value per cost.
    string, then a default-member `IRenderContext.TextCaretXs` (API addition) for O(rows × length); suite row
    "a11y/type in a 2,000-line TextArea, a reader reading"), **sdl-hint-minimize-raise** (Minimize/Raise under
    `WindowsActivation.RefuseIfUnwanted`, or the raise hint; test hygiene).
-2. **a11y-overlay-live** (approved 2026-10-25) (7, correctness) — overlay content gets the window's observer; overlay style
+2. ~~**a11y-overlay-live**~~ LANDED 0b477882, 02e17103, cb34eecc, 22021d66, 827f6ad5, cc028a7f, 08c49d10, b23c9251 (approved 2026-10-25) (7, correctness) — overlay content gets the window's observer; overlay style
    and layout run before the a11y phase; patches find nodes under overlays; ContextMenuElement tells its
    selection and has item geometry before the tree reads it (all menu items have zero-height rects today);
    AT-SPI `state-changed:expandable`. Today: label/check/text/children changes inside an open overlay build
@@ -152,6 +152,11 @@ Re-ranked by the round 6 survey.
 - **apps-junction-highlight-prefetch** (5/8, app) — worker tokenizing 5.9 MB per History key at 500 ms (25× the
   UI thread), 92.8 MB at start-up; tokenize only to the last hunk line / after the selection rests.
 - **text-lazy-line-runs** (5, lead after step 3) — undrawn lines' strings and run objects (50 % of text/wrap).
+- **dialog-scrim-button-role** (7, correctness bug, from r5 step 2) — `Dialog.Show`'s scrim has a click handler, so it is
+  inferred as a Button named from all the dialog's text: every dialog is announced inside a "button", and each palette
+  keystroke fires a Name change on it.
+- **palette-row-keys** (6, lead from r5 step 2) — `CommandPalette` keys rows `{group}|{title}|{index}`, so every
+  keystroke replaces every row and its a11y nodes (6 UIA structure events per key); key by command.
 - **uitests-borderless-maximize-width** (3, from r5 step 1; pre-existing at a33bd6b0) — the two Borderless runs of
   WindowStateActivationTests fail on this desk: the maximized client is 2,554 px wide against a 2,560 px work area.
 - **a11y-box-selected-patch** (7, lead from r5 step 1) — changing `AccessibleSelected` on a plain Box builds a whole a11y
@@ -383,6 +388,10 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 6388f868 | findbar-step-double-rebuild | A `FindBar` holds its own search's notices during a step and calls `onChanged` once, reveal set first; opening with a selection builds once, not three times. Per Enter: Vesper reader 518.9 → 416.7 KB (−19.7 %), Junction diff 538.0 → 440.5 (−18.1 %), Meridian response 2,017 → 1,715 (−15 %); builds per step 2 → 1. ELEMENTS.md. |
 | 5 | 2a332218 | live-frame-posted-work | Posted work stops being a reason to draw a live frame only for 100 ms after a frame was drawn for a source's request (platform clock): a source that only posts draws 56/124 frames in a move/held drag (0 since ee6d0bb0); Reel 1080p120 keeps 0 drops. THREADING.md, MEDIA.md; headless + guarded real-window tests. |
 | 5 | 3dd5c97b, 6895ac2d | text-textarea-a11y-row-xs | Suite row "a11y/type in a 2,000-line TextArea, a reader reading, bridge on"; each row's string cut once, and **default member `IRenderContext.TextCaretXs(lineText, style, Span<float>)`** (API addition; Skia finds the line once, then `CaretXAt` per boundary). 704 → 308.7 KB/op (−56 %), min −25 %; boxes bit-identical (all corpora; Skia 6 styles × 7 line kinds); one ask per row (was 570 per-character asks). |
+| 5 | 0b477882 | apps-scenario-overlay-reader | Suite rows: context menu walk and command palette typing over 1,000 rows, UIA. |
+| 5 | 02e17103, cb34eecc, 08c49d10, b23c9251 | a11y-overlay-live | Approved. `PrepareOverlays` styles and lays out overlays after root layout, before the a11y phase; overlay Children dirt builds, layout dirt/moves coalesce; hit-testable overlay content gets the observer while open; `FindNodeDown` starts at the overlay's node; a change inside an open overlay rebuilds, diffs and swaps in only that overlay's subtree (`TryRebuildOverlays`); the overlay refresh keeps its own clock (b23c9251: overlay churn had postponed the window's refresh indefinitely). Overlay toggle/keystroke patch 0.9–1.6 KB, no tree. Palette typing over 2,000 commands, UIA 811.7 → 553.4 KB/key (−32 %), min −13.3 %, trees/key 1 → 0 (at the base the reader heard nothing). Proof: 49/49 probe steps equal a fresh tree on recording/UIA/AT-SPI (base 13–15), FlaUI 24/24 (base 10), live WSL pyatspi 39/39 (base 15), Junction/Meridian palettes 0 stale (base 7/7); staleness audit 0 STALE over 2,660 audits; 50 frames byte-identical. 0 slower. |
+| 5 | 22021d66, 827f6ad5 | contextmenu-a11y-selection-geometry | Keyboard/hover selection told as IsSelected (a Down key 0.5–1.1 KB patch, no tree); items placed in `MeasureContent` (same sums as `Render`), so no zero-height boxes. |
+| 5 | cc028a7f | atspi-expandable-state | `state-changed:expandable` when expanded goes to/from null; `expanded` only when that bit changes. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -919,3 +928,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   refuse activation. All Windows suites and WSL pass; guarded UiTests 120 pass, 2 Borderless maximize-width failures
   pre-existing at a33bd6b0 (Waiting). Guideline notes: don't let a FindBar's own search call `MarkDirty` too; for every
   caret position on a line call `TextCaretXs` once.
+- 2026-10-25: round 5 step 2 landed (0b477882..b23c9251): readers now hear changes inside open overlays (menus,
+  dropdowns, dialogs, palette) as patches or overlay-only rebuilds; menu items have real bounds; AT-SPI expandable.
+  Palette typing with UIA −32 %. Proof 49/49, FlaUI 24/24, live AT-SPI 39/39, audit 0 stale, pixels identical; all
+  suites, guarded UiTests (2 known Borderless failures) and WSL pass. New bug found: the dialog scrim reads as a
+  Button named from the dialog's text (Waiting). Guideline note: with a reader, a keystroke in a dialog or palette
+  costs in proportion to the overlay — keep overlay content small. **Paused at the user's request** after this step.
