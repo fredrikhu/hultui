@@ -258,6 +258,86 @@ public class A11yOverlayTests
         Assert.Equal((trees, 0), (session.Window.AccessibilityTreesBuilt, patching.Patches));
     }
 
+    /// <summary>The selected state of each item node of the list <paramref name="list"/> in a tree.</summary>
+    private static string Selection(AccessibilityNode? tree, Element list) =>
+        string.Concat(Find(tree, n => n.ElementId == list.Id)!.Children.Select(c => c.IsSelected == true ? "x" : "."));
+
+    private static Element? OverlayContent(HeadlessSession session) => session.Window.OverlayContents.LastOrDefault();
+
+    [Fact]
+    public void AContextMenusSelection_IsToldAsItMoves_WithNoTreeBuilt()
+    {
+        var (session, bridge, patching) = MountPatching(Flex.Column().Children(TextB.New("Main")));
+        using var _ = session;
+        var items = new List<ContextMenuItem>
+        {
+            new() { Label = "Copy", Action = () => { } },
+            new() { IsSeparator = true },
+            new() { Label = "Disabled", IsDisabled = true, Action = () => { } },
+            new() { Label = "Paste", Action = () => { } },
+            new() { Label = "Delete", Action = () => { } },
+        };
+        session.Window.Window.OpenContextMenu(items, new Point(100, 80));
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var menu = OverlayContent(session)!;
+        int trees = session.Window.AccessibilityTreesBuilt;
+        string Told() => Selection(bridge.CurrentTree, menu);
+        string Fresh() => Selection(session.Window.Window.BuildAccessibilityTree(), menu);
+
+        // Separators are not items; a disabled one is, but the keys pass it by.
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+        session.PumpFrame();
+        Assert.Equal(("x...", "x..."), (Told(), Fresh()));
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+        session.PumpFrame();
+        Assert.Equal(("..x.", "..x."), (Told(), Fresh()));
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Up);
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Up);
+        session.PumpFrame();
+        Assert.Equal(("...x", "...x"), (Told(), Fresh()));
+
+        // The pointer: onto an item, then off the menu.
+        var box = menu.WindowBorderBox;
+        session.Window.MoveMouse(box.X + box.Width / 2, box.Y + 12);
+        session.PumpFrame();
+        Assert.Equal(("x...", "x..."), (Told(), Fresh()));
+        session.Window.MoveMouse(box.Right + 40, box.Bottom + 40);
+        session.PumpFrame();
+        Assert.Equal(("....", "...."), (Told(), Fresh()));
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(5, patching.Patches);
+    }
+
+    [Fact]
+    public void ADropdownsListSelection_IsToldAsItMoves()
+    {
+        var dropdown = Dropdown.New(["Alpha", "Bravo", "Charlie", "Delta"], selectedIndex: 1).Width(Dimension.Px(160));
+        var (session, bridge, patching) = MountPatching(Flex.Column().Padding(8).Children(TextB.New("Pick one"), dropdown));
+        using var _ = session;
+        session.Window.Click(dropdown);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        var list = OverlayContent(session)!;
+        Assert.Equal(".x..", Selection(bridge.CurrentTree, list));
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+        session.PumpFrame();
+        Assert.Equal("..x.", Selection(bridge.CurrentTree, list));
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.End);
+        session.PumpFrame();
+        Assert.Equal("...x", Selection(bridge.CurrentTree, list));
+        session.Window.PressKey(HultUI.Core.Events.KeyCode.Home);
+        session.PumpFrame();
+        Assert.Equal("x...", Selection(bridge.CurrentTree, list));
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(3, patching.Patches);
+        Assert.Equal("x...", Selection(session.Window.Window.BuildAccessibilityTree(), list));
+    }
+
     [Fact]
     public void AChangeInAnOverlayWhileMinimized_IsBuiltOnce()
     {
