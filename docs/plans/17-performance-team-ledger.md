@@ -5,7 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 4
-- **Phase:** build — round 4; surveys in (`17-reports/r4-*`, all eight not satisfied); all 14 steps landed; full suite (`dotnet test HultUI.slnx -c Release`) next, then Phase `release`.
+- **Phase:** release — round 4; all 14 steps landed; full suite passed on 788c3222 (30 projects, 12,401
+  passed, 206 skipped, 0 failed). The user chose (2026-10-25) to merge `ci/github-hosted-runners` into main
+  first, then round 4, testing the combined tree before one push; then wait for CI on hosted runners.
   All 4 round 4 questions answered 2026-10-13 (the user took every recommendation). To
   resume after a pause, run in this worktree: `/loop Run the next step of the performance team:
   follow docs/plans/17-performance-team.md, with state in docs/plans/17-performance-team-ledger.md.
@@ -20,20 +22,16 @@ file after every step and commits it with the step's work. Full survey reports a
   round 3 builds `r3b2/`…`r3b17/`, `r3b9b/`, `r3b14b/`; older `probes/`, `l1r3/`, `r3*`.
 
 **Repository move (user, 2026-10-24): HultUI moved to `github.com/fredrikhu/hultui`; the old
-`hultui-revamped` will be deleted. Never push to the old URL again.** The new main has the same
-history (a9081035 on both, checked). At round 4's release, before merging: `git remote set-url
-origin git@github.com:fredrikhu/hultui.git`, `git fetch --prune origin`, then merge and push to the new
-origin as usual (the remote is shared with the primary checkout and other worktrees — that is the
-user's intent). No local `pacs-support` branch exists (checked 2026-10-24); if one appears, delete it
-(`git branch -D pacs-support`), never push it (replaced by app-support). Open PRs/issues on the old repo
-don't carry over. Plan 17 adds nothing PACS/Sectra/healthcare-related (round 4 diff and plan docs
-checked); keep it that way for the open-sourcing. **The new repo will be public and will NOT get
-self-hosted runners (user, 2026-10-24: anyone could push code that runs on them); it uses GitHub-hosted
-runners.** Every workflow is hard-wired to `[self-hosted, …]` today (0 runners on the new repo; CI run
-40030590762 on a9081035 queued since 2026-10-23), so round 4's release waits until the workflows run on
-GitHub-hosted runners — offered to the user as a separate task (chip task_f35e3acf, "Move CI to
-GitHub-hosted runners"). Plan 17 never registers a runner. Hosted runners are slower and differ in fonts
-and tooling: expect new CI precondition failures like 58c186f's, fixed in tests, not by adding runners.
+`hultui-revamped` will be deleted. Never push to the old URL again.** The new main had the same
+history (a9081035). The shared `origin` was switched at round 4's release (2026-10-25: `git remote
+set-url origin git@github.com:fredrikhu/hultui.git`, `git fetch --prune origin`). Open PRs/issues on
+the old repo don't carry over. The repository is being prepared for open-sourcing: plan 17 adds only
+HultUI and its apps, nothing outside them. **The new repo will be public and will
+NOT get self-hosted runners (user, 2026-10-24: anyone could push code that runs on them); it uses
+GitHub-hosted runners** (`ci/github-hosted-runners`, docs/CI.md; merged into main with round 4 at the
+user's choice, 2026-10-25). Plan 17 never registers a runner. Hosted runners are slower (2-core while
+the repo is private; Windows CI ~26 min) and differ in fonts and tooling: expect new CI precondition
+failures like 58c186f's, fixed in tests, not by adding runners.
 
 **App releases:** cut only when the user asks (they asked after rounds 2 and 3; round 3's on
 58c186f: junction-v1.21.0, vesper-v1.21.0, meridian-v1.4.0, aperture-v1.20.0, reel-v1.5.0). Follow
@@ -855,3 +853,5 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   `LaunchSample()` for sample exes); `SWP_NOACTIVATE` on every Win32 call in a test; windows owned by
   another process can take the foreground, so such tests go behind `HULTUI_UITESTS_FOREGROUND`; pixel
   read-back works from windows kept out of the foreground.
+- 2026-10-25: full suite passed on 788c3222 (30 projects, 12,401 passed, 0 failed). Phase `release`: shared
+  origin switched to fredrikhu/hultui; the user chose to merge `ci/github-hosted-runners` first.
