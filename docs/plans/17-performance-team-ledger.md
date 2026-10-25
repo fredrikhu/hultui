@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** **PAUSED (user, 2026-10-25, during round 5 step 3).** Steps 1–2 landed; step 3 partly landed
+- **Phase:** build — round 5 (resumed 2026-10-25 20:45; main merged again). **Finishing step 3**: Steps 1–2 landed; step 3 partly landed
   (91d48601 glyphs on first read, cc6f8467 line scratch). **On resume, finish step 3 first:** text-last-line-view is
   saved as local branch `plan17/last-line-view-wip` (91bb4762, one commit on cc6f8467; never push or merge it as is; also scratchpad `r5b3/last-line-view-wip.patch`; bit compare and pixels identical, text/wrap
   −17 %, richtext open/resize −12 %); still to do: a filtered rerun of `component/edit one of 1,000 unkeyed rows`
