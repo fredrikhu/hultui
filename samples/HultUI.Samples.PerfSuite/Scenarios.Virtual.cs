@@ -136,11 +136,12 @@ static partial class Scenarios
     /// the list draws the selection (<c>.SelectionHighlight(…)</c>) and its rows are made
     /// unselected. The row reports the rows made per step. With
     /// <paramref name="chrome"/> the pane sits in a window's chrome (<see cref="WalkChrome"/>).
+    /// The list holds <paramref name="count"/> commits.
     /// </summary>
     internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false,
-        WalkChrome chrome = WalkChrome.None, bool listHighlight = false)
+        WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000)
     {
-        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows, chrome: chrome, listHighlight: listHighlight);
+        var pane = new WalkPane(WalkItems(ctx.Rng, count), itemRows, chrome: chrome, listHighlight: listHighlight);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {

@@ -114,6 +114,18 @@ static partial class Scenarios
                     reset: bridge.ClearDiffs, itemRows: true);
             });
 
+        yield return new Scenario("a11y/selection walk 3,000 item rows, bridge on",
+            "The item-rows walk over 3,000 commits, past the 2,000 a list publishes a node for each of: its items are served on demand when a reader asks, so the tree holds the list's node and none for its items, whatever the list's length (plan 17, round 5, step 14)",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return SelectionWalk(ctx, _ =>
+                    bridge.Diffs.Count == 0 ? "the bridge received no change"
+                    : !HoldsItems(bridge.CurrentTree, 3_000) ? "the tree does not hold the list's 3,000 items"
+                    : null,
+                    reset: bridge.ClearDiffs, itemRows: true, count: 3_000);
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
             ctx =>
@@ -550,6 +562,14 @@ static partial class Scenarios
             {
                 var rig = UiaRig.Install(ctx.Window);
                 return SelectionWalk(ctx, Applied(rig));
+            });
+
+        yield return new Scenario("a11y/selection walk 3,000 item rows, UIA",
+            "The item-rows walk over 3,000 commits with the UIA bridge: items served on demand, the wrapper upkeep and events of a move and the scroll it makes",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return SelectionWalk(ctx, Applied(rig), itemRows: true, count: 3_000);
             });
 
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, UIA",
