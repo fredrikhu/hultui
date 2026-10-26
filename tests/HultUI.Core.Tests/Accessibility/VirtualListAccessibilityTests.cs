@@ -249,7 +249,7 @@ public class VirtualListAccessibilityTests
         list.SelectedIndex = 2;
         var changes = new List<PropertyChange>();
 
-        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes));
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, []));
 
         var diff = AccessibilityTreeDiffer.Diff(before, BuildLaidOut(list));
         Assert.Equal(
@@ -271,36 +271,179 @@ public class VirtualListAccessibilityTests
         var tree = BuildLaidOut(list);
         list.Items = Enumerable.Range(0, 11).Select(i => $"row {i}").ToArray();
         list.SelectedIndex = 10;
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes, []));
 
         // Rows that are their own controls publish no item nodes.
         var composite = MakeList(10);
         var compositeTree = BuildLaidOut(composite);
         composite.RowsAreComposite = true;
         composite.SelectedIndex = 1;
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(compositeTree, composite, changes));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(compositeTree, composite, changes, []));
 
         // Grown past the items built eagerly.
         var grown = MakeList(10);
         var grownTree = BuildLaidOut(grown);
         grown.Items = Enumerable.Range(0, AccessibilityTreeBuilder.MaxEagerVirtualItems + 1).Select(i => $"row {i}").ToArray();
-        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(grownTree, grown, changes));
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(grownTree, grown, changes, []));
+
+        // And back under it.
+        var shrunk = MakeList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1);
+        var shrunkTree = BuildLaidOut(shrunk);
+        shrunk.Items = Enumerable.Range(0, 10).Select(i => $"row {i}").ToArray();
+        Assert.False(AccessibilityTreeBuilder.ItemSelectionChanges(shrunkTree, shrunk, changes, []));
         Assert.Empty(changes);
     }
 
-    [Fact]
-    public void ItemSelectionChanges_OfAListServedOnDemand_AreNone()
-    {
-        // Its items have no nodes, and a move there is told to no reader (a later step); the
-        // tree need not be built again for it.
-        var list = MakeList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1);
-        var tree = BuildLaidOut(list);
-        Assert.True(tree.IsVirtualItemContainer);
-        list.SelectedIndex = 4;
-        var changes = new List<PropertyChange>();
+    private const int Served = AccessibilityTreeBuilder.MaxEagerVirtualItems + 1;
 
-        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(tree, list, changes));
+    [Fact]
+    public void AListServedOnDemand_CarriesItsItemsNumberAndSelection()
+    {
+        // Its items have no nodes: what a reader is told of them is the list node's.
+        var list = MakeList(3_000);
+        list.SelectedIndex = 4;
+        var tree = BuildLaidOut(list);
+
+        Assert.True(tree.IsVirtualItemContainer);
+        Assert.Empty(tree.Children);
+        Assert.Equal(3_000, tree.Served.Count);
+        Assert.Equal([4], tree.Served.SelectedArray);
+        Assert.True(tree.Served.IsSelected(4));
+        Assert.False(tree.Served.IsSelected(5));
+
+        // A selection past the end is no item's.
+        list.SelectedIndex = 3_000;
+        Assert.Empty(BuildLaidOut(list).Served.SelectedArray);
+
+        // A multi-selection's, ascending, whatever order the list gives them in.
+        list.CanSelectMultiple = true;
+        var source = (IAccessibleItemSource)list;
+        source.SetItemSelected(2_999, true);
+        source.SetItemSelected(7, true);
+        source.SetItemSelected(1_500, true);
+        Assert.Equal([7, 1_500, 2_999], BuildLaidOut(list).Served.SelectedArray);
+        Assert.Equal([3, 9], AccessibilityTreeBuilder.SelectedItemsOf(new Unordered([9, 3, 9, -1, 4_000]), 3_000));
+    }
+
+    /// <summary>A multi-select source that lists its selection out of order, with repeats and
+    /// indices that are no item's.</summary>
+    private sealed class Unordered(int[] selected) : IAccessibleItemSource
+    {
+        public int ItemCount => 3_000;
+        public float ItemHeight => 20f;
+        public int SelectedIndex => -1;
+        public bool CanSelectMultiple => true;
+        public IReadOnlyList<int> SelectedIndices => selected;
+        public string? GetItemLabel(int index) => null;
+        public void ActivateItem(int index) { }
+    }
+
+    [Fact]
+    public void ItemSelectionChanges_OfAListServedOnDemand_AreTheDiffs_OnTheListNode()
+    {
+        // A move is told as the list node's own change, with a stand-in for it as it was: what the
+        // differ reports between the tree before the move and one built after it. The node is left as
+        // it was; what to put on it is handed back.
+        var list = MakeList(Served);
+        list.SelectedIndex = 4;
+        var before = BuildLaidOut(list);
+        list.SelectedIndex = 1_999;
+        var changes = new List<PropertyChange>();
+        var served = new List<(AccessibilityNode Node, int Count, int[] Selected)>();
+
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served));
+
+        var diff = AccessibilityTreeDiffer.Diff(before, BuildLaidOut(list));
+        Assert.Equal([(list.Id, AccessibilityProperties.ItemSelection)], diff.PropertyChanged.Select(c => (c.Node.ElementId, c.PropertyName)));
+        var change = Assert.Single(changes);
+        Assert.Equal((before, AccessibilityProperties.ItemSelection), (change.Node, change.PropertyName));
+        Assert.Equal([4], change.Previous!.Served.SelectedArray);
+        Assert.Equal([4], before.Served.SelectedArray);
+        var (node, count, selected) = Assert.Single(served);
+        Assert.Same(before, node);
+        Assert.Equal(Served, count);
+        Assert.Equal([1_999], selected);
+
+        // Put in place, the stand-in keeps what was told before.
+        node.ReplaceServedItems(count, selected);
+        Assert.Equal([1_999], before.Served.SelectedArray);
+        Assert.Equal([4], change.Previous.Served.SelectedArray);
+
+        // Nothing moved: nothing to tell.
+        changes.Clear();
+        served.Clear();
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served));
         Assert.Empty(changes);
+        Assert.Empty(served);
+    }
+
+    [Fact]
+    public void AListServedOnDemand_ThatGainedItems_TellsTheirNumberThenTheSelection()
+    {
+        // In the order a diff lists them, the patch and the diff alike.
+        var list = MakeList(Served);
+        list.SelectedIndex = 4;
+        var before = BuildLaidOut(list);
+        list.Items = Enumerable.Range(0, 2_500).Select(i => $"row {i}").ToArray();
+        list.SelectedIndex = 2_400;
+        var changes = new List<PropertyChange>();
+        var served = new List<(AccessibilityNode Node, int Count, int[] Selected)>();
+
+        Assert.True(AccessibilityTreeBuilder.ItemSelectionChanges(before, list, changes, served));
+        string[] told = [AccessibilityProperties.ItemCount, AccessibilityProperties.ItemSelection];
+        Assert.Equal(told, changes.Select(c => c.PropertyName));
+        Assert.Same(changes[0].Previous, changes[1].Previous);
+        Assert.Equal(Served, changes[0].Previous!.Served.Count);
+        Assert.Equal(2_500, served[0].Count);
+        Assert.Equal([2_400], served[0].Selected);
+
+        var after = BuildLaidOut(list);
+        Assert.Equal(told, AccessibilityTreeDiffer.Diff(before, after).PropertyChanged.Select(c => c.PropertyName));
+        Assert.Equal(2_500, after.Served.Count);
+    }
+
+    [Fact]
+    public void AnItemServedOnDemand_IsWhereAnItemNodeWouldBe()
+    {
+        // The box an item node of the list would have, from the list node and the list: in the
+        // viewport at its index, moved by the scroll, out of view below the viewport's bottom.
+        var list = MakeList(Served);
+        list.ScrollOffsetY = 40;
+        var tree = BuildLaidOut(list);
+        var eager = MakeList(10);
+        eager.ScrollOffsetY = 40;
+        var eagerTree = BuildLaidOut(eager);
+
+        Assert.True(tree.TryGetServedItemBox(3, out var box, out bool offscreen));
+        Assert.Equal(eagerTree.Children[3].BoundingRect, box);
+        Assert.False(offscreen);
+        Assert.True(tree.TryGetServedItemBox(0, out _, out offscreen));
+        Assert.True(offscreen);   // scrolled out above
+        Assert.True(tree.TryGetServedItemBox(Served - 1, out box, out offscreen));
+        Assert.Equal((Served - 1) * 20f - 40f, box.Y - tree.BoundingRect.Y, 3);
+        Assert.True(offscreen);
+        Assert.False(tree.TryGetServedItemBox(Served, out _, out _));
+        Assert.False(tree.TryGetServedItemBox(-1, out _, out _));
+        Assert.False(eagerTree.TryGetServedItemBox(3, out _, out _));
+    }
+
+    [Fact]
+    public void SelectionChanges_AreTheItemsWhoseStateChanged_InItemOrder()
+    {
+        static (int, bool)[] Changes(int[] was, int[] now)
+        {
+            var list = new List<(int, bool)>();
+            foreach (var change in ServedItems.Changes(new ServedItems(3_000, was), new ServedItems(3_000, now)))
+                list.Add(change);
+            return [.. list];
+        }
+
+        Assert.Equal([(4, false), (5, true)], Changes([4], [5]));
+        Assert.Equal([(4, true), (5, false)], Changes([5], [4]));
+        Assert.Equal([(9, true)], Changes([], [9]));
+        Assert.Equal([(9, false)], Changes([9], []));
+        Assert.Empty(Changes([3, 7], [3, 7]));
+        Assert.Equal([(1, true), (3, false), (8, true), (9, false)], Changes([3, 7, 9], [1, 7, 8]));
     }
 
     [Fact]

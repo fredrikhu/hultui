@@ -226,6 +226,19 @@ public static class AccessibilityTreeDiffer
             changes.Add(new PropertyChange(curr, AccessibilityProperties.BoundingRect));
         if (rare && prev.ScrollOffset != curr.ScrollOffset)
             changes.Add(new PropertyChange(curr, AccessibilityProperties.ScrollPosition, prev));
+        // A list whose items are served on demand has no item nodes: the number of its items and
+        // which are selected are its own, and a change of either is told on it, with the previous
+        // node, where a list of item nodes tells nodes added or removed and their IsSelected. After
+        // the list's own properties, as its items' changes come after them. A list that crossed the
+        // number its items are served on demand from has item nodes on one side, which tell it.
+        if (rare && prev.IsVirtualItemContainer && curr.IsVirtualItemContainer)
+        {
+            var (was, now) = (prev.Served, curr.Served);
+            if (was.Count != now.Count)
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.ItemCount, prev));
+            if (!was.Selected.SequenceEqual(now.Selected))
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.ItemSelection, prev));
+        }
     }
 
     /// <summary>

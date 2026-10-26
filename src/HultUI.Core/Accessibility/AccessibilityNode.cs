@@ -144,6 +144,75 @@ public sealed class AccessibilityNode
         }
     }
 
+    /// <summary>
+    /// For a list whose items are served on demand (<see cref="IsVirtualItemContainer"/>): how many
+    /// items it has and which of them are selected, as this tree was built or as last told, read
+    /// whole on any thread. Its items have no nodes, so what a reader is told of them (how many
+    /// there are, which is selected) is the list node's: a move of the selection, or another number
+    /// of items, is told as the list's own change (<see cref="AccessibilityProperties.ItemSelection"/>,
+    /// <see cref="AccessibilityProperties.ItemCount"/>), and a bridge answers from here, as an item
+    /// node's state answers for it. Empty for anything else.
+    /// </summary>
+    internal ServedItems Served => _extras?.Scroll is { } s ? new ServedItems(s.ItemCount, s.SelectedItems) : default;
+
+    /// <summary>Gives a list served on demand its items' number and selection (ascending), while the
+    /// tree is built.</summary>
+    internal void SetServedItems(int count, int[] selected)
+    {
+        var scroll = Scroll;
+        scroll.ItemCount = count;
+        scroll.SelectedItems = selected;
+    }
+
+    /// <summary>
+    /// Gives a list served on demand in a tree that is out its items' number and selection now (UI
+    /// thread): one reference write of new fields in place of the old, as a scroll's
+    /// (<see cref="ReplaceScrollView"/>), so a reader on another thread reads the two as they were or
+    /// as they are. A stand-in made before (<see cref="ScrollStandIn"/>) keeps the old ones.
+    /// </summary>
+    internal void ReplaceServedItems(int count, int[] selected)
+    {
+        var extras = Extras;
+        var scroll = extras.Scroll?.Copy() ?? new ScrollFields();
+        scroll.ItemCount = count;
+        scroll.SelectedItems = selected;
+        Volatile.Write(ref extras.Scroll, scroll);
+    }
+
+    /// <summary>
+    /// Where item <paramref name="index"/> of a list served on demand is, when a reader asks: its box
+    /// on screen in layout units — in the list's viewport at its place
+    /// (<see cref="IAccessibleItemSource.ItemBounds"/>, or stacked at
+    /// <see cref="IAccessibleItemSource.ItemHeight"/>), moved by the list's scroll, as the builder
+    /// places an eager list's item nodes — and whether it is out of the viewport. From the list's
+    /// node (its viewport, its scroll, its items' number as told) and the list (its items' heights),
+    /// on any thread. False for an item the list does not have, or a list that does not scroll.
+    /// </summary>
+    internal bool TryGetServedItemBox(int index, out Rect box, out bool offscreen)
+    {
+        box = default;
+        offscreen = true;
+        // Once: the UI thread may put new fields in place meanwhile.
+        if (_extras?.Scroll is not { IsScrollView: true, Items: { } source } s || (uint)index >= (uint)s.ItemCount)
+            return false;
+        float top, height;
+        try
+        {
+            float itemHeight = source.ItemHeight;
+            (top, height) = source.ItemBounds(index) ?? (index * itemHeight, itemHeight);
+        }
+        catch
+        {
+            return false;   // the live list, read on a reader's thread
+        }
+        var above = ScrollAbove();
+        var viewport = s.Viewport;
+        float scrolled = top - s.Offset.Y;
+        box = new Rect(viewport.X - above.X - s.Offset.X, viewport.Y - above.Y + scrolled, viewport.Width, height);
+        offscreen = scrolled + height <= 0f || scrolled >= viewport.Height;
+        return true;
+    }
+
     /// <summary>Gives the node its scroll view's geometry (<see cref="ScrollExtent"/>) and offset. The
     /// viewport is where it sits in the content of the scroll views above, as the node's own box
     /// (<see cref="UnscrolledRect"/>). While the tree is built.</summary>
@@ -171,23 +240,23 @@ public sealed class AccessibilityNode
     internal void ReplaceScrollView(Point offset, Rect viewport, Size content)
     {
         var extras = Extras;
-        var scroll = new ScrollFields
-        {
-            Offset = offset,
-            Viewport = viewport,
-            Content = content,
-            IsScrollView = true,
-            Items = extras.Scroll?.Items,
-        };
+        // The list it stands for, and the items it serves on demand, stay.
+        var scroll = extras.Scroll?.Copy() ?? new ScrollFields();
+        scroll.Offset = offset;
+        scroll.Viewport = viewport;
+        scroll.Content = content;
+        scroll.IsScrollView = true;
         Volatile.Write(ref extras.Scroll, scroll);
     }
 
     /// <summary>
     /// A node of no tree standing for this one as its scroll view is now, before a layout refresh
-    /// gives it another offset in place (<see cref="ReplaceScrollView"/>): what the refresh hands a
-    /// bridge as a scroll's previous node, which a diff takes from the previous tree. It carries
-    /// what a bridge reads of a scroll's previous node — the offset and the geometry — and the id,
-    /// the role and the name. Its fields are the node's, which are never written again once out.
+    /// gives it another offset in place (<see cref="ReplaceScrollView"/>), or a list served on demand
+    /// is given its items' number and selection now (<see cref="ReplaceServedItems"/>): what the
+    /// refresh or the patch hands a bridge as the change's previous node, which a diff takes from the
+    /// previous tree. It carries what a bridge reads of such a previous node — the offset and the
+    /// geometry, the items served (<see cref="Served"/>) — and the id, the role and the name. Its
+    /// fields are the node's, which are never written again once out.
     /// </summary>
     internal AccessibilityNode ScrollStandIn() =>
         new(ElementId, Role, Name, description: null, BoundingRect)
@@ -413,8 +482,8 @@ public sealed class AccessibilityNode
     /// A scroll view's or a list's fields, in an object of their own that only those nodes get: the
     /// offset was the one of them a rare field had, and RareFields stays the size it was for every
     /// other node that has one (a text field, a described control). Written while the tree is
-    /// built, never once it is out: a layout refresh puts new ones in place
-    /// (<see cref="ReplaceScrollView"/>).
+    /// built, never once it is out: a layout refresh or a selection move puts new ones in place
+    /// (<see cref="ReplaceScrollView"/>, <see cref="ReplaceServedItems"/>).
     /// </summary>
     private sealed class ScrollFields
     {
@@ -423,6 +492,11 @@ public sealed class AccessibilityNode
         public Size Content;
         public bool IsScrollView;
         public IAccessibleItemSource? Items;
+        // A list served on demand: its items' number and the selected ones, ascending (Served).
+        public int ItemCount;
+        public int[]? SelectedItems;
+
+        public ScrollFields Copy() => (ScrollFields)MemberwiseClone();
     }
 
     private RareFields? _extras;
@@ -519,6 +593,62 @@ public sealed class AccessibilityNode
         children[^1] = child;
         child.Parent = this;
         _children = children;
+    }
+}
+
+/// <summary>
+/// The items of a list served on demand as an accessibility tree carries them
+/// (<see cref="AccessibilityNode.Served"/>): how many, and which are selected, ascending. Default
+/// for a node that is no such list: none, none selected.
+/// </summary>
+internal readonly struct ServedItems(int count, int[]? selected)
+{
+    public int Count => count;
+
+    /// <summary>The selected items' indices, ascending.</summary>
+    public ReadOnlySpan<int> Selected => selected;
+
+    /// <summary>The same, for a reader to keep: the array is never written once out.</summary>
+    public int[] SelectedArray => selected ?? [];
+
+    public bool IsSelected(int index) => selected is not null && Array.BinarySearch(selected, index) >= 0;
+
+    /// <summary>The items whose selected state differs from <paramref name="was"/> to
+    /// <paramref name="now"/>, in item order, each with its state in <paramref name="now"/>: what a
+    /// diff of item nodes reports as their <see cref="AccessibilityProperties.IsSelected"/> changes.
+    /// O(the two selections), allocating nothing.</summary>
+    public static SelectionChanges Changes(ServedItems was, ServedItems now) => new(was.Selected, now.Selected);
+
+    /// <summary>See <see cref="Changes"/>: a merge of two ascending selections.</summary>
+    internal ref struct SelectionChanges(ReadOnlySpan<int> was, ReadOnlySpan<int> now)
+    {
+        private readonly ReadOnlySpan<int> _was = was, _now = now;
+        private int _i, _j;
+
+        public (int Index, bool Selected) Current { get; private set; }
+
+        public bool MoveNext()
+        {
+            while (_i < _was.Length || _j < _now.Length)
+            {
+                if (_j >= _now.Length || (_i < _was.Length && _was[_i] < _now[_j]))
+                {
+                    Current = (_was[_i++], false);
+                    return true;
+                }
+                if (_i >= _was.Length || _now[_j] < _was[_i])
+                {
+                    Current = (_now[_j++], true);
+                    return true;
+                }
+                // Selected before and after.
+                _i++;
+                _j++;
+            }
+            return false;
+        }
+
+        public readonly SelectionChanges GetEnumerator() => this;
     }
 }
 

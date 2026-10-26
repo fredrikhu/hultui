@@ -10,8 +10,9 @@ public static partial class AccessibilityTreeBuilder
     /// What a layout refresh found to change in an applied tree, kept by the window between
     /// refreshes so that finding nothing allocates nothing: the nodes that moved in their scroll
     /// views' content, the ones that went out of view or came into it, the scroll views whose offset
-    /// or geometry changed, the leaves made again for a change of their own properties, and the
-    /// changes a diff would have reported, in its order. Nothing is written to the tree until the
+    /// or geometry changed, the leaves made again for a change of their own properties, the lists
+    /// served on demand whose items changed in number or selection, and the changes a diff would
+    /// have reported, in its order. Nothing is written to the tree until the
     /// whole of it is found to be what a build would make (<see cref="TryRefreshInPlace"/>).
     /// </summary>
     internal sealed class LayoutRefresh
@@ -22,6 +23,7 @@ public static partial class AccessibilityTreeBuilder
         internal readonly List<(AccessibilityNode Node, Point Offset, Rect Viewport, Size Content)> Scrolls = [];
         internal readonly List<(AccessibilityNode Parent, int Index, AccessibilityNode Node)> Remade = [];
         internal readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> TextVersions = [];
+        internal readonly List<(AccessibilityNode Node, int Count, int[] Selected)> Served = [];
 
         /// <summary>Why the last walk did not match, for tests: the first thing it found that a
         /// build would make otherwise. Null when it matched.</summary>
@@ -37,7 +39,8 @@ public static partial class AccessibilityTreeBuilder
         /// <summary>Puts what was found in the tree (UI thread). Each write is one a reader on
         /// another thread sees whole: a box (<see cref="AccessibilityNode.MoveTo"/>), a state bit, a
         /// scroll view's fields (<see cref="AccessibilityNode.ReplaceScrollView"/>), a child
-        /// (<see cref="AccessibilityNode.ReplaceChild"/>).</summary>
+        /// (<see cref="AccessibilityNode.ReplaceChild"/>), a list's items served on demand
+        /// (<see cref="AccessibilityNode.ReplaceServedItems"/>).</summary>
         internal void Apply()
         {
             foreach (var (node, rect) in Moves) node.MoveTo(rect);
@@ -45,6 +48,7 @@ public static partial class AccessibilityTreeBuilder
             foreach (var (node, offset, viewport, content) in Scrolls) node.ReplaceScrollView(offset, viewport, content);
             foreach (var (node, version) in TextVersions) node.ReplaceTextVersion(version);
             foreach (var (parent, index, node) in Remade) parent.ReplaceChild(index, node);
+            foreach (var (node, count, selected) in Served) node.ReplaceServedItems(count, selected);
         }
 
         internal void Clear()
@@ -55,6 +59,7 @@ public static partial class AccessibilityTreeBuilder
             Scrolls.Clear();
             Remade.Clear();
             TextVersions.Clear();
+            Served.Clear();
         }
     }
 
@@ -155,7 +160,8 @@ public static partial class AccessibilityTreeBuilder
                 if (element is IAccessibleItemSource { PublishesItemNodes: true } items && element is not IAccessibleContentSource)
                 {
                     made.ItemSource = items;
-                    if (items.ItemCount > MaxEagerVirtualItems) made.IsVirtualItemContainer = true;
+                    int count = items.ItemCount;
+                    if (count > MaxEagerVirtualItems) ServeOnDemand(made, items, count);
                 }
                 int start = refresh.Changes.Count;
                 AccessibilityTreeDiffer.CompareNodes(refresh.Changes, applied, made, prevAbove, currAbove);
@@ -217,7 +223,13 @@ public static partial class AccessibilityTreeBuilder
         {
             if (!ReferenceEquals(node.ItemSource, items)) return refresh.Fail("a list's items");
             if (items.ItemCount > MaxEagerVirtualItems)
-                return (node.IsVirtualItemContainer && node.Children.Count == 0) || refresh.Fail("a list's items");
+            {
+                if (!node.IsVirtualItemContainer || node.Children.Count != 0) return refresh.Fail("a list's items");
+                // Its items' number and selection are the node's own: told as a diff tells them, and
+                // put in place. A node made again carries them as they are.
+                if (!mustBeLeaf) ServedItemChanges(node, items, refresh.Changes, refresh.Served);
+                return true;
+            }
             if (node.IsVirtualItemContainer) return refresh.Fail("a list's items");
             if (mustBeLeaf && items.ItemCount != 0) return refresh.Fail("a list's items");
             return MatchItems(element, items, node, place, clip, prevAbove, currAbove, refresh);

@@ -316,15 +316,101 @@ public static partial class AccessibilityTreeBuilder
         if (!source.PublishesItemNodes) return false;
         // What a bridge asks for the items it serves on demand, without finding the list first.
         node.ItemSource = source;
-        if (source.ItemCount <= MaxEagerVirtualItems)
+        int count = source.ItemCount;
+        if (count <= MaxEagerVirtualItems)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).
             BuildVirtualItems(element, source, node, place, clip);
         else
-            // Too large to expand eagerly: mark it so the bridge provisions items
-            // on demand by index instead of building/diffing them all.
-            node.IsVirtualItemContainer = true;
+            // Too large to expand eagerly: mark it so the bridge provisions items on demand by
+            // index instead of building/diffing them all. What is told of them, their number and
+            // which are selected, the list's node carries.
+            ServeOnDemand(node, source, count);
         return true;
+    }
+
+    /// <summary>Marks <paramref name="node"/> as a list whose <paramref name="count"/> items are
+    /// served on demand, with their number and selection as they are now.</summary>
+    private static void ServeOnDemand(AccessibilityNode node, IAccessibleItemSource source, int count)
+    {
+        node.IsVirtualItemContainer = true;
+        node.SetServedItems(count, SelectedItemsOf(source, count));
+    }
+
+    /// <summary>
+    /// The indices of <paramref name="source"/>'s selected items below <paramref name="count"/>,
+    /// ascending: the one at <see cref="IAccessibleItemSource.SelectedIndex"/>, or a multi-selection's
+    /// (<see cref="IAccessibleItemSource.SelectedIndices"/>), as
+    /// <see cref="IAccessibleItemSource.IsItemSelected"/> answers for each item. O(1) for one
+    /// selection; a multi-selection's are its own number.
+    /// </summary>
+    internal static int[] SelectedItemsOf(IAccessibleItemSource source, int count)
+    {
+        if (!source.CanSelectMultiple)
+        {
+            int index = source.SelectedIndex;
+            return index >= 0 && index < count ? [index] : [];
+        }
+        var indices = source.SelectedIndices;
+        int kept = 0;
+        bool ascending = true;
+        for (int i = 0; i < indices.Count; i++)
+        {
+            int index = indices[i];
+            if (index < 0 || index >= count) continue;
+            kept++;
+            if (i > 0 && index <= indices[i - 1]) ascending = false;
+        }
+        if (kept == 0) return [];
+        var selected = new int[kept];
+        int at = 0;
+        for (int i = 0; i < indices.Count; i++)
+            if (indices[i] >= 0 && indices[i] < count) selected[at++] = indices[i];
+        if (!ascending)
+        {
+            // The interface says ascending; one that is not is read as the set it holds.
+            Array.Sort(selected);
+            at = 1;
+            for (int i = 1; i < selected.Length; i++)
+                if (selected[i] != selected[at - 1]) selected[at++] = selected[i];
+            if (at < selected.Length) Array.Resize(ref selected, at);
+        }
+        return selected;
+    }
+
+    /// <summary>Whether <paramref name="told"/> holds the items of <paramref name="source"/> that are
+    /// selected now (below <paramref name="count"/>), without making a list of them for one selection.</summary>
+    private static bool SameSelection(ServedItems told, IAccessibleItemSource source, int count)
+    {
+        if (!source.CanSelectMultiple)
+        {
+            int index = source.SelectedIndex;
+            var selected = told.Selected;
+            return index >= 0 && index < count ? selected.Length == 1 && selected[0] == index : selected.Length == 0;
+        }
+        return told.Selected.SequenceEqual(SelectedItemsOf(source, count));
+    }
+
+    /// <summary>
+    /// What a change of a list served on demand tells, between what <paramref name="listNode"/> carries
+    /// and what the list has now: its items in another number (<see cref="AccessibilityProperties.ItemCount"/>),
+    /// another selection (<see cref="AccessibilityProperties.ItemSelection"/>), each added to
+    /// <paramref name="changes"/> with a stand-in for the node as it is (<see cref="AccessibilityNode.ScrollStandIn"/>),
+    /// in the order a diff lists them; and what to put on the node, in <paramref name="served"/>. The node
+    /// is not touched. Nothing when nothing changed.
+    /// </summary>
+    internal static void ServedItemChanges(AccessibilityNode listNode, IAccessibleItemSource source,
+        List<PropertyChange> changes, List<(AccessibilityNode Node, int Count, int[] Selected)> served)
+    {
+        int count = source.ItemCount;
+        var told = listNode.Served;
+        bool counted = told.Count != count;
+        bool moved = !SameSelection(told, source, count);
+        if (!counted && !moved) return;
+        var standIn = listNode.ScrollStandIn();
+        if (counted) changes.Add(new PropertyChange(listNode, AccessibilityProperties.ItemCount, standIn));
+        if (moved) changes.Add(new PropertyChange(listNode, AccessibilityProperties.ItemSelection, standIn));
+        served.Add((listNode, count, moved ? SelectedItemsOf(source, count) : told.SelectedArray));
     }
 
     /// <summary>
@@ -385,16 +471,22 @@ public static partial class AccessibilityTreeBuilder
     /// when the node's items cannot be patched and the tree has to be built again: the list does
     /// not publish item nodes (its rows are composite), or its items are not the node's (their
     /// number changed, or crossed <see cref="MaxEagerVirtualItems"/>). A list whose items are
-    /// served on demand has no item nodes and tells no selection: true, adding nothing.
+    /// served on demand has no item nodes: the selection, and the items' number, are its node's own
+    /// (<see cref="ServedItemChanges"/>), what to put on it added to <paramref name="served"/>.
     /// </summary>
     /// <remarks>Only the selected state: an item whose label changed with the move is told by the
     /// next rebuild, when the list's layout refresh comes due, as a change of items always was.</remarks>
     internal static bool ItemSelectionChanges(AccessibilityNode listNode, IAccessibleItemSource source,
-        List<PropertyChange> changes)
+        List<PropertyChange> changes, List<(AccessibilityNode Node, int Count, int[] Selected)> served)
     {
         if (!source.PublishesItemNodes) return false;
         int count = source.ItemCount;
-        if (count > MaxEagerVirtualItems) return listNode.IsVirtualItemContainer;
+        if (count > MaxEagerVirtualItems)
+        {
+            if (!listNode.IsVirtualItemContainer) return false;
+            ServedItemChanges(listNode, source, changes, served);
+            return true;
+        }
         if (listNode.IsVirtualItemContainer) return false;
         var items = listNode.Children;
         if (items.Count != count) return false;

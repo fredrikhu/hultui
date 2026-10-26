@@ -178,14 +178,16 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     private const int MaxPatchedLeaves = 32;
     // Kept for the patch: the nodes of the moved lists and texts and the changed leaves in the applied
     // tree, sorted into tree order, each with its element, its kind and its place in the tree (the
-    // child indices from the root, in _a11yPaths); the changes found; each text's new version and each
-    // leaf's new node, put in place once every change of the frame is found; the element's ancestors,
-    // bottom up, while its node is looked for (FindNodeDown).
+    // child indices from the root, in _a11yPaths); the changes found; each text's new version, each
+    // leaf's new node and each list's items served on demand (their number and selection), put in place
+    // once every change of the frame is found; the element's ancestors, bottom up, while its node is
+    // looked for (FindNodeDown).
     private readonly List<A11yPatchTarget> _a11yPatchTargets = [];
     private readonly List<int> _a11yPaths = [];
     private readonly List<PropertyChange> _a11ySelectionChanges = [];
     private readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> _a11yTextVersions = [];
     private readonly List<(A11yPatchTarget Target, AccessibilityNode Node)> _a11yRemade = [];
+    private readonly List<(AccessibilityNode Node, int Count, int[] Selected)> _a11yServed = [];
     private readonly List<Element> _a11yChain = [];
     // Kept for the layout refresh made in place (TryRefreshA11yInPlace): what it finds to change, and
     // the open overlays whose parts follow the root's children in the tree.
@@ -807,7 +809,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
     /// <summary>
     /// Changes of a few nodes' own properties, told without a rebuild: a move of a list's selection
-    /// (the selected state of the item nodes it changed is marked), of a text's caret or selection (its
+    /// (the selected state of the item nodes it changed is marked; a list whose items are served on
+    /// demand has none, and its node takes the selection, and its items' number), of a text's caret or selection (its
     /// new version goes on its node), and a change of a leaf's own properties — a name, a description,
     /// an expanded state, a value, a toggle, a range — for which the leaf's node is made again and put
     /// in its place, all on the applied tree in place; then the bridge is handed those changes, which
@@ -832,6 +835,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         var changes = _a11ySelectionChanges;
         var versions = _a11yTextVersions;
         var remade = _a11yRemade;
+        var served = _a11yServed;
         try
         {
             if (!AddPatchTargets(tree, _a11ySelectionMoved, A11yPatchKind.List)
@@ -849,7 +853,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 switch (target.Kind)
                 {
                     case A11yPatchKind.List:
-                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes)) return false;
+                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes, served))
+                            return false;
                         break;
                     case A11yPatchKind.Text:
                         if (element.AccessibleTextSource is not IVersionedAccessibleTextSource source
@@ -866,7 +871,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             foreach (var (node, version) in versions) node.ReplaceTextVersion(version);
             foreach (var (target, node) in remade)
                 target.Node.Parent!.ReplaceChild(_a11yPaths[target.PathStart + target.PathLength - 1], node);
-            if (changes.Count == 0) return true;   // moved back, or served on demand: nothing to tell
+            foreach (var (node, count, selected) in served) node.ReplaceServedItems(count, selected);
+            if (changes.Count == 0) return true;   // moved back: nothing to tell
             var patch = new TreeDiff();
             foreach (var change in changes)
             {
@@ -884,6 +890,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             changes.Clear();
             versions.Clear();
             remade.Clear();
+            served.Clear();
         }
     }
 
