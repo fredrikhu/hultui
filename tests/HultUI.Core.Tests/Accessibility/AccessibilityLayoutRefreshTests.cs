@@ -225,6 +225,9 @@ public class AccessibilityLayoutRefreshTests
         var row = viewNode.Children[12];
         var vp = viewNode.ScrollExtent!.Value.Viewport;
         var (a, b) = ((new Point(0, 40), new Size(300, 600)), (new Point(0, 90), new Size(300, 900)));
+        // Start from one of the two sets: a reader that runs before the first write (a busy
+        // two-core runner) would otherwise count the built tree's own values as torn.
+        viewNode.ReplaceScrollView(a.Item1, vp, a.Item2);
         int torn = 0, reads = 0;
         using var stop = new ManualResetEventSlim();
         var reader = new Thread(() =>
