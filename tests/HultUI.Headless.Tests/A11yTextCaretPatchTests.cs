@@ -110,11 +110,13 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.Equal(0, change.Previous!.Text!.Caret);
         Assert.Equal(editor.Id, change.Previous.ElementId);
 
-        // The next rebuild compares against the marked tree: it does not tell the move again.
+        // The next refresh compares against the marked tree: it does not tell the move again. (The
+        // label's layout refresh brings it, in place.)
         bridge.ClearDiffs();
+        int refreshes = session.Window.Window.AccessibilityLayoutRefreshesInPlace;
         label.Content += "!";
         session.PumpFrame();
-        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt + session.Window.Window.AccessibilityLayoutRefreshesInPlace - refreshes);
         Assert.DoesNotContain(bridge.Diffs.SelectMany(d => d.PropertyChanged),
             c => c.PropertyName == AccessibilityProperties.TextSelection);
         Assert.Equal(1, NodeOf(bridge.CurrentTree!, editor).Text!.Caret);

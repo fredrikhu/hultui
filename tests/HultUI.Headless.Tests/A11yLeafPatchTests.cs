@@ -573,13 +573,11 @@ public class A11yLeafPatchTests
         Assert.Equal(Play(which, forceRebuild: true, AtSpi).Told, run.Told);
     }
 
-    /// <summary>A change that marks no layout builds no tree at all; a label's (which marks layout)
-    /// builds the one the coalesced layout refresh brings, and the patch tells its name before it.</summary>
-    private static void AssertNoTreeForTheChange(string which, Run run)
-    {
-        bool layout = which is "label" or "label in an explicitly named button" or "two leaves, reverse order" or "selection and leaves";
-        Assert.All(run.TreesPerStep, built => Assert.Equal(layout ? 1 : 0, built));
-    }
+    /// <summary>No change builds a tree: one that marks no layout is patched, and a label's (which
+    /// marks layout) is told by the coalesced layout refresh it brings, which finds the same nodes and
+    /// brings the applied tree up to date in place.</summary>
+    private static void AssertNoTreeForTheChange(string which, Run run) =>
+        Assert.All(run.TreesPerStep, built => Assert.Equal(0, built));
 
     [WindowsTheory]
     [MemberData(nameof(Patched))]

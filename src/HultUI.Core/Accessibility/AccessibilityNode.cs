@@ -20,7 +20,7 @@ public sealed class AccessibilityNode
     {
         get
         {
-            var rect = _rect;
+            var rect = ReadUnscrolledRect();
             var above = ScrollAbove();
             return new Rect(rect.X - above.X, rect.Y - above.Y, rect.Width, rect.Height);
         }
@@ -29,12 +29,54 @@ public sealed class AccessibilityNode
     /// <summary>
     /// The node's box where it sits in the content of the scroll views above it, in layout units:
     /// <see cref="BoundingRect"/> with their offsets added back. What the builder makes and the
-    /// differ compares: a scroll moves a node on screen and leaves this as it was.
+    /// differ compares: a scroll moves a node on screen and leaves this as it was. UI thread, the
+    /// one that moves it (<see cref="MoveTo"/>).
     /// </summary>
-    internal Rect UnscrolledRect => _rect;
+    internal Rect UnscrolledRect => new(_x, _y, _width, _height);
 
-    // The node's box in its scroll views' content (UnscrolledRect).
-    private readonly Rect _rect;
+    // The node's box in its scroll views' content (UnscrolledRect). A layout refresh that finds
+    // the node where it was in the tree moves it in place (MoveTo) while readers on other threads
+    // read it: _rectVersion is odd while it is written, and a reader that saw it odd or changed
+    // reads again, so each read is the old box or the new, whole. In the node's spare bytes: it is
+    // still 80 bytes.
+    private float _x, _y, _width, _height;
+    private int _rectVersion;
+
+    /// <summary>The node's box in its scroll views' content, whole, on any thread (see
+    /// <see cref="MoveTo"/>).</summary>
+    private Rect ReadUnscrolledRect()
+    {
+        var spinner = new SpinWait();
+        while (true)
+        {
+            int version = Volatile.Read(ref _rectVersion);
+            if ((version & 1) == 0)
+            {
+                // Each read an acquire: none of them moves after the second read of the version.
+                var rect = new Rect(Volatile.Read(ref _x), Volatile.Read(ref _y),
+                    Volatile.Read(ref _width), Volatile.Read(ref _height));
+                if (Volatile.Read(ref _rectVersion) == version) return rect;
+            }
+            spinner.SpinOnce();
+        }
+    }
+
+    /// <summary>
+    /// Moves the node to <paramref name="unscrolledRect"/> in a tree that is out (UI thread): a
+    /// layout refresh found it moved or resized in its scroll views' content. A reader on another
+    /// thread reads the box it had or this one, whole (<see cref="BoundingRect"/>).
+    /// </summary>
+    internal void MoveTo(Rect unscrolledRect)
+    {
+        // Odd, with a full fence: none of the writes below moves before it.
+        Interlocked.Increment(ref _rectVersion);
+        _x = unscrolledRect.X;
+        _y = unscrolledRect.Y;
+        _width = unscrolledRect.Width;
+        _height = unscrolledRect.Height;
+        // Even again, a release: none of the writes above moves after it.
+        Volatile.Write(ref _rectVersion, _rectVersion + 1);
+    }
 
     /// <summary>
     /// How far the scroll views above this node are scrolled, summed: the offsets of its
@@ -104,7 +146,7 @@ public sealed class AccessibilityNode
 
     /// <summary>Gives the node its scroll view's geometry (<see cref="ScrollExtent"/>) and offset. The
     /// viewport is where it sits in the content of the scroll views above, as the node's own box
-    /// (<see cref="UnscrolledRect"/>).</summary>
+    /// (<see cref="UnscrolledRect"/>). While the tree is built.</summary>
     internal void SetScrollView(Point offset, Rect viewport, Size content)
     {
         var scroll = Scroll;
@@ -113,6 +155,53 @@ public sealed class AccessibilityNode
         scroll.Content = content;
         scroll.IsScrollView = true;
     }
+
+    /// <summary>Whether the node's scroll view has <paramref name="offset"/>,
+    /// <paramref name="viewport"/> (in the content of the views above) and
+    /// <paramref name="content"/> now.</summary>
+    internal bool HasScrollView(Point offset, Rect viewport, Size content) =>
+        _extras?.Scroll is { IsScrollView: true } s && s.Offset == offset && s.Viewport == viewport && s.Content == content;
+
+    /// <summary>
+    /// Gives a scroll view's node in a tree that is out its scroll view's offset and geometry now
+    /// (UI thread): one reference write of new fields in place of the old, so a reader on another
+    /// thread reads the offset, the viewport and the content as they were or as they are, each
+    /// set whole. The list it stands for stays.
+    /// </summary>
+    internal void ReplaceScrollView(Point offset, Rect viewport, Size content)
+    {
+        var extras = Extras;
+        var scroll = new ScrollFields
+        {
+            Offset = offset,
+            Viewport = viewport,
+            Content = content,
+            IsScrollView = true,
+            Items = extras.Scroll?.Items,
+        };
+        Volatile.Write(ref extras.Scroll, scroll);
+    }
+
+    /// <summary>
+    /// A node of no tree standing for this one as its scroll view is now, before a layout refresh
+    /// gives it another offset in place (<see cref="ReplaceScrollView"/>): what the refresh hands a
+    /// bridge as a scroll's previous node, which a diff takes from the previous tree. It carries
+    /// what a bridge reads of a scroll's previous node — the offset and the geometry — and the id,
+    /// the role and the name. Its fields are the node's, which are never written again once out.
+    /// </summary>
+    internal AccessibilityNode ScrollStandIn() =>
+        new(ElementId, Role, Name, description: null, BoundingRect)
+        {
+            _extras = new RareFields { Scroll = _extras?.Scroll },
+        };
+
+    /// <summary>The value the node was built with: no text made on request (<see cref="Value"/>
+    /// makes one).</summary>
+    internal string? BuiltValue => _extras?.Value;
+
+    /// <summary>The text the node was built with, made with the tree: none made on request
+    /// (<see cref="Text"/> makes one).</summary>
+    internal AccessibleText? BuiltText => _extras?.Text;
 
     public bool IsFocusable => (_flags & FocusableBit) != 0;
 
@@ -303,7 +392,9 @@ public sealed class AccessibilityNode
     /// get: a description, a value, an automation id, a scroll offset, native content, text. A
     /// tree is rebuilt in full on every change a reader can see, and these were 64 bytes of every
     /// node (136 → 80) for the few that use them: a text field, a scroll view, a described control.
-    /// Written while the tree is built, on the UI thread, never after it is out.
+    /// Written while the tree is built, on the UI thread; once it is out, only a text's version
+    /// (<see cref="ReplaceTextVersion"/>) and a scroll view's fields (<see cref="ReplaceScrollView"/>)
+    /// are, each one reference write.
     /// </summary>
     private sealed class RareFields
     {
@@ -321,7 +412,9 @@ public sealed class AccessibilityNode
     /// <summary>
     /// A scroll view's or a list's fields, in an object of their own that only those nodes get: the
     /// offset was the one of them a rare field had, and RareFields stays the size it was for every
-    /// other node that has one (a text field, a described control).
+    /// other node that has one (a text field, a described control). Written while the tree is
+    /// built, never once it is out: a layout refresh puts new ones in place
+    /// (<see cref="ReplaceScrollView"/>).
     /// </summary>
     private sealed class ScrollFields
     {
@@ -385,7 +478,10 @@ public sealed class AccessibilityNode
         ElementId = elementId;
         Role = role;
         Name = name;
-        _rect = unscrolledRect;
+        _x = unscrolledRect.X;
+        _y = unscrolledRect.Y;
+        _width = unscrolledRect.Width;
+        _height = unscrolledRect.Height;
         if (description is not null || value is not null || automationId is not null)
             _extras = new RareFields { Description = description, Value = value, AutomationId = automationId };
         _flags = (ushort)((isFocusable ? FocusableBit : 0) | (isFocused ? FocusedBit : 0)

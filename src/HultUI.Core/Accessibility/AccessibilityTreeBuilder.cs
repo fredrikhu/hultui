@@ -5,7 +5,7 @@ using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Accessibility;
 
-public static class AccessibilityTreeBuilder
+public static partial class AccessibilityTreeBuilder
 {
     /// <summary>
     /// Switch point between the two ways a virtualized list exposes its items.
@@ -268,24 +268,8 @@ public static class AccessibilityTreeBuilder
             var item = data[i];
             var b = item.Bounds;
             float x = b.X / scale, y = b.Y / scale, width = b.Width / scale, height = b.Height / scale;
-            var rect = new Rect(unscrolled.X + x, unscrolled.Y + y, width, height);
-            var node = new AccessibilityNode(
-                ContentNodeId.ForSlot(ownerSlot, item.Key),
-                item.Role,
-                item.Name,
-                item.Description,
-                rect,
-                isFocusable: item.IsFocusable,
-                isFocused: item.IsFocused,
-                isEnabled: item.IsEnabled,
-                isToggled: item.IsToggled,
-                value: item.Value,
-                expanded: item.Expanded,
-                // Described content says checked for a radio or a tab; for those, that is selected.
-                isSelected: item.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab ? item.IsToggled : null)
-            {
-                IsOffscreen = !RectsIntersect(clip, new Rect(onScreen.X + x, onScreen.Y + y, width, height)),
-            };
+            var node = MakeContentNode(ownerSlot, item, new Rect(unscrolled.X + x, unscrolled.Y + y, width, height),
+                !RectsIntersect(clip, new Rect(onScreen.X + x, onScreen.Y + y, width, height)));
             var children = item.Children;
             if (children.Count > 0)
                 node.SetChildren(BuildContent(ownerSlot, children, unscrolled, onScreen, scale, clip));
@@ -293,6 +277,30 @@ public static class AccessibilityTreeBuilder
         }
         return nodes;
     }
+
+    /// <summary>The node of <paramref name="item"/>, described content of the source holding
+    /// <paramref name="ownerSlot"/>, without its children.</summary>
+    private static AccessibilityNode MakeContentNode(uint ownerSlot, AccessibleContentNode item, Rect unscrolled,
+        bool offscreen) =>
+        new(ContentNodeId.ForSlot(ownerSlot, item.Key),
+            item.Role,
+            item.Name,
+            item.Description,
+            unscrolled,
+            isFocusable: item.IsFocusable,
+            isFocused: item.IsFocused,
+            isEnabled: item.IsEnabled,
+            isToggled: item.IsToggled,
+            value: item.Value,
+            expanded: item.Expanded,
+            // Described content says checked for a radio or a tab; for those, that is selected.
+            isSelected: ContentSelected(item))
+        {
+            IsOffscreen = offscreen,
+        };
+
+    private static bool? ContentSelected(AccessibleContentNode item) =>
+        item.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab ? item.IsToggled : null;
 
     /// <summary>
     /// If the element is a virtualized list small enough to expand eagerly, emits
@@ -343,26 +351,31 @@ public static class AccessibilityTreeBuilder
             // itself; everything else stacks at one height.
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
-            items[i] = new AccessibilityNode(
-                VirtualItemId.ForSlot(slot, i),
-                AccessibilityRole.ListItem,
-                source.GetItemLabel(i),
-                description: null,
-                place.Unscrolled(box),
-                isFocusable: false,
-                isFocused: false,
-                isEnabled: true,
-                isToggled: source.ItemIsToggled(i),
-                value: null,
-                // In the node, so the differ sees a move of the selection: without it a move that
-                // scrolled nothing changed no node, and no reader heard which item was selected.
-                isSelected: source.IsItemSelected(i))
-            {
-                IsOffscreen = !RectsIntersect(clip, place.OnScreen(box)),
-            };
+            items[i] = MakeItemNode(slot, i, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
+                source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
         }
         listNode.SetChildren(items);
     }
+
+    /// <summary>The node of item <paramref name="index"/> of the list holding <paramref name="slot"/>.</summary>
+    private static AccessibilityNode MakeItemNode(uint slot, int index, string? label, Rect unscrolled,
+        bool? toggled, bool selected, bool offscreen) =>
+        new(VirtualItemId.ForSlot(slot, index),
+            AccessibilityRole.ListItem,
+            label,
+            description: null,
+            unscrolled,
+            isFocusable: false,
+            isFocused: false,
+            isEnabled: true,
+            isToggled: toggled,
+            value: null,
+            // In the node, so the differ sees a move of the selection: without it a move that
+            // scrolled nothing changed no node, and no reader heard which item was selected.
+            isSelected: selected)
+        {
+            IsOffscreen = offscreen,
+        };
 
     /// <summary>
     /// What a move of a list's selection changes in an applied tree's node of the list, without

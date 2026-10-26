@@ -168,8 +168,9 @@ public class VirtualListItemLabelTests
     }
 
     /// <summary>The one-argument template promises nothing, so its labels are asked for on
-    /// every tree, as they always were — also a tree that a scroll brings, with no rebuild of
-    /// the owner to make the list again.</summary>
+    /// every tree, as they always were — also on the refresh a scroll brings, with no rebuild of
+    /// the owner to make the list again, which compares every item's label with its node's as a
+    /// tree's diff would.</summary>
     [Fact]
     public void AOneArgumentList_LabelsEveryItemOnEveryTree()
     {
@@ -180,20 +181,22 @@ public class VirtualListItemLabelTests
         RebuildAndBuildTree(session, pane);
         Assert.Equal(Count, pane.Labelled);
 
-        Assert.Equal(Count * ScrollAndBuildTree(session, pane), pane.Labelled - Count);
+        Assert.Equal(Count * ScrollAndRefresh(session, pane), pane.Labelled - Count);
     }
 
     /// <summary>Scrolls the list a row, with no rebuild, and pumps past the 100 ms a scroll's
-    /// refresh of the tree waits; returns the trees built.</summary>
-    private static int ScrollAndBuildTree(HeadlessSession session, Pane pane)
+    /// refresh of the tree waits; returns the refreshes: trees built, or the applied tree brought
+    /// up to date in place.</summary>
+    private static int ScrollAndRefresh(HeadlessSession session, Pane pane)
     {
-        int trees = session.Window.AccessibilityTreesBuilt;
+        int Refreshes() => session.Window.AccessibilityTreesBuilt + session.Window.Window.AccessibilityLayoutRefreshesInPlace;
+        int refreshes = Refreshes();
         pane.List.Current!.ScrollOffsetY += 24f;
         session.PumpFrame();
         session.PumpFrame(TimeSpan.FromMilliseconds(120));
-        int built = session.Window.AccessibilityTreesBuilt - trees;
-        Assert.True(built > 0, "the scroll built no accessibility tree");
-        return built;
+        int made = Refreshes() - refreshes;
+        Assert.True(made > 0, "the scroll refreshed no accessibility tree");
+        return made;
     }
 
     [Fact]
@@ -203,7 +206,7 @@ public class VirtualListItemLabelTests
         using var __ = session;
         pane.Labelled = 0;
 
-        ScrollAndBuildTree(session, pane);
+        ScrollAndRefresh(session, pane);
 
         Assert.Equal(0, pane.Labelled);
     }

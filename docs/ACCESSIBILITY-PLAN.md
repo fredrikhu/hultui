@@ -233,16 +233,40 @@ description or expanded state under an ancestor named from its content (a button
 with no name of its own), more than 32 leaves in a frame, or a leaf's change while a focus
 move waits for its node. A label's change marks layout: its name is patched, and the bounds
 it moved (its own and its neighbours') are told by the coalesced layout refresh, as every
-move is — or by its leading edge at once, which rebuilds, when no rebuild came in the last
-100 ms. Two consequences, both of the coalescing: a reader asking within 100 ms reads the old
-bounds, and a node removed within the wait never had its new bounds told.
+move is — or by its leading edge at once, when no refresh came in the last 100 ms. Two
+consequences, both of the coalescing: a reader asking within 100 ms reads the old bounds, and a
+node removed within the wait never had its new bounds told.
+
+The coalesced layout refresh builds no tree either where a build would make the same nodes
+(2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
+views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),
+and its box on screen (`BoundingRect`) is that less the offsets of the scroll views above it, read
+up its parents, summed from the root down as the builder sums them: the same value as before, and
+a scroll is one scroll view's offset. When the refresh comes due, the window walks the elements
+against the applied tree by the builder's own rules (`AccessibilityTreeBuilder.TryRefreshInPlace`:
+the nodes it would make, flattened where it flattens, a list's items, described content). Where
+every node is the one a build would put there, it writes what changed in place — a box moved in its
+content, an offscreen state, a scroll view's offset and geometry, a text's new version, a leaf made
+again for its own properties as a leaf's patch makes it — and hands the bridges the changes the
+build's diff would have reported, in its order (`ApplyPatchedProperties`; a scroll's previous node
+is a stand-in carrying the old offset). A list's selection, a caret or a leaf told since is in that,
+and a list's item labels are compared as the diff compares them. A wheel turn over 1,000 rows built
+and diffed 3,001 nodes (43 KB); a reader walking a list at its own pace, a ticking elapsed label and
+a label's edit beside 1,000 rows built one tree each (79–174 KB); now 0.2–8 KB, the same events.
+Where a build would make other nodes it builds the tree, as before: a node added, gone or moved to
+another parent (a box that gained a click handler or a name, a list's realized composite rows), a
+list's items in another number, a node with children whose own properties changed, the root's own,
+or a change no diff tells (whether a node is focusable, another text source).
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
 access). Since 2026-10-24 (plan 17 round 4) every read a client makes answers
 from the element's node in the applied tree, which never changes once applied (a leaf
-whose own properties changed gets a new node, put in place of the old one, above):
+whose own properties changed gets a new node, put in place of the old one, above) but for
+what a layout refresh writes in place since 2026-10-26: a box, under a version a reader on
+another thread checks so it reads the old box or the new, whole; an offscreen state; a scroll
+view's offset, viewport and content size, replaced as one object:
 properties and patterns alike — a text input's value, a toggle, a range, a list
 item's selected state, a list's selection, a scroll view's percents (the node
 carries its viewport and content size, `AccessibilityNode.ScrollExtent`). Pattern

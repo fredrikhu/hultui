@@ -125,6 +125,18 @@ public static class AccessibilityTreeDiffer
     internal static void CompareNodes(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr) =>
         CompareProperties(changes, prev, curr, default, default);
 
+    /// <summary>
+    /// The property changes a diff reports between a node and the same node made again in the same
+    /// place of a tree (a layout refresh's, <see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>),
+    /// added to <paramref name="changes"/> in the order a diff lists them.
+    /// </summary>
+    /// <param name="prevScroll">How far the scroll views above <paramref name="prev"/> are scrolled,
+    /// summed, as a diff sums them on its way down.</param>
+    /// <param name="currScroll">The same above <paramref name="curr"/>.</param>
+    internal static void CompareNodes(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr,
+        Point prevScroll, Point currScroll) =>
+        CompareProperties(changes, prev, curr, prevScroll, currScroll);
+
     private static void CompareProperties(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr,
         Point prevScroll, Point currScroll)
     {

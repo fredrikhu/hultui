@@ -18,7 +18,9 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// from <see cref="Node"/>: the differ compares neither, so a copy taken when the wrapper was
 /// made answered for good — a group that became a dialog stayed a group. The node is the
 /// current tree's (the bridge moves every wrapper there after each diff), never changes once
-/// applied, and is no element, so reading it from a UIA worker thread is safe.
+/// applied but for what a layout refresh writes in place (its box, its offscreen state, a scroll
+/// view's fields, each read whole), and is no element, so reading it from a UIA worker thread is
+/// safe.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaFragment : INativeSimple, INativeFragment
