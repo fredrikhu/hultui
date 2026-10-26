@@ -43,6 +43,26 @@ public static class AccessibilityProperties
     public const string ScrollPosition = "ScrollPosition";
 
     /// <summary>
+    /// A list whose items are served on demand (<see cref="AccessibilityNode.IsVirtualItemContainer"/>,
+    /// over 2,000 items) has another number of them. Its items have no nodes to add or remove, so
+    /// the change is the list node's own. It carries the previous node, so a bridge can tell how
+    /// many came or went: UIA raises what a list of item nodes raises for them (ChildrenBulkAdded
+    /// or ChildrenBulkRemoved on the list), AT-SPI tells the list's children changed and lets go of
+    /// the item objects it made past the new end.
+    /// </summary>
+    public const string ItemCount = "ItemCount";
+
+    /// <summary>
+    /// Which items of a list served on demand are selected changed (a move of its selection). Its
+    /// items have no nodes to carry their selected state, so the list node carries the selected
+    /// indices and the change is its own. It carries the previous node, so a bridge can tell each
+    /// item whose state changed, the one that had the selection and the one that has it, and tell
+    /// it on that item as it tells an item node's <see cref="IsSelected"/>: UIA's
+    /// SelectionItem.IsSelected, AT-SPI's state-changed:selected.
+    /// </summary>
+    public const string ItemSelection = "ItemSelection";
+
+    /// <summary>
     /// <see cref="AccessibilityNode.NativeContent"/> changed: a foreign tree arrived under the
     /// node, left it, or was replaced. A structure change more than a property one — the
     /// node's children are different — and a bridge that joins foreign trees treats it so.

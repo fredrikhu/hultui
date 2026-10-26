@@ -94,6 +94,8 @@ public static class ElementRenderer
             var clipRect = element.Layout.AbsoluteContentBox;
             ctx.PushClip(clipRect);
             ctx.PushTranslate(-scrollView.ScrollOffsetX, -scrollView.ScrollOffsetY);
+            // Under the children, where they are: a virtual list's own selection highlight.
+            scrollView.RenderUnderContent(ctx);
 
             // The viewport in screen space (the clip, shifted by the transform in
             // effect when it was pushed). Children are drawn under an extra scroll

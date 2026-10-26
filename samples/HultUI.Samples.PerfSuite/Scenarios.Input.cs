@@ -75,6 +75,10 @@ static partial class Scenarios
             "The same keystroke with the diff flattened once and the list on item rows (two-argument RenderWith): the rebuild makes no row",
             ctx => TypeBesideDiffOp(ctx, kept: true));
 
+        yield return new Scenario("input/type beside a large TextArea and checkboxes",
+            $"Type into a summary field whose component rebuilds a commit form (a description TextArea, two checkboxes) beside a {JsonLines:N0}-line response in a read-only TextArea, every one of them patched with what it shows",
+            TypeBesideTextAreaOp);
+
         yield return new Scenario("input/type in 2,000-line TextArea",
             "Type one character in the middle of a 2,000-line TextArea",
             ctx =>

@@ -233,16 +233,40 @@ description or expanded state under an ancestor named from its content (a button
 with no name of its own), more than 32 leaves in a frame, or a leaf's change while a focus
 move waits for its node. A label's change marks layout: its name is patched, and the bounds
 it moved (its own and its neighbours') are told by the coalesced layout refresh, as every
-move is — or by its leading edge at once, which rebuilds, when no rebuild came in the last
-100 ms. Two consequences, both of the coalescing: a reader asking within 100 ms reads the old
-bounds, and a node removed within the wait never had its new bounds told.
+move is — or by its leading edge at once, when no refresh came in the last 100 ms. Two
+consequences, both of the coalescing: a reader asking within 100 ms reads the old bounds, and a
+node removed within the wait never had its new bounds told.
+
+The coalesced layout refresh builds no tree either where a build would make the same nodes
+(2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
+views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),
+and its box on screen (`BoundingRect`) is that less the offsets of the scroll views above it, read
+up its parents, summed from the root down as the builder sums them: the same value as before, and
+a scroll is one scroll view's offset. When the refresh comes due, the window walks the elements
+against the applied tree by the builder's own rules (`AccessibilityTreeBuilder.TryRefreshInPlace`:
+the nodes it would make, flattened where it flattens, a list's items, described content). Where
+every node is the one a build would put there, it writes what changed in place — a box moved in its
+content, an offscreen state, a scroll view's offset and geometry, a text's new version, a leaf made
+again for its own properties as a leaf's patch makes it — and hands the bridges the changes the
+build's diff would have reported, in its order (`ApplyPatchedProperties`; a scroll's previous node
+is a stand-in carrying the old offset). A list's selection, a caret or a leaf told since is in that,
+and a list's item labels are compared as the diff compares them. A wheel turn over 1,000 rows built
+and diffed 3,001 nodes (43 KB); a reader walking a list at its own pace, a ticking elapsed label and
+a label's edit beside 1,000 rows built one tree each (79–174 KB); now 0.2–8 KB, the same events.
+Where a build would make other nodes it builds the tree, as before: a node added, gone or moved to
+another parent (a box that gained a click handler or a name, a list's realized composite rows), a
+list's items in another number, a node with children whose own properties changed, the root's own,
+or a change no diff tells (whether a node is focusable, another text source).
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
 time (preferred — matches the design above and avoids cross-thread element
 access). Since 2026-10-24 (plan 17 round 4) every read a client makes answers
 from the element's node in the applied tree, which never changes once applied (a leaf
-whose own properties changed gets a new node, put in place of the old one, above):
+whose own properties changed gets a new node, put in place of the old one, above) but for
+what a layout refresh writes in place since 2026-10-26: a box, under a version a reader on
+another thread checks so it reads the old box or the new, whole; an offscreen state; a scroll
+view's offset, viewport and content size, replaced as one object:
 properties and patterns alike — a text input's value, a toggle, a range, a list
 item's selected state, a list's selection, a scroll view's percents (the node
 carries its viewport and content size, `AccessibilityNode.ScrollExtent`). Pattern
@@ -322,6 +346,14 @@ Files:
       in WSL (reverse, swap, rotate, last to front, and a reverse with an insert, a removal or an
       append) read the old order; now all 17 insert and reorder cases match. UIA raises
       `ChildrenReordered` on the parent, as it did.
+    - **Geometry from the node (2026-10-26, plan 17 round 5).** An object reads its box and its
+      offscreen state from its node when a client asks (`AtSpiAccessible.Node`; GetExtents,
+      Contains and the state set read the box once, as it is now). A layout refresh made in place
+      (above) moves boxes, scrolls views and takes nodes out of view in the applied tree and sends
+      nothing for a move or a scroll, so its patch keeps every object and points a leaf's object at
+      the node made again for it. The objects were made again for every node on every refresh to
+      copy the geometry: 772 KB a wheel turn over 1,000 rows, 301 KB a key of a reader's walk
+      beside details, 518 KB a label's edit beside 1,000 rows; now 0.2, 0.8 and 0.4 KB.
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
@@ -379,10 +411,53 @@ navigate, and act on the whole list at any size. Built in increments, all done:
   bounds on demand rather than re-emitting per-item events — verified with a
   100k-item list (navigate, hit-test, invoke all instant). The cap is now just a
   fast-path switch, not a ceiling.
+- **Increment 4 (done, plan 17 round 5 step 14: 167b4ef9, 46a5aa12, 69a9fac2): told and served
+  the same on both bridges.**
+  Until then a list over 2,000 items told a screen reader nothing when its selection moved
+  (40 moves over 3,000 items: 0 events on either bridge, where 1,500 items raised 80), and
+  AT-SPI could not reach its items at all (the list's object had no children). Now the list's
+  node carries its items' number and the selected indices (`AccessibilityNode.Served`, read
+  whole on any thread), and a change of either is the node's own:
+  `AccessibilityProperties.ItemSelection` and `ItemCount`, with the node as it was for the
+  change's previous node. Both are patched in place like an item node's `IsSelected` (no tree
+  is built for a move: 0 trees per 40 moves, as before), told by the layout refresh made in
+  place, or reported by the differ between two trees.
 
-Remaining refinements (nice-to-have): a UIA `ScrollPattern` / `ItemContainer`
-`FindItemByProperty` on the container, and the container-level `Selection` pattern
-(`ISelectionProvider.GetSelection`, needs a SAFEARRAY of providers).
+What a screen reader gets for a list of 3,000 items:
+
+| | UI Automation | AT-SPI |
+|---|---|---|
+| The list's children | `UiaVirtualItem`s, made per navigation result, as before | `ChildCount` 3,000 (was 0); `GetChildAtIndex` makes an item's object the first time it is asked for and keeps it while the list serves its items; the snapshot still publishes the list's object alone (2 objects for the window) |
+| An item's name, check state | read from the list when asked | the same |
+| An item's selected state, the list's number of items | from the list's node: what the events told | the same |
+| An item's box, offscreen | from the list's viewport and scroll (`AccessibilityNode.TryGetServedItemBox`), where its node would be | the same, in device pixels |
+| A move of the selection | `SelectionItem.IsSelected` on the item that had it and the one that has it, in item order: the same 80 events on the same items as 1,500 items | `state-changed:selected` on the two items, in item order: the same 80 signals as 1,500 items |
+| Items added or removed | `ChildrenBulkAdded` / `ChildrenBulkRemoved` on the list, as for item nodes | one `children-changed` for the first item that came or went, a `cache-remove` for each item object a client may hold past the new end (made for it, named in a signal, or every one after `GetChildren`), and the list's `cache-add` again, which sizes a caching client's list of its children (libatspi's rule, seen live in round 3) |
+| An item a client holds after it went | `UIA_E_ELEMENTNOTAVAILABLE`; after the list shrank to 2,000 items or fewer, it answers from its item's node (the same runtime id) | disposed by the `cache-remove`; its path is unknown |
+| Crossing 2,000 items either way | item nodes added or removed under the list, as before | the items keep their paths and objects: no `cache-remove` for an item that is still there |
+
+Where it differs from a list of item nodes:
+
+- **A relabelled item is not told.** Its name is read when asked. A UIA client reads it
+  live anyway; an AT-SPI client that already fetched it keeps its copy until it asks again
+  (an item node's change sends `accessible-name`). Telling it would mean keeping a label
+  per item a client holds and comparing them on every refresh.
+- **UIA raises no `ElementSelected` / `ElementAddedToSelection` events**, and neither does the
+  item-node path: both raise the `IsSelected` property changes only.
+- **No `manages-descendants` state** on the list's AT-SPI object. With it, libatspi would
+  stop keeping a list of the list's children and Orca would expect
+  `active-descendant-changed`, which neither path sends; left out so a reader treats 3,000
+  items as it treats 1,500. A candidate for a live check with Orca.
+
+The cost of telling (Release probe, 40 moves over 3,000 items, KB per move; recording
+bridge / UIA / AT-SPI): 4.01 / 4.01 / 4.01 → 4.68 / 5.04 / 5.42, where 1,500 items
+cost 4.43 / 4.79 / 5.24. O(1) a move: the list's node, a stand-in for it, the selected
+index, one event per item that changed; nothing for the items nobody asked for. In the perf
+suite's walks over 3,000 item rows: 24.4 → 24.7 KB/op with the recording bridge, 24.8 with
+UIA, no row slower.
+
+The refinements once listed here are built: the UIA `Scroll` pattern, `ItemContainer`'s
+`FindItemByProperty` and the container-level `Selection` pattern, whose selection is the node's.
 
 ## Patterns & properties supported
 
@@ -438,7 +513,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   Expand/Collapse reuse the element's click-to-toggle. A change raises the
   ExpandCollapseState property event (2026-10-05), and on Linux the node carries AT-SPI's
   `expandable` state, plus `expanded` while open, with a `state-changed:expanded` signal —
-  before that, Orca read every expandable node as a plain button.
+  before that, Orca read every expandable node as a plain button. A node that stops being
+  expandable (`AccessibleExpanded` back to null) or starts sends `state-changed:expandable` as well
+  (2026-10-25, plan 17 round 5), and `expanded` only when that bit changes: only `expanded` was
+  sent, so a caching client (libatspi) kept "expandable" for good (seen live in WSL).
 - **Table column headers** — role `ColumnHeader` (UIA HeaderItem, AT-SPI table column header),
   Invoke/click sorts (`TableView<T>`, 2026-10-05).
 - **Tabs** — per W3C Core-AAM 1.1 (2026-10-05). Role `TabList` is the strip: UIA `Tab`,
@@ -537,7 +615,7 @@ providers), a UIA `ItemContainer` on virtualized lists.
     the caret. And `TextArea` (2026-10-24, plan 17 round 4): its rows as lines, its
     `'\n'`-separated runs as paragraphs, its caret and selection, each character's box from
     where the area draws its caret, for the rows on screen and one either side (the rest
-    spaced at the average width there). Made on request from a version, as the editor's: the
+    spaced at the average width there; one ask of the render context a row, `IRenderContext.TextCaretXs`, since round 5: asked a character at a time, a keystroke with a reader reading cost 704 KB at 2,000 lines, now 309). Made on request from a version, as the editor's: the
     string by identity, the caret, the anchor, the rows and the part on screen; a keystroke
     is a text change (UIA `Text_TextChanged`, AT-SPI `text-changed` with what was inserted
     and removed, from the strings the versions hold, no tables made for it), never a value
@@ -581,8 +659,29 @@ providers), a UIA `ItemContainer` on virtualized lists.
   the next frame. Nothing the frame looked at said it changed, so an overlay reached a reader only
   when something else rebuilt the tree — usually the control's own expanded state (a dropdown's, a
   date picker's), until a leaf's expanded state was patched without a rebuild, and never for a plain
-  overlay. Property changes inside an overlay still reach no observer (its content has no parent and
-  no observer of its own): an open menu or dialog is told again only by the next rebuild.
+  overlay. **Fixed 2026-10-25 (plan 17 round 5):** changes inside an open overlay reach a reader. An
+  overlay's tree is a root of its own, so no flag of its elements reaches the window's root, and it
+  was styled, laid out and placed while it was drawn, after the accessibility phase: a component that
+  changed its children in an open dialog or command palette, a label that moved others in a menu, a
+  popover that followed its anchor, a check box toggled or a field typed into in a dialog were told
+  only when something else rebuilt the tree, often the close. Now the window styles, lays out and
+  places its overlays before the phase (`PrepareOverlays`; still outside the style and layout timers)
+  and reads what changed in the ones a reader sees: a change of children builds that overlay's part
+  of the tree again in that frame, a layout change, a move or a scroll inside on the coalesced layout
+  refresh, as in the main tree; only the part is built (`TryRebuildOverlays`), diffed against the
+  applied part and put in its place among the root node's children, and the rest of the applied tree
+  stays (a command palette's keystroke built the whole window's tree for the palette's few hundred
+  nodes). A frame that rebuilds anyway builds it whole, as before. Each such overlay's
+  content has the window's observer while it is open, so a leaf's own change inside is patched as in
+  the main tree, its node found down from the overlay's node, a child of the root node after the
+  root's own children. Tooltips stay out of both. A context menu, a menu bar's menu and a dropdown's
+  list tell a move of their selection (the arrow keys, Home and End, the pointer): the two items'
+  selected state is patched with no rebuild, as a list's (UIA SelectionItem.IsSelected, AT-SPI
+  `state-changed:selected`); it only marked the paint before, and a reader walking a menu heard
+  nothing. Their items have their places from the menu's measure, before its first frame is drawn
+  (the tree is built in that frame, before the drawing, and gave every item a zero-height box for as
+  long as the menu was open); a drawing context that measures text otherwise moves them once, and
+  tells their bounds.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

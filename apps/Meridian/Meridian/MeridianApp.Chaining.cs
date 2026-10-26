@@ -66,8 +66,8 @@ public partial class MeridianApp
                     Text.New("No assertions yet. A run counts this request as ✓ if the response is 2xx.")
                         .FontSize(12f).TextColor(Azimuth.TextMuted),
                     Flex.Row(gap: Azimuth.S2).Children(
-                        AddRowButton("＋ assert status 200", "starter-status", () => { tab.Doc.AddAssert("status equals 200"); MarkDirty(); }),
-                        AddRowButton("＋ assert time under 500 ms", "starter-time", () => { tab.Doc.AddAssert("time under 500 ms"); MarkDirty(); }))));
+                        AddRowButton("＋ assert status 200", "starter-status", () => { bool wasDirty = tab.Dirty; tab.Doc.AddAssert("status equals 200"); DocEdited(tab, wasDirty); }),
+                        AddRowButton("＋ assert time under 500 ms", "starter-time", () => { bool wasDirty = tab.Dirty; tab.Doc.AddAssert("time under 500 ms"); DocEdited(tab, wasDirty); }))));
         }
         else
         {
@@ -75,8 +75,9 @@ public partial class MeridianApp
                 col.AddChild(AssertionRow(tab, i, response));
             col.AddChild(AddRowButton("＋ add assertion", "add-assert", () =>
             {
+                bool wasDirty = tab.Dirty;
                 tab.Doc.AddAssert("status equals 200");
-                MarkDirty();
+                DocEdited(tab, wasDirty);
             }));
         }
 
@@ -86,8 +87,9 @@ public partial class MeridianApp
             col.AddChild(ExtractionRow(tab, i, response));
         col.AddChild(AddRowButton("＋ add extraction", "add-extract", () =>
         {
+            bool wasDirty = tab.Dirty;
             tab.Doc.AddExtract("body $.id -> value");
-            MarkDirty();
+            DocEdited(tab, wasDirty);
         }));
 
         scroll.AddChild(col);
@@ -108,9 +110,9 @@ public partial class MeridianApp
 
         if (spec == null)
         {
-            row.AddChild(FormInput(args, v => { tab.Doc.SetAssert(index, v); MarkDirty(); }, 0, $"assert-raw-{index}"));
+            row.AddChild(FormInput(args, v => { bool wasDirty = tab.Dirty; tab.Doc.SetAssert(index, v); DocEdited(tab, wasDirty); }, 0, $"assert-raw-{index}"));
             row.AddChild(Text.New($"! {parseError}").FontSize(10.5f).TextColor(Azimuth.StatusWarn).FlexShrink(0));
-            row.AddChild(RemoveButton($"Remove assertion {index + 1}", () => { tab.Doc.RemoveAssert(index); MarkDirty(); }));
+            row.AddChild(RemoveButton($"Remove assertion {index + 1}", () => { bool wasDirty = tab.Dirty; tab.Doc.RemoveAssert(index); DocEdited(tab, wasDirty); }));
             return row;
         }
 
@@ -144,7 +146,7 @@ public partial class MeridianApp
         row.AddChild(FormInput(spec.Expected, v => RewriteAssert(tab, index, expected: v), 0, $"assert-expected-{index}"));
 
         row.AddChild(AssertPreview(spec, response));
-        row.AddChild(RemoveButton($"Remove assertion {index + 1}", () => { tab.Doc.RemoveAssert(index); MarkDirty(); }));
+        row.AddChild(RemoveButton($"Remove assertion {index + 1}", () => { bool wasDirty = tab.Dirty; tab.Doc.RemoveAssert(index); DocEdited(tab, wasDirty); }));
         return row;
     }
 
@@ -167,8 +169,9 @@ public partial class MeridianApp
     {
         if (Directives.ParseAssert(tab.Doc.Asserts[index].Args, out _) is not { } current) return;
         string sourceText = source ?? (current.Qualifier.Length > 0 ? $"{current.Source} {current.Qualifier}" : current.Source);
+        bool wasDirty = tab.Dirty;
         tab.Doc.SetAssert(index, $"{sourceText} {op ?? current.Op} {expected ?? current.Expected}");
-        MarkDirty();
+        DocEdited(tab, wasDirty);
     }
 
     /// <summary>One extract line: source+selector · → variable · what it
@@ -181,20 +184,20 @@ public partial class MeridianApp
         var row = Flex.Row(gap: Azimuth.S2).Height(Azimuth.RowForm).FlexShrink(0).AlignItems(AlignItems.Center);
         if (spec == null)
         {
-            row.AddChild(FormInput(args, v => { tab.Doc.SetExtract(index, v); MarkDirty(); }, 0, $"extract-raw-{index}"));
+            row.AddChild(FormInput(args, v => { bool wasDirty = tab.Dirty; tab.Doc.SetExtract(index, v); DocEdited(tab, wasDirty); }, 0, $"extract-raw-{index}"));
             row.AddChild(Text.New($"! {parseError}").FontSize(10.5f).TextColor(Azimuth.StatusWarn).FlexShrink(0));
-            row.AddChild(RemoveButton($"Remove extraction {index + 1}", () => { tab.Doc.RemoveExtract(index); MarkDirty(); }));
+            row.AddChild(RemoveButton($"Remove extraction {index + 1}", () => { bool wasDirty = tab.Dirty; tab.Doc.RemoveExtract(index); DocEdited(tab, wasDirty); }));
             return row;
         }
 
         row.AddChild(FormInput($"{spec.Source} {spec.Selector}",
-            v => { tab.Doc.SetExtract(index, $"{v} -> {spec.Variable}"); MarkDirty(); }, 240, $"extract-selector-{index}"));
+            v => { bool wasDirty = tab.Dirty; tab.Doc.SetExtract(index, $"{v} -> {spec.Variable}"); DocEdited(tab, wasDirty); }, 240, $"extract-selector-{index}"));
         row.AddChild(Ui.Mono("→", 11f, Azimuth.TextFaint).FlexShrink(0));
         row.AddChild(FormInput(spec.Variable,
-            v => { tab.Doc.SetExtract(index, $"{spec.Source} {spec.Selector} -> {v}"); MarkDirty(); }, 130, $"extract-var-{index}"));
+            v => { bool wasDirty = tab.Dirty; tab.Doc.SetExtract(index, $"{spec.Source} {spec.Selector} -> {v}"); DocEdited(tab, wasDirty); }, 130, $"extract-var-{index}"));
 
         row.AddChild(ExtractPreview(tab, spec, response));
-        row.AddChild(RemoveButton($"Remove extraction {index + 1}", () => { tab.Doc.RemoveExtract(index); MarkDirty(); }));
+        row.AddChild(RemoveButton($"Remove extraction {index + 1}", () => { bool wasDirty = tab.Dirty; tab.Doc.RemoveExtract(index); DocEdited(tab, wasDirty); }));
         return row;
     }
 

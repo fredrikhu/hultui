@@ -130,9 +130,14 @@ public partial class MeridianApp : Component, IDisposable
 
     // Bumped to force a *reactive* rebuild (via the build Effect) rather than the
     // untracked MarkDirty path. Nothing subscribes through it yet in P0, but the
-    // async loaders from P1 on will — same arrangement as the other apps.
+    // async loaders from P1 on will — same arrangement as the other apps. The parts are
+    // built again too (see Part).
     private readonly Signal<int> _revision = new(0);
-    private void Rerender() => _revision.Value++;
+    private void Rerender()
+    {
+        _partRevision.Value++;
+        _revision.Value++;
+    }
 
     // Toast.
     private readonly ToastHost _toasts;
@@ -161,7 +166,8 @@ public partial class MeridianApp : Component, IDisposable
         Engine = new HttpEngine(viewerCapBytes);
         _oauth = new OAuth2(Engine);
         _responseFind = NewResponseFind();
-        _historyFind = new TextSearch(MarkDirty);
+        // History's search, walk and filters show in the History view alone (see Part).
+        _historyFind = new TextSearch(MarkViewDirty);
 
         View = MeridianView.Requests;
 
@@ -207,10 +213,14 @@ public partial class MeridianApp : Component, IDisposable
         Builds++;
         // Track the revision signal so a Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
-        _sendElapsed.Current = null;   // set again by the readout of a send in flight, if shown
+        _responsePlaced = false;
 
-        var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
+        // The title bar is a part of its own (see Part), keyed by its host.
+        var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
+        // The response panel keeps the readout of a send in flight (TickWhileSending) while it is
+        // kept; with no panel on screen there is none.
+        if (!_responsePlaced) _sendElapsed.Current = null;
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
             .Background(Azimuth.Bg)
@@ -268,8 +278,7 @@ public partial class MeridianApp : Component, IDisposable
     private Element BuildBody()
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        var rail = BuildRail(); rail.Key = "rail";
-        body.AddChild(rail);
+        body.AddChild(RailPart.Mount().FlexShrink(0));
 
         Element view = View switch
         {
@@ -589,6 +598,10 @@ public partial class MeridianApp : Component, IDisposable
     /// <summary>The elapsed readout of the shown tab's send in flight, which the tick below
     /// rewrites in place; null when the last build showed none.</summary>
     private readonly Ref<TextElement> _sendElapsed = new();
+
+    /// <summary>Whether the build under way placed the response panel (which sets
+    /// <see cref="_sendElapsed"/> when it builds).</summary>
+    private bool _responsePlaced;
 
     /// <summary>
     /// Keeps the elapsed readout current while <paramref name="sending"/> is in flight, by

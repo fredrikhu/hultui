@@ -21,7 +21,11 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
     private readonly bool _hasIcons;
     private int _hoveredIndex = -1;
 
-    // Cached item layout (computed during Render, reused for hit-testing)
+    // Each item's top and height, element-local: for hit-testing, keyboard moves, a flyout's anchor
+    // and the accessible items' bounds. Placed when the menu is measured, so they are there before
+    // its first frame is drawn (the accessibility tree is built in that frame, before the drawing,
+    // and gave every item a zero-height box for as long as the menu was open), and again as it is
+    // drawn, from the drawing context's own text heights.
     private float[] _itemYOffsets = [];
     private float[] _itemHeights = [];
 
@@ -43,10 +47,24 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
 
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerDownEvent>(OnPointerDown);
-        OnOwn<PointerLeaveEvent>(_ => { _hoveredIndex = -1; MarkPaintDirty(); });
+        OnOwn<PointerLeaveEvent>(_ => Hover(-1));
     }
 
     public int HoveredIndex => _hoveredIndex;
+
+    /// <summary>
+    /// Puts the selection — the keyboard's and the pointer's are one — on <paramref name="index"/>
+    /// (-1 for none), and tells a reader: the item nodes' selected state changes (a list's selection
+    /// move, patched into the tree with no rebuild). Only the paint was marked, so a reader moving
+    /// through a menu or a dropdown's list with the arrow keys heard nothing.
+    /// </summary>
+    private void Hover(int index)
+    {
+        if (index == _hoveredIndex) return;
+        _hoveredIndex = index;
+        MarkPaintDirty();
+        NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.IsSelected);
+    }
 
     // ──── Accessibility ────
     // The menu draws its items itself rather than building an element each, which used to
@@ -122,7 +140,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         {
             // Opening a submenu is what activating its parent means; the host owns the
             // flyout, so it is told rather than opened from here.
-            _hoveredIndex = item;
+            Hover(item);
             HoverChanged?.Invoke(item);
             return;
         }
@@ -149,17 +167,13 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         index >= 0 && index < _items.Count ? _items[index] : null;
 
     /// <summary>Top edge (element-local) of an item row, for anchoring its
-    /// flyout. Falls back to 0 before the first render pass.</summary>
+    /// flyout. Falls back to 0 before the menu is first laid out.</summary>
     internal float ItemTop(int index) =>
         index >= 0 && index < _itemYOffsets.Length ? _itemYOffsets[index] : 0f;
 
     /// <summary>Places keyboard selection directly, without walking. The dropdown uses it
     /// to open with its current value highlighted, and as the anchor for Home/End.</summary>
-    internal void SetHoveredIndex(int index)
-    {
-        _hoveredIndex = index;
-        MarkPaintDirty();
-    }
+    internal void SetHoveredIndex(int index) => Hover(index);
 
     /// <summary>Move keyboard selection up or down, skipping separators and disabled items.</summary>
     public void MoveSelection(int direction)
@@ -176,8 +190,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             var item = _items[index];
             if (!item.IsSeparator && !item.IsDisabled)
             {
-                _hoveredIndex = index;
-                MarkPaintDirty();
+                Hover(index);
                 return;
             }
         }
@@ -207,8 +220,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         int index = IndexFromPoint(evt.Position);
         if (index != _hoveredIndex)
         {
-            _hoveredIndex = index;
-            MarkPaintDirty();
+            Hover(index);
             if (index >= 0)   // gaps/separators don't close an open flyout
                 HoverChanged?.Invoke(index);
         }
@@ -252,6 +264,16 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         return -1;
     }
 
+    /// <summary>Sizes the item arrays for the items; new ones are measured again when drawn.</summary>
+    private void EnsureItemArrays()
+    {
+        if (_itemYOffsets.Length == _items.Count) return;
+        _itemYOffsets = new float[_items.Count];
+        _itemHeights = new float[_items.Count];
+        _textHeights = new float[_items.Count];
+        _measured = false;
+    }
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
         float maxLabelWidth = 0;
@@ -261,13 +283,21 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         var style = ResolvedInherited;
         var itemStyle = style with { FontSize = _theme.FontSize };
         var shortcutStyle = style with { FontSize = _theme.ShortcutFontSize };
+        EnsureItemArrays();
+        // Each item's place, worked out as Render works it out (from the drawing context's text
+        // heights, which are these): the tree reads them before the first frame is drawn.
+        float y = _theme.Padding.Top;
 
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
+            _itemYOffsets[i] = y;
             if (item.IsSeparator)
             {
-                totalHeight += _theme.SeparatorMargin * 2 + 1;
+                float sepHeight = _theme.SeparatorMargin * 2 + 1;
+                _itemHeights[i] = sepHeight;
+                y += sepHeight;
+                totalHeight += sepHeight;
                 continue;
             }
 
@@ -285,7 +315,10 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 maxShortcutWidth = Math.Max(maxShortcutWidth, arrowSize.Width);
             }
 
-            totalHeight += _theme.ItemPadding.Top + labelSize.Height + _theme.ItemPadding.Bottom;
+            float itemHeight = _theme.ItemPadding.Top + labelSize.Height + _theme.ItemPadding.Bottom;
+            _itemHeights[i] = itemHeight;
+            y += itemHeight;
+            totalHeight += itemHeight;
         }
 
         float shortcutExtra = maxShortcutWidth > 0 ? _theme.ShortcutGap + maxShortcutWidth : 0;
@@ -310,14 +343,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         ctx.DrawRoundedRect(box, new CornerRadius(_theme.CornerRadius),
             _theme.Background, _theme.BorderColor, new Thickness(_theme.BorderWidth));
 
-        // Build item layout arrays
-        if (_itemYOffsets.Length != _items.Count)
-        {
-            _itemYOffsets = new float[_items.Count];
-            _itemHeights = new float[_items.Count];
-            _textHeights = new float[_items.Count];
-            _measured = false;
-        }
+        EnsureItemArrays();
         bool measure = !_measured || _measuredStyle != itemStyle;
         _measured = true;
         _measuredStyle = itemStyle;
@@ -340,14 +366,19 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             visibleBottom = clip.Bottom;
         }
 
+        // Whether an item is not where measuring put it: a drawing context that measures text
+        // otherwise than the layout's (only a test's fixed metrics do). Its bounds are told then.
+        bool moved = false;
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
+            moved |= _itemYOffsets[i] != y;
             _itemYOffsets[i] = y;
 
             if (item.IsSeparator)
             {
                 float sepHeight = _theme.SeparatorMargin * 2 + 1;
+                moved |= _itemHeights[i] != sepHeight;
                 _itemHeights[i] = sepHeight;
                 if (box.Y + y + sepHeight > visibleTop && box.Y + y < visibleBottom)
                 {
@@ -364,6 +395,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
             if (measure) _textHeights[i] = ctx.MeasureText(item.Label, itemStyle).Height;
             float textHeight = _textHeights[i];
             float itemHeight = _theme.ItemPadding.Top + textHeight + _theme.ItemPadding.Bottom;
+            moved |= _itemHeights[i] != itemHeight;
             _itemHeights[i] = itemHeight;
             if (box.Y + y + itemHeight <= visibleTop || box.Y + y >= visibleBottom)
             {
@@ -434,6 +466,7 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         }
 
         ctx.Pop(); // clip
+        if (moved) NotifyAccessibilityPropertyChanged(Accessibility.AccessibilityProperties.BoundingRect);
     }
 
     public override bool HitTest(Point point) =>

@@ -93,6 +93,36 @@ public class MarkAllTests
         Assert.Equal(new[] { "alpha.txt" }, Marks(t).Order());
     }
 
+    /// <summary>Insert marks the row under the cursor and moves down — one build of the window,
+    /// with the mark in it. It built twice: once for the move and once more after it.</summary>
+    [Fact]
+    public void Insert_MarksAndMovesOn_InOneBuild()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.WriteLeft("a.txt", "one");
+        t.WriteLeft("b.txt", "two");
+        t.WriteLeft("c.txt", "three");
+        t.Open();
+        t.PutCursorOn('L', "a.txt");
+        int cursor = t.Cursor('L');
+
+        int builds = t.Field<int>("_builds");
+        t.Session.Window.PressKey(KeyCode.Insert);
+        Assert.Equal(1, t.Field<int>("_builds") - builds);
+        t.Session.PumpFrame();
+
+        Assert.Equal(new[] { "a.txt" }, Marks(t).Order());
+        Assert.Equal(cursor + 1, t.Cursor('L'));
+
+        // On the last row there is nowhere to move: the mark still lands, in one build.
+        t.PutCursorOn('L', "c.txt");
+        builds = t.Field<int>("_builds");
+        t.Session.Window.PressKey(KeyCode.Insert);
+        Assert.Equal(1, t.Field<int>("_builds") - builds);
+        t.Session.PumpFrame();
+        Assert.Equal(new[] { "a.txt", "c.txt" }, Marks(t).Order());
+    }
+
     /// <summary>Leaf names of the left pane's marks — the set itself is keyed by full
     /// path (CommanderApp.MarkKey), which these single-folder tests don't need to spell out.</summary>
     private static HashSet<string> Marks(DiffViewTests.Fixture t) => t.MarkNames('L');

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -839,33 +840,55 @@ public abstract class Element
     }
 
     // ──── Events ────
-    private Dictionary<Type, List<EventHandlerEntry>>? _handlers;
+    /// <summary>
+    /// This element's handlers for every kind of event, in one array, in the order they were
+    /// registered (after a patch: the element's own, then the build's). The used slots come
+    /// first; a slot with no <see cref="EventHandlerEntry.Kind"/> ends them. Null while there
+    /// are none.
+    ///
+    /// <para>Nearly every handled element has one or two handlers, so finding an event's is a
+    /// scan of a few slots. A dictionary of lists, with a closure around each handler to cast
+    /// the event, cost 424 B for an element's first handler and 208 B for each other kind;
+    /// a build makes its elements' handlers again on every key, and that was 18–28 KB a key in
+    /// Junction, Vesper and Meridian. An entry holds the handler as the app typed it, and its
+    /// <see cref="EventKind"/> runs it.</para>
+    /// </summary>
+    private EventHandlerEntry[]? _handlers;
 
     /// <summary>
-    /// How many dispatches are currently walking this element's handler lists. While it is
-    /// non-zero, anything that changes a list replaces the instance instead of mutating it,
+    /// How many dispatches are currently walking this element's handlers. While it is
+    /// non-zero, anything that changes them replaces the array instead of writing to it,
     /// so the walk in progress keeps seeing the handlers that were attached when it started.
     /// Nested because one dispatch can synchronously trigger another (a click handler that
-    /// moves focus fires blur).
+    /// moves focus fires blur). Copy-on-write is what lets <see cref="RunHandlers"/> walk the
+    /// live array with no per-event snapshot: pointer storms and drags dispatch continuously,
+    /// and that snapshot was the highest-frequency allocation in the framework.
     /// </summary>
     private int _dispatchDepth;
 
-    /// <summary>
-    /// The list to mutate for <paramref name="type"/>, copied first if a dispatch is walking
-    /// it. Copy-on-write is what lets <see cref="RunHandlers"/> iterate the live list with
-    /// no per-event snapshot: pointer storms and drags dispatch continuously, and that
-    /// snapshot was the highest-frequency allocation in the framework.
-    /// </summary>
-    private List<EventHandlerEntry> ListForMutation(Type type)
+    /// <summary>The handlers in use: up to the first slot with no kind.</summary>
+    private static int CountOf(EventHandlerEntry[] items)
     {
-        _handlers ??= [];
-        if (!_handlers.TryGetValue(type, out var list))
-            return _handlers[type] = [];
+        int count = 0;
+        while (count < items.Length && items[count].Kind is not null)
+            count++;
+        return count;
+    }
 
-        if (_dispatchDepth > 0)
-            _handlers[type] = list = [.. list];
-
-        return list;
+    private void AddEntry(in EventHandlerEntry entry)
+    {
+        var items = _handlers;
+        int count = items is null ? 0 : CountOf(items);
+        // A handler can register another handler on the same element mid-dispatch, so a walk in
+        // progress gets a copy to keep, as for every other change.
+        if (items is null || count == items.Length || _dispatchDepth > 0)
+        {
+            var copy = new EventHandlerEntry[items is null ? 2 : count == items.Length ? count * 2 : items.Length];
+            if (count > 0)
+                Array.Copy(items!, copy, count);
+            _handlers = items = copy;
+        }
+        items[count] = entry;
     }
 
     public void On<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent
@@ -909,46 +932,67 @@ public abstract class Element
     /// or each build makes one.
     /// </summary>
     public void OnPassive<TEvent>(Action<TEvent> handler, Func<bool> listening) where TEvent : ElementEvent =>
-        ListForMutation(typeof(TEvent)).Add(new EventHandlerEntry(EventPhase.Bubble,
-            new ListeningHandler<TEvent>(handler, listening).Invoke, Owned: false, Passive: true));
+        AddEntry(new EventHandlerEntry(EventKind<TEvent>.Instance,
+            (Action<TEvent>)new ListeningHandler<TEvent>(handler, listening).Invoke, EventPhase.Bubble, Owned: false, Passive: true));
 
-    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent
+    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent =>
+        AddEntry(new EventHandlerEntry(EventKind<TEvent>.Instance, handler, phase, owned, passive));
+
+    internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent => Listens(_handlers, typeof(TEvent));
+
+    internal bool HasAnyEventHandlers => _handlers is not null;
+
+    /// <summary>Whether <paramref name="items"/> holds a handler for <paramref name="eventType"/>.</summary>
+    private static bool Listens(EventHandlerEntry[]? items, Type eventType)
     {
-        // A handler can register another handler on the same element mid-dispatch, so this
-        // goes through the copy-on-write path like every other mutation.
-        ListForMutation(typeof(TEvent))
-            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned, passive));
+        if (items is null) return false;
+        for (int i = 0; i < items.Length; i++)
+        {
+            var kind = items[i].Kind;
+            if (kind is null) break;
+            if (kind.Type == eventType) return true;
+        }
+        return false;
     }
-
-    internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
-        _handlers is not null && _handlers.ContainsKey(typeof(TEvent));
-
-    internal bool HasAnyEventHandlers => _handlers is not null && _handlers.Count > 0;
 
     /// <summary>
     /// Names of the event types this element has handlers for, for DevTools
     /// introspection ("why doesn't my click fire" is usually "nothing is listening").
     /// </summary>
-    internal IEnumerable<string> HandlerEventNames =>
-        _handlers is null ? [] : _handlers.Keys.Select(static t => t.Name);
+    internal IEnumerable<string> HandlerEventNames
+    {
+        get
+        {
+            var names = new List<string>();
+            if (_handlers is { } items)
+            {
+                for (int i = 0; i < items.Length && items[i].Kind is { } kind; i++)
+                {
+                    if (!names.Contains(kind.Type.Name))
+                        names.Add(kind.Type.Name);
+                }
+            }
+            return names;
+        }
+    }
 
     /// <summary>
-    /// Hold this element's handler lists still, and hand back the one for
-    /// <paramref name="eventType"/> — null when nothing listens for it. While pinned,
-    /// anything that changes a list replaces the instance instead of mutating it, so the
-    /// returned list keeps exactly the handlers that were attached at this moment, whatever
-    /// a rebuild does to the element in the meantime.
+    /// Hold this element's handlers still, and hand them back — null when it has none. While
+    /// pinned, anything that changes them replaces the array instead of writing to it, so the
+    /// returned array keeps exactly the handlers that were attached at this moment, whatever
+    /// a rebuild does to the element in the meantime. It holds every kind of handler the
+    /// element has; <see cref="InvokeHandlers(ElementEvent, EventPhase, EventHandlerEntry[])"/>
+    /// runs the event's own, so they are looked through once, there.
     ///
     /// <para><see cref="EventDispatcher.Dispatch"/> pins the whole path up front, which is
     /// what makes "the handlers that were live when the event was dispatched" true for the
     /// ancestors as well as for the element in flight. Always paired with
     /// <see cref="UnpinHandlers"/> in a finally.</para>
     /// </summary>
-    internal List<EventHandlerEntry>? PinHandlers(Type eventType)
+    internal EventHandlerEntry[]? PinHandlers()
     {
         _dispatchDepth++;
-        if (_handlers is null) return null;
-        return _handlers.TryGetValue(eventType, out var list) ? list : null;
+        return _handlers;
     }
 
     /// <summary>Releases one <see cref="PinHandlers"/>.</summary>
@@ -956,17 +1000,17 @@ public abstract class Element
 
     internal void InvokeHandlers(ElementEvent evt, EventPhase phase)
     {
-        if (_handlers is null) return;
-        if (!_handlers.TryGetValue(evt.GetType(), out var list)) return;
+        var items = _handlers;
+        if (items is null) return;
 
         // No snapshot. A handler can MarkDirty → synchronous rebuild → PatchFrom, which
         // swaps this element's app handlers mid-dispatch; _dispatchDepth makes every such
-        // mutation replace the list instance rather than touch this one, so `list` still
-        // holds exactly the handlers that were attached when dispatch started.
+        // change replace the array rather than touch this one, so `items` still holds
+        // exactly the handlers that were attached when dispatch started.
         _dispatchDepth++;
         try
         {
-            RunHandlers(evt, phase, list);
+            RunHandlers(evt, phase, items);
         }
         finally
         {
@@ -976,22 +1020,29 @@ public abstract class Element
 
     /// <summary>
     /// Runs the handlers a caller already pinned (see <see cref="PinHandlers"/>), which is
-    /// how a bubbling dispatch reaches an ancestor: the list is the one that ancestor had
+    /// how a bubbling dispatch reaches an ancestor: the handlers are the ones that ancestor had
     /// when the event started, not whatever an earlier handler in the same walk rebuilt it
     /// into.
     /// </summary>
-    internal void InvokeHandlers(ElementEvent evt, EventPhase phase, List<EventHandlerEntry>? pinned)
+    internal void InvokeHandlers(ElementEvent evt, EventPhase phase, EventHandlerEntry[]? pinned)
     {
         if (pinned is not null)
             RunHandlers(evt, phase, pinned);
     }
 
-    private void RunHandlers(ElementEvent evt, EventPhase phase, List<EventHandlerEntry> list)
+    /// <summary>Runs the handlers in <paramref name="items"/> for exactly the event's type, in
+    /// order. Nothing changes the array while it runs (copy-on-write, see
+    /// <see cref="_dispatchDepth"/>).</summary>
+    private static void RunHandlers(ElementEvent evt, EventPhase phase, EventHandlerEntry[] items)
     {
-        for (int i = 0; i < list.Count; i++)
+        var type = evt.GetType();
+        for (int i = 0; i < items.Length; i++)
         {
-            var entry = list[i];
-            if (entry.Phase != phase && phase != EventPhase.Target)
+            ref readonly var entry = ref items[i];
+            var kind = entry.Kind;
+            if (kind is null)
+                break;
+            if (kind.Type != type || (entry.Phase != phase && phase != EventPhase.Target))
                 continue;
 
             // Only handlers that may mutate without marking count toward the input
@@ -1002,7 +1053,7 @@ public abstract class Element
             // pointer move over an idle window.
             if (!entry.Owned && !entry.Passive)
                 EventDispatcher.HandlerInvocationCount++;
-            entry.Handler(evt);
+            kind.Invoke(entry.Handler, evt);
             if (evt.StopPropagation) break;
         }
     }
@@ -1447,6 +1498,9 @@ public abstract class Element
 
     [ThreadStatic] private static List<PendingMove>? _pendingMoves;
 
+    // TryRestoreMoved's list of a parent's children before the build; empty between calls.
+    [ThreadStatic] private static List<Element>? _restoreScratch;
+
     /// <summary>How many component builds are running on this thread (ComponentHost): only a
     /// move made inside one waits for the reconcile that follows it.</summary>
     [ThreadStatic] internal static int Building;
@@ -1481,10 +1535,12 @@ public abstract class Element
     /// the parent it left it inherits what it had, and the parent being reconciled was patched,
     /// which marked it and its ancestors for style.</para>
     /// </summary>
-    internal static bool TryRestoreMoved(Element parent, List<Element> result)
+    internal static bool TryRestoreMoved(Element parent, ReadOnlySpan<Element> result)
     {
         var moves = _pendingMoves;
-        if (moves is null || moves.Count == 0) return false;
+        if (moves is null || moves.Count == 0 || result.IsEmpty) return false;
+        var current = parent._children;
+        int count = current?.Count ?? 0;
         int moved = 0;
         foreach (var m in moves)
         {
@@ -1492,36 +1548,52 @@ public abstract class Element
             if (ReferenceEquals(m.Child.Parent, parent)) return false;
             moved++;
         }
-        var current = parent._children;
-        int count = current?.Count ?? 0;
-        if (moved == 0 || count + moved != result.Count) return false;
+        if (moved == 0 || count + moved != result.Length) return false;
 
         // The children before the build: each moved one back at its place, the last moved
-        // first, as each removal shifted the places of the ones after it.
-        var before = new List<Element>(result.Count);
-        if (current is not null) before.AddRange(current);
-        for (int i = moves.Count - 1; i >= 0; i--)
+        // first, as each removal shifted the places of the ones after it. In a list kept for
+        // the purpose, emptied after: a pass may ask this for every container it reconciles.
+        var before = _restoreScratch ??= [];
+        try
         {
-            var m = moves[i];
-            if (!ReferenceEquals(m.From, parent)) continue;
-            if (m.Index > before.Count) return false;
-            before.Insert(m.Index, m.Child);
+            if (current is not null) before.AddRange(current);
+            for (int i = moves.Count - 1; i >= 0; i--)
+            {
+                var m = moves[i];
+                if (!ReferenceEquals(m.From, parent)) continue;
+                if (m.Index > before.Count) return false;
+                before.Insert(m.Index, m.Child);
+            }
+            for (int i = 0; i < before.Count; i++)
+                if (!ReferenceEquals(before[i], result[i])) return false;
         }
-        for (int i = 0; i < before.Count; i++)
-            if (!ReferenceEquals(before[i], result[i])) return false;
+        finally
+        {
+            before.Clear();
+        }
 
         var carried = DirtyFlags.None;
         for (int i = moves.Count - 1; i >= 0; i--)
         {
             var m = moves[i];
             if (!ReferenceEquals(m.From, parent)) continue;
-            // Out of the build's tree, which the reconcile is about to drop.
-            if (m.Child.Parent?._children is { } fresh && fresh.Remove(m.Child)) fresh.ZOrder = null;
+            // Out of the build's tree, which the reconcile is about to drop. From its end when it
+            // is the last there, as it is when the build added the children in their order.
+            if (m.Child.Parent?._children is { } fresh)
+            {
+                if (fresh.Count > 0 && ReferenceEquals(fresh[^1], m.Child)) fresh.RemoveAt(fresh.Count - 1);
+                else fresh.Remove(m.Child);
+                fresh.ZOrder = null;
+            }
             m.Child.Parent = parent;
             carried |= m.Child.DirtyFlags;
-            moves.RemoveAt(i);
         }
-        var list = parent._children ??= new ChildList(result.Count);
+        // The moves out of this parent are over: dropped in one pass, keeping the others' order.
+        int kept = 0;
+        for (int i = 0; i < moves.Count; i++)
+            if (!ReferenceEquals(moves[i].From, parent)) moves[kept++] = moves[i];
+        moves.RemoveRange(kept, moves.Count - kept);
+        var list = parent._children ??= new ChildList(result.Length);
         list.Clear();
         list.AddRange(result);
         list.ZOrder = null;
@@ -1690,48 +1762,54 @@ public abstract class Element
     /// </summary>
     private void CopyAppHandlersFrom(Element source)
     {
-        if (_handlers is not null)
-        {
-            List<Type>? empty = null;
-            // Collect first, apply after: this runs mid-dispatch often enough (a handler
-            // marks dirty and the rebuild lands here) that mutating while enumerating the
-            // dictionary is not worth relying on.
-            List<(Type Type, List<EventHandlerEntry> List)>? replacements = null;
-
-            foreach (var (type, list) in _handlers)
-            {
-                if (_dispatchDepth > 0)
-                {
-                    var kept = list.FindAll(static e => e.Owned);
-                    if (kept.Count == 0) (empty ??= []).Add(type);
-                    else (replacements ??= []).Add((type, kept));
-                    continue;
-                }
-
-                list.RemoveAll(static e => !e.Owned);
-                if (list.Count == 0)
-                    (empty ??= []).Add(type);
-            }
-
-            if (replacements is not null)
-                foreach (var (type, kept) in replacements)
-                    _handlers[type] = kept;
-            if (empty is not null)
-                foreach (var type in empty)
-                    _handlers.Remove(type);
-        }
-
-        if (source._handlers is null)
+        var items = _handlers;
+        var incoming = source._handlers;
+        if (items is null && incoming is null)
             return;
-        foreach (var (type, list) in source._handlers)
+
+        int count = 0, owned = 0, added = 0;
+        if (items is not null)
         {
-            foreach (var entry in list)
+            for (; count < items.Length && items[count].Kind is not null; count++)
+                if (items[count].Owned) owned++;
+        }
+        if (incoming is not null)
+        {
+            for (int i = 0; i < incoming.Length && incoming[i].Kind is not null; i++)
+                if (!incoming[i].Owned) added++;
+        }
+
+        int total = owned + added;
+        if (total == 0)
+        {
+            _handlers = null;
+            return;
+        }
+
+        // A rebuild patches every element it keeps, and nearly always hands each the handlers it
+        // had, made again: the array stays, keeps the element's own and takes the build's. Making
+        // the storage again cost 208 B a patched element with one click handler, 13 KB a key in
+        // Vesper's Detail view. A dispatch walking the array gets a copy to keep instead.
+        var target = items is not null && _dispatchDepth == 0 && total <= items.Length
+            ? items
+            : new EventHandlerEntry[Math.Max(2, total)];
+        int at = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (items![i].Owned)
+                target[at++] = items[i];
+        }
+        if (incoming is not null)
+        {
+            for (int i = 0; i < incoming.Length && incoming[i].Kind is not null; i++)
             {
-                if (entry.Owned)
-                    continue;
-                ListForMutation(type).Add(entry);
+                if (!incoming[i].Owned)
+                    target[at++] = incoming[i];
             }
         }
+        if (ReferenceEquals(target, items) && count > at)
+            Array.Clear(target, at, count - at);
+        _handlers = target;
     }
 
     // ──── Rendering ────
@@ -1845,8 +1923,34 @@ public abstract class Element
     }
 }
 
+/// <summary>One handler on an element: the <see cref="Action{T}"/> it was registered as, for
+/// events of <see cref="Kind"/>'s type, which runs it.</summary>
 internal readonly record struct EventHandlerEntry(
-    EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false);
+    EventKind Kind, Delegate Handler, EventPhase Phase, bool Owned = false, bool Passive = false);
+
+/// <summary>
+/// What an element's handlers for one type of event share: the type they are filed under, and how
+/// to run one with the event. One for each type of event (<see cref="EventKind{TEvent}.Instance"/>),
+/// so a handler is stored as the app typed it, with no closure around it to cast the event.
+/// </summary>
+internal abstract class EventKind(Type type)
+{
+    public readonly Type Type = type;
+
+    /// <summary>Runs <paramref name="handler"/>, an <see cref="Action{T}"/> of this kind's type, with
+    /// <paramref name="evt"/>, an event of exactly that type.</summary>
+    public abstract void Invoke(Delegate handler, ElementEvent evt);
+}
+
+internal sealed class EventKind<TEvent>() : EventKind(typeof(TEvent)) where TEvent : ElementEvent
+{
+    public static readonly EventKind<TEvent> Instance = new();
+
+    // Every entry of this kind is made with an Action<TEvent> (Element.AddHandler, OnPassive), so
+    // the handler needs no cast; the event keeps its own.
+    public override void Invoke(Delegate handler, ElementEvent evt) =>
+        Unsafe.As<Action<TEvent>>(handler)((TEvent)evt);
+}
 
 /// <summary>Whether a handler wants events now: what a handler registered with a listening
 /// condition is the target of (<see cref="ListeningHandler{TEvent}"/>).</summary>
@@ -1868,5 +1972,5 @@ internal sealed class ListeningHandler<TEvent>(Action<TEvent> handler, Func<bool
 {
     public bool Listening => listening();
 
-    public void Invoke(ElementEvent evt) => handler((TEvent)evt);
+    public void Invoke(TEvent evt) => handler(evt);
 }

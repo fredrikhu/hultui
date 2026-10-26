@@ -213,18 +213,27 @@ public class WordShapeLookupTests
     }
 
     [Fact]
-    public void ShapingWordsItHasMet_AllocatesTheRunAndOneArrayOfItsGlyphs()
+    public void ShapingWordsItHasMet_AllocatesTheRun_ThenOneArrayOfItsGlyphsWhenTheyAreRead()
     {
         var fonts = new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false);
         var pipeline = new TextPipeline(fonts, new WidthChangeEquivalenceTests.ContextShaper());
         var font = fonts.Resolve(Base.FontFamily, Base.FontWeight, Base.FontSlant);
         const string text = "pretty red table 4711 chair house keyboard";
         var run = pipeline.ShapeByWords(text, font, 16f);
-
-        // 16 bytes a glyph, and two objects' headers and fields: the run and the array.
         long glyphBytes = 16L * run.Glyphs.Length;
-        long allocated = Allocations.Least(() => run = pipeline.ShapeByWords(text, font, 16f), goal: glyphBytes + 160);
-        Assert.InRange(allocated, glyphBytes, glyphBytes + 160);
+
+        // The run alone (its header and fields, 56 bytes on a 64-bit runtime): no glyph array.
+        long shaping = Allocations.Least(() => run = pipeline.ShapeByWords(text, font, 16f), goal: 64);
+        Assert.InRange(shaping, 1, 64);
+        Assert.False(run.GlyphsComposed);
+
+        // Its glyphs read: one array of exactly that many, made once.
+        var runs = new ShapedRun[Allocations.MaxRounds];
+        for (int i = 0; i < runs.Length; i++) runs[i] = pipeline.ShapeByWords(text, font, 16f);
+        int next = 0;
+        long reading = Allocations.Least(() => _ = runs[next++].Glyphs, goal: glyphBytes + 32);
+        Assert.InRange(reading, glyphBytes, glyphBytes + 32);
+        Assert.Equal(0, Allocations.Least(() => _ = runs[0].Glyphs));
     }
 
     private static List<FontRun> FontRuns(IFontCollection fonts, string text, ResolvedInheritedStyle style) =>

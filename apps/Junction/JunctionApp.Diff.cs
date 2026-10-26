@@ -490,8 +490,9 @@ public partial class JunctionApp
         // and range on it. A caret or range move keeps that list and changes only the rows whose
         // marks moved; anything else weaves again.
         bool reviewMarksOnly = false;
+        int reviewRemakeRow = -1;
         if (review is not null)
-            rows = ReviewRowsFor(diff, rows, review, out reviewMarksOnly);
+            rows = ReviewRowsFor(diff, rows, review, out reviewMarksOnly, out reviewRemakeRow);
         BindDiffSelection(diff, rows);
         BindDiffSearch(diff, rows);
 
@@ -539,17 +540,20 @@ public partial class JunctionApp
         // face, size and tab width, the colour scheme. The review's cards read its composer and
         // threads, so while reviewing the rows are made again on every build that wove them
         // again; a caret or range move only changes the marks of the line rows it moved
-        // between, which their items carry.
+        // between, which their items carry. Typing in a comment changes the one card holding its
+        // editor, which is made again alone.
         var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
             Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
+        // Only the list this build patches: another file's list is replaced, rows and all.
+        var mountedList = _diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } m && k == listKey ? m : null;
         // `|`, not `||`: the staging snapshot is brought up to date either way.
         if (DiffStageSelectionChanged() | rowShape != _diffRowShape || (review is not null && !reviewMarksOnly))
         {
-            // Only the list this build patches: another file's list is replaced, rows and all.
-            if (_diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } mounted && k == listKey)
-                mounted.InvalidateRows();
+            mountedList?.InvalidateRows();
             _diffRowShape = rowShape;
         }
+        else if (reviewRemakeRow >= 0)
+            mountedList?.InvalidateRow(reviewRemakeRow);
 
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)

@@ -16,8 +16,13 @@ public partial class CommanderApp
 
     /// <summary>A 1px full-height divider between panes (the design's per-pane
     /// <c>border-right</c>, pulled out so the active-pane ring can stay layout-stable).</summary>
-    private static Element VDivider() =>
-        Box.New().Width(1).FlexShrink(0).Background(Nocturne.Divider);
+    private static Element VDivider()
+    {
+        // Keyed like its siblings, so the body's kept rail and the panes go back unmarked.
+        var divider = Box.New().Width(1).FlexShrink(0).Background(Nocturne.Divider);
+        divider.Key = "divider";
+        return divider;
+    }
 
     // ── Chrome (brand · search & commands · window controls) ─────────────
     // Mirrors Junction's title bar so the two apps read as one family: a
@@ -176,7 +181,7 @@ public partial class CommanderApp
             if (_active != side || _previewFocused)
             {
                 _active = side; _previewFocused = false;
-                HultUI.Application.InvokeOnMainThread(MarkDirty);
+                HultUI.Application.InvokeOnMainThread(MarkViewDirty);
             }
         });
         // Mouse back / forward buttons navigate this pane's history — the same as
@@ -196,36 +201,54 @@ public partial class CommanderApp
         if (IsDropHighlighted(side, Dir(side)))
             pane.BorderColor(Nocturne.Accent).BorderWidth(1f);
 
-        // Tab strip on top, then breadcrumb + column header as one block on the
-        // pane ground; the header's bottom border is the only divider to the list.
-        pane.AddChild(BuildTabStrip(side));
-        // A fed-in result set replaces the path trail outright — it is not a place, so a
-        // trail of folders would be a lie about where the pane is.
-        var crumb = ResultsOf(side) is { } results
-            ? BuildResultsBreadcrumb(side, active, results)
-            : BuildBreadcrumb(side, active);
-        // Keyed: the two are different elements at one position, and the reconciler does not
-        // copy handlers across a keyless swap.
-        crumb.Key = ResultsOf(side) != null ? "crumb-results" : "crumb-path";
-        pane.AddChild(crumb);
+        // The tab strip on top, then the path trail and, in Detail, the column header as one
+        // block on the pane ground (the header's bottom border is the only divider to the
+        // list), the view, and the footer. All but the view are parts of their own (see Part),
+        // keyed by their hosts; the view is keyed by what it is, so every child of the pane is
+        // keyed and the kept hosts go back without a mark.
+        pane.AddChild(StripPart(side).Place().FlexShrink(0));
+        pane.AddChild(TrailPart(side).Place().FlexShrink(0));
         // The column header belongs to Detail only — Brief and Thumbnails have no columns.
         if (ViewOf(side) == ViewMode.Detail)
-            pane.AddChild(BuildListHeader(side, InArchive(side)));
+            pane.AddChild(ColumnsPart(side).Place().FlexShrink(0));
         // Non-ok states replace the list with a centered status block. An archive that
         // couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message. A
         // filter that hides everything shows a "no matches" hint instead of a bare ".." row.
         bool noMatches = _search.Length > 0 && active && !list.Any(e => !e.IsParent);
-        pane.AddChild(state != PaneState.Ok
+        Element view;
+        if (state != PaneState.Ok)
+        {
             // While connecting, the held archive status belongs to the folder being left —
             // showing its error over the wait would be a message about somewhere else.
-            ? (state != PaneState.Connecting
-                    && ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
-                ? BuildArchiveError(side, arcStatus)
-                : BuildStateBlock(side, state))
-            : noMatches
-                ? BuildNoMatches()
-                : BuildViewArea(side, list, active));
-        pane.AddChild(BuildFooter(side, list));
+            if (state != PaneState.Connecting
+                && ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty)
+            {
+                view = BuildArchiveError(side, arcStatus);
+                view.Key = "view-archive-error";
+            }
+            else
+            {
+                view = BuildStateBlock(side, state);
+                view.Key = "view-state";
+            }
+        }
+        else if (noMatches)
+        {
+            view = BuildNoMatches();
+            view.Key = "view-no-matches";
+        }
+        else
+        {
+            view = BuildViewArea(side, list, active);
+            view.Key = ViewOf(side) switch
+            {
+                ViewMode.Brief => "view-brief",
+                ViewMode.Thumbnails => "view-thumbnails",
+                _ => "view-detail",
+            };
+        }
+        pane.AddChild(view);
+        pane.AddChild(FootPart(side).Place().FlexShrink(0));
         return pane;
     }
 
@@ -733,9 +756,19 @@ public partial class CommanderApp
         Color tri = active ? Nocturne.Accent : hover ? Nocturne.Neutral500 : Color.Transparent;
         row.AddChild(Ui.Icon(active && SortDescOf(side) ? Glyphs.CaretDown : Glyphs.CaretUp, 9f, tri));
         row.OnClick(_ => SetSort(side, col));
-        row.OnPointerEnter(_ => { if (_hoverSort != (side, col)) { _hoverSort = (side, col); MarkDirty(); } });
-        row.OnPointerLeave(_ => { if (_hoverSort == (side, col)) { _hoverSort = null; MarkDirty(); } });
+        row.OnPointerEnter(_ => { if (_hoverSort != (side, col)) SetHoverSort((side, col)); });
+        row.OnPointerLeave(_ => { if (_hoverSort == (side, col)) SetHoverSort(null); });
         return row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+    }
+
+    /// <summary>The column the pointer is over shows in its pane's column header alone, which
+    /// builds again on its own (and the one it left, if another pane's).</summary>
+    private void SetHoverSort((char side, SortMode col)? hover)
+    {
+        var was = _hoverSort;
+        _hoverSort = hover;
+        if (was is (var a, _)) ColumnsDirty(a);
+        if (hover is (var b, _) && (was is not (var a2, _) || a2 != b)) ColumnsDirty(b);
     }
 
     private Element BuildList(char side, IReadOnlyList<FileEntry> list, bool active)
@@ -1147,7 +1180,7 @@ public partial class CommanderApp
             _imageLoader.Load(key, () => inArc ? LoadImageMember(focused) : LoadImage(focused.FullPath, focused.Size), onLoaded: img =>
             {
                 if (!ReferenceEquals(_lastImage, img)) { (_lastImage as IDisposable)?.Dispose(); _lastImage = img; }
-                MarkDirty();
+                MarkViewDirty();
             });
             image = _imageLoader.Value;
             var body = Box.New().FlexGrow(1).Overflow(Overflow.Hidden)
@@ -1175,7 +1208,7 @@ public partial class CommanderApp
             // arrow / page / home / end keys). Keyed per file so a new file starts at the
             // top. Wrapped in a padded box because the theme owns the TextArea's padding.
             _previewLoader.Load(key, () => inArc ? PreviewTextMember(focused) : FileSystem.PreviewText(focused.FullPath, focused.Size),
-                onLoaded: _ => MarkDirty());
+                onLoaded: _ => MarkViewDirty());
             var excerpt = _previewLoader.Value;
             if (excerpt.Length == 0)
             {
@@ -1201,8 +1234,8 @@ public partial class CommanderApp
                 // when reconciliation copies them onto the retained element. Blur can fire
                 // mid-reconcile (element removed while focused, e.g. Ctrl+Q away), so defer
                 // the repaint rather than re-enter the differ.
-                body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
-                body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
+                body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkViewDirty); });
+                body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkViewDirty); });
                 body.IsFocusable = true;
                 body.TabIndex = 0;
                 wrap.AddChild(body);

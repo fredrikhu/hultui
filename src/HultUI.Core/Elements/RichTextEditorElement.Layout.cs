@@ -42,6 +42,9 @@ public partial class RichTextEditorElement
             && ring == _ring && findHit == _findHit && findCurrent == _findCurrent)
             return;
 
+        // Heading sizes, the code face and the spacing are the rich text theme's: an editor as tall
+        // as its document measures them, so another one lays it out again. Colours alone do not.
+        if (!ReferenceEquals(rt, _rt) && _autoHeight is not null) MarkLayoutDirty();
         (_rt, _linkColor, _codeBackground, _quoteBar, _quoteText) = (rt, link, code, bar, quote);
         (_checked, _checkedText, _rule, _rawText, _checkBorder) = (check, checkedText, rule, raw, checkBorder);
         (_tableBorder, _tableHeader, _ring, _findHit, _findCurrent) = (tableBorder, tableHeader, ring, findHit, findCurrent);

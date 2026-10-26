@@ -83,18 +83,100 @@ public partial class JunctionApp
             for (var i = Math.Max(0, filtered.Count - Math.Max(2, _historyPageCommits / 10)); i < filtered.Count; i++)
                 _historyTail.Add(filtered[i].Hash);
 
+        // Every child is keyed: the include bar and the footer are handed back to the next build
+        // while what they show is what they showed (KeptPart), and a handed-back element comes
+        // back through the keyed reconcile, untouched.
         var col = Flex.Column(gap: 0).FlexGrow(1);
         // A GitLab-backed repository with no account gets one line offering to connect,
         // above everything else and dismissable for good — see JunctionApp.GitLabMarks.
         if (BuildFirstRunStrip() is { } firstRun)
+        {
+            firstRun.Key = "first-run";
             col.AddChild(firstRun);
-        col.AddChild(BuildIncludeBar(
-            IncludeSet(_activeRepoPath).OrderBy(x => x, StringComparer.Ordinal).ToList(), filtered.Count, data));
+        }
+        var include = IncludeSet(_activeRepoPath).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        col.AddChild(Kept(_includeBarPart, IncludeBarShapeFor(include, filtered.Count, data),
+            () => BuildIncludeBar(include, filtered.Count, data), "include-bar"));
         if (_contentSearchOpen)
-            col.AddChild(BuildContentSearchBar(filtered.Count));
-        col.AddChild(BuildCommitList(data, stats, filtered));
-        col.AddChild(BuildHistoryFooter(data));
+        {
+            var contentSearch = BuildContentSearchBar(filtered.Count);
+            contentSearch.Key = "content-search";
+            col.AddChild(contentSearch);
+        }
+        var list = BuildCommitList(data, stats, filtered);
+        list.Key = "commit-list";
+        col.AddChild(list);
+        col.AddChild(Kept(_footerPart, FooterShapeFor(data), () => BuildHistoryFooter(data), "history-footer"));
         return col;
+    }
+
+    // ── Kept parts of the view ───────────────────────────────────────────
+    //
+    // The include bar and the footer show nothing a selection move changes, and building them
+    // was 59 % of a History key's build (21 KB and 13 KB a key in the NativeAOT app). Each is
+    // handed back to the next build while what it shows is what it showed (REACTIVITY.md, "Hand
+    // back the elements a key does not change"), and built again — patched into the live one —
+    // when anything in its shape moved. A shape names everything its part reads; the handlers
+    // inside read the app's state when they run, so a kept part never acts on a stale build.
+
+    /// <summary>A handed-back part: the live element (through a Ref, which follows the patch),
+    /// what it was made from, and the build that last built or handed it back. A part is handed
+    /// back only to the build right after that one: a part another build left out is out of the
+    /// tree (another view was on screen).</summary>
+    private sealed class KeptPart
+    {
+        public object? Shape;
+        public int Build = -1;
+        public int Made;
+        public readonly HultUI.Core.Reactivity.Ref<Element> Live = new();
+    }
+
+    private readonly KeptPart _includeBarPart = new(), _footerPart = new();
+
+    /// <summary>Times the include bar and the footer have been built, for tests.</summary>
+    internal int HistoryPartsMade => _includeBarPart.Made + _footerPart.Made;
+
+    private Element Kept(KeptPart part, object shape, Func<Element> build, string key)
+    {
+        if (part.Build == Builds - 1 && part.Live.Current is { Parent: not null } live && Equals(part.Shape, shape))
+        {
+            part.Build = Builds;
+            return live;
+        }
+        part.Made++;
+        var element = build();
+        element.Key = key;
+        element.WithRef(part.Live);
+        part.Shape = shape;
+        part.Build = Builds;
+        return element;
+    }
+
+    /// <summary>Everything the include bar shows: the include set and the branch checked out
+    /// (the chips and the "Only" button), the compact breakpoint, the query (the search box and
+    /// its clear button), the content search's two states, what the count says, and the colour
+    /// scheme and the scale its glyphs are cut at.</summary>
+    private readonly record struct IncludeBarShape(string Include, string Branch, bool Compact, string Query,
+        bool ContentApplied, bool ContentOpen, int Shown, int Loaded, bool Exhausted, object Theme, float Scale);
+
+    private IncludeBarShape IncludeBarShapeFor(List<string> include, int shown, HistoryData data) =>
+        new(include.Count == 0 ? "" : string.Join('\n', include), HasActiveRepo ? SummaryFor(_activeRepoPath).Branch : "",
+            _compactChrome, _historyQuery, _contentApplied.Length > 0, _contentSearchOpen, shown, data.Commits.Count,
+            data.Exhausted, Nocturne.Theme, Ui.DisplayScale);
+
+    /// <summary>Everything the footer shows: how far the log reaches and whether more is loading
+    /// (the paging controls, none once it is all in), whether a search is on (what "Load all" is
+    /// called), how many commits a compare would take (none when there is no compare), and the
+    /// scheme and the scale.</summary>
+    private readonly record struct FooterShape(int Loaded, bool LoadAll, bool Loading, bool Searching, int Comparing,
+        object Theme, float Scale);
+
+    private FooterShape FooterShapeFor(HistoryData data)
+    {
+        bool paging = data.Commits.Count > 0 && !data.Exhausted;
+        return new(paging ? data.Commits.Count : -1, paging && WindowFor(_activeRepoPath).LoadAll,
+            paging && _history.IsLoading, _historyQuery.Trim().Length > 0,
+            SelectedRange() != null ? _selectedCommitHashes.Count : 0, Nocturne.Theme, Ui.DisplayScale);
     }
 
     /// <summary>
@@ -272,15 +354,24 @@ public partial class JunctionApp
             onLoaded: _ => { if (missingCount > missing.Count) MarkDirty(); });
     }
 
-    private List<GitCommit> FilteredCommits(HistoryData data)
+    // The commits the query leaves, kept while the log and the query are what they were. With no
+    // query they are the log itself, which every build used to copy (7.9 KB a History key in the
+    // NativeAOT app, more with every page loaded). Callers read them; none changes them.
+    private (IReadOnlyList<GitCommit>? Commits, string Query, IReadOnlyList<GitCommit> Shown) _filteredCommits = (null, "", []);
+
+    private IReadOnlyList<GitCommit> FilteredCommits(HistoryData data)
     {
         var q = _historyQuery.Trim();
-        if (q.Length == 0) return data.Commits.ToList();
-        return data.Commits.Where(c =>
+        if (q.Length == 0) return data.Commits;
+        if (ReferenceEquals(_filteredCommits.Commits, data.Commits) && _filteredCommits.Query == q)
+            return _filteredCommits.Shown;
+        var shown = data.Commits.Where(c =>
             c.Subject.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             c.AuthorName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             c.ShortHash.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             c.Hash.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        _filteredCommits = (data.Commits, q, shown);
+        return shown;
     }
 
     // Runs off the UI thread.
@@ -456,7 +547,7 @@ public partial class JunctionApp
 
     /// <summary>Adds the contiguous run of commits between two hashes (inclusive,
     /// either order) to the selection set.</summary>
-    private void AddRangeToSelection(List<GitCommit> commits, string aHash, string bHash)
+    private void AddRangeToSelection(IReadOnlyList<GitCommit> commits, string aHash, string bHash)
     {
         var i = IndexOfHash(commits, aHash);
         var j = IndexOfHash(commits, bHash);
@@ -541,7 +632,7 @@ public partial class JunctionApp
     /// certainly be absent from the list on screen. Doing nothing in that case would be
     /// indistinguishable from a dead menu item.</para>
     /// </summary>
-    private void ResolvePendingReveal(List<GitCommit> filtered)
+    private void ResolvePendingReveal(IReadOnlyList<GitCommit> filtered)
     {
         if (_pendingRevealHash is not { } hash || _history.IsLoading) return;
 
@@ -950,7 +1041,7 @@ public partial class JunctionApp
     // ── Commit list ──────────────────────────────────────────────────────
 
     private Element BuildCommitList(HistoryData data,
-        Dictionary<string, (int Added, int Deleted)> stats, List<GitCommit> commits)
+        Dictionary<string, (int Added, int Deleted)> stats, IReadOnlyList<GitCommit> commits)
     {
         if (commits.Count == 0)
         {

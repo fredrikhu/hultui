@@ -138,7 +138,11 @@ never waits and so is safe from the decoder's own thread; the loop dispatches it
 and the window draws. A 120 fps clip shows its 120 frames a second while its
 window is moved or a drag is held, on GL and Vulkan (before: about 64, SDL's
 live-resize timer, and mpv dropped half). Not within 20 ms of a new size, whose
-own frame took the newest picture.
+own frame took the newest picture. A GPU source of your own that only posts (an
+`IGpuImageSource` that never asks) is still drawn there for its waiting post, at
+the timer's rate, about 64 frames a second: the window leaves posted work undrawn
+only while a source has asked for a frame in the last 100 ms. Until round 5 of
+plan 17 such a source froze for the whole move or held drag.
 
 The converse holds too: a frame must not wait for a thread that is waiting for
 that frame. mpv's core waits, for up to 200 ms after every load and seek, for the

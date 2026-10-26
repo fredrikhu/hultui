@@ -476,7 +476,7 @@ public partial class CommanderApp
         row.AddChild(Ui.Icon(Glyphs.CaretRight, 11f, Nocturne.DirText).GridColumn(0));
         row.AddChild(Ui.Mono(b.Name, 11.5f, selected ? Nocturne.Text : Nocturne.On(0.80)).GridColumn(1)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
-        row.OnClick(_ => { _bookmarkSel = index; MarkDirty(); });
+        row.OnClick(_ => { _bookmarkSel = index; MarkViewDirty(); });
         row.On<DoubleClickEvent>(e => { e.StopPropagation = true; OpenBookmarkInPane(index, _active); });
         return row;
     }

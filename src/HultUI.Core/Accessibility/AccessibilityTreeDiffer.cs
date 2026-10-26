@@ -125,6 +125,18 @@ public static class AccessibilityTreeDiffer
     internal static void CompareNodes(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr) =>
         CompareProperties(changes, prev, curr, default, default);
 
+    /// <summary>
+    /// The property changes a diff reports between a node and the same node made again in the same
+    /// place of a tree (a layout refresh's, <see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>),
+    /// added to <paramref name="changes"/> in the order a diff lists them.
+    /// </summary>
+    /// <param name="prevScroll">How far the scroll views above <paramref name="prev"/> are scrolled,
+    /// summed, as a diff sums them on its way down.</param>
+    /// <param name="currScroll">The same above <paramref name="curr"/>.</param>
+    internal static void CompareNodes(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr,
+        Point prevScroll, Point currScroll) =>
+        CompareProperties(changes, prev, curr, prevScroll, currScroll);
+
     private static void CompareProperties(List<PropertyChange> changes, AccessibilityNode prev, AccessibilityNode curr,
         Point prevScroll, Point currScroll)
     {
@@ -210,24 +222,39 @@ public static class AccessibilityTreeDiffer
         // the bounds on screen and the offscreen state: the bridges read them from the current
         // tree. Each rebuild during a wheel turn over 1,000 rows raised a bounds event for each of
         // the ~130 rows on screen.
-        if (!(prev.IsOffscreen && curr.IsOffscreen) && Moved(prev.BoundingRect, curr.BoundingRect, prevScroll, currScroll))
+        if (!(prev.IsOffscreen && curr.IsOffscreen) && Moved(prev.UnscrolledRect, curr.UnscrolledRect, prevScroll, currScroll))
             changes.Add(new PropertyChange(curr, AccessibilityProperties.BoundingRect));
         if (rare && prev.ScrollOffset != curr.ScrollOffset)
             changes.Add(new PropertyChange(curr, AccessibilityProperties.ScrollPosition, prev));
+        // A list whose items are served on demand has no item nodes: the number of its items and
+        // which are selected are its own, and a change of either is told on it, with the previous
+        // node, where a list of item nodes tells nodes added or removed and their IsSelected. After
+        // the list's own properties, as its items' changes come after them. A list that crossed the
+        // number its items are served on demand from has item nodes on one side, which tell it.
+        if (rare && prev.IsVirtualItemContainer && curr.IsVirtualItemContainer)
+        {
+            var (was, now) = (prev.Served, curr.Served);
+            if (was.Count != now.Count)
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.ItemCount, prev));
+            if (!was.Selected.SequenceEqual(now.Selected))
+                changes.Add(new PropertyChange(curr, AccessibilityProperties.ItemSelection, prev));
+        }
     }
 
     /// <summary>
-    /// Whether a node moved or resized within its scroll views: its box on screen with the scroll
-    /// above it added back, compared. Unscrolled, exactly as before; scrolled, to a hundredth of a
-    /// unit, because the builder's subtraction and this addition can each round a float.
+    /// Whether a node moved or resized within its scroll views: its box in their content
+    /// (<see cref="AccessibilityNode.UnscrolledRect"/>, the box on screen with the scroll above it
+    /// added back), compared. With the same scroll above, exactly; scrolled, to a hundredth of a
+    /// unit, as when the scroll was added back to the box on screen here and each could round a
+    /// float.
     /// </summary>
-    private static bool Moved(Rect prev, Rect curr, Point prevScroll, Point currScroll)
+    internal static bool Moved(Rect prev, Rect curr, Point prevScroll, Point currScroll)
     {
         if (prevScroll == currScroll)
             return prev != curr;
         const float tolerance = 0.01f;
-        return MathF.Abs(prev.X + prevScroll.X - (curr.X + currScroll.X)) > tolerance
-            || MathF.Abs(prev.Y + prevScroll.Y - (curr.Y + currScroll.Y)) > tolerance
+        return MathF.Abs(prev.X - curr.X) > tolerance
+            || MathF.Abs(prev.Y - curr.Y) > tolerance
             || MathF.Abs(prev.Width - curr.Width) > tolerance
             || MathF.Abs(prev.Height - curr.Height) > tolerance;
     }

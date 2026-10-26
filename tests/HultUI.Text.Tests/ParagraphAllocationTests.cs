@@ -39,6 +39,57 @@ public class ParagraphAllocationTests
     }
 
     [Fact]
+    public void AWrappedLine_AllocatesWhatItKeeps_AndNoListToItemizeIn()
+    {
+        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        string ten = Lines(10), forty = Lines(40);
+        float width = 60f;
+        // Laid out once, so their shaping and break segments are kept; then each round at a width
+        // not laid out before: a miss in the layout cache, and every line made again.
+        Assert.Equal(10, pipeline.Layout(ten, Style, width, null).Lines.Count);
+        Assert.Equal(40, pipeline.Layout(forty, Style, width, null).Lines.Count);
+        long a = Allocations.Least(() => pipeline.Layout(ten, Style, width += 0.001f, null));
+        long b = Allocations.Least(() => pipeline.Layout(forty, Style, width += 0.001f, null));
+
+        // What a line keeps, and the layout's list of lines growing to 40 rather than 10.
+        var line = pipeline.Layout(ten, Style, width, null).Lines[0];
+        var made = new TextLine[100];
+        long lineBytes = Allocations.Least(() =>
+        {
+            for (int i = 0; i < made.Length; i++) made[i] = new TextLine(line.Runs, 1f, 1f, 1f, 0f);
+        }) / made.Length;
+        long ListOf(int n) => Allocations.Least(() =>
+        {
+            var lines = new List<TextLine>();
+            for (int i = 0; i < n; i++) lines.Add(line);
+        });
+        long listGrowth = ListOf(40) - ListOf(10);
+
+        // Each line: its text ("abcdefgh ") and the same trimmed, 40 B each; a list of its one run
+        // with room for one (32 + 32 B); the run, sharing its word's glyphs (56 B); and the line.
+        // Its font runs go into a list the pipeline keeps: one made for each line was 120 B more,
+        // and the list of its runs grown to room for four 24 B more.
+        Assert.Equal(30L * (40 + 40 + 64 + 56 + lineBytes) + listGrowth, b - a);
+    }
+
+    [Fact]
+    public void AWrapsLastLine_IsSearchedWithoutATableOfItsOwn()
+    {
+        // The same paragraph but for its last line: four words of a letter each, or one word of the
+        // same seven characters. A table of the last line's prefix widths made for its search — the
+        // line cut out as a string, exact arrays of its runs and segments — cost 20 B more for each
+        // segment; read out of the lists the pipeline keeps, seven segments cost what one does.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        string one = Lines(10) + " abcdefg", seven = Lines(10) + " a b c d";
+        float width = 60f;
+        Assert.Equal(11, pipeline.Layout(one, Style, width, null).Lines.Count);
+        Assert.Equal(11, pipeline.Layout(seven, Style, width, null).Lines.Count);
+        long a = Allocations.Least(() => pipeline.Layout(one, Style, width += 0.001f, null));
+        long b = Allocations.Least(() => pipeline.Layout(seven, Style, width += 0.001f, null));
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
     public void ASelectionDrawnOnAParagraph_IsCutIntoAListMadeOnce()
     {
         var pipeline = new TextPipeline(new Fonts(), new Shaper());

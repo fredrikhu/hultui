@@ -138,6 +138,100 @@ public class HistoryRowKeepTests
         });
     }
 
+    /// <summary>The include bar and the footer show nothing a move changes: a key hands both back
+    /// to the build as they were — the same elements, not built. What they do show reaches them:
+    /// a widened selection makes the footer offer the compare, a character in the search box
+    /// builds the bar again (and the box keeps its focus and its text). Each time, the two are
+    /// what a fresh build of them makes.</summary>
+    [Fact]
+    public void TheIncludeBarAndTheFooter_AreKeptAcrossKeys_AndFollowWhatTheyShow()
+    {
+        Hosted((session, app) =>
+        {
+            var bar = Part(session, "include-bar");
+            var footer = Part(session, "history-footer");
+            int made = app.HistoryPartsMade;
+            for (int i = 0; i < 4; i++)
+            {
+                session.Window.PressKey(KeyCode.Down);
+                session.PumpFrames(2);
+            }
+            Assert.Equal(made, app.HistoryPartsMade);
+            Assert.Same(bar, Part(session, "include-bar"));
+            Assert.Same(footer, Part(session, "history-footer"));
+            AssertPartsAreAFreshBuild(session, app);
+
+            // Shift+Down selects two: the footer is built again, and offers to compare them.
+            made = app.HistoryPartsMade;
+            session.Window.PressKey(KeyCode.Down, KeyModifiers.Shift);
+            session.PumpFrames(2);
+            Assert.Equal(made + 1, app.HistoryPartsMade);
+            Assert.Contains(LayoutProbe.Descendants<TextElement>(Part(session, "history-footer"), _ => true),
+                t => t.Content == "Compare 2 commits");
+            AssertPartsAreAFreshBuild(session, app);
+
+            // The search box: each character builds the bar again, into the same box.
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.Slash);
+            session.PumpFrames(2);
+            var box = Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+            foreach (var ch in "Commit 1")
+            {
+                made = app.HistoryPartsMade;
+                session.Window.TypeText(ch.ToString());
+                session.PumpFrames(2);
+                Assert.True(app.HistoryPartsMade > made, $"'{ch}' did not build the include bar");
+            }
+            Assert.Same(box, session.Window.Window.FocusedElement);
+            Assert.Equal("Commit 1", box.Text);
+            AssertPartsAreAFreshBuild(session, app);
+        });
+    }
+
+    private static Element Part(HeadlessSession session, string key) =>
+        LayoutProbe.Descendants<Element>(Root(session), e => e.Key == key).Single();
+
+    /// <summary>The kept include bar and footer show what a build of them makes: the parts are
+    /// told they were not built last time, the window rebuilt, and the two compared.</summary>
+    private static void AssertPartsAreAFreshBuild(HeadlessSession session, JunctionApp app)
+    {
+        var kept = Sig(Part(session, "include-bar")) + Sig(Part(session, "history-footer"));
+        int made = app.HistoryPartsMade;
+        foreach (var name in new[] { "_includeBarPart", "_footerPart" })
+        {
+            var part = typeof(JunctionApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            part.GetType().GetField("Build")!.SetValue(part, -1);
+        }
+        Rebuild(app);
+        session.PumpFrames(2);
+        Assert.Equal(made + 2, app.HistoryPartsMade);
+        Assert.Equal(kept, Sig(Part(session, "include-bar")) + Sig(Part(session, "history-footer")));
+    }
+
+    /// <summary>What a subtree shows: element kinds, keys, text, colours, tooltips, names and
+    /// enabled state, in tree order.</summary>
+    private static string Sig(Element e)
+    {
+        var sb = new System.Text.StringBuilder();
+        void Walk(Element el, int depth)
+        {
+            sb.Append(' ', depth).Append(el.GetType().Name);
+            if (el.Key is { } k) sb.Append(" key=").Append(k);
+            if (el is TextElement t) sb.Append(" text=").Append(t.Content);
+            if (el is TextInputElement input) sb.Append(" input=").Append(input.Text);
+            if (el is BoxElement b) sb.Append(" bg=").Append(b.BackgroundColor).Append(" border=").Append(b.BorderColor);
+            if (el.TooltipText is { } tip) sb.Append(" tip=").Append(tip);
+            if (el.AccessibleName is { } n) sb.Append(" name=").Append(n);
+            if (el.Inherited.TextColor is { } c) sb.Append(" fg=").Append(c);
+            if (el is ButtonElement btn) sb.Append(" enabled=").Append(btn.IsEnabled);
+            sb.Append('\n');
+            foreach (var child in el.Children) Walk(child, depth + 1);
+        }
+        Walk(e, 0);
+        return sb.ToString();
+    }
+
     private static bool HasHeadChip(HeadlessSession session) =>
         LayoutProbe.Descendants<TextElement>(Rows(session)[0], t => t.Content == "HEAD").Any();
 

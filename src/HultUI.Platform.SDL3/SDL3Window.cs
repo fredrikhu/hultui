@@ -926,6 +926,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     {
         // From here only a focus gain says the window is back on Wayland (see MinimizedState).
         _focusedSinceMinimize = false;
+        // A window that was raised asks for its own activation as it minimizes, even through
+        // SW_SHOWMINNOACTIVE (see WindowsActivation).
+        using var quiet = WindowsActivation.RefuseIfUnwanted();
         SDL_MinimizeWindow(_window);
     }
 
@@ -969,6 +972,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // raise of a maximized window (a file handed over from a second launch) shrank it.
         if (((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MINIMIZED) != 0)
             Restore();
+        // A raise asks Windows for the foreground unless SDL's raise hint says not to; a process
+        // that said not to activate a window when it shows one means a raise too.
+        using var quiet = WindowsActivation.RefuseIfUnwanted();
         SDL_RaiseWindow(_window);
     }
 

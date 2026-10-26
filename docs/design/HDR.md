@@ -62,7 +62,13 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates always, `=0` never. The half-float offscreen is
   made at the over-allocated size too (`VulkanFrameTarget.AllocatedWidthPx`), clipped to the
   window, and kept with the swapchain: remade at every size, an 80-step drag made 81 offscreens,
-  each with a synchronous submit and a scratch purge, against 5 swapchains.
+  each with a synchronous submit and a scratch purge, against 5 swapchains. On an 8-bit swapchain
+  the render targets over its images are made at that size and clipped the same way, so a drag
+  wraps each image once per swapchain: 80 → 12 wraps (each an image view and a framebuffer) in an
+  80-step drag, 2,198 → 516 bytes a step, step time flat (3.42 → 3.46 ms median over 12 alternated
+  runs), mid-drag captures identical. The half-float swapchain's targets stay at the window's size:
+  the one run of that, a prototype in plan 17's round 5 survey, coincided with two NVIDIA driver
+  errors (`nvlddmkm` 153) and a stall over a second, and has not been repeated.
 - **Rebuild:** the old swapchain is handed to the new one as `oldSwapchain`, except the scRGB one
   under MAILBOX on Windows, which is destroyed first. Handed over, it made the next present wait
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and
@@ -77,8 +83,12 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
 - **Layouts:** the present transition moves the image to `PRESENT_SRC_KHR` behind Skia's back.
   When the renderer keeps a render target over the image, it asks the host to move the image back
-  to `COLOR_ATTACHMENT_OPTIMAL`, the layout Skia left it in, in a small submit of its own, from
-  `UNDEFINED`, discarding what every frame overwrites anyway (`TransitionAcquiredImage`).
+  to `COLOR_ATTACHMENT_OPTIMAL`, the layout Skia left it in, from `UNDEFINED`, discarding what
+  every frame overwrites anyway (`TransitionAcquiredImage`). The host owes that barrier until
+  Skia's first submit after the request: `GetProcedureAddress` hands Skia a `vkQueueSubmit`
+  trampoline (found by queue, since each window has its own device) that puts the barrier's
+  command buffer at the head of Skia's batch. If Skia submits nothing, the barrier goes in a submit
+  of its own at the present (`AcquireBarrier`).
 - **Before the images go** — any rebuild, a minimized window's swapchain, the host's disposal —
   the host calls the renderer, which drops its render targets over them first
   (`IVulkanSurfaceHost.SetSwapchainReleasing`).
@@ -95,23 +105,28 @@ moves it back (above) before any of Skia's work on the image is submitted. Built
 target cost 2,048 bytes of managed allocation, an image view and a framebuffer a frame, all of an
 idle-animating window's allocation; kept, a steady frame allocates nothing. A target is made again
 when the image, its size, format or colour space changes, which is how the scaled colour space
-follows the white scale. **When the barrier is submitted matters**, and `SwapchainTargetUses`
-decides it:
+follows the white scale. **When the barrier is submitted matters**: `SwapchainTargetUses` decides
+when it is asked for, and the host submits it as late as it may:
 
-| Frame | Target | Host barrier |
-|---|---|---|
-| through the offscreen | kept | just before the blit, after any GL draw in the frame |
-| straight onto the swapchain | kept | at once, before anything is drawn |
-| straight onto the swapchain, after a frame that drew a GPU source | this frame's only, declared `UNDEFINED` | none |
+| Frame | Target | Barrier asked for | Barrier submitted |
+|---|---|---|---|
+| through the offscreen | kept | just before the blit | with Skia's next submit |
+| straight onto the swapchain | kept | when the frame begins | with Skia's first submit |
 
 A submit of the host's on the Vulkan queue just before mpv's GL draw of a video frame made that
 draw slower on NVIDIA (610): Reel at 1080p24, Render averaged 1.25–1.47 ms a frame against
-0.97–1.14 without the submit, on both formats. After the GL draw it costs nothing, but that is
-safe only where nothing of Skia's on the swapchain image can be submitted earlier: the offscreen
-path. Drawing straight onto the swapchain, Skia may submit its work on the image at any point, so
-the barrier goes first, and a frame with a video wraps its own target instead, as every frame did
-before. So a video on an 8-bit swapchain still allocates the 2 KB a frame; on an scRGB one with a
-white scale above 1 (Windows HDR, where Reel and Aperture play HDR video) it does not.
+0.97–1.14 without the submit, on both formats. After the GL draw it costs nothing. Skia's first
+submit of a frame comes after the GL draw (it never came before it in 982 video frames measured),
+so the barrier rides on it. Until 2026-10-26 the host submitted the barrier at once when asked, so
+a frame straight onto the swapchain after a video frame wrapped its own target instead: an 8-bit
+swapchain paid 2 KB, an image view and a framebuffer a video frame (1080p120: 2,030 → 86 bytes a
+frame; 1080p24: 2,056 → 112). Timed in a real window, mpv's GL draw (the median of 600 frames of
+1080p120, four alternating runs) took 0.316–0.338 ms with the barrier in Skia's batch, 0.317–0.327
+with no barrier at all, and 0.385–0.418 with the barrier submitted when the frame began; at
+1080p24 the means were 0.90–1.00, 0.91–1.00 and 1.26–1.34. A barrier submitted alone just before
+Skia's batch measured 0.311–0.351, which is why it is carried instead. The validation layer (core
+and synchronisation) is clean on every path; with the barrier left to the present it reports
+`VUID-vkCmdDraw-None-09600` and `SYNC-HAZARD-WRITE-AFTER-WRITE`.
 
 On scRGB, 1.0 is 80 nits, and the UI's white has to land at the display's SDR white instead: the
 **white scale**, SDR white over 80 (3.0 for 240 nits). **Skia cannot put a glyph past 1.0**, with

@@ -228,6 +228,13 @@ public class ToggleSwitchElement : Element
         }
     }
 
+    // Its track is the theme's (compared on a themed twin, so a rebuild hands back the track the
+    // style pass wrote, and a state change slides the knob at the theme's pace); of what it copies
+    // below, the label, its gap and the track's size are measured, and their setters mark layout
+    // when one changes. The rest is paint and behaviour.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(ToggleSwitchElement);
+    private protected override bool PatchThemesTwin => GetType() == typeof(ToggleSwitchElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

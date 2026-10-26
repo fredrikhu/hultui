@@ -394,8 +394,10 @@ Three things decide whether it stays right and stays cheap:
   must fill its host `FlexGrow(1)` (the host is a column).
 - **Keep the parent's children keyed.** A keyed list puts a kept host back without marking the
   parent (round 4, 87698f1): no layout, and no structural change, which would make a window
-  with a listening screen reader build a whole new accessibility tree for the key. A host in an
-  unkeyed list, or alone in its parent, goes back the ordinary way and marks both.
+  with a listening screen reader build a whole new accessibility tree for the key. So does a
+  parent whose children are all handed back, a host alone in its parent among them (round 5):
+  the build moved every child out, and they come back as they were. A host in an unkeyed list
+  beside children the build made goes back the ordinary way and marks both.
 
 Junction with its chrome in three parts (b35fc58; headless, JIT, a 1,562-commit clone, a key
 and 8 frames): History 242.5 → 107.3 KB a key (−56 %), Branches 186.0 → 50.8 (−73 %), Tags
@@ -405,6 +407,72 @@ same accessibility trees a key with a reader. The perf suite pins the pattern:
 `component/list walk beside chrome built with it` (173.5 KB a step) against `… in kept parts`
 (35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
 as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
+
+Meridian keeps its title bar, rail, request tree and response pane this way (round 5, step 11),
+and adds four lessons:
+
+- **A view-only path can still flip something a part shows.** The tree marks a request with
+  unsaved edits, and the first keystroke in its URL makes it unsaved. The editor's edits read
+  the flag before and after (`DocEdited`): the edit that flips it takes the full path, the rest
+  are view-only. A part shows a value only when the value is an input to it; a part that showed
+  the typed text itself would have to rebuild on every key.
+- **A part's own controls can rebuild the part alone.** The response pane's tabs, its
+  pretty/raw switch and its find bar change nothing else, so they write a second signal only
+  the pane reads: no parent build at all. A helper that has work waiting for a build (a
+  `FindBar`'s `Service()`, which gives its field the keyboard) then has to run after the part's
+  builds too — but not after the first, which runs while the parent's build makes the host,
+  before the part is in the window (`Mount().Parent` is still null).
+- **A part can hear the revision before the parent removes it.** Outside an event handler a
+  signal write runs its effects at once, so `MarkDirty()`'s bump rebuilds the parts before the
+  parent's own rebuild takes out one that no longer belongs (the pane, when the last tab
+  closed). Its build must cope with that state: return an empty box.
+- **A pane that gives way can keep its sizing on its root.** The bottom pane (380 high,
+  shrinking to a floor) needs nothing on its host: an unsized host takes its content's height
+  and floor. Only a host whose root never shrank needs `FlexShrink(0)`; left out, the tree and
+  the right pane gave their width to the editor.
+
+Meridian with the four parts (headless, 1400×900, a key and two frames; NativeAOT the same): a
+keystroke in the URL 237 → 72 KB (−70 %), elements patched 218 → 54; in a 200-request collection,
+where the tree had cost about 4.4 KB a request on every key, 938 → 72 KB and the key's time −22 %;
+the header, param and body editors −64…−70 %; a History key −35 %; a find character in the
+response rebuilds only the pane (no window build, −12 %). The time of a key and its frames moves
+less (−1…−7 % at 25 requests): at this size the frames, not the build, are most of it.
+
+Vesper keeps its title bar, rail and command line, and each pane's tab strip, path trail, column
+header and footer, this way (round 5, step 12), and adds four lessons:
+
+- **Let the parent's build place the parts.** Junction's and Meridian's parts read a revision
+  signal, so a full rebuild built them from the signal's effect: inside an event when the dispatch
+  ended, after the parent's build and its `OnAfterBuild` (which still saw the old parts), and
+  outside one before the parent's build, in a state the parent might be about to remove. Vesper
+  places each part through a check in its build (`Part.Place()`): a part whose revision moved
+  builds there and then, where its elements used to be built, so the command line's field exists
+  when `OnAfterBuild` focuses it. The revision for a full rebuild is then a plain counter. A part's
+  own signal stays for a part that rebuilds alone (the column header under the pointer, with no
+  window build), and a loader a part reads still rebuilds it (a footer hears its listing land).
+- **Compare, in the view-only path, what a view-only change can move.** Tab, a click in the other
+  pane, a mark, type-to-find and a thumbnail landing all call `MarkViewDirty()`, which compares the
+  few inputs of each part that such a change can move with what the part was built from: which
+  pane is active (a trail lights its root crumb in the active pane), the mark count, the filter,
+  the files cut and the decodes running (a footer), the filter, a notice and an open prompt (the
+  command line). The parts that show what moved build; the paths need not know which part shows
+  what.
+- **Split a part by what changes together.** One header part per pane made Tab build both tab
+  strips and column headers as well (159 KB a key), because the trail shows which pane is active:
+  as three parts, Tab builds the two trails (106 KB), and the pointer over a sort column builds one
+  column header and no window (378 → 26 KB a move).
+- **Set what a build shows before asking for it.** Duplicating a tab set the copy's view and sort
+  after the build that showed the tab; the next rebuild of anything used to cover that, and a kept
+  part does not. With parts, a full rebuild no longer happens by accident.
+
+Vesper with the parts (headless, 1240×820, 400 files a pane eight folders deep, a key and two
+frames; NativeAOT within 2 %): a cursor key in Detail 210 → 34 KB (−84 %), elements patched 169 →
+7, and the other pane is not touched; with the F3 partner ring 218 → 44 (−80 %); Brief 199 → 37
+(−81 %); Thumbnails 219 → 58 and 257 → 94 (−74 %, −63 %); a mark 362 → 190 (−47 %: a mark still
+makes every visible row again); Tab 207 → 105 (−49 %); a folder in and out 554 → 273 (−51 %); a
+filter character 365 → 209 (−43 %); a walk with the preview panel 329 → 73 (−78 %). With a reader
+the same bytes come off and the same accessibility trees are built. A key's time on NativeAOT
+−7…−21 %: the two frames are most of it.
 
 ### Hand back the elements a key does not change
 
@@ -432,6 +500,14 @@ Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 
 key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
 real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
 moves to its new column (755.8 → 229.4 KB a step).
+
+A column whose cells are all kept is left with no children by the time the reconciler reaches
+it, since the build moved every one into its new tree. Until round 5 those came back one by one,
+each marking the column's structure, so with a reader listening every key built the whole
+accessibility tree; now they come back as they were and mark nothing (Brief with a reader, 400
+files: 300.6 → 230.2 KB a key, 1.00 → 0 trees; Reel's player, alone in its container, 5.8 → 2.0
+KB a build). The same elements in the same order is the rule: a column handed back in another
+order, or with a new cell, marks its structure as any change does.
 
 ---
 

@@ -112,6 +112,12 @@ sealed class TypeBesideDiff(Random rng, bool kept) : Component
     private Element Row(DiffLine r)
     {
         RowsMade++;
+        return DiffRow(r);
+    }
+
+    /// <summary>A row of the diff: its two line numbers, its sign and its text with the spans.</summary>
+    internal static Element DiffRow(DiffLine r)
+    {
         if (r.Kind == DiffKind.Hunk)
             return Box.New().Padding(new Thickness(5, 14)).Background(Color.FromHex("#EEF2FF"))
                 .Children(Text.New(r.Text).FontSize(11.5f).TextColor(Ui.Accent).MaxLines(1));
@@ -143,7 +149,7 @@ sealed class TypeBesideDiff(Random rng, bool kept) : Component
 
     /// <summary>One hunk: runs of context between runs of removed lines and the lines that
     /// replace them, each changed pair differing by a word or two.</summary>
-    private static List<DiffSourceLine> MakeSource(Random rng, int count)
+    internal static List<DiffSourceLine> MakeSource(Random rng, int count)
     {
         var lines = new List<DiffSourceLine>(count);
         int oldNo = 1, newNo = 1;
@@ -172,7 +178,7 @@ sealed class TypeBesideDiff(Random rng, bool kept) : Component
 
     /// <summary>The rows the list shows: a hunk header, then every line, a changed pair's two
     /// lines each carrying the spans of the words that differ.</summary>
-    private static List<DiffLine> Flatten(List<DiffSourceLine> source)
+    internal static List<DiffLine> Flatten(List<DiffSourceLine> source)
     {
         var rows = new List<DiffLine>(source.Count + 1)
         {

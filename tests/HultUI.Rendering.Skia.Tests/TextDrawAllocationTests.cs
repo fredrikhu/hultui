@@ -50,6 +50,17 @@ public class TextDrawAllocationTests
         return surface;
     }
 
+    /// <summary>The paragraph with its glyph arrays made. A run of several words makes its array
+    /// the first time its glyphs are read (ShapedRun.Glyphs): what laying it out allocates, not
+    /// drawing it, which these tests measure.</summary>
+    internal static TextParagraph WithGlyphs(TextParagraph paragraph)
+    {
+        foreach (var line in ((HultUI.Text.PipelineTextParagraph)paragraph).TextLines)
+            foreach (var run in line.Runs)
+                _ = run.Glyphs;
+        return paragraph;
+    }
+
     /// <summary>Bytes this thread allocated per frame of <paramref name="draw"/>, once the
     /// caches are warm: the least of a few rounds.</summary>
     private static double AllocatedPerFrame(SkiaRasterRenderSurface surface, Action<IRenderContext> draw)
@@ -198,29 +209,34 @@ public class TextDrawAllocationTests
         const int Round = 500;
         var paragraphs = new TextParagraph[SkiaRenderContext.RunBlobCacheMaxSize + 1_000 + Allocations.MaxRounds * Round];
         for (int i = 0; i < paragraphs.Length; i++)
-            paragraphs[i] = ctx.LayoutParagraph($"Row {i:D5} of the list", style, 400);
+            paragraphs[i] = WithGlyphs(ctx.LayoutParagraph($"Row {i:D5} of the list", style, 400));
 
-        ctx.BeginFrame(600, 400, 1f, Color.White);
-        // Draw until the blob cache reaches its bound and empties: an emptied dictionary keeps
-        // its capacity, so the misses measured after it grow nothing and cost only the blob.
+        // A hundred new rows a frame, as a list scrolled through, until the blob cache reaches its
+        // bound and lets the old rows go: a dictionary keeps its capacity, so the misses measured
+        // after it grow nothing and cost only the blob.
+        const int PerFrame = 100;
         int next = 0, lastCount = 0;
-        while (next < paragraphs.Length && ctx.CachedBlobCount >= lastCount)
+        void Frame()
+        {
+            ctx.BeginFrame(600, 400, 1f, Color.White);
+            for (int end = next + PerFrame; next < end; next++)
+                ctx.DrawParagraph(paragraphs[next], new Point(10, 10));
+            ctx.EndFrame();
+        }
+        while (next + PerFrame <= paragraphs.Length && ctx.CachedBlobCount >= lastCount)
         {
             lastCount = ctx.CachedBlobCount;
-            ctx.DrawParagraph(paragraphs[next++], new Point(10, 10));
+            Frame();
         }
         Assert.True(next < SkiaRenderContext.RunBlobCacheMaxSize + 1_000, "the blob cache never reached its bound");
 
-        // Rows never drawn before (each its own glyphs, so each a new blob), a round of them at
+        // Rows never drawn before (each its own glyphs, so each a new blob), a round of frames at
         // a time: the least of a few rounds.
         int start = next, missesBefore = ctx.CachedBlobCount;
         long bytes = Allocations.Least(() =>
         {
-            for (int i = next; i < next + Round; i++)
-                ctx.DrawParagraph(paragraphs[i], new Point(10, 10));
-            next += Round;
+            for (int f = 0; f < Round / PerFrame; f++) Frame();
         });
-        ctx.EndFrame();
 
         Assert.True(next - start >= Round, "no round was drawn");
         Assert.NotEqual(missesBefore, ctx.CachedBlobCount);

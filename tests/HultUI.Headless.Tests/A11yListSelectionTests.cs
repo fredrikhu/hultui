@@ -306,10 +306,11 @@ public class A11yListSelectionTests
     }
 
     [Fact]
-    public void AListOver2000Items_AMove_BuildsNoTree_AndTellsNothing_AsBefore()
+    public void AListOver2000Items_AMove_BuildsNoTree_AndIsToldOnTheListNode()
     {
-        // Its items are served on demand, with no node each, and no reader is told a move there
-        // (a later step). A move made the window build and diff the whole tree for an empty diff.
+        // Its items are served on demand, with no node each: the list node carries the selection,
+        // and a move is its own change (plan 17, round 5, step 14; until then no reader was told a
+        // move there). A move made the window build and diff the whole tree for an empty diff.
         using var session = HeadlessSession.Create(800, 600);
         var bridge = session.Window.InstallAccessibilityBridge();
         var list = List(3_000);
@@ -325,7 +326,9 @@ public class A11yListSelectionTests
         session.PumpFrame();
 
         Assert.Equal(builds, root.Builds);
-        Assert.Empty(bridge.Diffs);
+        Assert.Equal([(list.Id, AccessibilityProperties.ItemSelection), (list.Id, AccessibilityProperties.ItemSelection)],
+            bridge.Diffs.SelectMany(d => d.PropertyChanged).Select(c => (c.Node.ElementId, c.PropertyName)));
+        Assert.Equal([6], ListNode(bridge.CurrentTree!, list).Served.SelectedArray);
     }
 
     [Fact]

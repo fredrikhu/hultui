@@ -14,10 +14,12 @@ namespace HultUI.Platform.SDL3;
 /// <c>ShowWindow(SW_MAXIMIZE)</c> and <c>ShowWindow(SW_RESTORE)</c>, which activate whatever the
 /// hint says — there is no show command that maximizes without activating — and so are the
 /// custom frame's <c>WM_SYSCOMMAND</c> maximize and restore, full screen's restore before it covers
-/// the monitor and its maximize on the way out, and a maximized placement. A process that set the
-/// hint because it shares a desktop someone is using (a probe, a test) had its window ask for the
-/// foreground at each of them: ten times in one maximize, restore, full screen and placement
-/// sequence (plan 17, round 4).</para>
+/// the monitor and its maximize on the way out, and a maximized placement. So are a minimize of a
+/// window that was raised (it asks for its own activation inside the call, even through
+/// <c>SW_SHOWMINNOACTIVE</c>) and a raise, unless SDL's separate raise hint says no. A process
+/// that set the hint because it shares a desktop someone is using (a probe, a test) had its window
+/// ask for the foreground at each of them: ten times in one maximize, restore, full screen and
+/// placement sequence (plan 17, round 4); minimize and raise since round 5.</para>
 /// <para>So while the hint says no, those calls run under a CBT hook on the calling thread that
 /// refuses <c>HCBT_ACTIVATE</c>. The window still maximizes, restores and covers the monitor; it is
 /// only not activated. An app that leaves the hint unset — every real one — installs no hook and

@@ -123,3 +123,6 @@ Not environment variables, but the switches people look for alongside them:
 - `Application.DevToolsHotkeysEnabled` — the one switch for Ctrl+Shift+I, F12 and F11.
 - `UIThread.Enforce` — the wrong-thread guard, on in Debug builds of `HultUI.Core`. See
   [REACTIVITY.md — the thread guard](REACTIVITY.md#the-thread-guard).
+- GC settings — an app's project file, not the framework: the five apps raise the large-object
+  threshold to 512 KB (`apps/AppRuntime.props`), and `DOTNET_GCLOHThreshold` overrides it on one
+  machine. See [NATIVE-AOT.md — GC settings for an app](NATIVE-AOT.md#gc-settings-for-an-app).

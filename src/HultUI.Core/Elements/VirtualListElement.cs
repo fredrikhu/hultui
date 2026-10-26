@@ -29,6 +29,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     // pass per invalidation buys O(log n) scroll-offset lookups and O(1) row positions, which
     // is what lets a list of unequal rows stay as cheap to scroll as a uniform one.
     private float[]? _offsets;
+    // The arrays the offsets are worked out in, kept: the last ones worked out (what _offsets is
+    // while they are current) and a spare of the same length. An owner rebuilt per key hands the
+    // list a new height function every build, and working its heights out into a new array cost
+    // 4(n + 1) bytes a patch, twice after InvalidateRows, on the large object heap past 21,250
+    // rows. They are worked out into the spare, compared with the last ones, and swapped in only
+    // when one moved (EnsureOffsets).
+    private float[]? _offsetsLast;
+    private float[]? _offsetsSpare;
 
     /// <summary>
     /// Optional accessible label for an item, used by assistive tech to name each
@@ -103,11 +111,48 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             _selectedIndex = value;
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
             // Kept rows drew the selection they were made with: the one that had it and the one
-            // that has it are made again.
+            // that has it are made again. With the list drawing it, no row is: the highlight moves.
             DropRowsWhoseSelectionChanged();
+            if (_selectionHighlight is not null) MarkPaintDirty();
         }
     }
     private int _selectedIndex = -1;
+
+    /// <summary>
+    /// The selection drawn by the list itself, under the selected row (each selected row on
+    /// screen with <see cref="CanSelectMultiple"/>), at the row's border box and before the row
+    /// is drawn; null (the default) leaves the selection to the rows, as it always was. Set by
+    /// <c>.SelectionHighlight(…)</c>.
+    /// <para>
+    /// With it, rows are made as unselected: an item-rows template
+    /// (<see cref="ItemRowTemplate"/>) is asked with <c>selected = false</c>, so a selection move
+    /// makes no row again — the list only draws the highlight somewhere else. A row that drew
+    /// its selection as a background draws a transparent one instead, and the pixels are the
+    /// same when the highlight is the fill, radius and border the row drew (see
+    /// <see cref="RowHighlight"/>). A row that shows its selection any other way — a bolder
+    /// label, an icon's colour, a hover tint left off the selected row, an affordance on the
+    /// selected row — cannot show it any more; such a list keeps the selection in its rows.
+    /// Assistive technology reads the list's selection, not the rows', so it is told the same.
+    /// </para>
+    /// <para>
+    /// A change of highlight is drawn on the next frame and makes no row; turning it on or off
+    /// makes the rows whose selected state changes for the template (the selected ones).
+    /// </para>
+    /// </summary>
+    public RowHighlight? SelectionHighlight
+    {
+        get => _selectionHighlight;
+        set
+        {
+            if (_selectionHighlight == value) return;
+            bool onOrOff = _selectionHighlight.HasValue != value.HasValue;
+            _selectionHighlight = value;
+            MarkPaintDirty();
+            // Rows made for the template's own selection, or made unselected for the list's.
+            if (onOrOff) DropRowsWhoseSelectionChanged();
+        }
+    }
+    private RowHighlight? _selectionHighlight;
 
     /// <summary>
     /// When true, the list manages a set of selected indices that assistive tech
@@ -134,6 +179,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     private bool IsItemSelected(int index) =>
         CanSelectMultiple ? _multiSelected.Contains(index) : index == _selectedIndex;
+
+    /// <summary>The selected state a row is made with, and kept while: its item's, unless the
+    /// list draws the selection itself (<see cref="SelectionHighlight"/>), when every row is
+    /// made unselected.</summary>
+    private bool RowSelected(int index) => _selectionHighlight is null && IsItemSelected(index);
 
     // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
     //    virtualization hasn't materialized as elements. ──
@@ -476,13 +526,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     /// <summary>
     /// With <see cref="ItemRowTemplate"/>, lets go of the realized rows whose selected state is
-    /// not the one they were made with, so the next frame makes them again; the rest stay.
+    /// not the one they were made with (<see cref="RowSelected"/>), so the next frame makes them
+    /// again; the rest stay.
     /// </summary>
     private void DropRowsWhoseSelectionChanged()
     {
         if (_itemRowTemplate is null || _activeElements.Count == 0) return;
         foreach (var (index, row) in _activeElements)
-            if (row.Selected != IsItemSelected(index))
+            if (row.Selected != RowSelected(index))
                 _dropping.Add(index);
         DropGathered();
     }
@@ -506,12 +557,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     // ── Row geometry. With no height function these all reduce to the uniform arithmetic. ──
 
-    private void EnsureOffsets()
+    /// <summary>
+    /// Works the row offsets out when they are not current. Returns whether they moved from the
+    /// last ones worked out: true when there were none, or when there is no height function (and
+    /// so no offsets) now.
+    /// </summary>
+    private bool EnsureOffsets()
     {
-        if (_itemHeightFor is null) { _offsets = null; return; }
-        if (_offsets is not null && _offsets.Length == _items.Count + 1) return;
+        if (_itemHeightFor is null)
+        {
+            _offsets = _offsetsLast = _offsetsSpare = null;
+            return true;
+        }
+        int length = _items.Count + 1;
+        if (_offsets is not null && _offsets.Length == length) return false;
 
-        var offsets = new float[_items.Count + 1];
+        var offsets = _offsetsSpare is { } spare && spare.Length == length ? spare : new float[length];
         float y = 0f;
         for (int i = 0; i < _items.Count; i++)
         {
@@ -521,7 +582,17 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             y += Math.Max(1f, _itemHeightFor(_items[i], i));
         }
         offsets[_items.Count] = y;
-        _offsets = offsets;
+
+        if (_offsetsLast is { } last && last.Length == length && last.AsSpan().SequenceEqual(offsets))
+        {
+            // The heights did not move: the array that holds them stays, and this one stays spare.
+            _offsetsSpare = offsets;
+            _offsets = last;
+            return false;
+        }
+        _offsetsSpare = _offsetsLast is { } previous && previous.Length == length ? previous : null;
+        _offsets = _offsetsLast = offsets;
+        return true;
     }
 
     private float HeightOf(int index) =>
@@ -594,6 +665,35 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and layout so the children are renderable immediately.
         if (_visibleStart != prevStart || _visibleEnd != prevEnd)
             LayoutVisibleChildren();
+    }
+
+    /// <summary>The selection, when the list draws it (<see cref="SelectionHighlight"/>): at each
+    /// selected row on screen, under the rows, as a box would draw its own background and
+    /// border. Rows are realized by now (<see cref="UpdateContentSize"/> runs first).</summary>
+    internal override void RenderUnderContent(IRenderContext ctx)
+    {
+        if (_selectionHighlight is not { } highlight || _activeElements.Count == 0) return;
+        if (!CanSelectMultiple)
+        {
+            if (_selectedIndex >= 0 && _activeElements.TryGetValue(_selectedIndex, out var row))
+                DrawHighlight(ctx, in highlight, row.Element);
+            return;
+        }
+        if (_multiSelected.Count == 0) return;
+        foreach (var (index, row) in _activeElements)
+            if (_multiSelected.Contains(index))
+                DrawHighlight(ctx, in highlight, row.Element);
+    }
+
+    // BoxElement.Render's call for a background with a uniform solid border, or none.
+    private static void DrawHighlight(IRenderContext ctx, in RowHighlight highlight, Element row)
+    {
+        var box = row.Layout.AbsoluteBorderBox;
+        bool ring = highlight.BorderColor.A > 0 && highlight.BorderWidth > 0;
+        if (highlight.Background.A == 0 && !ring) return;
+        ctx.DrawRoundedRect(box, highlight.CornerRadius, highlight.Background,
+            ring ? highlight.BorderColor : Color.Transparent,
+            ring ? new Thickness(highlight.BorderWidth) : default);
     }
 
     private void LayoutVisibleChildren()
@@ -741,7 +841,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             if (_recyclePool.Count > 0)
                 _recyclePool.RemoveAt(_recyclePool.Count - 1);
             var item = _items[i];
-            bool selected = _itemRowTemplate is not null && IsItemSelected(i);
+            bool selected = _itemRowTemplate is not null && RowSelected(i);
             var element = _itemRowTemplate is { } rowTemplate ? rowTemplate(item, selected) : _itemTemplate!(item);
 
             // A keyed row that was on screen before the invalidation is patched from the
@@ -811,7 +911,6 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     internal override void PatchFrom(Element source)
     {
-        var offsetsBefore = _offsets;
         base.PatchFrom(source);
         if (source is VirtualListElement<T> vl)
         {
@@ -832,6 +931,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 _offsets = null;
             }
 
+            // First: it decides the selected state rows are made with, which the selection
+            // below and the kept rows' check compare against.
+            SelectionHighlight = vl.SelectionHighlight;
             // Accessibility state is rebuilt fresh each render in declarative UIs,
             // so it must ride across the patch — otherwise the a11y selection and
             // activation wiring freeze at their first-mount values.
@@ -854,7 +956,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
             if (keepRows)
             {
-                KeepUnchangedRows(vl._items, heightsFromFunction, offsetsBefore);
+                KeepUnchangedRows(vl._items, heightsFromFunction);
                 return;
             }
 
@@ -883,14 +985,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     /// <param name="heightsFromFunction">Whether row heights came, or now come, from
     /// <see cref="ItemHeightFor"/>: then they are worked out again.</param>
-    /// <param name="offsetsBefore">The row offsets before the patch, to tell whether they moved.</param>
-    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction, float[]? offsetsBefore)
+    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction)
     {
         _items = items;
         var comparer = EqualityComparer<T>.Default;
         foreach (var (index, row) in _activeElements)
         {
-            if (index >= items.Count || row.Selected != IsItemSelected(index) || !comparer.Equals(row.Item, items[index]))
+            if (index >= items.Count || row.Selected != RowSelected(index) || !comparer.Equals(row.Item, items[index]))
                 _dropping.Add(index);
         }
         DropGathered();
@@ -901,13 +1002,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and the list is laid out again; the same when a list stops using one and every row goes
         // back to ItemHeight. When none moved there is nothing to redo: a diff list patched by a
         // rebuild for something beside it laid out itself and everything around it on every key.
+        // They are compared with the last ones worked out, also when the app told the list with
+        // InvalidateRows first (which lays the window out again by itself), and the ones worked
+        // out here are the ones the layout pass uses: it worked them out a second time.
         if (heightsFromFunction)
         {
             _offsets = null;
-            EnsureOffsets();
-            if (offsetsBefore is null || _offsets is not { } now || !offsetsBefore.AsSpan().SequenceEqual(now))
+            if (EnsureOffsets())
             {
-                _offsets = null;
                 _visibleStart = -1;
                 _visibleEnd = -1;
                 MarkLayoutDirty();

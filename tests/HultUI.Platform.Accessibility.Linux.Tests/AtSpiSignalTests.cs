@@ -84,6 +84,32 @@ public class AtSpiSignalTests
         ], driver.Apply());
     }
 
+    /// <summary>Expandable is a state of its own beside expanded. Only expanded was sent, so a node
+    /// that stopped being expandable went on reading "collapsed" in a caching client (seen live in
+    /// WSL, plan 17 round 4), and one that became expandable while closed was never called so.</summary>
+    [Fact]
+    public void ANodeThatStopsOrStartsBeingExpandable_SaysSo()
+    {
+        var box = BoxElement.New();
+        box.AccessibleName = "Section";
+        box.AccessibleExpanded = true;
+        var root = BoxElement.New();
+        root.AddChild(box);
+        var driver = new Driver(root);
+        string id = Id(box);
+
+        box.AccessibleExpanded = false;
+        Assert.Equal([$"state-changed:expanded {id} 0"], driver.Apply());
+        box.AccessibleExpanded = null;
+        Assert.Equal([$"state-changed:expandable {id} 0"], driver.Apply());
+        box.AccessibleExpanded = true;
+        Assert.Equal([$"state-changed:expandable {id} 1", $"state-changed:expanded {id} 1"], driver.Apply());
+        box.AccessibleExpanded = null;
+        Assert.Equal([$"state-changed:expanded {id} 0", $"state-changed:expandable {id} 0"], driver.Apply());
+        box.AccessibleExpanded = false;
+        Assert.Equal([$"state-changed:expandable {id} 1"], driver.Apply());
+    }
+
     [Fact]
     public void RemovedObjects_AreStillRemoved_OneNudgePerParent()
     {

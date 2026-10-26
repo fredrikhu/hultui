@@ -193,12 +193,55 @@ public class ViewModesTests
         Assert.True(t.Field<int>("_builds") - builds < 54 + 20, "most resize steps still built");
     }
 
-    /// <summary>The texts and boxes of both path trails and of the left pane's grid.</summary>
+    /// <summary>Detail sizes nothing from the window but the path trail, so a resize builds only
+    /// when a trail would change: each step shows what a forced build at that size shows, the
+    /// sweep drops and brings back segments, and the steps that leave the trails alone build
+    /// nothing. Before, a Detail resize never built, and the trail kept the old window's
+    /// truncation until a key press.</summary>
+    [Fact]
+    public void ADetailResizeStep_ShowsTheTrailABuildWould_AndBuildsOnlyWhenItChanges()
+    {
+        using var t = new DiffViewTests.Fixture();
+        var deep = Path.Combine(t.Left, "first-long-name", "second-long-name", "third-long-name",
+            "fourth-long-name", "fifth-long-name", "sixth-long-name");
+        Directory.CreateDirectory(deep);
+        for (int i = 0; i < 20; i++) File.WriteAllText(Path.Combine(deep, $"f{i:00}.txt"), "x");
+        t.Open();
+        t.Invoke("NavigateTo", 'L', deep);
+        t.Session.PumpUntil(() => t.Rows('L').Count > 20);
+        t.Press(KeyCode.F1, KeyModifiers.Ctrl);   // view: Detail
+        t.Session.PumpFrames(2);
+
+        int trailChanges = 0, stepBuilds = 0;
+        string trail = Trail(t.Root, "crumb-strip-L") + Trail(t.Root, "crumb-strip-R");
+        for (int width = 1240; width >= 640; width -= 12)
+        {
+            int builds = t.Field<int>("_builds");
+            t.Session.Window.SetClientSize(width, 820);
+            t.Session.PumpFrames(2);
+            stepBuilds += t.Field<int>("_builds") - builds;
+            string shown = Snapshot(t, KeyCode.F1);
+
+            t.MarkDirty();
+            t.Session.PumpFrames(2);
+            Assert.Equal(Snapshot(t, KeyCode.F1), shown);
+
+            string now = Trail(t.Root, "crumb-strip-L") + Trail(t.Root, "crumb-strip-R");
+            if (now != trail) trailChanges++;
+            trail = now;
+        }
+        Assert.True(trailChanges > 0, "no step of the sweep changed the path trail");
+        Assert.Equal(trailChanges, stepBuilds);
+    }
+
+    /// <summary>The texts and boxes of both path trails and of the left pane's grid (none in
+    /// Detail).</summary>
     private static string Snapshot(DiffViewTests.Fixture t, KeyCode view)
     {
         var sb = new System.Text.StringBuilder();
         foreach (var id in new[] { "crumb-strip-L", "crumb-strip-R" })
             Dump(FindById(t.Root, id) ?? throw new Xunit.Sdk.XunitException($"no {id}"), sb);
+        if (view == KeyCode.F1) return sb.ToString();
         Element grid = view == KeyCode.F2
             ? t.Field<Ref<ScrollViewElement>>("_briefScrollL").Current!
             : t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL").Current!;

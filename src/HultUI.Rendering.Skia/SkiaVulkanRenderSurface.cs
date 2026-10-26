@@ -40,11 +40,35 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         public SKSurface Surface { get; private set; } = null!;
         public SKCanvas Canvas { get; private set; } = null!;
 
+        /// <summary>The window size the canvas is clipped to while the target is larger than the
+        /// window, or (0, 0); see <see cref="ClipTo"/>.</summary>
+        private (int Width, int Height) _clip;
+
         public void Hold(GRBackendRenderTarget target, SKSurface surface)
         {
             _target = target;
             Surface = surface;
             Canvas = surface.Canvas;
+            _clip = (0, 0);
+        }
+
+        /// <summary>
+        /// Clips the canvas to the window's top-left <paramref name="width"/> by
+        /// <paramref name="height"/> pixels, or unclips it with (0, 0), when that changes. Skia keeps
+        /// the clip across frames (the render context's own saves are balanced within a frame), and
+        /// the frame's scale is set after this: the clip is in device pixels.
+        /// </summary>
+        public void ClipTo(int width, int height)
+        {
+            if (_clip == (width, height)) return;
+            Canvas.RestoreToCount(1);
+            if (width > 0)
+            {
+                Canvas.Save();
+                Canvas.ResetMatrix();
+                Canvas.ClipRect(SKRect.Create(width, height));
+            }
+            _clip = (width, height);
         }
 
         /// <summary>Disposes what it holds; the holder itself can hold again.</summary>
@@ -77,9 +101,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// <para><b>Why keep them.</b> Built every frame, the target and surface cost 2,048 bytes of
     /// managed allocation a frame — all of an idle-animating window's, and of Aperture's quiet
     /// frames — and Skia made and destroyed an image view and a framebuffer over the image every
-    /// frame. A host that cannot do both, and a frame drawn straight onto the swapchain after one
-    /// that drew a video, get a target for that frame only, declared in the layout the frame
-    /// says, as before (<see cref="_once"/>).</para>
+    /// frame. A host that cannot do both gets a target for that frame only, declared in the layout
+    /// the frame says, as before (<see cref="_once"/>).</para>
     /// </summary>
     private readonly SwapchainTargets<WrappedImage> _kept = new();
 
@@ -427,10 +450,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     ///
     /// <para><b>Only when the host rebuilds.</b> A host that calls before its images go
     /// (<see cref="IVulkanSurfaceHost.SetSwapchainReleasing"/>) drops them itself, at the rebuild;
-    /// a resize that keeps the swapchain — an over-allocated one, during a drag — keeps them, and a
-    /// target made for the old size is replaced when its image next comes round (the size is part
-    /// of its key). Dropped here, every step of a drag paid a synchronous submit and every kept
-    /// target. A host that cannot say so gets them dropped first, as before.</para>
+    /// a resize that keeps the swapchain — an over-allocated one, during a drag — keeps them. On an
+    /// 8-bit swapchain a kept target is the images' allocated size and serves every size of the
+    /// drag; on the half-float one a target made for the old size is replaced when its image next
+    /// comes round (the size is part of its key; see <see cref="TargetFor"/>). Dropped here, every
+    /// step of a drag paid a synchronous submit and every kept target. A host that cannot say so
+    /// gets them dropped first, as before.</para>
     ///
     /// <para>Only a new <i>pixel</i> size. The scale is not a property of the swapchain, and
     /// on Wayland a move between outputs arrives as two calls — the new pixels at the old
@@ -464,14 +489,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // Before the target: a new offscreen may wait for the GPU and submit, which is harmless
         // while nothing of this frame is recorded against the swapchain image yet.
         bool throughOffscreen = OffscreenFor(frame, path) is not null;
-        var use = SwapchainTargetUses.Choose(_keepTargets, throughOffscreen, gpuSourceLastFrame: _lent.Count > 0);
+        var use = SwapchainTargetUses.Choose(_keepTargets, throughOffscreen);
         var target = TargetFor(frame, path, use);
         if (target is null) return false;
 
         // Straight onto the swapchain, the image has to be in the kept target's layout before
-        // anything is drawn: Skia may submit its work on the image whenever it likes. Through the
-        // offscreen, it waits for the blit, after any GL work in the frame (SwapchainTargetUses).
-        if (use == SwapchainTargetUse.KeptTransitionNow) _host.TransitionAcquiredImage();
+        // any of Skia's work on it is submitted, which may be whenever Skia likes: asked for now,
+        // and submitted by the host with Skia's first submit, ahead of Skia's work. Through the
+        // offscreen, asked for before the blit (SwapchainTargetUses).
+        if (use == SwapchainTargetUse.KeptTransitionAtBegin) _host.TransitionAcquiredImage();
         _transitionBeforeBlit = use == SwapchainTargetUse.KeptTransitionBeforeBlit;
 
         _frameColorSpace = frame.ColorSpace;
@@ -572,29 +598,41 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// The render target over this frame's image: the one kept for it if it was made for this
     /// image, size and colour space, otherwise a new one, kept when the host allows
     /// (<see cref="_kept"/>) and this frame's only when it does not.
+    ///
+    /// <para>While a drag keeps an over-allocated 8-bit swapchain, a kept target is made at the
+    /// images' allocated size, and kept across the drag's sizes with its canvas clipped to the
+    /// window (<see cref="SwapchainTargetUses.TargetSize"/>): the window's size is not part of its
+    /// key then. The swapchain shows the images one-to-one from their top-left corner, so what lies
+    /// outside the clip is never shown.</para>
     /// </summary>
     private WrappedImage? TargetFor(in VulkanFrameTarget frame, ScRgbFramePath path, SwapchainTargetUse use)
     {
         ReleaseOnce();
 
-        var key = new SwapchainTargetKey(frame.Image, frame.WidthPx, frame.HeightPx, frame.Format,
+        bool keep = use != SwapchainTargetUse.ThisFrameOnly;
+        var (width, height) = SwapchainTargetUses.TargetSize(keep, frame.Format, frame.WidthPx, frame.HeightPx,
+            frame.AllocatedWidthPx, frame.AllocatedHeightPx);
+        var key = new SwapchainTargetKey(frame.Image, width, height, frame.Format,
             frame.Usage, frame.ColorSpace, path,
             path == ScRgbFramePath.ScaledSpace ? _host.SdrWhiteScale : 0f);
-        bool keep = use != SwapchainTargetUse.ThisFrameOnly;
-        if (keep && _kept.TryGet(frame.Index, key, out var kept)) return _frame = kept;
-
-        // A kept target is declared in the layout Skia leaves it in, which is where the host's
-        // barrier puts the image before any of Skia's work on it runs; one for this frame only,
-        // in the layout the image has.
-        var made = keep ? new WrappedImage() : _onceHolder;
-        if (!Wrap(frame, path, keep ? VkImageLayoutColorAttachmentOptimal : frame.Layout, made))
-            return _frame = null;
-        if (keep) _kept.Put(frame.Index, key, made);
-        else _once = made;
-        return _frame = made;
+        if (!keep || !_kept.TryGet(frame.Index, key, out var target))
+        {
+            // A kept target is declared in the layout Skia leaves it in, which is where the host's
+            // barrier puts the image before any of Skia's work on it runs; one for this frame only,
+            // in the layout the image has.
+            target = keep ? new WrappedImage() : _onceHolder;
+            if (!Wrap(frame, path, keep ? VkImageLayoutColorAttachmentOptimal : frame.Layout, target, width, height))
+                return _frame = null;
+            if (keep) _kept.Put(frame.Index, key, target);
+            else _once = target;
+        }
+        bool largerThanWindow = width != frame.WidthPx || height != frame.HeightPx;
+        target.ClipTo(largerThanWindow ? frame.WidthPx : 0, largerThanWindow ? frame.HeightPx : 0);
+        return _frame = target;
     }
 
-    private bool Wrap(in VulkanFrameTarget frame, ScRgbFramePath path, uint layout, WrappedImage into)
+    private bool Wrap(in VulkanFrameTarget frame, ScRgbFramePath path, uint layout, WrappedImage into,
+        int widthPx, int heightPx)
     {
         var imageInfo = new GRVkImageInfo
         {
@@ -616,7 +654,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             SharingMode = VkSharingModeExclusive,
         };
 
-        var target = new GRBackendRenderTarget(frame.WidthPx, frame.HeightPx, imageInfo);
+        var target = new GRBackendRenderTarget(widthPx, heightPx, imageInfo);
         if (!target.IsValid)
         {
             target.Dispose();

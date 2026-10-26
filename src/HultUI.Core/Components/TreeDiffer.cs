@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HultUI.Core.Elements;
 
 namespace HultUI.Core.Components;
@@ -141,8 +142,14 @@ internal static class TreeDiffer
 
         if (oldSnapshot.Length == 0)
         {
-            foreach (var child in newSnapshot)
-                existing.AddChild(child);
+            // A container whose every child the build handed back — persistent child components,
+            // or live elements an owner keeps between builds — has none left by now: the build
+            // moved them all into the tree it made. Put back as they were, they mark nothing, as
+            // in a keyed list (ReconcileKeyed); added one by one, each marked this container's
+            // structure, and a listening reader got a new accessibility tree for it.
+            if (!Element.TryRestoreMoved(existing, newSnapshot))
+                foreach (var child in newSnapshot)
+                    existing.AddChild(child);
             return;
         }
 
@@ -254,7 +261,8 @@ internal static class TreeDiffer
         // frame for a move of the History selection. A child that did change marks itself.
         // A persistent child the build moved out and this pass put back in its place is no
         // change either (Element.TryRestoreMoved).
-        if (!SameChildren(parent.Children, resultChildren) && !Element.TryRestoreMoved(parent, resultChildren))
+        if (!SameChildren(parent.Children, resultChildren)
+            && !Element.TryRestoreMoved(parent, CollectionsMarshal.AsSpan(resultChildren)))
             parent.ReplaceChildren(resultChildren.ToArray());
     }
 

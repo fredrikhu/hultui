@@ -106,7 +106,7 @@ public sealed class TextPipeline
         {
             var runs = lines[i].Runs;
             for (int r = 0; r < runs.Count; r++)
-                glyphs += runs[r].Glyphs.Length;
+                glyphs += runs[r].GlyphCount;
         }
         return 16 * glyphs;
     }
@@ -222,8 +222,25 @@ public sealed class TextPipeline
         }
     }
 
+    // Into the pipeline's kept list (_fontRuns), good until the next call of this overload: every
+    // caller reads the runs before it itemizes again, and nothing it calls while it reads them
+    // itemizes into this list (a foreach over it would throw if anything did). A new list a call
+    // was 14–27 % of what styled, BiDi and fallback text allocated per layout (plan 17, round 5).
     private List<FontRun> Itemize(string text, ResolvedInheritedStyle style) =>
-        Itemize(text, style, new List<FontRun>());
+        Itemize(text, style, Kept(_fontRuns));
+
+    private readonly List<FontRun> _fontRuns = new();
+
+    // The most items a kept scratch list holds room for between uses: a line of a few thousand
+    // runs or BiDi pieces. One that grew past it for a long paragraph is let go of at its next use.
+    private const int KeptScratchItems = 4096;
+
+    private static List<T> Kept<T>(List<T> scratch)
+    {
+        scratch.Clear();
+        if (scratch.Capacity > KeptScratchItems) scratch.TrimExcess();
+        return scratch;
+    }
 
     // Into a list the caller owns, cleared first: MeasureString's, which needs the runs only
     // while it adds them up.
@@ -479,10 +496,12 @@ public sealed class TextPipeline
     /// twice the answer. Bisecting the whole range instead would start by shaping half of what
     /// may be a 25,000-character line to discover that ~200 of them fit.
     /// <para><paramref name="prefixes"/>, when given, is the prefix widths of
-    /// <c>text[from..to]</c> (or of more of the text from <paramref name="from"/> on).</para>
+    /// <c>text[from..to]</c> (or of more of the text from <paramref name="from"/> on);
+    /// <paramref name="keptTable"/> says the kept lists hold those of <c>text[from..to]</c>
+    /// (<see cref="FillPrefixTable"/>, a wrap's last line).</para>
     /// </remarks>
     private int FitPrefix(string text, int from, int to, ResolvedInheritedStyle style, float maxWidth,
-        PrefixWidths? prefixes = null)
+        PrefixWidths? prefixes = null, bool keptTable = false)
     {
         int span = 1;
         while (from + span < to && Measure(from + span) <= maxWidth)
@@ -499,9 +518,13 @@ public sealed class TextPipeline
         }
         return SnapPrefix(text, best);   // never split a surrogate pair
 
-        float Measure(int end) => prefixes is null
-            ? MeasureString(text[from..end], style)
-            : PrefixWidth(prefixes, end - from, style);
+        float Measure(int end) => keptTable
+            ? PrefixWidth(text, from, to - from, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_prefixRuns),
+                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_prefixSegments), style.FontSize,
+                style.LetterSpacing, end - from, style)
+            : prefixes is null
+                ? MeasureString(text[from..end], style)
+                : PrefixWidth(prefixes, end - from, style);
     }
 
     /// <summary>
@@ -512,17 +535,17 @@ public sealed class TextPipeline
     /// no separators — this is the only thing that can make it fit. Without it the run is
     /// emitted as a single line wider than the box, and simply runs out of it.</para>
     ///
-    /// <para><paramref name="prefixes"/>, when given, is the prefix widths of
+    /// <para><paramref name="keptTable"/> says the kept lists hold the prefix widths of
     /// <c>text[from..to]</c>, for the first cut only.</para>
     /// </summary>
     private int SplitByCharacter(string text, int from, int to, ResolvedInheritedStyle style,
-        float maxWidth, List<TextLine> lines, int? maxLines, PrefixWidths? prefixes = null,
+        float maxWidth, List<TextLine> lines, int? maxLines, bool keptTable = false,
         PrefixWidths? measureOnly = null)
     {
         while (from < to && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
-            int fit = FitPrefix(text, from, to, style, maxWidth, prefixes);
-            prefixes = null;
+            int fit = FitPrefix(text, from, to, style, maxWidth, keptTable: keptTable);
+            keptTable = false;
             // A box too narrow for even one character would otherwise never advance. One
             // character per line is the sane floor, and what a browser does.
             if (fit <= from) fit = NextCodePoint(text, from);
@@ -886,10 +909,13 @@ public sealed class TextPipeline
     /// paragraph-scoped, so a neutral character next to a cut would resolve
     /// against the cut instead of against the text that actually surrounds it —
     /// and it also meant one ICU round trip per break candidate per line.
+    /// <para>Into <paramref name="segments"/>, cleared first and returned: the pipeline's kept
+    /// list, which MeasureBidi and ShapeBidiLine each read before anything fills it again.</para>
     /// </remarks>
-    private static List<(int Start, int End, byte Level)> SegmentsIn(byte[] levels, int from, int to)
+    private static List<(int Start, int End, byte Level)> SegmentsIn(byte[] levels, int from, int to,
+        List<(int Start, int End, byte Level)> segments)
     {
-        var segments = new List<(int, int, byte)>();
+        Kept(segments);
         int i = from;
         while (i < to)
         {
@@ -906,17 +932,19 @@ public sealed class TextPipeline
     /// UAX #9 rule L2: from the highest embedding level down to the lowest odd one,
     /// reverse every contiguous run at that level or higher. Returns the visual
     /// sequence of logical segment indices. Implemented directly — it is a dozen
-    /// lines — so the reorder does not depend on a second ICU API surface.
+    /// lines — so the reorder does not depend on a second ICU API surface. Into
+    /// <paramref name="order"/>, cleared first and returned (ShapeBidiLine's kept list).
     /// </summary>
-    private static int[] VisualOrder(IReadOnlyList<byte> levels)
+    private static List<int> VisualOrder(List<byte> levels, List<int> order)
     {
         int n = levels.Count;
-        var order = new int[n];
-        for (int i = 0; i < n; i++) order[i] = i;
+        Kept(order);
+        for (int i = 0; i < n; i++) order.Add(i);
 
         byte max = 0, minOdd = byte.MaxValue;
-        foreach (var l in levels)
+        for (int i = 0; i < n; i++)
         {
+            byte l = levels[i];
             if (l > max) max = l;
             if ((l & 1) == 1 && l < minOdd) minOdd = l;
         }
@@ -931,7 +959,7 @@ public sealed class TextPipeline
                 {
                     int j = i;
                     while (j < n && levels[order[j]] >= level) j++;
-                    Array.Reverse(order, i, j - i);
+                    order.Reverse(i, j - i);
                     i = j;
                 }
                 else i++;
@@ -1020,7 +1048,7 @@ public sealed class TextPipeline
         int bytes = 180;
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
-            bytes += 104 + 2 * runs[i].Text.Length + 16 * runs[i].Glyphs.Length;
+            bytes += 104 + 2 * runs[i].Text.Length + 16 * runs[i].GlyphCount;
         return bytes;
     }
 
@@ -1264,7 +1292,7 @@ public sealed class TextPipeline
     {
         if (to <= from) return 0;
         float width = 0;
-        foreach (var (s, e, level) in SegmentsIn(levels, from, to))
+        foreach (var (s, e, level) in SegmentsIn(levels, from, to, _bidiSegments))
         {
             // One piece per style run of the direction run; with no spans, the whole run.
             for (int i = s, b; i < e; i = b)
@@ -1278,6 +1306,15 @@ public sealed class TextPipeline
         }
         return width;
     }
+
+    // MeasureBidi's and ShapeBidiLine's segments, and ShapeBidiLine's levels, runs and visual
+    // order while it builds a line: lists made anew for each line were 17 % of what laying out
+    // 2,000 emoji labels allocated (plan 17, round 5). Neither calls the other.
+    private readonly List<(int Start, int End, byte Level)> _bidiSegments = new();
+    private readonly List<byte> _bidiLevels = new();
+    private readonly List<int> _bidiFirstRuns = new();
+    private readonly List<ShapedRun> _bidiRuns = new();
+    private readonly List<int> _bidiOrder = new();
 
     /// <summary>
     /// One line, direction-aware: segments shaped with their resolved direction and
@@ -1294,16 +1331,19 @@ public sealed class TextPipeline
         int sourceLength = to - from + (appendEllipsis ? 1 : 0);
         while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
 
-        var segments = SegmentsIn(paraLevels, from, to);
-        var segRuns = new List<ShapedRun>[segments.Count];
-        var levels = new byte[segments.Count];
+        // Each segment's level, and where its runs start in the runs of the line, in logical
+        // order: kept lists, as the segments are (nothing below fills them again).
+        var segments = SegmentsIn(paraLevels, from, to, _bidiSegments);
+        var levels = Kept(_bidiLevels);
+        var firstRuns = Kept(_bidiFirstRuns);
+        var lineRuns = Kept(_bidiRuns);
         float maxAscent = 0, maxDescent = 0, maxLeading = 0;
 
         for (int s = 0; s < segments.Count; s++)
         {
             var (segStart, segEnd, level) = segments[s];
-            levels[s] = level;
-            var runs = new List<ShapedRun>();
+            levels.Add(level);
+            firstRuns.Add(lineRuns.Count);
             // One piece per style run of the segment; with no spans, the whole segment. A
             // larger-size piece raises the line, the max-across-runs rule fallback follows.
             for (int i = segStart, b; i < segEnd; i = b)
@@ -1315,31 +1355,32 @@ public sealed class TextPipeline
                     var shaped = ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing,
                         rtl: (level & 1) == 1);
                     shaped.Level = level;
-                    runs.Add(shaped);
+                    lineRuns.Add(shaped);
                     maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * eff.FontSize);
                     maxDescent = Math.Max(maxDescent, fr.Font.Descent * eff.FontSize);
                     maxLeading = Math.Max(maxLeading, fr.Font.Leading * eff.FontSize);
                 }
             }
-            segRuns[s] = runs;
         }
 
         // Place in visual order; within an RTL segment the fallback sub-runs flip too.
         float x = 0;
-        foreach (int logical in VisualOrder(levels))
+        foreach (int logical in VisualOrder(levels, _bidiOrder))
         {
-            var runs = segRuns[logical];
+            int first = firstRuns[logical];
+            int count = (logical + 1 < firstRuns.Count ? firstRuns[logical + 1] : lineRuns.Count) - first;
             bool rtl = (levels[logical] & 1) == 1;
-            for (int r = 0; r < runs.Count; r++)
+            for (int r = 0; r < count; r++)
             {
-                var run = runs[rtl ? runs.Count - 1 - r : r];
+                var run = lineRuns[first + (rtl ? count - 1 - r : r)];
                 run.OffsetX = x;
                 x += run.Width;
             }
         }
 
-        var logicalRuns = new List<ShapedRun>();
-        foreach (var runs in segRuns) logicalRuns.AddRange(runs);
+        var logicalRuns = new List<ShapedRun>(lineRuns.Count + (appendEllipsis ? 1 : 0));
+        logicalRuns.AddRange(lineRuns);
+        lineRuns.Clear();   // the line keeps its runs; the kept list does not
 
         if (appendEllipsis)
         {
@@ -1752,14 +1793,19 @@ public sealed class TextPipeline
         var segments = _prefixSegments;
         FillPrefixTable(text, 0, text.Length, style, runs, segments);
         var table = new PrefixWidths(text, style.FontSize, style.LetterSpacing, runs.ToArray(), segments.ToArray());
-        runs.Clear();   // the runs' faces are not kept alive by the scratch list
-        // A whole document's single line can have a hundred thousand segments: its list is not kept.
-        if (segments.Capacity > KeptPrefixSegments)
-        {
-            segments.Clear();
-            segments.TrimExcess();
-        }
+        ReleasePrefixScratch();
         return table;
+    }
+
+    private void ReleasePrefixScratch()
+    {
+        _prefixRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        // A whole document's single line can have a hundred thousand segments: its list is not kept.
+        if (_prefixSegments.Capacity > KeptPrefixSegments)
+        {
+            _prefixSegments.Clear();
+            _prefixSegments.TrimExcess();
+        }
     }
 
     // Fills `runs` and `segments` with the table of text[from..end), measured as a string of those
@@ -1800,7 +1846,9 @@ public sealed class TextPipeline
     // truncating allocated (a list doubles its way up: a line of 60 segments went through five
     // arrays before its own was copied out). Nothing BuildPrefixWidths calls builds a table, and a
     // pipeline is used from one thread, as MeasureString's run list is. The font runs FillPrefixTable
-    // itemizes into are ranges of the text, not strings of their own.
+    // itemizes into are ranges of the text, not strings of their own. A wrap's last line reads its
+    // table straight out of them for the one search it is made for (BreakIntoLines), which builds
+    // no table either.
     private readonly List<PrefixRun> _prefixRuns = new();
     private readonly List<PrefixSegment> _prefixSegments = new();
     private readonly List<RunRange> _runRanges = new();
@@ -2418,9 +2466,10 @@ public sealed class TextPipeline
         // first, and the caches' space-split assumptions are unproven for RTL
         // (Arabic joining does not cross spaces, but "likely sound" is not proven —
         // docs/plans/14-bidi.md). LTR text keeps every cache untouched.
+        // Spacing moves every glyph, so a spaced run needs its glyphs now.
         var run = rtl
             ? _shaper.Shape(text, font, fontSize, rtl: true)
-            : ShapeByWords(text, font, fontSize);
+            : ShapeByWords(text, font, fontSize, composeNow: letterSpacing != 0f);
         if (letterSpacing == 0f || run.Glyphs.Length == 0)
             return run;
 
@@ -2442,7 +2491,14 @@ public sealed class TextPipeline
     // segments, shaping each through the word cache, and concatenating. Single
     // segments (no space) go straight through the cache. Internal for the tests that
     // hold it to the segments shaped apart, and to what it allocates.
-    internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize)
+    //
+    // A run of several segments gets its width and its glyph count here, and its glyph array
+    // only when something reads it (ShapedRun.Glyphs, ComposeGlyphs): a paragraph's lines off
+    // screen, the single line of a text that wraps, and the layouts at each width a resize drag
+    // passes through are laid out and never drawn. Their glyphs were 59 % of what wrapping 150
+    // paragraphs allocated at each width, and 37 % of opening a 5,000-block rich text document
+    // (plan 17, round 5). composeNow makes the array now (letter spacing moves every glyph).
+    internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize, bool composeNow = false)
     {
         int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
         if (text.IndexOf(' ') < 0)
@@ -2455,6 +2511,24 @@ public sealed class TextPipeline
             if (wordGlyphs is null)
                 ComposeDigits(text, 0, text.Length, word.Digits!, 0f, wordGlyphs = new GlyphPosition[text.Length], 0);
             return new ShapedRun(text, font, fontSize, word.Width, wordGlyphs);
+        }
+
+        if (ComposeGlyphsWhenRead && !composeNow)
+        {
+            // The width as the composing pass below adds it up: the segments' widths, in order.
+            float width = 0;
+            int glyphCount = 0;
+            for (int i = 0; i < text.Length;)
+            {
+                bool isSpace = text[i] == ' ';
+                int start = i;
+                while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+                var word = ShapeSegment(text, start, i - start, font, fontSize, fontHash);
+                width += word.Width;
+                glyphCount += word.Glyphs;
+            }
+            if (glyphCount <= ushort.MaxValue)
+                return new ShapedRun(text, font, fontSize, width, (ushort)glyphCount, this);
         }
 
         // The segments first, counting their glyphs, then one array of exactly that many:
@@ -2495,6 +2569,51 @@ public sealed class TextPipeline
     // ShapeByWords' segments, between its two passes (one list per pipeline, as a pipeline is
     // used from one thread; nothing ShapeByWords calls comes back to it).
     private readonly List<WordShape> _words = new();
+
+    /// <summary>
+    /// The glyph array of a run ShapeByWords made without one, the first time it is read: the
+    /// same segments looked up again — a segment the word cache has let go of since is shaped
+    /// again, to the same glyphs — each segment's glyphs at the widths of the segments before
+    /// it, added in the order ShapeByWords added the run's width. So the array is the one
+    /// ShapeByWords would have made, to the bit. It uses nothing a call into the pipeline holds
+    /// between two of its steps (no scratch list, no paragraph), so it may run between any two.
+    /// </summary>
+    internal GlyphPosition[] ComposeGlyphs(ShapedRun run, int glyphCount)
+    {
+        string text = run.Text;
+        var font = run.Font;
+        float fontSize = run.FontSize;
+        int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
+        var glyphs = new GlyphPosition[glyphCount];
+        float x = 0;
+        int at = 0;
+        for (int i = 0; i < text.Length;)
+        {
+            bool isSpace = text[i] == ' ';
+            int start = i;
+            while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+            var word = ShapeSegment(text, start, i - start, font, fontSize, fontHash);
+            if (word.Run is { } shaped)
+            {
+                foreach (var g in shaped.Glyphs)
+                    glyphs[at++] = g with { X = g.X + x };
+            }
+            else
+            {
+                at = ComposeDigits(text, word.Start, word.Glyphs, word.Digits!, x, glyphs, at);
+            }
+            x += word.Width;
+        }
+        return glyphs;
+    }
+
+    /// <summary>
+    /// When false, ShapeByWords makes every run's glyph array with the run — the reference: the
+    /// same runs, glyphs and widths, made whether anything draws them or not. When true (the
+    /// default), a run of several segments makes its array the first time it is read
+    /// (<see cref="ShapedRun.Glyphs"/>). Tests hold the two to the same output.
+    /// </summary>
+    internal bool ComposeGlyphsWhenRead { get; init; } = true;
 
     /// <summary>
     /// A space or non-space segment of a run, shaped: the word cache's run for it, or, for an
@@ -2728,11 +2847,18 @@ public sealed class TextPipeline
             // several prefixes over: from the line's own segments, that is one measure, and
             // the probes cost a word-cache lookup each. Not for a line that does not fit —
             // possibly a 25,000-character token, which the gallop exists not to measure whole.
-            var lastLine = segments is not null && lineWidth <= maxWidth
-                ? BuildPrefixWidths(text[textOffset..], style)
-                : null;
-            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLine,
+            // The table is read for that one search, so it goes into the lists the pipeline keeps,
+            // itemized in the paragraph's own Han context as a string of the line would be: one
+            // of its own — the line cut out as a string, exact arrays of its runs and segments —
+            // was 7 % of what wrapping a paragraph allocated, and more once glyphs were made only
+            // where they are read (plan 17, round 5).
+            bool lastLineTable = segments is not null && lineWidth <= maxWidth;
+            if (lastLineTable)
+                FillPrefixTable(text, textOffset, text.Length, style, _prefixRuns, _prefixSegments);
+            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines, lastLineTable,
                 measureOnly);
+            if (lastLineTable)
+                ReleasePrefixScratch();
             if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
                 lines.Add(NewLine(textOffset, text.Length));
         }
@@ -2775,7 +2901,8 @@ public sealed class TextPipeline
         var trimmed = lineText.TrimEnd();
         var fontRuns = Itemize(trimmed, style);
 
-        var runs = new List<ShapedRun>();
+        // The line keeps this list: room for its runs and no more.
+        var runs = new List<ShapedRun>(fontRuns.Count);
         float width = 0;
 
         foreach (var fr in fontRuns)

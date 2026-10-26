@@ -3,6 +3,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Platform;
+using HultUI.Core.Primitives;
 using HultUI.Headless;
 using Junction.Git;
 using Junction.GitLab;
@@ -15,7 +16,8 @@ namespace Junction.Tests;
 /// <summary>
 /// The Branches and Tags tables keep a row until its item or its caret changes (the item-rows
 /// <c>RenderWith</c>), so a key makes the two rows it moved between instead of every row on
-/// screen. Their items are the tree's nodes, kept between builds while the refs, the query, the
+/// screen; in Tags the caret is the list's own highlight (<c>SelectionHighlight</c>), so a key
+/// makes none. Their items are the tree's nodes, kept between builds while the refs, the query, the
 /// flat/tree choice and the open folders are unchanged; a branch row's item also carries its
 /// compare pick and base/head tag. Everything else a row shows is in a shape that makes the rows
 /// again. One test per input: each fails with that input left out.
@@ -376,8 +378,11 @@ public class RefRowKeepTests
 
     // ── Tags ─────────────────────────────────────────────────────────────
 
+    /// <summary>The caret's tint is the list's highlight, drawn under the caret's row, so a move
+    /// makes no row: every row is kept, none draws the tint itself, and the list draws it where
+    /// the caret went.</summary>
     [Fact]
-    public void APlainMove_MakesTheTwoTagRowsItMovedBetween_AndKeepsTheRest()
+    public void APlainMove_MakesNoTagRow_AndTheListDrawsTheCaret()
     {
         Hosted((session, app) =>
         {
@@ -385,12 +390,29 @@ public class RefRowKeepTests
             int made = app.TagRowsMade;
 
             Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Up);
 
-            Assert.Equal(2, app.TagRowsMade - made);
+            Assert.Equal(0, app.TagRowsMade - made);
             var after = TagRows(session);
             Assert.Equal(before.Count, after.Count);
-            Assert.Equal(before.Count - 2, before.Zip(after).Count(p => ReferenceEquals(p.First, p.Second)));
-            Assert.Equal(Nocturne.Neutral900, after[1].BackgroundColor);
+            Assert.True(before.Zip(after).All(p => ReferenceEquals(p.First, p.Second)), "a row was made again");
+            Assert.All(after, r => Assert.Equal(0, r.BackgroundColor.A));
+
+            var list = TagList(session);
+            Assert.Equal(1, list.SelectedIndex);
+            Assert.Equal(new RowHighlight(Nocturne.Neutral900, new CornerRadius(Nocturne.RadiusRow)), list.SelectionHighlight);
+            // On screen: the caret's row carries the tint, the row it left does not.
+            using var shot = session.Window.CapturePixels();
+            using var bitmap = SkiaSharp.SKBitmap.FromImage(shot);
+            SkiaSharp.SKColor At(BoxElement row)
+            {
+                var box = row.WindowBorderBox;   // the list sits at the top: no scroll
+                return bitmap.GetPixel((int)(box.X + 8), (int)(box.Y + box.Height / 2));
+            }
+            var tint = Nocturne.Neutral900;
+            Assert.Equal(new SkiaSharp.SKColor(tint.R, tint.G, tint.B, tint.A), At(after[1]));
+            Assert.NotEqual(At(after[1]), At(after[2]));
         }, tags: true);
     }
 
@@ -431,16 +453,18 @@ public class RefRowKeepTests
         {
             try
             {
-                var before = TagRows(session)[0].BackgroundColor;
-                Assert.Equal(Nocturne.Neutral900, before);
+                // The rows' own colours (their divider), and the caret's tint, which the list draws.
+                var before = (Row: TagRows(session)[0].BorderColor, Caret: TagList(session).SelectionHighlight!.Value.Background);
+                Assert.Equal((Nocturne.On(0.06), Nocturne.Neutral900), before);
 
                 Nocturne.Use("solarized-light");
                 Rebuild(app);
                 session.PumpFrames(3);
 
-                var after = TagRows(session)[0].BackgroundColor;
-                Assert.Equal(Nocturne.Neutral900, after);
-                Assert.NotEqual(before, after);
+                var after = (Row: TagRows(session)[0].BorderColor, Caret: TagList(session).SelectionHighlight!.Value.Background);
+                Assert.Equal((Nocturne.On(0.06), Nocturne.Neutral900), after);
+                Assert.NotEqual(before.Row, after.Row);
+                Assert.NotEqual(before.Caret, after.Caret);
             }
             finally
             {

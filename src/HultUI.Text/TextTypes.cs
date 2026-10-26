@@ -362,7 +362,32 @@ public sealed class ShapedRun
     public bool IsRtl => (Level & 1) == 1;
 
     /// <summary>Glyph positions relative to the run's origin, for drawing.</summary>
-    public GlyphPosition[] Glyphs { get; }
+    /// <remarks>
+    /// A run the pipeline put together from its word cache — a run of several words — knows its
+    /// width and how many glyphs it has from the start, and puts its glyph array together the
+    /// first time this is read, from the same words: most runs laid out are never drawn (the
+    /// lines of a paragraph off screen, the layouts at the widths a resize passes through), and
+    /// their glyphs were most of what wrapping allocated. Read it on the thread that lays text
+    /// out with the pipeline that made the run — the UI thread — as the pipeline itself is used.
+    /// </remarks>
+    public GlyphPosition[] Glyphs => _glyphs as GlyphPosition[] ?? ComposeGlyphs();
+
+    // The glyph array; or, while a run's glyphs are not put together yet, the pipeline that puts
+    // them together. One field for both: one more would make every run 8 bytes bigger, and a
+    // scroll pays for each run it lays out.
+    private object _glyphs;
+
+    // How many glyphs a run whose glyphs are not put together yet has: what the caches weigh it
+    // by. 16 bits fit in the room the run's other fields leave; a run of more glyphs is put
+    // together when it is made.
+    private readonly ushort _pendingGlyphCount;
+
+    /// <summary>How many glyphs the run has, without putting its glyph array together.</summary>
+    internal int GlyphCount => _glyphs is GlyphPosition[] glyphs ? glyphs.Length : _pendingGlyphCount;
+
+    /// <summary>Whether the glyph array exists yet, for the tests that hold the pipeline to making
+    /// it only when it is read.</summary>
+    internal bool GlyphsComposed => _glyphs is GlyphPosition[];
 
     public ShapedRun(string text, IResolvedFont font, float fontSize, float width, GlyphPosition[] glyphs)
     {
@@ -370,7 +395,28 @@ public sealed class ShapedRun
         Font = font;
         FontSize = fontSize;
         Width = width;
-        Glyphs = glyphs;
+        _glyphs = glyphs;
+    }
+
+    // A run whose glyphs the pipeline puts together when they are first read
+    // (TextPipeline.ComposeGlyphs).
+    internal ShapedRun(string text, IResolvedFont font, float fontSize, float width, ushort glyphCount,
+        TextPipeline composer)
+    {
+        Text = text;
+        Font = font;
+        FontSize = fontSize;
+        Width = width;
+        _pendingGlyphCount = glyphCount;
+        _glyphs = composer;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private GlyphPosition[] ComposeGlyphs()
+    {
+        var glyphs = ((TextPipeline)_glyphs).ComposeGlyphs(this, _pendingGlyphCount);
+        _glyphs = glyphs;
+        return glyphs;
     }
 }
 

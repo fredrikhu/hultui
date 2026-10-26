@@ -56,6 +56,10 @@ static partial class Scenarios
             "The same walk with .RenderWith((item, selected) => …): the list keeps the rows whose item and selection did not change and makes only the old and the new selected row (and the one scrolled in)",
             ctx => SelectionWalk(ctx, null, itemRows: true));
 
+        yield return new Scenario("virtual/selection walk 1,000 item rows, the list draws the highlight",
+            "The same walk with .SelectionHighlight(…): the list draws the selection under the selected row, its rows are made unselected, and a move makes only the row scrolled in",
+            ctx => SelectionWalk(ctx, null, itemRows: true, listHighlight: true));
+
         yield return new Scenario("virtual/partner walk beside 1,000 item rows, every row told",
             "Down in the left of two 1,000-row lists on item rows while the right one rings the row at the same index, as a file manager marks the file the other pane's cursor pairs with: the ring is told to the right list with InvalidateRows, so each move makes every row on screen there again",
             ctx => PartnerWalk(ctx, oneRow: false));
@@ -63,6 +67,14 @@ static partial class Scenarios
         yield return new Scenario("virtual/partner walk beside 1,000 item rows, two rows told",
             "The same walk telling the right list only the row the ring left and the row it reached, with InvalidateRow: each move makes those two there, and the one scrolled in",
             ctx => PartnerWalk(ctx, oneRow: true));
+
+        yield return new Scenario("virtual/rebuild beside a 20,000-row RowHeights list",
+            "Type into a find field above 20,000 lines whose list takes its row heights from RowHeights, one component rebuilt per keystroke: the list is handed a new height function over the same heights, and keeps its rows",
+            ctx => TypeBesideRowHeightsOp(ctx, rowsTold: false));
+
+        yield return new Scenario("virtual/rebuild beside a 20,000-row RowHeights list, rows told",
+            "The same typing when the rows show the query: the component tells the list with InvalidateRows when it changed, as a file viewer does while find is typed in, and the rows on screen are made again",
+            ctx => TypeBesideRowHeightsOp(ctx, rowsTold: true));
 
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
@@ -120,13 +132,16 @@ static partial class Scenarios
     /// with an accessibility client listening every step rebuilds its tree: a scroll's refresh
     /// waits 100 ms. <paramref name="check"/> adds what the bridge must have seen. With
     /// <paramref name="itemRows"/> the rows come from <c>.RenderWith((item, selected) => …)</c>,
-    /// which keeps the ones that did not change. The row reports the rows made per step. With
+    /// which keeps the ones that did not change; with <paramref name="listHighlight"/> as well,
+    /// the list draws the selection (<c>.SelectionHighlight(…)</c>) and its rows are made
+    /// unselected. The row reports the rows made per step. With
     /// <paramref name="chrome"/> the pane sits in a window's chrome (<see cref="WalkChrome"/>).
+    /// The list holds <paramref name="count"/> commits.
     /// </summary>
     internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false,
-        WalkChrome chrome = WalkChrome.None)
+        WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000)
     {
-        var pane = new WalkPane(WalkItems(ctx.Rng, 1_000), itemRows, chrome: chrome);
+        var pane = new WalkPane(WalkItems(ctx.Rng, count), itemRows, chrome: chrome, listHighlight: listHighlight);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -234,10 +249,11 @@ enum WalkChrome
 /// template is the two-argument one, whose rows the list keeps while they are unchanged.
 /// With <paramref name="details"/> the same Build makes a details pane beside the list, for
 /// the commit the walk started on (<see cref="DetailsPane"/>): what an app's whole-window
-/// Build makes again, unchanged, on every move.
+/// Build makes again, unchanged, on every move. With <paramref name="listHighlight"/> the list
+/// draws the selection itself, the fill the rows drew, and makes its rows unselected.
 /// </summary>
 sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details = false,
-    WalkChrome chrome = WalkChrome.None) : Component
+    WalkChrome chrome = WalkChrome.None, bool listHighlight = false) : Component
 {
     public const float RowHeight = 46f;
 
@@ -301,6 +317,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
             .FlexGrow(1);
         if (itemRows) list.RenderWith((item, isSelected) => Row(item, isSelected));
         else list.RenderWith(item => Row(item, item.Index == selected));
+        if (listHighlight) list.SelectionHighlight(Ui.Selected);
         var pane = Flex.Column(gap: 0).FlexGrow(1).Children(
             Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(9, 16))
                 .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 0, 1, 0))
@@ -514,6 +531,15 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
         if (top < view.Y - 0.5f || top + RowHeight > view.Bottom + 0.5f)
             return $"row {expected} is not on screen whole (top {top:0.#}, view {view.Y:0.#}–{view.Bottom:0.#})";
         if (RowAt(list, top + RowHeight / 2) is not { } row) return $"no row is drawn where row {expected} is";
+        if (listHighlight)
+        {
+            // The list draws it, at the selected index; no row draws a selection of its own.
+            if (list.SelectionHighlight?.Background != Ui.Selected) return "the list draws no highlight";
+            for (int i = 0; i < list.Children.Count; i++)
+                if (list.Children[i] is BoxElement { Children.Count: > 0 } any && any.BackgroundColor == Ui.Selected)
+                    return "a row draws the selection itself";
+            return null;
+        }
         if (row.BackgroundColor != Ui.Selected) return $"row {expected} is not drawn selected";
         if (RowAt(list, top - RowHeight / 2) is { } above && above.BackgroundColor == Ui.Selected)
             return $"row {expected - 1} is still drawn selected";

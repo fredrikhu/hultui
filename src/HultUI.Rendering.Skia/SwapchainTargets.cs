@@ -23,12 +23,12 @@ internal enum SwapchainTargetUse
     /// <summary>A render target for this frame only; no barrier from the host.</summary>
     ThisFrameOnly,
 
-    /// <summary>The kept target, with the host's barrier submitted at once, before anything is
-    /// drawn: the frame draws straight onto the swapchain image, and Skia may submit that work
-    /// at any point.</summary>
-    KeptTransitionNow,
+    /// <summary>The kept target, with the host's barrier asked for when the frame begins, before
+    /// anything is drawn: the frame draws straight onto the swapchain image, and Skia may submit
+    /// that work at any point. The host submits it with Skia's first submit, ahead of Skia's work.</summary>
+    KeptTransitionAtBegin,
 
-    /// <summary>The kept target, with the host's barrier submitted just before the offscreen is
+    /// <summary>The kept target, with the host's barrier asked for just before the offscreen is
     /// blitted to it: the frame is drawn into the offscreen, and the blit is the first of Skia's
     /// work on the swapchain image.</summary>
     KeptTransitionBeforeBlit,
@@ -39,25 +39,54 @@ internal enum SwapchainTargetUse
 internal static class SwapchainTargetUses
 {
     /// <summary>
-    /// <para><b>Why the barrier is not always submitted at once.</b> A submit of the host's on
-    /// the Vulkan queue just before mpv's GL draw of a video frame makes that draw slower on
-    /// NVIDIA (610): Reel playing a 1080p24 clip, the frame's Render phase averaged 1.25–1.47 ms
-    /// against 0.97–1.14 without the submit, in nine runs on both swapchain formats, while a frame
-    /// without video got faster. Submitted after the GL draw, just before the blit, it cost
-    /// nothing (1.10–1.14). That is safe only where nothing of Skia's on the swapchain image can be
-    /// submitted earlier, which is the offscreen path. Straight onto the swapchain, a frame after
-    /// one that drew a GPU source (a video, a web page) wraps the image for itself instead, as
-    /// before: no barrier, and the 2 KB a frame that keeping the target saves.</para>
+    /// <para><b>When the barrier goes.</b> A submit of the host's on the Vulkan queue just before
+    /// mpv's GL draw of a video frame makes that draw slower on NVIDIA (610): Reel playing a
+    /// 1080p24 clip, the frame's Render phase averaged 1.25–1.47 ms against 0.97–1.14 without the
+    /// submit, in nine runs on both swapchain formats. Submitted after the GL draw it cost nothing
+    /// (1.10–1.14). The host asked at the frame's beginning owes the barrier until Skia's first
+    /// submit, which comes after the GL draw (<c>IVulkanSurfaceHost.TransitionAcquiredImage</c>),
+    /// so a frame straight onto the swapchain keeps its target after a video frame too. Until
+    /// 2026-10-26 the host submitted at once, and such a frame wrapped the image for itself: 2 KB,
+    /// an image view and a framebuffer a video frame on an 8-bit swapchain. Through the offscreen
+    /// the barrier is still asked for just before the blit, the first of Skia's work on the
+    /// swapchain image, which keeps it after the GL draw with a host that submits at once.</para>
     /// </summary>
     /// <param name="hostKeeps">The host restores the layout and calls before the images go
     /// (<c>IVulkanSurfaceHost.SetSwapchainReleasing</c>).</param>
     /// <param name="throughOffscreen">This frame is drawn into the offscreen and blitted.</param>
-    /// <param name="gpuSourceLastFrame">The frame before lent a GPU source its image.</param>
-    public static SwapchainTargetUse Choose(bool hostKeeps, bool throughOffscreen, bool gpuSourceLastFrame) =>
+    public static SwapchainTargetUse Choose(bool hostKeeps, bool throughOffscreen) =>
         !hostKeeps ? SwapchainTargetUse.ThisFrameOnly
         : throughOffscreen ? SwapchainTargetUse.KeptTransitionBeforeBlit
-        : gpuSourceLastFrame ? SwapchainTargetUse.ThisFrameOnly
-        : SwapchainTargetUse.KeptTransitionNow;
+        : SwapchainTargetUse.KeptTransitionAtBegin;
+
+    /// <summary>
+    /// The size a render target over a swapchain image is wrapped at: the window's, or, for a kept
+    /// target over an 8-bit swapchain a drag over-allocated, the size its images were allocated at,
+    /// with the canvas clipped to the window. Wrapped at the window's size, the target was made
+    /// again at every step of a drag, each with an image view and a framebuffer: 80 for an 80-step
+    /// drag, where an image kept at the allocated size is wrapped once per swapchain (12 for 4
+    /// swapchains of three images).
+    ///
+    /// <para><b>Not the half-float swapchain.</b> Its targets stay at the window's size: the only
+    /// run of this on the scRGB swapchain, a prototype in the plan 17 round 5 survey, coincided with
+    /// two NVIDIA driver errors (<c>nvlddmkm</c> event 153) and a stall over a second, and was not
+    /// repeated. Its offscreen is kept at the allocated size already.</para>
+    /// </summary>
+    /// <param name="kept">The target is kept (not made for this frame only).</param>
+    /// <param name="format">The swapchain's <c>VkFormat</c>.</param>
+    /// <param name="widthPx">The window's width, in device pixels.</param>
+    /// <param name="heightPx">The window's height.</param>
+    /// <param name="allocatedWidthPx">The images' allocated width when larger than the window,
+    /// otherwise zero (<c>VulkanFrameTarget.AllocatedWidthPx</c>).</param>
+    /// <param name="allocatedHeightPx">The images' allocated height, likewise.</param>
+    public static (int Width, int Height) TargetSize(bool kept, uint format, int widthPx, int heightPx,
+        int allocatedWidthPx, int allocatedHeightPx) =>
+        kept && allocatedWidthPx > 0 && IsEightBit(format)
+            ? (Math.Max(allocatedWidthPx, widthPx), Math.Max(allocatedHeightPx, heightPx))
+            : (widthPx, heightPx);
+
+    /// <summary>The 8-bit swapchain formats (<c>VkFormat</c> R8G8B8A8/B8G8R8A8, unorm or sRGB).</summary>
+    private static bool IsEightBit(uint format) => format is 37 or 43 or 44 or 50;
 }
 
 /// <summary>

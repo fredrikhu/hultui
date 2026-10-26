@@ -41,6 +41,8 @@
   <ItemGroup>
     <!-- The measure every "allocates nothing" test uses: the least of a few rounds. -->
     <Compile Include="..\Shared\Allocations.cs" Link="Shared\Allocations.cs" />
+    <!-- The runtime settings the app ships with (apps/AppRuntime.props). -->
+    <Compile Include="..\Shared\AppRuntimeSettingsTests.cs" Link="Shared\AppRuntimeSettingsTests.cs" />
   </ItemGroup>
 
 </Project>

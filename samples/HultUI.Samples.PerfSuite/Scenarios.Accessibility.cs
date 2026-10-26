@@ -114,6 +114,21 @@ static partial class Scenarios
                     reset: bridge.ClearDiffs, itemRows: true);
             });
 
+        yield return new Scenario("a11y/selection walk 3,000 item rows, bridge on",
+            "The item-rows walk over 3,000 commits, past the 2,000 a list publishes a node for each of: its items are served on demand when a reader asks, so the tree holds the list's node and none for its items, whatever the list's length (plan 17, round 5, step 14)",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return SelectionWalk(ctx, _ =>
+                    bridge.Diffs.Count == 0 ? "the bridge received no change"
+                    : !HoldsItems(bridge.CurrentTree, 3_000) ? "the tree does not hold the list's 3,000 items"
+                    // Told on the list's node since step 14: its items have none.
+                    : !bridge.Diffs.Any(d => d.PropertyChanged.Any(c => c.PropertyName == AccessibilityProperties.ItemSelection))
+                        ? "the bridge was not told the selection moved"
+                    : null,
+                    reset: bridge.ClearDiffs, itemRows: true, count: 3_000);
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
             ctx =>
@@ -136,6 +151,33 @@ static partial class Scenarios
             {
                 var bridge = ctx.Window.InstallAccessibilityBridge();
                 return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index), WalkChrome.Kept);
+            });
+
+        yield return new Scenario("a11y/filter a list below 1,000 rows, keys 500 ms apart, bridge on",
+            "A 200-item list below 1,000 rows loses or gains items on each key, as a list filtered while one types does, past the 100 ms a layout refresh waits: the refresh finds the list's items in another number and builds the tree, the case a refresh made in place cannot be (plan 17, round 5, step 13); the trees a key builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var all = Enumerable.Range(0, 200).Select(i => $"tag {i}").ToList();
+                // Made up front: the step times the refresh, not the list it is handed.
+                var filtered = Enumerable.Range(0, 40).Select(i => (IReadOnlyList<string>)all.Take(150 + i).ToList()).ToArray();
+                var list = VirtualListElement<string>.New().ItemHeight(24).Items(all).Height(Dimension.Px(200))
+                    .RenderWith((tag, selected) => Flex.Row().Padding(new Thickness(2, 8)).Children(Text.New(tag).FontSize(12f)));
+                ctx.Mount(Flex.Column().FlexGrow(1).Children(ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)), list));
+                int treesBefore = 0;
+                return new Op
+                {
+                    Run = step =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        list.Items = filtered[(step * 7) % filtered.Length];
+                    },
+                    FrameDelta = TimeSpan.FromMilliseconds(500),
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = step => FindItems(bridge.CurrentTree, filtered[(step * 7) % filtered.Length].Count) is not null
+                        ? null : "the bridge's tree does not hold the step's items",
+                };
             });
 
         yield return new Scenario("a11y/type beside a 150-line diff, rows made in Build, bridge on",
@@ -192,6 +234,24 @@ static partial class Scenarios
                     Figure = walk.Figure,
                     FigureUnit = walk.FigureUnit,
                     Check = walk.Check,
+                };
+            });
+
+        yield return new Scenario("a11y/type in a 2,000-line TextArea, a reader reading, bridge on",
+            "Type one character into a 2,000-line text area (121,744 characters) while a reader reads the line at the caret after each key, from its own thread: the text, with where each character on screen is, made from the layout for each key",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var area = MountLongTextArea(ctx);
+                ReadLineAtCaret(bridge.CurrentTree, area);
+                return new Op
+                {
+                    // Untimed, between keys, on the reader's thread: asking marks the area as read,
+                    // so the key after it makes its text from the layout on the UI thread.
+                    Reset = _ => ReadLineAtCaret(bridge.CurrentTree, area),
+                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+                    Check = _ => Find(bridge.CurrentTree, area)?.TextSource?.AccessibleText is { } text
+                        && text.Text.Length == area.Text.Length ? null : "the reader's text is not the area's",
                 };
             });
 
@@ -507,6 +567,14 @@ static partial class Scenarios
                 return SelectionWalk(ctx, Applied(rig));
             });
 
+        yield return new Scenario("a11y/selection walk 3,000 item rows, UIA",
+            "The item-rows walk over 3,000 commits with the UIA bridge: items served on demand, the wrapper upkeep and events of a move and the scroll it makes",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return SelectionWalk(ctx, Applied(rig), itemRows: true, count: 3_000);
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, UIA",
             "The real-loop walk with the UIA bridge: the trees a key builds, the bridge's upkeep and the IsSelected events (all under build)",
             ctx =>
@@ -579,6 +647,64 @@ static partial class Scenarios
                 UiaRig.Install(ctx.Window);
                 var area = MountLongTextArea(ctx);
                 return CaretWalk(ctx, area, _ => null);
+            });
+
+        // What a reader is told inside an open overlay, which lies over a busy screen as it does in
+        // an app: the trees a key builds count the whole window's.
+        yield return new Scenario("a11y/context menu walk over 1,000 rows, UIA",
+            "Down through an open 20-item context menu over 1,000 rows with the UIA bridge: what a move of its selection tells, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                ctx.Mount(Busy(ctx, Text.New("Menus").FontSize(13f)));
+                var items = new ContextMenuItem[20];
+                for (int i = 0; i < items.Length; i++)
+                    items[i] = new ContextMenuItem { Label = Ui.Label(ctx.Rng), Action = () => { }, ShortcutHint = $"Ctrl+{i}" };
+                ctx.Window.Window.OpenContextMenu(items, new Point(40, 60));
+                ctx.Pump(2);
+                int treesBefore = 0;
+                return new Op
+                {
+                    Run = _ =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+                    },
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = _ => ctx.Window.OverlayContents.Count == 1 ? null : $"{ctx.Window.OverlayContents.Count} overlays open, not the menu alone",
+                };
+            });
+
+        yield return new Scenario("a11y/command palette typing over 2,000 commands, UIA",
+            "Type one letter into an open command palette over 2,000 commands and 1,000 rows with the UIA bridge (a Backspace between keys, untimed): the field's value and the new list told, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                var commands = new List<PaletteCommand>(2_000);
+                for (int i = 0; i < 2_000; i++) commands.Add(new PaletteCommand($"{Ui.Label(ctx.Rng)} {i}", () => { }));
+                var palette = new CommandPalette(() => commands);
+                ctx.Mount(Busy(ctx, Text.New("Palette").FontSize(13f)));
+                palette.Open(ctx.Window.Window);
+                ctx.Pump(2);
+                const string letters = "rblpzchgta";
+                int treesBefore = 0;
+                return new Op
+                {
+                    Reset = _ =>
+                    {
+                        if (palette.Query.Length > 0) ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+                    },
+                    Run = step =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        ctx.Window.TypeText(letters[step % letters.Length].ToString());
+                    },
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = _ => palette.IsOpen && palette.Query.Length == 1 && palette.Matches.Count is > 0 and < 2_000
+                        ? null : $"the palette's query is \"{palette.Query}\" with {palette.Matches.Count} matches",
+                };
             });
     }
 

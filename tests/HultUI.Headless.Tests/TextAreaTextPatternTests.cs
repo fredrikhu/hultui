@@ -336,6 +336,45 @@ public sealed class TextAreaTextPatternTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Each character's box is where the render context puts the caret at its two boundaries, bit
+    /// for bit: the text asks once a row (<c>IRenderContext.TextCaretXs</c>,
+    /// each row's string cut once) what it asked once a character before (a substring and a layout
+    /// lookup per character, O(rows × length²) a keystroke with a reader reading).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Corpus))]
+    public void TheCharacterBoxes_AreWhereTheCaretGoesAtEachBoundary_BitForBit(string corpus)
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        session.Window.InstallAccessibilityBridge();
+        var (area, _) = Mount(session, corpus);
+        area.CursorPosition = corpus.Length / 2;
+        session.PumpFrame();
+
+        var text = area.AccessibleTextSource!.AccessibleText!;
+        var ctx = (Core.Rendering.IRenderContext)typeof(TextAreaElement)
+            .GetField("_renderCtx", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(area)!;
+        var style = area.ResolvedInherited;
+        var content = area.Layout.AbsoluteContentBox;
+        float frameX = content.X, frameY = content.Y - area.ScrollOffsetY;
+        float lh = text.Geometry!.CharacterBounds(text, 0).Height;
+        int boxes = 0;
+        for (int at = text.VisibleStart; at < text.VisibleEnd; at = text.NextCharacter(at))
+        {
+            int row = text.LineAt(at), start = text.LineStart(row), length = text.LineEnd(row) - start;
+            string rowText = corpus.Substring(start, length);
+            float X(int k) => k == 0 ? 0f : ctx.TextCaretX(rowText, style, k);
+            int k = at - start;
+            int next = k >= length ? k : text.NextCharacter(at) - start;
+            float x0 = X(k), x1 = X(next);
+            var expected = new Rect(frameX + Math.Min(x0, x1), frameY + row * lh, Math.Abs(x1 - x0), lh);
+            Assert.Equal(expected, text.Geometry.CharacterBounds(text, at));
+            boxes++;
+        }
+        Assert.Equal(corpus.Length == 0, boxes == 0);
+    }
+
     [Theory]
     [MemberData(nameof(Corpus))]
     public void TheText_AnswersAsTheRichTextEditorsDoes_ForTheSameLines(string corpus)

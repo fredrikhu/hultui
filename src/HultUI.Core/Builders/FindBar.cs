@@ -45,16 +45,38 @@ public sealed class FindBar
     private bool _pendingFocus;
     private bool _pendingReveal;
     private bool _pendingBodyFocus;
+    // While above zero the bar is in a step of its own (a move, a switch, opening or closing), and
+    // its own search's changes wait for the one onChanged the step ends with.
+    private int _inStep;
 
     /// <param name="onChanged">Runs whenever the bar or its search changes — normally the
-    /// owner's <c>MarkDirty</c>.</param>
-    public FindBar(Action onChanged) : this(new TextSearch(onChanged), onChanged) { }
+    /// owner's <c>MarkDirty</c>. Once for each step the bar takes (a key or a button: a move, a
+    /// switch, opening, closing), however many things about its search the step changed.</param>
+    public FindBar(Action onChanged)
+    {
+        _onChanged = onChanged;
+        Search = new TextSearch(SearchChanged);
+    }
 
-    /// <summary>A bar over a search something else owns — a terminal searches its own scrollback.</summary>
+    /// <summary>A bar over a search something else owns — a terminal searches its own scrollback.
+    /// The search tells its owner through its own callback, which the bar cannot hold back, so a
+    /// step here runs both: give the search a callback that does not rebuild what
+    /// <paramref name="onChanged"/> rebuilds.</summary>
     public FindBar(TextSearch search, Action onChanged)
     {
         Search = search;
         _onChanged = onChanged;
+    }
+
+    /// <summary>
+    /// The bar's own search changed. Outside a step — a query typed into the field, the owner
+    /// binding new text — that is the owner's to hear at once; inside one, the step tells it once
+    /// when it is done. A step used to let the search tell the owner and then tell it again: two
+    /// builds for every Enter, F3 or switch, the first before the step had asked for its reveal.
+    /// </summary>
+    private void SearchChanged()
+    {
+        if (_inStep == 0) _onChanged();
     }
 
     public TextSearch Search { get; }
@@ -111,12 +133,17 @@ public sealed class FindBar
         Opening?.Invoke();
         IsOpen = true;
         _pendingFocus = true;
-        if (Selection?.Invoke() is { } selected && TextSearch.QueryFromSelection(selected.Text) is { } query)
+        _inStep++;
+        try
         {
-            Search.SetQuery(query);
-            Search.SeekTo(selected.Line, selected.Lane, selected.Start);
-            _pendingReveal = true;
+            if (Selection?.Invoke() is { } selected && TextSearch.QueryFromSelection(selected.Text) is { } query)
+            {
+                _pendingReveal = true;
+                Search.SetQuery(query);
+                Search.SeekTo(selected.Line, selected.Lane, selected.Start);
+            }
         }
+        finally { _inStep--; }
         _onChanged();
     }
 
@@ -124,10 +151,12 @@ public sealed class FindBar
     public void Close()
     {
         IsOpen = false;
-        Search.SetQuery("");
         // A reveal still owed is for a query that is gone.
         _pendingReveal = false;
         _pendingBodyFocus = true;
+        _inStep++;
+        try { Search.SetQuery(""); }
+        finally { _inStep--; }
         _onChanged();
     }
 
@@ -141,22 +170,28 @@ public sealed class FindBar
 
     private void Move(int dir)
     {
-        Search.Move(dir);
         _pendingReveal = true;
+        _inStep++;
+        try { Search.Move(dir); }
+        finally { _inStep--; }
         _onChanged();
     }
 
     private void ToggleMatchCase()
     {
-        Search.ToggleMatchCase();
         _pendingReveal = true;
+        _inStep++;
+        try { Search.ToggleMatchCase(); }
+        finally { _inStep--; }
         _onChanged();
     }
 
     private void ToggleRegex()
     {
-        Search.ToggleRegex();
         _pendingReveal = true;
+        _inStep++;
+        try { Search.ToggleRegex(); }
+        finally { _inStep--; }
         _onChanged();
     }
 

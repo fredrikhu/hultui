@@ -19,6 +19,9 @@
     <ApplicationIcon>Assets\vesper.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- The runtime settings the five apps share (the GC's large-object threshold). -->
+  <Import Project="..\AppRuntime.props" />
+
   <ItemGroup>
     <InternalsVisibleTo Include="VesperCommander.Tests" />
   </ItemGroup>

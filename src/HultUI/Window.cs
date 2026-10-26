@@ -130,6 +130,22 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// <summary>How many accessibility trees this window's frames have built for a listening
     /// bridge (a patch — a selection or caret move, a leaf's own property — builds none). UI thread.</summary>
     internal int AccessibilityTreesBuilt { get; private set; }
+
+    /// <summary>How many times a frame built an open overlay's part of the tree on its own, for a
+    /// change in it, in place of a tree (<see cref="TryRebuildOverlays"/>). UI thread.</summary>
+    internal int AccessibilityOverlayPartsBuilt { get; private set; }
+
+    /// <summary>How many coalesced layout refreshes brought the applied tree up to date in place,
+    /// building none (<see cref="TryRefreshA11yInPlace"/>). UI thread.</summary>
+    internal int AccessibilityLayoutRefreshesInPlace { get; private set; }
+
+    /// <summary>Why the last layout refresh that could not be made in place built a tree (what a
+    /// build makes otherwise there), or null. For tests. UI thread.</summary>
+    internal string? AccessibilityLayoutRefreshMismatch { get; private set; }
+
+    /// <summary>How many layout refreshes built a tree without a walk, after others in a row could
+    /// not be made in place (<see cref="_a11yRefreshSkips"/>). For tests. UI thread.</summary>
+    internal int AccessibilityLayoutRefreshesSkipped { get; private set; }
     // Set when an element reports an a11y-visible property change that cannot be patched in
     // (a role, an enabled state, a radio's selection, anything of an element with children, …).
     // Such changes aren't structural, so they force the next frame to rebuild+diff the tree —
@@ -162,15 +178,28 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     private const int MaxPatchedLeaves = 32;
     // Kept for the patch: the nodes of the moved lists and texts and the changed leaves in the applied
     // tree, sorted into tree order, each with its element, its kind and its place in the tree (the
-    // child indices from the root, in _a11yPaths); the changes found; each text's new version and each
-    // leaf's new node, put in place once every change of the frame is found; the element's ancestors,
-    // bottom up, while its node is looked for (FindNodeDown).
+    // child indices from the root, in _a11yPaths); the changes found; each text's new version, each
+    // leaf's new node and each list's items served on demand (their number and selection), put in place
+    // once every change of the frame is found; the element's ancestors, bottom up, while its node is
+    // looked for (FindNodeDown).
     private readonly List<A11yPatchTarget> _a11yPatchTargets = [];
     private readonly List<int> _a11yPaths = [];
     private readonly List<PropertyChange> _a11ySelectionChanges = [];
     private readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> _a11yTextVersions = [];
     private readonly List<(A11yPatchTarget Target, AccessibilityNode Node)> _a11yRemade = [];
+    private readonly List<(AccessibilityNode Node, int Count, int[] Selected)> _a11yServed = [];
     private readonly List<Element> _a11yChain = [];
+    // Kept for the layout refresh made in place (TryRefreshA11yInPlace): what it finds to change, and
+    // the open overlays whose parts follow the root's children in the tree.
+    private readonly AccessibilityTreeBuilder.LayoutRefresh _a11yRefresh = new();
+    private readonly List<(Element Content, float X, float Y)> _a11yOverlayParts = [];
+    // Layout refreshes in a row that a build made other nodes for, and how many of the next ones go
+    // straight to a build. A list its owner filters as one types, a grid of composite rows that
+    // scrolls, makes other nodes on every refresh, and a walk that finds that at its end costs
+    // nearly a build of its own (a whole walk is 88 % of a build and a diff over 3,203 nodes). After
+    // 1, 2, 3, 4 or more such refreshes in a row the next 1, 3, 7 or 15 build at once; one made in
+    // place starts the count again.
+    private int _a11yRefreshFailures, _a11yRefreshSkips;
 
     private enum A11yPatchKind : byte { List, Text, Leaf }
 
@@ -189,7 +218,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     // the trailing edge — the batching browsers apply to a11y location updates.
     // Timed on the platform's clock, so a headless session's virtual time drives it.
     private bool _a11yLayoutRefreshPending;
+    // The same for the open overlays alone (a layout of their own, a move, a scroll inside): only
+    // the parts of the stale ones (OverlayEntry.A11yStale) are built again when it comes due.
+    private bool _a11yOverlayRefreshPending;
     private long _lastA11yRebuildMs;
+    // When the overlays' parts were last built (a whole tree builds them too). Their refresh keeps
+    // its own clock: on the window's, a stream of changes in an open overlay (a part built every
+    // frame) put off the window's own refresh for as long as it lasted.
+    private long _lastA11yOverlayRebuildMs;
     private const long A11yCoalesceMs = 100;
     // A value in a range (a slider's, a progress bar's) can move on every frame: a drag, a
     // download, a playing video's scrubber, a key held down. Each refresh rebuilds the whole tree,
@@ -586,7 +622,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             var overlay = _overlays[i];
             if (!overlay.IsHitTestable) continue;
-            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y));
+            // Under the root's node, whose scroll (a root that is a scroll view) it does not take.
+            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset));
         }
         return tree;
     }
@@ -772,7 +809,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
     /// <summary>
     /// Changes of a few nodes' own properties, told without a rebuild: a move of a list's selection
-    /// (the selected state of the item nodes it changed is marked), of a text's caret or selection (its
+    /// (the selected state of the item nodes it changed is marked; a list whose items are served on
+    /// demand has none, and its node takes the selection, and its items' number), of a text's caret or selection (its
     /// new version goes on its node), and a change of a leaf's own properties — a name, a description,
     /// an expanded state, a value, a toggle, a range — for which the leaf's node is made again and put
     /// in its place, all on the applied tree in place; then the bridge is handed those changes, which
@@ -797,6 +835,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         var changes = _a11ySelectionChanges;
         var versions = _a11yTextVersions;
         var remade = _a11yRemade;
+        var served = _a11yServed;
         try
         {
             if (!AddPatchTargets(tree, _a11ySelectionMoved, A11yPatchKind.List)
@@ -814,7 +853,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 switch (target.Kind)
                 {
                     case A11yPatchKind.List:
-                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes)) return false;
+                        if (!AccessibilityTreeBuilder.ItemSelectionChanges(node, (IAccessibleItemSource)element, changes, served))
+                            return false;
                         break;
                     case A11yPatchKind.Text:
                         if (element.AccessibleTextSource is not IVersionedAccessibleTextSource source
@@ -831,7 +871,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             foreach (var (node, version) in versions) node.ReplaceTextVersion(version);
             foreach (var (target, node) in remade)
                 target.Node.Parent!.ReplaceChild(_a11yPaths[target.PathStart + target.PathLength - 1], node);
-            if (changes.Count == 0) return true;   // moved back, or served on demand: nothing to tell
+            foreach (var (node, count, selected) in served) node.ReplaceServedItems(count, selected);
+            if (changes.Count == 0) return true;   // moved back: nothing to tell
             var patch = new TreeDiff();
             foreach (var change in changes)
             {
@@ -849,6 +890,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             changes.Clear();
             versions.Clear();
             remade.Clear();
+            served.Clear();
         }
     }
 
@@ -881,10 +923,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// from the root, and its place there, the child index at each step, added to
     /// <see cref="_a11yPaths"/>: each ancestor that has a node of its own (a semantic one) has it among
     /// the children of the node above, and the rest pass theirs up. So it looks only at the children of
-    /// the nodes on the way, not at the whole tree. Null when the element has no node there: it is not
-    /// in the root's tree (an overlay's), or the tree was built otherwise than its ancestors say now (one
-    /// that became semantic since, a list whose items stand for its rows, a button whose name is the text
-    /// inside), and a rebuild makes what it makes.
+    /// the nodes on the way, not at the whole tree. An element in an open overlay is found down from the
+    /// overlay's node, a child of the root node after the root's own children (the overlay's content
+    /// always has a node). Null when the element has no node there: it is in neither tree (a closed
+    /// overlay's), or the tree was built otherwise than its ancestors say now (one that became semantic
+    /// since, a list whose items stand for its rows, a button whose name is the text inside, an overlay
+    /// opened since), and a rebuild makes what it makes.
     /// </summary>
     private AccessibilityNode? FindNodeDown(AccessibilityNode tree, Element element)
     {
@@ -897,8 +941,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 chain.Add(top);
                 top = parent;
             }
-            if (!ReferenceEquals(top, _root)) return null;
             var node = tree;
+            if (!ReferenceEquals(top, _root))
+            {
+                int at = OverlayNodeIndex(tree, top);
+                if (at < 0) return null;
+                _a11yPaths.Add(at);
+                node = tree.Children[at];
+            }
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 var step = chain[i];
@@ -922,6 +972,178 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             chain.Clear();
         }
+    }
+
+    /// <summary>The open overlay a reader sees whose tree holds <paramref name="element"/>; null for
+    /// the main tree, or an element in neither.</summary>
+    private OverlayEntry? OverlayHolding(Element element)
+    {
+        var top = element;
+        while (top.Parent is { } parent) top = parent;
+        if (ReferenceEquals(top, _root)) return null;
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+            if (_overlays[i].IsHitTestable && ReferenceEquals(_overlays[i].Content, top)) return _overlays[i];
+        return null;
+    }
+
+    /// <summary>Takes out of the frame's patch lists the elements in an open overlay whose part of the
+    /// tree is built again in this frame (<see cref="TryRebuildOverlays"/>): its diff tells their
+    /// changes, and a node mounted since has nothing to patch. And the elements in neither tree: one
+    /// that told a change and was then taken out (a palette's "no matches" line as the list came
+    /// back) has no node, and whatever took it out marked the tree it left for structure.</summary>
+    private void DropPatchTargetsInStaleOverlays()
+    {
+        Drop(_a11ySelectionMoved);
+        Drop(_a11yTextMoved);
+        Drop(_a11yLeafChanged);
+        Drop(_a11yRangeChanged);
+
+        void Drop(List<Element> elements)
+        {
+            for (int i = elements.Count - 1; i >= 0; i--)
+            {
+                int at = OverlayIndexOf(elements[i]);
+                if (at == -2 || (at >= 0 && _overlays[at] is { IsHitTestable: true, A11yStale: true }))
+                    elements.RemoveAt(i);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds again the part of the applied tree of each open overlay that changed since it was built
+    /// (<see cref="OverlayEntry.A11yStale"/>: its children, its layout, its place, a scroll inside), puts
+    /// it in place of the old part among the root node's children (one reference write each, as a
+    /// leaf's patch), and hands the bridge the parts' diffs as one, in the overlays' order. A command
+    /// palette's keystroke, which changes the list under the field, built the whole window's tree, in
+    /// an app of a few thousand nodes for the palette's few hundred. The rest of the tree is the one
+    /// applied, with whatever was patched into it; a change of it waits for its own refresh, as it
+    /// would between rebuilds. False, building nothing, when the tree must be built whole: no applied
+    /// tree, or an overlay with no part in it (opened since; opening one asks for a tree anyway).
+    /// </summary>
+    private bool TryRebuildOverlays()
+    {
+        if (_previousA11yTree is not { } tree) return false;
+        for (int i = 0; i < _overlays.Count; i++)
+            if (_overlays[i] is { IsHitTestable: true, A11yStale: true } stale && OverlayNodeIndex(tree, stale.Content) < 0)
+                return false;
+        // A focus move onto an element with no node waits for the tree that has one: a part built
+        // here has it only when the element is in it.
+        if (_a11yPendingFocusId is { } pending && (_focusManager.FocusedElement is not { } focused
+            || focused.Id != pending || OverlayHolding(focused) is not { A11yStale: true }))
+            return false;
+        TreeDiff? diff = null;
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            var overlay = _overlays[i];
+            if (!overlay.IsHitTestable || !overlay.A11yStale) continue;
+            overlay.A11yStale = false;
+            int at = OverlayNodeIndex(tree, overlay.Content);
+            var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset);
+            AccessibilityOverlayPartsBuilt++;
+            var partDiff = AccessibilityTreeDiffer.Diff(tree.Children[at], part);
+            tree.ReplaceChild(at, part);
+            if (partDiff.IsEmpty) continue;
+            if (diff is null) diff = partDiff;
+            else
+            {
+                diff.Added.AddRange(partDiff.Added);
+                diff.Removed.AddRange(partDiff.Removed);
+                diff.Reordered.AddRange(partDiff.Reordered);
+                diff.PropertyChanged.AddRange(partDiff.PropertyChanged);
+            }
+        }
+        if (diff is not null) _accessibilityBridge.ApplyChanges(diff, tree);
+        _a11yFocusId = _focusManager.FocusedElement?.Id;
+        NotifyPendingA11yFocus(tree);
+        return true;
+    }
+
+    /// <summary>
+    /// A coalesced layout refresh without a tree: the elements are walked against the applied tree by
+    /// the builder's rules (<see cref="AccessibilityTreeBuilder.TryRefreshInPlace"/>), and where a build
+    /// would make the same nodes, what changed is written in place — a box moved in its scroll views'
+    /// content, a node gone out of view or come into it, a scroll view's offset and geometry, a leaf
+    /// whose own properties changed (made again, as a leaf's patch makes it) — and the bridge is handed
+    /// the changes the build's diff would have reported, in its order, as patched properties. A pure
+    /// scroll writes one offset and the offscreen states: each wheel turn over a 1,000-row list built
+    /// and diffed 3,001 nodes, and a reader walking a list at its own pace one tree per key. Whatever
+    /// a list's selection, a caret or a leaf told since is in that, as it is in a build's diff. False,
+    /// writing nothing, when a build would make another tree (a node added, gone or moved elsewhere, a
+    /// list's items in another number, a node with children whose own properties changed, a change no
+    /// diff tells), and the tree is built then, as it always was.
+    /// </summary>
+    private bool TryRefreshA11yInPlace()
+    {
+        if (_previousA11yTree is not { } tree) return false;
+        if (_a11yRefreshSkips > 0)
+        {
+            _a11yRefreshSkips--;
+            AccessibilityLayoutRefreshesSkipped++;
+            return false;
+        }
+        var refresh = _a11yRefresh;
+        var parts = _a11yOverlayParts;
+        try
+        {
+            for (int i = 0; i < _overlays.Count; i++)
+                if (_overlays[i] is { IsHitTestable: true } overlay) parts.Add((overlay.Content, overlay.X, overlay.Y));
+            if (!AccessibilityTreeBuilder.TryRefreshInPlace(tree, _root!, parts, _focusManager, refresh))
+            {
+                AccessibilityLayoutRefreshMismatch = refresh.Mismatch;
+                _a11yRefreshSkips = (1 << Math.Min(++_a11yRefreshFailures, 4)) - 1;
+                return false;
+            }
+            _a11yRefreshFailures = 0;
+            refresh.Apply();
+            AccessibilityLayoutRefreshesInPlace++;
+            if (refresh.Changes.Count > 0)
+            {
+                var patch = new TreeDiff();
+                patch.PropertyChanged.AddRange(refresh.Changes);
+                _accessibilityBridge.ApplyPatchedProperties(patch, tree);
+            }
+            _a11yFocusId = _focusManager.FocusedElement?.Id; // what the walk compared against
+            NotifyPendingA11yFocus(tree);
+            return true;
+        }
+        finally
+        {
+            refresh.Clear();
+            parts.Clear();
+        }
+    }
+
+    /// <summary>A layout refresh came due and told everything, as of <paramref name="nowMs"/>: built
+    /// a tree, or brought the applied one up to date in place. It tells a range's value as it is now,
+    /// and the open overlays' parts, too.</summary>
+    private void A11yRefreshed(long nowMs)
+    {
+        if (_a11yRangeRefreshPending)
+        {
+            _a11yRangeRefreshPending = false;
+            _lastA11yRangeMs = nowMs;
+        }
+        _a11yRangeChanged.Clear();
+        _a11yLayoutRefreshPending = false;
+        _a11yOverlayRefreshPending = false;
+        for (int i = 0; i < _overlays.Count; i++) _overlays[i].A11yStale = false;
+        _lastA11yRebuildMs = nowMs;
+        _lastA11yOverlayRebuildMs = nowMs;
+    }
+
+    /// <summary>Where, among the root node's children, the node of an open overlay a reader sees whose
+    /// content is <paramref name="content"/> is in <paramref name="tree"/>; -1 when there is none.
+    /// The overlays' nodes come last, in the order they opened, so the search starts at the end.</summary>
+    private int OverlayNodeIndex(AccessibilityNode tree, Element content)
+    {
+        bool open = false;
+        for (int i = _overlays.Count - 1; i >= 0 && !open; i--)
+            open = _overlays[i].IsHitTestable && ReferenceEquals(_overlays[i].Content, content);
+        if (!open) return -1;
+        var children = tree.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int c = children.Count - 1; c >= 0; c--)
+            if (children[c].ElementId == content.Id) return c;
+        return -1;
     }
 
     /// <summary>Sorts the targets into the order of their nodes in the tree (an insertion sort: a
@@ -1126,6 +1348,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
         || (_a11yLayoutRefreshPending && A11yClockMs - _lastA11yRebuildMs >= A11yCoalesceMs)
+        || (_a11yOverlayRefreshPending && A11yClockMs - _lastA11yOverlayRebuildMs >= A11yCoalesceMs)
         // The same for a range value's trailing edge: the value it came to rest at.
         || (_a11yRangeRefreshPending && A11yClockMs - _lastA11yRangeMs >= A11yRangeCoalesceMs))
         // Asked last: on Windows it asks UI Automation whether a client listens.
@@ -1144,10 +1367,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         long frequency = clock.TimestampFrequency;
         // Only while a client listens: otherwise the frame that clears them never comes, and
         // the loop would wake for nothing.
-        if ((_a11yLayoutRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
+        if ((_a11yLayoutRefreshPending || _a11yOverlayRefreshPending || _a11yRangeRefreshPending) && _accessibilityBridge.IsActive)
         {
             if (_a11yLayoutRefreshPending)
                 Application.Earliest(ref at, ref deadline, (_lastA11yRebuildMs + A11yCoalesceMs) * frequency / 1000,
+                    IdleDeadline.A11yLayout);
+            if (_a11yOverlayRefreshPending)
+                Application.Earliest(ref at, ref deadline, (_lastA11yOverlayRebuildMs + A11yCoalesceMs) * frequency / 1000,
                     IdleDeadline.A11yLayout);
             if (_a11yRangeRefreshPending)
                 Application.Earliest(ref at, ref deadline, (_lastA11yRangeMs + A11yRangeCoalesceMs) * frequency / 1000,
@@ -1322,6 +1548,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // caption region tall enough to contain it (for Snap Layouts when restored).
         UpdateCaptionHeight();
 
+        // The overlays next, before the accessibility phase, which reads what changed in them.
+        // Outside the style and layout timers, as when the overlays were done with their drawing.
+        var overlayChanges = _overlays.Count > 0 ? PrepareOverlays(theme) : OverlayChanges.None;
+
         // Accessibility: rebuild + diff when the tree changed and something is
         // actually listening. The Null bridge's IsActive is false, so this is a
         // single boolean read for apps with no AT attached. The first frame after
@@ -1340,17 +1570,36 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             || (_root.DirtyFlags & DirtyFlags.Children) != 0);
         if (a11yActive && layoutWasDirty)
             _a11yLayoutRefreshPending = true;
+        // An open overlay's part of the tree, a child of the root node, is built again on its own:
+        // at once for a change of its children, on the coalesced schedule for its layout or place.
+        if (a11yActive && (overlayChanges & OverlayChanges.Bounds) != 0)
+            _a11yOverlayRefreshPending = true;
         long nowMs = A11yClockMs;
         bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
             && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
         bool a11yRangeDue = a11yActive && _a11yRangeRefreshPending
             && nowMs - _lastA11yRangeMs >= A11yRangeCoalesceMs;
-        bool a11yRebuild = a11yImmediate || a11yLayoutDue;
+        bool a11yRebuild = a11yImmediate;
+        // A layout refresh came due and nothing else asks for a tree: the applied tree is brought up to
+        // date in place where a build would make the same nodes, and built where it would not. Either
+        // tells what the patches below would, so they do not run then.
+        bool a11yRefreshed = false;
+        if (a11yLayoutDue && !a11yImmediate)
+        {
+            using (_tracer.Begin("Phase", "A11y"))
+                a11yRefreshed = TryRefreshA11yInPlace();
+            if (a11yRefreshed) A11yRefreshed(nowMs);
+            else a11yRebuild = true;
+        }
+        bool a11yOverlays = a11yActive && !a11yRebuild && !a11yRefreshed && ((overlayChanges & OverlayChanges.Structure) != 0
+            || (_a11yOverlayRefreshPending && nowMs - _lastA11yOverlayRebuildMs >= A11yCoalesceMs));
+        // What changed in an overlay whose part is built again is told by that part's diff.
+        if (a11yOverlays) DropPatchTargetsInStaleOverlays();
         // A list's selection moved, a text's caret, a leaf's own property, or a range's refresh came
         // due, and nothing else asks for a rebuild: the changes are marked on the applied tree and told
         // from it. A leaf's patch tells the ranges waiting for their refresh too, as the rebuild it
         // stands for would have. A rebuild in this frame tells all of them in its diff.
-        if (a11yActive && !a11yRebuild && (_a11ySelectionMoved.Count > 0 || _a11yTextMoved.Count > 0
+        if (a11yActive && !a11yRebuild && !a11yRefreshed && (_a11ySelectionMoved.Count > 0 || _a11yTextMoved.Count > 0
             || _a11yLeafChanged.Count > 0 || a11yRangeDue))
         {
             bool withRanges = _a11yRangeRefreshPending && (a11yRangeDue || _a11yLeafChanged.Count > 0);
@@ -1364,15 +1613,21 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             }
         }
 
+        if (a11yOverlays && !a11yRebuild)
+        {
+            using (_tracer.Begin("Phase", "A11y"))
+                a11yRebuild = !TryRebuildOverlays();
+            if (!a11yRebuild)
+            {
+                _a11yOverlayRefreshPending = false;
+                _lastA11yOverlayRebuildMs = nowMs;
+            }
+        }
+
         if (a11yRebuild)
         {
             // Whatever the rebuild was for, it tells a range's value as it is now.
-            if (_a11yRangeRefreshPending)
-            {
-                _a11yRangeRefreshPending = false;
-                _lastA11yRangeMs = nowMs;
-            }
-            _a11yRangeChanged.Clear();
+            A11yRefreshed(nowMs);
             using (_tracer.Begin("Phase", "A11y"))
             {
                 var newTree = BuildAccessibilityTreeWithOverlays(_root);
@@ -1384,8 +1639,6 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 _a11yFocusId = _focusManager.FocusedElement?.Id; // what the builder marked
                 NotifyPendingA11yFocus(newTree);
             }
-            _a11yLayoutRefreshPending = false;
-            _lastA11yRebuildMs = nowMs;
         }
         else if (!a11yActive && _a11yWasActive)
         {
@@ -1393,6 +1646,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             _previousA11yTree = null;
             _a11yPendingFocusId = null;
             _a11yLayoutRefreshPending = false;
+            _a11yOverlayRefreshPending = false;
             _a11yRangeRefreshPending = false;
             _a11yRangeChanged.Clear();
         }
@@ -1446,9 +1700,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             // above, has had its answer; left set, it rebuilt the whole tree on every pass of the
             // loop until the restore — one element added to 2,016 while minimized, a UIA client
             // listening: a rebuild on each of 61 passes a second, 10.8 MB/s.
-            if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0)
+            if (layoutWasDirty || styleWasDirty || (_root.DirtyFlags & DirtyFlags.Children) != 0
+                || (overlayChanges & OverlayChanges.Work) != 0)
                 _root.MarkPaintDirty();
             ClearFlags(_root, DirtyFlags.Children);
+            // The overlays' too: they are styled and laid out in such a frame now, and left set,
+            // an overlay's structural flag would rebuild the tree on every pass.
+            for (int i = 0; i < _overlays.Count; i++)
+                ClearFlags(_overlays[i].Content, DirtyFlags.Children);
             ServiceUndrawnSources();
             return false;
         }
@@ -2969,6 +3228,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // And the window's focus, as the root has it, so Focus() works inside: a dialog's field
         // can take the keyboard. (Style resolution hands it down to the content's children.)
         content.FocusManager = _focusManager;
+        // And the window's accessibility observer, as the root has it, when a reader sees the overlay
+        // (a tooltip is not in the tree): a change inside — a check box, a field's value, a menu's
+        // selection — is told as one in the main tree is. The content has no parent, so its elements
+        // found no observer, and such a change waited for the next rebuild, often the close.
+        if (entry.IsHitTestable) content.AccessibilityObserver = _a11yObserver;
 
         // Resolve style and layout immediately so we can clamp to viewport
         var theme = Application.Theme;
@@ -3015,6 +3279,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// of the elements in it (<see cref="Element.WindowBorderBox"/>) are where they are drawn.</summary>
     private static void MoveOverlay(OverlayEntry entry, float x, float y)
     {
+        if (entry.X != x || entry.Y != y) entry.Moved = true;
         entry.X = x;
         entry.Y = y;
         entry.Content.OverlayOrigin = new Point(x, y);
@@ -3052,6 +3317,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     {
         var entry = _overlays[index];
         _overlays.RemoveAt(index);
+        // What changes in it from now on is nothing a reader sees.
+        if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
+            entry.Content.AccessibilityObserver = null;
         A11yOverlaysChanged(entry);
         if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
         _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);
@@ -3173,6 +3441,82 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         }
     }
 
+    /// <summary>What a frame's overlays did before its accessibility phase (<see cref="PrepareOverlays"/>).</summary>
+    [Flags]
+    private enum OverlayChanges : byte
+    {
+        None = 0,
+        /// <summary>Children added, removed or replaced in an overlay a reader sees.</summary>
+        Structure = 1,
+        /// <summary>An overlay a reader sees was laid out again or put somewhere else.</summary>
+        Bounds = 2,
+        /// <summary>Some overlay, a tooltip too, was styled or laid out again.</summary>
+        Work = 4,
+    }
+
+    /// <summary>
+    /// Styles, lays out and places the open overlays, as the root is styled and laid out, before
+    /// the frame's accessibility phase; and says what changed in the ones a reader sees (any but a
+    /// tooltip, <see cref="BuildAccessibilityTreeWithOverlays"/>): children (the tree is built again)
+    /// or bounds (the coalesced layout refresh, as a scroll or a resize). Overlay trees are separate
+    /// roots, so no flag of theirs reaches the root's. This ran in <see cref="RenderOverlays"/>, after
+    /// the phase: a component that changed its children in an open dialog or command palette, a
+    /// label that moved others in a menu, built no tree until something else did, and a reader kept
+    /// the list it saw when the overlay opened. A window that draws nothing (minimized) runs it too.
+    /// </summary>
+    private OverlayChanges PrepareOverlays(Theme theme)
+    {
+        var changes = OverlayChanges.None;
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            var overlay = _overlays[i];
+            var content = overlay.Content;
+            bool seen = overlay.IsHitTestable;
+            if (seen && (content.DirtyFlags & DirtyFlags.Children) != 0)
+            {
+                changes |= OverlayChanges.Structure | OverlayChanges.Work;
+                overlay.A11yStale = true;
+            }
+
+            if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
+            {
+                StyleResolver.Resolve(content, theme);
+                // As the root's: what the pass resolved is not resolved again under a list that
+                // realizes rows while it is drawn.
+                ClearFlags(content, DirtyFlags.Style | DirtyFlags.StyleSubtree);
+                overlay.StyleResolved = true;
+                changes |= OverlayChanges.Work;
+            }
+
+            if (!overlay.LayoutDone || (content.DirtyFlags & DirtyFlags.Layout) != 0)
+            {
+                _layoutEngine.PerformLayout(content,
+                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
+                overlay.LayoutDone = true;
+                changes |= OverlayChanges.Work;
+                if (seen)
+                {
+                    changes |= OverlayChanges.Bounds;
+                    overlay.A11yStale = true;
+                }
+            }
+
+            // Every frame, not only on a relayout: the anchor moves with the page under it.
+            if (overlay.Place is not null)
+                PlaceOverlay(overlay);
+            if (overlay.Moved)
+            {
+                overlay.Moved = false;
+                if (seen)
+                {
+                    changes |= OverlayChanges.Bounds;
+                    overlay.A11yStale = true;
+                }
+            }
+        }
+        return changes;
+    }
+
     private void RenderOverlays(IRenderContext ctx)
     {
         var theme = Application.Theme;
@@ -3180,6 +3524,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             var content = overlay.Content;
 
+            // Done before the accessibility phase (PrepareOverlays); here for an overlay opened or
+            // changed since, while the root was drawn.
             if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 StyleResolver.Resolve(content, theme);
@@ -3193,7 +3539,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 overlay.LayoutDone = true;
             }
 
-            // Every frame, not only on a relayout: the anchor moves with the page under it.
+            // Again after the root is drawn: an anchor can be placed by its own drawing (a row
+            // realized as its list draws). The same place as before, when it is not.
             if (overlay.Place is not null)
                 PlaceOverlay(overlay);
 
@@ -3734,8 +4081,17 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             // and changes nothing else. They go on the coalesced schedule a resize gets — a
             // property change rebuilt the whole tree on every frame of a wheel turn, 0.7 ms a
             // frame of a 1.9 ms frame in a scrolling History list, and up to 9 ms.
+            // Inside an open overlay (a palette's list scrolled to its choice), only that overlay's
+            // part of the tree is built again for it.
             if (propertyName == AccessibilityProperties.BoundingRect)
-                window._a11yLayoutRefreshPending = true;
+            {
+                if (window.OverlayHolding(element) is { } overlay)
+                {
+                    overlay.A11yStale = true;
+                    window._a11yOverlayRefreshPending = true;
+                }
+                else window._a11yLayoutRefreshPending = true;
+            }
             // A range's value can move every frame (a drag, a playback): on its own schedule, when
             // the range's node is made again and patched in (TryPatchA11y), as a leaf's is.
             else if (propertyName == AccessibilityProperties.RangeValue)

@@ -1194,6 +1194,7 @@ var list = VirtualListElement<FileEntry>.New()
 | — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
+| `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
 
 **How rows live.** With the one-argument template, the visible window plus a row or two of
 overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
@@ -1303,6 +1304,38 @@ With `InvalidateRow` a key makes about 3.5 rows across both panes instead of 31.
 walk, headless: 427 → 259 KB a key). The perf suite pins it: `virtual/partner walk beside 1,000 item
 rows, every row told` makes 23 rows a step and allocates 105 KB, `… two rows told` makes 6 and
 allocates 39 KB.
+
+**A selection the list draws.** On item rows a selection move still makes two rows, the one
+the selection left and the one it reached, when often all that changes in them is their
+background. `.SelectionHighlight(fill, cornerRadius, ringColor, ringWidth)` has the list draw
+the selection itself: a box at each selected row's border box (every selected row on screen
+with `CanSelectMultiple`), under the row and before it is drawn, through the same call a box
+makes for its own background and uniform border (`RowHighlight`), so it snaps and rounds the
+same way. The rows are then made unselected — the template is asked with `selected = false` —
+and a selection move makes no row at all: the list only draws the highlight somewhere else.
+
+```csharp
+var list = VirtualListElement<Tag>.New()
+    .Items(tags)
+    .SelectedIndex(caret)
+    .SelectionHighlight(Nocturne.Neutral900, Nocturne.RadiusRow)   // what the rows' background was
+    .RenderWith((t, _) => TagRow(t));                               // no background of its own
+```
+
+The pixels are the same as rows that drew it when the highlight is the fill, radius and ring the
+row drew and the row's own background becomes transparent (a row with a ring keeps a transparent
+border of the ring's width, so its contents stay where they were). It fits only a selection that
+is a background. A row that shows its selection any other way cannot show it any more: a bolder
+label, an icon's colour, something only the selected row has (Junction's History names what
+Enter will do on the caret's row), or a hover tint the row leaves off its selected row (a kept
+row has no way to learn it became selected, so its hover tint would cover the highlight). Such a
+list keeps the selection in its rows. Assistive technology reads the list's selection, not the
+rows', so it is told the same either way. Another highlight from a rebuild (a theme's colour) is
+drawn on the next frame and makes no row; turning it on or off makes the selected rows again.
+`.SelectionHighlight(null)` leaves the selection to the rows. On the perf suite's walk a step
+makes 1 row instead of 3 and allocates 16 KB instead of 25 (`virtual/selection walk 1,000 item
+rows, the list draws the highlight`); Junction's Tags table, whose caret's tint is the list's,
+makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
@@ -1658,8 +1691,17 @@ _find.Service();
 | `RevealAfterLayout` (true) | false when `Reveal` defers itself (`ScrollRangeIntoView`) and can land on the same frame |
 | `Placeholder`, `FieldWidth` 280, `FieldHeight` 30, `Icon` | the field and the glyphs |
 
+**One build a step.** `onChanged` runs once for each step — a key, a button, opening, closing —
+however much of the search the step changed: the search the bar makes tells the owner through
+the bar, which holds it for the step's own notice. Until round 5 of plan 17 a step let the search
+call `onChanged` and then called it again, two builds for every Enter or F3 and three for Ctrl+F
+over a selection, the first before the step had asked for its reveal (Vesper's reader, find Enter:
+two builds a step → one). Don't make the bar's `TextSearch` call `MarkDirty` itself too.
+
 `new FindBar(search, onChanged)` puts a bar over a search something else owns — a terminal
-searches its own scrollback. The bar handles its own keys while its field has the keyboard, so
+searches its own scrollback. That search tells its owner through its own callback, which the bar
+cannot hold back, so give it one that does not rebuild what `onChanged` rebuilds (the terminal's
+repaints and raises an event). The bar handles its own keys while its field has the keyboard, so
 an owner with nothing else to route can skip `HandleKey`; routing it as well is harmless.
 Ctrl+F on an open bar puts the keyboard back in the field with the query selected whole. Keys
 match the letter on the key (`LayoutKey`), as the text fields' shortcuts do.

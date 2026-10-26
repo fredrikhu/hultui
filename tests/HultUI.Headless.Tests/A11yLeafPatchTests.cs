@@ -105,7 +105,7 @@ public class A11yLeafPatchTests
         "typing", "password", "checkbox click", "checkbox by code, offscreen", "switch", "app toggle", "slider",
         "progress, toggle while pending", "number field", "leaf name", "leaf description", "leaf expanded",
         "canvas name", "label", "label in an explicitly named button", "two leaves, reverse order",
-        "selection and leaves",
+        "selection and leaves", "in an open overlay",
     };
 
     /// <summary>Cases the tree is rebuilt for, as before.</summary>
@@ -315,6 +315,88 @@ public class A11yLeafPatchTests
                     s.Settled("select 4", () => { label.Content = "item 4"; list.SelectedIndex = 4; check.IsChecked = false; });
                 });
             }
+            case "in an open overlay":
+            {
+                // A dialog's fields: the overlay's node is a child of the root node, and its leaves are
+                // found down from it (plan 17, round 5).
+                var check = Checkbox.New(false, "Remember me");
+                var input = TextInput.New("").Width(Dimension.Px(200));
+                var content = Flex.Column(gap: 4).Padding(8).Children(TextB.New("Sign in"), input, check);
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    s.Steps.Add(("open, toggle", session =>
+                    {
+                        session.Window.Window.ShowOverlay(content, 300, 40);
+                        session.PumpFrame();
+                        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                    }, () => check.IsChecked = true, (session, force) => { force(); session.PumpFrame(); }));
+                    s.Steps.Add(("focus, a", session => { input.Focus(); session.PumpFrame(); }, () => input.Text += "a",
+                        (session, force) => { force(); session.PumpFrame(); }));
+                    s.Step("b", () => input.Text += "b");
+                    s.Step("toggle back", () => check.IsChecked = false);
+                });
+            }
+            case "palette typing" or "palette list scrolled":
+            {
+                // An open overlay's part of the tree is built again on its own (plan 17, round 5): the
+                // field's value and the new list for a keystroke, the list's scroll for a move.
+                var words = Enumerable.Range(0, 40).Select(i => $"{(i % 3 == 0 ? "Save" : i % 3 == 1 ? "Open" : "Close")} item {i}").ToList();
+                var palette = new CommandPalette(() => words.Select(w => new PaletteCommand(w, () => { })));
+                HeadlessSession? live = null;
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    void Open(HeadlessSession session)
+                    {
+                        live = session;
+                        palette.Open(session.Window.Window);
+                        session.PumpFrame();
+                        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                    }
+                    if (which == "palette typing")
+                    {
+                        s.Steps.Add(("open, s", Open, () => live!.Window.TypeText("s"), (session, force) => { force(); session.PumpFrame(); }));
+                        s.Step("a", () => live!.Window.TypeText("a"));
+                        s.Step("backspace", () => live!.Window.PressKey(KeyCode.Backspace));
+                        s.Step("zz, no match", () => live!.Window.TypeText("zz"));
+                        s.Step("backspace x3", () => { for (int i = 0; i < 3; i++) live!.Window.PressKey(KeyCode.Backspace); });
+                    }
+                    else
+                    {
+                        s.Steps.Add(("open", Open, () => { }, (session, force) => { force(); session.PumpFrame(); }));
+                        for (int k = 1; k <= 3; k++)
+                            s.Settled($"down x10 ({k})", () => { for (int i = 0; i < 10; i++) live!.Window.PressKey(KeyCode.Down); });
+                        s.Settled("up x25", () => { for (int i = 0; i < 25; i++) live!.Window.PressKey(KeyCode.Up); });
+                    }
+                });
+            }
+            case "overlay children" or "move in an overlay":
+            {
+                var count = new HultUI.Core.Reactivity.Signal<int>(2);
+                var choices = new Picker(count);
+                var grow = Box.New().Width(Dimension.Px(20)).Height(Dimension.Px(10));
+                var content = Flex.Column(gap: 4).Padding(8).Children(Flex.Row(gap: 4).Children(grow, Button.New("After")), choices.Mount());
+                return With(Box.New().Width(Dimension.Px(10)).Height(Dimension.Px(10)), s =>
+                {
+                    void Open(HeadlessSession session)
+                    {
+                        session.Window.Window.ShowOverlay(content, 300, 40);
+                        session.PumpFrame();
+                        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+                    }
+                    if (which == "overlay children")
+                    {
+                        s.Steps.Add(("open, 4", Open, () => count.Value = 4, (session, force) => { force(); session.PumpFrame(); }));
+                        s.Step("1", () => count.Value = 1);
+                        s.Step("3", () => count.Value = 3);
+                    }
+                    else
+                    {
+                        s.Steps.Add(("open", Open, () => { }, (session, force) => { force(); session.PumpFrame(); }));
+                        s.Settled("grow", () => { grow.Box.Width = Dimension.Px(120); grow.MarkLayoutDirty(); });
+                        s.Settled("shrink", () => { grow.Box.Width = Dimension.Px(60); grow.MarkLayoutDirty(); });
+                    }
+                });
+            }
             case "box that gains a name" or "box whose name goes":
             {
                 var box = Box.New().Width(Dimension.Px(24)).Height(Dimension.Px(24));
@@ -349,6 +431,47 @@ public class A11yLeafPatchTests
             default:
                 throw new ArgumentOutOfRangeException(nameof(which));
         }
+    }
+
+    /// <summary>Buttons as many as <paramref name="count"/> says.</summary>
+    private sealed class Picker(HultUI.Core.Reactivity.Signal<int> count) : HultUI.Core.Components.Component
+    {
+        public override Element Build()
+        {
+            var column = Flex.Column(gap: 4);
+            for (int i = 0; i < count.Value; i++) column.AddChild(Button.New($"Choice {i}"));
+            return column;
+        }
+    }
+
+    /// <summary>Cases a change inside an open overlay builds that overlay's part of the tree again for,
+    /// and no tree (plan 17, round 5).</summary>
+    public static TheoryData<string> OverlayParts => new()
+    {
+        "palette typing", "palette list scrolled", "overlay children", "move in an overlay",
+    };
+
+    [Theory]
+    [MemberData(nameof(OverlayParts))]
+    public void ATSPI_AnOverlaysPartBuiltAgain_TellsWhatARebuildTells_AndBuildsNoTree(string which)
+    {
+        var parts = Play(which, forceRebuild: false, AtSpi);
+        var rebuilt = Play(which, forceRebuild: true, AtSpi);
+        Assert.Equal(rebuilt.Told, parts.Told);
+        Assert.Equal(rebuilt.Trees, parts.Trees);
+        Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
+    }
+
+    [WindowsTheory]
+    [MemberData(nameof(OverlayParts))]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AnOverlaysPartBuiltAgain_RaisesWhatARebuildRaises_AndBuildsNoTree(string which)
+    {
+        var parts = PlayUia(which, forceRebuild: false);
+        var rebuilt = PlayUia(which, forceRebuild: true);
+        Assert.Equal(rebuilt.Told, parts.Told);
+        Assert.Equal(rebuilt.Trees, parts.Trees);
+        Assert.All(parts.TreesPerStep, built => Assert.Equal(0, built));
     }
 
     /// <summary>What a run told and built: the bridge's lines, a dump of the tree after each step,
@@ -450,13 +573,11 @@ public class A11yLeafPatchTests
         Assert.Equal(Play(which, forceRebuild: true, AtSpi).Told, run.Told);
     }
 
-    /// <summary>A change that marks no layout builds no tree at all; a label's (which marks layout)
-    /// builds the one the coalesced layout refresh brings, and the patch tells its name before it.</summary>
-    private static void AssertNoTreeForTheChange(string which, Run run)
-    {
-        bool layout = which is "label" or "label in an explicitly named button" or "two leaves, reverse order" or "selection and leaves";
-        Assert.All(run.TreesPerStep, built => Assert.Equal(layout ? 1 : 0, built));
-    }
+    /// <summary>No change builds a tree: one that marks no layout is patched, and a label's (which
+    /// marks layout) is told by the coalesced layout refresh it brings, which finds the same nodes and
+    /// brings the applied tree up to date in place.</summary>
+    private static void AssertNoTreeForTheChange(string which, Run run) =>
+        Assert.All(run.TreesPerStep, built => Assert.Equal(0, built));
 
     [WindowsTheory]
     [MemberData(nameof(Patched))]

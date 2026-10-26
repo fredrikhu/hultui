@@ -44,7 +44,10 @@ public interface IAccessibilityBridge
     /// Properties changed with no rebuild: the window has marked them in place on the most
     /// recently applied tree, <paramref name="root"/>, and the next diff will not report them.
     /// Today a move of a list's selection: <see cref="AccessibilityNode.IsSelected"/> on the item
-    /// that had the selection and the one that has it; a move of a caret or a selection in text
+    /// that had the selection and the one that has it, or, for a list whose items are served on demand,
+    /// <see cref="AccessibilityProperties.ItemSelection"/> (and <see cref="AccessibilityProperties.ItemCount"/>
+    /// when its items changed in number) on the list's node, which carries them, the change's previous
+    /// node a stand-in for it as it was; a move of a caret or a selection in text
     /// made on request (the rich text editor's): <see cref="AccessibilityProperties.TextSelection"/>
     /// on its node, which carries the text's new version, the change's previous node a stand-in for
     /// it with the old one (no tree's); and a change of a leaf's own name, description, value, range,

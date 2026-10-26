@@ -525,6 +525,79 @@ public class ReviewTests
         });
     }
 
+    /// <summary>Typing in a comment — the composer's or a reply's — builds the window once a
+    /// character (the editor tells an edit and the caret's move in one event), leaves the chrome
+    /// as it is and keeps the woven rows: the list makes again only the card holding the editor,
+    /// whose formatting bar follows the caret. It made every row twice a character and built the
+    /// chrome three times (1.4 MB a character on a 400-line file).</summary>
+    [Fact]
+    public void TypingAComment_BuildsOnceACharacter_AndMakesOnlyItsCardAgain()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412, focusThread: Thread1);
+            session.PumpUntil(() => ById(session, "review-plus") is not null && ById(session, "review-reply") is not null,
+                TimeSpan.FromSeconds(20));
+            session.PumpFrames(4);
+
+            void TypeAndCheck(string text, string card)
+            {
+                int quiet = 0;
+                foreach (var ch in text)
+                {
+                    var before = Rows(session);
+                    var label = Label(session);
+                    int builds = app.Builds, chrome = app.ChromeBuilds, made = app.DiffRowsMade;
+                    session.Window.TypeText(ch.ToString());
+                    // The character's own rebuild runs as its event ends: one, and not the chrome.
+                    Assert.Equal(1, app.Builds - builds);
+                    Assert.Equal(0, app.ChromeBuilds - chrome);
+                    session.PumpFrames(2);
+                    // Something outside the typing — the repository's watcher seeing the review's
+                    // fetch — may rebuild the window meanwhile, and that weaves again. Otherwise the
+                    // frame makes the card again and nothing else: it is keyed, so it is made into
+                    // the row it had, every row on screen is the element it was, and every label
+                    // the list kept is kept.
+                    if (app.Builds - builds > 1) continue;
+                    quiet++;
+                    Assert.Equal(1, app.DiffRowsMade - made);
+                    Assert.Equal(before, Rows(session));
+                    Assert.Same(label, Label(session));
+                }
+                Assert.True(quiet >= text.Length - 2, $"{quiet} of {text.Length} characters typed without a rebuild from elsewhere");
+                Assert.Contains(text.Replace("*", ""), ((RichTextEditorElement)Focused(session)!).Document.ToPlainText());
+                Assert.NotNull(ById(session, card));
+            }
+
+            // A reply's editor is in its thread's card, and that card is the one made again.
+            session.Window.Click(ById(session, "review-reply")!);
+            session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-reply-text" }, TimeSpan.FromSeconds(10));
+            session.PumpFrames(4);
+            TypeAndCheck("Agreed", "review-reply-text");
+
+            // The composer, on the caret's line.
+            session.Window.Click(ById(session, "review-plus")!);
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.C);
+            session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
+            session.PumpFrames(4);
+            TypeAndCheck("Not **this**", "review-composer");
+
+            // The caret moving into the bold word lights the card's Bold button: the bar is in the
+            // card made again, and it reads the editor on screen.
+            for (int i = 0; i < 2; i++)
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                session.Window.PressKey(KeyCode.Left);
+                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(0, app.ChromeBuilds - chrome);
+                session.PumpFrames(2);
+            }
+            var bold = LayoutProbe.Descendants<ButtonElement>(ById(session, "review-composer")!, b => b.AutomationId == "richtext-bold").Single();
+            Assert.True(bold.AccessibleToggled);
+        });
+    }
+
     /// <summary>The diff list's realized rows, top to bottom (its first child is the spacer).</summary>
     private static List<Element> Rows(HeadlessSession session) =>
         Root(session) is { } root

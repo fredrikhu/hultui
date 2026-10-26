@@ -300,8 +300,17 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         var ti = theme.TextInput;
         var s = _style;
         CornerRadius = s?.CornerRadius ?? ti.CornerRadius;
-        Box.Padding = s?.Padding ?? ti.Padding;
-        Box.BorderWidth = s?.BorderWidth ?? ti.BorderWidth;
+        // Another padding or border (a theme, a style set on the live area) lays the area out
+        // again: a rebuild no longer does it for every area it patches (PatchThemesTwin).
+        var box = BoxRead;
+        var padding = s?.Padding ?? ti.Padding;
+        var border = s?.BorderWidth ?? ti.BorderWidth;
+        if (box.Padding != padding || box.BorderWidth != border)
+        {
+            Box.Padding = padding;
+            Box.BorderWidth = border;
+            MarkLayoutDirty();
+        }
         // Theme font size is a default: an explicit builder FontSize (e.g. a code
         // preview) wins and isn't re-clobbered every StyleResolver pass.
         Inherited.FontSize ??= s?.FontSize ?? ti.FontSize;
@@ -2058,6 +2067,13 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
                     ctx.DrawRect(new Rect(contentBox.X + r.X0, lineY, r.X1 - r.X0, lh), SelectionColor);
         }
     }
+
+    // Its chrome is the theme's (compared on a themed twin). Nothing it copies below is measured:
+    // the area's box comes from its layout styles, and its lines are wrapped to that box when it
+    // is drawn, so its text, spans and colours are paint. A rebuild of a pane around a long
+    // document laid the area and every box above it out on every key (Meridian's response).
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(TextAreaElement);
+    private protected override bool PatchThemesTwin => GetType() == typeof(TextAreaElement);
 
     internal override void PatchFrom(Element source)
     {

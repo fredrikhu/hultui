@@ -315,7 +315,7 @@ public partial class CommanderApp : Component, IDisposable
             if (got < want) settled = false;   // clamped short — the content isn't measured yet
         }
         _pendingPaneScroll = settled ? 0 : _pendingPaneScroll - 1;
-        if (_pendingPaneScroll > 0) MarkDirty();
+        if (_pendingPaneScroll > 0) MarkViewDirty();
     }
 
     // Each pane is a Tab-focusable region; `_active` follows which one holds focus
@@ -617,8 +617,9 @@ public partial class CommanderApp : Component, IDisposable
     private void NudgeWhenConnectingIsDue(char side)
     {
         if (ConnectingDelayMs <= 0) return;   // already due; the build in progress will show it
+        // The connecting block is the pane's view: the parts stay.
         _ = Task.Delay(ConnectingDelayMs + 20).ContinueWith(_ =>
-            HultUI.Application.InvokeOnMainThread(() => { if (Loader(side).IsLoading) MarkDirty(); }));
+            HultUI.Application.InvokeOnMainThread(() => { if (Loader(side).IsLoading) MarkViewDirty(); }));
     }
 
     /// <summary>The Cancel in the connecting block: stop waiting and go back to the folder the
@@ -669,7 +670,10 @@ public partial class CommanderApp : Component, IDisposable
             // Clamp the cursor into the freshly-loaded range and scroll to it.
             SetCursor(side, Math.Clamp(Cursor(side), 0, Math.Max(0, listed.Count - 1)));
             RequestScroll(side);
-            MarkDirty();
+            // The rows reach the view; this pane's footer reads them too, and builds again on its
+            // own (see Part). The rest of its parts show the folder, which the navigation that
+            // asked for these rows built them for.
+            MarkViewDirty();
         });
         return loader.Value.Entries;
     }
@@ -708,8 +712,8 @@ public partial class CommanderApp : Component, IDisposable
         }
         else
         {
-        var rail = BuildRail(); rail.Key = "rail";
-        body.AddChild(rail);
+        // The rail is a part of its own (see Part), keyed by its host.
+        body.AddChild(RailPart.Place().FlexShrink(0));
         if (_settings.PreviewPane)
         {
             // The preview stands in for the pane you are *not* browsing, and shows what the
@@ -738,12 +742,14 @@ public partial class CommanderApp : Component, IDisposable
         }
         body.Key = "body";
 
+        // The title bar and the command line are parts of their own (see Part), keyed by their
+        // hosts: every child of the root is keyed, so a kept host goes back without a mark.
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
             .Background(Nocturne.Bg)
             .TextColor(Nocturne.Text)
             .FontSize(12.5f)
-            .Children(BuildChrome(), body, BuildCommandLine());
+            .Children(ChromePart.Place().FlexShrink(0), body, CmdPart.Place().FlexShrink(0));
         // A right-drag mark ends wherever the button is released — pointer-up bubbles
         // to the root even when the release lands off the rows (empty list, footer, …).
         // The Find dialog's corner-grip resize tracks the same way: move updates the size,
@@ -917,7 +923,10 @@ public partial class CommanderApp : Component, IDisposable
         _search = "";
         _previewFocused = false;
         _pendingFocusChild[side == 'L' ? 0 : 1] = focusChildName;
-        MarkDirty();
+        // Another folder is this pane's tab strip, trail, column header and footer and nothing
+        // else's: the other pane, the rail and the title bar stay (a filter cleared or a pane
+        // made active on the way here reach the parts that show them through MarkViewDirty).
+        PaneDirty(side);
     }
 
     private bool CanGoBack(char side) => ActiveTab(side).Back.Count > 0;
@@ -1165,18 +1174,20 @@ public partial class CommanderApp : Component, IDisposable
         // started on as well as the one it lands on.
         if (_shiftMarking) BeginMarkSweep(side, list);
         int next = Math.Clamp(Cursor(side) + delta, 0, list.Count - 1);
+        // The cursor is the view's alone: the parts stay (a sweep's marks reach the footer, and a
+        // cleared filter the footer and the command line, through MarkViewDirty's compare).
         if (next == Cursor(side))
         {
             // Already at the end of the list: the row under the cursor still joins the
             // range, so Shift+End on the last row marks it rather than doing nothing.
             if (_shiftMarking) ApplyMarkSweep(side, list);
-            MarkDirty();
+            MarkViewDirty();
             return;
         }
         SetCursor(side, next);
         if (_shiftMarking) ApplyMarkSweep(side, list);
         RequestScroll(side);
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private static int IndexOfName(IReadOnlyList<FileEntry> list, string name)
@@ -1296,8 +1307,11 @@ public partial class CommanderApp : Component, IDisposable
             var marks = Marks(side);
             if (!marks.Remove(MarkKey(e))) marks.Add(MarkKey(e));
         }
+        // The move builds the window, the mark already in it: a MarkDirty after it built the
+        // window a second time for every Insert. A mark shows in the rows and the footer's
+        // count, which MarkViewDirty compares.
         if (advance) MoveCursor(side, 1, clearSearch: false);
-        MarkDirty();
+        else MarkViewDirty();
     }
 
     /// <summary>Ctrl+A: mark every row in the pane (never the ".." parent) — or, when
@@ -1316,7 +1330,7 @@ public partial class CommanderApp : Component, IDisposable
             if (allMarked) marks.Remove(MarkKey(e));
             else marks.Add(MarkKey(e));
         }
-        MarkDirty();
+        MarkViewDirty();   // the rows and the footer's count (compared)
     }
 
     /// <summary>Ctrl+Shift+A: prompt for a pattern and mark the files it matches.</summary>
@@ -1385,7 +1399,7 @@ public partial class CommanderApp : Component, IDisposable
         if (!_rmarkSeen.Add(MarkKey(e))) return;     // each row toggles once per drag
         var marks = Marks(side);
         if (_rmarkAdd) marks.Add(MarkKey(e)); else marks.Remove(MarkKey(e));
-        MarkDirty();
+        MarkViewDirty();   // the rows and the footer's count (compared)
     }
 
     private void EndRightMark()
@@ -1414,7 +1428,7 @@ public partial class CommanderApp : Component, IDisposable
             {
                 if (!ReferenceEquals(excerpt, _previewSpanExcerpt)) return;   // user moved on
                 _previewSpans = spans;
-                MarkDirty();   // repaint the excerpt with its colors
+                MarkViewDirty();   // repaint the excerpt with its colors
             });
         });
         return null;
@@ -1549,13 +1563,15 @@ public partial class CommanderApp : Component, IDisposable
     // Typing in a pane narrows it to the matching entries (a live filter, so every match is
     // visible at once). Arrows move within the filtered set; Esc clears and restores the
     // cursor to where it was. Only the active pane filters (the search text is per-focus).
+    // The filter narrows the active pane's rows, and shows in its footer's counts and in the
+    // command line, which MarkViewDirty compares: the headers, the rail and the title bar stay.
     private void ExtendSearch(char side, char ch)
     {
         int anchor = CursorListingPos(side);
         _search += ch;
         ReclampFilterCursor(side, anchor);
         RequestScroll(side);
-        MarkDirty();
+        MarkViewDirty();
     }
 
     private void BackspaceSearch(char side)
@@ -1565,7 +1581,7 @@ public partial class CommanderApp : Component, IDisposable
         _search = _search[..^1];
         ReclampFilterCursor(side, anchor);
         RequestScroll(side);
-        MarkDirty();
+        MarkViewDirty();
     }
 
     /// <summary>Clear the filter, moving the cursor back onto the same entry in the full
@@ -2250,8 +2266,8 @@ public partial class CommanderApp : Component, IDisposable
         switch (e.Key)
         {
             case KeyCode.Escape: CloseOverlays(); break;
-            case KeyCode.Up: _bookmarkSel = Math.Max(0, _bookmarkSel - 1); MarkDirty(); break;
-            case KeyCode.Down: _bookmarkSel = Math.Min(_bookmarks.Count - 1, _bookmarkSel + 1); MarkDirty(); break;
+            case KeyCode.Up: _bookmarkSel = Math.Max(0, _bookmarkSel - 1); MarkViewDirty(); break;
+            case KeyCode.Down: _bookmarkSel = Math.Min(_bookmarks.Count - 1, _bookmarkSel + 1); MarkViewDirty(); break;
             case KeyCode.Enter: OpenBookmarkInPane(_bookmarkSel, _active); break;
         }
     }
@@ -2689,12 +2705,17 @@ public partial class CommanderApp : Component, IDisposable
 
     /// <summary>Open a new tab in <paramref name="side"/> on <paramref name="dir"/>
     /// (defaults to the active tab's folder), placed just after the active one.</summary>
-    private void NewTab(char side, string? dir = null)
+    private void NewTab(char side, string? dir = null) =>
+        InsertTab(side, SeededTab(dir ?? Dir(side), _settings.DefaultView));
+
+    /// <summary>Put <paramref name="tab"/> just after <paramref name="side"/>'s active tab and
+    /// make it the active one.</summary>
+    private void InsertTab(char side, PaneTab tab)
     {
         ExitSearch(_active);
         var tabs = Tabs(side);
         int at = TabIndex(side) + 1;
-        tabs.Insert(at, SeededTab(dir ?? Dir(side), _settings.DefaultView));
+        tabs.Insert(at, tab);
         _active = side;
         SetTabIndex(side, at);
         BumpGen(side);
@@ -2729,11 +2750,13 @@ public partial class CommanderApp : Component, IDisposable
         var tabs = Tabs(side);
         if (index < 0 || index >= tabs.Count) return;
         var src = tabs[index];
-        NewTab(side, src.Dir);
-        var dup = ActiveTab(side);        // a duplicate keeps the source's view mode + sort
-        dup.View = src.View;
+        // A duplicate keeps the source's view mode and sort — set before the new tab's build,
+        // which is the build that shows them: set after it, the trail's view toggle and the
+        // column header kept the defaults until something rebuilt the parts.
+        var dup = SeededTab(src.Dir, src.View);
         dup.Sort = src.Sort;
         dup.SortDescending = src.SortDescending;
+        InsertTab(side, dup);
     }
 
     /// <summary>Open the tab's folder as a new tab in the other pane.</summary>
@@ -2812,10 +2835,10 @@ public partial class CommanderApp : Component, IDisposable
         switch (e.Key)
         {
             case KeyCode.Escape: CloseOverlays(); break;
-            case KeyCode.Up: _driveCur = Math.Max(0, _driveCur - 1); MarkDirty(); break;
-            case KeyCode.Down: _driveCur = Math.Min(_drives.Count - 1, _driveCur + 1); MarkDirty(); break;
-            case KeyCode.Home: _driveCur = 0; MarkDirty(); break;
-            case KeyCode.End: _driveCur = _drives.Count - 1; MarkDirty(); break;
+            case KeyCode.Up: _driveCur = Math.Max(0, _driveCur - 1); MarkViewDirty(); break;
+            case KeyCode.Down: _driveCur = Math.Min(_drives.Count - 1, _driveCur + 1); MarkViewDirty(); break;
+            case KeyCode.Home: _driveCur = 0; MarkViewDirty(); break;
+            case KeyCode.End: _driveCur = _drives.Count - 1; MarkViewDirty(); break;
             case KeyCode.Enter: SelectDrive(target, _driveCur); break;
             // A letter picks its drive outright, the way Total Commander's drive list does —
             // Alt+F1 then "c" is two keystrokes, not a walk down the list.
@@ -2866,7 +2889,8 @@ public partial class CommanderApp : Component, IDisposable
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
-        if (_notice != null) { _notice = null; MarkDirty(); }   // transient — clears on the next key
+        // Transient — clears on the next key. Only the command line shows it (compared).
+        if (_notice != null) { _notice = null; MarkViewDirty(); }
 
         // Modal overlays own the keyboard while open. The palette keeps its query
         // field focused, so its handler consumes only nav/Enter/Escape and lets text
@@ -3042,11 +3066,13 @@ public partial class CommanderApp : Component, IDisposable
 
         switch (e.Key)
         {
+            // The active pane shows in the trails, and a filter in the footer and the command
+            // line, which MarkViewDirty compares: the rest of the parts stay.
             case KeyCode.Tab:
                 ExitSearch(_active); _active = _active == 'L' ? 'R' : 'L';
-                MarkDirty(); e.StopPropagation = true; return;
+                MarkViewDirty(); e.StopPropagation = true; return;
             case KeyCode.Escape:
-                if (_search.Length > 0) { ExitSearch(side); MarkDirty(); e.StopPropagation = true; }
+                if (_search.Length > 0) { ExitSearch(side); MarkViewDirty(); e.StopPropagation = true; }
                 else if (_cutPending.Count > 0) { _cutPending.Clear(); Clipboard.Clear(); MarkDirty(); e.StopPropagation = true; }
                 return;
             case KeyCode.Space:
@@ -3113,14 +3139,19 @@ public partial class CommanderApp : Component, IDisposable
         // until something else rebuilds — a key press, a decode. Most resize steps change only
         // the size, though, and a build of the whole window for it made every cell of the grid
         // again (750 KB a step in Brief): so a build only when one would make something the last
-        // one did not — the grid's rows, columns or tiles per row, or a pane's path trail, which
-        // a grid view has always followed — and otherwise the live grid takes the new size.
-        // Behind a full-shell view the panes are not shown, and a resize rebuilds as it did.
+        // one did not — the grid's rows, columns or tiles per row, or a pane's path trail — and
+        // otherwise the live grid takes the new size. Behind a full-shell view the panes are not
+        // shown, and a grid view's resize rebuilds as it did.
+        //
+        // The path trail is decided in the build in every view: Detail too drops and brings back
+        // its leading segments with the pane's width. A Detail pane has nothing else a build
+        // sizes from the window, so it builds only when its trail would change — before, it
+        // never built on a resize, and the trail kept the old window's truncation until a key.
         bool gridView = ViewOf('L') is ViewMode.Brief or ViewMode.Thumbnails
                      || ViewOf('R') is ViewMode.Brief or ViewMode.Thumbnails;
-        if (!gridView) return;
-        if (FullShellOpen || WindowFitChanged()) MarkDirty();
-        else FitGridsInPlace();
+        if (gridView && FullShellOpen) { MarkDirty(); return; }
+        if (WindowFitChanged()) MarkDirty();
+        else if (gridView) FitGridsInPlace();
     }
 
     /// <summary>

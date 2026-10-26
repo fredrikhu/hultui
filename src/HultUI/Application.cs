@@ -327,6 +327,16 @@ public sealed class Application : IDisposable
         return window;
     }
 
+    /// <summary>When a live frame last drew for a GPU source's request (the platform clock's
+    /// timestamp; 0 for never). UI thread.</summary>
+    private long _lastLiveRequest;
+
+    /// <summary>How long after a live frame drew for a request the sources still count as asking
+    /// for their own frames, so posted work is no reason to draw: well past the gap between two
+    /// frames of a video playing (42 ms at 24 fps), short enough that a source that only posts
+    /// draws again soon after a video beside it stops.</summary>
+    internal static readonly TimeSpan LiveRequestsQuietAfter = TimeSpan.FromMilliseconds(100);
+
     /// <summary>
     /// Draws one frame from inside the platform's modal resize loop.
     ///
@@ -354,7 +364,10 @@ public sealed class Application : IDisposable
     /// which calls this for it, so a video keeps its own frame rate while its window is moved or a
     /// drag is held. Before, the source's post waited in the queue the held loop cannot run, and
     /// the timer drew for that post: about 64 frames a second, whatever the video's rate. A
-    /// platform that does not answer requests still draws for posted work.</para>
+    /// platform that does not answer requests still draws for posted work, and so does one that
+    /// does once no request has come for <see cref="LiveRequestsQuietAfter"/>: a GPU source that
+    /// signals only by posting (any <c>IGpuImageSource</c> outside HultUI.Media and WebView) is
+    /// drawn at the timer's rate, as before requests were answered, rather than not at all.</para>
     /// </summary>
     private void RenderLiveResizeFrame(Window window)
     {
@@ -373,10 +386,18 @@ public sealed class Application : IDisposable
             var platform = window.PlatformWindow;
             // Taken whichever frame draws: any frame takes the newest picture.
             bool requested = LiveFrameRequests.TakeWaiting();
-            // Posted work no frame can run: a reason to draw only where GPU sources' requests are
-            // not answered on their own, since it is their next frame that waits. Where they are,
-            // SDL's timer drew the same picture again some 64 times a second beside them.
-            bool posted = !_mainThreadQueue.IsEmpty && !LiveFrameRequests.Answering;
+            var clock = _platform.TimeProvider;
+            long at = clock.GetTimestamp();
+            if (requested) _lastLiveRequest = at;
+            // Posted work no frame can run: a reason to draw, since it may be a GPU source's next
+            // frame that waits — except while sources are asking for their frames themselves
+            // (LiveFrameRequests), whose frames come by request: SDL's timer then drew the same
+            // picture again some 64 times a second beside them. Only while they ask: a source that
+            // signals by posting alone, as any IGpuImageSource may, froze for the whole move when
+            // every posted-work frame was dropped once requests could be answered.
+            bool asking = LiveFrameRequests.Answering && _lastLiveRequest != 0
+                && clock.GetElapsedTime(_lastLiveRequest, at) < LiveRequestsQuietAfter;
+            bool posted = !_mainThreadQueue.IsEmpty && !asking;
             if (platform.ResizePending)
             {
                 long now = Environment.TickCount64;

@@ -28,26 +28,27 @@ public partial class MeridianApp
     private Element BuildCollectionShell()
     {
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        var tree = BuildTree(); tree.Key = "tree";
-        row.AddChild(tree);
+        // The tree and the response pane are parts of their own (see Part), keyed by their hosts.
+        row.AddChild(TreePart.Mount().FlexShrink(0));
 
         var editor = BuildEditorColumn(); editor.Key = "editor";
-        if (ActiveTab is not { } tab)
+        if (ActiveTab is null)
         {
             row.AddChild(editor);
             return row;
         }
 
         // The response pane: right of the editor by default, under it when
-        // flipped or forced by the breakpoint. Keyed by orientation so the two
+        // flipped or forced by the breakpoint. One part per place, so the two
         // shapes never patch into each other.
-        var response = BuildResponsePanel(tab, ResponseAtBottom);
-        response.Key = "response-" + (ResponseAtBottom ? "bottom" : "right");
+        var response = ResponsePart(ResponseAtBottom).Mount();
+        _responsePlaced = true;
         if (ResponseAtBottom)
         {
             // The editor starts from its floor and takes whatever the pane's 380 leaves; when
             // the column is too short for both, the pane shrinks instead (to its own floor),
-            // since the editor's floor holds it. See EditorMinHeight.
+            // since the editor's floor holds it. See EditorMinHeight. The host takes the pane's
+            // height and floor from the pane (BuildResponsePanel).
             editor.FlexBasis(Dimension.Px(EditorMinHeight)).MinHeight(EditorMinHeight);
             var main = Flex.Column(gap: 0).FlexGrow(1).Children(editor, response);
             main.Key = "main-bottom";
@@ -55,6 +56,7 @@ public partial class MeridianApp
         }
         else
         {
+            response.FlexShrink(0);
             var main = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch).Children(editor, response);
             main.Key = "main-right";
             row.AddChild(main);
@@ -333,14 +335,19 @@ public partial class MeridianApp
         if (tab.UrlEditing)
         {
             var input = TextInput.New(tab.Doc.Url ?? "");
-            input.OnTextChanged(url => { tab.Doc.SetRequestLine(tab.Doc.Method ?? "GET", url); MarkDirty(); })
+            input.OnTextChanged(url =>
+                {
+                    bool wasDirty = tab.Dirty;
+                    tab.Doc.SetRequestLine(tab.Doc.Method ?? "GET", url);
+                    DocEdited(tab, wasDirty);
+                })
                 .Height(Dimension.Px(28))
                 .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
                 .FontFamily(Fonts.Mono).FontSize(13f)
                 .TextColor(Azimuth.Text)
                 .WithRef(_urlRef);
             input.AutomationId("url-input");
-            input.On<BlurEvent>(_ => { tab.UrlEditing = false; MarkDirty(); });
+            input.On<BlurEvent>(_ => { tab.UrlEditing = false; MarkViewDirty(); });
             urlBox.AddChild(input);
         }
         else
@@ -351,7 +358,7 @@ public partial class MeridianApp
                 .AccessibleName($"URL: {tab.Doc.Url ?? "empty"}")
                 .AutomationId("url-display");
             AddUrlChips(display, tab.Doc.Url ?? "");
-            display.OnClick(_ => { tab.UrlEditing = true; _pendingUrlFocus = true; MarkDirty(); });
+            display.OnClick(_ => { tab.UrlEditing = true; _pendingUrlFocus = true; MarkViewDirty(); });
             urlBox.AddChild(display);
         }
         bar.AddChild(urlBox);
@@ -480,7 +487,7 @@ public partial class MeridianApp
                 .FontWeight(active ? FontWeight.Medium : FontWeight.Regular)
                 .TextColor(active ? Azimuth.Text : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Raised);
-        b.OnClick(_ => { tab.SubTab = which; MarkDirty(); });
+        b.OnClick(_ => { tab.SubTab = which; MarkViewDirty(); });
         if (!active) b.HoverBg(Azimuth.Raised, Color.Transparent);
         return b;
     }
@@ -494,15 +501,31 @@ public partial class MeridianApp
             var header = tab.Doc.Headers[i];
             int index = i;
             var row = Flex.Row(gap: Azimuth.S2).Height(Azimuth.RowForm).FlexShrink(0).AlignItems(AlignItems.Center);
-            row.AddChild(FormInput(header.Name, v => { tab.Doc.SetHeader(index, v, CurrentHeader(tab, index).Value); MarkDirty(); }, 220, $"header-name-{i}"));
-            row.AddChild(FormInput(header.Value, v => { tab.Doc.SetHeader(index, CurrentHeader(tab, index).Name, v); MarkDirty(); }, 0, $"header-value-{i}"));
-            row.AddChild(RemoveButton($"Remove header {header.Name}", () => { tab.Doc.RemoveHeader(index); MarkDirty(); }));
+            row.AddChild(FormInput(header.Name, v =>
+            {
+                bool wasDirty = tab.Dirty;
+                tab.Doc.SetHeader(index, v, CurrentHeader(tab, index).Value);
+                DocEdited(tab, wasDirty);
+            }, 220, $"header-name-{i}"));
+            row.AddChild(FormInput(header.Value, v =>
+            {
+                bool wasDirty = tab.Dirty;
+                tab.Doc.SetHeader(index, CurrentHeader(tab, index).Name, v);
+                DocEdited(tab, wasDirty);
+            }, 0, $"header-value-{i}"));
+            row.AddChild(RemoveButton($"Remove header {header.Name}", () =>
+            {
+                bool wasDirty = tab.Dirty;
+                tab.Doc.RemoveHeader(index);
+                DocEdited(tab, wasDirty);
+            }));
             col.AddChild(row);
         }
         col.AddChild(AddRowButton("＋ add header", "add-header", () =>
         {
+            bool wasDirty = tab.Dirty;
             tab.Doc.AddHeader("Name", "value");
-            MarkDirty();
+            DocEdited(tab, wasDirty);
         }));
         scroll.AddChild(col);
         return scroll;
@@ -574,8 +597,9 @@ public partial class MeridianApp
         int q = url.IndexOf('?');
         string baseUrl = q < 0 ? url : url[..q];
         string query = string.Join('&', pairs.Select(p => p.Value.Length > 0 ? $"{p.Name}={p.Value}" : p.Name));
+        bool wasDirty = tab.Dirty;
         tab.Doc.SetRequestLine(tab.Doc.Method ?? "GET", query.Length > 0 ? $"{baseUrl}?{query}" : baseUrl);
-        MarkDirty();
+        DocEdited(tab, wasDirty);
     }
 
     private Element BuildBodyEditor(RequestTab tab)
@@ -588,7 +612,12 @@ public partial class MeridianApp
             .CornerRadius(Azimuth.Radius1);
         var area = TextArea.New(tab.Doc.Body?.Content ?? "");
         area.PlaceholderText("Request body — saved as a body block in the file.")
-            .OnTextChanged(text => { tab.Doc.SetBody(tab.Doc.Body?.Type ?? "json", text); MarkDirty(); })
+            .OnTextChanged(text =>
+            {
+                bool wasDirty = tab.Dirty;
+                tab.Doc.SetBody(tab.Doc.Body?.Type ?? "json", text);
+                DocEdited(tab, wasDirty);
+            })
             .FontFamily(Fonts.Mono).FontSize(12f)
             .TextColor(Azimuth.Text)
             .FlexGrow(1);

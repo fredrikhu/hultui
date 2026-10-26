@@ -1,8 +1,10 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Junction.Git;
 using Junction.Theme;
@@ -457,39 +459,178 @@ public partial class JunctionApp
         return row;
     }
 
+    // ── The file list: a virtual list of item rows ───────────────────────
+    //
+    // It was a scroll view holding a row for every file and folder, so every key — each step of
+    // the cursor through it — built all of them again: 1.9 MB a key on a commit of 300 files in
+    // 81 folders, every one of them in the accessibility tree. It is the Files tab's shape now: a
+    // virtual list of item rows, the header its first, so only the rows on screen are elements
+    // and a key makes the rows whose item changed — the two the cursor left and reached. The
+    // rows keep the heights they had (CommitRowHeights), so it looks and scrolls as it did.
+
     private Element BuildFileTree(IReadOnlyList<GitFileChange> files, bool fill = false)
     {
-        // When the diff pane is hidden the tree fills the view; otherwise it's a
-        // fixed-width sidebar next to the diff.
-        var scroll = ScrollView.New()
-            .Padding(new Thickness(8, 6, 8, 6))
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0))
-            .WithRef(_fileScrollRef);
-        if (fill) scroll.FlexGrow(1);
-        else scroll.Width(_commitSplit.Size).FlexShrink(0);
-
-        scroll.AddChild(Text.New($"{files.Count} FILES CHANGED").FontSize(10f)
-            .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8)));
-
-        // The rows are the visible part of the tree — folders and files in one flat
-        // list, which is what the keyboard steps through and what the scroll-into-view
-        // ref attaches to.
+        // The rows are the visible part of the tree — folders and files in one flat list,
+        // which is what the keyboard steps through.
         _commitFilesTree.Bind(files, f => f.Path, sort: ChangeTreeSort);
-        _commitFileRows = _commitFilesTree.Rows();
+        SyncCommitFileRows();
         // A collapse (or a reload) can take the cursor's row away; fall back to the open
         // file, then to the top of the list.
-        if (_commitCursorPath == null || _commitFileRows.All(r => r.Path != _commitCursorPath))
-            _commitCursorPath = _commitFileRows.Any(r => r.Path == _selectedFilePath)
+        if (_commitCursorPath == null || CommitRowIndex(_commitCursorPath) < 0)
+            _commitCursorPath = CommitRowIndex(_selectedFilePath) >= 0
                 ? _selectedFilePath
                 : _commitFileRows.FirstOrDefault()?.Path;
 
-        foreach (var node in _commitFileRows)
+        // Everything else a row shows is the colour scheme and the scale its glyphs are cut at.
+        var shape = new CommitTreeRowShape(Nocturne.Theme, Ui.DisplayScale);
+        if (shape != _commitRowShape)
         {
-            var rowEl = node.IsFolder ? CommitFolderRow(node) : FileTreeRow(node);
-            if (node.Path == _commitCursorPath) rowEl.WithRef(_fileSelRef);
-            scroll.AddChild(rowEl);
+            _commitRowShape = shape;
+            (_fileScrollRef.Current as VirtualListElement<CommitTreeRowItem>)?.InvalidateRows();
         }
-        return scroll;
+
+        var list = VirtualListElement<CommitTreeRowItem>.New()
+            .Items(new CommitTreeRowItems(this, _commitFileRows, files.Count))
+            .RenderWith((item, _) => CommitTreeRow(item))
+            .RowHeights(_commitRowHeight ??= (item, _) => CommitRowHeight(item));
+        list.Padding(new Thickness(8, 6, 8, 6))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
+        // The rows are what a reader walks — tree items for the folders, as before — in a
+        // container that says it is a scroll view, as it did. A row off screen is not an
+        // element, so a reader no longer finds it there (the Files tab's trade).
+        list.RowsAreComposite = true;
+        list.Role = AccessibilityRole.ScrollView;
+        list.WithRef(_fileScrollRef);
+        // When the diff pane is hidden the list fills the view; otherwise it's a fixed-width
+        // sidebar next to the diff.
+        if (fill) list.FlexGrow(1);
+        else list.Width(_commitSplit.Size).FlexShrink(0);
+        return list;
+    }
+
+    private readonly record struct CommitTreeRowShape(object Theme, float Scale);
+
+    private CommitTreeRowShape _commitRowShape;
+    private Func<CommitTreeRowItem, int, float>? _commitRowHeight;
+
+    /// <summary>
+    /// One row of the Commit view's file list as its list sees it: the header (no node), which
+    /// carries the count; or a node, and what its look takes from the rest of the view — whether
+    /// it is the open file, under the cursor, an open folder, and a reviewed file's threads. A
+    /// key that moves the cursor changes two items; opening a folder moves the rows below it,
+    /// which are other nodes at those places now.
+    /// </summary>
+    internal readonly record struct CommitTreeRowItem(TreeNode<GitFileChange>? Node, int Files, bool Open,
+        bool Cursor, bool Expanded, (int Threads, int Unresolved) Threads);
+
+    /// <summary>The header and the visible rows as the list's items, each made when the list
+    /// asks for it — a key compares the rows on screen, not every row.</summary>
+    private sealed class CommitTreeRowItems(JunctionApp app, List<TreeNode<GitFileChange>> rows, int files)
+        : IReadOnlyList<CommitTreeRowItem>
+    {
+        public int Count => rows.Count + 1;
+
+        public CommitTreeRowItem this[int index]
+        {
+            get
+            {
+                if (index == 0) return new CommitTreeRowItem(null, files, false, false, false, default);
+                var node = rows[index - 1];
+                bool cursor = node.Path == app._commitCursorPath;
+                return node.IsFolder
+                    ? new CommitTreeRowItem(node, 0, false, cursor, app._commitFilesTree.IsExpanded(node), default)
+                    : new CommitTreeRowItem(node, 0, node.Path == app._selectedFilePath, cursor, false,
+                        app.ReviewThreadCounts(node.Path));
+            }
+        }
+
+        public IEnumerator<CommitTreeRowItem> GetEnumerator()
+        {
+            for (var i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    /// <summary>Rows the Commit view's file list has made, for tests.</summary>
+    internal int CommitTreeRowsMade { get; private set; }
+
+    private Element CommitTreeRow(CommitTreeRowItem item)
+    {
+        CommitTreeRowsMade++;
+        if (item.Node is not { } node)
+            return Text.New($"{item.Files} FILES CHANGED").FontSize(10f)
+                .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8));
+        return node.IsFolder
+            ? CommitFolderRow(node, item.Cursor, item.Expanded)
+            : FileTreeRow(node, item.Open, item.Cursor, item.Threads);
+    }
+
+    // The heights the rows had in the scroll view, which a virtual list has to be told: each is
+    // its padding (6 above, 6 below) and its tallest child — the name, 12 px text in a file row
+    // and 11.5 px medium in a folder row — and the header is one 10 px line. Measured from the
+    // faces as layout measures a line, once per display scale.
+    private (float Scale, float Header, float Folder, float File) _commitRowHeights;
+
+    private float CommitRowHeight(CommitTreeRowItem item)
+    {
+        var h = CommitRowHeights();
+        return item.Node is null ? h.Header : item.Node.IsFolder ? h.Folder : h.File;
+    }
+
+    private (float Scale, float Header, float Folder, float File) CommitRowHeights()
+    {
+        float scale = Ui.DisplayScale;
+        if (_commitRowHeights.File > 0 && _commitRowHeights.Scale == scale) return _commitRowHeights;
+        static float Line(float size, string family = "sans-serif", FontWeight weight = FontWeight.Regular) =>
+            TextMeasure.Measure("Ag", TextMeasure.StyleFor(size, family, weight)).Height;
+        float file = Math.Max(Line(12f), Line(11f, Fonts.Mono, FontWeight.Bold));
+        float folder = Math.Max(Line(11.5f, weight: FontWeight.Medium), Math.Max(Line(10f), Ui.IconBox(12f)));
+        float header = Line(10f);
+        // No measure context yet (nothing has been drawn): what the default face gives, until a
+        // later build measures.
+        if (file <= 0) return (scale, 25.3f, 27.3f, 28f);
+        return _commitRowHeights = (scale, 12f + header, 12f + folder, 12f + file);
+    }
+
+    // The visible rows, kept while the tree and its open folders are what they were: flattened
+    // again on every key, they were a list of every row and a walk of the tree a key. Indexed by
+    // path for the cursor's lookups. The tree is another object for another commit's files.
+    private (object? Roots, int Gen) _commitRowsKey;
+    private Dictionary<string, int>? _commitRowIndex;
+
+    private void SyncCommitFileRows()
+    {
+        var key = ((object?)_commitFilesTree.Roots, _commitTreeGen);
+        if (key == _commitRowsKey) return;
+        _commitRowsKey = key;
+        _commitFileRows = _commitFilesTree.Rows();
+        _commitRowIndex = null;
+    }
+
+    /// <summary>Where a path is among the visible rows, or -1.</summary>
+    private int CommitRowIndex(string? path)
+    {
+        if (path is null) return -1;
+        if (_commitRowIndex is null)
+        {
+            _commitRowIndex = new Dictionary<string, int>(_commitFileRows.Count, StringComparer.Ordinal);
+            for (var i = 0; i < _commitFileRows.Count; i++) _commitRowIndex[_commitFileRows[i].Path] = i;
+        }
+        return _commitRowIndex.TryGetValue(path, out var index) ? index : -1;
+    }
+
+    /// <summary>Brings the cursor's row on screen. The list may not have realized it, so its band
+    /// comes from the row heights, summed in the order the list sums them (the header first).</summary>
+    private void ScrollCommitCursorIntoView()
+    {
+        if (_fileScrollRef.Current is not VirtualListElement<CommitTreeRowItem> list) return;
+        int index = CommitRowIndex(_commitCursorPath ?? _selectedFilePath);
+        if (index < 0) return;
+        var h = CommitRowHeights();
+        float top = 0f + h.Header;
+        for (int i = 0; i < index; i++) top += _commitFileRows[i].IsFolder ? h.Folder : h.File;
+        list.ScrollRangeIntoView(top, _commitFileRows[index].IsFolder ? h.Folder : h.File);
     }
 
     /// <summary>Resets the tree when the Commit view moves to another commit (or range).
@@ -500,6 +641,7 @@ public partial class JunctionApp
         if (_commitTreeKey == key) return;
         _commitTreeKey = key;
         _commitFilesTree.ClearOverrides();
+        _commitTreeGen++;
         _commitCursorPath = null;
     }
 
@@ -527,13 +669,7 @@ public partial class JunctionApp
         }
     }
 
-    private int CommitCursorIndex()
-    {
-        var target = _commitCursorPath ?? _selectedFilePath;
-        for (var i = 0; i < _commitFileRows.Count; i++)
-            if (_commitFileRows[i].Path == target) return i;
-        return 0;
-    }
+    private int CommitCursorIndex() => Math.Max(0, CommitRowIndex(_commitCursorPath ?? _selectedFilePath));
 
     /// <summary>Moves the cursor to a visible row. A file row opens too, so arrowing
     /// through the list still previews each diff; a folder row only moves the highlight
@@ -568,11 +704,8 @@ public partial class JunctionApp
         return -1;
     }
 
-    private Element CommitFolderRow(TreeNode<GitFileChange> node)
+    private Element CommitFolderRow(TreeNode<GitFileChange> node, bool cursor, bool expanded)
     {
-        var expanded = _commitFilesTree.IsExpanded(node);
-        var cursor = node.Path == _commitCursorPath;
-
         var row = ChangeFolderRow(node, expanded);
         // Cursor and open state both change how the row looks, and a collapse moves
         // every row below it — without them in the key a patched row would keep the
@@ -588,11 +721,10 @@ public partial class JunctionApp
         return row;
     }
 
-    private Element FileTreeRow(TreeNode<GitFileChange> node)
+    private Element FileTreeRow(TreeNode<GitFileChange> node, bool selected, bool cursor,
+        (int Threads, int Unresolved) threads)
     {
         var f = node.Item;
-        var selected = f.Path == _selectedFilePath;
-        var cursor = f.Path == _commitCursorPath;
         var (letter, color) = StatusLetter(f.Kind);
 
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
@@ -612,7 +744,7 @@ public partial class JunctionApp
         row.AddChild(Text.New(node.Segment).FontSize(12f).FlexGrow(1).FlexShrink(1)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         // Reviewing: how many threads the file has, and whether any is still open.
-        if (ReviewFilePill(f.Path) is { } pill) row.AddChild(pill);
+        if (ReviewFilePill(threads) is { } pill) row.AddChild(pill);
 
         row.OnClick(_ => { _commitCursorPath = f.Path; _selectedFilePath = f.Path; Rerender(); });
         if (!selected && !cursor) row.HoverBg(Nocturne.Neutral900, Color.Transparent);

@@ -4,6 +4,8 @@ using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Text;
 using SkiaSharp;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace HultUI.Rendering.Skia;
 
@@ -58,15 +60,78 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Keyed by what the run draws, not by the run: a paragraph laid out again after
     // an edit makes new runs for every line, the ones that did not change too.
     // The blobs are native handles (NativeTextBlob), each holding the one reference this
-    // context gives up when the cache empties or the context is disposed: an SKTextBlob
+    // context gives up when the map lets it go or the context is disposed: an SKTextBlob
     // wrapper was 80 B per new blob.
-    private readonly Dictionary<ShapedRun, nint> _runBlobCache = new(SameGlyphs.Instance);
+    private readonly Dictionary<ShapedRun, KeptBlob> _runBlobCache = new(SameGlyphs.Instance);
     internal const int RunBlobCacheMaxSize = 2048;
     internal int CachedBlobCount => _runBlobCache.Count;
 
     // Every native blob this context made and gave up, for the tests that hold the two equal.
     internal long BlobsMade { get; private set; }
     internal long BlobsReleased { get; private set; }
+
+    // ── What the blob maps keep ──
+    //
+    // Both maps (runs' blobs and stretches' sub-blobs) are bounded by RunBlobCacheMaxSize, and a
+    // full map used to empty whole: a screen that needed more made every blob again on every frame
+    // (plan 17, round 5: a dense-colour terminal 2,338 a frame at 1200×900 and 6,662 at
+    // 1600×1000, a Chinese one 4,096 run blobs at 1080p; each a native copy of its glyphs, and on
+    // a GPU surface a new blob ID whose vertex data Skia makes again). Now each blob carries the
+    // frame that last drew it, and a full map lets go only of what neither this frame nor the
+    // last drew. The next sweep waits until the map holds twice what the sweep kept, and at
+    // least its bound: a screen whose two frames need fewer than half the bound keeps the map at
+    // its bound, as before, and a big screen's first frame grows the map by doubling, with no
+    // look at any entry while none is older than the last frame (a sweep on every new blob past
+    // the bound was O(n²)). The map empties whole, as it did, when what two frames drew holds
+    // more than MaxGlyphsKept glyphs.
+    private struct KeptBlob(nint blob, int glyphs, uint frame)
+    {
+        public readonly nint Blob = blob;
+        public readonly int Glyphs = glyphs;
+        public uint Frame = frame;
+    }
+
+    // For each map: how many of its blobs this frame and the last drew, the glyphs it holds, and
+    // the size at which it next sweeps.
+    private struct BlobUse
+    {
+        public int DrawnNow, DrawnBefore, SweepAt;
+        public long Glyphs;
+
+        public static BlobUse Empty => new() { SweepAt = RunBlobCacheMaxSize };
+
+        public void Touch(ref KeptBlob kept, uint frame)
+        {
+            if (kept.Frame == frame) return;
+            if (kept.Frame == frame - 1) DrawnBefore--;
+            DrawnNow++;
+            kept.Frame = frame;
+        }
+
+        public void Added(int glyphs)
+        {
+            DrawnNow++;
+            Glyphs += glyphs;
+        }
+
+        public void NextFrame()
+        {
+            DrawnBefore = DrawnNow;
+            DrawnNow = 0;
+        }
+    }
+
+    /// <summary>The most glyphs a blob map keeps in the blobs this frame and the last drew
+    /// (about 2.6 MB of glyph ids and places, natively): two frames of a dense-colour terminal
+    /// at 3840×2100 hold ~96,000. Past it a full map empties whole, as every full map did.</summary>
+    internal const int MaxGlyphsKept = 1 << 18;
+
+    private uint _frame;
+    private BlobUse _runUse = BlobUse.Empty, _subUse = BlobUse.Empty;
+
+    /// <summary>Entries the blob maps' sweeps looked at, for the tests that hold a sweep to
+    /// maps that have something to let go.</summary>
+    internal long SweptEntries { get; private set; }
 
     // Every new blob is built in this one builder: making the blob hands it over and leaves the
     // builder empty for the next. A builder per blob was 80 B more per new blob (216 -> 136),
@@ -77,11 +142,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     // Sub-blobs: the glyphs of one run that can ink one colour stretch of a spanned line (see
     // DrawRunPart). Keyed by the run itself, not its glyphs, so a lookup hashes nothing: a run
-    // laid out again makes new ones, released with the rest when the cache empties. The map is
-    // made at its bound's capacity with the first sub-blob (~74 KB, once per context that draws
-    // a spanned line), so filling it allocates nothing more.
+    // laid out again makes new ones, let go when the map sweeps. The map is made at its bound's
+    // capacity with the first sub-blob (~90 KB, once per context that draws a spanned line), so
+    // filling it allocates nothing more unless a screen needs more than half the bound.
     private readonly record struct SubRun(ShapedRun Run, int Start, int End);
-    private Dictionary<SubRun, nint>? _subBlobCache;
+    private Dictionary<SubRun, KeptBlob>? _subBlobCache;
     internal int CachedSubBlobCount => _subBlobCache?.Count ?? 0;
 
     /// <summary>Whether a colour stretch draws only the glyphs that can reach it. Off, each
@@ -94,20 +159,57 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     // How far each face's glyphs ink left and right of their origin, per unit of size: its
     // bounding box and a slack (InkExtentOf), or, where Skia marks the box as a guess, each run's
-    // own glyphs (RunInkExtentOf); neither for a colour or bitmap face.
+    // own glyphs (RunInkExtentOf), whose bounds the face keeps (GlyphInks); neither for a colour or
+    // bitmap face.
     private readonly Dictionary<IResolvedFont, FaceInk> _inkExtents = new(ReferenceEqualityComparer.Instance);
     internal readonly record struct InkExtent(float Left, float Right);
-    private readonly record struct FaceInk(InkExtent? Box, bool FromGlyphs, float Slack);
+    private readonly record struct FaceInk(InkExtent? Box, GlyphInks? Glyphs, float Slack);
     private readonly SKFont _boundsFont = new() { LinearMetrics = true };
 
-    // The extents of runs in faces whose box is a guess, from their glyphs' bounds: kept per run,
-    // like the sub-blobs, in a map made at the same bound with the first (~57 KB, once per context
-    // that draws such a spanned line). The bounds are read in pieces of a fixed size.
-    private Dictionary<ShapedRun, InkExtent>? _runInkExtents;
-    internal int CachedRunInkExtentCount => _runInkExtents?.Count ?? 0;
+    // The glyph bounds a run's extent is taken from are read from Skia in pieces of a fixed size,
+    // into kept buffers.
     private const int BoundsPiece = 256;
     private ushort[]? _boundsGlyphs;
     private SKRect[]? _glyphBounds;
+
+    /// <summary>Glyph bounds read from Skia for the faces whose box is a guess, and runs whose
+    /// extent was taken from them, for the tests that hold each glyph to one read.</summary>
+    internal long GlyphInksRead { get; private set; }
+    internal long RunExtentsFromGlyphs { get; private set; }
+
+    /// <summary>
+    /// How far each glyph of a face whose box is a guess inks left and right of its origin at
+    /// 2048, as Skia gives its bounds: read the first time a run holds the glyph, then kept for
+    /// the face. A run's extent is the union of its glyphs', taken where a spanned line draws it.
+    /// The runs' extents were kept per run instead, which kept every run drawn alive after the
+    /// text caches had let it go (plan 17, round 5: 2.29 MB after a 20,000-line Cascadia document
+    /// closed); a face holds at most its own glyphs, in pages of 256 made as they are first needed
+    /// (2 KB each: Cascadia's ASCII is one).
+    /// </summary>
+    private sealed class GlyphInks
+    {
+        private const int PageBits = 8, PageSize = 1 << PageBits;
+        private readonly InkExtent[]?[] _pages = new InkExtent[]?[(ushort.MaxValue + 1) >> PageBits];
+
+        /// <summary>Not read yet; and read by the run asking now (so it asks once).</summary>
+        public static readonly InkExtent Unread = new(float.NaN, float.NaN), Asked = new(float.NaN, 0f);
+
+        /// <summary>The page holding <paramref name="glyph"/>, at the glyph's low byte: its left
+        /// and right at 2048, or <see cref="Unread"/> or <see cref="Asked"/> (a NaN left). A glyph
+        /// with no ink is +∞ to −∞ (it widens nothing), one whose bounds are not numbers −∞ to +∞
+        /// (its run's extent then reaches everywhere, as it did when a bound not a number joined
+        /// it): the table holds no NaN once a glyph is read.</summary>
+        public InkExtent[] PageOf(ushort glyph)
+        {
+            ref var page = ref _pages[glyph >> PageBits];
+            if (page is null)
+            {
+                page = new InkExtent[PageSize];
+                page.AsSpan().Fill(Unread);
+            }
+            return page;
+        }
+    }
 
     // Per spanned line, for each run: whether its glyphs are in X order (0 not asked yet, 1 yes,
     // 2 no, 3 drawn whole: no extent is known) and its ink extent; and the margin in layout units
@@ -171,6 +273,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null)
     {
         _scale = scaleFactor > 0f ? scaleFactor : 1f;
+        // A new frame for the blob maps: what the last one drew is kept when they sweep.
+        _frame++;
+        _runUse.NextFrame();
+        _subUse.NextFrame();
         // Nothing should be held here; a frame that threw between a draw and its
         // EndFrame would have leaked its borrows into this one.
         ReleaseHeldFrames();
@@ -1039,10 +1145,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // Once a line for each run: its extent, and whether its glyphs are in X order.
         if (_runXOrder[runIndex] == 0)
         {
-            if (RunInkExtentOf(run) is { } extent)
+            if (RunInkExtentAndOrderOf(run, out bool xOrdered) is { } extent)
             {
                 _runInk[runIndex] = extent;
-                _runXOrder[runIndex] = GlyphRange.XOrdered(glyphs) ? (byte)1 : (byte)2;
+                _runXOrder[runIndex] = xOrdered ? (byte)1 : (byte)2;
             }
             else _runXOrder[runIndex] = 3;
         }
@@ -1072,10 +1178,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // The kept sub-blob of glyphs [start, end) of a run, at their places in the run.
     private nint SubBlob(ShapedRun run, int start, int end)
     {
-        var cache = _subBlobCache ??= new Dictionary<SubRun, nint>(RunBlobCacheMaxSize);
+        var cache = _subBlobCache ??= new Dictionary<SubRun, KeptBlob>(RunBlobCacheMaxSize);
         var key = new SubRun(run, start, end);
-        if (cache.TryGetValue(key, out nint blob))
-            return blob;
+        ref var kept = ref CollectionsMarshal.GetValueRefOrNullRef(cache, key);
+        if (!Unsafe.IsNullRef(ref kept))
+        {
+            _subUse.Touch(ref kept, _frame);
+            return kept.Blob;
+        }
 
         _pooledFont.Typeface = (SKTypeface)run.Font.NativeHandle;
         _pooledFont.Size = run.FontSize;
@@ -1088,21 +1198,51 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             glyphSpan[i - start] = (ushort)glyphs[i].GlyphId;
             positionSpan[i - start] = new SKPoint(glyphs[i].X, glyphs[i].Y);
         }
-        blob = NativeTextBlob.Make(_blobBuilder);
+        nint blob = NativeTextBlob.Make(_blobBuilder);
         if (blob != 0) BlobsMade++;
 
-        if (cache.Count >= RunBlobCacheMaxSize)
-            ClearSubBlobCache();
-        cache[key] = blob;
+        if (cache.Count >= _subUse.SweepAt)
+            Sweep(cache, ref _subUse);
+        cache[key] = new KeptBlob(blob, end - start, _frame);
+        _subUse.Added(end - start);
         return blob;
     }
 
     private void ClearSubBlobCache()
     {
-        if (_subBlobCache is not { } cache) return;
-        foreach (var blob in cache.Values)
-            Release(blob);
-        cache.Clear();
+        if (_subBlobCache is { } cache) Empty(cache, ref _subUse);
+    }
+
+    // A full map: lets go of the blobs neither this frame nor the last drew (when there are any:
+    // a map of only those has nothing to look for), empties whole if what is left holds more than
+    // MaxGlyphsKept glyphs, and puts the next sweep at twice what is kept, and at least the bound.
+    private void Sweep<TKey>(Dictionary<TKey, KeptBlob> map, ref BlobUse use) where TKey : notnull
+    {
+        if (map.Count > use.DrawnNow + use.DrawnBefore)
+        {
+            SweptEntries += map.Count;
+            uint frame = _frame;
+            foreach (var (key, kept) in map)
+            {
+                if (frame - kept.Frame <= 1) continue;
+                Release(kept.Blob);
+                use.Glyphs -= kept.Glyphs;
+                map.Remove(key);
+            }
+        }
+        if (use.Glyphs > MaxGlyphsKept)
+            Empty(map, ref use);
+        use.SweepAt = Math.Max(RunBlobCacheMaxSize, 2 * map.Count);
+    }
+
+    // Gives up this context's reference to every blob in the map: each was made once and is
+    // released once, here or in a sweep.
+    private void Empty<TKey>(Dictionary<TKey, KeptBlob> map, ref BlobUse use) where TKey : notnull
+    {
+        foreach (var kept in map.Values)
+            Release(kept.Blob);
+        map.Clear();
+        use = BlobUse.Empty;
     }
 
     /// <summary>
@@ -1121,49 +1261,94 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     /// of font size: its face's extent (<see cref="InkExtentOf"/>) or, for an outline face whose
     /// box Skia marks as a guess (Cascadia Mono and Code, Segoe UI Variable, Bahnschrift, Noto
     /// Sans on Fedora: variable fonts), the union of its own glyphs' bounds as Skia gives them for
-    /// that face, with the same slack. Read once per run and kept (at most
-    /// <see cref="RunBlobCacheMaxSize"/> runs, then the map starts over). Null where neither is
-    /// known: a colour or bitmap face, whose runs are drawn whole.
+    /// that face, with the same slack. The glyphs' bounds are read once and kept for the face
+    /// (<see cref="GlyphInks"/>); the union is taken again on each call, once per run a spanned
+    /// line draws, and holds nothing of the run. Null where neither is known: a colour or bitmap
+    /// face, whose runs are drawn whole.
     /// </summary>
-    internal InkExtent? RunInkExtentOf(ShapedRun run)
+    internal InkExtent? RunInkExtentOf(ShapedRun run) => RunInkExtentAndOrderOf(run, out _);
+
+    // The same, and whether the run's glyphs are in X order (GlyphRange.XOrdered), found in the
+    // same pass over them where the extent is the glyphs' own.
+    internal InkExtent? RunInkExtentAndOrderOf(ShapedRun run, out bool xOrdered)
     {
         var face = FaceInkOf(run.Font);
-        if (!face.FromGlyphs) return face.Box;
-
-        var map = _runInkExtents ??= new Dictionary<ShapedRun, InkExtent>(RunBlobCacheMaxSize, ReferenceEqualityComparer.Instance);
-        if (map.TryGetValue(run, out var known)) return known;
-
-        // The bounds at 2048, as the face's box is taken, in one call for each piece of the run:
-        // a glyph Skia has metrics for already costs a lookup.
-        const float Size = 2048f;
-        var ids = _boundsGlyphs ??= new ushort[BoundsPiece];
-        var bounds = _glyphBounds ??= new SKRect[BoundsPiece];
-        _boundsFont.Typeface = (SKTypeface)run.Font.NativeHandle;
-        _boundsFont.Size = Size;
         var glyphs = run.Glyphs;
-        float left = 0f, right = 0f;
-        for (int at = 0; at < glyphs.Length; at += BoundsPiece)
+        if (face.Glyphs is not { } inks)
         {
-            int n = Math.Min(BoundsPiece, glyphs.Length - at);
-            for (int i = 0; i < n; i++) ids[i] = (ushort)glyphs[at + i].GlyphId;
-            _boundsFont.GetGlyphWidths(ids.AsSpan(0, n), Span<float>.Empty, bounds.AsSpan(0, n));
-            for (int i = 0; i < n; i++)
-            {
-                var b = bounds[i];
-                if (b.IsEmpty) continue;
-                left = MathF.Min(left, b.Left);
-                right = MathF.Max(right, b.Right);
-            }
+            xOrdered = face.Box is not null && GlyphRange.XOrdered(glyphs);
+            return face.Box;
         }
+        RunExtentsFromGlyphs++;
+
+        // The union of the glyphs' bounds at 2048, as the face's box is taken, in any order: the
+        // glyphs read now are joined after the rest. The table holds no NaN once a glyph is read,
+        // so a comparison finds the least and the most as MathF.Min and Max did over the run read
+        // whole, but for the sign of a zero, which the slack added below takes away.
+        const float Size = 2048f;
+        float left = 0f, right = 0f, lastX = float.NegativeInfinity;
+        bool ordered = true;
+        int unread = 0;
+        InkExtent[]? page = null;
+        int pageOf = -1;
+        for (int i = 0; i < glyphs.Length; i++)
+        {
+            ref readonly var glyph = ref glyphs[i];
+            if (glyph.X < lastX) ordered = false;
+            lastX = glyph.X;
+            ushort id = (ushort)glyph.GlyphId;
+            if (id >> 8 != pageOf)
+            {
+                page = inks.PageOf(id);
+                pageOf = id >> 8;
+            }
+            var ink = page![(byte)id];
+            if (float.IsNaN(ink.Left))
+            {
+                // Not read yet: read with the rest of its piece, once.
+                if (!float.IsNaN(ink.Right)) continue;
+                page[(byte)id] = GlyphInks.Asked;
+                (_boundsGlyphs ??= new ushort[BoundsPiece])[unread++] = id;
+                if (unread == BoundsPiece)
+                {
+                    ReadGlyphInks(run.Font, inks, unread, ref left, ref right);
+                    unread = 0;
+                }
+                continue;
+            }
+            if (ink.Left < left) left = ink.Left;
+            if (ink.Right > right) right = ink.Right;
+        }
+        if (unread > 0) ReadGlyphInks(run.Font, inks, unread, ref left, ref right);
+        xOrdered = ordered;
+
         // A bound that is not a number reaches everywhere: every stretch then draws the run whole.
-        var extent = float.IsFinite(left) && float.IsFinite(right)
+        return float.IsFinite(left) && float.IsFinite(right)
             ? new InkExtent(left / Size - face.Slack, right / Size + face.Slack)
             : new InkExtent(float.NegativeInfinity, float.PositiveInfinity);
+    }
 
-        if (map.Count >= RunBlobCacheMaxSize)
-            map.Clear();
-        map[run] = extent;
-        return extent;
+    // Reads the bounds of the first `count` glyphs in _boundsGlyphs from Skia, in one call (a glyph
+    // Skia has metrics for already costs a lookup), keeps them in the face's table, and joins them
+    // into the union.
+    private void ReadGlyphInks(IResolvedFont font, GlyphInks inks, int count, ref float left, ref float right)
+    {
+        var ids = _boundsGlyphs!;
+        var bounds = _glyphBounds ??= new SKRect[BoundsPiece];
+        _boundsFont.Typeface = (SKTypeface)font.NativeHandle;
+        _boundsFont.Size = 2048f;
+        _boundsFont.GetGlyphWidths(ids.AsSpan(0, count), Span<float>.Empty, bounds.AsSpan(0, count));
+        GlyphInksRead += count;
+        for (int i = 0; i < count; i++)
+        {
+            var b = bounds[i];
+            var ink = b.IsEmpty ? new InkExtent(float.PositiveInfinity, float.NegativeInfinity)
+                : float.IsNaN(b.Left) || float.IsNaN(b.Right) ? new InkExtent(float.NegativeInfinity, float.PositiveInfinity)
+                : new InkExtent(b.Left, b.Right);
+            inks.PageOf(ids[i])[(byte)ids[i]] = ink;
+            if (ink.Left < left) left = ink.Left;
+            if (ink.Right > right) right = ink.Right;
+        }
     }
 
     // What the face's ink is known by: its box, its runs' glyphs (an outline face whose box is a
@@ -1192,8 +1377,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             float xMin = metrics.XMin / Size, xMax = metrics.XMax / Size;
             float slack = typeface.FontSlant == SKFontStyleSlant.Upright ? 0.125f : 0.375f;
             face = (flags & BoundsInvalid) == 0 && float.IsFinite(xMin) && float.IsFinite(xMax) && xMax > xMin
-                ? new FaceInk(new InkExtent(MathF.Min(xMin, 0f) - slack, MathF.Max(xMax, 0f) + slack), false, slack)
-                : new FaceInk(null, true, slack);
+                ? new FaceInk(new InkExtent(MathF.Min(xMin, 0f) - slack, MathF.Max(xMax, 0f) + slack), null, slack)
+                : new FaceInk(null, new GlyphInks(), slack);
         }
         _inkExtents[font] = face;
         return face;
@@ -1522,6 +1707,20 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return line is null ? 0f : line.CaretXAt(offset, PrefixMeasurer(line, style));
     }
 
+    // The line and its measurer found once; each boundary is then what TextCaretX gives for it.
+    public void TextCaretXs(string lineText, ResolvedInheritedStyle style, Span<float> xs)
+    {
+        var line = SingleLine(lineText, style);
+        if (line is null)
+        {
+            xs.Clear();
+            return;
+        }
+        var measurer = PrefixMeasurer(line, style);
+        for (int k = 0; k < xs.Length; k++)
+            xs[k] = line.CaretXAt(k, measurer);
+    }
+
     public int TextOffsetAtX(string lineText, ResolvedInheritedStyle style, float x)
     {
         var line = SingleLine(lineText, style);
@@ -1802,10 +2001,16 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // The cached blob of a run, made on its first draw; 0 for a run with no glyphs.
     private nint BuildShapedBlob(ShapedRun run)
     {
-        if (_runBlobCache.TryGetValue(run, out var cached))
-            return cached;
+        ref var kept = ref CollectionsMarshal.GetValueRefOrNullRef(_runBlobCache, run);
+        if (!Unsafe.IsNullRef(ref kept))
+        {
+            _runUse.Touch(ref kept, _frame);
+            return kept.Blob;
+        }
 
-        if (run.Glyphs.Length == 0)
+        // Read once: a run of several words puts its glyph array together on the first read.
+        var glyphs = run.Glyphs;
+        if (glyphs.Length == 0)
             return 0;
 
         var typeface = (SKTypeface)run.Font.NativeHandle;
@@ -1815,34 +2020,27 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // The raw buffer is a struct. AllocatePositionedRun hands out the same two spans in a
         // class, 56 B more per new blob wherever the compiler does not keep it on the stack:
         // NativeAOT's build of the perf suite heap-allocated it (scroll/jump 9.1 -> 6.3 KB/op).
-        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, run.Glyphs.Length);
+        var buffer = _blobBuilder.AllocateRawPositionedRun(_pooledFont, glyphs.Length);
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 
-        for (int i = 0; i < run.Glyphs.Length; i++)
+        for (int i = 0; i < glyphs.Length; i++)
         {
-            glyphSpan[i] = (ushort)run.Glyphs[i].GlyphId;
-            positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
+            glyphSpan[i] = (ushort)glyphs[i].GlyphId;
+            positionSpan[i] = new SKPoint(glyphs[i].X, glyphs[i].Y);
         }
 
         nint blob = NativeTextBlob.Make(_blobBuilder);
         if (blob != 0) BlobsMade++;
 
-        if (_runBlobCache.Count >= RunBlobCacheMaxSize)
-            ClearRunBlobCache();
-
-        _runBlobCache[run] = blob;
+        if (_runBlobCache.Count >= _runUse.SweepAt)
+            Sweep(_runBlobCache, ref _runUse);
+        _runBlobCache[run] = new KeptBlob(blob, glyphs.Length, _frame);
+        _runUse.Added(glyphs.Length);
         return blob;
     }
 
-    // Gives up this context's reference to every cached blob: each was made once and is
-    // released once, here, whether the cache filled up or the context is going away.
-    private void ClearRunBlobCache()
-    {
-        foreach (var blob in _runBlobCache.Values)
-            Release(blob);
-        _runBlobCache.Clear();
-    }
+    private void ClearRunBlobCache() => Empty(_runBlobCache, ref _runUse);
 
     private void Release(nint blob)
     {
