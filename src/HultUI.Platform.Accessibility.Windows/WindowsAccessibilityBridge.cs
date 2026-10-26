@@ -235,15 +235,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     /// <summary>All selected item indices of a list, ascending, for container Selection: an eager
     /// list's from its item nodes (each carries its selected state, marked on the applied tree when
-    /// the selection moves), an on-demand list's from the list.</summary>
+    /// the selection moves), an on-demand list's from its node, which carries them the same way
+    /// (<see cref="AccessibilityNode.Served"/>): what the selection's events told.</summary>
     internal IReadOnlyList<int> GetSelectedIndices(ElementId listId)
     {
         if (NodeOf(listId) is not { } node) return [];
-        if (node.IsVirtualItemContainer)
-        {
-            try { return node.ItemSource?.SelectedIndices ?? []; }
-            catch { return []; }
-        }
+        if (node.IsVirtualItemContainer) return node.Served.SelectedArray;
         List<int>? selected = null;
         var items = node.Children;
         for (int i = 0; i < items.Count; i++)
@@ -299,7 +296,7 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     /// <summary>Whether a list item is selected; false (not handled) if it isn't a list item. An
     /// item with a node answers from it, as its IsSelected property does; one served on demand
-    /// from its list.</summary>
+    /// from its list's node, which carries the selection its events told.</summary>
     internal bool TryGetItemSelected(ElementId itemId, out bool selected)
     {
         if (!TryResolveItem(itemId, out var listId, out var index))
@@ -309,6 +306,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         }
         if (_wrappers.TryGetValue(itemId, out var item))
             selected = item.Selected == true;
+        else if (NodeOf(listId) is { IsVirtualItemContainer: true } list)
+            selected = list.Served.IsSelected(index);
         else
         {
             try { selected = ItemsOf(listId)?.IsItemSelected(index) == true; }
@@ -316,6 +315,30 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         }
         return true;
     }
+
+    /// <summary>Whether item <paramref name="index"/> of a list served on demand is selected, as its
+    /// list's node carries it (what <see cref="UiaVirtualItem"/> answers for SelectionItem.IsSelected).</summary>
+    internal bool GetServedItemSelected(ElementId listId, int index) => NodeOf(listId)?.Served.IsSelected(index) == true;
+
+    /// <summary>
+    /// The wrapper of item <paramref name="index"/>'s node, when its list has item nodes now: a
+    /// provider of an item served on demand that a client still holds after the list shrank to 2,000
+    /// items or fewer answers from the item's node, whose runtime id is the same. Null otherwise.
+    /// </summary>
+    internal UiaFragment? EagerItem(ElementId listId, int index)
+    {
+        if (NodeOf(listId) is not { IsVirtualItemContainer: false } list) return null;
+        var items = list.Children;
+        if ((uint)index >= (uint)items.Count) return null;
+        return _wrappers.TryGetValue(items[index].ElementId, out var item) ? item : null;
+    }
+
+    /// <summary>Whether item <paramref name="index"/> of a list is gone: the list has no node any
+    /// more, or has fewer items, as its node carries them. A provider of it that a client still holds
+    /// answers UIA_E_ELEMENTNOTAVAILABLE, as UI Automation expects of an element that is gone.</summary>
+    internal bool ServedItemGone(ElementId listId, int index) =>
+        listId == default || NodeOf(listId) is not { } list
+        || (uint)index >= (uint)(list.IsVirtualItemContainer ? list.Served.Count : list.Children.Count);
 
     /// <summary>The selection container (as Simple) of a list item — its list — or of a tab —
     /// the strip that holds it; null for anything else.</summary>
@@ -385,12 +408,20 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     }
 
     /// <summary>The first item after <paramref name="startAfter"/> that matches: an eager list's
-    /// among its item nodes, an on-demand list's by the list (which may keep an index).</summary>
+    /// among its item nodes, an on-demand list's by the list (which may keep an index), or, for the
+    /// selected one, among the selection its node carries.</summary>
     private int FindItemIndex(ElementId listId, int startAfter, AccessibleItemQuery query)
     {
         if (NodeOf(listId) is not { } node) return -1;
         if (node.IsVirtualItemContainer)
         {
+            if (query.Property == AccessibleItemProperty.Selected)
+            {
+                var selected = node.Served.Selected;
+                int at = selected.BinarySearch(startAfter + 1);
+                if (at < 0) at = ~at;
+                return at < selected.Length ? selected[at] : -1;
+            }
             try { return node.ItemSource?.FindItem(startAfter, query) ?? -1; }
             catch { return -1; }
         }
@@ -409,11 +440,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         return -1;
     }
 
-    internal int GetVirtualItemCount(ElementId listId)
-    {
-        try { return ItemsOf(listId)?.ItemCount ?? 0; }
-        catch { return 0; }
-    }
+    /// <summary>How many items a list serves on demand, as its node carries them: what its items'
+    /// events told (<see cref="AccessibilityProperties.ItemCount"/>).</summary>
+    internal int GetVirtualItemCount(ElementId listId) =>
+        NodeOf(listId) is { IsVirtualItemContainer: true } node ? node.Served.Count : 0;
 
     internal string? GetVirtualItemLabel(ElementId listId, int index)
     {
@@ -422,48 +452,20 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     }
 
     /// <summary>Whether an on-demand item sits outside its list's viewport, at the scroll the tree
-    /// was built with.</summary>
-    internal bool GetVirtualItemOffscreen(ElementId listId, int index)
-    {
-        if (!TryGetItemPlace(listId, index, out var scroll, out var offset, out float top, out float height)) return true;
-        float y = top - offset.Y;
-        return y + height <= 0f || y >= scroll.Viewport.Height;
-    }
+    /// carries.</summary>
+    internal bool GetVirtualItemOffscreen(ElementId listId, int index) =>
+        NodeOf(listId) is not { } node || !node.TryGetServedItemBox(index, out _, out bool offscreen) || offscreen;
 
     /// <summary>
     /// An on-demand item's box in layout units: in its list's viewport at its index, moved by the
-    /// list's scroll, as the builder places an eager list's item nodes. The viewport and the scroll
-    /// are the list node's, as the tree was built; the item height and count the list's.
+    /// list's scroll, as the builder places an eager list's item nodes
+    /// (<see cref="AccessibilityNode.TryGetServedItemBox"/>). The viewport, the scroll and the items'
+    /// number are the list node's, as the tree carries them; the items' heights the list's.
     /// </summary>
     private bool TryGetItemLayout(ElementId listId, int index, out Rect layout)
     {
-        if (!TryGetItemPlace(listId, index, out var scroll, out var offset, out float top, out float height))
-        {
-            layout = default;
-            return false;
-        }
-        var viewport = scroll.Viewport;
-        layout = new Rect(viewport.X - offset.X, viewport.Y - offset.Y + top, viewport.Width, height);
-        return true;
-    }
-
-    private bool TryGetItemPlace(ElementId listId, int index, out AccessibleScrollExtent scroll, out Point offset,
-        out float top, out float height)
-    {
-        scroll = default;
-        offset = default;
-        top = height = 0f;
-        if (NodeOf(listId) is not { ItemSource: { } source, ScrollExtent: { } extent } node) return false;
-        try
-        {
-            if (index < 0 || index >= source.ItemCount) return false;
-            height = source.ItemHeight;
-        }
-        catch { return false; }
-        scroll = extent;
-        offset = node.ScrollOffset;
-        top = index * height;
-        return true;
+        layout = default;
+        return NodeOf(listId) is { } node && node.TryGetServedItemBox(index, out layout, out _);
     }
 
     /// <summary>Scroll pattern state of a scroll view, from its node.</summary>
@@ -644,9 +646,55 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
                 RaiseScrolled(wrapper, change.Previous, change.Node);
             else if (change.PropertyName == AccessibilityProperties.RangeValue)
                 RaiseRange(wrapper, change.Previous, change.Node);
+            else if (change.PropertyName == AccessibilityProperties.ItemCount)
+                RaiseServedCount(change.Previous, change.Node);
+            else if (change.PropertyName == AccessibilityProperties.ItemSelection)
+                RaiseServedSelection(change.Previous, change.Node);
             else
                 RaisePropertyChanged(wrapper, change.PropertyName);
         }
+    }
+
+    /// <summary>
+    /// A list served on demand has another number of items: what a list of item nodes raises for
+    /// item nodes added or removed under it, one ChildrenBulkAdded or ChildrenBulkRemoved on the list
+    /// (<see cref="TreeDiff.CoalescedAddedParents"/>). Its items' providers answer from the number
+    /// the list's node carries now; one a client holds past the end answers that it is gone.
+    /// </summary>
+    private void RaiseServedCount(AccessibilityNode? previous, AccessibilityNode node)
+    {
+        int was = previous?.Served.Count ?? 0, now = node.Served.Count;
+        if (was != now)
+            RaiseStructureChanged(node.ElementId,
+                now > was ? UiaInterop.StructureChangeType_ChildrenBulkAdded : UiaInterop.StructureChangeType_ChildrenBulkRemoved);
+    }
+
+    /// <summary>
+    /// A move of the selection of a list served on demand: a SelectionItem.IsSelected property change
+    /// on each item whose state changed — the one that had the selection, the one that has it — in
+    /// item order, with its state now: what a list of item nodes raises for the same move (their
+    /// IsSelected changes). Each on a provider of the item made for the event
+    /// (<see cref="NativeVirtualItemSimple"/>), which UI Automation knows by its runtime id. O(1) for a
+    /// move of one selection, whatever the list's length. An item that went with the list's end
+    /// raises nothing, as an item node removed does not.
+    /// </summary>
+    private void RaiseServedSelection(AccessibilityNode? previous, AccessibilityNode node)
+    {
+        if (!RaiseEvents) return;
+        var now = node.Served;
+        foreach (var (index, selected) in ServedItems.Changes(previous?.Served ?? default, now))
+            if (index < now.Count)
+                RaiseItemProperty(node.ElementId, index, UiaInterop.UIA_SelectionItemIsSelectedPropertyId, UiaVariant.FromBool(selected));
+    }
+
+    /// <summary>A property change of an item served on demand, with its new value, which this frees.</summary>
+    private void RaiseItemProperty(ElementId listId, int index, int propertyId, UiaVariant newValue)
+    {
+        IntPtr prov = NativeVirtualItemSimple(listId, index);
+        if (prov == IntPtr.Zero) { newValue.Free(); return; }
+        Raised?.Invoke(new UiaRaised(UiaRaisedKind.Property, propertyId, VirtualItemId.For(listId, index)));
+        try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(prov, propertyId, UiaVariant.Empty, newValue); }
+        finally { newValue.Free(); Marshal.Release(prov); }
     }
 
     // The apply pass, counted, so a wrapper the rebase did not reach, and one this pass added,

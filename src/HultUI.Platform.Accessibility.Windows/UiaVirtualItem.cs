@@ -11,17 +11,24 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// carries only its owning list and index; name, bounds, sibling count and
 /// activation are resolved live through the bridge/host each time UIA asks — so a
 /// list of any size costs nothing until assistive tech actually walks into it.
+/// Its selected state and its list's number of items are what the list's node carries
+/// (<see cref="AccessibilityNode.Served"/>), as the selection's events told them.
 /// </summary>
 /// <remarks>
 /// A fresh native object is created per navigation result (see
 /// <see cref="WindowsAccessibilityBridge.NativeVirtualItem"/>); UIA tracks
 /// identity by the stable runtime id from <see cref="VirtualItemId"/>, so these
-/// need no caching.
+/// need no caching. One a client still holds after its item went with the list's end, or with
+/// the list, answers <see cref="ElementNotAvailable"/>; after the list shrank to item nodes, its
+/// item's node answers for it.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementId listId, int index)
     : INativeSimple, INativeFragment
 {
+    /// <summary>UIA_E_ELEMENTNOTAVAILABLE: what an element that is gone answers.</summary>
+    private const int ElementNotAvailable = unchecked((int)0x80040201);
+
     /// <summary>The owning list, so ItemContainer can decode a startAfter item.</summary>
     public ElementId ListId => listId;
 
@@ -38,6 +45,9 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
 
     public int GetPatternProvider(int patternId, out IntPtr pPatternProvider)
     {
+        pPatternProvider = IntPtr.Zero;
+        if (bridge.EagerItem(listId, index) is { } node) return node.GetPatternProvider(patternId, out pPatternProvider);
+        if (bridge.ServedItemGone(listId, index)) return ElementNotAvailable;
         // Invoke and SelectionItem both route through the synthetic id back to the
         // list — the same path materialized list items use.
         var id = VirtualItemId.For(listId, index);
@@ -53,6 +63,12 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
 
     public int GetPropertyValue(int propertyId, out UiaVariant pRetVal)
     {
+        if (bridge.EagerItem(listId, index) is { } node) return node.GetPropertyValue(propertyId, out pRetVal);
+        if (bridge.ServedItemGone(listId, index))
+        {
+            pRetVal = UiaVariant.Empty;
+            return ElementNotAvailable;
+        }
         pRetVal = propertyId switch
         {
             UiaInterop.UIA_NamePropertyId when bridge.GetVirtualItemLabel(listId, index) is { } name
@@ -60,6 +76,8 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(UiaInterop.UIA_ListItemControlTypeId),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(true),
             UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemOffscreen(listId, index)),
+            // As an item node's wrapper answers it, from the state its events told.
+            UiaInterop.UIA_SelectionItemIsSelectedPropertyId => UiaVariant.FromBool(bridge.GetServedItemSelected(listId, index)),
             _ => UiaVariant.Empty,
         };
         return 0;
@@ -75,6 +93,9 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
 
     public int Navigate(int direction, out IntPtr pRetVal)
     {
+        if (bridge.EagerItem(listId, index) is { } node) return node.Navigate(direction, out pRetVal);
+        pRetVal = IntPtr.Zero;
+        if (bridge.ServedItemGone(listId, index)) return ElementNotAvailable;
         pRetVal = direction switch
         {
             UiaInterop.NavigateDirection_Parent => bridge.NativeFragment(listId),
@@ -89,16 +110,18 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
 
     public int GetRuntimeId(out IntPtr pRetVal)
     {
+        // Answered even once gone: it is how UI Automation knows which element went.
         pRetVal = UiaInterop.BuildRuntimeId(VirtualItemId.For(listId, index).Value);
         return 0;
     }
 
     public int GetBoundingRectangle(out UiaRect pRetVal)
     {
+        if (bridge.EagerItem(listId, index) is { } node) return node.GetBoundingRectangle(out pRetVal);
+        pRetVal = default;
+        if (bridge.ServedItemGone(listId, index)) return ElementNotAvailable;
         if (bridge.TryGetVirtualItemScreenRect(listId, index, out Rect screen))
             pRetVal = new UiaRect { Left = screen.X, Top = screen.Y, Width = screen.Width, Height = screen.Height };
-        else
-            pRetVal = default;
         return 0;
     }
 

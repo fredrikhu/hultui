@@ -193,4 +193,216 @@ public class A11yServedItemsTests
         Assert.Equal(3_000, change.Previous!.Served.Count);
         Assert.Equal(2_500, ListNode(bridge.CurrentTree!, list).Served.Count);
     }
+
+    // ── UI Automation ──
+
+    /// <summary>A session with the UIA bridge on a hidden window, its events recorded.</summary>
+    [SupportedOSPlatform("windows")]
+    private sealed class UiaRig : IDisposable
+    {
+        private readonly TestHwnd _hwnd = TestHwnd.Create();
+        public readonly HeadlessSession Session = HeadlessSession.Create(800, 600);
+        public readonly WindowsAccessibilityBridge Bridge;
+        public readonly List<UiaRaised> Raised = [];
+
+        public UiaRig()
+        {
+            var window = Session.Window.Window;
+            var router = new AccessibilityActionRouter(window);
+            var host = new UiaHostBridge(window, router);
+            window.SetUiaHostBridge(host);
+            window.SetActionRouter(router);
+            Bridge = new WindowsAccessibilityBridge(_hwnd.Handle, host);
+            Bridge.Raised = Raised.Add;
+            Session.Window.InstallAccessibilityBridge(new Active(Bridge));
+        }
+
+        public void Dispose()
+        {
+            Bridge.Dispose();
+            Session.Dispose();
+            _hwnd.Dispose();
+        }
+    }
+
+    /// <summary>The UIA events of the 40 moves of the walk over a list of <paramref name="count"/>
+    /// items, as (kind, id, item index), and the trees they built.</summary>
+    [SupportedOSPlatform("windows")]
+    private static (List<(UiaRaisedKind, int, int)> Raised, int Builds) UiaWalk(int count)
+    {
+        using var rig = new UiaRig();
+        var list = List(count);
+        var root = Mount(rig.Session, list);
+        list.SelectedIndex = 3;
+        rig.Session.PumpFrame();
+        int builds = root.Builds;
+        rig.Raised.Clear();
+        for (int i = 0; i < 40; i++)
+        {
+            list.SelectedIndex = WalkIndex(i);
+            rig.Session.PumpFrame();
+        }
+        var raised = rig.Raised.Select(r => (r.Kind, r.Id,
+            r.Element is { } e && VirtualItemId.TryDecode(e, out var owner, out int index) && owner == list.Id ? index : -1)).ToList();
+        return (raised, root.Builds - builds);
+    }
+
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_FortyMovesOver3000Items_RaiseWhatTheyRaiseOver1500()
+    {
+        var (eager, _) = UiaWalk(1_500);
+        var (served, builds) = UiaWalk(3_000);
+
+        Assert.Equal(80, eager.Count);
+        Assert.All(eager, r => Assert.Equal((UiaRaisedKind.Property, IsSelectedProperty), (r.Item1, r.Item2)));
+        // The same events on the same items, in the same order: the item that had the selection and
+        // the one that has it, in item order.
+        Assert.Equal(eager, served);
+        Assert.Equal([(UiaRaisedKind.Property, IsSelectedProperty, 3), (UiaRaisedKind.Property, IsSelectedProperty, 4)], served.Take(2));
+        Assert.Equal(0, builds);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static T Logic<T>(IntPtr native) where T : class
+    {
+        Assert.NotEqual(IntPtr.Zero, native);
+        try { return Assert.IsType<T>(NativeProvider.LogicOf(native)); }
+        finally { Marshal.Release(native); }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool Selected(INativeSimple provider)
+    {
+        Assert.Equal(0, provider.GetPropertyValue(IsSelectedProperty, out var value));
+        Assert.Equal(UiaVariant.VT_BOOL, value.Vt);
+        return value.ShortValue != 0;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string? Name(INativeSimple provider)
+    {
+        Assert.Equal(0, provider.GetPropertyValue(UiaInterop.UIA_NamePropertyId, out var value));
+        try { return value.AsString(); }
+        finally { value.Free(); }
+    }
+
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_ItemsServedOnDemand_AnswerFromTheListNode_AsItemNodesWould()
+    {
+        // Where an item node would be: the same list at 1,500 items has one for item 0.
+        UiaRect eagerRect;
+        using (var eagerRig = new UiaRig())
+        {
+            var eager = List(1_500);
+            Mount(eagerRig.Session, eager);
+            var eagerItem = Logic<UiaFragment>(eagerRig.Bridge.NativeFragment(Item(eager, 0)));
+            Assert.Equal(0, eagerItem.GetBoundingRectangle(out eagerRect));
+        }
+
+        using var rig = new UiaRig();
+        var list = List(3_000);
+        Mount(rig.Session, list);
+        list.SelectedIndex = 1_500;
+        rig.Session.PumpFrame();
+        var bridge = rig.Bridge;
+        var listWrapper = Logic<UiaFragment>(bridge.NativeFragment(list.Id));
+
+        // First, last and middle: the items a reader reaches.
+        Assert.Equal(0, listWrapper.Navigate(UiaInterop.NavigateDirection_FirstChild, out var first));
+        var item0 = Logic<UiaVirtualItem>(first);
+        Assert.Equal(0, item0.Index);
+        Assert.Equal(0, listWrapper.Navigate(UiaInterop.NavigateDirection_LastChild, out var last));
+        Assert.Equal(2_999, Logic<UiaVirtualItem>(last).Index);
+        var middle = Logic<UiaVirtualItem>(bridge.ItemSimpleProvider(list.Id, 1_500));
+        Assert.Equal("item 1500", Name(middle));
+        Assert.True(Selected(middle));
+        Assert.False(Selected(item0));
+        Assert.Equal("item 0", Name(item0));
+
+        Assert.Equal(0, item0.GetBoundingRectangle(out var servedRect));
+        Assert.Equal((eagerRect.Left, eagerRect.Top, eagerRect.Width, eagerRect.Height),
+            (servedRect.Left, servedRect.Top, servedRect.Width, servedRect.Height));
+
+        // The container's selection and a search for the selected item, from the node.
+        Assert.Equal([1_500], bridge.GetSelectedIndices(list.Id));
+        var found = Logic<UiaVirtualItem>(bridge.FindItemByProperty(list.Id, -1, IsSelectedProperty, null));
+        Assert.Equal(1_500, found.Index);
+        Assert.Equal(IntPtr.Zero, bridge.FindItemByProperty(list.Id, 1_500, IsSelectedProperty, null));
+
+        // Told before it is read: a client that reads the item on the event reads its state now.
+        rig.Raised.Clear();
+        list.SelectedIndex = 1_501;
+        rig.Session.PumpFrame();
+        Assert.Equal(
+        [
+            new UiaRaised(UiaRaisedKind.Property, IsSelectedProperty, Item(list, 1_500)),
+            new UiaRaised(UiaRaisedKind.Property, IsSelectedProperty, Item(list, 1_501)),
+        ], rig.Raised);
+        Assert.False(Selected(middle));
+        Assert.True(Selected(Logic<UiaVirtualItem>(bridge.ItemSimpleProvider(list.Id, 1_501))));
+    }
+
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AMultiSelection_IsToldOnEachItemThatChanged()
+    {
+        using var rig = new UiaRig();
+        var list = List(3_000);
+        list.CanSelectMultiple = true;
+        Mount(rig.Session, list);
+        rig.Raised.Clear();
+
+        var source = (IAccessibleItemSource)list;
+        source.SetItemSelected(2_999, true);
+        source.SetItemSelected(7, true);
+        rig.Session.PumpFrame();
+
+        Assert.Equal(
+        [
+            new UiaRaised(UiaRaisedKind.Property, IsSelectedProperty, Item(list, 7)),
+            new UiaRaised(UiaRaisedKind.Property, IsSelectedProperty, Item(list, 2_999)),
+        ], rig.Raised);
+        Assert.Equal([7, 2_999], rig.Bridge.GetSelectedIndices(list.Id));
+    }
+
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AnItemAClientHolds_IsGone_WhenTheListShrinksPastIt()
+    {
+        using var rig = new UiaRig();
+        var list = List(3_000);
+        Mount(rig.Session, list);
+        var bridge = rig.Bridge;
+        var held = Logic<UiaVirtualItem>(bridge.ItemSimpleProvider(list.Id, 2_999));
+        var kept = Logic<UiaVirtualItem>(bridge.ItemSimpleProvider(list.Id, 5));
+        Assert.Equal("item 2999", Name(held));
+        rig.Raised.Clear();
+
+        list.Items = Items(2_500);
+        Settle(rig.Session);
+
+        Assert.Contains(new UiaRaised(UiaRaisedKind.Structure, UiaInterop.StructureChangeType_ChildrenBulkRemoved, list.Id), rig.Raised);
+        Assert.Equal(ElementNotAvailable, held.GetPropertyValue(UiaInterop.UIA_NamePropertyId, out _));
+        Assert.Equal(ElementNotAvailable, held.GetBoundingRectangle(out _));
+        Assert.Equal(ElementNotAvailable, held.Navigate(UiaInterop.NavigateDirection_Parent, out _));
+        Assert.Equal("item 5", Name(kept));
+        Assert.Equal(2_500, bridge.GetVirtualItemCount(list.Id));
+
+        rig.Raised.Clear();
+        list.Items = Items(3_100);
+        Settle(rig.Session);
+        Assert.Contains(new UiaRaised(UiaRaisedKind.Structure, UiaInterop.StructureChangeType_ChildrenBulkAdded, list.Id), rig.Raised);
+        Assert.Equal("item 2999", Name(held));
+
+        // Under 2,000 items the list has item nodes again: a provider held from before answers
+        // from its item's node, which has its runtime id.
+        list.Items = Items(1_500);
+        list.SelectedIndex = 5;
+        Settle(rig.Session);
+        Assert.Equal("item 5", Name(kept));
+        Assert.True(Selected(kept));
+        Assert.Equal(ElementNotAvailable, held.GetPropertyValue(UiaInterop.UIA_NamePropertyId, out _));
+    }
 }
