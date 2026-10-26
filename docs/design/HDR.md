@@ -62,7 +62,13 @@ every such run a false negative. `HultUI.WinForms` hosts GL only.
   `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates always, `=0` never. The half-float offscreen is
   made at the over-allocated size too (`VulkanFrameTarget.AllocatedWidthPx`), clipped to the
   window, and kept with the swapchain: remade at every size, an 80-step drag made 81 offscreens,
-  each with a synchronous submit and a scratch purge, against 5 swapchains.
+  each with a synchronous submit and a scratch purge, against 5 swapchains. On an 8-bit swapchain
+  the render targets over its images are made at that size and clipped the same way, so a drag
+  wraps each image once per swapchain: 80 → 12 wraps (each an image view and a framebuffer) in an
+  80-step drag, 2,198 → 516 bytes a step, step time flat (3.42 → 3.46 ms median over 12 alternated
+  runs), mid-drag captures identical. The half-float swapchain's targets stay at the window's size:
+  the one run of that, a prototype in plan 17's round 5 survey, coincided with two NVIDIA driver
+  errors (`nvlddmkm` 153) and a stall over a second, and has not been repeated.
 - **Rebuild:** the old swapchain is handed to the new one as `oldSwapchain`, except the scRGB one
   under MAILBOX on Windows, which is destroyed first. Handed over, it made the next present wait
   about 100 ms on NVIDIA, and the compositor showed the old image scaled meanwhile. IMMEDIATE and

@@ -244,7 +244,9 @@ public sealed class VulkanProbeTests
     /// bucket, and the end of the loop goes back to an exact swapchain, which keeps the
     /// compositor's direct path that video needs. A move runs the same loop and must not pay a
     /// rebuild at either end. Where the surface offers no ONE_TO_ONE, and in any present mode but
-    /// MAILBOX, every size rebuilds and the end of the loop does nothing.
+    /// MAILBOX, every size rebuilds and the end of the loop does nothing. The drag goes back the way
+    /// it came before it ends, inside the swapchain it grew, where an 8-bit window keeps its render
+    /// targets too.
     /// </summary>
     [VulkanUiTheory]
     [InlineData("f16-mailbox")]
@@ -292,6 +294,15 @@ public sealed class VulkanProbeTests
         // every size, sixteen.
         Assert.True(builds >= 1 && builds == oneToOne, $"{builds} builds ({oneToOne} one-to-one) during the drag:\n{run.Output}");
         Assert.True(builds <= 4, $"{builds} swapchain builds for {steps} steps of a drag:\n{run.Output}");
+        // Back the way it came, the swapchain is kept, and on an 8-bit one so is every render target
+        // over its images: made at the size they were allocated at and clipped to the window, not
+        // remade at each new window size: 96 bytes a step on 8-bit, 2,568 when it was (and on the
+        // half-float swapchain, which keeps window-sized targets).
+        var back = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: drag back (\d+) steps, (\d+) builds, (\d+) frames, (-?\d+) bytes a step");
+        Assert.True(back.Success, run.Output);
+        Assert.True(N(back, 2) == 0, $"the drag back built {N(back, 2)} swapchains:\n{run.Output}");
+        if (variant == "8-bit")
+            Assert.True(N(back, 4) < 1000, $"a step of the drag back allocated {N(back, 4)} bytes:\n{run.Output}");
         // One exact swapchain at the end, at the window's size, and its frame drawn at once.
         Assert.True(N(ended, 1) == 1 && N(ended, 2) == 0 && ended.Groups[4].Value == "exact",
             $"the end of the drag: {ended.Value}\n{run.Output}");

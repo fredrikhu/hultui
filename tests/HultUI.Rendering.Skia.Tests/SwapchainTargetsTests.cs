@@ -113,6 +113,33 @@ public class SwapchainTargetsTests
         Assert.Equal(SwapchainTargetUse.KeptTransitionBeforeBlit, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: true));
     }
 
+    [Theory]
+    [InlineData(44u)]   // B8G8R8A8_UNORM, what Windows offers first
+    [InlineData(50u)]   // B8G8R8A8_SRGB
+    [InlineData(37u)]   // R8G8B8A8_UNORM
+    [InlineData(43u)]   // R8G8B8A8_SRGB
+    public void AKeptTargetOverAnOverAllocated8BitSwapchain_IsTheAllocatedSize_AtEverySizeOfTheDrag(uint format)
+    {
+        // A drag from 1800 to 2000 px wide inside a 2048 x 1280 swapchain: one size, so one key, for
+        // every step, and the canvas is clipped to the window.
+        foreach (int width in new[] { 1800, 1860, 1920, 2000 })
+            Assert.Equal((2048, 1280), SwapchainTargetUses.TargetSize(kept: true, format, width, 1170, 2048, 1280));
+
+        // Grown to the allocated size, the swapchain is not larger than the window any more
+        // (AllocatedWidthPx is 0), and the size, and so the key, is the same.
+        Assert.Equal((2048, 1280), SwapchainTargetUses.TargetSize(kept: true, format, 2048, 1280, 0, 0));
+    }
+
+    [Fact]
+    public void TheHalfFloatSwapchain_AndATargetForOneFrame_AndAnExactSwapchain_AreTheWindowsSize()
+    {
+        // The scRGB swapchain stays on window-sized targets (an earlier prototype of the allocated
+        // size coincided with driver errors); a target made for one frame gains nothing from it.
+        Assert.Equal((1800, 1170), SwapchainTargetUses.TargetSize(kept: true, 97, 1800, 1170, 2048, 1280));
+        Assert.Equal((1800, 1170), SwapchainTargetUses.TargetSize(kept: false, 44, 1800, 1170, 2048, 1280));
+        Assert.Equal((1800, 1170), SwapchainTargetUses.TargetSize(kept: true, 44, 1800, 1170, 0, 0));
+    }
+
     [Fact]
     public void Clear_DisposesEveryTarget_OnceEach_AndForgetsThem()
     {

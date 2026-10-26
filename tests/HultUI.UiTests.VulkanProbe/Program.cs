@@ -256,10 +256,13 @@ internal static class Program
         Console.SetError(trace);
         using var app = Foreground.NoActivate(new Application("vulkan-probe", 640, 400, renderer: renderer));
         int frames = 0;
+        // The UI thread's allocation count as each frame draws: what one step of the drag costs.
+        var allocated = new long[256];
         app.SetRoot(Flex.Row().FlexGrow(1).Children(
             Box.New().FlexGrow(1).Background(Color.FromHex("#FF0000")),
             Box.New().FlexGrow(1).Background(Color.FromHex("#0000FF")),
-            Canvas.New(_ => frames++).Width(1f).Height(1f)));
+            Canvas.New(_ => { if (frames < allocated.Length) allocated[frames] = GC.GetAllocatedBytesForCurrentThread(); frames++; })
+                .Width(1f).Height(1f)));
         for (int i = 0; i < 12; i++)
             app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
 
@@ -271,6 +274,16 @@ internal static class Program
             SetWindowPos(hwnd, 0, 0, 0, 1000 + 24 * (i + 1), 700 + 16 * (i + 1), NoMove | NoZOrder | NoActivate);
         Console.WriteLine($"probe: drag {steps} steps, {trace.Builds - builds} builds ({trace.OneToOne - oneToOne} one-to-one), " +
             $"{frames - before} frames, {trace.Purges - purges} offscreens freed");
+        // Back the way it came, in the swapchain the drag grew: no build, every image reused at a
+        // new window size each step.
+        builds = trace.Builds; before = frames;
+        for (int i = steps - 2; i >= 0; i--)
+            SetWindowPos(hwnd, 0, 0, 0, 1000 + 24 * (i + 1), 700 + 16 * (i + 1), NoMove | NoZOrder | NoActivate);
+        var perStep = new List<long>();
+        for (int f = before + 1; f < Math.Min(frames, allocated.Length); f++) perStep.Add(allocated[f] - allocated[f - 1]);
+        perStep.Sort();
+        Console.WriteLine($"probe: drag back {steps - 1} steps, {trace.Builds - builds} builds, {frames - before} frames, " +
+            $"{(perStep.Count > 0 ? perStep[perStep.Count / 2] : -1)} bytes a step");
         builds = trace.Builds; oneToOne = trace.OneToOne; before = frames;
         SendMessageW(hwnd, ExitSizeMove, 0, 0);
         GetClientRect(hwnd, out var client);

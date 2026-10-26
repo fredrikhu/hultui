@@ -58,6 +58,35 @@ internal static class SwapchainTargetUses
         !hostKeeps ? SwapchainTargetUse.ThisFrameOnly
         : throughOffscreen ? SwapchainTargetUse.KeptTransitionBeforeBlit
         : SwapchainTargetUse.KeptTransitionAtBegin;
+
+    /// <summary>
+    /// The size a render target over a swapchain image is wrapped at: the window's, or, for a kept
+    /// target over an 8-bit swapchain a drag over-allocated, the size its images were allocated at,
+    /// with the canvas clipped to the window. Wrapped at the window's size, the target was made
+    /// again at every step of a drag, each with an image view and a framebuffer: 80 for an 80-step
+    /// drag, where an image kept at the allocated size is wrapped once per swapchain (12 for 4
+    /// swapchains of three images).
+    ///
+    /// <para><b>Not the half-float swapchain.</b> Its targets stay at the window's size: the only
+    /// run of this on the scRGB swapchain, a prototype in the plan 17 round 5 survey, coincided with
+    /// two NVIDIA driver errors (<c>nvlddmkm</c> event 153) and a stall over a second, and was not
+    /// repeated. Its offscreen is kept at the allocated size already.</para>
+    /// </summary>
+    /// <param name="kept">The target is kept (not made for this frame only).</param>
+    /// <param name="format">The swapchain's <c>VkFormat</c>.</param>
+    /// <param name="widthPx">The window's width, in device pixels.</param>
+    /// <param name="heightPx">The window's height.</param>
+    /// <param name="allocatedWidthPx">The images' allocated width when larger than the window,
+    /// otherwise zero (<c>VulkanFrameTarget.AllocatedWidthPx</c>).</param>
+    /// <param name="allocatedHeightPx">The images' allocated height, likewise.</param>
+    public static (int Width, int Height) TargetSize(bool kept, uint format, int widthPx, int heightPx,
+        int allocatedWidthPx, int allocatedHeightPx) =>
+        kept && allocatedWidthPx > 0 && IsEightBit(format)
+            ? (Math.Max(allocatedWidthPx, widthPx), Math.Max(allocatedHeightPx, heightPx))
+            : (widthPx, heightPx);
+
+    /// <summary>The 8-bit swapchain formats (<c>VkFormat</c> R8G8B8A8/B8G8R8A8, unorm or sRGB).</summary>
+    private static bool IsEightBit(uint format) => format is 37 or 43 or 44 or 50;
 }
 
 /// <summary>
