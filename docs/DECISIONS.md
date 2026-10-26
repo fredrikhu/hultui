@@ -393,6 +393,33 @@ file built on every key, and were looked at in the same step. They do not fit th
 Declined in that step. Worth revisiting with sticky headers in a virtual list (a framework
 feature), or when a working tree with hundreds of changed files shows up in a profile.
 
+### Junction's History and Vesper's panes keep drawing their own selection
+
+Round 5, step 9 let a virtual list draw its selection itself (`SelectionHighlight`, ELEMENTS.md
+"A selection the list draws"): the rows are made unselected, so a selection move makes no row.
+Junction's Tags table took it. The survey named two more lists, and neither takes it with the
+same pixels:
+
+- **Junction's History** (the survey's counting prototype: −30 % bytes a key). The caret's row
+  shows more than a background: it ends in "Details →" ("Compare →" with a multi-selection), an
+  element in the row's flow, so the subject's ellipsis comes earlier on that row than on the
+  others. A row made unselected cannot show it, and telling the list the two rows the caret moved
+  between (`InvalidateRow`) makes them again, which is what a move costs today. Its other rows
+  also tint under the pointer and the selected row does not (`HoverBg` only when not selected): a
+  kept row never learns it became selected, so a row under the pointer that the caret reaches would
+  keep its tint over the highlight. The prototype counted rows as unselected and so lost both.
+- **Vesper's panes** (−5…−6 % in the survey, under the bar: the window's build is most of a key).
+  The cursor is a fill and a 1 px ring, which the list could draw identically over a row that keeps
+  a transparent border, but the rows also read the cursor elsewhere: the zebra stripe is drawn in
+  place of the cursor's fill (under the highlight it would tint it), the partner ring is only drawn
+  when the row is not the cursor's, and the row's pointer handling takes the cursor.
+
+Declined in that step, as pixel changes the step did not have. To adopt History, the affordance
+would leave the row's flow (drawn over the caret's row by the list or an overlay, or its space
+kept in every row) and the hover tint would come from the list too; both change pixels, and need
+the user. Meridian's History (step 8) is the same shape: its older rows fade with `Opacity`, which
+fades their background with them, and they tint under the pointer.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
