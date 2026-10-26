@@ -5,9 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** release — round 5; all 14 steps landed, full suite passed on the merge with main (7ef01769); merging into main, then wait for CI. **After round 5's release (CI green) STOP the loop (user, 2026-10-26):** the user reboots, then wants the perf tests run again for the TOTAL improvement of all rounds — baseline 520002e9 (main 2026-10-07, just before b9f80d07) vs main after round 5, built side by side (baseline in a detached scratch worktree), idle-gated, pinned, alternated, JIT + AOT: suite rows both have, app walks (KB and time per key, start-up, idle, working set), a11y rows. Round 6 survey only after that. Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
-  3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
-  3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
+- **Phase:** paused (user, 2026-10-26) — round 5 released: merge 61308cfd plus two CI test fixes (6e51acad, f31194ab) on fredrikhu/hultui main, CI run 40409675144 green. **Next, when the user says go after rebooting: the total-improvement comparison of all rounds** — baseline 520002e9 (main 2026-10-07, just before b9f80d07) vs main f31194ab, built side by side (baseline in a detached scratch worktree), idle-gated, pinned, alternated, JIT + AOT: perf suite rows both commits have, app walks (KB and time per key, start-up, idle, working set), a11y rows; report in `17-reports/total-r1-r5.md`. Round 6 survey only after that. Round 5 question 5 open (Junction History row pixels). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
   state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls for, record it in
   the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved.
@@ -1089,3 +1087,13 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
 - 2026-10-26: main (d5eaefc9: async-load retry + held-sheet test fixes from other sessions) merged into the branch
   as 7ef01769. Round 5 full suite on it: Windows `dotnet test HultUI.slnx -c Release` 31 projects, 0 failures
   (UiTests skipped by their gate); WSL Fedora slnf 22 projects, 0 failures. Phase → release.
+- 2026-10-26: round 5 merged into main as 61308cfd (detached origin/main merge, tree identical to the tested
+  branch, gate held), pushed d5eaefc9..61308cfd, primary fast-forwarded behind the guard. CI run 40406538950 red on
+  Windows only, two test faults from this round, no product bug: (1) step 13's scroll-view torn-read test never
+  wrote a starting set, so a reader that ran before the first write (2-core runner) counted the built tree's values
+  as torn (293,354; a 100 ms sleep reproduced 1,314,523 locally; with the start written it passes even with the
+  sleep) → 6e51acad; (2) step 6's `AppRuntimeSettingsTests` in Meridian.Tests read the CLI's
+  `meridian.runtimeconfig.json`, which `ReferenceOutputAssembly="false"` still copies and which is the GUI's file
+  on Windows → `Private="false"` on the CLI reference, f31194ab. Pushed 61308cfd..f31194ab; CI run 40409675144 green
+  (test, test-linux, docs). Guideline notes: a thread test starts from a state its reader accepts; a referenced
+  exe's runtimeconfig/deps/apphost are copied unless `Private="false"`. Loop stopped for the user's reboot.
