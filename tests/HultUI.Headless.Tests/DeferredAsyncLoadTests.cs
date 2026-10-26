@@ -152,6 +152,41 @@ public class DeferredAsyncLoadTests
     }
 
     [Fact]
+    public void ARetryOfAnEndedSession_EndsWithIt()
+    {
+        // A failed load's retry waits out its backoff on the pool. It was posted to whichever
+        // application was current when the delay ran out: once its session had ended, the next
+        // test's, whose loop it woke (LoopWakeTests counted 3 wakes where 1 was asked for) and
+        // in whose frames it ran this producer again. It goes back to the session it began in.
+        var loader = new AsyncLoader<string>("empty");
+        int attempts = 0;
+        HeadlessWindowingPlatform endedPlatform;
+        int endedWakes;
+        using (var ended = HeadlessSession.Create())
+        {
+            endedPlatform = ended.Platform;
+            loader.Load("key", () => { attempts++; throw new InvalidOperationException("broken"); });
+            ended.PumpFrame();
+            endedWakes = endedPlatform.WakeCalls;
+        }
+
+        using var next = HeadlessSession.Create();
+        int nextWakes = next.Platform.WakeCalls;
+
+        // The backoff is a real 0.5 s: wait until the retry has landed, in either session.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (endedPlatform.WakeCalls == endedWakes && next.Platform.WakeCalls == nextWakes
+            && DateTime.UtcNow < deadline)
+            Thread.Sleep(5);
+
+        Assert.True(endedPlatform.WakeCalls > endedWakes, "the retry did not go back to the session it began in");
+        Assert.Equal(nextWakes, next.Platform.WakeCalls);
+        next.PumpFrame();
+        next.PumpFrame();
+        Assert.Equal(1, attempts);
+    }
+
+    [Fact]
     public void ALoadRequestedByOnLoaded_WaitsForItsOwnFrame()
     {
         // A completion that requests another load (a reveal chasing a two-step fetch)
