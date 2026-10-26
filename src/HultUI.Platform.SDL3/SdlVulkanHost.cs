@@ -35,9 +35,9 @@ namespace HultUI.Platform.SDL3;
 /// <para><b>Layouts at both ends of a frame.</b> The present transition moves the image to
 /// PRESENT_SRC_KHR behind Skia's back, and when the renderer asks, a barrier moves the acquired
 /// image back to COLOR_ATTACHMENT_OPTIMAL (<see cref="TransitionAcquiredImage"/>), the layout Skia
-/// left it in. That is what lets the renderer keep one render target per image for the
-/// swapchain's life rather than wrap every frame (2,048 bytes, an image view and a framebuffer a
-/// frame): see <see cref="SetSwapchainReleasing"/>.</para>
+/// left it in, at the head of Skia's first submit of the frame. That is what lets the renderer keep
+/// one render target per image for the swapchain's life rather than wrap every frame (2,048
+/// bytes, an image view and a framebuffer a frame): see <see cref="SetSwapchainReleasing"/>.</para>
 /// </summary>
 internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDisposable
 {
@@ -325,8 +325,87 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             System.Globalization.CultureInfo.InvariantCulture, out float nits) && nits > 0f
             ? nits : 0f;
 
-    public nint GetProcedureAddress(string name, nint instance, nint device) =>
-        _vk.Resolve(name, instance, device);
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>vkQueueSubmit</c> comes back as <see cref="RendererSubmit"/>, which puts an acquire barrier
+    /// the renderer asked for and the host still owes ahead of the renderer's own work
+    /// (<see cref="TransitionAcquiredImage"/>). Skia resolves it for its device, and every window has
+    /// a device of its own, so the trampoline finds its host by the queue.
+    /// </remarks>
+    public nint GetProcedureAddress(string name, nint instance, nint device)
+    {
+        nint address = _vk.Resolve(name, instance, device);
+        if (address == 0 || name != "vkQueueSubmit" || _queue.IsNull) return address;
+        RendererQueues[_queue.Handle] = this;
+        _rendererSubmitsPassHere = true;
+        return (nint)(delegate* unmanaged<VkQueue, uint, VkSubmitInfo*, VkFence, VkResult>)&RendererSubmit;
+    }
+
+    /// <summary>The host of each queue the renderer submits on through <see cref="RendererSubmit"/>;
+    /// a host leaves once its device is destroyed.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, SdlVulkanHost> RendererQueues = new();
+
+    /// <summary>The renderer resolved <c>vkQueueSubmit</c> here, so an acquire barrier may be owed
+    /// until its next submit.</summary>
+    private bool _rendererSubmitsPassHere;
+
+    /// <summary>The renderer's <c>vkQueueSubmit</c>, through its host's
+    /// <see cref="SubmitForRenderer"/>. No managed exception may leave a function native code calls.</summary>
+    [UnmanagedCallersOnly]
+    private static VkResult RendererSubmit(VkQueue queue, uint submitCount, VkSubmitInfo* submits, VkFence fence)
+    {
+        try
+        {
+            // Always found: registered before the renderer could submit, gone only with the device.
+            return RendererQueues.TryGetValue(queue.Handle, out var host)
+                ? host.SubmitForRenderer(queue, submitCount, submits, fence)
+                : VkResult.ErrorInitializationFailed;
+        }
+        catch (Exception)
+        {
+            return VkResult.ErrorUnknown;
+        }
+    }
+
+    /// <summary>
+    /// The renderer's submit, with an owed acquire barrier as the first command buffer of its first
+    /// batch: ahead of all the renderer's work in it, and no submit of its own. Its own submit just
+    /// before, only where the batch cannot carry it (no batch, a long one, or a <c>pNext</c> chain,
+    /// which may count the command buffers).
+    ///
+    /// <para><b>Carried, not submitted alone.</b> mpv's GL draw of a 1080p120 frame, the median of 600
+    /// frames in four alternating runs on an 8-bit swapchain: 0.305–0.342 ms with the barrier in
+    /// Skia's batch, 0.311–0.351 with it submitted alone just before, 0.309–0.336 with no barrier
+    /// (the frame wrapped its own target), and 0.390–0.436 with it submitted when the frame began,
+    /// before the draw.</para>
+    /// </summary>
+    private VkResult SubmitForRenderer(VkQueue queue, uint submitCount, VkSubmitInfo* submits, VkFence fence)
+    {
+        if (!_haveAcquired || _swapchain.IsNull || !_acquireBarrier.TakeOwed())
+            return _vk.QueueSubmit(queue, submitCount, submits, fence);
+
+        var recorded = RecordAcquireBarrier(_acquiredIndex, out var barrier);
+        if (recorded != VkResult.Success) return recorded;
+
+        const uint MostCarried = 8;
+        if (submitCount == 0 || submitCount > MostCarried || submits[0].pNext != null
+            || submits[0].commandBufferCount >= MostCarried)
+        {
+            var alone = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &barrier };
+            var submitted = _vk.QueueSubmit(queue, 1, &alone, VkFence.Null);
+            return submitted == VkResult.Success ? _vk.QueueSubmit(queue, submitCount, submits, fence) : submitted;
+        }
+
+        uint count = submits[0].commandBufferCount;
+        var buffers = stackalloc VkCommandBuffer[(int)count + 1];
+        buffers[0] = barrier;
+        for (uint i = 0; i < count; i++) buffers[i + 1] = submits[0].pCommandBuffers[i];
+        var batches = stackalloc VkSubmitInfo[(int)submitCount];
+        for (uint i = 0; i < submitCount; i++) batches[i] = submits[i];
+        batches[0].commandBufferCount = count + 1;
+        batches[0].pCommandBuffers = buffers;
+        return _vk.QueueSubmit(queue, submitCount, batches, fence);
+    }
 
     public static SdlVulkanHost Create(SDL_Window* window, int widthPx, int heightPx, bool displayIsHdr)
     {
@@ -1093,12 +1172,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         _acquiredIndex = index;
         _haveAcquired = true;
-        _acquiredTransitioned = false;
+        _acquireBarrier.Reset();
         return Current();
     }
 
-    /// <summary>Whether <see cref="TransitionAcquiredImage"/> has run for the image acquired now.</summary>
-    private bool _acquiredTransitioned;
+    /// <summary>Whether the image acquired now has had its barrier, or is owed it; see
+    /// <see cref="TransitionAcquiredImage"/>.</summary>
+    private AcquireBarrier _acquireBarrier;
 
     /// <inheritdoc />
     /// <remarks>
@@ -1112,23 +1192,45 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <para>From UNDEFINED, which is true of an image never presented and of one that was, and
     /// discards the contents — free, since every frame clears and overwrites the whole image. No
     /// semaphore: the acquire's fence has been waited, so the presentation engine is done with the
-    /// image. A submit of its own, because SkiaSharp offers nothing to record into. Once per
+    /// image. A command buffer of its own, because SkiaSharp offers nothing to record into. Once per
     /// acquire: asked again for the same image it does nothing.</para>
+    ///
+    /// <para><b>Owed, not submitted, when asked.</b> Where Skia's submits pass the host
+    /// (<see cref="GetProcedureAddress"/>), the barrier goes at the head of Skia's first submit after
+    /// the request (<see cref="SubmitForRenderer"/>), or in a submit of its own at the present if
+    /// Skia submitted nothing (<see cref="AcquireBarrier"/>). A video's GL draw and the host's
+    /// hand-over of its image come before that submit, so the barrier lands after them: submitted
+    /// before the draw, it slowed it. Before this, a frame straight onto an 8-bit swapchain after a
+    /// video frame wrapped its image for itself instead of asking: 1,944 of the 2,030 bytes a
+    /// 1080p120 video frame allocated, and an image view and a framebuffer.</para>
     /// </remarks>
     public bool TransitionAcquiredImage()
     {
         if (!_haveAcquired || _swapchain.IsNull) return false;
-        if (_acquiredTransitioned) return true;
-        _acquiredTransitioned = true;
-        RecordAcquireBarrier(_acquiredIndex);
+        if (_acquireBarrier.Ask(canDefer: _rendererSubmitsPassHere))
+            Check(SubmitAcquireBarrier(_acquiredIndex), "acquire barrier");
         return true;
     }
 
-    private void RecordAcquireBarrier(uint imageIndex)
+    /// <summary>Records and submits the acquire barrier for <paramref name="imageIndex"/>, alone.</summary>
+    private VkResult SubmitAcquireBarrier(uint imageIndex)
+    {
+        var recorded = RecordAcquireBarrier(imageIndex, out var cmd);
+        if (recorded != VkResult.Success) return recorded;
+        var submit = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &cmd };
+        return _vk.QueueSubmit(_queue, 1, &submit, VkFence.Null);
+    }
+
+    /// <summary>Records the acquire barrier for <paramref name="imageIndex"/> into its command
+    /// buffer, for a submit of its own or the renderer's. Returns the first failure rather than
+    /// throwing: <see cref="SubmitForRenderer"/> runs inside a call from native code.</summary>
+    private VkResult RecordAcquireBarrier(uint imageIndex, out VkCommandBuffer recorded)
     {
         var cmd = _acquireCmd[imageIndex];
+        recorded = cmd;
         var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
-        Check(_vk.BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+        var began = _vk.BeginCommandBuffer(cmd, &begin);
+        if (began != VkResult.Success) return began;
 
         var barrier = new VkImageMemoryBarrier
         {
@@ -1145,9 +1247,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
             VkPipelineStageFlags.ColorAttachmentOutput, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
 
-        Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
-        var submit = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &cmd };
-        Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
+        return _vk.EndCommandBuffer(cmd);
     }
 
     /// <inheritdoc />
@@ -1208,6 +1308,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             DestroyForgottenSlots();
             return;
         }
+
+        // Still owed: the renderer submitted nothing after asking. The capture and the present
+        // transition both expect the image in the layout the barrier gives.
+        if (_acquireBarrier.TakeOwed()) Check(SubmitAcquireBarrier(_acquiredIndex), "acquire barrier");
 
         // The capture reads the image on the CPU, so it is the one thing here that still has
         // to wait for the GPU. Diagnostic only, and off unless asked for.
@@ -1341,6 +1445,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _swapchainReleasing?.Invoke();
         Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
+        _acquireBarrier.Reset();
         BuildSwapchain(widthPx, heightPx);
     }
 
@@ -1396,6 +1501,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!_swapchain.IsNull) _vk.DestroySwapchain(_device, _swapchain, 0);
             _vk.DestroyDevice(_device, 0);
         }
+        // Only now: the backstop call at the top can still flush the renderer's work through
+        // RendererSubmit. A later device may get the same queue handle, so only this host's entry goes.
+        if (_rendererSubmitsPassHere)
+            RendererQueues.TryRemove(new KeyValuePair<nint, SdlVulkanHost>(_queue.Handle, this));
         // Guarded because Dispose also cleans up after an Init that threw, which can be before
         // LoadInstance resolved these.
         if (!_surface.IsNull && _vk.DestroySurface is not null) _vk.DestroySurface(_instance, _surface, 0);

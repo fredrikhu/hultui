@@ -93,30 +93,24 @@ public class SwapchainTargetsTests
     [Fact]
     public void AHostThatCannotRestoreTheLayout_GetsATargetEveryFrame()
     {
-        Assert.Equal(SwapchainTargetUse.ThisFrameOnly, SwapchainTargetUses.Choose(hostKeeps: false, throughOffscreen: true, gpuSourceLastFrame: false));
-        Assert.Equal(SwapchainTargetUse.ThisFrameOnly, SwapchainTargetUses.Choose(hostKeeps: false, throughOffscreen: false, gpuSourceLastFrame: false));
+        Assert.Equal(SwapchainTargetUse.ThisFrameOnly, SwapchainTargetUses.Choose(hostKeeps: false, throughOffscreen: true));
+        Assert.Equal(SwapchainTargetUse.ThisFrameOnly, SwapchainTargetUses.Choose(hostKeeps: false, throughOffscreen: false));
     }
 
     [Fact]
-    public void StraightOntoTheSwapchain_TheBarrierComesAtOnce()
+    public void StraightOntoTheSwapchain_TheTargetIsKept_AndTheBarrierAskedForAtTheBeginning()
     {
-        // Skia may submit its work on the image at any point after the first draw.
-        Assert.Equal(SwapchainTargetUse.KeptTransitionNow, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: false, gpuSourceLastFrame: false));
+        // Skia may submit its work on the image at any point after the first draw; the host owes
+        // the barrier until Skia's first submit, after any video's GL draw, so a frame after a video
+        // keeps its target too (it wrapped its own until 2026-10-26: 2 KB a frame).
+        Assert.Equal(SwapchainTargetUse.KeptTransitionAtBegin, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: false));
     }
 
     [Fact]
-    public void ThroughTheOffscreen_TheBarrierWaitsForTheBlit_VideoOrNot()
+    public void ThroughTheOffscreen_TheBarrierWaitsForTheBlit()
     {
         // After mpv's GL draw: a submit before it made that draw slower.
-        Assert.Equal(SwapchainTargetUse.KeptTransitionBeforeBlit, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: true, gpuSourceLastFrame: false));
-        Assert.Equal(SwapchainTargetUse.KeptTransitionBeforeBlit, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: true, gpuSourceLastFrame: true));
-    }
-
-    [Fact]
-    public void StraightOntoTheSwapchain_AfterAVideoFrame_TheFrameWrapsItsOwnTarget()
-    {
-        // No barrier to submit before the GL draw, at the old 2 KB a frame.
-        Assert.Equal(SwapchainTargetUse.ThisFrameOnly, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: false, gpuSourceLastFrame: true));
+        Assert.Equal(SwapchainTargetUse.KeptTransitionBeforeBlit, SwapchainTargetUses.Choose(hostKeeps: true, throughOffscreen: true));
     }
 
     [Fact]

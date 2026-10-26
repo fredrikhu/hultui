@@ -166,9 +166,13 @@ public interface IVulkanSurfaceHost
     /// render target in, in a submit of its own; false when there is no acquired image or the host
     /// cannot. The host moves the image to <c>PRESENT_SRC_KHR</c> behind Skia's back on the way to
     /// the screen, so a render target kept over it believes a layout the image no longer has
-    /// until this runs. It must be submitted before any of the renderer's work on the image is:
-    /// before Skia draws on it, or at least before Skia submits. Once per acquire; asked again for
-    /// the same image it does nothing.
+    /// until this runs. It must be asked for before any of the renderer's work on the image is
+    /// submitted. Once per acquire; asked again for the same image it does nothing.
+    ///
+    /// <para>A host may submit it later than asked, and should: with the renderer's next submit
+    /// through an entry point resolved by <see cref="GetProcedureAddress"/>, ahead of the renderer's
+    /// work, or at the present if there is none. A submit of the host's on the queue before a GL
+    /// draw in the frame (a video) slows that draw, and the renderer asks when its frame begins.</para>
     /// </summary>
     bool TransitionAcquiredImage() => false;
 }

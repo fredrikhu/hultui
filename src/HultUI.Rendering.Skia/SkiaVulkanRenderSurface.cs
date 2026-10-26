@@ -77,9 +77,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// <para><b>Why keep them.</b> Built every frame, the target and surface cost 2,048 bytes of
     /// managed allocation a frame — all of an idle-animating window's, and of Aperture's quiet
     /// frames — and Skia made and destroyed an image view and a framebuffer over the image every
-    /// frame. A host that cannot do both, and a frame drawn straight onto the swapchain after one
-    /// that drew a video, get a target for that frame only, declared in the layout the frame
-    /// says, as before (<see cref="_once"/>).</para>
+    /// frame. A host that cannot do both gets a target for that frame only, declared in the layout
+    /// the frame says, as before (<see cref="_once"/>).</para>
     /// </summary>
     private readonly SwapchainTargets<WrappedImage> _kept = new();
 
@@ -464,14 +463,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // Before the target: a new offscreen may wait for the GPU and submit, which is harmless
         // while nothing of this frame is recorded against the swapchain image yet.
         bool throughOffscreen = OffscreenFor(frame, path) is not null;
-        var use = SwapchainTargetUses.Choose(_keepTargets, throughOffscreen, gpuSourceLastFrame: _lent.Count > 0);
+        var use = SwapchainTargetUses.Choose(_keepTargets, throughOffscreen);
         var target = TargetFor(frame, path, use);
         if (target is null) return false;
 
         // Straight onto the swapchain, the image has to be in the kept target's layout before
-        // anything is drawn: Skia may submit its work on the image whenever it likes. Through the
-        // offscreen, it waits for the blit, after any GL work in the frame (SwapchainTargetUses).
-        if (use == SwapchainTargetUse.KeptTransitionNow) _host.TransitionAcquiredImage();
+        // any of Skia's work on it is submitted, which may be whenever Skia likes: asked for now,
+        // and submitted by the host with Skia's first submit, ahead of Skia's work. Through the
+        // offscreen, asked for before the blit (SwapchainTargetUses).
+        if (use == SwapchainTargetUse.KeptTransitionAtBegin) _host.TransitionAcquiredImage();
         _transitionBeforeBlit = use == SwapchainTargetUse.KeptTransitionBeforeBlit;
 
         _frameColorSpace = frame.ColorSpace;

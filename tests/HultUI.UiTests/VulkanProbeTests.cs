@@ -524,8 +524,12 @@ public sealed class VulkanProbeTests
     /// shared image every frame. The surface keeps that image now, so a wrapper gone stale would
     /// show one picture for ever: the clip gets brighter frame by frame, and the capture of the
     /// swapchain a resize builds after the rounds must be brighter than the one before them. An
-    /// 8-bit swapchain also wraps its image for the frame after one that drew a video (by design:
-    /// an earlier barrier slowed mpv's draw), about 2.3 KB; it was 2,820 bytes in all.
+    /// 8-bit swapchain also wrapped its image for each frame after one that drew a video, 2,331
+    /// bytes in all (a barrier submitted when the frame began slowed mpv's draw); the host now owes
+    /// that barrier until Skia's first submit and the frame keeps its target. A target kept without
+    /// its barrier still draws right on NVIDIA, so the Vulkan runs load the validation layer where
+    /// it is installed and must leave its log empty: left to the present, the barrier comes after
+    /// Skia's work and the layer reports <c>VUID-vkCmdDraw-None-09600</c>.
     /// </summary>
     [VulkanUiTheory]
     [InlineData("f16-mailbox")]
@@ -536,6 +540,7 @@ public sealed class VulkanProbeTests
         if (!OperatingSystem.IsWindows() || !HultUI.Media.Mpv.MpvBackend.IsAvailable) return;
         string clip = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.y4m");
         string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.ppm");
+        string validation = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-ramp-{Guid.NewGuid():N}.log");
         try
         {
             WriteRampClip(clip);
@@ -548,6 +553,11 @@ public sealed class VulkanProbeTests
                 ["HULTUI_VULKAN_F16"] = null,
                 ["HULTUI_VULKAN_PRESENT"] = null,
                 ["HULTUI_VULKAN_WHITE_SCALE"] = null,
+                // Nothing happens here without the layer installed (the Vulkan SDK).
+                ["VK_LOADER_LAYERS_ENABLE"] = "*validation*",
+                ["VK_LAYER_VALIDATE_SYNC"] = "1",
+                ["VK_LAYER_LOG_FILENAME"] = validation,
+                ["VK_LOADER_DEBUG"] = "warn",
             };
             string arguments = $"--video-frame-bytes \"--clip={clip}\"";
             switch (variant)
@@ -565,9 +575,9 @@ public sealed class VulkanProbeTests
             var bytes = System.Text.RegularExpressions.Regex.Match(run.Output, @"probe: ([\d.]+) bytes a video frame");
             Assert.True(bytes.Success, run.Output);
             double perFrame = double.Parse(bytes.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            // 35 on the half-float swapchain, 13 on GL, 2,331 on 8-bit (2026-10-24).
-            double most = variant == "8-bit" ? 2500 : 100;
-            Assert.True(perFrame < most, $"a steady video frame allocated {perFrame:0.0} bytes:\n{run.Output}");
+            // 35 on the half-float swapchain, 13 on GL (2026-10-24); 8-bit 2,331 then, and as the
+            // half-float one since 2026-10-26.
+            Assert.True(perFrame < 100, $"a steady video frame allocated {perFrame:0.0} bytes:\n{run.Output}");
 
             if (variant == "gl") return;   // GL has no swapchain capture
             Assert.Contains(" vulkan device=", run.Output);
@@ -576,11 +586,19 @@ public sealed class VulkanProbeTests
             int before = int.Parse(shown.Groups[1].Value), after = int.Parse(shown.Groups[2].Value);
             // Two seconds or more of a ramp that climbs 219 levels in 15 s: 18 then 142 here.
             Assert.True(after > before + 20, $"the video's brightness went from {before} to {after}:\n{run.Output}");
+
+            if (run.Output.Contains("\"VK_LAYER_KHRONOS_validation\" forced enabled"))
+            {
+                string reported = File.Exists(validation) ? File.ReadAllText(validation) : "";
+                Assert.True(reported.Length == 0, "the validation layer reported:\n" +
+                    (reported.Length > 4000 ? reported[..4000] : reported));
+            }
         }
         finally
         {
             File.Delete(clip);
             File.Delete(capture);
+            File.Delete(validation);
         }
     }
 
