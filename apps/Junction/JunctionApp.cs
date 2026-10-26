@@ -172,9 +172,12 @@ public partial class JunctionApp : Component, IDisposable
     // The Commit view's file list is a folder tree (JunctionApp.ChangeTree.cs). The
     // cursor is the highlighted row and may sit on a folder; _selectedFilePath stays the
     // file the diff pane shows, so crossing a folder doesn't blank it. _commitFileRows is
-    // the visible-row order, rebuilt each Build so the arrow keys step what's on screen.
+    // the visible-row order the arrow keys step, kept while the tree and its open folders
+    // are what they were (see SyncCommitFileRows).
     private readonly TreeView<GitFileChange> _commitFilesTree;
     private List<TreeNode<GitFileChange>> _commitFileRows = [];
+    /// <summary>Bumped by every change to which of the Commit tree's folders are open.</summary>
+    private int _commitTreeGen;
     private string? _commitCursorPath;
     private string? _commitTreeKey;       // the commit (or range) the expansion belongs to
 
@@ -252,7 +255,6 @@ public partial class JunctionApp : Component, IDisposable
 
     // Commit-view file list: scroll the keyboard-selected file into view.
     private readonly Ref<ScrollViewElement> _fileScrollRef = new();
-    private readonly Ref<Element> _fileSelRef = new();
 
     // Command palette.
 
@@ -435,7 +437,9 @@ public partial class JunctionApp : Component, IDisposable
         _filesFind.Opening = () => _filesBlame = false;
         // Every change to which folders are open comes through here: the kept rows go with it.
         _filesTree = new TreeView<string>(() => { _filesExpandGen++; MarkDirty(); });
-        _commitFilesTree = NewChangeTree();
+        // As the Files tree: every change to which folders are open comes through here, and the
+        // kept rows go with it.
+        _commitFilesTree = NewChangeTree(() => { _commitTreeGen++; MarkDirty(); });
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
         _commitMsgExpanded = _settings.CommitMessageExpanded;
@@ -984,16 +988,20 @@ public partial class JunctionApp : Component, IDisposable
                 // Fixed row height, so index math needs no per-row layout.
                 EnsureSelectedCommitVisible();
             }
-            else if (View is JunctionView.Commit or JunctionView.Changes)
+            else if (View == JunctionView.Commit)
+            {
+                // A virtual list of rows: the cursor's row may not be an element yet, so its
+                // band comes from the row heights. After the frame, as before, so the list has
+                // its new items and viewport.
+                _window.RequestPostFrameCallback(ScrollCommitCursorIntoView);
+            }
+            else if (View == JunctionView.Changes)
             {
                 // OnAfterBuild runs before the layout pass, so the selected row's box
                 // for this frame isn't available yet (and the file row, re-keyed on
                 // selection, is a fresh element with no prior layout at all). Read it
                 // in a post-frame callback, once the frame has been laid out.
-                var changes = View == JunctionView.Changes;
-                var scrollRef = changes ? _changeScrollRef : _fileScrollRef;
-                var rowRef = changes ? _changeFocusRef : _fileSelRef;
-                _window.RequestPostFrameCallback(() => ScrollRowIntoView(scrollRef, rowRef));
+                _window.RequestPostFrameCallback(() => ScrollRowIntoView(_changeScrollRef, _changeFocusRef));
             }
         }
     }

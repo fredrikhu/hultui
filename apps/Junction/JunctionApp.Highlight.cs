@@ -122,8 +122,10 @@ public partial class JunctionApp
                 // Re-render the diff rows with their colours — when the diff on screen is the
                 // one waiting for them. The History prefetch lands while the log is on screen,
                 // and rebuilding the whole window for it doubled the cost of every move a
-                // reader made through the log (two builds a key instead of one).
-                if (key == _highlightShown) MarkDirty();
+                // reader made through the log (two builds a key instead of one). The view's
+                // alone: colours are nothing the chrome shows (it built 0.45 times a key in the
+                // Commit view's file walk).
+                if (key == _highlightShown) MarkViewDirty();
             });
         });
         return null;

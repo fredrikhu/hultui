@@ -1524,9 +1524,14 @@ public partial class JunctionApp
     }
 
     /// <summary>The thread-count pill and unresolved dot a file row carries while reviewing.</summary>
-    private Element? ReviewFilePill(string path)
+    /// <summary>How many threads a reviewed file has and how many are open; none outside a
+    /// review, and for a file without threads.</summary>
+    private (int Threads, int Unresolved) ReviewThreadCounts(string path) =>
+        _review is { Ready: true } rv && rv.ByFile.TryGetValue(path, out var counts) ? counts : default;
+
+    private static Element? ReviewFilePill((int Threads, int Unresolved) counts)
     {
-        if (_review is not { Ready: true } rv || !rv.ByFile.TryGetValue(path, out var counts)) return null;
+        if (counts.Threads == 0) return null;
         var row = Flex.Row(gap: 4).AlignItems(AlignItems.Center).FlexShrink(0);
         row.AddChild(Flex.Row(gap: 3).AlignItems(AlignItems.Center).Padding(new Thickness(0, 6, 0, 6)).CornerRadius(999f)
             .Background(Nocturne.Neutral800).Children(

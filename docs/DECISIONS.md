@@ -372,6 +372,27 @@ Declined for now: each is a structural change to an action that runs once. The g
 (`RerenderView`); that changes when every Vesper handler sees its rebuild, and would be a
 change of its own, measured across the app.
 
+### Junction's Changes list stays a scroll view, for now
+
+Round 5, step 8 made the Commit view's file list a virtual list of item rows, as the Files tab's
+tree already was: a key on a commit of 300 files had built every row (2.0 MB a key), and now builds
+the two the cursor moved between. The Changes view's lists have the same per-key shape, one row per
+file built on every key, and were looked at in the same step. They do not fit the same change:
+
+- **Sticky section headers.** Conflicts, Staged, Changes and Hidden are each a column whose header
+  is held at the top while its own rows scroll under it (`Sticky()`), and the next section's header
+  pushes it off. One virtual list of every row has no sections to hold a header in; a list per
+  section would each scroll on its own.
+- **Rows of more than one height.** A hidden file's row has its directory on a second line, and
+  the headers have a gap above them when another section precedes them; the heights would all have
+  to be worked out up front, as the Commit list's are.
+- **The composer below, in the same column.** Typing in it rebuilds the lists too; that is the
+  Waiting candidate junction-changes-composer (the composer as its own component), which removes
+  the lists from a keystroke's build without touching their shape.
+
+Declined in that step. Worth revisiting with sticky headers in a virtual list (a framework
+feature), or when a working tree with hundreds of changed files shows up in a profile.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

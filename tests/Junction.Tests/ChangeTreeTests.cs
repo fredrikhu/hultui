@@ -112,6 +112,96 @@ public class ChangeTreeTests
         });
     }
 
+    /// <summary>
+    /// A commit of many files is a virtual list: only the rows on screen are elements, a key
+    /// makes the two rows the cursor left and reached and keeps the rest, End brings the last
+    /// row on screen, a collapse takes its rows off, folders are tree items with their open
+    /// state, and every row is exactly as tall as it lays out — the heights the list is told
+    /// are the ones the rows had in the scroll view it replaced (2 MB a key on 382 rows).
+    /// </summary>
+    [Fact]
+    public void AManyFileCommitIsAVirtualListOfTheRowsOnScreen()
+    {
+        Hosted(repo =>
+        {
+            for (int i = 0; i < 160; i++) repo.Write($"src/mod{i % 8}/part{i % 5}/file{i:000}.cs", $"{i}\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-q", "-m", "many files");
+        }, (repo, session, app) =>
+        {
+            var rows = OpenCommit(session, app);
+            session.PumpFrames(2);
+            Assert.Equal(1 + 8 + 40 + 160, rows.Count);
+            var list = TreeList(app);
+            Assert.True(list.Children.Count < 40, $"{list.Children.Count} of {rows.Count + 1} rows are elements");
+            AssertRowsAreTheirOwnHeight(list);
+
+            // The cursor starts on the open file, the first of src/mod0/part0's four; three keys
+            // walk the others, each making the row left and the row reached.
+            Assert.Equal("src/mod0/part0/file000.cs", Cursor(app));
+            for (int i = 0; i < 3; i++)
+            {
+                var before = Realized(list);
+                int made = app.CommitTreeRowsMade, builds = app.ChromeBuilds;
+                session.Window.PressKey(KeyCode.Down);
+                session.PumpFrames(2);
+                Assert.Equal(2, app.CommitTreeRowsMade - made);
+                Assert.Equal(before.Count - 2, Realized(list).Intersect(before, ReferenceEqualityComparer.Instance).Count());
+                Assert.Equal(builds, app.ChromeBuilds);
+            }
+            Assert.Equal("src/mod0/part0/file120.cs", SelectedFile(app));
+
+            // End: the last row is the cursor's, and on screen.
+            session.Window.PressKey(KeyCode.End);
+            session.PumpFrames(3);
+            var last = rows[^1].Path;
+            Assert.Equal(last, Cursor(app));
+            var lastRow = Realized(list).Single(r => r.Key is string k && k.StartsWith(last, StringComparison.Ordinal));
+            var view = list.Layout.AbsoluteContentBox;
+            var box = lastRow.Layout.AbsoluteBorderBox;
+            Assert.True(list.ScrollOffsetY > 0);
+            Assert.InRange(box.Y - list.ScrollOffsetY, view.Y - 0.01f, view.Bottom - box.Height + 0.01f);
+            AssertRowsAreTheirOwnHeight(list);
+
+            // Home and ← close the top folder: one row left, then → brings them all back.
+            session.Window.PressKey(KeyCode.Home);
+            session.Window.PressKey(KeyCode.Left);
+            session.PumpFrames(2);
+            Assert.Single(CommitRows(app));
+            Assert.Equal(3, list.Children.Count);   // the spacer, the header and the folder
+            session.Window.PressKey(KeyCode.Right);
+            session.PumpFrames(2);
+            Assert.Equal(rows.Count, CommitRows(app).Count);
+
+            // A reader still finds the folders as tree items, open, in a scroll view.
+            var tree = Walk(session.Window.AccessibilityTree).Single(n => n.Children.Any(c => c.Name == "160 FILES CHANGED"));
+            Assert.Equal(HultUI.Core.Accessibility.AccessibilityRole.ScrollView, tree.Role);
+            Assert.Contains(tree.Children, c => c.Role == HultUI.Core.Accessibility.AccessibilityRole.TreeItem && c.Expanded == true);
+            Assert.Contains(tree.Children, c => c.Name == "A file000.cs");   // added, the status letter first
+        });
+    }
+
+    private static VirtualListElement<JunctionApp.CommitTreeRowItem> TreeList(JunctionApp app) =>
+        (VirtualListElement<JunctionApp.CommitTreeRowItem>)((HultUI.Core.Reactivity.Ref<ScrollViewElement>)Field(app, "_fileScrollRef")!).Current!;
+
+    /// <summary>The list's realized rows (its first child is the spacer).</summary>
+    private static List<Element> Realized(Element list) => list.Children.Skip(1).ToList();
+
+    /// <summary>Each realized row is its padding and its name's line: the height the list gave
+    /// it is the one it lays out to.</summary>
+    private static void AssertRowsAreTheirOwnHeight(Element list)
+    {
+        foreach (var row in Realized(list))
+        {
+            var text = row as TextElement ?? LayoutProbe.Descendants<TextElement>(row, _ => true)
+                .OrderByDescending(t => t.Layout.AbsoluteBorderBox.Height).First();
+            float natural = text == row
+                ? text.Layout.AbsoluteContentBox.Height + 12f
+                : text.Layout.AbsoluteBorderBox.Height + 12f;
+            Assert.Equal(natural, row.Layout.AbsoluteBorderBox.Height, 0.001f);
+        }
+    }
+
     // ── The Changes view's lists ─────────────────────────────────────────
 
     [Fact]
