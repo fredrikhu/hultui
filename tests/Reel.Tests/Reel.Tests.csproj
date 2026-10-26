@@ -24,4 +24,9 @@
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The runtime settings the app ships with (apps/AppRuntime.props). -->
+    <Compile Include="..\Shared\AppRuntimeSettingsTests.cs" Link="Shared\AppRuntimeSettingsTests.cs" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,25 @@
+<Project>
+
+  <!--
+    Runtime settings the five desktop apps share: Junction, Vesper Commander, Meridian, Aperture
+    and Reel each import this file. Libraries, Meridian's CLI and the tests do not, and the
+    framework's defaults for other applications are unchanged. docs/NATIVE-AOT.md ("GC settings
+    for an app") has the measurements and the advice for app authors.
+
+    RuntimeHostConfigurationOption is the form both kinds of build honour: a NativeAOT publish
+    bakes it into the exe (ILC's runtime knobs) and a JIT build writes it into the app's
+    runtimeconfig.json. A DOTNET_ environment variable still overrides it at run time (its value
+    in hex, DOTNET_GCLOHThreshold=80000 for this one).
+  -->
+  <ItemGroup>
+    <!--
+      Objects of 512 KB or more go on the large-object heap, instead of 85,000 bytes or more.
+      A text area makes its whole text a new string on every edit, so above 42,500 characters
+      each keystroke allocated on the large-object heap, and that heap is collected only with
+      gen 2: a background gen-2 collection every 5 to 8 keystrokes in an 89,000-character
+      request body in Meridian. With this, text up to about 262,000 characters stays in gen 0.
+    -->
+    <RuntimeHostConfigurationOption Include="System.GC.LOHThreshold" Value="524288" />
+  </ItemGroup>
+
+</Project>

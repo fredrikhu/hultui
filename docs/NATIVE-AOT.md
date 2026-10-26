@@ -79,6 +79,68 @@ Symptom of a missing setup: an MSB3073 link error whose command text contains
 `'vswhere.exe' is not recognized` — the linker path resolved, but `vswhere`'s
 error text was captured into the link command.
 
+## GC settings for an app
+
+A NativeAOT exe runs the same garbage collector as the JIT runtime, with the same defaults. The
+framework leaves those defaults alone; the settings below are an app's choice. HultUI's five apps
+share theirs in `apps/AppRuntime.props`, which each app's project imports.
+
+### How to set them
+
+Use `RuntimeHostConfigurationOption` with the GC's public names, in the app's project file:
+
+```xml
+<ItemGroup>
+  <RuntimeHostConfigurationOption Include="System.GC.LOHThreshold" Value="524288" />
+</ItemGroup>
+```
+
+A NativeAOT publish bakes the item into the exe, and a JIT build (`dotnet run`, the debugger)
+writes it into the app's `runtimeconfig.json`, so both behave alike. A `DOTNET_` environment
+variable still overrides it on a given machine (`DOTNET_GCLOHThreshold`, the value in hex).
+
+**Trap:** ILC's `--runtimeopt:` switch, which the SDK uses for `gcServer`, is not a general way in.
+`<IlcArg Include="--runtimeopt:GCLOHThreshold=80000" />` works, but
+`<IlcArg Include="--runtimeopt:GCgen0MaxBudget=600000" />` builds and is ignored: a probe exe still
+allocated 16.7 MB between gen-0 collections, and 6.1 MB with the `RuntimeHostConfigurationOption`
+form. Check that a value is in effect, not only configured:
+
+```csharp
+var config = GC.GetConfigurationVariables();      // "LOHThreshold", "GCGen0MaxBudget", ...
+int gen = GC.GetGeneration(new string('x', 150_000));  // a 300 KB string: 2 by default, 0 under 512 KB
+```
+
+### The large-object threshold: 512 KB in the apps
+
+Objects of 85,000 bytes or more go on the large-object heap, which is collected only with gen 2.
+`TextAreaElement` makes its whole text a new string on every edit, so a document above 42,500
+characters puts every keystroke on that heap, and typing brings a background gen-2 collection every
+few keys. The apps raise the threshold to 512 KB, which keeps text up to about 262,000 characters in
+gen 0.
+
+Measured in the apps' own views in AOT windows (round 5 of plan 17; three runs a side, alternated,
+idle-gated, accessibility off), typing 507 characters into the middle of an 89,000-character
+request body in Meridian:
+
+| | Default (85,000 B) | 512 KB |
+|---|---|---|
+| Gen-2 collections | 103 | 2 |
+| GC pause over the walk | 78.1 ms | 40.5 ms |
+| Frame p95 / p99 | 1.32 / 1.80 ms | 1.02 / 1.35 ms |
+| Per-key work p95 / p99 (handler and frames) | 2.08 / 2.56 ms | 1.85 / 2.17 ms |
+| Process CPU over the walk | 1.11 s | 0.83 s |
+| Private bytes after | 143.3 MB | 151.6 MB |
+
+The cost is memory while such a document is edited: the long strings now pass through gen 0 and
+gen 1, and GC committed memory rose 30.8 → 40.0 MB. The first collection after typing starts moves
+them up a generation and pauses 3–4 ms once. Elsewhere it helped or did nothing: Junction's
+History view (300 keys on a clone of this repository) kept 12.9 MB of large-object heap instead
+of 34.4 MB and ended at 240.7 MB private instead of 270.7 MB (−11 %),
+with 8 % less GC pause; Vesper's and Aperture's walks were unchanged; start-up did not move.
+
+Above about 262,000 characters a TextArea's text is a large object again. Editors of bigger
+documents need the text kept in pieces, which `TextAreaElement` does not do today.
+
 ## Measured results (HultUI.Samples.HelloWorld, win-x64)
 
 | | NativeAOT | Framework-dependent | Self-contained (no AOT) |

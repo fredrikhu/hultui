@@ -21,6 +21,9 @@
     <PublishAot>true</PublishAot>
   </PropertyGroup>
 
+  <!-- The runtime settings the five apps share (the GC's large-object threshold). -->
+  <Import Project="..\..\AppRuntime.props" />
+
   <ItemGroup>
     <InternalsVisibleTo Include="Aperture.Tests" />
   </ItemGroup>
