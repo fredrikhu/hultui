@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–5 landed, step 6 next (runtime GC options). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–6 landed, step 7 next (GPU). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -99,7 +99,7 @@ Correctness and round 4 objections first, then value per cost.
    reader −20…−27 KB/key; suite row: typing beside a large TextArea and checkboxes), **layout-virtuallist-
    offsets-kept** (a RowHeights list allocates a new `float[n+1]` every patch, twice after `InvalidateRows`:
    O(n) bytes per rebuild → 0; Vesper viewer find typing −9.4 %; suite row beside a 20,000-row list).
-6. **runtime-gc-gen0-budget-and-loh-threshold** (4) — in the five AOT apps: (a) gen-0 budget capped at 6 MB
+6. ~~**runtime-gc-gen0-budget-and-loh-threshold**~~ LANDED 828a7d69 (LOH threshold kept), b1323e9d (gen-0 cap declined) (4) — in the five AOT apps: (a) gen-0 budget capped at 6 MB
    (default 17.3 MB follows L3): working set Junction −10 %, Vesper −9 %, bytes per key unchanged; (b) LOH
    threshold ~512 KB: typing in a 42.5k–256k-character TextArea no longer triggers a gen-2 GC every 14–17
    keys. Each its own commit; time frame p95/p99 and `GC.GetTotalPauseDuration` on app walks and TODO.md
@@ -148,7 +148,7 @@ Re-ranked by the round 6 survey.
 - **junction-changes-composer** (6/8, app) — summary keystroke 95.8 KB; lists and diff unchanged: −60…−70 %.
 - **apps-aperture-components** (6/8, app) — rail + title bar: −25…−35 % per grid key. Also Aperture rebuilds on
   every resize step (92 KB, 63 patches): build only when the column count changes, as e6a432fa.
-- **apps-junction-highlight-prefetch** (5/8, app) — worker tokenizing 5.9 MB per History key at 500 ms (25× the
+- **apps-junction-highlight-prefetch** (5/8, app; priority up after r5 step 6: the worker drives 95 ms of GC pauses per 100 History keys and defeated the gen-0 cap) — worker tokenizing 5.9 MB per History key at 500 ms (25× the
   UI thread), 92.8 MB at start-up; tokenize only to the last hunk line / after the selection rests.
 - **text-lazy-line-runs** (5, lead after step 3) — undrawn lines' strings and run objects (50 % of text/wrap).
 - **dialog-scrim-button-role** (7, correctness bug, from r5 step 2) — `Dialog.Show`'s scrim has a click handler, so it is
@@ -178,6 +178,7 @@ Re-ranked by the round 6 survey.
 - **vesper-free-label-per-build** (8, lead) — `DriveInfo.AvailableFreeSpace` per pane per build: a disk query
   (or network round trip) per key on the UI thread; cache per folder.
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
+- **meridian-body-edit-bytes** (8/5, lead from r5 step 6) — editing an 89k-character request body allocates ~2.0 MB per keystroke on the UI thread (supports textarea-chunked-document or a Meridian fix).
 - **textarea-chunked-document** (5/4; user chose this option B, 2026-10-25, after step 6's LOH threshold) — store a
   TextArea's text in chunks; keep `string Text { get; set; }` (built on read, cached per version) and
   `OnTextChanged(Action<string>)`; add a read-only `TextAreaElement.Document` (`Length`, indexer,
@@ -402,6 +403,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 09abf712, dff306df | paint-blob-maps-frame-working-set | Suite row `terminal/dense colour screen, unique rows, forced frame` (1600×1000, 6,662 sub-blobs a frame). Kept blobs carry a frame stamp and glyph count; a full map releases only blobs drawn in neither this frame nor the last; next sweep when the map holds twice what the last kept (≥ 2,048); counters skip the pass when nothing is old; hard cap 262,144 glyphs → full clear. Blobs made per steady frame: dense terminal 2,338/5,877/12,520 → 0 (1200×900/1600×1000/4K), Chinese terminal 4,096/8,294 → 0; new row −23.2 % JIT, −22.5 % AOT; 0 slower; +0.3–0.6 KB/op one-time map growth. 190 frames identical; WSL 10,498 pass. |
 | 5 | ce70fec7, 415ecefa | layout-patch-keeps-layout-more-kinds | Suite row `input/type beside a large TextArea and checkboxes`. TextArea, Checkbox, RadioButton, ToggleSwitch and RichTextEditor opt into `PatchMarksOwnLayout` + `PatchThemesTwin`; TextArea/RichTextEditor `ApplyTheme` write padding/border only where they differ and mark layout (fixes: a theme switch without a rebuild now lays out a text area's new padding — Meridian's light-theme response drew at the dark padding; a rebuilt switch slides at the theme's `TransitionSeconds`). AOT per key: Meridian URL laid out 10.5 → 1.2, MeasureSize 365 → 47.5, frame −9.6 % reader on / −7.9 % off; Junction summary 10 → 0, 2,142 → 0, frame −5.4 % / −10.8 %, reader bytes −20.6 %. Suite 0 slower. Layout audit over 29 projects: no new differences; 70 scenes identical. |
 | 5 | a31a38c7, 93226dda | layout-virtuallist-offsets-kept | Suite rows `virtual/rebuild beside a 20,000-row RowHeights list` (+ `rows told`). `EnsureOffsets` fills a spare array, swaps only when an offset moved; `KeepUnchangedRows` keeps the computed offsets (no second array after `InvalidateRows`); +1 kept array per RowHeights list. Vesper viewer find typing 1,701.1 → 1,544.8 KB/key (−9.2 %); suite rows 90.3 → 12.2 KB/op (JIT −10.4 %) and 203.4 → 47.1 (AOT −13.6 %). WSL 10,523 pass. The height function still runs O(n) per patch. |
+| 5 | 828a7d69 | runtime-gc-loh-threshold | The five AOT apps import `apps/AppRuntime.props`: `RuntimeHostConfigurationOption System.GC.LOHThreshold = 524288` (baked into ILC's knob blob; `--runtimeopt:GCgen0MaxBudget` is silently ignored, so ILC runtimeopts can't be trusted key by key; a `DOTNET_GC*` env var still overrides). Real AOT windows, 3 runs a side: Meridian 89k-character body typing gen-2 GCs 103 → 2, GC pause −48 %, frame p95/p99 1.32/1.80 → 1.02/1.35 ms, CPU −25 %, private +5.8 %, slowest key +1.3 ms; Junction History private −11 % (LOH 34.4 → 12.9 MB); start-up unchanged. `AppRuntimeSettingsTests` linked into the five app test projects. NATIVE-AOT.md "GC settings for an app". Focus guard 0 over 111 launches. |
+| 5 | b1323e9d | runtime-gc-gen0-budget (declined) | A `System.GC.Gen0MaxBudget` cap of 6/8/10/12 MB: memory −1…−8.5 % in Vesper/Aperture but Junction History private +11 % at 6 MB (its highlight worker allocates ~6 MB per key; live data promoted), frame p99 and GC pause up at every value. DECISIONS.md. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -965,3 +968,8 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   find typing). Audit, pixels, all suites and WSL pass. Guideline note: a control that writes its own box in
   `ApplyTheme` must compare and mark layout, or a theme switch keeps the old box; then both patch flags take the
   layout pass out of every rebuild.
+- 2026-10-26: round 5 step 6 landed: the apps raise the GC's large-object threshold to 512 KB (828a7d69; typing in an
+  89k-character document: gen-2 GCs 103 → 2, pause −48 %, frame p99 −25 %); the gen-0 cap declined at 6–12 MB
+  (b1323e9d: Junction's highlight worker made it cost memory and pauses). Guideline notes: set GC knobs through
+  `RuntimeHostConfigurationOption` `System.GC.*`, not ILC runtimeopts, and verify in the exe; measure memory settings
+  on heavy real data; frame p99 over ~100 inputs is one frame — use 300+ inputs, per-key work percentiles, total pause.
