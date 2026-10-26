@@ -42,22 +42,32 @@ public static class AccessibilityTreeBuilder
     /// <param name="originY">The vertical half of <paramref name="originX"/>.</param>
     public static AccessibilityNode Build(Element root, FocusManager? focusManager = null,
         float originX = 0f, float originY = 0f)
+        => Build(root, focusManager, originX, originY, default);
+
+    /// <param name="scrollAbove">How far the node this tree's root goes under is scrolled, with
+    /// the scroll views above it: an open overlay's part goes under the window's root node
+    /// (<see cref="AccessibilityNode.ScrollAbove"/>), which may scroll, and the overlay does not
+    /// move with it.</param>
+    internal static AccessibilityNode Build(Element root, FocusManager? focusManager, float originX, float originY,
+        Point scrollAbove)
     {
         // Threaded as a negative scroll: the builder already subtracts an accumulated
         // offset from every box, which is exactly this with the other sign.
         float ox = -originX, oy = -originY;
-        var node = CreateNode(root, focusManager, ox, oy);
-        var (cx, cy) = ChildScroll(root, ox, oy);
+        var place = new Place(ox, oy, ox - scrollAbove.X, oy - scrollAbove.Y);
+        var box = root.Layout.AbsoluteBorderBox;
+        var node = CreateNode(root, focusManager, place.Unscrolled(box), place.ShiftX, place.ShiftY);
+        var childPlace = ChildPlace(root, place);
         // The root is the top-level visible region; descendants clipped out of it
         // (and out of any scroll view along the way) are marked offscreen.
-        var childClip = ClipForChildren(root, node.BoundingRect, ox, oy);
-        if (!TryBuildContent(root, node, cx, cy, childClip) && !TryBuildVirtualItems(root, node, cx, cy, childClip))
+        var childClip = ClipForChildren(root, place.OnScreen(box), place);
+        if (!TryBuildContent(root, node, childPlace, childClip) && !TryBuildVirtualItems(root, node, childPlace, childClip))
         {
             var pending = t_pending ??= [];
             int start = pending.Count;
             try
             {
-                BuildElementChildren(root, node, pending, focusManager, cx, cy, childClip);
+                BuildElementChildren(root, node, pending, focusManager, childPlace, childClip);
             }
             finally
             {
@@ -66,6 +76,33 @@ public static class AccessibilityTreeBuilder
             }
         }
         return node;
+    }
+
+    /// <summary>
+    /// Where the elements of a subtree sit. <see cref="ScrollX"/> is what is subtracted from an
+    /// element's box to put it on screen: the offsets of the scroll views above it, and, threaded
+    /// as a negative scroll, a sticky element's shift and an overlay's origin. Element boxes are
+    /// laid out ignoring scroll — a scroll view shifts its children only at render time — so the
+    /// walk sums it on the way down. <see cref="ShiftX"/> is the part of it that is no scroll
+    /// view's offset: what a node's own box keeps subtracted
+    /// (<see cref="AccessibilityNode.UnscrolledRect"/>), its place in its scroll views' content.
+    /// The scroll views' offsets are their nodes' (<see cref="AccessibilityNode.ScrollOffset"/>),
+    /// and a node's box on screen subtracts them from there.
+    /// </summary>
+    private readonly record struct Place(float ScrollX, float ScrollY, float ShiftX, float ShiftY)
+    {
+        /// <summary>A box on screen: what decides what is clipped out of view.</summary>
+        public Rect OnScreen(Rect box) => new(box.X - ScrollX, box.Y - ScrollY, box.Width, box.Height);
+
+        /// <summary>A box in the content of the scroll views above: what a node keeps.</summary>
+        public Rect Unscrolled(Rect box) => new(box.X - ShiftX, box.Y - ShiftY, box.Width, box.Height);
+
+        /// <summary>Inside a scroll view scrolled this far.</summary>
+        public Place Scrolled(float x, float y) => this with { ScrollX = ScrollX + x, ScrollY = ScrollY + y };
+
+        /// <summary>A sticky element, moved by its shift, subtree and all.</summary>
+        public Place Shifted(Point shift) =>
+            new(ScrollX - shift.X, ScrollY - shift.Y, ShiftX - shift.X, ShiftY - shift.Y);
     }
 
     private static bool RectsIntersect(Rect a, Rect b) =>
@@ -80,32 +117,28 @@ public static class AccessibilityTreeBuilder
 
     /// <summary>The visible region for an element's children: its own clip, narrowed
     /// to the scroll-view viewport if this element scrolls.</summary>
-    private static Rect ClipForChildren(Element element, Rect clip, float scrollX, float scrollY)
+    private static Rect ClipForChildren(Element element, Rect clip, Place place)
     {
         if (element is not ScrollViewElement) return clip;
-        var cb = element.Layout.AbsoluteContentBox;
-        return IntersectRects(clip, new Rect(cb.X - scrollX, cb.Y - scrollY, cb.Width, cb.Height));
+        return IntersectRects(clip, place.OnScreen(element.Layout.AbsoluteContentBox));
     }
 
     // Element AbsoluteBorderBox is laid out ignoring scroll — a ScrollView shifts
     // its children only at render time. So the on-screen rect of a node is its
     // box minus the accumulated scroll offset of its ancestor scroll views. We
     // thread that accumulation down the element tree (which the a11y flattening
-    // walks anyway) and bake scroll-adjusted rects into the nodes, so bounds and
-    // hit-testing match what the user actually sees.
-    private static (float x, float y) ChildScroll(Element element, float accX, float accY)
-        => element is ScrollViewElement sv ? (accX + sv.ScrollOffsetX, accY + sv.ScrollOffsetY) : (accX, accY);
+    // walks anyway): what is clipped out of view is decided on screen, and a node
+    // keeps its box in its scroll views' content, which a scroll leaves as it is.
+    private static Place ChildPlace(Element element, Place place)
+        => element is ScrollViewElement sv ? place.Scrolled(sv.ScrollOffsetX, sv.ScrollOffsetY) : place;
 
-    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager, float scrollX, float scrollY)
-    {
-        var box = element.Layout.AbsoluteBorderBox;
-        return CreateNode(element, focusManager, new Rect(box.X - scrollX, box.Y - scrollY, box.Width, box.Height),
-            scrollX, scrollY);
-    }
-
-    /// <param name="onScreen">The node's box: the element's on screen, the scroll above it applied.</param>
-    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager, Rect onScreen,
-        float scrollX, float scrollY)
+    /// <param name="unscrolled">The node's box: the element's in the content of the scroll views
+    /// above it (<see cref="AccessibilityNode.UnscrolledRect"/>).</param>
+    /// <param name="shiftX">What the box has subtracted that is no scroll view's offset
+    /// (<see cref="Place.ShiftX"/>): a scroll view's viewport keeps it subtracted too.</param>
+    /// <param name="shiftY">The vertical half of <paramref name="shiftX"/>.</param>
+    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager, Rect unscrolled,
+        float shiftX, float shiftY)
     {
         var textSource = element.AccessibleTextSource;
         // A source that makes its text on request gives a version, and the value comes from it
@@ -116,7 +149,7 @@ public static class AccessibilityTreeBuilder
             ResolveRole(element),
             ResolveName(element),
             element.AccessibleDescription,
-            onScreen,
+            unscrolled,
             isFocusable: element.IsFocusable,
             isFocused: focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element),
             isEnabled: element.IsEnabledForAccessibility,
@@ -129,14 +162,14 @@ public static class AccessibilityTreeBuilder
         node.NativeContent = element.NativeAccessibleContent;
         if (element is IRangeValueElement range)
             node.Range = AccessibleRange.Of(range);
-        // What ChildScroll subtracts from everything under it, and what UI Automation's Scroll
+        // What ChildPlace subtracts from everything under it, and what UI Automation's Scroll
         // pattern answers from: it read the live scroll view through a walk of the element tree on
         // the client's thread.
         if (element is ScrollViewElement sv)
         {
             var viewport = element.Layout.AbsoluteContentBox;
             node.SetScrollView(new Point(sv.ScrollOffsetX, sv.ScrollOffsetY),
-                new Rect(viewport.X - scrollX, viewport.Y - scrollY, viewport.Width, viewport.Height),
+                new Rect(viewport.X - shiftX, viewport.Y - shiftY, viewport.Width, viewport.Height),
                 new Size(sv.ContentWidth, sv.ContentHeight));
         }
         if (textSource is not null)
@@ -151,10 +184,10 @@ public static class AccessibilityTreeBuilder
     /// <summary>Builds <paramref name="node"/>'s children from <paramref name="element"/>'s, on top
     /// of <paramref name="pending"/>, and gives them to the node.</summary>
     private static void BuildElementChildren(Element element, AccessibilityNode node, List<AccessibilityNode> pending,
-        FocusManager? focusManager, float scrollX, float scrollY, Rect clip)
+        FocusManager? focusManager, Place place, Rect clip)
     {
         int start = pending.Count;
-        BuildChildren(element, pending, focusManager, scrollX, scrollY, clip);
+        BuildChildren(element, pending, focusManager, place, clip);
         int count = pending.Count - start;
         if (count == 0) return;
         var children = new AccessibilityNode[count];
@@ -164,42 +197,43 @@ public static class AccessibilityTreeBuilder
     }
 
     private static void BuildChildren(Element element, List<AccessibilityNode> pending, FocusManager? focusManager,
-        float scrollX, float scrollY, Rect clip)
+        Place place, Rect clip)
     {
         var children = element.Children;   // by index: foreach over the interface boxes an enumerator
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
             // A sticky child is moved by its shift, subtree and all — to the builder, a negative scroll.
-            var stick = child.PositionRead.Type == Layout.PositionType.Sticky ? child.StickyShift : default;
-            BuildChild(child, pending, focusManager, scrollX - stick.X, scrollY - stick.Y, clip);
+            BuildChild(child, pending, focusManager,
+                child.PositionRead.Type == Layout.PositionType.Sticky ? place.Shifted(child.StickyShift) : place, clip);
         }
     }
 
     private static void BuildChild(Element child, List<AccessibilityNode> pending, FocusManager? focusManager,
-        float scrollX, float scrollY, Rect clip)
+        Place place, Rect clip)
     {
         // The child's own box sits in the parent's scroll space; its own
         // scroll (if it's a ScrollView) applies to its descendants.
-        var (cx, cy) = ChildScroll(child, scrollX, scrollY);
-        var childClip = ClipForChildren(child, clip, scrollX, scrollY);
+        var childPlace = ChildPlace(child, place);
+        var childClip = ClipForChildren(child, clip, place);
         if (IsSemantic(child))
         {
-            var childNode = CreateNode(child, focusManager, scrollX, scrollY);
-            childNode.IsOffscreen = !RectsIntersect(clip, childNode.BoundingRect);
+            var box = child.Layout.AbsoluteBorderBox;
+            var childNode = CreateNode(child, focusManager, place.Unscrolled(box), place.ShiftX, place.ShiftY);
+            childNode.IsOffscreen = !RectsIntersect(clip, place.OnScreen(box));
             pending.Add(childNode);
             // A virtualized list only materializes on-screen rows as elements;
             // expose every item to assistive tech instead. Otherwise, unless a
             // text-only button folded its text into its own name (which would
             // double-announce), walk the real children.
-            if (!TryBuildContent(child, childNode, cx, cy, childClip)
-                && !TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
-                BuildElementChildren(child, childNode, pending, focusManager, cx, cy, childClip);
+            if (!TryBuildContent(child, childNode, childPlace, childClip)
+                && !TryBuildVirtualItems(child, childNode, childPlace, childClip) && !ConsumesTextContent(child))
+                BuildElementChildren(child, childNode, pending, focusManager, childPlace, childClip);
         }
         else
         {
             // Flatten: promote this element's children directly into the parent's
-            BuildChildren(child, pending, focusManager, cx, cy, childClip);
+            BuildChildren(child, pending, focusManager, childPlace, childClip);
         }
     }
 
@@ -208,7 +242,7 @@ public static class AccessibilityTreeBuilder
     /// place of its element children. Bounds come in device pixels from the element's content
     /// box and are made layout units here, scroll-adjusted and clipped like any child's.
     /// </summary>
-    private static bool TryBuildContent(Element element, AccessibilityNode node, float scrollX, float scrollY, Rect clip)
+    private static bool TryBuildContent(Element element, AccessibilityNode node, Place place, Rect clip)
     {
         if (element is not IAccessibleContentSource source) return false;
         var content = element.Layout.AbsoluteContentBox;
@@ -216,21 +250,25 @@ public static class AccessibilityTreeBuilder
         var roots = source.AccessibleContent;
         if (roots.Count > 0)
             node.SetChildren(BuildContent(AccessibleOwnerSlots.SlotOf(element.Id), roots,
-                content.X - scrollX, content.Y - scrollY, scale, clip));
+                place.Unscrolled(content), place.OnScreen(content), scale, clip));
         return true;
     }
 
     /// <summary>One node per item of <paramref name="data"/>, each with its own under it. The
     /// owner's slot comes in looked up: it is the same for every node.</summary>
+    /// <param name="unscrolled">The source's content box in its scroll views' content: what the
+    /// nodes' boxes are placed in.</param>
+    /// <param name="onScreen">The same on screen: what decides what is clipped out of view.</param>
     private static AccessibilityNode[] BuildContent(uint ownerSlot, IReadOnlyList<AccessibleContentNode> data,
-        float originX, float originY, float scale, Rect clip)
+        Rect unscrolled, Rect onScreen, float scale, Rect clip)
     {
         var nodes = new AccessibilityNode[data.Count];
         for (int i = 0; i < nodes.Length; i++)
         {
             var item = data[i];
             var b = item.Bounds;
-            var rect = new Rect(originX + b.X / scale, originY + b.Y / scale, b.Width / scale, b.Height / scale);
+            float x = b.X / scale, y = b.Y / scale, width = b.Width / scale, height = b.Height / scale;
+            var rect = new Rect(unscrolled.X + x, unscrolled.Y + y, width, height);
             var node = new AccessibilityNode(
                 ContentNodeId.ForSlot(ownerSlot, item.Key),
                 item.Role,
@@ -246,11 +284,11 @@ public static class AccessibilityTreeBuilder
                 // Described content says checked for a radio or a tab; for those, that is selected.
                 isSelected: item.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab ? item.IsToggled : null)
             {
-                IsOffscreen = !RectsIntersect(clip, rect),
+                IsOffscreen = !RectsIntersect(clip, new Rect(onScreen.X + x, onScreen.Y + y, width, height)),
             };
             var children = item.Children;
             if (children.Count > 0)
-                node.SetChildren(BuildContent(ownerSlot, children, originX, originY, scale, clip));
+                node.SetChildren(BuildContent(ownerSlot, children, unscrolled, onScreen, scale, clip));
             nodes[i] = node;
         }
         return nodes;
@@ -261,7 +299,7 @@ public static class AccessibilityTreeBuilder
     /// its item nodes and returns true; otherwise returns false so the caller
     /// falls back to walking realized children.
     /// </summary>
-    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, float scrollX, float scrollY, Rect clip)
+    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, Place place, Rect clip)
     {
         if (element is not IAccessibleItemSource source) return false;
         // A container whose rows are composite (a grid row of cards) publishes nothing of
@@ -273,7 +311,7 @@ public static class AccessibilityTreeBuilder
         if (source.ItemCount <= MaxEagerVirtualItems)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).
-            BuildVirtualItems(element, source, node, scrollX, scrollY, clip);
+            BuildVirtualItems(element, source, node, place, clip);
         else
             // Too large to expand eagerly: mark it so the bridge provisions items
             // on demand by index instead of building/diffing them all.
@@ -289,7 +327,7 @@ public static class AccessibilityTreeBuilder
     /// hit-testing stay correct as the list scrolls.
     /// </summary>
     private static void BuildVirtualItems(Element list, IAccessibleItemSource source,
-        AccessibilityNode listNode, float scrollX, float scrollY, Rect clip)
+        AccessibilityNode listNode, Place place, Rect clip)
     {
         int count = source.ItemCount;
         if (count == 0) return;
@@ -304,14 +342,13 @@ public static class AccessibilityTreeBuilder
             // A container with uneven items (a menu with separators in it) places them
             // itself; everything else stacks at one height.
             var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
-            float top = content.Y + localTop;
-            var rect = new Rect(content.X - scrollX, top - scrollY, content.Width, height);
+            var box = new Rect(content.X, content.Y + localTop, content.Width, height);
             items[i] = new AccessibilityNode(
                 VirtualItemId.ForSlot(slot, i),
                 AccessibilityRole.ListItem,
                 source.GetItemLabel(i),
                 description: null,
-                rect,
+                place.Unscrolled(box),
                 isFocusable: false,
                 isFocused: false,
                 isEnabled: true,
@@ -321,7 +358,7 @@ public static class AccessibilityTreeBuilder
                 // scrolled nothing changed no node, and no reader heard which item was selected.
                 isSelected: source.IsItemSelected(i))
             {
-                IsOffscreen = !RectsIntersect(clip, rect),
+                IsOffscreen = !RectsIntersect(clip, place.OnScreen(box)),
             };
         }
         listNode.SetChildren(items);
@@ -418,7 +455,7 @@ public static class AccessibilityTreeBuilder
             || element.AccessibleTextSource is not null || !element.NativeAccessibleContent.IsEmpty
             || !IsSemantic(element))
             return false;
-        var node = CreateNode(element, focusManager, applied.BoundingRect, 0f, 0f);
+        var node = CreateNode(element, focusManager, applied.UnscrolledRect, 0f, 0f);
         node.IsOffscreen = applied.IsOffscreen;
         // Not compared by the differ, so not told; a bridge keeps it from the node it was made from.
         if (node.IsFocusable != applied.IsFocusable) return false;

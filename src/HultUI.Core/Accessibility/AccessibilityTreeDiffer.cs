@@ -210,24 +210,26 @@ public static class AccessibilityTreeDiffer
         // the bounds on screen and the offscreen state: the bridges read them from the current
         // tree. Each rebuild during a wheel turn over 1,000 rows raised a bounds event for each of
         // the ~130 rows on screen.
-        if (!(prev.IsOffscreen && curr.IsOffscreen) && Moved(prev.BoundingRect, curr.BoundingRect, prevScroll, currScroll))
+        if (!(prev.IsOffscreen && curr.IsOffscreen) && Moved(prev.UnscrolledRect, curr.UnscrolledRect, prevScroll, currScroll))
             changes.Add(new PropertyChange(curr, AccessibilityProperties.BoundingRect));
         if (rare && prev.ScrollOffset != curr.ScrollOffset)
             changes.Add(new PropertyChange(curr, AccessibilityProperties.ScrollPosition, prev));
     }
 
     /// <summary>
-    /// Whether a node moved or resized within its scroll views: its box on screen with the scroll
-    /// above it added back, compared. Unscrolled, exactly as before; scrolled, to a hundredth of a
-    /// unit, because the builder's subtraction and this addition can each round a float.
+    /// Whether a node moved or resized within its scroll views: its box in their content
+    /// (<see cref="AccessibilityNode.UnscrolledRect"/>, the box on screen with the scroll above it
+    /// added back), compared. With the same scroll above, exactly; scrolled, to a hundredth of a
+    /// unit, as when the scroll was added back to the box on screen here and each could round a
+    /// float.
     /// </summary>
-    private static bool Moved(Rect prev, Rect curr, Point prevScroll, Point currScroll)
+    internal static bool Moved(Rect prev, Rect curr, Point prevScroll, Point currScroll)
     {
         if (prevScroll == currScroll)
             return prev != curr;
         const float tolerance = 0.01f;
-        return MathF.Abs(prev.X + prevScroll.X - (curr.X + currScroll.X)) > tolerance
-            || MathF.Abs(prev.Y + prevScroll.Y - (curr.Y + currScroll.Y)) > tolerance
+        return MathF.Abs(prev.X - curr.X) > tolerance
+            || MathF.Abs(prev.Y - curr.Y) > tolerance
             || MathF.Abs(prev.Width - curr.Width) > tolerance
             || MathF.Abs(prev.Height - curr.Height) > tolerance;
     }

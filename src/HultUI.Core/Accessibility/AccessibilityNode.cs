@@ -12,12 +12,49 @@ public sealed class AccessibilityNode
 
     /// <summary>The node's box on screen, in layout units: every scroll container above it
     /// subtracted (<see cref="ScrollOffset"/>).</summary>
-    public Rect BoundingRect { get; }
+    /// <remarks>Worked out from the node's place in its scroll views' content
+    /// (<see cref="UnscrolledRect"/>) less the offsets of the scroll views above it, read up its
+    /// <see cref="Parent"/>s: a scroll changes one node's offset, and every box under it reads
+    /// the move from there.</remarks>
+    public Rect BoundingRect
+    {
+        get
+        {
+            var rect = _rect;
+            var above = ScrollAbove();
+            return new Rect(rect.X - above.X, rect.Y - above.Y, rect.Width, rect.Height);
+        }
+    }
+
+    /// <summary>
+    /// The node's box where it sits in the content of the scroll views above it, in layout units:
+    /// <see cref="BoundingRect"/> with their offsets added back. What the builder makes and the
+    /// differ compares: a scroll moves a node on screen and leaves this as it was.
+    /// </summary>
+    internal Rect UnscrolledRect => _rect;
+
+    // The node's box in its scroll views' content (UnscrolledRect).
+    private readonly Rect _rect;
+
+    /// <summary>
+    /// How far the scroll views above this node are scrolled, summed: the offsets of its
+    /// <see cref="Parent"/>s, added from the root down, in the order the builder adds them while it
+    /// walks down, so <see cref="BoundingRect"/> comes out as the builder's subtraction did.
+    /// </summary>
+    internal Point ScrollAbove()
+    {
+        var parent = Parent;
+        if (parent is null) return default;
+        var above = parent.ScrollAbove();
+        var offset = parent.ScrollOffset;
+        return new Point(above.X + offset.X, above.Y + offset.Y);
+    }
 
     /// <summary>
     /// How far this node's content is scrolled, in layout units: a scroll view's (a virtual
     /// list's) offset; zero for anything that does not scroll. Its descendants' bounds have it
-    /// subtracted, so a scroll moves them on screen and leaves them where they were within it.
+    /// subtracted (<see cref="BoundingRect"/>), so a scroll moves them on screen and leaves them
+    /// where they were within it (<see cref="UnscrolledRect"/>).
     /// </summary>
     public Point ScrollOffset
     {
@@ -35,8 +72,18 @@ public sealed class AccessibilityNode
     /// this tree was built: what UI Automation's Scroll pattern answers, on the client's thread.
     /// Null for anything that does not scroll.
     /// </summary>
-    public AccessibleScrollExtent? ScrollExtent =>
-        _extras?.Scroll is { IsScrollView: true } s ? new AccessibleScrollExtent(s.Viewport, s.Content) : null;
+    public AccessibleScrollExtent? ScrollExtent
+    {
+        get
+        {
+            if (_extras?.Scroll is not { IsScrollView: true } s) return null;
+            // Kept where it sits in the content of the views above, as the node's box is.
+            var above = ScrollAbove();
+            var viewport = s.Viewport;
+            return new AccessibleScrollExtent(
+                new Rect(viewport.X - above.X, viewport.Y - above.Y, viewport.Width, viewport.Height), s.Content);
+        }
+    }
 
     /// <summary>
     /// The list a node of a list stands for (<see cref="IAccessibleItemSource"/>): its items' nodes
@@ -55,7 +102,9 @@ public sealed class AccessibilityNode
         }
     }
 
-    /// <summary>Gives the node its scroll view's geometry (<see cref="ScrollExtent"/>) and offset.</summary>
+    /// <summary>Gives the node its scroll view's geometry (<see cref="ScrollExtent"/>) and offset. The
+    /// viewport is where it sits in the content of the scroll views above, as the node's own box
+    /// (<see cref="UnscrolledRect"/>).</summary>
     internal void SetScrollView(Point offset, Rect viewport, Size content)
     {
         var scroll = Scroll;
@@ -315,12 +364,14 @@ public sealed class AccessibilityNode
     private static int TriState(bool? value, int shift) =>
         value is { } v ? (v ? 3 : 1) << shift : 0;
 
+    /// <param name="unscrolledRect">The node's box in the content of the scroll views above it
+    /// (<see cref="UnscrolledRect"/>); a node that is no tree's, or the root's, is on screen there.</param>
     internal AccessibilityNode(
         ElementId elementId,
         AccessibilityRole role,
         string? name,
         string? description,
-        Rect boundingRect,
+        Rect unscrolledRect,
         bool isFocusable = false,
         bool isFocused = false,
         bool isEnabled = true,
@@ -334,7 +385,7 @@ public sealed class AccessibilityNode
         ElementId = elementId;
         Role = role;
         Name = name;
-        BoundingRect = boundingRect;
+        _rect = unscrolledRect;
         if (description is not null || value is not null || automationId is not null)
             _extras = new RareFields { Description = description, Value = value, AutomationId = automationId };
         _flags = (ushort)((isFocusable ? FocusableBit : 0) | (isFocused ? FocusedBit : 0)

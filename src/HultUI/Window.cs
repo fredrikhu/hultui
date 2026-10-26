@@ -597,7 +597,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             var overlay = _overlays[i];
             if (!overlay.IsHitTestable) continue;
-            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y));
+            // Under the root's node, whose scroll (a root that is a scroll view) it does not take.
+            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset));
         }
         return tree;
     }
@@ -1007,7 +1008,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             if (!overlay.IsHitTestable || !overlay.A11yStale) continue;
             overlay.A11yStale = false;
             int at = OverlayNodeIndex(tree, overlay.Content);
-            var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y);
+            var part = AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y, tree.ScrollOffset);
             AccessibilityOverlayPartsBuilt++;
             var partDiff = AccessibilityTreeDiffer.Diff(tree.Children[at], part);
             tree.ReplaceChild(at, part);
