@@ -122,6 +122,9 @@ static partial class Scenarios
                 return SelectionWalk(ctx, _ =>
                     bridge.Diffs.Count == 0 ? "the bridge received no change"
                     : !HoldsItems(bridge.CurrentTree, 3_000) ? "the tree does not hold the list's 3,000 items"
+                    // Told on the list's node since step 14: its items have none.
+                    : !bridge.Diffs.Any(d => d.PropertyChanged.Any(c => c.PropertyName == AccessibilityProperties.ItemSelection))
+                        ? "the bridge was not told the selection moved"
                     : null,
                     reset: bridge.ClearDiffs, itemRows: true, count: 3_000);
             });
