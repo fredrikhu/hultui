@@ -187,6 +187,19 @@ Re-ranked by the round 6 survey.
   keystroke. Medium–large: undo, find, the a11y text pattern, tests reading `Text`. Only worth it if documents
   above ~256k characters matter once the threshold has landed.
 - **vk-startup-preload** (3, low) — the GL preload runs only with `HULTUI_GL_PRELOAD=1` and only Reel calls it.
+- **gl-driver-thread-walk** (3, GL on NVIDIA; r5 step 7's gl-first-use-flush trace, no code) — Meridian's first-response
+  flush (43–75 ms in process, JIT) is one glyph-atlas upload (`glTexSubImage2D`, 508×13 R8) inside which NVIDIA's GL
+  driver walks every thread on the system: a driver thread in `Thread32Next` and `NtMapViewOfSection`, the render
+  thread polling `NtQueryInformationThread` and sleeping (236 of 237 samples). It lands in the first GL-heavy frame
+  after the process gains threads (the send adds 8): with 14 pool threads added at 2 s it moved to the first palette
+  open (162 ms) and the send had none. Ruled out: Skia program compiles (none in that frame), GC (a no-GC region left
+  it at 54 ms; the 2 GCs inside take 3 ms), the GPU (a `glFinish` after every frame: still 56 ms), the upload's shape
+  (the same upload into a texture of our own: 0.19 ms the first time), the pool grown before the window (still
+  49–56 ms). The Vulkan renderer has no such stall (Flush max 11 ms, the first frame; Present max 2.8). The first
+  frame's flush (26–29 ms) is Skia's six program compiles (`glCreateProgram` 21 ms). Fix options, none tried: an
+  NVIDIA application profile with Threaded optimization off for the GL apps (a driver setting the installer would
+  write: the user's call), or no thread creation on the GL apps' interaction paths; warming programs at idle does not
+  touch it. Probe: scratchpad `r5b7/` (host `MeridianMode.cs`, `Sampler.cs`, `AllThreads.cs`, `probe-part3.patch`).
 - **layout-ordered-children** (1, low) — suite rows only; every app list is virtual.
 - **apps-tokenize-on-ui-thread** (5/8, low).
 - **Suite scenarios** (8): document-switch (Junction Files 222 KB/key), image-grid (Aperture posters 157 KB/key).
