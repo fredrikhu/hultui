@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–11 landed, step 12 next (Vesper components). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–12 landed, step 13 next (a11y layout refresh in place). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -129,7 +129,7 @@ Correctness and round 4 objections first, then value per cost.
     wrapper closure (~320 → 60–100 B per registration estimated, −11…−16 % per key). Prototype (b) first.
 11. ~~**apps-meridian-components**~~ LANDED ff6262ff (6/8, app) — title bar, rail, request tree, response as parts; URL typing opts
     out: 309–312 KB/keystroke, the tree 120 KB (O(requests)); −50…−70 %.
-12. **apps-vesper-components** (6/8, app) — per-pane header/footer, rail, chrome as parts: panes are 71 % of the
+12. ~~**apps-vesper-components**~~ LANDED fcf366c6 (6/8, app) — per-pane header/footer, rail, chrome as parts: panes are 71 % of the
     build; −45…−80 % per key.
 13. **a11y-layout-refresh-in-place** (7, large) — a layout-due refresh walks elements against the applied tree
     and updates offscreen bits, scroll offsets and moved rects in place (scroll-space rects), falling back to
@@ -143,6 +143,13 @@ Correctness and round 4 objections first, then value per cost.
 
 Re-ranked by the round 6 survey.
 
+- **vesper-marks-in-row-shape** (6/8, lead from r5 step 12) — a mark remakes every visible row because marks are in
+  the rows' shape: ~150 KB of what is left on Insert, Space and type-to-find (190–209 KB/key).
+- **vesper-transfer-progress-rebuilds** (6/8, lead from r5 step 12) — transfer progress still rebuilds the whole
+  window about every 40 ms; route it through the footer/progress part.
+- **vesper-own-selection-revisit** (1/6, lead from r5 step 12) — Vesper's panes kept their own selection highlight
+  (68817800) because the window build was most of a key; with parts that is no longer true. Re-measure
+  `RowHighlight` on Detail/Brief.
 - **meridian-find-typing** (5/8, lead from r5 step 11) — find typing in a 2,000-line response is still 1,529 KB per
   character after the pane stopped rebuilding the window, all in the search and the span merge.
 - **meridian-method-popover-double-build** (6/8, lead from r5 step 11) — picking a method builds twice: the row
@@ -441,6 +448,7 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 76b6f78e | events-handler-lists-kept | A patch sheds app handlers in place and keeps the lists, dropping only types nothing listens for (mid-dispatch copy-on-write unchanged): patch 208–328 → 0 B; per key −2…−5 % (Vesper Detail −4.7 %). Under the bar alone; the base for 574f43a7. |
 | 5 | 574f43a7 | events-handler-array | Re-opens P4's inline half with rebuild-churn evidence: one `EventHandlerEntry[]` per element (24 B entries: typed delegate, phase/flags, an `EventKind` with a static invoker per event type), the first two handlers in one 72 B array reused by patches, no wrapper closure. Per key JIT/AOT: Vesper Detail −14 %, Meridian URL −13 %, Meridian History −12 %, Junction summary −20 %; first handler 424 → 72 B, second 208/88 → 0. Retained: handled Box 1,005 → 654 B, TextInput 3,912 → 1,856 B, 10,000 rows of two handled boxes −30 %. Dispatch time flat or faster (depth 8 all listen 117 → 88 ns JIT). Suite: 10 rows −19…−35 % allocation, none more, 0 slower (TableView 10k sort +4 % AOT only, unexplained, DECISIONS.md). Order, exact-type match, copy-on-write, live pinning, passive handlers kept. P4 bitmask stays declined. |
 | 5 | ff6262ff | apps-meridian-components | Title bar, rail, request tree and response pane are kept `Part`s reading `_partRevision` (`MarkDirty`/`Rerender` bump it); editor edits (URL, headers, params, body, assertions, extractions) go through `DocEdited` view-only unless the edit flips the unsaved dot; sub-tabs, URL box, History walk, filters, search and environment values view-only; the response pane's tabs, pretty/raw and find bar rebuild the pane alone (`ResponseDirty`). Headless KB/key (JIT = AOT within 1 KB): URL 237 → 72 (−70 %), with 2,000-line JSON 259 → 72 (−72 %), 200 requests 938 → 72 (−92 %, scaling gone); header/param/body −64…−70 %; History Down −35 %, search −51 %; environment value −33 %; find typing −12 % (window builds per char 1 → 0); patches per key 218 → 54; with a reader −58…−92 %. Time −1…−22 % (frames dominate a key). Suite 0 slower/0 faster ×2; 48 scenes identical (pixels, a11y tree, focus) JIT + AOT. 12 PartTests vs forced full rebuilds, 11/11 mutations caught. |
+| 5 | fcf366c6 | apps-vesper-components | Title bar, rail, command line and per pane the tab strip, path trail (path + result-set pill), column header and footer are kept parts placed through `Part.Place()` from the app's build (a stale part rebuilds right there, so `OnAfterBuild` sees the current field and no part builds before its parent removes it). `MarkViewDirty` compares only what a view-only change can move (active pane, footer marks/filter/cut/decodes, command-line filter/notice/prompt); navigation uses `PaneDirty` (that pane's parts only). Row presses, marks, type-to-find, Tab, Brief scrolling, landings and dialog list walks view-only; sort-column hover rebuilds one header. Fix: a duplicated tab's view/sort set before its build. KB/key (AOT within 2 %): Detail 210 → 34 (−84 %), partner 218 → 44 (−80 %), Brief 199 → 37 (−81 %), Thumbnails 219 → 58 / 257 → 94, Insert/Space 362 → 190 (−47 %), Tab 207 → 105, folder in/out 554 → 273, type-to-find 365 → 209, sort hover 378 → 25 (−93 %), preview 329 → 73; with a reader −31…−80 %. AOT time −7…−21 % (folder I/O flat). Patches per Detail key 169 → 7, resolves 181 → 19. Suite 0/0 ×2; 93 scenes identical (pixels, layout, a11y, focus) JIT + AOT. 11 PartTests, 32/33 mutations caught (survivor a redundant `FlexShrink(0)`). |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -1051,3 +1059,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   outside a handler it can rebuild before the app's rebuild removes it; only parts that never shrank need
   `FlexShrink(0)`. WSL: `NarrowEditorLayoutTests.Tab_titles_and_sub_tabs_stay_on_one_line…` fails on Fedora on
   the baseline cd1b374f too (not this change) — check it in the full-suite step and on CI's Ubuntu run.
+- 2026-10-26: round 5 step 12 landed (fcf366c6): Vesper's chrome and per-pane header/trail/footer are kept parts,
+  placed from the app's build with `Part.Place()`; Detail key 210 → 34 KB (−84 %), Brief −81 %, partner walk −80 %,
+  AOT time −7…−21 %; 93 scenes identical. Guideline notes (in REACTIVITY.md): place parts from the parent's build;
+  in the view-only path compare only the few inputs such a change can move; split a part by what changes
+  together; set what a build shows before asking for the build. Leads to Waiting: marks in row shape, transfer
+  progress rebuilds, Vesper own-selection re-examine.
