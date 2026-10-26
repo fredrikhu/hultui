@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–10 landed, step 11 next (Meridian components). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–11 landed, step 12 next (Vesper components). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -127,7 +127,7 @@ Correctness and round 4 objections first, then value per cost.
     (a) a patch reuses the live element's handler lists (patch copy 13.2 → 1.9 KB; Vesper −6.9 %),
     (b) inline handler storage with a typed delegate per entry instead of `Dictionary<Type, List>` + a
     wrapper closure (~320 → 60–100 B per registration estimated, −11…−16 % per key). Prototype (b) first.
-11. **apps-meridian-components** (6/8, app) — title bar, rail, request tree, response as parts; URL typing opts
+11. ~~**apps-meridian-components**~~ LANDED ff6262ff (6/8, app) — title bar, rail, request tree, response as parts; URL typing opts
     out: 309–312 KB/keystroke, the tree 120 KB (O(requests)); −50…−70 %.
 12. **apps-vesper-components** (6/8, app) — per-pane header/footer, rail, chrome as parts: panes are 71 % of the
     build; −45…−80 % per key.
@@ -142,6 +142,11 @@ Correctness and round 4 objections first, then value per cost.
 ### Waiting
 
 Re-ranked by the round 6 survey.
+
+- **meridian-find-typing** (5/8, lead from r5 step 11) — find typing in a 2,000-line response is still 1,529 KB per
+  character after the pane stopped rebuilding the window, all in the search and the span merge.
+- **meridian-method-popover-double-build** (6/8, lead from r5 step 11) — picking a method builds twice: the row
+  handler and `SetMethod` both call `MarkDirty`.
 
 - **a11y-atspi-snapshot-per-diff + apps-scenario-atspi-rows** (7, Linux) — 265 B per node per apply; AT-SPI steps
   3.9–4.1× UIA's; keep objects by path; needs a suite seam. After step 13 only structural applies remain.
@@ -435,6 +440,7 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 8157c282 | junction-tags-selection-highlight | Tags list draws the caret (`Neutral900`, `RadiusRow`); rows ignore `selected`. Tags Down 87.4 → 40.6 KB/key (−54 %), reader −54 %, time −6…−15 %; elements per key 45.5 → 1.5. 74 scenes identical (pixels, a11y, focus). History (affordance in the row's flow, selection-dependent hover tint — round 5 question 5) and Vesper's cursor (zebra, partner ring) declined, 68817800. |
 | 5 | 76b6f78e | events-handler-lists-kept | A patch sheds app handlers in place and keeps the lists, dropping only types nothing listens for (mid-dispatch copy-on-write unchanged): patch 208–328 → 0 B; per key −2…−5 % (Vesper Detail −4.7 %). Under the bar alone; the base for 574f43a7. |
 | 5 | 574f43a7 | events-handler-array | Re-opens P4's inline half with rebuild-churn evidence: one `EventHandlerEntry[]` per element (24 B entries: typed delegate, phase/flags, an `EventKind` with a static invoker per event type), the first two handlers in one 72 B array reused by patches, no wrapper closure. Per key JIT/AOT: Vesper Detail −14 %, Meridian URL −13 %, Meridian History −12 %, Junction summary −20 %; first handler 424 → 72 B, second 208/88 → 0. Retained: handled Box 1,005 → 654 B, TextInput 3,912 → 1,856 B, 10,000 rows of two handled boxes −30 %. Dispatch time flat or faster (depth 8 all listen 117 → 88 ns JIT). Suite: 10 rows −19…−35 % allocation, none more, 0 slower (TableView 10k sort +4 % AOT only, unexplained, DECISIONS.md). Order, exact-type match, copy-on-write, live pinning, passive handlers kept. P4 bitmask stays declined. |
+| 5 | ff6262ff | apps-meridian-components | Title bar, rail, request tree and response pane are kept `Part`s reading `_partRevision` (`MarkDirty`/`Rerender` bump it); editor edits (URL, headers, params, body, assertions, extractions) go through `DocEdited` view-only unless the edit flips the unsaved dot; sub-tabs, URL box, History walk, filters, search and environment values view-only; the response pane's tabs, pretty/raw and find bar rebuild the pane alone (`ResponseDirty`). Headless KB/key (JIT = AOT within 1 KB): URL 237 → 72 (−70 %), with 2,000-line JSON 259 → 72 (−72 %), 200 requests 938 → 72 (−92 %, scaling gone); header/param/body −64…−70 %; History Down −35 %, search −51 %; environment value −33 %; find typing −12 % (window builds per char 1 → 0); patches per key 218 → 54; with a reader −58…−92 %. Time −1…−22 % (frames dominate a key). Suite 0 slower/0 faster ×2; 48 scenes identical (pixels, a11y tree, focus) JIT + AOT. 12 PartTests vs forced full rebuilds, 11/11 mutations caught. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -1037,3 +1043,11 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   storage costs 0–72 B per element per build now — what remains is the app's own delegate (a capturing lambda costs a
   closure plus a 64 B delegate every build; a non-capturing one nothing); compare AOT micro/row changes against a
   build that leaves the measured code alone (AOT placement moved −1…+6 %).
+- 2026-10-26: round 5 step 11 landed (ff6262ff): Meridian's title bar, rail, tree and response pane are kept parts;
+  URL typing 237 → 72 KB/key (−70 %), and 938 → 72 at 200 requests (the tree's O(requests) per key is gone);
+  48 scenes identical. Guideline notes (now in REACTIVITY.md): a view-only path can flip something a part shows —
+  compare before/after and go full only on a flip; a part's own controls can rebuild that part alone through its
+  own signal (post-build helpers then run after its builds too); guard a part's build against stale state, since
+  outside a handler it can rebuild before the app's rebuild removes it; only parts that never shrank need
+  `FlexShrink(0)`. WSL: `NarrowEditorLayoutTests.Tab_titles_and_sub_tabs_stay_on_one_line…` fails on Fedora on
+  the baseline cd1b374f too (not this change) — check it in the full-suite step and on CI's Ubuntu run.
