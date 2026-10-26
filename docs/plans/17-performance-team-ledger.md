@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–8 landed, step 9 next (list selection highlight). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–9 landed, step 10 next (event handler churn). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -120,7 +120,7 @@ Correctness and round 4 objections first, then value per cost.
    −60…−70 %; Changes list same shape; highlight landing uses `MarkViewDirty`), **apps-junction-view-parts**
    (History include bar + footer as parts, no `Commits.ToList()` per build: −20…−25 %), and
    **vesper-detail-resize-stale** (approved) (not perf: run e6a432fa's fit comparison in Detail too).
-9. **layout-virtuallist-selection-highlight** (approved 2026-10-25: opt in) (1/8) — an opt-in highlight the VirtualList draws under the
+9. ~~**layout-virtuallist-selection-highlight**~~ LANDED 0d3bc10a (API), 8157c282 (Tags); History and Vesper declined, 68817800 (approved 2026-10-25: opt in) (1/8) — an opt-in highlight the VirtualList draws under the
    selected rows, so a move makes no rows: Junction History −30 %, Tags −54 %, suite item-row walk −36 %;
    visual API (fill, ring, radius), adopted one list at a time.
 10. **events-handler-churn** (4/1/6; re-opens P4's inline half with new evidence: rebuild churn, not events) —
@@ -431,6 +431,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 57e954ca | apps-junction-commit-tree-virtualize | The Commit file list is a VirtualList of item rows (header as row 0, `CommitRowHeights` from font line heights, scroll-into-view by summed heights, flattened rows kept per tree/expand state); the highlight landing uses `MarkViewDirty`. 382-row commit Down 2,002 → 142 KB/key (−93 %), time −27 % JIT / −31 % AOT, window elements 1,834 → 345. Off-screen rows leave the a11y tree (as the Files tab). Changes list declined (sticky headers). |
 | 5 | ea6ceb7a | apps-junction-view-parts | History's include bar and footer handed back while their inputs are unchanged (`KeptPart`; every History child keyed); `FilteredCommits` returns the log itself with no query. History Down 82.2 → 47.8 KB/key (−42 %), reader −35 %; parts built per key 2 → 0. |
 | 5 | 1ed9d938 | vesper-detail-resize-stale | Approved (not perf): the fit comparison runs in Detail view too, so a resize updates the path trail's truncation; a 4 px step that keeps the trail 2.2 → 9.4 KB. 39 scenes (all step 8 items) identical against a deterministic A/A; WSL passes. |
+| 5 | 0d3bc10a | layout-virtuallist-selection-highlight (API) | Approved. **Public `RowHighlight` record struct and `VirtualListElement<T>.SelectionHighlight` (+ fluent `.SelectionHighlight(...)`)** (API addition; null = old behaviour): drawn by an internal `ScrollViewElement.RenderUnderContent` hook after clip/scroll and before rows, with the same `DrawRoundedRect` a Box uses; rows made with `selected = false`; `SelectedIndex` marks paint. Suite row `virtual/selection walk 1,000 item rows, the list draws the highlight`: rows per step 3 → 1, 25.4 → 16.5 KB/op (−35 %, AOT the same), time −2 %. 11 tests, pixels identical to self-drawn rows. ELEMENTS.md §15 (which rows can't adopt). |
+| 5 | 8157c282 | junction-tags-selection-highlight | Tags list draws the caret (`Neutral900`, `RadiusRow`); rows ignore `selected`. Tags Down 87.4 → 40.6 KB/key (−54 %), reader −54 %, time −6…−15 %; elements per key 45.5 → 1.5. 74 scenes identical (pixels, a11y, focus). History (affordance in the row's flow, selection-dependent hover tint — round 5 question 5) and Vesper's cursor (zebra, partner ring) declined, 68817800. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -542,6 +544,11 @@ Round 5 questions (asked 2026-10-25 on resume). Recommendations in brackets.
    storage only if documents above ~256k characters matter.] → **threshold first; add option B to Waiting**
    (2026-10-25: keep `Text`/`OnTextChanged`, add a read-only `Document` view and `OnDocumentChanged(TextChange)`;
    options A same API / B additive / C breaking were written up for the user).
+5. **junction-history-row-selection-pixels** (from r5 step 9): Junction History can adopt the list-drawn selection
+   (survey −30 % per key) only if two things move out of its rows, which changes pixels: the caret row's "Details →"/
+   "Compare →" affordance (it sits in the row's flow, so that row's subject ellipsis comes earlier) and the hover tint
+   (unselected rows tint under the pointer, the selected one doesn't). May the affordance become an overlay at the
+   row's end and the list own the hover tint? [Ask when convenient; not blocking.] → **open**.
 4. **vesper-detail-resize-stale** (not perf): in Detail view a resize never rebuilds, so the path trail's
    truncation stays stale until the next key; e6a432fa's fit comparison runs only in grid views. Fix it in
    step 8? [Yes, small.] → **yes** (2026-10-25).
@@ -1016,3 +1023,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   SelectedIndex; a list that can reach hundreds of rows is a VirtualList of item rows (RowHeights from font line
   heights; scroll into view from summed heights). Trap: Python text-mode writes on Windows turn LF into CRLF — use
   `newline=''`.
+- 2026-10-26: round 5 step 9 landed: `VirtualListElement.SelectionHighlight` (0d3bc10a; selection walk −35 %) adopted in
+  Junction Tags (8157c282: −54 % per key); History and Vesper can't adopt without pixel changes (68817800; round 5
+  question 5 asks about History). Guideline notes: a selection shown only as a row background uses
+  `.SelectionHighlight(...)` on item rows; keep selection-only affordances and selection-dependent hover tints out of
+  rows. Test trap: `HeadlessWindow.CapturePixels()` renders a fresh frame, so a pixel test can't catch a missing paint
+  mark — assert `session.PumpFrame()` returns true after the change (HEADLESS.md should say so).
