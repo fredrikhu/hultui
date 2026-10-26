@@ -218,6 +218,12 @@ public class RadioButtonElement : Element
         }
     }
 
+    // Its circle's size is the theme's (compared on a themed twin, so a rebuild hands back the size
+    // the style pass wrote); of what it copies below, the label, its gap and that size are measured,
+    // and their setters mark layout when one changes. The rest is paint and behaviour.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(RadioButtonElement);
+    private protected override bool PatchThemesTwin => GetType() == typeof(RadioButtonElement);
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

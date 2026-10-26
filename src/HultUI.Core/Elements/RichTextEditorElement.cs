@@ -194,9 +194,18 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
         var ti = theme.TextInput;
         var s = _style;
         CornerRadius = s?.CornerRadius ?? ti.CornerRadius;
-        Box.Padding = s?.Padding ?? new Thickness(
+        // Another padding or border (a theme, a style set on the live editor) lays the editor out
+        // again: a rebuild no longer does it for every editor it patches (PatchThemesTwin).
+        var box = BoxRead;
+        var padding = s?.Padding ?? new Thickness(
             Math.Max(ti.Padding.Top, 6), ti.Padding.Right, Math.Max(ti.Padding.Bottom, 6), ti.Padding.Left);
-        Box.BorderWidth = s?.BorderWidth ?? ti.BorderWidth;
+        var border = s?.BorderWidth ?? ti.BorderWidth;
+        if (box.Padding != padding || box.BorderWidth != border)
+        {
+            Box.Padding = padding;
+            Box.BorderWidth = border;
+            MarkLayoutDirty();
+        }
         Inherited.FontSize ??= s?.FontSize ?? ti.FontSize;
         BackgroundColor = s?.Background ?? ti.Background ?? theme.Background;
         BorderColor = s?.Border ?? ti.BorderColor ?? theme.Border;
@@ -241,6 +250,13 @@ public partial class RichTextEditorElement : BoxElement, IScrollbarDraggable, IA
     internal override string? AccessibleValue => _state.Document.ToPlainText();
 
     // ── Reconciliation ──
+
+    // Its chrome is the theme's (compared on a themed twin). Of what it copies below, only an
+    // editor as tall as its document is measured on anything: its bounds (AutoHeight's setter
+    // marks layout), its document (a new one marks it through OnStateDocumentChanged) and its
+    // pictures (RefreshPictures marks it when one arrives). The rest is paint and behaviour.
+    private protected override bool PatchMarksOwnLayout => GetType() == typeof(RichTextEditorElement);
+    private protected override bool PatchThemesTwin => GetType() == typeof(RichTextEditorElement);
 
     internal override void PatchFrom(Element source)
     {
