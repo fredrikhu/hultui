@@ -341,6 +341,46 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A key in History makes the two rows the selection left and reached, not every
+    /// row on screen (they are item rows the list keeps, and none of them looks its own place up
+    /// in the log any more); the list holds the selection, so a reader hears which row it is;
+    /// and a character typed into the search builds the window once, not twice.</summary>
+    [Fact]
+    public void AKeyMakesTheTwoRowsItMovesBetween_AndASearchCharacterBuildsOnce()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(-90);
+        for (int i = 0; i < 40; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), i % 3 == 0 ? "POST" : "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            GoTo(session, KeyCode.Down);
+            for (int i = 0; i < 5; i++)
+            {
+                int made = app.HistoryRowsMade, builds = app.Builds;
+                GoTo(session, KeyCode.Down);
+                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(2, app.HistoryRowsMade - made);
+            }
+            // Newest first: the sixth row is the 35th send.
+            var selected = Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true);
+            Assert.EndsWith("/items/34 200", selected.Name);
+
+            session.Window.FindByAutomationId("history-search")!.Click();
+            session.PumpFrames(2);
+            foreach (var ch in "items/3")
+            {
+                int builds = app.Builds;
+                session.Window.TypeText(ch.ToString());
+                Assert.Equal(1, app.Builds - builds);
+                session.PumpFrames(2);
+            }
+            Assert.Equal(11, app.FilteredHistory().Count);   // items/3 and items/30 … 39
+            Assert.True(Contains(session, "11 of 40"), "the count should reflect the filter");
+        });
+    }
+
     [Fact]
     public void AnEmptyHistorySaysSo()
     {

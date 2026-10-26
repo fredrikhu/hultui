@@ -16,6 +16,9 @@ public partial class MeridianApp
     // ── History state ────────────────────────────────────────────────────
 
     private List<HistoryEntry> _history = [];
+    /// <summary>Bumped whenever <see cref="_history"/> changes, so the filtered rows are kept
+    /// while it has not.</summary>
+    private int _historyVersion;
     private bool _historyLoaded;
     private HistoryEntry? _historySelection;
     /// <summary>The keyboard cursor into the filtered rows (the mock's
@@ -45,6 +48,7 @@ public partial class MeridianApp
 
         HistoryLog.Append(ws.Root, entry);
         _history.Insert(0, entry);
+        _historyVersion++;
         _historyLoaded = true;
     }
 
@@ -52,16 +56,32 @@ public partial class MeridianApp
     {
         if (_historyLoaded || _workspace is not { } ws) return;
         _history = HistoryLog.Read(ws.Root).ToList();
+        _historyVersion++;
         _historyLoaded = true;
     }
 
+    /// <summary>Everything <see cref="FilteredHistory"/> reads: the log's version, the filters,
+    /// the query, and — with "today" on — the day.</summary>
+    private readonly record struct HistoryFilter(int Version, string? Method, bool FailuresOnly, bool TodayOnly,
+        DateTime Day, string? Env, string Query);
+
+    private HistoryFilter _filteredFor;
+    private List<HistoryEntry>? _filtered;
+
     /// <summary>The rows the filters and the query leave. The query matches the
     /// URL and the method, which is what someone types when hunting a send.</summary>
+    /// <remarks>Kept while nothing it reads has changed: a key in the list asked for it three
+    /// times a build, each a walk and a copy of the whole log (up to ten thousand sends). The
+    /// list is the caller's to read, not to change.</remarks>
     internal List<HistoryEntry> FilteredHistory()
     {
         var now = DateTimeOffset.Now;
         var query = _historyFind.Query.Trim();
-        return _history.Where(e =>
+        var filter = new HistoryFilter(_historyVersion, _filterMethod, _filterFailuresOnly, _filterTodayOnly,
+            _filterTodayOnly ? now.ToLocalTime().Date : default, _filterEnv, query);
+        if (_filtered is { } kept && filter == _filteredFor) return kept;
+        _filteredFor = filter;
+        return _filtered = _history.Where(e =>
             (_filterMethod == null || e.Method.Equals(_filterMethod, StringComparison.OrdinalIgnoreCase))
             && (!_filterFailuresOnly || !e.Reached || e.StatusCode >= 400)
             && (!_filterTodayOnly || HistoryLog.IsToday(e, now))
@@ -185,7 +205,9 @@ public partial class MeridianApp
         var input = TextInput.New(_historyFind.Query).Style(Ui.Field)
             .Height(Dimension.Px(26)).Width(260).MinWidth(Dimension.Px(140));
         input.PlaceholderText("find in history…");
-        input.OnTextChanged(v => { _historyFind.SetQuery(v); MarkDirty(); });
+        // The search calls MarkDirty itself when its query changes (it was made with it): a
+        // second one here built the window twice a character.
+        input.OnTextChanged(_historyFind.SetQuery);
         input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
         input.WithRef(_historyFieldRef);
         input.AutomationId("history-search");
@@ -247,38 +269,90 @@ public partial class MeridianApp
             return col;
         }
 
-        var now = DateTimeOffset.Now;
+        // A row's time reads against today (a clock time today, "yesterday", a weekday, a
+        // date), so a new day makes the rows on screen, and their labels, again.
+        var day = DateTimeOffset.Now.ToLocalTime().Date;
+        if (day != _historyRowsDay)
+        {
+            _historyRowsDay = day;
+            _historyListRef.Current?.InvalidateRows();
+        }
+
         // VirtualList: history is the one surface that really does grow to
-        // thousands of rows, and it is capped at ten thousand.
-        var list = VirtualListElement<HistoryEntry>.New()
+        // thousands of rows, and it is capped at ten thousand. Item rows: the list keeps a row
+        // while its entry, its place and whether it is selected are what they were, so a key
+        // makes the two rows the selection left and reached, not every row on screen.
+        var list = VirtualListElement<HistoryRowItem>.New()
             .ItemHeight((int)Azimuth.RowRun)
-            .Items(rows)
-            .RenderWith(entry => HistoryRow(entry, now, rows.IndexOf(entry)))
-            .AccessibleItemLabel(e =>
-                $"{HistoryLog.TimeLabel(e, now)} {e.Method} {e.Url} {(e.Reached ? e.StatusCode.ToString() : e.Detail)}")
-            .OnActivateItem(entry => { _historySelection = entry; MarkDirty(); })
+            .Items(new HistoryRowItems(rows))
+            .RenderWith((item, selected) => HistoryRow(item.Entry, selected, item.Index))
+            // One delegate from build to build, so the list keeps each row's label too.
+            .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, DateTimeOffset.Now))
+            .OnActivateItem(item => { _historySelection = item.Entry; MarkDirty(); })
+            .SelectedIndex(SelectedHistoryIndex(rows))
             .FlexGrow(1);
         list.AutomationId("history-rows");
+        list.WithRef(_historyListRef);
         col.AddChild(list);
         return col;
     }
 
+    /// <summary>A row of the History list as its list sees it: the entry, and where it sits
+    /// among the filtered rows (which names the row for automation). Whether it is selected is
+    /// the list's.</summary>
+    internal readonly record struct HistoryRowItem(HistoryEntry Entry, int Index);
+
+    /// <summary>The filtered rows as the list's items, each made when the list asks for it.</summary>
+    private sealed class HistoryRowItems(List<HistoryEntry> rows) : IReadOnlyList<HistoryRowItem>
+    {
+        public int Count => rows.Count;
+        public HistoryRowItem this[int index] => new(rows[index], index);
+
+        public IEnumerator<HistoryRowItem> GetEnumerator()
+        {
+            for (int i = 0; i < rows.Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private readonly Ref<VirtualListElement<HistoryRowItem>> _historyListRef = new();
+    private Func<HistoryRowItem, string?>? _historyItemLabel;
+    private DateTime _historyRowsDay;
+
+    /// <summary>Rows History's template has made, for tests.</summary>
+    internal int HistoryRowsMade { get; private set; }
+
+    /// <summary>Where the selected send is among <paramref name="rows"/>: the keyboard cursor
+    /// when it is on it, else the first row holding it; -1 when it is filtered out or none is.
+    /// Once a build — the rows used to look their own place up, a walk of the list per row.</summary>
+    private int SelectedHistoryIndex(List<HistoryEntry> rows)
+    {
+        if (_historySelection is not { } selected) return -1;
+        if (_historyCursor >= 0 && _historyCursor < rows.Count && rows[_historyCursor] == selected) return _historyCursor;
+        return rows.IndexOf(selected);
+    }
+
+    private static string HistoryRowName(HistoryEntry entry, DateTimeOffset now) =>
+        $"{HistoryLog.TimeLabel(entry, now)} {entry.Method} {entry.Url} {(entry.Reached ? entry.StatusCode.ToString() : entry.Detail)}";
+
     private Element BuildClearRow()
     {
         var row = Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.Center);
-        row.AddChild(BarAction("clear search", "history-clear-search",
-            () => { _historyFind.SetQuery(""); MarkDirty(); }));
+        row.AddChild(BarAction("clear search", "history-clear-search", () => _historyFind.SetQuery("")));
         if (AnyFilterActive)
             row.AddChild(BarAction("drop filters", "history-clear-filters", ClearHistoryFilters));
         return row;
     }
 
     /// <summary><paramref name="index"/> only names the row for automation —
-    /// virtualized rows are recycled, so a shared id would be ambiguous.</summary>
-    private Element HistoryRow(HistoryEntry entry, DateTimeOffset now, int index)
+    /// virtualized rows are recycled, so a shared id would be ambiguous. The row reads only its
+    /// item, whether it is selected and today's date (see BuildHistoryList).</summary>
+    private Element HistoryRow(HistoryEntry entry, bool selected, int index)
     {
+        HistoryRowsMade++;
+        var now = DateTimeOffset.Now;
         bool today = HistoryLog.IsToday(entry, now);
-        bool selected = _historySelection == entry;
         var (glyph, color) = entry.Reached ? StatusFace(entry.StatusCode) : ("!", Azimuth.StatusWarn);
 
         var row = Flex.Row(gap: Azimuth.S2).Height(Azimuth.RowRun)
@@ -286,7 +360,7 @@ public partial class MeridianApp
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName($"{HistoryLog.TimeLabel(entry, now)} {entry.Method} {entry.Url} {(entry.Reached ? entry.StatusCode.ToString() : entry.Detail)}")
+            .AccessibleName(HistoryRowName(entry, now))
             .AutomationId($"hist-row-{Math.Max(index, 0)}");
         if (selected) row.Background(Azimuth.Raised);
         // Older than today reads dimmer — the mock's 60%.
