@@ -64,6 +64,14 @@ static partial class Scenarios
             "The same walk telling the right list only the row the ring left and the row it reached, with InvalidateRow: each move makes those two there, and the one scrolled in",
             ctx => PartnerWalk(ctx, oneRow: true));
 
+        yield return new Scenario("virtual/rebuild beside a 20,000-row RowHeights list",
+            "Type into a find field above 20,000 lines whose list takes its row heights from RowHeights, one component rebuilt per keystroke: the list is handed a new height function over the same heights, and keeps its rows",
+            ctx => TypeBesideRowHeightsOp(ctx, rowsTold: false));
+
+        yield return new Scenario("virtual/rebuild beside a 20,000-row RowHeights list, rows told",
+            "The same typing when the rows show the query: the component tells the list with InvalidateRows when it changed, as a file viewer does while find is typed in, and the rows on screen are made again",
+            ctx => TypeBesideRowHeightsOp(ctx, rowsTold: true));
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
