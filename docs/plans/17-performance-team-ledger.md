@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–6 landed, step 7 next (GPU). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–7 landed, step 8 next (app double rebuilds and lists). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -104,7 +104,7 @@ Correctness and round 4 objections first, then value per cost.
    threshold ~512 KB: typing in a 42.5k–256k-character TextArea no longer triggers a gen-2 GC every 14–17
    keys. Each its own commit; time frame p95/p99 and `GC.GetTotalPauseDuration` on app walks and TODO.md
    typing; verify the option is in the shipped exe (`--runtimeopt`).
-7. **GPU** (3): **vk-sdr-video-lazy-barrier** (8-bit direct path keeps its target after a video frame and submits
+7. ~~**GPU**~~ LANDED 7f9df4ea, 6c627f27, ba8fb89d (trace) (3): **vk-sdr-video-lazy-barrier** (8-bit direct path keeps its target after a video frame and submits
    the acquire barrier lazily before Skia's first submit: 2,054 → 112 B per frame, validation clean with a
    positive control; time mpv's render phase), **vk-drag-kept-target-wraps** (8-bit only: 80 → 12 wraps per
    80-step drag, −77 % bytes per step; **F16 deferred** — its prototype coincided with two `nvlddmkm` 153 GPU
@@ -418,6 +418,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | a31a38c7, 93226dda | layout-virtuallist-offsets-kept | Suite rows `virtual/rebuild beside a 20,000-row RowHeights list` (+ `rows told`). `EnsureOffsets` fills a spare array, swaps only when an offset moved; `KeepUnchangedRows` keeps the computed offsets (no second array after `InvalidateRows`); +1 kept array per RowHeights list. Vesper viewer find typing 1,701.1 → 1,544.8 KB/key (−9.2 %); suite rows 90.3 → 12.2 KB/op (JIT −10.4 %) and 203.4 → 47.1 (AOT −13.6 %). WSL 10,523 pass. The height function still runs O(n) per patch. |
 | 5 | 828a7d69 | runtime-gc-loh-threshold | The five AOT apps import `apps/AppRuntime.props`: `RuntimeHostConfigurationOption System.GC.LOHThreshold = 524288` (baked into ILC's knob blob; `--runtimeopt:GCgen0MaxBudget` is silently ignored, so ILC runtimeopts can't be trusted key by key; a `DOTNET_GC*` env var still overrides). Real AOT windows, 3 runs a side: Meridian 89k-character body typing gen-2 GCs 103 → 2, GC pause −48 %, frame p95/p99 1.32/1.80 → 1.02/1.35 ms, CPU −25 %, private +5.8 %, slowest key +1.3 ms; Junction History private −11 % (LOH 34.4 → 12.9 MB); start-up unchanged. `AppRuntimeSettingsTests` linked into the five app test projects. NATIVE-AOT.md "GC settings for an app". Focus guard 0 over 111 launches. |
 | 5 | b1323e9d | runtime-gc-gen0-budget (declined) | A `System.GC.Gen0MaxBudget` cap of 6/8/10/12 MB: memory −1…−8.5 % in Vesper/Aperture but Junction History private +11 % at 6 MB (its highlight worker allocates ~6 MB per key; live data promoted), frame p99 and GC pause up at every value. DECISIONS.md. |
+| 5 | 7f9df4ea | vk-sdr-video-lazy-barrier | The host owes the acquire barrier until Skia's first submit (`GetProcedureAddress` hands Skia a `vkQueueSubmit` trampoline found by queue; the barrier rides at the head of Skia's first batch, or its own submit at Present); `AcquireBarrier` type; every direct-path frame keeps its target. 8-bit video bytes per frame 1080p120 2,030 → 86 B (−96 %), 1080p24 2,056 → 112, UiTest ramp 2,331 → 35 (limit 2,500 → 100); wraps per frame 1 → 0; mpv's GL draw time flat (an eager-barrier control reads +20…+35 %); one `vkQueueSubmit` fewer per frame. Validation core+sync 0 messages (positive control 2 VUIDs ×10); ramp captures brighten. HDR.md. |
+| 5 | 6c627f27 | vk-drag-kept-target-wraps (8-bit) | On an 8-bit over-allocated swapchain a kept target is wrapped at the allocated size, canvas clipped to the window in device pixels, window size out of its key; F16 keeps window-sized targets (deferred after the survey's GPU errors). 80-step drag: wraps 80 → 12, bytes per step 2,200 → 515 (−76 %), step time flat; 5 mid-drag in-process captures identical (a 64 px clip error shows 184,512 channels). UiTest `--drag` asserts it. No `nvlddmkm` events before/after; 128 guarded launches, 0 foreground takes. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -986,3 +988,11 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   (b1323e9d: Junction's highlight worker made it cost memory and pauses). Guideline notes: set GC knobs through
   `RuntimeHostConfigurationOption` `System.GC.*`, not ILC runtimeopts, and verify in the exe; measure memory settings
   on heavy real data; frame p99 over ~100 inputs is one frame — use 300+ inputs, per-key work percentiles, total pause.
+- 2026-10-26: round 5 step 7 landed: 8-bit video frames keep their target with a lazy acquire barrier (7f9df4ea:
+  −96 % bytes per frame, mpv draw flat, validation clean), 8-bit drags keep their targets (6c627f27: −76 % per step),
+  and Meridian's first-use stall traced to NVIDIA's GL driver walking every thread inside a glyph-atlas upload after
+  the process gains threads (ba8fb89d, Waiting: gl-driver-thread-walk; Vulkan has no such stall; a fix would be an
+  NVIDIA profile with Threaded optimization off — a user decision — or no thread creation on GL interaction paths).
+  No new `nvlddmkm` events; no F16 kept-target drag run. Guideline notes: GL on NVIDIA can stall 50–160 ms on the
+  first GL-heavy frame after a process gains threads; time a barrier's placement with an eager control and 3+ batches;
+  set clips on kept canvases in device pixels.
