@@ -138,6 +138,33 @@ static partial class Scenarios
                 return RealLoopWalk(ctx, index => ToldSelected(bridge.CurrentTree, index), WalkChrome.Kept);
             });
 
+        yield return new Scenario("a11y/filter a list below 1,000 rows, keys 500 ms apart, bridge on",
+            "A 200-item list below 1,000 rows loses or gains items on each key, as a list filtered while one types does, past the 100 ms a layout refresh waits: the refresh finds the list's items in another number and builds the tree, the case a refresh made in place cannot be (plan 17, round 5, step 13); the trees a key builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var all = Enumerable.Range(0, 200).Select(i => $"tag {i}").ToList();
+                // Made up front: the step times the refresh, not the list it is handed.
+                var filtered = Enumerable.Range(0, 40).Select(i => (IReadOnlyList<string>)all.Take(150 + i).ToList()).ToArray();
+                var list = VirtualListElement<string>.New().ItemHeight(24).Items(all).Height(Dimension.Px(200))
+                    .RenderWith((tag, selected) => Flex.Row().Padding(new Thickness(2, 8)).Children(Text.New(tag).FontSize(12f)));
+                ctx.Mount(Flex.Column().FlexGrow(1).Children(ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)), list));
+                int treesBefore = 0;
+                return new Op
+                {
+                    Run = step =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        list.Items = filtered[(step * 7) % filtered.Length];
+                    },
+                    FrameDelta = TimeSpan.FromMilliseconds(500),
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = step => FindItems(bridge.CurrentTree, filtered[(step * 7) % filtered.Length].Count) is not null
+                        ? null : "the bridge's tree does not hold the step's items",
+                };
+            });
+
         yield return new Scenario("a11y/type beside a 150-line diff, rows made in Build, bridge on",
             "Type beside a 150-line diff whose rows Build flattens anew, an accessibility client listening: the list has no item label, so every item is named by its record's ToString()",
             ctx =>
