@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–3 landed, step 4 next (paint). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–4 landed, step 5 next (layout). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -87,7 +87,7 @@ Correctness and round 4 objections first, then value per cost.
    −57 % open, −61 % closed; 20,000 layouts bit-identical; scroll rows pay first draws), **text-line-temporaries-
    scratch** (Itemize's per-call `List<FontRun>` and BiDi temporaries into kept scratch: 7 rows −14…−27 %),
    **text-last-line-view** (a wrap's last line fills scratch instead of a durable PrefixWidths; after the first).
-4. **Paint** (2/4): **paint-run-ink-extents-dead-keys** (b52ca178's run-keyed extent map keeps dropped runs alive:
+4. ~~**Paint**~~ LANDED e5ff3fea, 09abf712, dff306df (2/4): **paint-run-ink-extents-dead-keys** (b52ca178's run-keyed extent map keeps dropped runs alive:
    2.29 MB after a 20,000-line Cascadia document closes; per-face glyph-extent table or a field on the run),
    **paint-blob-maps-frame-working-set** (a full blob map clears all 2,048 entries, so a screen needing more
    remakes every blob every frame — dense-colour terminal at 1200×900, Chinese terminal at 1080p, 4K: keep the
@@ -394,6 +394,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 91d48601 | text-glyphs-on-first-draw | A multi-word run keeps its width and glyph count and makes its glyph array on the first `ShapedRun.Glyphs` read (one field holds the array or the pipeline; count in existing padding, `ShapedRun` stays 56 B; letter-spaced and > 65,535-glyph runs compose at once; UI-thread contract on the property). Per step JIT = AOT: text/wrap 1,367 → 544 KB (−60 %), ellipsis 1,844 → 740 (−60 %), richtext/open 9,259 → 5,737 (−38 %), resize 2,016 → 1,207 (−40 %), 13 rows −8…−28 %; time 0 slower, 5 faster (richtext/open −11.4 %). Held: 5,000-block rich text 24.79 → 10.58 MB open, 10.45 → 4.04 closed. Scroll rows pay first draws (viewer wheel 2.7 → 10.5 KB, richtext/wheel 1.3 → 8.3, scroll/jump +6 % min, never past the bar on both); whole sessions never cost more; Junction walk 12.99 → 12.32 MB. 20,000 layouts bit-identical (10.5M glyphs), 180 frames identical. WSL not run yet. |
 | 5 | cc6f8467 | text-line-temporaries-scratch | `Itemize` and BiDi lines use kept lists (segments, levels, runs, visual order), let go past 4,096; `ShapeLineText` sizes its run list. On top of 91d48601: bidi wrap 534 → 239 KB (−55 %), styled bidi wrap −54 %, emoji labels 6,344 → 4,164 (−34 %), styled wrap −37 %, text/wrap −12 %, others −7…−31 %; flagged rows within ±1 % on rerun. Bit compare and pixels identical. WSL and Junction.Tests not run yet. |
 | 5 | a1ff84a1 | text-last-line-view | A wrap's last line fills `BuildPrefixWidths`' kept lists (paragraph's own Han context) instead of a durable PrefixWidths. Per step JIT = AOT: text/wrap 480.8 → 397.3 KB (−17 %), richtext/open 5,280 → 4,631 (−12 %), resize 1,099 → 968 (−12 %); time flat; flagged rows noise on filtered rerun. 20,000-layout dump identical (a ×1.5 width mutation changes 911 layouts, proving coverage); 180 frames identical. Step 3 checks: WSL CrossPlatform 22/22, full `HultUI.slnx` 30/30 (Junction 989/989). |
+| 5 | e5ff3fea | paint-run-ink-extents-dead-keys | The run-keyed extent map is gone: each variable face keeps its glyphs' bounds at size 2048 in 256-glyph 2 KB pages made on need; a run's extent is the union per drawn line, fused with the X-order pass. Bit-identical to a direct Skia read over 1,284 runs; 185 frames identical (512 MB glyph cache, A/A). Retained after a 20,000-line Cascadia document closes: heap 6.45 → 4.10 MB (−36 %), extents 2.294 → 0.010 MB; steady frames 0 B; 0 slower (plain comparisons, not `MathF.Min/Max`, on AOT). |
+| 5 | 09abf712, dff306df | paint-blob-maps-frame-working-set | Suite row `terminal/dense colour screen, unique rows, forced frame` (1600×1000, 6,662 sub-blobs a frame). Kept blobs carry a frame stamp and glyph count; a full map releases only blobs drawn in neither this frame nor the last; next sweep when the map holds twice what the last kept (≥ 2,048); counters skip the pass when nothing is old; hard cap 262,144 glyphs → full clear. Blobs made per steady frame: dense terminal 2,338/5,877/12,520 → 0 (1200×900/1600×1000/4K), Chinese terminal 4,096/8,294 → 0; new row −23.2 % JIT, −22.5 % AOT; 0 slower; +0.3–0.6 KB/op one-time map growth. 190 frames identical; WSL 10,498 pass. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -945,3 +947,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   −12 %); WSL 22/22 and the full Windows solution pass for all three step 3 commits; WIP branch deleted. Testing note:
   a bit-compare needs a large mutation to prove coverage (+0.001 on cut-only widths changed 0 of 20,000 layouts, ×1.5
   changed 911); a row whose bytes don't move never ran the change, so a time difference there is noise.
+- 2026-10-26: round 5 step 4 landed (e5ff3fea, 09abf712, dff306df): the extent map no longer keeps dropped runs
+  alive (−2.3 MB, −36 % heap after a large Cascadia document), and full blob maps keep the last two frames' blobs
+  (dense terminal screens rebuild 0 blobs per frame instead of thousands; −23 % on the new row). WSL passes. Guideline
+  notes: a long-lived cache keyed by object identity keeps those objects alive — key per-face data by glyph, not run;
+  a bounded cache needs a working-set sweep (frame stamps, skip when nothing is old, doubling hysteresis, hard cap),
+  not a full clear; tests that draw thousands of new items in one frame look like one giant screen — draw in frames.
