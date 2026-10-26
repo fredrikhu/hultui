@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; all 14 steps landed; full test suite next, then `release`. **After round 5's release (CI green) STOP the loop (user, 2026-10-26):** the user reboots, then wants the perf tests run again for the TOTAL improvement of all rounds — baseline 520002e9 (main 2026-10-07, just before b9f80d07) vs main after round 5, built side by side (baseline in a detached scratch worktree), idle-gated, pinned, alternated, JIT + AOT: suite rows both have, app walks (KB and time per key, start-up, idle, working set), a11y rows. Round 6 survey only after that. Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** release — round 5; all 14 steps landed, full suite passed on the merge with main (7ef01769); merging into main, then wait for CI. **After round 5's release (CI green) STOP the loop (user, 2026-10-26):** the user reboots, then wants the perf tests run again for the TOTAL improvement of all rounds — baseline 520002e9 (main 2026-10-07, just before b9f80d07) vs main after round 5, built side by side (baseline in a detached scratch worktree), idle-gated, pinned, alternated, JIT + AOT: suite rows both have, app walks (KB and time per key, start-up, idle, working set), a11y rows. Round 6 survey only after that. Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -1086,3 +1086,6 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   `--disable-build-servers`. Guideline note: a served item's id packs its list's owner slot — a test must read an
   item's path before unmounting its list. All 14 round 5 build steps landed. User (2026-10-26): after this round's
   release, stop the loop for a reboot, then measure the total improvement of all rounds before round 6.
+- 2026-10-26: main (d5eaefc9: async-load retry + held-sheet test fixes from other sessions) merged into the branch
+  as 7ef01769. Round 5 full suite on it: Windows `dotnet test HultUI.slnx -c Release` 31 projects, 0 failures
+  (UiTests skipped by their gate); WSL Fedora slnf 22 projects, 0 failures. Phase → release.
