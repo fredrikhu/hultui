@@ -1334,7 +1334,8 @@ rows', so it is told the same either way. Another highlight from a rebuild (a th
 drawn on the next frame and makes no row; turning it on or off makes the selected rows again.
 `.SelectionHighlight(null)` leaves the selection to the rows. On the perf suite's walk a step
 makes 1 row instead of 3 and allocates 16 KB instead of 25 (`virtual/selection walk 1,000 item
-rows, the list draws the highlight`).
+rows, the list draws the highlight`); Junction's Tags table, whose caret's tint is the list's,
+makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change

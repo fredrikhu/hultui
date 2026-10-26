@@ -183,14 +183,17 @@ public partial class JunctionApp
         }
 
         // Virtualized like the branch table, and fed the same way: the expanded tree
-        // flattened into one row list of kept nodes, so the list keeps every row a key does
-        // not move the caret onto or off. What else a row shows is in the shape.
+        // flattened into one row list of kept nodes. The caret's tint is the list's own
+        // highlight, drawn under the caret's row with the fill and radius the rows drew, so the
+        // rows never show the caret and a key keeps every one. What else a row shows is in the
+        // shape.
         if (TagRowShapeChanged()) _tagScrollRef.Current?.InvalidateRows();
 
         return VirtualListElement<TreeNode<GitTag>>.New()
             .ItemHeight(TagRowHeight)
             .Items(rows)
-            .RenderWith((n, focused) => TagRow(n, focused))
+            .SelectionHighlight(Nocturne.Neutral900, Nocturne.RadiusRow)
+            .RenderWith((n, _) => TagRow(n))
             // The virtual list surfaces items to assistive tech by this label alone
             // (rows off-screen are never realized as elements), so it carries
             // everything the row says: name, kind, annotation message, commit. One
@@ -219,7 +222,7 @@ public partial class JunctionApp
 
     private Func<TreeNode<GitTag>, string?>? _tagItemLabel;
 
-    /// <summary>What a tag row shows besides its node and whether it has the caret: the
+    /// <summary>What a tag row shows besides its node (the caret is the list's highlight): the
     /// table's columns (compact, narrow), the colour scheme and the display scale the glyphs
     /// are cut at.</summary>
     private readonly record struct TagRowShape(bool Compact, bool Narrow, object Theme, float Scale);
@@ -239,18 +242,18 @@ public partial class JunctionApp
         return changed;
     }
 
-    private Element TagRow(TreeNode<GitTag> node, bool focused)
+    private Element TagRow(TreeNode<GitTag> node)
     {
         TagRowsMade++;
         // The node is one of the kept rows, so its place is the memo's (the row's click and
-        // context menu select it by index).
+        // context menu select it by index). The caret is drawn by the list, under the row.
         var index = _tagRowsMemo.IndexOf(node);
         return node.IsFolder
-            ? RefFolderRow(RefKindTag, node, index, focused, TagRowHeight, SelectTagRow)
-            : TagLeafRow(node, index, focused);
+            ? RefFolderRow(RefKindTag, node, index, focused: false, TagRowHeight, SelectTagRow)
+            : TagLeafRow(node, index);
     }
 
-    private Element TagLeafRow(TreeNode<GitTag> node, int index, bool focused)
+    private Element TagLeafRow(TreeNode<GitTag> node, int index)
     {
         var t = node.Item;
         var depth = node.Depth;
@@ -260,10 +263,9 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow)
             .BorderColor(Nocturne.On(0.06)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
-        // Keyed on the focus state so a flip replaces the row outright — the hover
-        // baseline differs per state, as on the branch rows.
-        row.Key = "tag:" + t.Name + (focused ? "#f" : "");
-        row.Background(focused ? Nocturne.Neutral900 : Color.Transparent);
+        // Keyed, so a row the list lets go of (InvalidateRows) is patched into the next one of
+        // that tag. No background: the caret's tint is the list's, drawn under the row.
+        row.Key = "tag:" + t.Name;
 
         // Tag cell: chip + name, with the annotation message underneath when there is one.
         // The tree's indent lives inside this cell so the columns beside it stay aligned.
