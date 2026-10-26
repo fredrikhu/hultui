@@ -411,10 +411,53 @@ navigate, and act on the whole list at any size. Built in increments, all done:
   bounds on demand rather than re-emitting per-item events — verified with a
   100k-item list (navigate, hit-test, invoke all instant). The cap is now just a
   fast-path switch, not a ceiling.
+- **Increment 4 (done, plan 17 round 5 step 14: 167b4ef9, 46a5aa12, 69a9fac2): told and served
+  the same on both bridges.**
+  Until then a list over 2,000 items told a screen reader nothing when its selection moved
+  (40 moves over 3,000 items: 0 events on either bridge, where 1,500 items raised 80), and
+  AT-SPI could not reach its items at all (the list's object had no children). Now the list's
+  node carries its items' number and the selected indices (`AccessibilityNode.Served`, read
+  whole on any thread), and a change of either is the node's own:
+  `AccessibilityProperties.ItemSelection` and `ItemCount`, with the node as it was for the
+  change's previous node. Both are patched in place like an item node's `IsSelected` (no tree
+  is built for a move: 0 trees per 40 moves, as before), told by the layout refresh made in
+  place, or reported by the differ between two trees.
 
-Remaining refinements (nice-to-have): a UIA `ScrollPattern` / `ItemContainer`
-`FindItemByProperty` on the container, and the container-level `Selection` pattern
-(`ISelectionProvider.GetSelection`, needs a SAFEARRAY of providers).
+What a screen reader gets for a list of 3,000 items:
+
+| | UI Automation | AT-SPI |
+|---|---|---|
+| The list's children | `UiaVirtualItem`s, made per navigation result, as before | `ChildCount` 3,000 (was 0); `GetChildAtIndex` makes an item's object the first time it is asked for and keeps it while the list serves its items; the snapshot still publishes the list's object alone (2 objects for the window) |
+| An item's name, check state | read from the list when asked | the same |
+| An item's selected state, the list's number of items | from the list's node: what the events told | the same |
+| An item's box, offscreen | from the list's viewport and scroll (`AccessibilityNode.TryGetServedItemBox`), where its node would be | the same, in device pixels |
+| A move of the selection | `SelectionItem.IsSelected` on the item that had it and the one that has it, in item order: the same 80 events on the same items as 1,500 items | `state-changed:selected` on the two items, in item order: the same 80 signals as 1,500 items |
+| Items added or removed | `ChildrenBulkAdded` / `ChildrenBulkRemoved` on the list, as for item nodes | one `children-changed` for the first item that came or went, a `cache-remove` for each item object a client may hold past the new end (made for it, named in a signal, or every one after `GetChildren`), and the list's `cache-add` again, which sizes a caching client's list of its children (libatspi's rule, seen live in round 3) |
+| An item a client holds after it went | `UIA_E_ELEMENTNOTAVAILABLE`; after the list shrank to 2,000 items or fewer, it answers from its item's node (the same runtime id) | disposed by the `cache-remove`; its path is unknown |
+| Crossing 2,000 items either way | item nodes added or removed under the list, as before | the items keep their paths and objects: no `cache-remove` for an item that is still there |
+
+Where it differs from a list of item nodes:
+
+- **A relabelled item is not told.** Its name is read when asked. A UIA client reads it
+  live anyway; an AT-SPI client that already fetched it keeps its copy until it asks again
+  (an item node's change sends `accessible-name`). Telling it would mean keeping a label
+  per item a client holds and comparing them on every refresh.
+- **UIA raises no `ElementSelected` / `ElementAddedToSelection` events**, and neither does the
+  item-node path: both raise the `IsSelected` property changes only.
+- **No `manages-descendants` state** on the list's AT-SPI object. With it, libatspi would
+  stop keeping a list of the list's children and Orca would expect
+  `active-descendant-changed`, which neither path sends; left out so a reader treats 3,000
+  items as it treats 1,500. A candidate for a live check with Orca.
+
+The cost of telling (Release probe, 40 moves over 3,000 items, KB per move; recording
+bridge / UIA / AT-SPI): 4.01 / 4.01 / 4.01 → 4.68 / 5.04 / 5.42, where 1,500 items
+cost 4.43 / 4.79 / 5.24. O(1) a move: the list's node, a stand-in for it, the selected
+index, one event per item that changed; nothing for the items nobody asked for. In the perf
+suite's walks over 3,000 item rows: 24.4 → 24.7 KB/op with the recording bridge, 24.8 with
+UIA, no row slower.
+
+The refinements once listed here are built: the UIA `Scroll` pattern, `ItemContainer`'s
+`FindItemByProperty` and the container-level `Selection` pattern, whose selection is the node's.
 
 ## Patterns & properties supported
 
