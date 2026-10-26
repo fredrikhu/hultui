@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–9 landed, step 10 next (event handler churn). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–10 landed, step 11 next (Meridian components). Round 5 question 5 open (Junction History row pixels). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -123,7 +123,7 @@ Correctness and round 4 objections first, then value per cost.
 9. ~~**layout-virtuallist-selection-highlight**~~ LANDED 0d3bc10a (API), 8157c282 (Tags); History and Vesper declined, 68817800 (approved 2026-10-25: opt in) (1/8) — an opt-in highlight the VirtualList draws under the
    selected rows, so a move makes no rows: Junction History −30 %, Tags −54 %, suite item-row walk −36 %;
    visual API (fill, ring, radius), adopted one list at a time.
-10. **events-handler-churn** (4/1/6; re-opens P4's inline half with new evidence: rebuild churn, not events) —
+10. ~~**events-handler-churn**~~ LANDED 76b6f78e, 574f43a7 (4/1/6; re-opens P4's inline half with new evidence: rebuild churn, not events) —
     (a) a patch reuses the live element's handler lists (patch copy 13.2 → 1.9 KB; Vesper −6.9 %),
     (b) inline handler storage with a typed delegate per entry instead of `Dictionary<Type, List>` + a
     wrapper closure (~320 → 60–100 B per registration estimated, −11…−16 % per key). Prototype (b) first.
@@ -433,6 +433,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | 1ed9d938 | vesper-detail-resize-stale | Approved (not perf): the fit comparison runs in Detail view too, so a resize updates the path trail's truncation; a 4 px step that keeps the trail 2.2 → 9.4 KB. 39 scenes (all step 8 items) identical against a deterministic A/A; WSL passes. |
 | 5 | 0d3bc10a | layout-virtuallist-selection-highlight (API) | Approved. **Public `RowHighlight` record struct and `VirtualListElement<T>.SelectionHighlight` (+ fluent `.SelectionHighlight(...)`)** (API addition; null = old behaviour): drawn by an internal `ScrollViewElement.RenderUnderContent` hook after clip/scroll and before rows, with the same `DrawRoundedRect` a Box uses; rows made with `selected = false`; `SelectedIndex` marks paint. Suite row `virtual/selection walk 1,000 item rows, the list draws the highlight`: rows per step 3 → 1, 25.4 → 16.5 KB/op (−35 %, AOT the same), time −2 %. 11 tests, pixels identical to self-drawn rows. ELEMENTS.md §15 (which rows can't adopt). |
 | 5 | 8157c282 | junction-tags-selection-highlight | Tags list draws the caret (`Neutral900`, `RadiusRow`); rows ignore `selected`. Tags Down 87.4 → 40.6 KB/key (−54 %), reader −54 %, time −6…−15 %; elements per key 45.5 → 1.5. 74 scenes identical (pixels, a11y, focus). History (affordance in the row's flow, selection-dependent hover tint — round 5 question 5) and Vesper's cursor (zebra, partner ring) declined, 68817800. |
+| 5 | 76b6f78e | events-handler-lists-kept | A patch sheds app handlers in place and keeps the lists, dropping only types nothing listens for (mid-dispatch copy-on-write unchanged): patch 208–328 → 0 B; per key −2…−5 % (Vesper Detail −4.7 %). Under the bar alone; the base for 574f43a7. |
+| 5 | 574f43a7 | events-handler-array | Re-opens P4's inline half with rebuild-churn evidence: one `EventHandlerEntry[]` per element (24 B entries: typed delegate, phase/flags, an `EventKind` with a static invoker per event type), the first two handlers in one 72 B array reused by patches, no wrapper closure. Per key JIT/AOT: Vesper Detail −14 %, Meridian URL −13 %, Meridian History −12 %, Junction summary −20 %; first handler 424 → 72 B, second 208/88 → 0. Retained: handled Box 1,005 → 654 B, TextInput 3,912 → 1,856 B, 10,000 rows of two handled boxes −30 %. Dispatch time flat or faster (depth 8 all listen 117 → 88 ns JIT). Suite: 10 rows −19…−35 % allocation, none more, 0 slower (TableView 10k sort +4 % AOT only, unexplained, DECISIONS.md). Order, exact-type match, copy-on-write, live pinning, passive handlers kept. P4 bitmask stays declined. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -1029,3 +1031,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   `.SelectionHighlight(...)` on item rows; keep selection-only affordances and selection-dependent hover tints out of
   rows. Test trap: `HeadlessWindow.CapturePixels()` renders a fresh frame, so a pixel test can't catch a missing paint
   mark — assert `session.PumpFrame()` returns true after the change (HEADLESS.md should say so).
+- 2026-10-26: round 5 step 10 landed (76b6f78e, 574f43a7): handlers live in one small array per element with no
+  closure each (−12…−20 % per key in Vesper, Meridian, Junction; a handled element retains 35–53 % less; dispatch flat
+  or faster). P4's inline-array half built with new evidence; the bitmask stays declined. Guideline notes: handler
+  storage costs 0–72 B per element per build now — what remains is the app's own delegate (a capturing lambda costs a
+  closure plus a 64 B delegate every build; a non-capturing one nothing); compare AOT micro/row changes against a
+  build that leaves the measured code alone (AOT placement moved −1…+6 %).
