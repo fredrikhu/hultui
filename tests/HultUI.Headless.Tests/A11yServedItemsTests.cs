@@ -405,4 +405,172 @@ public class A11yServedItemsTests
         Assert.True(Selected(kept));
         Assert.Equal(ElementNotAvailable, held.GetPropertyValue(UiaInterop.UIA_NamePropertyId, out _));
     }
+
+    // ── AT-SPI ──
+
+    private sealed class Signals : IAtSpiSignals
+    {
+        public readonly List<string> Lines = [];
+        public static string Short(string path) => path[(path.LastIndexOf('/') + 1)..];
+        public void EmitChildrenChanged(string parentPath, string childPath, int index, bool isAdd) =>
+            Lines.Add($"children-changed:{(isAdd ? "add" : "remove")} {Short(parentPath)} {Short(childPath)} {index}");
+        public void EmitPropertyChange(string path, string atSpiProperty, string newValue) => Lines.Add($"property-change:{atSpiProperty} {Short(path)}");
+        public void EmitValueChanged(string path, double value) => Lines.Add($"property-change:accessible-value {Short(path)}");
+        public void EmitRoleChange(string path, uint role) => Lines.Add($"property-change:accessible-role {Short(path)}");
+        public void EmitStateChanged(string path, string state, bool active) => Lines.Add($"state-changed:{state} {Short(path)} {(active ? 1 : 0)}");
+        public void EmitTextChanged(string path, bool insert, int offset, string text) => Lines.Add($"text-changed {Short(path)}");
+        public void EmitTextCaretMoved(string path, int offset) => Lines.Add($"text-caret-moved {Short(path)}");
+        public void EmitTextSelectionChanged(string path) => Lines.Add($"text-selection-changed {Short(path)}");
+        public void EmitAnnouncement(string path, string text, int politeness) => Lines.Add($"announcement {Short(path)}");
+        public void EmitCacheAdd(IAtSpiTree tree, AtSpiAccessible node) => Lines.Add($"cache-add {Short(node.Path)}");
+        public void EmitCacheRemove(string path) => Lines.Add($"cache-remove {Short(path)}");
+    }
+
+    private static string PathOf(ElementId id) => AtSpiConstants.AccessiblePathPrefix + id.Value;
+
+    /// <summary>The AT-SPI signals of the 40 moves of the walk over a list of <paramref name="count"/>
+    /// items, with each item named by its index.</summary>
+    private static List<string> AtSpiWalk(int count)
+    {
+        using var session = HeadlessSession.Create(800, 600);
+        var signals = new Signals();
+        using var bridge = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var list = List(count);
+        Mount(session, list);
+        list.SelectedIndex = 3;
+        session.PumpFrame();
+        signals.Lines.Clear();
+        for (int i = 0; i < 40; i++)
+        {
+            list.SelectedIndex = WalkIndex(i);
+            session.PumpFrame();
+        }
+        return signals.Lines.Select(line =>
+        {
+            var parts = line.Split(' ');
+            return ulong.TryParse(parts[1], out var id) && VirtualItemId.TryDecode(new ElementId(id), out _, out int index)
+                ? $"{parts[0]} item{index} {parts[2]}" : line;
+        }).ToList();
+    }
+
+    [Fact]
+    public void ATSPI_FortyMovesOver3000Items_SendWhatTheySendOver1500()
+    {
+        var eager = AtSpiWalk(1_500);
+        var served = AtSpiWalk(3_000);
+
+        Assert.Equal(80, eager.Count);
+        Assert.Equal(eager, served);
+        Assert.Equal(["state-changed:selected item3 0", "state-changed:selected item4 1"], served.Take(2));
+    }
+
+    [Fact]
+    public void ATSPI_AListServedOnDemand_ServesItsItems_WhereItemNodesWouldBe()
+    {
+        // Where an item node would be: the same list at 1,500 items has one for item 0.
+        (int, int, int, int) eagerBox;
+        uint eagerStates;
+        using (var eagerSession = HeadlessSession.Create(800, 600))
+        using (var eagerBridge = new LinuxAccessibilityBridge(new Signals()))
+        {
+            eagerSession.Window.InstallAccessibilityBridge(new Active(eagerBridge));
+            var eager = List(1_500);
+            Mount(eagerSession, eager);
+            var eagerItem = ((IAtSpiTree)eagerBridge).Find(PathOf(Item(eager, 0)))!;
+            (eagerBox, eagerStates) = (eagerItem.Box, AtSpiMarshal.StateBits(eagerItem));
+        }
+
+        using var session = HeadlessSession.Create(800, 600);
+        var signals = new Signals();
+        using var bridge = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var list = List(3_000);
+        Mount(session, list);
+        list.SelectedIndex = 1_500;
+        session.PumpFrame();
+        var tree = (IAtSpiTree)bridge;
+        int published = tree.All.Count;
+
+        var listAcc = tree.Find(PathOf(list.Id))!;
+        Assert.Equal(3_000, listAcc.ChildCount);
+        Assert.Null(listAcc.ChildPathAt(3_000));
+        Assert.Null(listAcc.ChildPathAt(-1));
+        foreach (int index in new[] { 0, 1_500, 2_999 })
+        {
+            var path = listAcc.ChildPathAt(index);
+            Assert.Equal(PathOf(Item(list, index)), path);
+            var item = tree.Find(path!)!;
+            Assert.Same(item, tree.Find(path!));   // made once, kept
+            Assert.Equal($"item {index}", item.Name);
+            Assert.Equal(AtSpiConstants.RoleListItem, item.Role);
+            Assert.Equal((listAcc.Path, index), (item.ParentPath, item.IndexInParent));
+            Assert.True(item.Selectable);
+            Assert.Equal(index == 1_500, item.Selected);
+            Assert.Equal(index != 0, item.Offscreen);
+            Assert.Equal(0, item.ChildCount);
+            Assert.Equal("click", item.ActionName);
+        }
+        // Asked for, not published: the snapshot is the list's node and the window's.
+        Assert.Equal(published, tree.All.Count);
+
+        Assert.Equal(eagerBox, tree.Find(PathOf(Item(list, 0)))!.Box);
+        Assert.Equal(eagerStates, AtSpiMarshal.StateBits(tree.Find(PathOf(Item(list, 0)))!));
+
+        // An item's object reads its state when asked: the move a signal told.
+        var held = tree.Find(PathOf(Item(list, 1_500)))!;
+        signals.Lines.Clear();
+        list.SelectedIndex = 0;
+        session.PumpFrame();
+        Assert.Equal([$"state-changed:selected {Item(list, 0).Value} 1", $"state-changed:selected {Item(list, 1_500).Value} 0"], signals.Lines);
+        Assert.False(held.Selected);
+        Assert.True(tree.Find(PathOf(Item(list, 0)))!.Selected);
+    }
+
+    [Fact]
+    public void ATSPI_AnItemAClientHolds_GoesWhenTheListShrinksPastIt_AndOnlyThatOne()
+    {
+        using var session = HeadlessSession.Create(800, 600);
+        var signals = new Signals();
+        using var bridge = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var list = List(3_000);
+        Mount(session, list);
+        var tree = (IAtSpiTree)bridge;
+        var listAcc = tree.Find(PathOf(list.Id))!;
+        var held = tree.Find(listAcc.ChildPathAt(2_999)!)!;
+        var kept = tree.Find(listAcc.ChildPathAt(5)!)!;
+        // Named in a signal: a client may hold it as well.
+        list.SelectedIndex = 2_600;
+        session.PumpFrame();
+        signals.Lines.Clear();
+
+        list.Items = Items(2_500);
+        Settle(session);
+
+        string Id(int index) => Item(list, index).Value.ToString();
+        Assert.Equal(
+        [
+            $"cache-remove {Id(2_600)}",
+            $"cache-remove {Id(2_999)}",
+            $"children-changed:remove {list.Id.Value} {Id(2_500)} 2500",
+            $"cache-add {list.Id.Value}",
+        ], signals.Lines.Where(l => !l.StartsWith("state-changed", StringComparison.Ordinal)));
+        Assert.Null(tree.Find(held.Path));
+        Assert.Same(kept, tree.Find(kept.Path));
+        Assert.Equal(2_500, tree.Find(PathOf(list.Id))!.ChildCount);
+
+        // Grown again: the selection, past the end until now, is an item's again.
+        signals.Lines.Clear();
+        list.Items = Items(3_100);
+        Settle(session);
+        Assert.Equal(
+        [
+            $"children-changed:add {list.Id.Value} {Id(2_500)} 2500",
+            $"cache-add {list.Id.Value}",
+            $"state-changed:selected {Id(2_600)} 1",
+        ], signals.Lines);
+        Assert.Equal(3_100, tree.Find(PathOf(list.Id))!.ChildCount);
+        Assert.Equal("item 2999", tree.Find(held.Path)!.Name);
+    }
 }

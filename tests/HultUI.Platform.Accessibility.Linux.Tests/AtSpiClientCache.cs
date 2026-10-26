@@ -30,10 +30,14 @@ internal sealed class AtSpiClientCache : IAtSpiSignals
     private readonly HashSet<string> _uncached = [];
 
     /// <summary>The children a client reads for <paramref name="path"/>: its cached list, an empty
-    /// slot read from <paramref name="tree"/>; all of it from the tree when the list was dropped.</summary>
+    /// slot read from <paramref name="tree"/>; all of it from the tree when the list was dropped. A
+    /// list that serves its items on demand answers each by its index (GetChildAtIndex).</summary>
     public List<string> ChildrenOf(IAtSpiTree tree, string path)
     {
-        IReadOnlyList<string> real = tree.Find(path)?.ChildPaths ?? [];
+        var acc = tree.Find(path);
+        IReadOnlyList<string> real = acc?.Served is { } served
+            ? [.. Enumerable.Range(0, served.Count).Select(served.PathOf)]
+            : acc?.ChildPaths ?? [];
         if (_uncached.Contains(path) || !_children.TryGetValue(path, out var cached)) return [.. real];
         var result = new List<string>(cached.Count);
         for (int i = 0; i < cached.Count; i++)

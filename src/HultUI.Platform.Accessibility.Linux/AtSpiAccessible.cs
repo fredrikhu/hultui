@@ -13,7 +13,9 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// What changes without a rebuild is set in place on the UI thread: the focused and
 /// selected states, and a leaf's name, description, value, range, toggle and expanded
 /// state (the window's patch). Its box and whether it is out of view are read from its node
-/// when a client asks (<see cref="Node"/>), as they are now.
+/// when a client asks (<see cref="Node"/>), as they are now. An item of a list whose items are
+/// served on demand has no node and is in no snapshot: its object is made when a client asks for it
+/// and reads everything from its list (<see cref="ItemOf"/>, <see cref="AtSpiServedItems"/>).
 /// </summary>
 /// <remarks>
 /// The snapshot carries everything the D-Bus method handlers need to answer a
@@ -35,10 +37,23 @@ internal sealed class AtSpiAccessible
     /// sets the new value on the UI thread, one write each, while the bus thread may read it.</summary>
     public string Name
     {
-        get => Volatile.Read(ref _name);
+        get => ItemOf is { } items ? items.LabelOf(ItemIndex) : Volatile.Read(ref _name);
         set => Volatile.Write(ref _name, value);
     }
     private string _name = "";
+
+    /// <summary>For an item of a list served on demand, which has no node: the list's items, which
+    /// it reads its name, states and box from when asked (<see cref="AtSpiServedItems"/>); null for
+    /// every other object.</summary>
+    public AtSpiServedItems? ItemOf { get; init; }
+
+    /// <summary>The item's index in its list, with <see cref="ItemOf"/>.</summary>
+    public int ItemIndex { get; init; }
+
+    /// <summary>For a list whose items are served on demand: its items, which its children are (it
+    /// has no child paths); null for every other object. Set as the snapshot is made, before it is
+    /// published.</summary>
+    public AtSpiServedItems? Served { get; set; }
 
     public string Description
     {
@@ -80,6 +95,7 @@ internal sealed class AtSpiAccessible
     {
         get
         {
+            if (ItemOf is { } items) return items.BoxOf(ItemIndex);
             if (Node is not { } node) return default;
             var rect = node.BoundingRect;
             return ((int)MathF.Round(rect.X * Scale), (int)MathF.Round(rect.Y * Scale),
@@ -106,22 +122,22 @@ internal sealed class AtSpiAccessible
     public bool Enabled { get; init; } = true;
 
     /// <summary>Whether the node is scrolled or clipped out of view, as it is now (<see cref="Node"/>).</summary>
-    public bool Offscreen => Node?.IsOffscreen ?? false;
+    public bool Offscreen => ItemOf is { } items ? items.OffscreenOf(ItemIndex) : Node?.IsOffscreen ?? false;
     public bool Selectable { get; init; }
 
     /// <summary>Changes after the snapshot is built too, for a list's items: a move of the list's
     /// selection rebuilds none, so the bridge sets it on the UI thread while the bus thread may
-    /// read it.</summary>
+    /// read it. An item served on demand reads it from its list's node.</summary>
     public bool Selected
     {
-        get => Volatile.Read(ref _selected);
+        get => ItemOf is { } items ? items.SelectedOf(ItemIndex) : Volatile.Read(ref _selected);
         set => Volatile.Write(ref _selected, value);
     }
     private bool _selected;
     /// <summary>Checked or not, for a toggle; null for anything else.</summary>
     public bool? Toggled
     {
-        get => FromTriState(Volatile.Read(ref _toggled));
+        get => ItemOf is { } items ? items.ToggledOf(ItemIndex) : FromTriState(Volatile.Read(ref _toggled));
         set => Volatile.Write(ref _toggled, ToTriState(value));
     }
     private byte _toggled;
@@ -172,7 +188,15 @@ internal sealed class AtSpiAccessible
     /// <summary>The action this object exposes to assistive tech, or null if none.</summary>
     public AtSpiActionKind? Action { get; init; }
 
-    public int ChildCount => ChildPaths.Count;
+    /// <summary>How many children: a list served on demand's items, however many, or the children
+    /// the snapshot has.</summary>
+    public int ChildCount => Served is { } served ? served.Count : ChildPaths.Count;
+
+    /// <summary>The path of child <paramref name="index"/>, or null past the end: an item of a list
+    /// served on demand is made when it is first asked for (<see cref="AtSpiServedItems.Item"/>).</summary>
+    public string? ChildPathAt(int index) =>
+        Served is { } served ? served.Item(index)?.Path
+        : (uint)index < (uint)ChildPaths.Count ? ChildPaths[index] : null;
     public bool HasAction => Action is not null;
 
     /// <summary>The AT-SPI action name reported via the Action interface.</summary>

@@ -46,6 +46,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     {
         public required Dictionary<string, AtSpiAccessible> ByPath { get; init; }
         public AtSpiAccessible? Root { get; init; }
+        /// <summary>The lists whose items are served on demand, by the list's element: their items
+        /// are found here, not in <see cref="ByPath"/>. Null when there are none.</summary>
+        public Dictionary<ElementId, AtSpiServedItems>? Served { get; init; }
         public static readonly Snapshot Empty = new() { ByPath = [] };
     }
 
@@ -171,8 +174,32 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     (string BusName, string Path) IAtSpiTree.Desktop =>
         _bus?.Desktop ?? (AtSpiConstants.RegistryService, AtSpiConstants.RegistryRootPath);
     AtSpiAccessible? IAtSpiTree.Root => _snapshot.Root;
-    AtSpiAccessible? IAtSpiTree.Find(string path) =>
-        _snapshot.ByPath.TryGetValue(path, out var node) ? node : null;
+
+    AtSpiAccessible? IAtSpiTree.Find(string path)
+    {
+        var snapshot = _snapshot;   // once: the UI thread may publish another meanwhile
+        return snapshot.ByPath.TryGetValue(path, out var node) ? node : ServedItem(snapshot, path);
+    }
+
+    /// <summary>The object of the item of a list served on demand at <paramref name="path"/>, made the
+    /// first time a client asks; null when the path is no such item, or the item is gone.</summary>
+    private static AtSpiAccessible? ServedItem(Snapshot snapshot, string path)
+    {
+        if (snapshot.Served is not { } served
+            || !path.StartsWith(AtSpiConstants.AccessiblePathPrefix, StringComparison.Ordinal)
+            || !ulong.TryParse(path.AsSpan(AtSpiConstants.AccessiblePathPrefix.Length), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out ulong value)
+            || !VirtualItemId.TryDecode(new ElementId(value), out var listId, out int index)
+            || !served.TryGetValue(listId, out var items))
+            return null;
+        return items.Item(index);
+    }
+
+    /// <summary>Whether <paramref name="id"/> is an item <paramref name="snapshot"/> serves on demand: a
+    /// node of an item of a list that went past 2,000 items is gone from the tree, and its object stays.</summary>
+    private static bool Serves(Snapshot snapshot, ElementId id) =>
+        snapshot.Served is { } served && VirtualItemId.TryDecode(id, out var listId, out int index)
+        && served.TryGetValue(listId, out var items) && (uint)index < (uint)items.Count;
     IReadOnlyCollection<AtSpiAccessible> IAtSpiTree.All => _snapshot.ByPath.Values;
     int IAtSpiTree.ApplicationId
     {
@@ -216,7 +243,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         DebugApplyChangesCalls++;
 
         var previous = _snapshot;
-        _snapshot = Build(root, _geometryHost?.Scale ?? 1f);
+        _snapshot = Build(root, _geometryHost?.Scale ?? 1f, previous);
 
         bool firstBuild = !_hasBuilt;
         _hasBuilt = true;
@@ -228,9 +255,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // marked focused may be gone too: the window names the focused one with the next move.
         if (diff.Added.Count > 0 && diff.Added[0].Parent is null && diff.Removed.Count == 0)
         {
-            foreach (var path in previous.ByPath.Keys)
+            foreach (var (path, acc) in previous.ByPath)
             {
-                if (_snapshot.ByPath.ContainsKey(path)) continue;
+                if (_snapshot.ByPath.ContainsKey(path) || Serves(_snapshot, acc.ElementId)) continue;
                 _signals.EmitCacheRemove(path);
                 DebugSignalsEmitted++;
             }
@@ -255,10 +282,12 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         // adds it under the new, and its cache-add below tells the client where it is. Removing
         // it made libatspi dispose an object it still holds — the client lost it, and saw it go
         // defunct. Its old parent learns of the move from a children-changed:remove.
+        // An item node of a list that went past 2,000 items is not gone either: the list serves it on
+        // demand now, at the same path, and the object a client holds stays its object.
         foreach (var removed in diff.Removed)
         {
             string path = PathOf(removed.Node);
-            if (_snapshot.ByPath.ContainsKey(path)) continue;
+            if (_snapshot.ByPath.ContainsKey(path) || Serves(_snapshot, removed.Node.ElementId)) continue;
             _signals.EmitCacheRemove(path);
             DebugSignalsEmitted++;
         }
@@ -270,9 +299,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         {
             EmitRemovedChildNudges(diff.BoundaryRemoved());
             // A reordered parent's children are all put in place by its own pass, added ones with
-            // them; every other parent's added children by theirs.
+            // them; every other parent's added children by theirs. A list that served its items on
+            // demand and has item nodes now is put right as a whole below (TellServedLists): the
+            // client's list of its children is as long as it had items.
             HashSet<ElementId>? reordered = null;
             foreach (var parent in diff.Reordered) (reordered ??= []).Add(parent.ElementId);
+            if (previous.Served is { } wasServed)
+                foreach (var listId in wasServed.Keys) (reordered ??= []).Add(listId);
             EmitAddedChildNudges(diff.BoundaryAdded(), reordered);
             foreach (var parent in diff.Reordered) EmitReorderNudges(previous, parent);
         }
@@ -291,16 +324,112 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         }
 
         if (!firstBuild)
+        {
+            TellServedLists(previous);
             foreach (var change in diff.PropertyChanged)
             {
                 string path = PathOf(change.Node);
+                if (change.PropertyName == AccessibilityProperties.ItemCount)
+                {
+                    // Told from the snapshots above, with every other list whose items' number changed;
+                    // a patch applied as a diff here has the same tree on both sides, and tells it from
+                    // the change.
+                    if (!_servedTold.Contains(change.Node.ElementId) && _snapshot.ByPath.TryGetValue(path, out var list)
+                        && list.Served is { } items)
+                        TellServedCount(list, items, change.Node.Served.Count, change.Previous?.Served.Count ?? 0, retire: false);
+                    continue;
+                }
                 // An expanded state is told from the object as it was published: whether it was
                 // expandable at all is a state of its own.
                 var expandedBefore = change.PropertyName == AccessibilityProperties.IsExpanded
                     && previous.ByPath.TryGetValue(path, out var before) ? (true, before.Expanded) : default;
                 if (EmitPropertyChange(change, path, expandedBefore)) DebugSignalsEmitted++;
             }
+        }
     }
+
+    /// <summary>
+    /// The lists that serve their items on demand in <paramref name="previous"/> or in the snapshot now,
+    /// whose children changed in number: a list served on demand with another number of items, one
+    /// that went past 2,000 (its item nodes are gone and the list serves them now, at the same paths)
+    /// or came back under it (it has item nodes again), and one that is gone with its items. Each is
+    /// told as <see cref="TellServedCount"/> tells it; a list gone, by a cache-remove of each item a
+    /// client may hold (the list's own went with the diff's).
+    /// </summary>
+    private void TellServedLists(Snapshot previous)
+    {
+        _servedTold.Clear();
+        if (previous.Served is { } was)
+            foreach (var (listId, items) in was)
+            {
+                var path = AtSpiAccessible.PathFor(listId);
+                var before = previous.ByPath[path];
+                if (!_snapshot.ByPath.TryGetValue(path, out var now))
+                {
+                    // The list is gone: so are its items.
+                    TellServedCount(null, items, count: 0, ChildrenOf(before), retire: true);
+                    continue;
+                }
+                if (now.Served == items) continue;   // served now too: below
+                // It has item nodes again, whose cache-adds went out above.
+                TellServedCount(now, items, now.ChildCount, ChildrenOf(before), retire: true);
+            }
+        if (_snapshot.Served is { } served)
+            foreach (var (listId, items) in served)
+            {
+                int count = items.Count;
+                int before = previous.ByPath.TryGetValue(AtSpiAccessible.PathFor(listId), out var old) ? ChildrenOf(old) : count;
+                if (before == count) continue;
+                TellServedCount(items.List, items, count, before, retire: false);
+                _servedTold.Add(listId);
+            }
+    }
+
+    // The lists TellServedLists told of in this apply. UI thread.
+    private readonly HashSet<ElementId> _servedTold = [];
+
+    /// <summary>How many children an object of a previous snapshot had, as the client was told: a list
+    /// served on demand's items as its node carried them (its items are the next snapshot's by then).</summary>
+    private static int ChildrenOf(AtSpiAccessible acc) =>
+        acc.Node is { IsVirtualItemContainer: true } node ? node.Served.Count : acc.ChildPaths.Count;
+
+    /// <summary>
+    /// A list's children went from <paramref name="before"/> to <paramref name="count"/>, and some or all
+    /// of them are items it serves on demand (<paramref name="items"/>), which have no nodes for a diff to
+    /// add or remove. What a caching client (libatspi, Orca's) must hear for its list of the list's
+    /// children to be right: each item it may hold past the new end disposed (cache-remove); one
+    /// children-changed for the first item that went or came, as a diff's run of items removed from or
+    /// added to a list's end is told; and the list's object published again (cache-add), which sizes the
+    /// client's list of its children to the number now, keeping what it holds below it (plan 17, round 3,
+    /// step 15, seen live in WSL). With <paramref name="retire"/>, the list serves its items no more.
+    /// </summary>
+    /// <param name="list">The list's object now; null when the list is gone.</param>
+    private void TellServedCount(AtSpiAccessible? list, AtSpiServedItems items, int count, int before, bool retire)
+    {
+        var gone = _gone;
+        items.TakeGone(retire && list is null ? 0 : count, before, gone);
+        if (retire && list is not null)
+        {
+            // Items below the end have nodes now: their objects are the snapshot's, at the same paths.
+            for (int i = gone.Count - 1; i >= 0; i--)
+                if (_snapshot.ByPath.ContainsKey(gone[i])) gone.RemoveAt(i);
+        }
+        foreach (var path in gone)
+        {
+            _signals!.EmitCacheRemove(path);
+            DebugSignalsEmitted++;
+        }
+        gone.Clear();
+        if (list is null || count == before) return;
+        if (count < before)
+            _signals!.EmitChildrenChanged(list.Path, items.PathOf(count), count, isAdd: false);
+        else
+            _signals!.EmitChildrenChanged(list.Path, items.PathOf(before), before, isAdd: true);
+        _signals.EmitCacheAdd(this, list);
+        DebugSignalsEmitted += 2;
+    }
+
+    private readonly List<string> _gone = [];
 
     // One children-changed:add per added child, in the order of its parent's children: each puts
     // the child at its index in a caching client's list, before its cache-add (which would put it
@@ -404,7 +533,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         var seenParents = new HashSet<string>();
         foreach (var removed in boundary)
         {
-            if (removed.Parent is null) continue;
+            // Still its list's item, at its place, served on demand now: the list's own signals
+            // tell its children changed (TellServedLists).
+            if (removed.Parent is null || Serves(_snapshot, removed.Node.ElementId)) continue;
             string parentPath = PathOf(removed.Parent);
             bool moved = _snapshot.ByPath.ContainsKey(PathOf(removed.Node));
             if (!moved && !seenParents.Add(parentPath)) continue;
@@ -457,7 +588,10 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// to take; every object reads its box and offscreen state from its node) and the bridge sends
     /// what a diff would have (state-changed:selected; text-caret-moved and text-selection-changed;
     /// accessible-name, accessible-description, accessible-value, state-changed:checked or expanded;
-    /// nothing for a move or a scroll), with no new snapshot. Anything else is applied as a diff.
+    /// nothing for a move or a scroll), with no new snapshot. A list whose items are served on demand
+    /// tells a move of its selection on its items (state-changed:selected, <see cref="EmitServedSelection"/>)
+    /// and another number of items as its children's (<see cref="TellServedCount"/>). Anything else is
+    /// applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {
@@ -477,6 +611,9 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                         or AccessibilityProperties.IsExpanded => change.Node.Parent is not null && change.Node.TextSource is null,
                     // Read from the node: nothing to set, and nothing a diff sends.
                     AccessibilityProperties.BoundingRect or AccessibilityProperties.ScrollPosition => true,
+                    // A list served on demand: its items read their number and selection from its node.
+                    AccessibilityProperties.ItemCount or AccessibilityProperties.ItemSelection
+                        => snapshot.Served?.ContainsKey(change.Node.ElementId) == true,
                     _ => false,
                 };
         }
@@ -492,6 +629,11 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             var node = change.Node;
             // A leaf's node made again is the change's: the object reads its box from it now.
             acc.Node = node;
+            if (change.PropertyName == AccessibilityProperties.ItemCount)
+            {
+                TellServedCount(acc, acc.Served!, node.Served.Count, change.Previous?.Served.Count ?? 0, retire: false);
+                continue;
+            }
             (bool, bool?) expandedBefore = (true, acc.Expanded);
             switch (change.PropertyName)
             {
@@ -583,6 +725,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             case AccessibilityProperties.IsSelected:
                 _signals!.EmitStateChanged(path, "selected", change.Node.IsSelected == true);
                 return true;
+            case AccessibilityProperties.ItemSelection:
+                return EmitServedSelection(change.Previous, change.Node);
             case AccessibilityProperties.Text:
             {
                 // From the versions' characters where the text is made on request: a text area's
@@ -605,6 +749,30 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// A move of the selection of a list served on demand: state-changed:selected on each item whose
+    /// state changed — the one that had the selection, the one that has it — in item order, with its
+    /// state now, as a list of item nodes sends for the same move. On the item's path, whether or not a
+    /// client has asked for its object (it is made when one does); a client may hold it from now on.
+    /// O(1) for a move of one selection. An item that went with the list's end sends nothing, as an
+    /// item node removed does not. False when nothing was sent.
+    /// </summary>
+    private bool EmitServedSelection(AccessibilityNode? previous, AccessibilityNode node)
+    {
+        if (_snapshot.Served?.GetValueOrDefault(node.ElementId) is not { } items) return false;
+        var now = node.Served;
+        int sent = 0;
+        foreach (var (index, selected) in ServedItems.Changes(previous?.Served ?? default, now))
+        {
+            if (index >= now.Count) continue;
+            _signals!.EmitStateChanged(items.PathOf(index), "selected", selected);
+            items.Named(index);
+            sent++;
+        }
+        DebugSignalsEmitted += Math.Max(0, sent - 1);   // the caller counts one
+        return sent > 0;
     }
 
     /// <summary>
@@ -631,7 +799,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     }
 
     /// <summary>For tests: publishes the snapshot of <paramref name="root"/>, as a rebuild would.</summary>
-    internal void Publish(AccessibilityNode root, float scale = 1f) => _snapshot = Build(root, scale);
+    internal void Publish(AccessibilityNode root, float scale = 1f) => _snapshot = Build(root, scale, _snapshot);
 
     /// <summary>
     /// The published view of <paramref name="root"/>'s tree, rebuilt in full on every apply. What
@@ -639,14 +807,27 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// the dictionary is sized for the tree (grown entry by entry to 3,000, it reallocated a dozen
     /// times), and each path is made once, in one string. A path was made twice, for the parent's
     /// list and for the node itself, in two strings each (the id's, then the path), and every
-    /// parent kept its children's paths in a list: about 500 bytes a node, about 270 now.
+    /// parent kept its children's paths in a list: about 500 bytes a node, about 270 now. A list
+    /// whose items are served on demand keeps its items (<see cref="AtSpiServedItems"/>) from
+    /// <paramref name="previous"/> while it serves them, so the item objects a client holds stay.
     /// </summary>
-    private static Snapshot Build(AccessibilityNode root, float scale)
+    private static Snapshot Build(AccessibilityNode root, float scale, Snapshot previous)
     {
         var byPath = new Dictionary<string, AtSpiAccessible>(CountNodes(root));
+        List<AtSpiAccessible>? lists = null;
         var rootAcc = Walk(root, AtSpiConstants.RootPath, isRoot: true, parentPath: AtSpiConstants.NullPath,
-            index: -1, scale, byPath);
-        return new Snapshot { ByPath = byPath, Root = rootAcc };
+            index: -1, scale, byPath, ref lists);
+        Dictionary<ElementId, AtSpiServedItems>? served = null;
+        if (lists is not null)
+            foreach (var acc in lists)
+            {
+                var id = acc.ElementId;
+                var items = previous.Served?.GetValueOrDefault(id) ?? new AtSpiServedItems(id, AccessibleOwnerSlots.SlotOf(id));
+                items.List = acc;
+                acc.Served = items;
+                (served ??= [])[id] = items;
+            }
+        return new Snapshot { ByPath = byPath, Root = rootAcc, Served = served };
     }
 
     private static int CountNodes(AccessibilityNode node)
@@ -658,16 +839,18 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         return count;
     }
 
+    /// <param name="lists">The objects of lists whose items are served on demand, added as found.</param>
     private static AtSpiAccessible Walk(
         AccessibilityNode node, string path, bool isRoot, string parentPath, int index, float scale,
-        Dictionary<string, AtSpiAccessible> byPath)
+        Dictionary<string, AtSpiAccessible> byPath, ref List<AtSpiAccessible>? lists)
     {
         var childPaths = AtSpiAccessible.ChildPathsOf(node);
         var acc = AtSpiAccessible.From(node, path, isRoot, parentPath, index, scale, childPaths);
         byPath[path] = acc;
+        if (node.IsVirtualItemContainer && !isRoot) (lists ??= []).Add(acc);
         var children = node.Children;
         for (int i = 0; i < childPaths.Length; i++)
-            Walk(children[i], childPaths[i], isRoot: false, path, i, scale, byPath);
+            Walk(children[i], childPaths[i], isRoot: false, path, i, scale, byPath, ref lists);
         return acc;
     }
 

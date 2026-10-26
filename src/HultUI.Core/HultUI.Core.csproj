@@ -30,7 +30,8 @@
          the SDL3 platform is what acts on it. -->
     <InternalsVisibleTo Include="HultUI.Platform.SDL3" />
     <!-- The AT-SPI bridge reads a text's caret and selection from the version of it the tree
-         carries (AccessibleTextVersion), without making the text, as the differ compares them. -->
+         carries (AccessibleTextVersion), without making the text, as the differ compares them,
+         and a list's owner slot (AccessibleOwnerSlots), which its items' ids pack (VirtualItemId.ForSlot). -->
     <InternalsVisibleTo Include="HultUI.Platform.Accessibility.Linux" />
     <!-- Both bridges read what a list whose items are served on demand carries for them: how many
          there are and which are selected (AccessibilityNode.Served), and where one is. -->

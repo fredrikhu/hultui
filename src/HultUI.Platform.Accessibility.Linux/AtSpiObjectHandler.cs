@@ -256,8 +256,8 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
             {
                 var reader = context.Request.GetBodyReader();
                 int index = reader.ReadInt32();
-                string childPath = index >= 0 && index < node.ChildPaths.Count
-                    ? node.ChildPaths[index] : null!;
+                // An item of a list served on demand is made here, the first time it is asked for.
+                string? childPath = node.ChildPathAt(index);
                 Reply(context, "(so)", (ref MessageWriter w) =>
                 {
                     if (childPath is null) AtSpiMarshal.WriteNullRef(ref w);
@@ -269,8 +269,17 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
                 Reply(context, "a(so)", (ref MessageWriter w) =>
                 {
                     var arr = w.WriteArrayStart(DBusType.Struct);
-                    foreach (var childPath in node.ChildPaths)
-                        AtSpiMarshal.WriteObjectRef(ref w, _tree.BusName, childPath);
+                    if (node.Served is { } served)
+                    {
+                        // Every item's path, made as it is written, no object for any: a client that
+                        // asks for all of a long list's children gets them, and may hold any.
+                        served.HandedOutAll();
+                        for (int i = 0, count = served.Count; i < count; i++)
+                            AtSpiMarshal.WriteObjectRef(ref w, _tree.BusName, served.PathOf(i));
+                    }
+                    else
+                        foreach (var childPath in node.ChildPaths)
+                            AtSpiMarshal.WriteObjectRef(ref w, _tree.BusName, childPath);
                     w.WriteArrayEnd(arr);
                 });
                 break;
