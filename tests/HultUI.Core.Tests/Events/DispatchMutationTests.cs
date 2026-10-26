@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Testing;
 using Xunit;
 
 namespace HultUI.Core.Tests.Events;
@@ -119,5 +120,59 @@ public class DispatchMutationTests
 
         Assert.Equal(1, owned);
         Assert.Equal(0, app);
+    }
+
+    [Fact]
+    public void APatch_KeepsOwnedHandlersFirst_ThenTheBuildsInItsOrder()
+    {
+        var live = Box.New();
+        var order = new List<string>();
+        live.On<PointerDownEvent>(_ => order.Add("old app"));
+        live.OnOwn<PointerDownEvent>(_ => order.Add("owned"));
+        live.On<BlurEvent>(_ => order.Add("old blur"));
+
+        var incoming = Box.New();
+        incoming.On<PointerDownEvent>(_ => order.Add("new 1"));
+        incoming.OnOwn<PointerDownEvent>(_ => order.Add("incoming owned"));
+        incoming.On<PointerDownEvent>(_ => order.Add("new 2"));
+        live.PatchFrom(incoming);
+        live.InvokeHandlers(Click(), EventPhase.Bubble);
+
+        Assert.Equal(["owned", "new 1", "new 2"], order);
+        // A kind of event the build no longer listens for is let go.
+        Assert.False(live.HasEventHandler<BlurEvent>());
+        Assert.True(live.HasEventHandler<PointerDownEvent>());
+    }
+
+    /// <summary>
+    /// A rebuild patches every element it keeps with handlers of the same kinds as before, every
+    /// key. The live element's lists take the new handlers where they are: making them again cost
+    /// 208 B a patched element with one click handler (Vesper's Detail view, 13 KB a key).
+    /// </summary>
+    [Fact]
+    public void APatchWithTheSameKindsOfHandler_AllocatesNothing()
+    {
+        const int Count = 64;
+        var live = new BoxElement[Count];
+        var twins = new BoxElement[Count];
+        for (int i = 0; i < Count; i++)
+        {
+            live[i] = Box.New();
+            live[i].OnOwn<KeyDownEvent>(_ => { });
+            live[i].On<ClickEvent>(_ => { });
+            twins[i] = Box.New();
+            twins[i].On<ClickEvent>(_ => { });
+            twins[i].On<PointerEnterEvent>(_ => { });
+            live[i].PatchFrom(twins[i]);
+        }
+
+        long bytes = Allocations.Least(() =>
+        {
+            for (int i = 0; i < Count; i++)
+                live[i].PatchFrom(twins[i]);
+        });
+
+        Assert.Equal(0, bytes);
+        Assert.True(live[0].HasEventHandler<PointerEnterEvent>());
     }
 }

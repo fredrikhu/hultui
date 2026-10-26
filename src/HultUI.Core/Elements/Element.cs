@@ -1711,27 +1711,62 @@ public abstract class Element
     /// </summary>
     private void CopyAppHandlersFrom(Element source)
     {
+        if (_dispatchDepth > 0)
+        {
+            CopyAppHandlersMidDispatch(source);
+            return;
+        }
+
+        // A rebuild patches every element it keeps, and nearly always hands each the same kinds
+        // of handler it had. So the lists stay: each sheds its app handlers in place and takes
+        // the incoming build's, and only a kind nothing listens for any more is let go. Making
+        // the lists again — and a list of the kinds emptied — cost 208 B a patched element with
+        // one click handler, 13 KB a key in Vesper's Detail view.
+        if (_handlers is not null)
+            foreach (var (_, list) in _handlers)
+                list.RemoveAll(static e => !e.Owned);
+
+        if (source._handlers is not null)
+        {
+            foreach (var (type, list) in source._handlers)
+            {
+                foreach (var entry in list)
+                {
+                    if (!entry.Owned)
+                        ListForMutation(type).Add(entry);
+                }
+            }
+        }
+
         if (_handlers is not null)
         {
-            List<Type>? empty = null;
-            // Collect first, apply after: this runs mid-dispatch often enough (a handler
-            // marks dirty and the rebuild lands here) that mutating while enumerating the
-            // dictionary is not worth relying on.
-            List<(Type Type, List<EventHandlerEntry> List)>? replacements = null;
-
+            // Removing during enumeration is safe for Dictionary (it leaves the enumerator valid).
             foreach (var (type, list) in _handlers)
             {
-                if (_dispatchDepth > 0)
-                {
-                    var kept = list.FindAll(static e => e.Owned);
-                    if (kept.Count == 0) (empty ??= []).Add(type);
-                    else (replacements ??= []).Add((type, kept));
-                    continue;
-                }
-
-                list.RemoveAll(static e => !e.Owned);
                 if (list.Count == 0)
-                    (empty ??= []).Add(type);
+                    _handlers.Remove(type);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="CopyAppHandlersFrom"/> while a dispatch is walking this element's lists (a
+    /// handler marked dirty and the rebuild landed here): every list is replaced, never changed,
+    /// so the walk in progress keeps the handlers it started with.
+    /// </summary>
+    private void CopyAppHandlersMidDispatch(Element source)
+    {
+        if (_handlers is not null)
+        {
+            // Collect first, apply after: replacing a value while enumerating the dictionary is
+            // not something to rely on.
+            List<Type>? empty = null;
+            List<(Type Type, List<EventHandlerEntry> List)>? replacements = null;
+            foreach (var (type, list) in _handlers)
+            {
+                var kept = list.FindAll(static e => e.Owned);
+                if (kept.Count == 0) (empty ??= []).Add(type);
+                else (replacements ??= []).Add((type, kept));
             }
 
             if (replacements is not null)
@@ -1748,9 +1783,8 @@ public abstract class Element
         {
             foreach (var entry in list)
             {
-                if (entry.Owned)
-                    continue;
-                ListForMutation(type).Add(entry);
+                if (!entry.Owned)
+                    ListForMutation(type).Add(entry);
             }
         }
     }
