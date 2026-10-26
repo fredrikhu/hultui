@@ -4,6 +4,8 @@ using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Text;
 using SkiaSharp;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace HultUI.Rendering.Skia;
 
@@ -58,15 +60,78 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Keyed by what the run draws, not by the run: a paragraph laid out again after
     // an edit makes new runs for every line, the ones that did not change too.
     // The blobs are native handles (NativeTextBlob), each holding the one reference this
-    // context gives up when the cache empties or the context is disposed: an SKTextBlob
+    // context gives up when the map lets it go or the context is disposed: an SKTextBlob
     // wrapper was 80 B per new blob.
-    private readonly Dictionary<ShapedRun, nint> _runBlobCache = new(SameGlyphs.Instance);
+    private readonly Dictionary<ShapedRun, KeptBlob> _runBlobCache = new(SameGlyphs.Instance);
     internal const int RunBlobCacheMaxSize = 2048;
     internal int CachedBlobCount => _runBlobCache.Count;
 
     // Every native blob this context made and gave up, for the tests that hold the two equal.
     internal long BlobsMade { get; private set; }
     internal long BlobsReleased { get; private set; }
+
+    // ── What the blob maps keep ──
+    //
+    // Both maps (runs' blobs and stretches' sub-blobs) are bounded by RunBlobCacheMaxSize, and a
+    // full map used to empty whole: a screen that needed more made every blob again on every frame
+    // (plan 17, round 5: a dense-colour terminal 2,338 a frame at 1200×900 and 6,662 at
+    // 1600×1000, a Chinese one 4,096 run blobs at 1080p; each a native copy of its glyphs, and on
+    // a GPU surface a new blob ID whose vertex data Skia makes again). Now each blob carries the
+    // frame that last drew it, and a full map lets go only of what neither this frame nor the
+    // last drew. The next sweep waits until the map holds twice what the sweep kept, and at
+    // least its bound: a screen whose two frames need fewer than half the bound keeps the map at
+    // its bound, as before, and a big screen's first frame grows the map by doubling, with no
+    // look at any entry while none is older than the last frame (a sweep on every new blob past
+    // the bound was O(n²)). The map empties whole, as it did, when what two frames drew holds
+    // more than MaxGlyphsKept glyphs.
+    private struct KeptBlob(nint blob, int glyphs, uint frame)
+    {
+        public readonly nint Blob = blob;
+        public readonly int Glyphs = glyphs;
+        public uint Frame = frame;
+    }
+
+    // For each map: how many of its blobs this frame and the last drew, the glyphs it holds, and
+    // the size at which it next sweeps.
+    private struct BlobUse
+    {
+        public int DrawnNow, DrawnBefore, SweepAt;
+        public long Glyphs;
+
+        public static BlobUse Empty => new() { SweepAt = RunBlobCacheMaxSize };
+
+        public void Touch(ref KeptBlob kept, uint frame)
+        {
+            if (kept.Frame == frame) return;
+            if (kept.Frame == frame - 1) DrawnBefore--;
+            DrawnNow++;
+            kept.Frame = frame;
+        }
+
+        public void Added(int glyphs)
+        {
+            DrawnNow++;
+            Glyphs += glyphs;
+        }
+
+        public void NextFrame()
+        {
+            DrawnBefore = DrawnNow;
+            DrawnNow = 0;
+        }
+    }
+
+    /// <summary>The most glyphs a blob map keeps in the blobs this frame and the last drew
+    /// (about 2.6 MB of glyph ids and places, natively): two frames of a dense-colour terminal
+    /// at 3840×2100 hold ~96,000. Past it a full map empties whole, as every full map did.</summary>
+    internal const int MaxGlyphsKept = 1 << 18;
+
+    private uint _frame;
+    private BlobUse _runUse = BlobUse.Empty, _subUse = BlobUse.Empty;
+
+    /// <summary>Entries the blob maps' sweeps looked at, for the tests that hold a sweep to
+    /// maps that have something to let go.</summary>
+    internal long SweptEntries { get; private set; }
 
     // Every new blob is built in this one builder: making the blob hands it over and leaves the
     // builder empty for the next. A builder per blob was 80 B more per new blob (216 -> 136),
@@ -77,11 +142,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     // Sub-blobs: the glyphs of one run that can ink one colour stretch of a spanned line (see
     // DrawRunPart). Keyed by the run itself, not its glyphs, so a lookup hashes nothing: a run
-    // laid out again makes new ones, released with the rest when the cache empties. The map is
-    // made at its bound's capacity with the first sub-blob (~74 KB, once per context that draws
-    // a spanned line), so filling it allocates nothing more.
+    // laid out again makes new ones, let go when the map sweeps. The map is made at its bound's
+    // capacity with the first sub-blob (~90 KB, once per context that draws a spanned line), so
+    // filling it allocates nothing more unless a screen needs more than half the bound.
     private readonly record struct SubRun(ShapedRun Run, int Start, int End);
-    private Dictionary<SubRun, nint>? _subBlobCache;
+    private Dictionary<SubRun, KeptBlob>? _subBlobCache;
     internal int CachedSubBlobCount => _subBlobCache?.Count ?? 0;
 
     /// <summary>Whether a colour stretch draws only the glyphs that can reach it. Off, each
@@ -208,6 +273,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null)
     {
         _scale = scaleFactor > 0f ? scaleFactor : 1f;
+        // A new frame for the blob maps: what the last one drew is kept when they sweep.
+        _frame++;
+        _runUse.NextFrame();
+        _subUse.NextFrame();
         // Nothing should be held here; a frame that threw between a draw and its
         // EndFrame would have leaked its borrows into this one.
         ReleaseHeldFrames();
@@ -1109,10 +1178,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // The kept sub-blob of glyphs [start, end) of a run, at their places in the run.
     private nint SubBlob(ShapedRun run, int start, int end)
     {
-        var cache = _subBlobCache ??= new Dictionary<SubRun, nint>(RunBlobCacheMaxSize);
+        var cache = _subBlobCache ??= new Dictionary<SubRun, KeptBlob>(RunBlobCacheMaxSize);
         var key = new SubRun(run, start, end);
-        if (cache.TryGetValue(key, out nint blob))
-            return blob;
+        ref var kept = ref CollectionsMarshal.GetValueRefOrNullRef(cache, key);
+        if (!Unsafe.IsNullRef(ref kept))
+        {
+            _subUse.Touch(ref kept, _frame);
+            return kept.Blob;
+        }
 
         _pooledFont.Typeface = (SKTypeface)run.Font.NativeHandle;
         _pooledFont.Size = run.FontSize;
@@ -1125,21 +1198,51 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             glyphSpan[i - start] = (ushort)glyphs[i].GlyphId;
             positionSpan[i - start] = new SKPoint(glyphs[i].X, glyphs[i].Y);
         }
-        blob = NativeTextBlob.Make(_blobBuilder);
+        nint blob = NativeTextBlob.Make(_blobBuilder);
         if (blob != 0) BlobsMade++;
 
-        if (cache.Count >= RunBlobCacheMaxSize)
-            ClearSubBlobCache();
-        cache[key] = blob;
+        if (cache.Count >= _subUse.SweepAt)
+            Sweep(cache, ref _subUse);
+        cache[key] = new KeptBlob(blob, end - start, _frame);
+        _subUse.Added(end - start);
         return blob;
     }
 
     private void ClearSubBlobCache()
     {
-        if (_subBlobCache is not { } cache) return;
-        foreach (var blob in cache.Values)
-            Release(blob);
-        cache.Clear();
+        if (_subBlobCache is { } cache) Empty(cache, ref _subUse);
+    }
+
+    // A full map: lets go of the blobs neither this frame nor the last drew (when there are any:
+    // a map of only those has nothing to look for), empties whole if what is left holds more than
+    // MaxGlyphsKept glyphs, and puts the next sweep at twice what is kept, and at least the bound.
+    private void Sweep<TKey>(Dictionary<TKey, KeptBlob> map, ref BlobUse use) where TKey : notnull
+    {
+        if (map.Count > use.DrawnNow + use.DrawnBefore)
+        {
+            SweptEntries += map.Count;
+            uint frame = _frame;
+            foreach (var (key, kept) in map)
+            {
+                if (frame - kept.Frame <= 1) continue;
+                Release(kept.Blob);
+                use.Glyphs -= kept.Glyphs;
+                map.Remove(key);
+            }
+        }
+        if (use.Glyphs > MaxGlyphsKept)
+            Empty(map, ref use);
+        use.SweepAt = Math.Max(RunBlobCacheMaxSize, 2 * map.Count);
+    }
+
+    // Gives up this context's reference to every blob in the map: each was made once and is
+    // released once, here or in a sweep.
+    private void Empty<TKey>(Dictionary<TKey, KeptBlob> map, ref BlobUse use) where TKey : notnull
+    {
+        foreach (var kept in map.Values)
+            Release(kept.Blob);
+        map.Clear();
+        use = BlobUse.Empty;
     }
 
     /// <summary>
@@ -1898,8 +2001,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // The cached blob of a run, made on its first draw; 0 for a run with no glyphs.
     private nint BuildShapedBlob(ShapedRun run)
     {
-        if (_runBlobCache.TryGetValue(run, out var cached))
-            return cached;
+        ref var kept = ref CollectionsMarshal.GetValueRefOrNullRef(_runBlobCache, run);
+        if (!Unsafe.IsNullRef(ref kept))
+        {
+            _runUse.Touch(ref kept, _frame);
+            return kept.Blob;
+        }
 
         // Read once: a run of several words puts its glyph array together on the first read.
         var glyphs = run.Glyphs;
@@ -1926,21 +2033,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         nint blob = NativeTextBlob.Make(_blobBuilder);
         if (blob != 0) BlobsMade++;
 
-        if (_runBlobCache.Count >= RunBlobCacheMaxSize)
-            ClearRunBlobCache();
-
-        _runBlobCache[run] = blob;
+        if (_runBlobCache.Count >= _runUse.SweepAt)
+            Sweep(_runBlobCache, ref _runUse);
+        _runBlobCache[run] = new KeptBlob(blob, glyphs.Length, _frame);
+        _runUse.Added(glyphs.Length);
         return blob;
     }
 
-    // Gives up this context's reference to every cached blob: each was made once and is
-    // released once, here, whether the cache filled up or the context is going away.
-    private void ClearRunBlobCache()
-    {
-        foreach (var blob in _runBlobCache.Values)
-            Release(blob);
-        _runBlobCache.Clear();
-    }
+    private void ClearRunBlobCache() => Empty(_runBlobCache, ref _runUse);
 
     private void Release(nint blob)
     {

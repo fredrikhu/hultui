@@ -613,6 +613,18 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
 
     // ── Allocation and lifetimes ──
 
+    // Draws count items, perFrame a frame: as a list scrolled through, whose blobs the maps let
+    // go once two frames have passed without them.
+    private static void InFrames(SkiaRenderContext ctx, int count, int perFrame, Action<int> draw)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (i % perFrame == 0) ctx.BeginFrame(800, 100, 1f, Color.White);
+            draw(i);
+            if (i % perFrame == perFrame - 1 || i == count - 1) ctx.EndFrame();
+        }
+    }
+
     private static TextSpan[] Thirds(string text) =>
     [
         new(0, text.Length / 3, new Color(86, 156, 214, 255)),
@@ -636,13 +648,13 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
             rows[i] = TextDrawAllocationTests.WithGlyphs(ctx.LayoutParagraph(text, style, 780, Thirds(text)));
         }
-        ctx.BeginFrame(800, 100, 1f, Color.White);
         // A few rows first, so the measured ones fill a map that has not grown yet: a map made
-        // small would grow under them (and the run blobs' cache, grown by then, would not).
+        // small would grow under them (and the run blobs' cache, grown by then, would not). Rows
+        // are drawn fifty a frame, as a list scrolled through, so the maps let the old ones go.
         int next = 0;
-        for (; next < 20; next++) ctx.DrawParagraph(rows[next], new Point(4, 4));
-        for (int i = 0; i <= SkiaRenderContext.RunBlobCacheMaxSize; i++)
-            ctx.DrawText($"Row {i} of the list", new Rect(4, 40, 780, 30), style, TextOverflow.Clip, null);
+        InFrames(ctx, 20, 20, _ => ctx.DrawParagraph(rows[next++], new Point(4, 4)));
+        InFrames(ctx, SkiaRenderContext.RunBlobCacheMaxSize + 100, 100,
+            i => ctx.DrawText($"Row {i} of the list", new Rect(4, 40, 780, 30), style, TextOverflow.Clip, null));
         Assert.True(ctx.CachedSubBlobCount > 0);
 
         long subBlobsBefore = ctx.BlobsMade;
@@ -652,17 +664,11 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         // read 40.4 once (the Meridian installer run of 2026-10-13), so the bound sits well
         // between the two rather than on the retired context's edge.
         long first = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = next; i < next + Round; i++) ctx.DrawParagraph(rows[i], new Point(4, 4));
-        next += Round;
+        InFrames(ctx, Round, 50, _ => ctx.DrawParagraph(rows[next++], new Point(4, 4)));
         double firstPerRow = (GC.GetAllocatedBytesForCurrentThread() - first) / (double)Round;
         Assert.True(firstPerRow < 120, $"the sub-blob map grew: {firstPerRow:0.#} B a row");
 
-        long bytes = Allocations.Least(() =>
-        {
-            for (int i = next; i < next + Round; i++) ctx.DrawParagraph(rows[i], new Point(4, 4));
-            next += Round;
-        });
-        ctx.EndFrame();
+        long bytes = Allocations.Least(() => InFrames(ctx, Round, 50, _ => ctx.DrawParagraph(rows[next++], new Point(4, 4))));
         Assert.True(ctx.BlobsMade - subBlobsBefore >= 2 * Round, $"{ctx.BlobsMade - subBlobsBefore} blobs made");
         Assert.True(bytes / (double)Round < 1, $"a new row of three stretches allocated {bytes / (double)Round:0.#} B");
     }
@@ -675,15 +681,13 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
         var ctx = (SkiaRenderContext)surface.RenderContext;
         var style = Style(12f, family: FamilyWithAnExtent(ctx));
         bool sawSubBlobs = false;
-        ctx.BeginFrame(800, 100, 1f, Color.White);
-        for (int i = 0; i < 3 * SkiaRenderContext.RunBlobCacheMaxSize; i++)
+        InFrames(ctx, 3 * SkiaRenderContext.RunBlobCacheMaxSize, 50, i =>
         {
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
             ctx.DrawText(text, new Rect(4, 4, 780, 30), style, TextOverflow.Clip, null, Thirds(text));
             Assert.Equal(ctx.CachedBlobCount + ctx.CachedSubBlobCount, ctx.BlobsMade - ctx.BlobsReleased);
             sawSubBlobs |= ctx.CachedSubBlobCount > 0;
-        }
-        ctx.EndFrame();
+        });
         Assert.True(sawSubBlobs, "no sub-blob was made");
         Assert.True(ctx.BlobsReleased > SkiaRenderContext.RunBlobCacheMaxSize, $"{ctx.BlobsReleased} released");
 
@@ -708,27 +712,22 @@ public class SpannedLineSubBlobTests(ITestOutputHelper output)
             string text = $"    var item{i} = Compute({i % 997}, \"value {i}\"); // note {i}";
             rows[i] = TextDrawAllocationTests.WithGlyphs(ctx.LayoutParagraph(text, style, 780, Thirds(text)));
         }
-        ctx.BeginFrame(800, 100, 1f, Color.White);
         int next = 0;
-        for (; next < Warm; next++) ctx.DrawParagraph(rows[next], new Point(4, 4));
+        InFrames(ctx, Warm, Warm, _ => ctx.DrawParagraph(rows[next++], new Point(4, 4)));
         // The run blobs' cache, which is not sized ahead, grown to its bound first.
-        for (int i = 0; i <= SkiaRenderContext.RunBlobCacheMaxSize; i++)
-            ctx.DrawText($"Row {i} of the list", new Rect(4, 40, 780, 30), style, TextOverflow.Clip, null);
+        InFrames(ctx, SkiaRenderContext.RunBlobCacheMaxSize + 100, 100,
+            i => ctx.DrawText($"Row {i} of the list", new Rect(4, 40, 780, 30), style, TextOverflow.Clip, null));
         Assert.True(ctx.RunExtentsFromGlyphs > 0, "no run took its own extent");
 
         // A thousand new runs. Kept per run in a map grown from a default capacity, their extents
         // were ~70 B a row; a one-off retired allocation context (see Allocations) is about 8 KB,
         // 8 B a row.
         long first = GC.GetAllocatedBytesForCurrentThread();
-        for (int end = next + First; next < end; next++) ctx.DrawParagraph(rows[next], new Point(4, 4));
+        InFrames(ctx, First, 50, _ => ctx.DrawParagraph(rows[next++], new Point(4, 4)));
         double firstPerRow = (GC.GetAllocatedBytesForCurrentThread() - first) / (double)First;
         Assert.True(firstPerRow < 30, $"the run extents grew something: {firstPerRow:0.#} B a row");
 
-        long bytes = Allocations.Least(() =>
-        {
-            for (int end = next + Round; next < end; next++) ctx.DrawParagraph(rows[next], new Point(4, 4));
-        });
-        ctx.EndFrame();
+        long bytes = Allocations.Least(() => InFrames(ctx, Round, 50, _ => ctx.DrawParagraph(rows[next++], new Point(4, 4))));
         Assert.True(bytes / (double)Round < 1, $"a new row of three stretches in {VariableFonts.Family} allocated {bytes / (double)Round:0.#} B");
     }
 

@@ -147,8 +147,9 @@ public class NativeTextBlobTests
             .ToArray();
 
     /// <summary>Every blob is made with one reference and released once: when the cache fills
-    /// and empties, and at Dispose for those still cached. None is released twice (Skia would
-    /// free it under another holder) and none is kept (a leak of native memory).</summary>
+    /// and lets go of what the last two frames did not draw, and at Dispose for those still
+    /// cached. None is released twice (Skia would free it under another holder) and none is kept
+    /// (a leak of native memory).</summary>
     [Fact]
     public void EveryBlobMade_IsReleasedOnce_ThroughCacheChurnAndDispose()
     {
@@ -156,17 +157,20 @@ public class NativeTextBlobTests
         var ctx = (SkiaRenderContext)surface.RenderContext;
         var rows = Rows(ctx, 3 * SkiaRenderContext.RunBlobCacheMaxSize + 100);
 
-        ctx.BeginFrame(600, 200, 1f, Color.White);
-        foreach (var row in rows)
+        // A hundred new rows a frame, as a list scrolled through.
+        for (int i = 0; i < rows.Length; i++)
         {
-            ctx.DrawParagraph(row, new Point(10, 10));
+            if (i % 100 == 0) ctx.BeginFrame(600, 200, 1f, Color.White);
+            ctx.DrawParagraph(rows[i], new Point(10, 10));
             Assert.Equal(ctx.CachedBlobCount, ctx.BlobsMade - ctx.BlobsReleased);
+            if (i % 100 == 99 || i == rows.Length - 1) ctx.EndFrame();
         }
-        // The same rows again: drawn from the cache, nothing made.
+        // The last rows again: drawn from the cache, nothing made.
+        ctx.BeginFrame(600, 200, 1f, Color.White);
         long made = ctx.BlobsMade;
         for (int i = rows.Length - 50; i < rows.Length; i++) ctx.DrawParagraph(rows[i], new Point(10, 10));
         Assert.Equal(made, ctx.BlobsMade);
-        // Their bounds come from the same blobs.
+        // Bounds come from the same blobs: a row let go long ago is made again.
         ctx.TextPaintBounds("Row 000001 of the list", new Rect(0, 0, 400, 30), Style(), TextOverflow.Clip, null, null);
         ctx.EndFrame();
 
