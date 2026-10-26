@@ -101,16 +101,16 @@ public partial class MeridianApp
             case KeyCode.Down when rows.Count > 0:
                 _historyCursor = Math.Min(_historyCursor + 1, rows.Count - 1);
                 _historySelection = rows[_historyCursor];
-                MarkDirty();
+                MarkViewDirty();
                 return true;
             case KeyCode.Up when rows.Count > 0:
                 _historyCursor = Math.Max(_historyCursor - 1, 0);
                 _historySelection = rows[_historyCursor];
-                MarkDirty();
+                MarkViewDirty();
                 return true;
             case KeyCode.Enter when _historyCursor >= 0 && _historyCursor < rows.Count:
                 _historySelection = rows[_historyCursor];
-                MarkDirty();
+                MarkViewDirty();
                 return true;
             default:
                 // r alone: Shift or Alt and r used to restore too.
@@ -132,7 +132,7 @@ public partial class MeridianApp
         _filterFailuresOnly = false;
         _filterTodayOnly = false;
         _filterEnv = null;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     /// <summary>
@@ -205,8 +205,8 @@ public partial class MeridianApp
         var input = TextInput.New(_historyFind.Query).Style(Ui.Field)
             .Height(Dimension.Px(26)).Width(260).MinWidth(Dimension.Px(140));
         input.PlaceholderText("find in history…");
-        // The search calls MarkDirty itself when its query changes (it was made with it): a
-        // second one here built the window twice a character.
+        // The search rebuilds the view itself when its query changes (it was made with
+        // MarkViewDirty): a second rebuild here built the window twice a character.
         input.OnTextChanged(_historyFind.SetQuery);
         input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
         input.WithRef(_historyFieldRef);
@@ -218,15 +218,15 @@ public partial class MeridianApp
                 "filter-" + method, () =>
                 {
                     _filterMethod = _filterMethod == method ? null : method;
-                    MarkDirty();
+                    MarkViewDirty();
                 }));
         bar.AddChild(FilterChip("failures", _filterFailuresOnly, Azimuth.StatusWarn, "filter-failures",
-            () => { _filterFailuresOnly = !_filterFailuresOnly; MarkDirty(); }));
+            () => { _filterFailuresOnly = !_filterFailuresOnly; MarkViewDirty(); }));
         bar.AddChild(FilterChip("today", _filterTodayOnly, Azimuth.Accent300, "filter-today",
-            () => { _filterTodayOnly = !_filterTodayOnly; MarkDirty(); }));
+            () => { _filterTodayOnly = !_filterTodayOnly; MarkViewDirty(); }));
         if (_envName is { } env)
             bar.AddChild(FilterChip($"env: {env}", _filterEnv == env, Azimuth.Accent300, "filter-env",
-                () => { _filterEnv = _filterEnv == env ? null : env; MarkDirty(); }));
+                () => { _filterEnv = _filterEnv == env ? null : env; MarkViewDirty(); }));
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.Mono($"{FilteredHistory().Count} of {_history.Count}", 10.5f, Azimuth.TextMuted)
@@ -288,7 +288,7 @@ public partial class MeridianApp
             .RenderWith((item, selected) => HistoryRow(item.Entry, selected, item.Index))
             // One delegate from build to build, so the list keeps each row's label too.
             .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, DateTimeOffset.Now))
-            .OnActivateItem(item => { _historySelection = item.Entry; MarkDirty(); })
+            .OnActivateItem(item => { _historySelection = item.Entry; MarkViewDirty(); })
             .SelectedIndex(SelectedHistoryIndex(rows))
             .FlexGrow(1);
         list.AutomationId("history-rows");
@@ -376,7 +376,7 @@ public partial class MeridianApp
         row.AddChild(Ui.Mono(entry.EnvName ?? "—", 10f, Azimuth.TextFaint).Width(64).FlexShrink(0));
 
         var captured = entry;
-        row.OnClick(_ => { _historySelection = captured; MarkDirty(); });
+        row.OnClick(_ => { _historySelection = captured; MarkViewDirty(); });
         if (!selected) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }

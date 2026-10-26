@@ -216,7 +216,8 @@ public partial class MeridianApp
         }
 
         var input = TextInput.New(doc.Values.GetValueOrDefault(key, "")).Style(Ui.Field);
-        input.OnTextChanged(v => { doc.SetValue(key, v); MarkDirty(); })
+        // A value shows in this table alone; the title bar names the environment, not its values.
+        input.OnTextChanged(v => { doc.SetValue(key, v); MarkViewDirty(); })
             .Height(Dimension.Px(26)).FlexGrow(1)
             .FontFamily(Fonts.Mono).FontSize(11.5f)
             .TextColor(Azimuth.Text);

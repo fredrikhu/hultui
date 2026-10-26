@@ -24,7 +24,8 @@ public partial class MeridianApp
     private readonly FindBar _responseFind;
     private readonly Ref<TextAreaElement> _responseBodyRef = new();
 
-    private FindBar NewResponseFind() => new(MarkDirty)
+    // A find step rebuilds the response panel alone: nothing else shows the bar or its hits.
+    private FindBar NewResponseFind() => new(ResponseDirty)
     {
         Placeholder = "find in response…",
         FieldWidth = 220,
@@ -257,7 +258,7 @@ public partial class MeridianApp
                 .FontWeight(active ? FontWeight.Medium : FontWeight.Regular)
                 .TextColor(active ? Azimuth.Text : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Raised);
-        b.OnClick(_ => { tab.RespTab = which; MarkDirty(); });
+        b.OnClick(_ => { tab.RespTab = which; ResponseDirty(); });
         if (!active) b.HoverBg(Azimuth.Raised, Color.Transparent);
         return b;
     }
@@ -275,7 +276,7 @@ public partial class MeridianApp
             .AutomationId("body-" + label)
             .Children(Ui.Mono(label, 10f, active ? Azimuth.Accent300 : Azimuth.TextMuted));
         if (active) b.Background(Azimuth.Tint(Azimuth.Accent));
-        b.OnClick(_ => { tab.RespRaw = raw; MarkDirty(); });
+        b.OnClick(_ => { tab.RespRaw = raw; ResponseDirty(); });
         return b;
     }
 

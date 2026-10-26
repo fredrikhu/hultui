@@ -429,9 +429,14 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
     private static Element Editor(HeadlessSession session, string paneId)
     {
         var editor = Get(session, "url-display").Element;
-        while (editor.Parent is { } p && !p.Children.Any(c => c.AutomationId == paneId)) editor = p;
+        while (editor.Parent is { } p && !p.Children.Any(c => IsPane(c, paneId))) editor = p;
         return editor;
     }
+
+    /// <summary>The pane, or the host of the part it is the build of (MeridianApp's Part).</summary>
+    private static bool IsPane(Element e, string paneId) =>
+        e.AutomationId == paneId
+        || (e is HultUI.Core.Components.ComponentHost && e.Children.Count == 1 && e.Children[0].AutomationId == paneId);
 
     /// <summary>All six sub-tabs show whole: none is cut by the strip, which scrolls sideways
     /// when they do not fit.</summary>
@@ -459,8 +464,7 @@ public class NarrowEditorLayoutTests : IClassFixture<TestHttpServer>, IDisposabl
         Rect flip = Get(session, "flip-pane").Element.WindowBorderBox;
         Assert.True(flip.X + flip.Width <= width + 0.5f, $"the flip button ends at x={flip.X + flip.Width:0.#}, past {width}");
 
-        var editor = Get(session, "url-display").Element;
-        while (editor.Parent is { } p && !p.Children.Any(c => c.AutomationId == "response-right")) editor = p;
+        var editor = Editor(session, "response-right");
         foreach (var label in Labels(editor))
         {
             Rect v = Visible(label);

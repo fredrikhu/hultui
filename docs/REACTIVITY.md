@@ -408,6 +408,36 @@ same accessibility trees a key with a reader. The perf suite pins the pattern:
 (35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
 as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
 
+Meridian keeps its title bar, rail, request tree and response pane this way (round 5, step 11),
+and adds four lessons:
+
+- **A view-only path can still flip something a part shows.** The tree marks a request with
+  unsaved edits, and the first keystroke in its URL makes it unsaved. The editor's edits read
+  the flag before and after (`DocEdited`): the edit that flips it takes the full path, the rest
+  are view-only. A part shows a value only when the value is an input to it; a part that showed
+  the typed text itself would have to rebuild on every key.
+- **A part's own controls can rebuild the part alone.** The response pane's tabs, its
+  pretty/raw switch and its find bar change nothing else, so they write a second signal only
+  the pane reads: no parent build at all. A helper that has work waiting for a build (a
+  `FindBar`'s `Service()`, which gives its field the keyboard) then has to run after the part's
+  builds too — but not after the first, which runs while the parent's build makes the host,
+  before the part is in the window (`Mount().Parent` is still null).
+- **A part can hear the revision before the parent removes it.** Outside an event handler a
+  signal write runs its effects at once, so `MarkDirty()`'s bump rebuilds the parts before the
+  parent's own rebuild takes out one that no longer belongs (the pane, when the last tab
+  closed). Its build must cope with that state: return an empty box.
+- **A pane that gives way can keep its sizing on its root.** The bottom pane (380 high,
+  shrinking to a floor) needs nothing on its host: an unsized host takes its content's height
+  and floor. Only a host whose root never shrank needs `FlexShrink(0)`; left out, the tree and
+  the right pane gave their width to the editor.
+
+Meridian with the four parts (headless, 1400×900, a key and two frames; NativeAOT the same): a
+keystroke in the URL 237 → 72 KB (−70 %), elements patched 218 → 54; in a 200-request collection,
+where the tree had cost about 4.4 KB a request on every key, 938 → 72 KB and the key's time −22 %;
+the header, param and body editors −64…−70 %; a History key −35 %; a find character in the
+response rebuilds only the pane (no window build, −12 %). The time of a key and its frames moves
+less (−1…−7 % at 25 requests): at this size the frames, not the build, are most of it.
+
 ### Hand back the elements a key does not change
 
 What the reconciler does for a kept host it does for any live element a build hands back: it
