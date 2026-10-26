@@ -34,7 +34,7 @@ public static class EventDispatcher
     /// handlers. That is how one click both created a row and deleted it — the button ran
     /// "add", the rebuild patched its parent into the new row's remove button, and the same
     /// click bubbled into "remove". So each element on the path is pinned up front (see
-    /// <see cref="Element.PinHandlers"/>): the walk sees the handler lists as they were, and
+    /// <see cref="Element.PinHandlers"/>): the walk sees the handlers as they were, and
     /// a patch mid-dispatch installs the new ones for the <i>next</i> event. This already
     /// held for the element in flight; pinning the path is the same rule applied to the
     /// ancestors, and it means a handler attached to an ancestor mid-dispatch does not run
@@ -42,7 +42,7 @@ public static class EventDispatcher
     /// </remarks>
     public static void Dispatch(ElementEvent evt, Element target)
     {
-        var path = PinPath(target, evt.GetType(), out var pinned, out int depth, out _);
+        var path = PinPath(target, out var pinned, out int depth);
         Walk(evt, target, path, pinned, depth);
     }
 
@@ -52,14 +52,14 @@ public static class EventDispatcher
     /// for one. Most moves reach no move handler at all — hover styles, cursors and tooltips
     /// need no event — and the event was 64 bytes a move, the bulk of what a 1,000 Hz mouse
     /// left behind. Nothing else differs: the path is pinned first, so whether anything listens
-    /// is asked of the same handler lists the walk would run. A handler registered with a
+    /// is asked of the same handlers the walk would run. A handler registered with a
     /// listening condition (<see cref="Element.OnPassive{TEvent}(Action{TEvent}, Func{bool})"/>)
     /// counts only while it holds; if a move is made, every handler on the path runs as ever.
     /// </summary>
     internal static void DispatchPointerMove(Element target, Point position, Point delta, KeyModifiers modifiers)
     {
-        var path = PinPath(target, typeof(PointerMoveEvent), out var pinned, out int depth, out bool listened);
-        if (!listened || !AnyListening(pinned, depth))
+        var path = PinPath(target, out var pinned, out int depth);
+        if (!AnyListening(pinned, depth))
         {
             Release(path, pinned, depth);
             return;
@@ -67,61 +67,62 @@ public static class EventDispatcher
         Walk(new PointerMoveEvent { Position = position, Delta = delta, Modifiers = modifiers }, target, path, pinned, depth);
     }
 
-    /// <summary>Whether a pinned handler wants the event now: one with no listening condition,
-    /// or one whose condition holds.</summary>
-    private static bool AnyListening(List<EventHandlerEntry>?[] pinned, int depth)
+    /// <summary>Whether a pinned handler wants the pointer move now: one with no listening
+    /// condition, or one whose condition holds.</summary>
+    private static bool AnyListening(EventHandlerEntry[]?[] pinned, int depth)
     {
         for (int i = 0; i < depth; i++)
         {
-            if (pinned[i] is not { } list) continue;
-            for (int j = 0; j < list.Count; j++)
-                if (list[j].Handler.Target is not IListeningHandler handler || handler.Listening) return true;
+            if (pinned[i] is not { } items) continue;
+            for (int j = 0; j < items.Length && items[j].Kind is { } kind; j++)
+            {
+                if (kind.Type == typeof(PointerMoveEvent)
+                    && (items[j].Handler.Target is not IListeningHandler handler || handler.Listening))
+                    return true;
+            }
         }
         return false;
     }
 
     /// <summary>
     /// The path from the root down to <paramref name="target"/>, each element pinned (see
-    /// <see cref="Element.PinHandlers"/>) with its handler list for <paramref name="type"/> in
-    /// <paramref name="pinned"/>; <paramref name="listened"/> says whether any of them has one.
-    /// Always handed on to <see cref="Walk"/> or <see cref="Release"/>.
+    /// <see cref="Element.PinHandlers"/>) with its handlers, of every kind, in
+    /// <paramref name="pinned"/>. Always handed on to <see cref="Walk"/> or <see cref="Release"/>.
     /// </summary>
-    private static Element[] PinPath(Element target, Type type, out List<EventHandlerEntry>?[] pinned, out int depth,
-        out bool listened)
+    private static Element[] PinPath(Element target, out EventHandlerEntry[]?[] pinned, out int depth)
     {
         // Both arrays are pooled rather than allocated: pointer moves and drags dispatch
         // continuously, and this runs once per event. Rent can hand back longer arrays;
         // only [0, depth) is ever touched, and that span is cleared before returning them
-        // so the pool holds no element or handler list alive.
+        // so the pool holds no element or handler array alive.
         depth = 0;
         for (var e = target; e is not null; e = e.Parent) depth++;
 
         var path = ArrayPool<Element>.Shared.Rent(depth);
-        pinned = ArrayPool<List<EventHandlerEntry>?>.Shared.Rent(depth);
+        pinned = ArrayPool<EventHandlerEntry[]?>.Shared.Rent(depth);
         // Root first, filled back to front — the walk only goes up.
         {
             int i = depth - 1;
             for (var e = target; e is not null; e = e.Parent) path[i--] = e;
         }
-        listened = false;
         for (int i = 0; i < depth; i++)
-            listened |= (pinned[i] = path[i].PinHandlers(type)) is not null;
+            pinned[i] = path[i].PinHandlers();
         return path;
     }
 
     /// <summary>Unpins a path from <see cref="PinPath"/> and gives its arrays back.</summary>
-    private static void Release(Element[] path, List<EventHandlerEntry>?[] pinned, int depth)
+    private static void Release(Element[] path, EventHandlerEntry[]?[] pinned, int depth)
     {
         for (int i = 0; i < depth; i++)
             path[i].UnpinHandlers();
         Array.Clear(path, 0, depth);
         Array.Clear(pinned, 0, depth);
         ArrayPool<Element>.Shared.Return(path);
-        ArrayPool<List<EventHandlerEntry>?>.Shared.Return(pinned);
+        ArrayPool<EventHandlerEntry[]?>.Shared.Return(pinned);
     }
 
     /// <summary>The capture, target and bubble phases over a pinned path, which it releases.</summary>
-    private static void Walk(ElementEvent evt, Element target, Element[] path, List<EventHandlerEntry>?[] pinned, int depth)
+    private static void Walk(ElementEvent evt, Element target, Element[] path, EventHandlerEntry[]?[] pinned, int depth)
     {
         bool batch = ReactiveRuntime.AutoBatch;
         if (batch) ReactiveRuntime.BeginBatch();

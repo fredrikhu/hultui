@@ -145,7 +145,7 @@ firing on those would be noise, and warning noise is the failure these rules exi
 | Capture → Target → Bubble | Matches DOM event model. Well-understood, flexible |
 | Hit testing: depth-first, reverse child order | Front-to-back testing. Respects visual stacking order |
 | Focus management built in | Tab/shift-tab traversal, focus/blur events, FocusManager |
-| **Handler storage stays `Dictionary<Type, List>`** (2026-09-20) | The bitmask/inline-array rewrite was measured at ≤5 ns per event — see "Allocation items P4/P5" under Rendering |
+| **Handler storage: one small array per element** (2026-10-26; was `Dictionary<Type, List>`) | Each entry holds the handler as the app typed it; one `EventKind` per event type runs it, so there is no list per kind and no closure per handler. Builds make their elements' handlers again on every key, which cost 18–28 KB a key in Junction, Vesper and Meridian: −11…−20 % bytes a key, dispatch no slower — see "Handler storage rebuilt" under Rendering. The bitmask stays declined (≤5 ns per event, "Allocation items P4/P5") |
 
 ---
 
@@ -275,7 +275,7 @@ five rounds; a temporary `GC.GetAllocatedBytesForCurrentThread` probe inside
 | Item | What it would replace | Measured cost today | Verdict |
 |------|-----------------------|---------------------|---------|
 | P4 handler bitmask | one `Dictionary<Type, List>` probe per path element that has handlers | 2.6 ns miss / 3.5 ns hit; a full depth-8 `Dispatch` is 105 ns (170 ns with all 8 listening) | ≤5 ns per event. Declined |
-| P4 inline handler array | the dictionary + list behind the first handler | first handler +424 B on a 576 B `BoxElement` (dictionary ~216, list ~120, closure+delegate ~88); second event type +208 B | ~250–300 B per handled element is the only real number here. Not needed by any app; revisit if element memory becomes a target |
+| P4 inline handler array | the dictionary + list behind the first handler | first handler +424 B on a 576 B `BoxElement` (dictionary ~216, list ~120, closure+delegate ~88); second event type +208 B | ~250–300 B per handled element is the only real number here. Not needed by any app; revisit if element memory becomes a target. **Built 2026-10-26** on new evidence: every rebuild pays it again (see "Handler storage rebuilt" below) |
 | P5 `TreeDiffer` pooling | the two `ToArray` snapshots and the keyed `Dictionary<string, Element>` | 1,000-row keyed rebuild: 3.6 ms, 4.2 MB, of which snapshots 112 KB + keyed 118 KB = 5.4 % (2.8 % unkeyed; same ratio at 50 rows) | ~5 % of gen0 churn on rebuild frames, no measurable time. Declined |
 | P5 text `LruCache` ring | the `LinkedList` relink on a cache hit | hit 57 ns vs 50 ns for the bare dictionary lookup; ~7 ns of the 70 ns warm `Layout` call | Declined |
 | P5 `Element` bool packing | six `bool`s and one `bool?` | ≤8 B of 576 B; the size is inline structs (`LayoutResult`, 4-slot `MeasureCache`, `ResolvedInheritedStyle`, constraint cache) | Declined |
@@ -285,6 +285,53 @@ and a pointer move is dominated by hit-testing, not dispatch: the same move
 costs 107 ns over a 10-row table and ~5 µs over a 1,000-row column (~5 ns per
 child), with enter/leave allocating 528 B vs 1,016 B. That linear hit test is
 the lever if pointer cost ever matters; none of the review's items touch it.
+
+### Handler storage rebuilt (P4's inline half, 2026-10-26)
+
+P4 was declined on element memory and dispatch time. Plan 17's round 5 survey found the cost
+somewhere else: a component's build makes every element's handlers again on every key, and the
+dictionary, the list per event type and the closure around each handler were 18–28 KB a key in
+Junction, Vesper and Meridian (~320 B a registration), plus 13 KB a key of lists a patch made
+again. Two changes, in plan 17 round 5 step 10:
+
+- **A patch keeps the live element's lists** and gives them the build's handlers. 208 → 0 B a
+  patched element with a click handler; −2…−5 % bytes a key. Under the plan's bar on its own.
+- **One array of entries per element**, each entry the handler as typed plus its event type's
+  `EventKind`, which runs it; the patch keeps the array. An element's first two handlers take
+  one 72 B array; a third grows it to four slots (120 B).
+
+Headless, i7-14700K pinned to its P-cores, idle-gated, JIT / NativeAOT; a step is one key or
+character and two frames:
+
+| | Before | After |
+|---|---|---|
+| Bytes a key: Vesper Detail Down | 250.0 / 246.8 KB | 214.1 / 212.2 KB (−14 %) |
+| Meridian URL typing | 264.9 / 263.3 KB | 230.9 / 230.6 KB (−13 %) |
+| Meridian History Down | 108.9 / 108.0 KB | 96.2 / 95.8 KB (−12 %) |
+| Junction summary typing | 98.0 / 96.4 KB | 78.6 / 78.0 KB (−20 %) |
+| Time a key, the same walks | | −2…+1 % (flat) |
+| Kept: a `BoxElement` with a click handler | 1,005 B | 654 B (582 B with none, unchanged) |
+| 10,000 rows, a click handler on each, Enter and Leave on a box in each | 28.4 MB | 19.8 MB (−30 %) |
+| Managed heap of a settled app: Vesper, Meridian, Junction | 1.59, 3.10, 4.85 MB | 1.54, 3.03, 4.75 MB (−2…−4 %) |
+| `Dispatch` on a depth-8 path, all 8 listening | 117 / 180 ns | 88 / 156 ns |
+| … all 8 with four other kinds of handler first | 117 / 180 ns | 116 / 181 ns |
+| … nothing listening; a pointer move nothing hears | 74 / 95; 54 / 71 ns | 68 / 84; 49 / 74 ns |
+| A key down a depth-25 path to an 8-kind control | 245 / 277 ns | 213 / 258 ns |
+
+The perf suite (148 rows, two runs a side): 0 rows slower or faster past 10 % on either runtime;
+allocation −19…−35 % on ten rows (gallery mount, dialog and menu open, typing beside a large
+`TextArea`, a signal tween), none higher. One row read slower on NativeAOT only:
+`table/TableView 10k sort`, +3.6…+5.4 % (min and median) in four pairs of runs, +0.11 ms in its
+build phase, which is an `Array.Sort` of 10,000 rows with the app's comparison (JIT +0.4 %). The
+change runs nothing in that phase but the header's few dozen handler registrations and patches,
+which got cheaper (allocation −2.3 %); a cold change to the base did not move the row, nor did
+one to the change. It stays unexplained.
+
+An element's handlers are found by a scan of its few entries rather than a hash lookup, once
+per dispatch (the path pins whole arrays; the walk picks the event's own). Kept dispatch
+semantics: handler order, owned handlers before the build's after a patch, copy-on-write while
+a dispatch walks an element (an add or a patch mid-dispatch replaces the array), passive and
+listening handlers, the pinned path.
 
 ### A per-element "move pending" mark: measured and declined
 
