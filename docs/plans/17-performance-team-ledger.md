@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–7 landed, step 8 next (app double rebuilds and lists). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–8 landed, step 9 next (list selection highlight). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -111,7 +111,7 @@ Correctness and round 4 objections first, then value per cost.
    errors and a > 1 s stall: validation run first, never repeat blind), **gl-first-use-flush** (trace only:
    Meridian's first response frame is 98 % flush and 28–30 % of its session frame time, the first palette open
    99.7 %, gone on repeat — likely Skia program compiles/atlas; KHR_debug timestamps or Nsight, then decide).
-8. **App double rebuilds and lists** (6/8, app): **junction-review-composer-typing** (1,367 KB per typed
+8. ~~**App double rebuilds and lists**~~ LANDED b1a12ef1, fe50f969, 54eded98, 57e954ca, ea6ceb7a, 1ed9d938 (6/8, app): **junction-review-composer-typing** (1,367 KB per typed
    character: 2 app builds + 3 chrome builds + re-weave → one view-only build keeping rows, −80…−90 %; app fix,
    not the editor's SelectionChanged), **meridian-history-rows** (item rows + no O(n) `IndexOf` per row:
    353 → ~110 KB/key; history search 2 → 1 builds per character), **vesper-mark-double-rebuild** (Insert
@@ -145,6 +145,11 @@ Re-ranked by the round 6 survey.
 
 - **a11y-atspi-snapshot-per-diff + apps-scenario-atspi-rows** (7, Linux) — 265 B per node per apply; AT-SPI steps
   3.9–4.1× UIA's; keep objects by path; needs a suite seam. After step 13 only structural applies remain.
+- **vesper-coalesce-markdirty** (6/8, lead from r5 step 8) — routing Vesper's `MarkDirty` through a signal would fold all its
+  one-off double builds (viewer open, name prompts, drive pick, confirm cancel; declined one by one in DECISIONS.md).
+  Also: caching each folder's trail segments would remove most of the Detail resize comparison's ~7 KB per step.
+- **virtuallist-sticky-headers** (1, lead from r5 step 8) — Junction's Changes list stays a scroll view (sticky section headers,
+  mixed heights, composer in the column); virtualizing it needs sticky headers inside a VirtualList.
 - **junction-changes-composer** (6/8, app) — summary keystroke 95.8 KB; lists and diff unchanged: −60…−70 %.
 - **apps-aperture-components** (6/8, app) — rail + title bar: −25…−35 % per grid key. Also Aperture rebuilds on
   every resize step (92 KB, 63 patches): build only when the column count changes, as e6a432fa.
@@ -420,6 +425,12 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | b1323e9d | runtime-gc-gen0-budget (declined) | A `System.GC.Gen0MaxBudget` cap of 6/8/10/12 MB: memory −1…−8.5 % in Vesper/Aperture but Junction History private +11 % at 6 MB (its highlight worker allocates ~6 MB per key; live data promoted), frame p99 and GC pause up at every value. DECISIONS.md. |
 | 5 | 7f9df4ea | vk-sdr-video-lazy-barrier | The host owes the acquire barrier until Skia's first submit (`GetProcedureAddress` hands Skia a `vkQueueSubmit` trampoline found by queue; the barrier rides at the head of Skia's first batch, or its own submit at Present); `AcquireBarrier` type; every direct-path frame keeps its target. 8-bit video bytes per frame 1080p120 2,030 → 86 B (−96 %), 1080p24 2,056 → 112, UiTest ramp 2,331 → 35 (limit 2,500 → 100); wraps per frame 1 → 0; mpv's GL draw time flat (an eager-barrier control reads +20…+35 %); one `vkQueueSubmit` fewer per frame. Validation core+sync 0 messages (positive control 2 VUIDs ×10); ramp captures brighten. HDR.md. |
 | 5 | 6c627f27 | vk-drag-kept-target-wraps (8-bit) | On an 8-bit over-allocated swapchain a kept target is wrapped at the allocated size, canvas clipped to the window in device pixels, window size out of its key; F16 keeps window-sized targets (deferred after the survey's GPU errors). 80-step drag: wraps 80 → 12, bytes per step 2,200 → 515 (−76 %), step time flat; 5 mid-drag in-process captures identical (a 64 px clip error shows 184,512 channels). UiTest `--drag` asserts it. No `nvlddmkm` events before/after; 128 guarded launches, 0 foreground takes. |
+| 5 | b1a12ef1 | junction-review-composer-typing | Both editor callbacks go through `DraftEdited` (one `RerenderView` signal write → one view-only build), which keeps the woven rows and remakes only the editor's row (`InvalidateRow`); Create MR description the same. Composer typing 1,367 → 209 KB/char (−85 %; AOT −84 %), time −36 % JIT / −28 % AOT; builds per char 2 → 1, chrome builds 3 → 0, rows made 230 → 1; Create MR −61 %. |
+| 5 | fe50f969 | meridian-history-rows | History on item rows `(Entry, Index)` with `SelectedIndex` (no per-row `IndexOf`), one kept label delegate, `FilteredHistory` memoized; the search box no longer calls `MarkDirty` itself. Down 355 → 109 KB/key (−69 %; 2,000 entries −73…−76 %), search 417 → 77 KB/char (−81 %), time −7…−21 %. The selected send is now announced as selected (was unselected). |
+| 5 | 54eded98 | vesper-mark-double-rebuild | Insert builds once (through the cursor move): 646 → 414 KB/key (−36 %), time −9 %. The other one-off doubles declined (DECISIONS.md). |
+| 5 | 57e954ca | apps-junction-commit-tree-virtualize | The Commit file list is a VirtualList of item rows (header as row 0, `CommitRowHeights` from font line heights, scroll-into-view by summed heights, flattened rows kept per tree/expand state); the highlight landing uses `MarkViewDirty`. 382-row commit Down 2,002 → 142 KB/key (−93 %), time −27 % JIT / −31 % AOT, window elements 1,834 → 345. Off-screen rows leave the a11y tree (as the Files tab). Changes list declined (sticky headers). |
+| 5 | ea6ceb7a | apps-junction-view-parts | History's include bar and footer handed back while their inputs are unchanged (`KeptPart`; every History child keyed); `FilteredCommits` returns the log itself with no query. History Down 82.2 → 47.8 KB/key (−42 %), reader −35 %; parts built per key 2 → 0. |
+| 5 | 1ed9d938 | vesper-detail-resize-stale | Approved (not perf): the fit comparison runs in Detail view too, so a resize updates the path trail's truncation; a 4 px step that keeps the trail 2.2 → 9.4 KB. 39 scenes (all step 8 items) identical against a deterministic A/A; WSL passes. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -996,3 +1007,12 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   No new `nvlddmkm` events; no F16 kept-target drag run. Guideline notes: GL on NVIDIA can stall 50–160 ms on the
   first GL-heavy frame after a process gains threads; time a barrier's placement with an eager control and 3+ batches;
   set clips on kept canvases in device pixels.
+- 2026-10-26: round 5 step 8 landed (b1a12ef1..1ed9d938): Junction review typing −85 % per character, Meridian History
+  −69…−81 %, Vesper Insert −36 %, Junction's commit file list virtualized (−93 % per key, −27…−31 % time), History
+  bars kept (−42 %), Vesper Detail resize updates the path trail. Guideline notes: a rich text editor raises
+  DocumentChanged and SelectionChanged per keystroke — route both through one signal write; a TextSearch/FindBar made
+  with MarkDirty already rebuilds, so don't MarkDirty again in the box's handler; a MarkDirty after a callee that builds
+  is a second build; a per-row IndexOf in a one-argument RenderWith makes each key O(n × rows) — use item rows +
+  SelectedIndex; a list that can reach hundreds of rows is a VirtualList of item rows (RowHeights from font line
+  heights; scroll into view from summed heights). Trap: Python text-mode writes on Windows turn LF into CRLF — use
+  `newline=''`.
