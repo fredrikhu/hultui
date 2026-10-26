@@ -31,8 +31,8 @@ public class TabLabelTests
         t.Field<Ref<BoxElement>>(side == 'L' ? "_paneRefL" : "_paneRefR").Current
         ?? throw new Xunit.Sdk.XunitException($"the {side} pane is not mounted");
 
-    /// <summary>The tab strip is the pane's first child.</summary>
-    private static Element Strip(DiffViewTests.Fixture t, char side) => Pane(t, side).Children[0];
+    /// <summary>The tab strip is a part, the pane's first child: its host, holding the strip.</summary>
+    private static Element Strip(DiffViewTests.Fixture t, char side) => Pane(t, side).Children[0].Children[0];
 
     private static TextElement TabLabel(DiffViewTests.Fixture t, char side) =>
         Labels(Strip(t, side).Children[0]).FirstOrDefault()

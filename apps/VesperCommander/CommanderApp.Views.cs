@@ -49,7 +49,7 @@ public partial class CommanderApp
     // rebuild so the tile swaps its thumbnail in.
     private ThumbnailCache? _thumbsCache;
     private ThumbnailCache Thumbs => _thumbsCache ??= new ThumbnailCache(
-        () => HultUI.Application.InvokeOnMainThread(MarkDirty));
+        () => HultUI.Application.InvokeOnMainThread(MarkViewDirty));
 
     private const float ViewToggleWidth = 88f;   // reserved so breadcrumbs truncate first
 
@@ -459,7 +459,7 @@ public partial class CommanderApp
             .Width(Dimension.Px(g.PaneW)).Height(Dimension.Px(g.AvailH));
         scroll.Children(content);
         // Any scroll re-windows which columns realize on the next build.
-        scroll.On<ScrollEvent>(_ => MarkDirty());
+        scroll.On<ScrollEvent>(_ => MarkViewDirty());
         return scroll;
     }
 
@@ -626,7 +626,9 @@ public partial class CommanderApp
             int idx = IndexOfPath(Rows(side), e.FullPath);
             if (idx >= 0) SetCursor(side, idx);
             if (IsDoublePress(side, e.FullPath)) ActivateCursor(side);
-            MarkDirty();
+            // The cursor is the view's; a pane made active reaches the trails through
+            // MarkViewDirty's compare, and a folder opened rebuilt its own parts (NavigateTo).
+            MarkViewDirty();
         });
         // Passive and heard only while a right-drag marks: ApplyRightMark rebuilds for what it
         // changes, and a move over a row otherwise changes nothing.
@@ -670,7 +672,10 @@ public partial class CommanderApp
 
     private void BeginFit(char side)
     {
-        _fit[Si(side)] = default;
+        // The path trail is a part the build may keep: what it noted when it last built stands
+        // (it builds again when the trail would change, OnWindowResized).
+        var trail = _fit[Si(side)];
+        _fit[Si(side)] = new PaneFit(default, trail.CrumbStart, trail.ResultsRoot, default, 0);
         _fitBuild[Si(side)] = _builds;
     }
 

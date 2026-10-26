@@ -157,7 +157,7 @@ public partial class CommanderApp
         var now = Environment.TickCount64;
         if (now - _lastFindRepaint < 80) return;
         _lastFindRepaint = now;
-        Application.InvokeOnMainThread(MarkDirty);
+        Application.InvokeOnMainThread(MarkViewDirty);   // the dialog's results: the parts stay
     }
 
     /// <summary>Move queued hits onto the (main-thread-only) results list, honoring the cap.
@@ -187,13 +187,13 @@ public partial class CommanderApp
                 if (_findSearching) StopFind(); else CloseFind();
                 e.StopPropagation = true; break;
             case KeyCode.Up:
-                _findSel = Math.Max(0, _findSel - 1); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+                _findSel = Math.Max(0, _findSel - 1); _pendingFindScroll = true; MarkViewDirty(); e.StopPropagation = true; break;
             case KeyCode.Down:
-                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + 1); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + 1); _pendingFindScroll = true; MarkViewDirty(); e.StopPropagation = true; break;
             case KeyCode.PageUp:
-                _findSel = Math.Max(0, _findSel - FindPageRows()); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+                _findSel = Math.Max(0, _findSel - FindPageRows()); _pendingFindScroll = true; MarkViewDirty(); e.StopPropagation = true; break;
             case KeyCode.PageDown:
-                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + FindPageRows()); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + FindPageRows()); _pendingFindScroll = true; MarkViewDirty(); e.StopPropagation = true; break;
             // Ctrl+R flips the scope segment (This folder ↔ Recursive) without leaving the field.
             case KeyCode.R when e.Modifiers.HasFlag(KeyModifiers.Ctrl):
                 _findRecursive = !_findRecursive; RunFind(); e.StopPropagation = true; break;
