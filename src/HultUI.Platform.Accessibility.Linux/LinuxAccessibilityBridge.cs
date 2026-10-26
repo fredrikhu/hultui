@@ -450,12 +450,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     /// Properties the window marked on the applied tree in place — a list's selection move: the
     /// item that had the selection and the one that has it; a caret or selection move in text made
     /// on request (the rich text editor's); a leaf's change of its own name, description, value,
-    /// range, toggle or expanded state, whose node the window made again and put in its place. Their
-    /// objects in the published snapshot take the new state (a text's object reads its text through
-    /// its source, so it has none to take) and the bridge sends what a diff would have
-    /// (state-changed:selected; text-caret-moved and text-selection-changed; accessible-name,
-    /// accessible-description, accessible-value, state-changed:checked or expanded), with no new
-    /// snapshot. Anything else is applied as a diff.
+    /// range, toggle or expanded state, whose node the window made again and put in its place; and
+    /// a layout refresh made in place: boxes moved, nodes gone out of view or come into it, scroll
+    /// views scrolled, with such leaves among them. Their objects in the published snapshot take the
+    /// new state and the new node (a text's object reads its text through its source, so it has none
+    /// to take; every object reads its box and offscreen state from its node) and the bridge sends
+    /// what a diff would have (state-changed:selected; text-caret-moved and text-selection-changed;
+    /// accessible-name, accessible-description, accessible-value, state-changed:checked or expanded;
+    /// nothing for a move or a scroll), with no new snapshot. Anything else is applied as a diff.
     /// </summary>
     public void ApplyPatchedProperties(TreeDiff patch, AccessibilityNode root)
     {
@@ -473,6 +475,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                     AccessibilityProperties.Name or AccessibilityProperties.Description or AccessibilityProperties.Value
                         or AccessibilityProperties.RangeValue or AccessibilityProperties.IsToggled
                         or AccessibilityProperties.IsExpanded => change.Node.Parent is not null && change.Node.TextSource is null,
+                    // Read from the node: nothing to set, and nothing a diff sends.
+                    AccessibilityProperties.BoundingRect or AccessibilityProperties.ScrollPosition => true,
                     _ => false,
                 };
         }
@@ -486,6 +490,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             string path = PathOf(change.Node);
             var acc = snapshot.ByPath[path];
             var node = change.Node;
+            // A leaf's node made again is the change's: the object reads its box from it now.
+            acc.Node = node;
             (bool, bool?) expandedBefore = (true, acc.Expanded);
             switch (change.PropertyName)
             {

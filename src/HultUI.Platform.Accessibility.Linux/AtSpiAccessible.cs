@@ -12,7 +12,8 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// <see cref="ElementId"/> so a node keeps its D-Bus identity across rebuilds.
 /// What changes without a rebuild is set in place on the UI thread: the focused and
 /// selected states, and a leaf's name, description, value, range, toggle and expanded
-/// state (the window's patch).
+/// state (the window's patch). Its box and whether it is out of view are read from its node
+/// when a client asks (<see cref="Node"/>), as they are now.
 /// </summary>
 /// <remarks>
 /// The snapshot carries everything the D-Bus method handlers need to answer a
@@ -57,11 +58,39 @@ internal sealed class AtSpiAccessible
         set => Volatile.Write(ref _value, _value is RangeBox box ? box with { Value = value } : value);
     }
 
-    // Bounding box in window-relative layout coordinates.
-    public int X { get; init; }
-    public int Y { get; init; }
-    public int Width { get; init; }
-    public int Height { get; init; }
+    /// <summary>
+    /// The node this object stands for in the window's applied tree; null for the seed root. Its box
+    /// and whether it is out of view are read from it on the bus thread (<see cref="Box"/>,
+    /// <see cref="Offscreen"/>): a layout refresh writes them in place in the tree — a scroll is one
+    /// scroll view's offset, a move one node's box — and sends nothing for them, as a diff sends
+    /// nothing for a scroll, so the object follows with no snapshot made again. The objects were made
+    /// again for every node on every refresh to copy them: 772 KB a wheel turn over 1,000 rows. A
+    /// leaf's node made again (the window's patch) is pointed at here, on the UI thread.
+    /// </summary>
+    public AccessibilityNode? Node
+    {
+        get => Volatile.Read(ref _node);
+        set => Volatile.Write(ref _node, value);
+    }
+    private AccessibilityNode? _node;
+
+    /// <summary>The bounding box in window-relative device pixels: the node's box on screen, as it is
+    /// now, times <see cref="Scale"/>, rounded. Read once: each read walks the node's parents.</summary>
+    public (int X, int Y, int Width, int Height) Box
+    {
+        get
+        {
+            if (Node is not { } node) return default;
+            var rect = node.BoundingRect;
+            return ((int)MathF.Round(rect.X * Scale), (int)MathF.Round(rect.Y * Scale),
+                (int)MathF.Round(rect.Width * Scale), (int)MathF.Round(rect.Height * Scale));
+        }
+    }
+
+    public int X => Box.X;
+    public int Y => Box.Y;
+    public int Width => Box.Width;
+    public int Height => Box.Height;
 
     public bool Focusable { get; init; }
 
@@ -75,7 +104,9 @@ internal sealed class AtSpiAccessible
     }
     private bool _focused;
     public bool Enabled { get; init; } = true;
-    public bool Offscreen { get; init; }
+
+    /// <summary>Whether the node is scrolled or clipped out of view, as it is now (<see cref="Node"/>).</summary>
+    public bool Offscreen => Node?.IsOffscreen ?? false;
     public bool Selectable { get; init; }
 
     /// <summary>Changes after the snapshot is built too, for a list's items: a move of the list's
@@ -226,8 +257,6 @@ internal sealed class AtSpiAccessible
     {
         uint role = isRoot ? AtSpiConstants.RoleApplication : RoleOf(node);
 
-        // Bounds are in layout units; AT-SPI reports device pixels.
-        var rect = node.BoundingRect;
         return new AtSpiAccessible
         {
             ElementId = node.ElementId,
@@ -240,14 +269,11 @@ internal sealed class AtSpiAccessible
             // A node that offers text is read through its source when asked: its text and value
             // are made only then (a long document's are 1.5 MB), and its changes are text changes.
             Value = node.TextSource is null ? node.Value : null,
-            X = (int)MathF.Round(rect.X * scale),
-            Y = (int)MathF.Round(rect.Y * scale),
-            Width = (int)MathF.Round(rect.Width * scale),
-            Height = (int)MathF.Round(rect.Height * scale),
+            // Its box and offscreen state, read from it; AT-SPI reports device pixels (Scale).
+            Node = node,
             Focusable = node.IsFocusable,
             Focused = node.IsFocused,
             Enabled = node.IsEnabled,
-            Offscreen = node.IsOffscreen,
             Selectable = node.IsSelected is not null || node.Role is AccessibilityRole.RadioButton
                 or AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem,
             // From the node's selected state, which a checked radio and a selected tab carry. It

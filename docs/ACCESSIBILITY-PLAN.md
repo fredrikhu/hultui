@@ -346,6 +346,14 @@ Files:
       in WSL (reverse, swap, rotate, last to front, and a reverse with an insert, a removal or an
       append) read the old order; now all 17 insert and reorder cases match. UIA raises
       `ChildrenReordered` on the parent, as it did.
+    - **Geometry from the node (2026-10-26, plan 17 round 5).** An object reads its box and its
+      offscreen state from its node when a client asks (`AtSpiAccessible.Node`; GetExtents,
+      Contains and the state set read the box once, as it is now). A layout refresh made in place
+      (above) moves boxes, scrolls views and takes nodes out of view in the applied tree and sends
+      nothing for a move or a scroll, so its patch keeps every object and points a leaf's object at
+      the node made again for it. The objects were made again for every node on every refresh to
+      copy the geometry: 772 KB a wheel turn over 1,000 rows, 301 KB a key of a reader's walk
+      beside details, 518 KB a label's edit beside 1,000 rows; now 0.2, 0.8 and 0.4 KB.
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 

@@ -454,6 +454,46 @@ public class A11yLayoutRefreshInPlaceTests
         Assert.Equal(built.Trees, run.Trees);
     }
 
+    /// <summary>AT-SPI's objects read their box and offscreen state from their nodes, which a layout
+    /// refresh moves in place: a scroll and a move make no snapshot, the objects stay, and each answers
+    /// where its node is now — what a snapshot made of the tree as it is would answer.</summary>
+    [Fact]
+    public void ATSPI_ALayoutRefresh_KeepsTheObjects_AndTheyAnswerWhereTheNodesAreNow()
+    {
+        using var session = HeadlessSession.Create(800, 600);
+        var signals = new Signals(path => path);
+        using var linux = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(linux);
+        var rows = Rows(60);
+        var label = (TextElement)rows.Children[2].Children[1];
+        var view = ScrollView.New().Height(Dimension.Px(300)).Children(rows);
+        session.Window.SetRoot(Flex.Column(gap: 4).Padding(8).Children(TextB.New("Header"), view));
+        session.PumpFrames(2);
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        var tree = (IAtSpiTree)linux;
+        var objects = tree.All.ToList();
+        int applies = linux.DebugApplyChangesCalls;
+
+        view.ScrollOffsetY = 230;
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        label.Content = "a label long enough to be another size";
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+
+        Assert.Equal(applies, linux.DebugApplyChangesCalls);
+        Assert.Equal(objects.Count, tree.All.Count);
+        foreach (var acc in objects) Assert.Same(acc, tree.Find(acc.Path));
+        // What a snapshot of the tree as it is now answers, object for object.
+        var fresh = new LinuxAccessibilityBridge(new Signals(path => path));
+        fresh.Publish(session.Window.Window.BuildAccessibilityTree()!);
+        foreach (var acc in tree.All)
+        {
+            var now = ((IAtSpiTree)fresh).Find(acc.Path)!;
+            Assert.Equal((now.Box, now.Offscreen, now.Name), (acc.Box, acc.Offscreen, acc.Name));
+        }
+        Assert.Contains(objects, acc => acc.Offscreen);
+        Assert.Contains(objects, acc => !acc.Offscreen && acc.Name.StartsWith("row 1"));
+    }
+
     /// <summary>A run with the UIA bridge on a hidden window: the events it raises, with what each
     /// node's wrapper answers for the property raised and for its box.</summary>
     [SupportedOSPlatform("windows")]

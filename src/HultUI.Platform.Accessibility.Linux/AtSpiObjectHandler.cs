@@ -325,29 +325,38 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
         switch (member)
         {
             case "GetExtents":
+            {
+                var box = node.Box;   // once: the UI thread may move the node meanwhile
                 Reply(context, "(iiii)", (ref MessageWriter w) =>
                 {
                     w.WriteStructureStart();
-                    w.WriteInt32(node.X);
-                    w.WriteInt32(node.Y);
-                    w.WriteInt32(node.Width);
-                    w.WriteInt32(node.Height);
+                    w.WriteInt32(box.X);
+                    w.WriteInt32(box.Y);
+                    w.WriteInt32(box.Width);
+                    w.WriteInt32(box.Height);
                 });
                 break;
+            }
             case "GetPosition":
+            {
+                var box = node.Box;
                 Reply(context, "ii", (ref MessageWriter w) =>
                 {
-                    w.WriteInt32(node.X);
-                    w.WriteInt32(node.Y);
+                    w.WriteInt32(box.X);
+                    w.WriteInt32(box.Y);
                 });
                 break;
+            }
             case "GetSize":
+            {
+                var box = node.Box;
                 Reply(context, "ii", (ref MessageWriter w) =>
                 {
-                    w.WriteInt32(node.Width);
-                    w.WriteInt32(node.Height);
+                    w.WriteInt32(box.Width);
+                    w.WriteInt32(box.Height);
                 });
                 break;
+            }
             case "GetLayer":
                 Reply(context, "u", static (ref MessageWriter w) => w.WriteUInt32(AtSpiConstants.LayerWidget));
                 break;
@@ -362,8 +371,9 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
                 var reader = context.Request.GetBodyReader();
                 int x = reader.ReadInt32();
                 int y = reader.ReadInt32();
-                bool inside = x >= node.X && x < node.X + node.Width &&
-                              y >= node.Y && y < node.Y + node.Height;
+                var box = node.Box;
+                bool inside = x >= box.X && x < box.X + box.Width &&
+                              y >= box.Y && y < box.Y + box.Height;
                 Reply(context, "b", (ref MessageWriter w) => w.WriteBool(inside));
                 break;
             }
