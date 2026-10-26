@@ -203,6 +203,44 @@ public class CreateMergeRequestTests
         });
     }
 
+    /// <summary>A character typed into the description builds the window once and leaves the
+    /// chrome as it is: the editor tells the edit and the caret's move in one event, and each
+    /// used to build at once (two builds a character, the chrome three times). The bar still
+    /// follows the caret.</summary>
+    [Fact]
+    public void TypingTheDescription_BuildsOnceACharacter_AndTheBarFollowsTheCaret()
+    {
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpUntil(() => DescriptionHas(session, "Closes #1042"), TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            var editor = (RichTextEditorElement)ById(session, "create-mr-description")!;
+            session.Window.Click(editor);
+            session.PumpFrames(2);
+
+            // Counted as each event ends: a frame may bring a rebuild from elsewhere (a loader
+            // landing), which is not the typing's.
+            foreach (var ch in " and **this**")
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds;
+                session.Window.TypeText(ch.ToString());
+                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(0, app.ChromeBuilds - chrome);
+                session.PumpFrames(2);
+            }
+            Assert.True(DescriptionHas(session, "Closes #1042 and this"));
+            Assert.Same(editor, ById(session, "create-mr-description"));
+
+            int before = app.Builds;
+            session.Window.PressKey(KeyCode.Left);
+            Assert.Equal(1, app.Builds - before);
+            session.PumpFrames(2);
+            Assert.Equal(true, ((ButtonElement)ById(session, "richtext-bold")!).AccessibleToggled);
+        });
+    }
+
     private static bool DescriptionHas(HeadlessSession session, string text) =>
         ById(session, "create-mr-description") is RichTextEditorElement d && d.Document.ToPlainText().Contains(text);
 

@@ -320,8 +320,11 @@ public partial class JunctionApp
         // Title + description.
         col.AddChild(CreateMrField("Title", CreateMrInput(f.Title, "What this change does", v => { f.Title = v; f.TitleTouched = true; MarkDirty(); }, "create-mr-title")));
         var toolbar = CreateMrToolbar();
+        // A typed character changes the document and moves the caret, in one event: both ask
+        // for one rebuild of the window (RerenderView coalesces them), and the chrome shows
+        // neither, so it stays as it is.
         var desc = MarkdownEditor(f.Description, toolbar, f.Path,
-                d => { f.Description = d; f.DescriptionTouched = true; MarkDirty(); })
+                d => { f.Description = d; f.DescriptionTouched = true; RerenderView(); }, RerenderView)
             .PlaceholderText("Pre-filled from the commits. Closes #… closes the issue on merge.")
             .AutoHeight(96, 320)
             .Style(Ui.Field(verticalPadding: 8f));

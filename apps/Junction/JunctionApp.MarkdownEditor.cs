@@ -42,14 +42,19 @@ public partial class JunctionApp
     /// <paramref name="bar"/>. Pictures load as the Markdown view of <paramref name="repoPath"/>
     /// loads them: uploads through the account, the rest plainly, one cache for both. One
     /// arriving rebuilds, and the editor asks again.</summary>
+    /// <param name="changed">The document as typed.</param>
+    /// <param name="selectionChanged">The caret or the selection moved — so the bar's buttons
+    /// follow it. A typed character raises both, in one event: hand both a rebuild that
+    /// coalesces (a signal write, <see cref="RerenderView"/>), not <c>MarkDirty</c>, which
+    /// builds at once and so built every character twice.</param>
     private RichTextEditorElement MarkdownEditor(RichDocument document, RichTextToolbar bar, string repoPath,
-        Action<RichDocument> changed)
+        Action<RichDocument> changed, Action selectionChanged)
     {
         var cx = MdContextFor(repoPath);
         return RichTextEditor.New(document)
             .Features(RichMarkdown.Features)
             .OnDocumentChanged(changed)
-            .OnSelectionChanged(MarkDirty)
+            .OnSelectionChanged(selectionChanged)
             .OnLinkRequested(bar.OpenLinkEditor)
             .OnLinkActivated(OpenUrl)
             .Images(url => MdPictureFor(ResolveMarkdownUrl(url, cx.Remote), cx).Source)

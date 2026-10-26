@@ -164,6 +164,22 @@ public partial class JunctionApp
         MarkViewDirty();
     }
 
+    /// <summary>
+    /// A comment being written — the composer's or a reply's — changed its text, its caret or
+    /// its selection, and nothing else did: the next build keeps the woven rows (the weave reads
+    /// no draft) and makes again only the row holding that editor, whose formatting bar follows
+    /// the caret; the chrome stays as it is.
+    /// <para>A typed character raises the editor's DocumentChanged and SelectionChanged in one
+    /// event. Each called MarkDirty, which builds at once — two builds of the window, the chrome
+    /// three times, and the review woven twice a character (1.4 MB). Through the revision signal
+    /// the two writes come to one build at the end of the event.</para>
+    /// </summary>
+    private void DraftEdited(ReviewDraft draft)
+    {
+        _reviewDraftEdited = draft;
+        RerenderView();
+    }
+
     // ── Entry and exit ───────────────────────────────────────────────────────────────
 
     /// <summary>Opens the request for review — from the detail page's button, its <c>r</c>
@@ -452,25 +468,34 @@ public partial class JunctionApp
 
     private WovenReviewRows? _woven;
     private bool _reviewCaretMove;
+    private ReviewDraft? _reviewDraftEdited;
 
     /// <summary>
     /// The rows the diff shows while reviewing. A caret or range move (ReviewCaretMoved) keeps
     /// the woven rows — weaving makes a record and a SHA-1 line code per line, about 300 KB for
     /// a 400-line file — and only moves the marks, when everything the weave read is as it was:
     /// the flattened rows, the session, its file and composer, the threads and drafts as loaded,
-    /// the cards' heights and pictures. Any other build weaves again.
+    /// the cards' heights and pictures. So does typing in a comment (DraftEdited), which also
+    /// names the one row to make again. Any other build weaves again.
     /// </summary>
     /// <param name="marksOnly">True when the rows were kept: only marks moved, and the list's
     /// rows need no making again beyond the ones whose marks did.</param>
-    private List<DiffRow> ReviewRowsFor(GitFileDiff diff, List<DiffRow> flat, ReviewSession rv, out bool marksOnly)
+    /// <param name="remakeRow">With the rows kept for a draft's edit, the row holding its editor
+    /// (the composer's, or the thread whose reply it is), which the list makes again; else -1.</param>
+    private List<DiffRow> ReviewRowsFor(GitFileDiff diff, List<DiffRow> flat, ReviewSession rv, out bool marksOnly,
+        out int remakeRow)
     {
         bool caretMove = _reviewCaretMove;
+        var draftEdited = _reviewDraftEdited;
         _reviewCaretMove = false;
+        _reviewDraftEdited = null;
+        remakeRow = -1;
         var key = WeaveKey(diff, flat, rv);
-        if (caretMove && _woven is { } kept && kept.Key.Equals(key))
+        if ((caretMove || draftEdited is not null) && _woven is { } kept && kept.Key.Equals(key))
         {
             MarkReviewRows(kept, rv);
             marksOnly = true;
+            if (draftEdited is not null) remakeRow = RowOfDraft(kept, rv, draftEdited);
             return kept.Shown;
         }
         var rows = WithReviewRows(diff, new List<DiffRow>(flat), rv);
@@ -489,6 +514,25 @@ public partial class JunctionApp
         var drafts = DraftNotesFor(rv.Path, rv.Iid);
         return (flat, rv, rv.File == diff.Path, rv.Composer, DiscussionsFor(rv.Path, rv.Iid).Value,
             drafts.Value, drafts.AsOf > rv.DraftsSettledAt, rv.HeightVersion, _mdLayoutGen);
+    }
+
+    /// <summary>The row whose card holds <paramref name="draft"/>'s editor: the composer's, or the
+    /// thread a reply is being written to. -1 when no row on the list holds it.</summary>
+    private static int RowOfDraft(WovenReviewRows w, ReviewSession rv, ReviewDraft draft)
+    {
+        var rows = w.Rows;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            if (r.Type == DiffRowType.Composer)
+            {
+                if (ReferenceEquals(rv.Composer?.Draft, draft)) return i;
+            }
+            else if (r.Thread?.DiscussionId is { } did && rv.Replies.TryGetValue(did, out var reply)
+                     && ReferenceEquals(reply, draft))
+                return i;
+        }
+        return -1;
     }
 
     /// <summary>Puts the caret and range marks on the shown rows: the rows marked before go
@@ -1035,7 +1079,8 @@ public partial class JunctionApp
     {
         var bar = (draft.Bar ??= MarkdownBar(draft.Editor)).Build()
             .FlexWrap(FlexWrap.NoWrap).Height(DraftBarHeight).Overflow(Overflow.Hidden);
-        var editor = MarkdownEditor(draft.Doc, draft.Bar, rv.Path, d => { draft.Doc = d; MarkDirty(); })
+        var editor = MarkdownEditor(draft.Doc, draft.Bar, rv.Path, d => { draft.Doc = d; DraftEdited(draft); },
+                () => DraftEdited(draft))
             .PlaceholderText(placeholder)
             .Height(Dimension.Px(ComposerAreaHeight))
             .Style(Ui.Field(verticalPadding: 6f));

@@ -846,6 +846,11 @@ public partial class JunctionApp : Component, IDisposable
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
         if (_modal != null) Overlay("modal", BuildModal(_modal));
 
+        // A caret move or a comment's edit that no review list read in this build (another view
+        // on screen) says nothing about the build after it, which weaves as any other would.
+        _reviewCaretMove = false;
+        _reviewDraftEdited = null;
+
         // Last, so the visible view's own load was scheduled first (see _preload).
         RunPendingPreload();
 
