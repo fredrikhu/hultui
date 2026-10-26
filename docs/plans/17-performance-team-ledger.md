@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** build — round 5; steps 1–4 landed, step 5 next (layout). All four round 5 questions answered (1, 2, 4 yes;
+- **Phase:** build — round 5; steps 1–5 landed, step 6 next (runtime GC options). All four round 5 questions answered (1, 2, 4 yes;
   3 threshold first, chunked document option B in Waiting). History note: rewritten 2026-10-25 (every commit after
   3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
@@ -93,7 +93,7 @@ Correctness and round 4 objections first, then value per cost.
    remakes every blob every frame — dense-colour terminal at 1200×900, Chinese terminal at 1080p, 4K: keep the
    last two frames' blobs, hysteresis, hard cap; suite row `terminal/dense colour screen, unique rows, forced
    frame` at ~1600×1000 first).
-5. **Layout** (1/5): **layout-patch-keeps-layout-more-kinds** (TextArea, Checkbox, RadioButton, ToggleSwitch,
+5. ~~**Layout**~~ LANDED ce70fec7, 415ecefa, a31a38c7, 93226dda (1/5): **layout-patch-keeps-layout-more-kinds** (TextArea, Checkbox, RadioButton, ToggleSwitch,
    RichTextEditor opt into `PatchMarksOwnLayout`: Meridian URL keystroke lays out the 18,884-line response plus
    9.5 ancestors, Junction Changes typing 10 elements and 1,982 MeasureSize; typing frames −8…−10 %, with a
    reader −20…−27 KB/key; suite row: typing beside a large TextArea and checkboxes), **layout-virtuallist-
@@ -156,6 +156,10 @@ Re-ranked by the round 6 survey.
   keystroke fires a Name change on it.
 - **palette-row-keys** (6, lead from r5 step 2) — `CommandPalette` keys rows `{group}|{title}|{index}`, so every
   keystroke replaces every row and its a11y nodes (6 UIA structure events per key); key by command.
+- **layout-patch-keeps-layout-dropdown-expander** (1, lead from r5 step 5) — after step 5 a Fluent controls page rebuild
+  still lays out 16 elements, from Dropdown, Expander and a one-argument list; give Dropdown and Expander the same
+  `PatchMarksOwnLayout`/`PatchThemesTwin` treatment. Also: the layout audit compares border boxes only — it should
+  compare `LayoutResult` padding and border too (step 5's stale-padding bug was found only through pixels).
 - **uitests-borderless-maximize-width** (3, from r5 step 1; pre-existing at a33bd6b0) — the two Borderless runs of
   WindowStateActivationTests fail on this desk: the maximized client is 2,554 px wide against a 2,560 px work area.
 - **a11y-box-selected-patch** (7, lead from r5 step 1) — changing `AccessibleSelected` on a plain Box builds a whole a11y
@@ -396,6 +400,8 @@ apps-meridian/vesper-components (→ 11, 12).
 | 5 | a1ff84a1 | text-last-line-view | A wrap's last line fills `BuildPrefixWidths`' kept lists (paragraph's own Han context) instead of a durable PrefixWidths. Per step JIT = AOT: text/wrap 480.8 → 397.3 KB (−17 %), richtext/open 5,280 → 4,631 (−12 %), resize 1,099 → 968 (−12 %); time flat; flagged rows noise on filtered rerun. 20,000-layout dump identical (a ×1.5 width mutation changes 911 layouts, proving coverage); 180 frames identical. Step 3 checks: WSL CrossPlatform 22/22, full `HultUI.slnx` 30/30 (Junction 989/989). |
 | 5 | e5ff3fea | paint-run-ink-extents-dead-keys | The run-keyed extent map is gone: each variable face keeps its glyphs' bounds at size 2048 in 256-glyph 2 KB pages made on need; a run's extent is the union per drawn line, fused with the X-order pass. Bit-identical to a direct Skia read over 1,284 runs; 185 frames identical (512 MB glyph cache, A/A). Retained after a 20,000-line Cascadia document closes: heap 6.45 → 4.10 MB (−36 %), extents 2.294 → 0.010 MB; steady frames 0 B; 0 slower (plain comparisons, not `MathF.Min/Max`, on AOT). |
 | 5 | 09abf712, dff306df | paint-blob-maps-frame-working-set | Suite row `terminal/dense colour screen, unique rows, forced frame` (1600×1000, 6,662 sub-blobs a frame). Kept blobs carry a frame stamp and glyph count; a full map releases only blobs drawn in neither this frame nor the last; next sweep when the map holds twice what the last kept (≥ 2,048); counters skip the pass when nothing is old; hard cap 262,144 glyphs → full clear. Blobs made per steady frame: dense terminal 2,338/5,877/12,520 → 0 (1200×900/1600×1000/4K), Chinese terminal 4,096/8,294 → 0; new row −23.2 % JIT, −22.5 % AOT; 0 slower; +0.3–0.6 KB/op one-time map growth. 190 frames identical; WSL 10,498 pass. |
+| 5 | ce70fec7, 415ecefa | layout-patch-keeps-layout-more-kinds | Suite row `input/type beside a large TextArea and checkboxes`. TextArea, Checkbox, RadioButton, ToggleSwitch and RichTextEditor opt into `PatchMarksOwnLayout` + `PatchThemesTwin`; TextArea/RichTextEditor `ApplyTheme` write padding/border only where they differ and mark layout (fixes: a theme switch without a rebuild now lays out a text area's new padding — Meridian's light-theme response drew at the dark padding; a rebuilt switch slides at the theme's `TransitionSeconds`). AOT per key: Meridian URL laid out 10.5 → 1.2, MeasureSize 365 → 47.5, frame −9.6 % reader on / −7.9 % off; Junction summary 10 → 0, 2,142 → 0, frame −5.4 % / −10.8 %, reader bytes −20.6 %. Suite 0 slower. Layout audit over 29 projects: no new differences; 70 scenes identical. |
+| 5 | a31a38c7, 93226dda | layout-virtuallist-offsets-kept | Suite rows `virtual/rebuild beside a 20,000-row RowHeights list` (+ `rows told`). `EnsureOffsets` fills a spare array, swaps only when an offset moved; `KeepUnchangedRows` keeps the computed offsets (no second array after `InvalidateRows`); +1 kept array per RowHeights list. Vesper viewer find typing 1,701.1 → 1,544.8 KB/key (−9.2 %); suite rows 90.3 → 12.2 KB/op (JIT −10.4 %) and 203.4 → 47.1 (AOT −13.6 %). WSL 10,523 pass. The height function still runs O(n) per patch. |
 | 5 | a18e70dd | sdl-hint-minimize-raise | `Minimize`/`Raise` run under `RefuseIfUnwanted()`: activations reaching the guard 2–3 → 0 with the hint; real apps unchanged. |
 
 ## Examined, not worth it
@@ -953,3 +959,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   notes: a long-lived cache keyed by object identity keeps those objects alive — key per-face data by glyph, not run;
   a bounded cache needs a working-set sweep (frame stamps, skip when nothing is old, doubling hysteresis, hard cap),
   not a full clear; tests that draw thousands of new items in one frame look like one giant screen — draw in frames.
+- 2026-10-26: round 5 step 5 landed (ce70fec7..93226dda): text areas, checkboxes, radios, switches and the rich text
+  editor keep layout across a no-op rebuild (Meridian URL typing −8…−10 % frame, Junction summary typing −5…−11 %;
+  fixes a stale padding after a theme switch), and RowHeights lists stop allocating offsets per rebuild (−9 % Vesper
+  find typing). Audit, pixels, all suites and WSL pass. Guideline note: a control that writes its own box in
+  `ApplyTheme` must compare and mark layout, or a theme switch keeps the old box; then both patch flags take the
+  layout pass out of every rebuild.
