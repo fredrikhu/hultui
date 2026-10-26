@@ -29,6 +29,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     // pass per invalidation buys O(log n) scroll-offset lookups and O(1) row positions, which
     // is what lets a list of unequal rows stay as cheap to scroll as a uniform one.
     private float[]? _offsets;
+    // The arrays the offsets are worked out in, kept: the last ones worked out (what _offsets is
+    // while they are current) and a spare of the same length. An owner rebuilt per key hands the
+    // list a new height function every build, and working its heights out into a new array cost
+    // 4(n + 1) bytes a patch, twice after InvalidateRows, on the large object heap past 21,250
+    // rows. They are worked out into the spare, compared with the last ones, and swapped in only
+    // when one moved (EnsureOffsets).
+    private float[]? _offsetsLast;
+    private float[]? _offsetsSpare;
 
     /// <summary>
     /// Optional accessible label for an item, used by assistive tech to name each
@@ -506,12 +514,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     // ── Row geometry. With no height function these all reduce to the uniform arithmetic. ──
 
-    private void EnsureOffsets()
+    /// <summary>
+    /// Works the row offsets out when they are not current. Returns whether they moved from the
+    /// last ones worked out: true when there were none, or when there is no height function (and
+    /// so no offsets) now.
+    /// </summary>
+    private bool EnsureOffsets()
     {
-        if (_itemHeightFor is null) { _offsets = null; return; }
-        if (_offsets is not null && _offsets.Length == _items.Count + 1) return;
+        if (_itemHeightFor is null)
+        {
+            _offsets = _offsetsLast = _offsetsSpare = null;
+            return true;
+        }
+        int length = _items.Count + 1;
+        if (_offsets is not null && _offsets.Length == length) return false;
 
-        var offsets = new float[_items.Count + 1];
+        var offsets = _offsetsSpare is { } spare && spare.Length == length ? spare : new float[length];
         float y = 0f;
         for (int i = 0; i < _items.Count; i++)
         {
@@ -521,7 +539,17 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             y += Math.Max(1f, _itemHeightFor(_items[i], i));
         }
         offsets[_items.Count] = y;
-        _offsets = offsets;
+
+        if (_offsetsLast is { } last && last.Length == length && last.AsSpan().SequenceEqual(offsets))
+        {
+            // The heights did not move: the array that holds them stays, and this one stays spare.
+            _offsetsSpare = offsets;
+            _offsets = last;
+            return false;
+        }
+        _offsetsSpare = _offsetsLast is { } previous && previous.Length == length ? previous : null;
+        _offsets = _offsetsLast = offsets;
+        return true;
     }
 
     private float HeightOf(int index) =>
@@ -811,7 +839,6 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     internal override void PatchFrom(Element source)
     {
-        var offsetsBefore = _offsets;
         base.PatchFrom(source);
         if (source is VirtualListElement<T> vl)
         {
@@ -854,7 +881,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
             if (keepRows)
             {
-                KeepUnchangedRows(vl._items, heightsFromFunction, offsetsBefore);
+                KeepUnchangedRows(vl._items, heightsFromFunction);
                 return;
             }
 
@@ -883,8 +910,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     /// <param name="heightsFromFunction">Whether row heights came, or now come, from
     /// <see cref="ItemHeightFor"/>: then they are worked out again.</param>
-    /// <param name="offsetsBefore">The row offsets before the patch, to tell whether they moved.</param>
-    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction, float[]? offsetsBefore)
+    private void KeepUnchangedRows(IReadOnlyList<T> items, bool heightsFromFunction)
     {
         _items = items;
         var comparer = EqualityComparer<T>.Default;
@@ -901,13 +927,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and the list is laid out again; the same when a list stops using one and every row goes
         // back to ItemHeight. When none moved there is nothing to redo: a diff list patched by a
         // rebuild for something beside it laid out itself and everything around it on every key.
+        // They are compared with the last ones worked out, also when the app told the list with
+        // InvalidateRows first (which lays the window out again by itself), and the ones worked
+        // out here are the ones the layout pass uses: it worked them out a second time.
         if (heightsFromFunction)
         {
             _offsets = null;
-            EnsureOffsets();
-            if (offsetsBefore is null || _offsets is not { } now || !offsetsBefore.AsSpan().SequenceEqual(now))
+            if (EnsureOffsets())
             {
-                _offsets = null;
                 _visibleStart = -1;
                 _visibleEnd = -1;
                 MarkLayoutDirty();
