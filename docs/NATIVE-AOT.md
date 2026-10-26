@@ -141,6 +141,14 @@ with 8 % less GC pause; Vesper's and Aperture's walks were unchanged; start-up d
 Above about 262,000 characters a TextArea's text is a large object again. Editors of bigger
 documents need the text kept in pieces, which `TextAreaElement` does not do today.
 
+### The gen-0 budget: left at the default
+
+The GC sizes gen 0 from the CPU's cache (17.3 MB on a 33 MB-L3 desktop) and keeps it committed
+once filled. Capping it (`System.GC.Gen0MaxBudget`) at 6, 8, 10 or 12 MB saved 1–9 % of private
+bytes in light windows, but every value added collections, and 6 MB made Junction use more memory
+and longer frames. None of the apps sets it; the numbers are in
+[DECISIONS.md](DECISIONS.md#a-smaller-gen-0-budget-for-the-apps-measured-and-declined).
+
 ## Measured results (HultUI.Samples.HelloWorld, win-x64)
 
 | | NativeAOT | Framework-dependent | Self-contained (no AOT) |

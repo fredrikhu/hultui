@@ -306,6 +306,47 @@ back whole, nothing searches. The counter would cost 8 B on every element (the f
 padding) and +1.0–1.4 KB a key in Vesper for no work saved. Declined; revisit if a profile shows
 `SettleMove` again.
 
+### A smaller gen-0 budget for the apps: measured and declined
+
+The GC sizes its gen-0 budget from the CPU's cache: 17,301,504 B on this desk's i7-14700K (33 MB
+L3). An app fills it once and the GC keeps it committed, so an idle window holds about 18 MB of
+GC memory it no longer uses. Plan 17's round 5 survey measured a 6 MB cap (`GCgen0MaxBudget`) at
+−10 % working set in Junction and −9 % in Vesper. Round 5, step 6 timed it in the apps' own
+components in AOT windows (a host per app; default frame, never focused, accessibility off;
+idle-gated; every value alternated with the default in the same batch). The walks: Junction
+History (100 keys) and Changes (93 typed characters) on a clone of this repository, Vesper's pane
+(100 keys), Meridian's URL (91 characters, a 312 KB response open) and an 89,000-character request
+body (169 characters), and Aperture's library on the lab server (100 keys). "Work" is a key's
+handler plus the frames drawn before the next key. Medians, each value against the default runs of
+its own batches (6 MB: 3 runs a side; 8 MB: 5; 10 and 12 MB: 2):
+
+| Cap | Private bytes after the walk | Frame and per-key work | GC pause and counts over the walk |
+|---|---|---|---|
+| 6 MB | Vesper −8.5 %, Aperture −6.4 %, Meridian URL −4.7 %, body −1.1 %; **Junction +11 %** (GC heap 73 → 111 MB, all 3 runs) | Junction History frame p99 1.26 → 2.07 ms (all 3 runs above every default run), work p95 1.42 → 1.81, p99 1.51 → 2.37; Meridian URL work p95 +9 % | Junction History 95 → 111 ms, gen-0 26 → 84, gen-1 10 → 14; Meridian body 20.5 → 27.0 ms, gen-1 1 → 25 |
+| 8 MB | Vesper −6.9 %, Junction −6.0 %, Aperture −4.7 %, Meridian URL −4.3 %, Junction Changes −4.0 %, body −1.4 % | p95 within ±10 % and inside the run-to-run spread (Junction Changes frame 1.31 → 1.43, Vesper work 1.70 → 1.79, Meridian URL work 1.57 → 1.72); p99 moved both ways between batches | Junction History 95.6 → 102.6 ms (ranges apart), gen-0 26 → 58, gen-1 10 → 16; Meridian body 20.2 → 24.8 ms, gen-1 1 → 13; URL +22 %; Vesper 1.45 → 3.16 ms. Process CPU over the History walk 10.48 → 10.92 s (+4 %, 3 runs a side, ranges apart) |
+| 10 MB | Vesper −5.5 %, Aperture −3.9 %, Junction −3.1 %, URL −1.8 %, body +1.8 % | Junction History frame p99 1.42 → 1.83 ms (both runs above every default run), Changes 1.54 → 1.91; Vesper work p95 +5 % | Junction History +5 %, Meridian body +17 %, Vesper ×1.9 |
+| 12 MB | Vesper −4.3 %, Aperture −2.3 %, URL −0.7 %, body +3.5 %; Junction +4.9 % (its heap after the walk is 70 or 110 MB, run to run) | Junction History frame p99 1.42 → 1.78 ms (both runs above every default run), work p99 +26 %; Changes frame p99 +29 %; Vesper work p95 +7 % | Junction History −6 %, Meridian body +4 %, Vesper ×1.6 |
+
+What the cap saves is the budget itself: GC committed memory 18.3 → 9–14 MB in Vesper, Aperture and
+Meridian's URL walk, 4–8 % of private bytes. What it costs is more collections, and in a window
+that allocates fast it costs more than it saves. Junction's History view tokenizes the selected
+commit's diff on a worker, about 6 MB a key on this repository (612 MB over 100 keys, 126 KB of it
+on the UI thread). With a smaller budget more of that worker's live data is caught by each
+collection and promoted, so at 6 MB the heap after the walk grew and pause time rose. The survey
+used a 30-commit repository where the worker barely allocates. Page faults over a walk fell with the
+cap (Aperture 1,446 → 453 at 8 MB), so the cost is the collections, not memory handed back and
+taken again. Start-up to the first frame did not move at any value (Junction 240–248 ms, Vesper
+263–277, Meridian 255–260, Aperture 367–379), and bytes per key were the same.
+
+Declined. 6, 10 and 12 MB cost frame time (Junction History frame p99 above every default run) or
+memory. 8 MB came closest: 1–7 % less private memory with frame percentiles inside the run-to-run
+spread, but more GC pause wherever it added collections (Junction History +7 %, Meridian URL
++22 %, body +23 %, Vesper 1.45 → 3.16 ms) and 4 % more CPU over Junction's History walk, the
+History pause and CPU outside the spread, while only two of the six walks reached the 5 % memory
+bar. The setting that did land is the large-object threshold in `apps/AppRuntime.props`; an
+app whose windows stay light could add the cap there. Revisit if Junction's highlight worker stops
+allocating per key (apps-junction-highlight-prefetch).
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
