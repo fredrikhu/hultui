@@ -142,6 +142,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// <summary>Why the last layout refresh that could not be made in place built a tree (what a
     /// build makes otherwise there), or null. For tests. UI thread.</summary>
     internal string? AccessibilityLayoutRefreshMismatch { get; private set; }
+
+    /// <summary>How many layout refreshes built a tree without a walk, after others in a row could
+    /// not be made in place (<see cref="_a11yRefreshSkips"/>). For tests. UI thread.</summary>
+    internal int AccessibilityLayoutRefreshesSkipped { get; private set; }
     // Set when an element reports an a11y-visible property change that cannot be patched in
     // (a role, an enabled state, a radio's selection, anything of an element with children, …).
     // Such changes aren't structural, so they force the next frame to rebuild+diff the tree —
@@ -187,6 +191,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     // the open overlays whose parts follow the root's children in the tree.
     private readonly AccessibilityTreeBuilder.LayoutRefresh _a11yRefresh = new();
     private readonly List<(Element Content, float X, float Y)> _a11yOverlayParts = [];
+    // Layout refreshes in a row that a build made other nodes for, and how many of the next ones go
+    // straight to a build. A list its owner filters as one types, a grid of composite rows that
+    // scrolls, makes other nodes on every refresh, and a walk that finds that at its end costs
+    // nearly a build of its own (a whole walk is 88 % of a build and a diff over 3,203 nodes). After
+    // 1, 2, 3, 4 or more such refreshes in a row the next 1, 3, 7 or 15 build at once; one made in
+    // place starts the count again.
+    private int _a11yRefreshFailures, _a11yRefreshSkips;
 
     private enum A11yPatchKind : byte { List, Text, Leaf }
 
@@ -1057,6 +1068,12 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     private bool TryRefreshA11yInPlace()
     {
         if (_previousA11yTree is not { } tree) return false;
+        if (_a11yRefreshSkips > 0)
+        {
+            _a11yRefreshSkips--;
+            AccessibilityLayoutRefreshesSkipped++;
+            return false;
+        }
         var refresh = _a11yRefresh;
         var parts = _a11yOverlayParts;
         try
@@ -1066,8 +1083,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             if (!AccessibilityTreeBuilder.TryRefreshInPlace(tree, _root!, parts, _focusManager, refresh))
             {
                 AccessibilityLayoutRefreshMismatch = refresh.Mismatch;
+                _a11yRefreshSkips = (1 << Math.Min(++_a11yRefreshFailures, 4)) - 1;
                 return false;
             }
+            _a11yRefreshFailures = 0;
             refresh.Apply();
             AccessibilityLayoutRefreshesInPlace++;
             if (refresh.Changes.Count > 0)

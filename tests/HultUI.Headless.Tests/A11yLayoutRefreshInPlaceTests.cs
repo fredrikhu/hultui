@@ -454,6 +454,49 @@ public class A11yLayoutRefreshInPlaceTests
         Assert.Equal(built.Trees, run.Trees);
     }
 
+    /// <summary>A refresh a build makes other nodes for, again and again — a list its owner filters
+    /// as one types — pays for a walk and a build each time. After 1, 2, 3 or 4 such refreshes in a
+    /// row, the next 1, 3, 7 or 15 build at once, and one made in place starts the count again.</summary>
+    [Fact]
+    public void RefreshesThatKeepFallingBack_BuildWithoutAWalk_UntilOneIsMadeInPlace()
+    {
+        using var session = HeadlessSession.Create(800, 600);
+        session.Window.InstallAccessibilityBridge();
+        var items = Commits(30);
+        var list = CommitList(items, itemRows: true);
+        var view = ScrollView.New().Height(Dimension.Px(200)).Children(Rows(40));
+        session.Window.SetRoot(Flex.Column(gap: 4).Children(list, view));
+        session.PumpFrames(2);
+        for (int i = 0; i < 3; i++) session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        var window = session.Window.Window;
+        int trees = window.AccessibilityTreesBuilt, inPlace = window.AccessibilityLayoutRefreshesInPlace,
+            skipped = window.AccessibilityLayoutRefreshesSkipped;
+        (int Trees, int InPlace, int Skipped) Since() => (window.AccessibilityTreesBuilt - trees,
+            window.AccessibilityLayoutRefreshesInPlace - inPlace, window.AccessibilityLayoutRefreshesSkipped - skipped);
+        void Refresh(Action change)
+        {
+            change();
+            session.PumpFrame(TimeSpan.FromMilliseconds(16));
+            session.PumpFrame(TimeSpan.FromMilliseconds(120));
+            session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        }
+        void Filter() { items = items.Count > 20 ? items[..^1] : [.. items, new Commit(items.Count, "again")]; list.Items = items; }
+
+        // Walks at the 1st, 3rd and 7th: 1 + 3 + 5 built without one.
+        for (int i = 0; i < 12; i++) Refresh(Filter);
+        Assert.Equal((12, 0, 9), Since());
+        Assert.Equal("a list's items", window.AccessibilityLayoutRefreshMismatch);
+
+        // Scrolls: the two refreshes left build, and the walk that comes next is made in place.
+        for (int i = 1; i <= 3; i++) Refresh(() => view.ScrollOffsetY = 40 * i);
+        Assert.Equal((14, 1, 11), Since());
+
+        // The count starts again: a walk, then one built without.
+        Refresh(Filter);
+        Refresh(Filter);
+        Assert.Equal((16, 1, 12), Since());
+    }
+
     /// <summary>AT-SPI's objects read their box and offscreen state from their nodes, which a layout
     /// refresh moves in place: a scroll and a move make no snapshot, the objects stay, and each answers
     /// where its node is now — what a snapshot made of the tree as it is would answer.</summary>
