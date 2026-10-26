@@ -208,6 +208,14 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// </summary>
     internal virtual void UpdateContentSize() => UpdateScrollExtent();
 
+    /// <summary>
+    /// The render-time hook for what this view draws under its content: called inside the
+    /// view's clip and scroll translation, after <see cref="UpdateContentSize"/> and before the
+    /// children, in the children's coordinates. <see cref="VirtualListElement{T}"/> draws its
+    /// selection here (<see cref="VirtualListElement{T}.SelectionHighlight"/>).
+    /// </summary>
+    internal virtual void RenderUnderContent(IRenderContext ctx) { }
+
     protected float ClampX(float value)
     {
         var viewportWidth = Layout.AbsoluteContentBox.Width;

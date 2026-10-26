@@ -342,6 +342,21 @@ public static class ElementExtensions
     public static VirtualListElement<T> AccessibleItemLabel<T>(this VirtualListElement<T> el, Func<T, string?> label) { el.AccessibleLabel = label; return el; }
     public static VirtualListElement<T> OnActivateItem<T>(this VirtualListElement<T> el, Action<T> handler) { el.OnItemActivate = handler; return el; }
     public static VirtualListElement<T> SelectedIndex<T>(this VirtualListElement<T> el, int index) { el.SelectedIndex = index; return el; }
+
+    /// <summary>The list draws the selection itself, under each selected row on screen: this
+    /// fill, corner radius and (optional) uniform border, at the row's box, as a box would draw
+    /// them. Rows are then made unselected (<c>selected = false</c>), so a selection move makes no
+    /// row again; see <see cref="VirtualListElement{T}.SelectionHighlight"/>.</summary>
+    public static VirtualListElement<T> SelectionHighlight<T>(this VirtualListElement<T> el, Color background,
+        float cornerRadius = 0f, Color borderColor = default, float borderWidth = 0f)
+    {
+        el.SelectionHighlight = new RowHighlight(background, new CornerRadius(cornerRadius), borderColor, borderWidth);
+        return el;
+    }
+
+    /// <summary>The list draws the selection as <paramref name="highlight"/> says, or leaves it to
+    /// the rows when it is null; see <see cref="VirtualListElement{T}.SelectionHighlight"/>.</summary>
+    public static VirtualListElement<T> SelectionHighlight<T>(this VirtualListElement<T> el, RowHighlight? highlight) { el.SelectionHighlight = highlight; return el; }
     public static VirtualListElement<T> CanSelectMultiple<T>(this VirtualListElement<T> el, bool value = true) { el.CanSelectMultiple = value; return el; }
     public static VirtualListElement<T> OnSelectionChanged<T>(this VirtualListElement<T> el, Action<IReadOnlyList<int>> handler) { el.OnSelectionChanged = handler; return el; }
     /// <summary>Let the focused list scroll itself with Up/Down/Page/Home/End.

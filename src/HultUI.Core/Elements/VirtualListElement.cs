@@ -111,11 +111,48 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             _selectedIndex = value;
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
             // Kept rows drew the selection they were made with: the one that had it and the one
-            // that has it are made again.
+            // that has it are made again. With the list drawing it, no row is: the highlight moves.
             DropRowsWhoseSelectionChanged();
+            if (_selectionHighlight is not null) MarkPaintDirty();
         }
     }
     private int _selectedIndex = -1;
+
+    /// <summary>
+    /// The selection drawn by the list itself, under the selected row (each selected row on
+    /// screen with <see cref="CanSelectMultiple"/>), at the row's border box and before the row
+    /// is drawn; null (the default) leaves the selection to the rows, as it always was. Set by
+    /// <c>.SelectionHighlight(…)</c>.
+    /// <para>
+    /// With it, rows are made as unselected: an item-rows template
+    /// (<see cref="ItemRowTemplate"/>) is asked with <c>selected = false</c>, so a selection move
+    /// makes no row again — the list only draws the highlight somewhere else. A row that drew
+    /// its selection as a background draws a transparent one instead, and the pixels are the
+    /// same when the highlight is the fill, radius and border the row drew (see
+    /// <see cref="RowHighlight"/>). A row that shows its selection any other way — a bolder
+    /// label, an icon's colour, a hover tint left off the selected row, an affordance on the
+    /// selected row — cannot show it any more; such a list keeps the selection in its rows.
+    /// Assistive technology reads the list's selection, not the rows', so it is told the same.
+    /// </para>
+    /// <para>
+    /// A change of highlight is drawn on the next frame and makes no row; turning it on or off
+    /// makes the rows whose selected state changes for the template (the selected ones).
+    /// </para>
+    /// </summary>
+    public RowHighlight? SelectionHighlight
+    {
+        get => _selectionHighlight;
+        set
+        {
+            if (_selectionHighlight == value) return;
+            bool onOrOff = _selectionHighlight.HasValue != value.HasValue;
+            _selectionHighlight = value;
+            MarkPaintDirty();
+            // Rows made for the template's own selection, or made unselected for the list's.
+            if (onOrOff) DropRowsWhoseSelectionChanged();
+        }
+    }
+    private RowHighlight? _selectionHighlight;
 
     /// <summary>
     /// When true, the list manages a set of selected indices that assistive tech
@@ -142,6 +179,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     private bool IsItemSelected(int index) =>
         CanSelectMultiple ? _multiSelected.Contains(index) : index == _selectedIndex;
+
+    /// <summary>The selected state a row is made with, and kept while: its item's, unless the
+    /// list draws the selection itself (<see cref="SelectionHighlight"/>), when every row is
+    /// made unselected.</summary>
+    private bool RowSelected(int index) => _selectionHighlight is null && IsItemSelected(index);
 
     // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
     //    virtualization hasn't materialized as elements. ──
@@ -484,13 +526,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     /// <summary>
     /// With <see cref="ItemRowTemplate"/>, lets go of the realized rows whose selected state is
-    /// not the one they were made with, so the next frame makes them again; the rest stay.
+    /// not the one they were made with (<see cref="RowSelected"/>), so the next frame makes them
+    /// again; the rest stay.
     /// </summary>
     private void DropRowsWhoseSelectionChanged()
     {
         if (_itemRowTemplate is null || _activeElements.Count == 0) return;
         foreach (var (index, row) in _activeElements)
-            if (row.Selected != IsItemSelected(index))
+            if (row.Selected != RowSelected(index))
                 _dropping.Add(index);
         DropGathered();
     }
@@ -622,6 +665,35 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and layout so the children are renderable immediately.
         if (_visibleStart != prevStart || _visibleEnd != prevEnd)
             LayoutVisibleChildren();
+    }
+
+    /// <summary>The selection, when the list draws it (<see cref="SelectionHighlight"/>): at each
+    /// selected row on screen, under the rows, as a box would draw its own background and
+    /// border. Rows are realized by now (<see cref="UpdateContentSize"/> runs first).</summary>
+    internal override void RenderUnderContent(IRenderContext ctx)
+    {
+        if (_selectionHighlight is not { } highlight || _activeElements.Count == 0) return;
+        if (!CanSelectMultiple)
+        {
+            if (_selectedIndex >= 0 && _activeElements.TryGetValue(_selectedIndex, out var row))
+                DrawHighlight(ctx, in highlight, row.Element);
+            return;
+        }
+        if (_multiSelected.Count == 0) return;
+        foreach (var (index, row) in _activeElements)
+            if (_multiSelected.Contains(index))
+                DrawHighlight(ctx, in highlight, row.Element);
+    }
+
+    // BoxElement.Render's call for a background with a uniform solid border, or none.
+    private static void DrawHighlight(IRenderContext ctx, in RowHighlight highlight, Element row)
+    {
+        var box = row.Layout.AbsoluteBorderBox;
+        bool ring = highlight.BorderColor.A > 0 && highlight.BorderWidth > 0;
+        if (highlight.Background.A == 0 && !ring) return;
+        ctx.DrawRoundedRect(box, highlight.CornerRadius, highlight.Background,
+            ring ? highlight.BorderColor : Color.Transparent,
+            ring ? new Thickness(highlight.BorderWidth) : default);
     }
 
     private void LayoutVisibleChildren()
@@ -769,7 +841,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             if (_recyclePool.Count > 0)
                 _recyclePool.RemoveAt(_recyclePool.Count - 1);
             var item = _items[i];
-            bool selected = _itemRowTemplate is not null && IsItemSelected(i);
+            bool selected = _itemRowTemplate is not null && RowSelected(i);
             var element = _itemRowTemplate is { } rowTemplate ? rowTemplate(item, selected) : _itemTemplate!(item);
 
             // A keyed row that was on screen before the invalidation is patched from the
@@ -859,6 +931,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 _offsets = null;
             }
 
+            // First: it decides the selected state rows are made with, which the selection
+            // below and the kept rows' check compare against.
+            SelectionHighlight = vl.SelectionHighlight;
             // Accessibility state is rebuilt fresh each render in declarative UIs,
             // so it must ride across the patch — otherwise the a11y selection and
             // activation wiring freeze at their first-mount values.
@@ -916,7 +991,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         var comparer = EqualityComparer<T>.Default;
         foreach (var (index, row) in _activeElements)
         {
-            if (index >= items.Count || row.Selected != IsItemSelected(index) || !comparer.Equals(row.Item, items[index]))
+            if (index >= items.Count || row.Selected != RowSelected(index) || !comparer.Equals(row.Item, items[index]))
                 _dropping.Add(index);
         }
         DropGathered();
