@@ -347,6 +347,31 @@ bar. The setting that did land is the large-object threshold in `apps/AppRuntime
 app whose windows stay light could add the cap there. Revisit if Junction's highlight worker stops
 allocating per key (apps-junction-highlight-prefetch).
 
+### Vesper's one-off double builds: left as they are
+
+A component's `MarkDirty` builds at once, so a handler that calls it twice builds the window twice
+(signal writes in one event come to one build; two `MarkDirty` calls do not). Plan 17's round 5
+survey logged every component built twice in one event across the apps' test suites. Vesper's
+Insert was one, on a hot path, and builds once since round 5, step 8 (646 → 414 KB a key). The
+others are actions taken once, each costing one more build of the window (about 200–250 KB, a
+millisecond or two), and none folds without changing how the action is put together:
+
+- **Opening the viewer** (Shift+F3, and the next file inside it): loading the file unbinds the
+  find bar's search, whose change callback is `MarkDirty`, so a build runs with the panes still
+  showing before `OpenViewer`'s own. Folding it means opening the view before the load and leaning
+  on the search's callback to build it.
+- **The name prompts** (go to path, mark by pattern, new folder, copy and move into an archive,
+  rename in an archive): `CommitNamePrompt` runs the prompt's action, which builds as it navigates
+  or starts its work, then closes the prompt and builds again. Folding it means every action stops
+  building, or the prompt closes first, which is the path that keeps it open on an error.
+- **Picking a drive** closes the picker (`CloseOverlays`, a build) and then navigates (another);
+  **cancelling a confirm** whose answer posts a notice builds for the notice and for the close.
+
+Declined for now: each is a structural change to an action that runs once. The general fix is a
+`MarkDirty` that coalesces within an event, as Junction's revision signal does
+(`RerenderView`); that changes when every Vesper handler sees its rebuild, and would be a
+change of its own, measured across the app.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

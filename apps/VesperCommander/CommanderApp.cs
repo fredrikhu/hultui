@@ -1296,8 +1296,10 @@ public partial class CommanderApp : Component, IDisposable
             var marks = Marks(side);
             if (!marks.Remove(MarkKey(e))) marks.Add(MarkKey(e));
         }
+        // The move builds the window, the mark already in it: a MarkDirty after it built the
+        // window a second time for every Insert.
         if (advance) MoveCursor(side, 1, clearSearch: false);
-        MarkDirty();
+        else MarkDirty();
     }
 
     /// <summary>Ctrl+A: mark every row in the pane (never the ".." parent) — or, when
