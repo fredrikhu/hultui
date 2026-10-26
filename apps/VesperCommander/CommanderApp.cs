@@ -3115,14 +3115,19 @@ public partial class CommanderApp : Component, IDisposable
         // until something else rebuilds — a key press, a decode. Most resize steps change only
         // the size, though, and a build of the whole window for it made every cell of the grid
         // again (750 KB a step in Brief): so a build only when one would make something the last
-        // one did not — the grid's rows, columns or tiles per row, or a pane's path trail, which
-        // a grid view has always followed — and otherwise the live grid takes the new size.
-        // Behind a full-shell view the panes are not shown, and a resize rebuilds as it did.
+        // one did not — the grid's rows, columns or tiles per row, or a pane's path trail — and
+        // otherwise the live grid takes the new size. Behind a full-shell view the panes are not
+        // shown, and a grid view's resize rebuilds as it did.
+        //
+        // The path trail is decided in the build in every view: Detail too drops and brings back
+        // its leading segments with the pane's width. A Detail pane has nothing else a build
+        // sizes from the window, so it builds only when its trail would change — before, it
+        // never built on a resize, and the trail kept the old window's truncation until a key.
         bool gridView = ViewOf('L') is ViewMode.Brief or ViewMode.Thumbnails
                      || ViewOf('R') is ViewMode.Brief or ViewMode.Thumbnails;
-        if (!gridView) return;
-        if (FullShellOpen || WindowFitChanged()) MarkDirty();
-        else FitGridsInPlace();
+        if (gridView && FullShellOpen) { MarkDirty(); return; }
+        if (WindowFitChanged()) MarkDirty();
+        else if (gridView) FitGridsInPlace();
     }
 
     /// <summary>
