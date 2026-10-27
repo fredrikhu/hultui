@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 5
-- **Phase:** paused (user, 2026-10-26) — round 5 released: merge 61308cfd plus two CI test fixes (6e51acad, f31194ab) on fredrikhu/hultui main, CI run 40409675144 green. **Next, when the user says go after rebooting: the total-improvement comparison of all rounds** — baseline 520002e9 (main 2026-10-07, just before b9f80d07) vs main f31194ab, built side by side (baseline in a detached scratch worktree), idle-gated, pinned, alternated, JIT + AOT: perf suite rows both commits have, app walks (KB and time per key, start-up, idle, working set), a11y rows; report in `17-reports/total-r1-r5.md`. Round 6 survey only after that. Round 5 question 5 open (Junction History row pixels). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
+- **Phase:** paused (user) — round 5 released (61308cfd + CI fixes f31194ab, CI green); the total-improvement comparison of all five rounds is done: [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md) (2026-10-27). **Next, when the user resumes the loop: round 6 survey.** Round 5 question 5 open (Junction History row pixels). History note: rewritten 2026-10-25 (every commit after 3353ce47 has a new ID; a pre-push hook refuses pushes built on the old history). To resume after a pause, run in
   this worktree: `/loop Run the next step of the performance team: follow docs/plans/17-performance-team.md, with
   state in docs/plans/17-performance-team-ledger.md. Read both, do the step the ledger's Phase calls for, record it in
   the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved.
@@ -148,6 +148,9 @@ Re-ranked by the round 6 survey.
 - **vesper-own-selection-revisit** (1/6, lead from r5 step 12) — Vesper's panes kept their own selection highlight
   (68817800) because the window build was most of a key; with parts that is no longer true. Re-measure
   `RowHighlight` on Detail/Brief.
+- **meridian-history-aot-p90** (6/8, lead from the total comparison) — Meridian History Down, headless AOT: p90
+  2.69 → 3.47 ms against the baseline (a stretch of ~9 keys near the walk's start at ~3.4 ms, same bytes); median
+  flat, min −11 %, JIT and the real window improved. Trace before calling it real.
 - **meridian-find-typing** (5/8, lead from r5 step 11) — find typing in a 2,000-line response is still 1,529 KB per
   character after the pane stopped rebuilding the window, all in the search and the span merge.
 - **meridian-method-popover-double-build** (6/8, lead from r5 step 11) — picking a method builds twice: the row
@@ -1097,3 +1100,9 @@ at per-frame allocation checks its bytes on AOT too (brief updated).
   on Windows → `Private="false"` on the CLI reference, f31194ab. Pushed 61308cfd..f31194ab; CI run 40409675144 green
   (test, test-linux, docs). Guideline notes: a thread test starts from a state its reader accepts; a referenced
   exe's runtimeconfig/deps/apphost are copied unless `Private="false"`. Loop stopped for the user's reboot.
+- 2026-10-27: total-improvement comparison after the user's reboot, baseline 520002e9 vs after (code of f31194ab),
+  idle-gated, pinned, alternated, JIT + AOT (captures 3c2afc67; report `17-reports/total-r1-r5.md`). Perf suite, 83
+  shared rows: 0 slower, summed time −25.5 % JIT / −28.7 % AOT, allocation −63…−64 %. Apps: bytes per key −51…−99 % on
+  23 walks (−90 % summed), CPU per key −26 % geomean AOT, real-window work per key −24…−64 %, idle 75 → 0 wakes/s,
+  memory after a walk −10…−22 %, Meridian 89k-body typing gen-2 127 → 1; start-up unchanged. 56 real-window launches:
+  no foreground events, no stalls, no new nvlddmkm events. Baseline worktree removed. Loop still paused for the user.
