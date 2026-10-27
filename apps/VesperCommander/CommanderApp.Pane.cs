@@ -1003,7 +1003,6 @@ public partial class CommanderApp
             if (e.IsDir) dirs++; else files++;
         }
         int marked = Marks(side).Count;
-        var free = FileSystem.FreeLabel(Dir(side));
 
         var footer = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4, 12, 4, 12))
@@ -1044,7 +1043,9 @@ public partial class CommanderApp
 
         // While the thumbnail grid is decoding, the right slot counts down instead of free space.
         int decoding = ViewOf(side) == ViewMode.Thumbnails && _thumbsCache != null ? _thumbsCache.PendingCount : 0;
-        var tail = decoding > 0 ? $"decoding {decoding}…" : free;
+        // Asked of the volume once for each folder and listing the pane shows (FreeLabelOf), not
+        // on every build of the footer.
+        var tail = decoding > 0 ? $"decoding {decoding}…" : FreeLabelOf(side);
         var label = $"{files} files, {dirs} dirs, {sizeLabel}" + (tail.Length > 0 ? $" · {tail}" : "");
         footer.AddChild(Ui.Mono(label, 10.5f, decoding > 0 ? Nocturne.Accent300 : Nocturne.On(0.50)));
 
