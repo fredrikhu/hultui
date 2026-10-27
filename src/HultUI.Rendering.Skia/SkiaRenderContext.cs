@@ -1034,13 +1034,17 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         for (int k = first; k < stop && at < drawnLength; k++)
         {
             var span = spans[k];
+            // A transparent colour colours nothing: the text keeps the colour it has there, the
+            // element's or, where spans overlap (a TextArea's may: a find match over a token),
+            // the other span's. Taken as the element's colour, a match that began at a token's
+            // start or ran into the next token painted those characters in it. Where spans do
+            // not overlap the stretches are the same either way.
+            if (span.Color.A == 0) continue;
             int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
             if (e <= at) continue;
             if (s > at) Continue(at, style.TextColor);
-            // Transparent span color = background-only span; glyphs keep the
-            // element's text color.
-            Continue(Math.Max(s, at), span.Color.A == 0 ? style.TextColor : span.Color);
+            Continue(Math.Max(s, at), span.Color);
             at = e;
         }
         if (at < drawnLength) Continue(at, style.TextColor);

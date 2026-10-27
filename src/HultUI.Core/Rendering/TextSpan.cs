@@ -7,8 +7,9 @@ namespace HultUI.Core.Rendering;
 /// A styled range of a text element's content, in UTF-16 character offsets
 /// (syntax highlighting and similar). Spans must be sorted by <see cref="Start"/>
 /// and non-overlapping; characters not covered by any span render in the
-/// element's own text color. A transparent <see cref="Color"/> (A == 0) means
-/// "keep the element's text color" — useful for background-only spans.
+/// element's own text color. A transparent <see cref="Color"/> (A == 0) colours
+/// nothing: the text keeps the element's colour — useful for background-only spans —
+/// or, where spans overlap (a TextArea's may), the colour another span gives it.
 /// <see cref="Background"/> fills the span's line rect behind the glyphs
 /// (diff word highlights, search matches); transparent means none.
 /// <see cref="Decoration"/> underlines or strikes the span's range, in the
