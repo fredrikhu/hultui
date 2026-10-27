@@ -240,6 +240,42 @@ public class KeptRowTests
         finally { settings.Zebra = zebra; }
     }
 
+    /// <summary>The zebra tint alternates on the row's index among the rows shown, which the row's
+    /// item carries: making the rows looks no path up per row (each look-up walks the rows, so
+    /// the tint cost O(rows²) a build), and under a filter it alternates on the filtered rows.</summary>
+    [Fact]
+    public void TheZebraTint_TakesTheRowsIndexFromItsItem()
+    {
+        using var t = Open();
+        var settings = t.Field<Settings>("_settings");
+        bool zebra = settings.Zebra;
+        var tint = Nocturne.Alpha(Nocturne.Text, 0.03);
+        try
+        {
+            t.PutCursorOn('L', Name(30));   // away from the rows looked at
+            var before = Rows(t, 'L');
+            settings.Zebra = true;
+            CommanderApp.IndexOfPathCalls = 0;
+            Rebuild(t);                     // the tint is in the shape: every row is made again
+
+            var rows = Rows(t, 'L');
+            Assert.True(rows.Count(r => !before.ContainsValue(r.Value)) >= 20);
+            Assert.InRange(CommanderApp.IndexOfPathCalls, 0, 4);
+            // "..", "docs", f00, f01, …: the odd rows are tinted, the parent row never.
+            Assert.Equal(tint, ((BoxElement)rows["docs"]).BackgroundColor);
+            Assert.Equal(Color.Transparent, ((BoxElement)rows[Name(0)]).BackgroundColor);
+            Assert.Equal(tint, ((BoxElement)rows[Name(1)]).BackgroundColor);
+
+            t.SetField("_search", "f1");    // "..", f10 … f19
+            Rebuild(t);
+            rows = Rows(t, 'L');
+            Assert.Equal(tint, ((BoxElement)rows[Name(10)]).BackgroundColor);
+            Assert.Equal(Color.Transparent, ((BoxElement)rows[Name(11)]).BackgroundColor);
+            Assert.Equal(tint, ((BoxElement)rows[Name(12)]).BackgroundColor);
+        }
+        finally { settings.Zebra = zebra; }
+    }
+
     [Fact]
     public void AFileCutForAMove_IsGhosted()
     {

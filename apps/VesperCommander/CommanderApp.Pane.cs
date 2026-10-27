@@ -822,15 +822,16 @@ public partial class CommanderApp
     private static readonly Func<PaneRowItem, string?> FileLabelOfItem = item => FileLabel(item.Entry, item.Marked);
 
     /// <summary>
-    /// A Detail row as the pane's list keeps it: its entry, and what only some rows show —
-    /// whether it is marked, whether it is cut for a move, and a folder's size measured with
-    /// Space (<see cref="Measured"/> −1 when it was not; the total counts up while the walk runs,
-    /// until <see cref="MeasureDone"/>). The list compares the items on screen with the ones the
-    /// rows were made from, so a mark makes the one row it changes again, where in the rows'
-    /// shape it made every row on screen again. Kept small (24 bytes): the list keeps one per
-    /// item beside each item's accessible label.
+    /// A Detail row as the pane's list keeps it: its entry and its index among the rows (which
+    /// the zebra tint alternates on), and what only some rows show — whether it is marked,
+    /// whether it is cut for a move, and a folder's size measured with Space
+    /// (<see cref="Measured"/> −1 when it was not; the total counts up while the walk runs, until
+    /// <see cref="MeasureDone"/>). The list compares the items on screen with the ones the rows
+    /// were made from, so a mark makes the one row it changes again, where in the rows' shape it
+    /// made every row on screen again. Kept small (24 bytes): the list keeps one per item beside
+    /// each item's accessible label.
     /// </summary>
-    internal readonly record struct PaneRowItem(FileEntry Entry, bool Marked, bool Cut,
+    internal readonly record struct PaneRowItem(FileEntry Entry, int Index, bool Marked, bool Cut,
         long Measured, bool MeasureDone);
 
     /// <summary>A pane's rows as items, made per index as the list asks: nothing is held per row,
@@ -848,7 +849,7 @@ public partial class CommanderApp
             {
                 var e = rows[index];
                 var measured = app._dirSizes.Count > 0 ? app.MeasuredDir(e) : null;
-                return new PaneRowItem(e,
+                return new PaneRowItem(e, index,
                     _marks.Count > 0 && _marks.Contains(MarkKey(e)),
                     app._cutPending.Count > 0 && app._cutPending.Contains(e.FullPath),
                     measured?.bytes ?? -1, measured?.done ?? false);
@@ -956,9 +957,8 @@ public partial class CommanderApp
         // because the mark is about what the cursor opposite pairs with.
         if (cursor)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
-        else if (_settings.Zebra && !marked && !e.IsParent
-                 && IndexOfPath(Rows(side), e.FullPath) % 2 == 1)
-            row.Background(Nocturne.Alpha(Nocturne.Text, 0.03));   // alternating tint
+        else if (_settings.Zebra && !marked && !e.IsParent && item.Index % 2 == 1)
+            row.Background(Nocturne.Alpha(Nocturne.Text, 0.03));   // alternating tint, by the row's index
 
         // Type icon rasterized from the design's SVG glyphs; marked rows tint red, a
         // cut-pending row ghosts via element opacity (keeps the design's own colours).

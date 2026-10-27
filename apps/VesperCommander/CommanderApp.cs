@@ -1197,11 +1197,16 @@ public partial class CommanderApp : Component, IDisposable
         return -1;
     }
 
+    /// <summary>Calls of <see cref="IndexOfPath"/> on this thread. Each walks the rows, so a build
+    /// asks a few times, never once a row (the zebra tint did: O(rows²) a build); a test counts.</summary>
+    [ThreadStatic] internal static int IndexOfPathCalls;
+
     /// <summary>The row holding <paramref name="path"/>. Used wherever a row has to be found
     /// again after the list was rebuilt or recycled — a fed-in result set lists many folders
     /// at once, so a name can name several rows and only the path names one.</summary>
     private static int IndexOfPath(IReadOnlyList<FileEntry> list, string? path)
     {
+        IndexOfPathCalls++;
         if (path == null) return -1;
         for (int i = 0; i < list.Count; i++)
             if (PathEquals(list[i].FullPath, path)) return i;
