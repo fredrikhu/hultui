@@ -385,9 +385,21 @@ public sealed class ShapedRun
     /// <summary>How many glyphs the run has, without putting its glyph array together.</summary>
     internal int GlyphCount => _glyphs is GlyphPosition[] glyphs ? glyphs.Length : _pendingGlyphCount;
 
-    /// <summary>Whether the glyph array exists yet, for the tests that hold the pipeline to making
-    /// it only when it is read.</summary>
+    /// <summary>Whether the glyph array exists yet. While it does not, a reader that only copies
+    /// the glyphs on writes them straight where it copies them to (<see cref="ComposeGlyphsInto"/>).</summary>
     internal bool GlyphsComposed => _glyphs is GlyphPosition[];
+
+    /// <summary>
+    /// Whether the run's glyphs follow from its face, size and text alone: the pipeline made it
+    /// from its word cache (<see cref="TextPipeline.ShapeByWords"/>), whose segments are shaped by
+    /// their text, face and size and set side by side at the widths of those before them, and
+    /// nothing moved a glyph after (letter spacing makes a run of its own, which is not marked; nor
+    /// is a right-to-left run, which the shaper makes whole). Two marked runs of the same text,
+    /// face and size hold the same glyphs at the same places, so the renderer's blob maps match
+    /// them by their text, without reading their glyphs — which, for a run of several words, would
+    /// put its glyph array together only to find a blob made before.
+    /// </summary>
+    internal bool GlyphsFollowText { get; init; }
 
     public ShapedRun(string text, IResolvedFont font, float fontSize, float width, GlyphPosition[] glyphs)
     {
@@ -398,8 +410,8 @@ public sealed class ShapedRun
         _glyphs = glyphs;
     }
 
-    // A run whose glyphs the pipeline puts together when they are first read
-    // (TextPipeline.ComposeGlyphs).
+    // A run whose glyphs the pipeline puts together from its word cache when they are first read
+    // (TextPipeline.ComposeGlyphs): so they follow from its text.
     internal ShapedRun(string text, IResolvedFont font, float fontSize, float width, ushort glyphCount,
         TextPipeline composer)
     {
@@ -409,6 +421,7 @@ public sealed class ShapedRun
         Width = width;
         _pendingGlyphCount = glyphCount;
         _glyphs = composer;
+        GlyphsFollowText = true;
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -417,6 +430,20 @@ public sealed class ShapedRun
         var glyphs = ((TextPipeline)_glyphs).ComposeGlyphs(this, _pendingGlyphCount);
         _glyphs = glyphs;
         return glyphs;
+    }
+
+    /// <summary>
+    /// Writes the run's <see cref="GlyphCount"/> glyphs into the start of <paramref name="into"/>,
+    /// as <see cref="Glyphs"/> holds them, without putting the run's glyph array together when it
+    /// is not yet: for a reader that only copies them on, such as a text blob, so a run that is
+    /// only drawn never makes an array of its own. Same thread as <see cref="Glyphs"/>.
+    /// </summary>
+    internal void ComposeGlyphsInto(Span<GlyphPosition> into)
+    {
+        if (_glyphs is TextPipeline composer)
+            composer.ComposeGlyphs(this, into[.._pendingGlyphCount]);
+        else
+            ((GlyphPosition[])_glyphs).CopyTo(into);
     }
 }
 

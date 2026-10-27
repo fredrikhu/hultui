@@ -2515,6 +2515,9 @@ public sealed class TextPipeline
     // passes through are laid out and never drawn. Their glyphs were 59 % of what wrapping 150
     // paragraphs allocated at each width, and 37 % of opening a 5,000-block rich text document
     // (plan 17, round 5). composeNow makes the array now (letter spacing moves every glyph).
+    //
+    // Every run made here holds glyphs that follow from its text, face and size, and is marked so
+    // (ShapedRun.GlyphsFollowText) — except one made for letter spacing to move.
     internal ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize, bool composeNow = false)
     {
         int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
@@ -2527,7 +2530,7 @@ public sealed class TextPipeline
             var wordGlyphs = word.Run?.Glyphs;
             if (wordGlyphs is null)
                 ComposeDigits(text, 0, text.Length, word.Digits!, 0f, wordGlyphs = new GlyphPosition[text.Length], 0);
-            return new ShapedRun(text, font, fontSize, word.Width, wordGlyphs);
+            return new ShapedRun(text, font, fontSize, word.Width, wordGlyphs) { GlyphsFollowText = !composeNow };
         }
 
         if (ComposeGlyphsWhenRead && !composeNow)
@@ -2580,7 +2583,7 @@ public sealed class TextPipeline
             x += word.Width;
         }
         words.Clear();
-        return new ShapedRun(text, font, fontSize, x, glyphs);
+        return new ShapedRun(text, font, fontSize, x, glyphs) { GlyphsFollowText = !composeNow };
     }
 
     // ShapeByWords' segments, between its two passes (one list per pipeline, as a pipeline is
@@ -2597,11 +2600,19 @@ public sealed class TextPipeline
     /// </summary>
     internal GlyphPosition[] ComposeGlyphs(ShapedRun run, int glyphCount)
     {
+        var glyphs = new GlyphPosition[glyphCount];
+        ComposeGlyphs(run, glyphs);
+        return glyphs;
+    }
+
+    /// <summary>The same glyphs written into <paramref name="glyphs"/> (exactly the run's glyph
+    /// count long), for a reader that only copies them on (ShapedRun.ComposeGlyphsInto).</summary>
+    internal void ComposeGlyphs(ShapedRun run, Span<GlyphPosition> glyphs)
+    {
         string text = run.Text;
         var font = run.Font;
         float fontSize = run.FontSize;
         int fontHash = WordShapeKeyComparer.FontHash(font, fontSize);
-        var glyphs = new GlyphPosition[glyphCount];
         float x = 0;
         int at = 0;
         for (int i = 0; i < text.Length;)
@@ -2621,7 +2632,6 @@ public sealed class TextPipeline
             }
             x += word.Width;
         }
-        return glyphs;
     }
 
     /// <summary>
@@ -2690,7 +2700,7 @@ public sealed class TextPipeline
     // each at the advances before it in the segment plus x (the segment's place in its run), and
     // returns the index after them.
     private static int ComposeDigits(string text, int start, int length, DigitTable table, float x,
-        GlyphPosition[] glyphs, int at)
+        Span<GlyphPosition> glyphs, int at)
     {
         float advanced = 0;
         for (int i = start; i < start + length; i++)

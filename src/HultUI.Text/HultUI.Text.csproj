@@ -18,6 +18,10 @@
     <!-- TextPipeline.ReuseAcrossWidths: the reference path WidthChangeEquivalenceTests compare against; LineBreaker. -->
     <InternalsVisibleTo Include="HultUI.Text.Tests" />
     <InternalsVisibleTo Include="HultUI.Rendering.Skia.Tests" />
+    <!-- The run-blob maps match runs whose glyphs follow from their text by the text
+         (ShapedRun.GlyphsFollowText), count glyphs without putting them together (GlyphCount),
+         and build a new blob from a run's words without a glyph array (ComposeGlyphsInto). -->
+    <InternalsVisibleTo Include="HultUI.Rendering.Skia" />
   </ItemGroup>
 
 </Project>
