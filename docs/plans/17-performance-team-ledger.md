@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 7c next (the user's rich text table probe; steps 1–7b landed). User (2026-10-27):
-  pause the loop when weekly plan usage reaches 90 % (`get_usage`; 85 % after step 7b, ~1–3 % a step). The survey's eight reports are
+- **Phase:** build — round 6, step 8 next (steps 1–7c landed). User (2026-10-27): pause the loop when weekly plan usage
+  reaches 90 % (`get_usage`; 85 % after step 7c, ~1–3 % a step). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -261,6 +261,7 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 9947adaf | textarea-highlight-layer (API) | Approved (user, question 3b). **Public `TextHighlight(int Start, int Length, Color Background)` record struct (12 B; `TextSpan` is 40) and `TextAreaElement.Highlights` (`IReadOnlyList<TextHighlight>?`, fluent `.Highlights(list)`)**: same list by reference costs nothing, a new list marks paint only; each row merges spans and highlights per line by index (a highlight is a background-only span after the selection fill, under the text); nothing copied, 0 B a row, not exposed to readers. New suite rows: find typing 0.725 → 0.460 ms JIT (0.791 → 0.489 AOT), 333 → 54 KB; find Enter 0.657 → 0.391, 305 → 26 KB. ELEMENTS.md. |
 | 6 | 3eec43f7 | meridian-find-typing | Spans stay one list across keys; matches go to `Highlights`, kept between builds by search key. 2,000-line response: typing 1,529 → 132 KB/key, min 3.01 → 2.25 ms JIT / 3.09 → 1.87 AOT; Enter 1,458 → 65; 19,000 lines: typing 14,009 → 730 KB, 11.6 → 3.0 ms JIT / 14.1 → 3.4 AOT, Enter 13,414 → 172; gen-2 per 240 keys 24–108 → 0; layouts per key 1 (the find bar), body line passes and shapes 0. |
 | 6 | c5586b3f | junction-files-find-highlights | The same in Junction Files; line starts computed once per file with the text (fixes a selection seed in a match-less file using the previous file's starts). 6,000-line C#: typing 7,089 → 145 KB/key (7.3 → 2.7 ms JIT, 8.4 → 2.9 AOT), Enter 7,023 → 80, repaint with find open 7,140 → 186. Step 7b pixels: suite 159 scenarios A/A = A/B; Meridian/Junction scenes differ only where text now keeps its token colour (eac5f19b). Suite: no row slower in both runs (TableView 10k sort +5–6 % AOT only, its known placement effect). |
+| 6 | 0493921d, 49634ea5 | richtext-table-scroll-depth | User's case (300×10 rich text table, 1200×800): nothing grows with position at 3c709d10 — wheel 0.608/0.599/0.621 ms top/middle/bottom, cells drawn 261/270/260, 136 B per step; drawing, hit-testing and the a11y range already binary-search (since e624b076). One thing scaled: every frame drew all 301 row-edge grid lines; now only the visible stretch's (313 → 38 rectangles a frame at any depth, bottom wheel −3 %; scaling bar). Four top/bottom twin suite rows. 41 frames A/A = A/B; goldens identical; suite 0/0. |
 
 ## Examined, not worth it
 
@@ -609,3 +610,7 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   its token colour. Guideline notes: don't merge transient tints into a document's span list — use `Highlights` and
   keep the spans the same list; memoize the highlight list by query, options, current match and document; compute
   line starts once per document; span arrays copied per key reach the LOH and cost gen-2 GCs. Usage 85 %.
+- 2026-10-27: step 7c landed (0493921d, 49634ea5): the user's slow-at-the-bottom rich text table no longer reproduces
+  (flat top to bottom); the grid lines were the one thing drawn whole (313 → 38 rectangles a frame); top/bottom twin
+  rows pin it. Guideline note: cull every kind of drawn item by the visible stretch, decorations too (grid lines,
+  separators, markers); pin with a top/bottom twin and a render-log count. Usage still 85 % (a lean step: 214k tokens).
