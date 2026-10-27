@@ -264,8 +264,8 @@ public partial class CommanderApp : Component, IDisposable
     // filesystem-derived state.
     private PaneState? _forceStateL, _forceStateR;
 
-    private readonly Ref<VirtualListElement<FileEntry>> _vlistL = new();
-    private readonly Ref<VirtualListElement<FileEntry>> _vlistR = new();
+    private readonly Ref<VirtualListElement<PaneRowItem>> _vlistL = new();
+    private readonly Ref<VirtualListElement<PaneRowItem>> _vlistR = new();
     private bool _pendingScrollL, _pendingScrollR;
 
     // ── Pane scroll across a full-shell view ─────────────────────────────
@@ -503,7 +503,7 @@ public partial class CommanderApp : Component, IDisposable
     private int Cursor(char side) => ActiveTab(side).Cursor;
     private AsyncLoader<DirListing> Loader(char side) => side == 'L' ? _listL : _listR;
     private int Gen(char side) => side == 'L' ? _genL : _genR;
-    private Ref<VirtualListElement<FileEntry>> VList(char side) => side == 'L' ? _vlistL : _vlistR;
+    private Ref<VirtualListElement<PaneRowItem>> VList(char side) => side == 'L' ? _vlistL : _vlistR;
 
     private void SetCursor(char side, int value)
     {

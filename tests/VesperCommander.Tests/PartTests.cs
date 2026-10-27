@@ -588,7 +588,7 @@ public class PartTests
     /// <summary>Presses on the realized row showing <paramref name="name"/>.</summary>
     private static void ClickRow(DiffViewTests.Fixture t, char side, string name)
     {
-        var list = t.Field<Ref<VirtualListElement<FileEntry>>>(side == 'L' ? "_vlistL" : "_vlistR").Current!;
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.PaneRowItem>>>(side == 'L' ? "_vlistL" : "_vlistR").Current!;
         var row = list.Children.Skip(1).First(r => Descendants(r).Any(e => e is TextElement { Content: var c } && c == name));
         ClickOn(t, row);
     }

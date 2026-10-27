@@ -97,7 +97,7 @@ public class DiffPartnerMarkTests
     /// and a search by name would find whichever came first.</summary>
     private static BoxElement Row(DiffViewTests.Fixture t, char side, string name)
     {
-        var list = t.Field<Ref<VirtualListElement<FileEntry>>>(side == 'L' ? "_vlistL" : "_vlistR").Current
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.PaneRowItem>>>(side == 'L' ? "_vlistL" : "_vlistR").Current
             ?? throw new Xunit.Sdk.XunitException($"the {side} pane has no list");
         // The list's first child is the spacer standing in for the rows scrolled past above.
         foreach (var row in list.Children.Skip(1))

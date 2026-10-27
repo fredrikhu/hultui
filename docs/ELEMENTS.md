@@ -1292,7 +1292,10 @@ The model objects themselves have to be kept between rebuilds for the comparison
 nodes made again by every build (a tree flattened from a fresh filter) are new objects at
 every index, and every row is made again. Keep them while what they come from is the same.
 Junction's Files tree, moved from a scroll view of every row onto a virtual list this way,
-makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now).
+makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now). Vesper's
+Detail rows carry their mark, their cut-for-a-move state and a folder's measured size in the
+item (`PaneRowItem`) rather than in the rows' shape: Insert makes the row it marked and the row
+the cursor reached instead of all 30 on screen, 191 → 42 KB a key (headless, 400 files).
 
 When the items are records the list is handed as they come (a folder's entries straight from
 the loader) and the highlight is one value that moves, the app can instead tell the list the

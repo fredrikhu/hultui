@@ -777,7 +777,6 @@ public partial class CommanderApp
         // moved between rather than every row on screen in both panes. Only the active pane
         // renders a cursor (design: the caret follows focus).
         int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, list.Count - 1));
-        var marks = Marks(side);
 
         // The row F3 would compare the active pane's cursor against. Only in the inactive
         // pane — the active one already draws a cursor, and the answer is always over here.
@@ -786,13 +785,15 @@ public partial class CommanderApp
         string? partnerPath = active ? null : DiffTargetPath();
         if (partnerPath is not null && IndexOfPath(list, partnerPath) < 0) partnerPath = null;
 
-        // A kept row shows what it showed when it was made; everything it shows besides its
-        // entry and the cursor is in the shape, and a change makes the rows again. The partner
-        // is the exception: in a folder of the same names it moves with every key, and only the
-        // row it leaves and the row it reaches show it, so those two are made again and the
-        // rest are kept. The mounted list is told before this build patches it.
+        // A kept row shows what it showed when it was made. What only some rows show — a mark, a
+        // file cut for a move, a folder's measured size — is in the row's item, so a change makes
+        // the rows it changed. Everything else a row shows besides its item and the cursor is in
+        // the shape, and a change makes the rows again. The partner is kept out of both: in a
+        // folder of the same names it moves with every key, and only the row it leaves and the
+        // row it reaches show it, so those two are made again and the rest are kept. The mounted
+        // list is told before this build patches it.
         var rowState = PaneRows(side);
-        bool shapeChanged = rowState.Changed(this, side, marks);
+        bool shapeChanged = rowState.Changed(this, side);
         bool partnerMoved = rowState.PartnerMoved(partnerPath, out var partnerWas);
         if (VList(side).Current is { } mounted)
         {
@@ -804,36 +805,73 @@ public partial class CommanderApp
             }
         }
 
-        return VirtualListElement<FileEntry>.New()
+        return VirtualListElement<PaneRowItem>.New()
             .ItemHeight((int)RowHeight)
-            .Items(list)
+            .Items(new PaneRowItems(this, side, list))
             .SelectedIndex(active && list.Count > 0 ? cur : -1)
-            .RenderWith((e, cursor) => FileRow(side, e, cursor, marks.Contains(MarkKey(e)), partnerPath))
+            .RenderWith((item, cursor) => FileRow(side, item, cursor, partnerPath))
             // The list names its rows to assistive tech by this alone, off-screen ones included.
-            // Without it each row was read out as the FileEntry record's ToString(). One delegate
-            // per pane, reading the marks as they are: the list keeps each entry's label while the
-            // entry and the delegate are unchanged, and a change of marks makes them again.
-            .AccessibleItemLabel(FileLabelFn(side))
+            // Without it each row was read out as the FileEntry record's ToString(). It reads the
+            // item alone, so the list keeps each row's label while the item is unchanged, and a
+            // mark makes the label of the row it changed again.
+            .AccessibleItemLabel(FileLabelOfItem)
             .WithRef(VList(side))
             .FlexGrow(1);
     }
 
-    private Func<FileEntry, string?>? _fileLabelL, _fileLabelR;
+    private static readonly Func<PaneRowItem, string?> FileLabelOfItem = item => FileLabel(item.Entry, item.Marked);
 
-    private Func<FileEntry, string?> FileLabelFn(char side) => side == 'L'
-        ? _fileLabelL ??= e => FileLabel(e, Marks('L').Contains(MarkKey(e)))
-        : _fileLabelR ??= e => FileLabel(e, Marks('R').Contains(MarkKey(e)));
+    /// <summary>
+    /// A Detail row as the pane's list keeps it: its entry, and what only some rows show —
+    /// whether it is marked, whether it is cut for a move, and a folder's size measured with
+    /// Space (<see cref="Measured"/> −1 when it was not; the total counts up while the walk runs,
+    /// until <see cref="MeasureDone"/>). The list compares the items on screen with the ones the
+    /// rows were made from, so a mark makes the one row it changes again, where in the rows'
+    /// shape it made every row on screen again. Kept small (24 bytes): the list keeps one per
+    /// item beside each item's accessible label.
+    /// </summary>
+    internal readonly record struct PaneRowItem(FileEntry Entry, bool Marked, bool Cut,
+        long Measured, bool MeasureDone);
+
+    /// <summary>A pane's rows as items, made per index as the list asks: nothing is held per row,
+    /// and one of these per build is all a build allocates for them.</summary>
+    private sealed class PaneRowItems(CommanderApp app, char side, IReadOnlyList<FileEntry> rows)
+        : IReadOnlyList<PaneRowItem>
+    {
+        private readonly HashSet<string> _marks = app.Marks(side);
+
+        public int Count => rows.Count;
+
+        public PaneRowItem this[int index]
+        {
+            get
+            {
+                var e = rows[index];
+                var measured = app._dirSizes.Count > 0 ? app.MeasuredDir(e) : null;
+                return new PaneRowItem(e,
+                    _marks.Count > 0 && _marks.Contains(MarkKey(e)),
+                    app._cutPending.Count > 0 && app._cutPending.Contains(e.FullPath),
+                    measured?.bytes ?? -1, measured?.done ?? false);
+            }
+        }
+
+        public IEnumerator<PaneRowItem> GetEnumerator()
+        {
+            for (int i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     private readonly PaneRowState _paneRowsL = new(), _paneRowsR = new();
     private PaneRowState PaneRows(char side) => side == 'L' ? _paneRowsL : _paneRowsR;
 
     /// <summary>
-    /// What a pane's Detail rows show besides their entry and whether the cursor is on it, as
-    /// the rows on screen were made with it: the Size and Date columns, the zebra tint, a
-    /// fed-in result set's source folders, the scale the icons are cut at, a folder a drag
-    /// hovers, and the sets a row looks itself up in — the marks, the files cut for a move, the
-    /// folders measured with Space (whose totals count up while they walk). And, apart from
-    /// that shape, the F3 partner, which only one row shows.
+    /// What a pane's Detail rows show besides their item (<see cref="PaneRowItem"/>) and
+    /// whether the cursor is on it, as the rows on screen were made with it: the Size and Date
+    /// columns, the zebra tint, a fed-in result set's source folders, the scale the icons are
+    /// cut at, and a folder a drag hovers. And, apart from that shape, the F3 partner, which
+    /// only one row shows.
     /// <para>The rest comes with something the list already handles: another folder, an
     /// archive (and its ratio column) or a filter are other entries; the density is another
     /// row height, which makes every row again; another colour scheme is another Theme object,
@@ -842,9 +880,6 @@ public partial class CommanderApp
     private sealed class PaneRowState
     {
         private PaneRowShape _shape;
-        private readonly HashSet<string> _marks = PathSet();
-        private readonly HashSet<string> _cut = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, (long Bytes, bool Done)> _sizes = new(StringComparer.Ordinal);
         private bool _made;
         private string? _partner;
 
@@ -861,30 +896,14 @@ public partial class CommanderApp
 
         /// <summary>Whether anything the rows show changed since the last build asked; takes
         /// the new state either way.</summary>
-        public bool Changed(CommanderApp app, char side, HashSet<string> marks)
+        public bool Changed(CommanderApp app, char side)
         {
             var shape = new PaneRowShape(app._settings.ShowSize, app._settings.ShowDate,
                 app._settings.Zebra, app.ResultsOf(side), Icons.DisplayScale, app._dropTarget);
             bool changed = !_made || shape != _shape;
             _made = true;
             _shape = shape;
-            if (!_marks.SetEquals(marks)) { changed = true; _marks.Clear(); _marks.UnionWith(marks); }
-            if (!_cut.SetEquals(app._cutPending)) { changed = true; _cut.Clear(); _cut.UnionWith(app._cutPending); }
-            if (!SameSizes(app._dirSizes))
-            {
-                changed = true;
-                _sizes.Clear();
-                foreach (var (path, ds) in app._dirSizes) _sizes[path] = (ds.Bytes, ds.Done);
-            }
             return changed;
-        }
-
-        private bool SameSizes(Dictionary<string, DirSize> sizes)
-        {
-            if (sizes.Count != _sizes.Count) return false;
-            foreach (var (path, ds) in sizes)
-                if (!_sizes.TryGetValue(path, out var kept) || kept != (ds.Bytes, ds.Done)) return false;
-            return true;
         }
     }
 
@@ -903,9 +922,10 @@ public partial class CommanderApp
         return marked ? label + ", marked" : label;
     }
 
-    private Element FileRow(char side, FileEntry e, bool cursor, bool marked,
-        string? partnerPath = null)
+    private Element FileRow(char side, PaneRowItem item, bool cursor, string? partnerPath = null)
     {
+        var e = item.Entry;
+        bool marked = item.Marked;
         // The other pane's F3 operand. Matched on the full path rather than the name, because
         // this one comes from DiffPartner as a path and a name could collide with a row in a
         // folder the answer isn't about.
@@ -915,7 +935,7 @@ public partial class CommanderApp
         Color metaFg = marked ? Nocturne.MarkRedDim : Nocturne.On(0.50);
         // A cut-pending row ghosts to ~45% (icon + name) with dimmed metadata — reads as
         // "leaving", distinct from a mark (red) and the cursor ring (which paints over it).
-        bool cut = !marked && _cutPending.Contains(e.FullPath);
+        bool cut = !marked && item.Cut;
         if (cut) { fg = Nocturne.Alpha(fg, 0.45); metaFg = Nocturne.Neutral700; }
         var (cols, sizeCol, ratioCol, dateCol) = ListLayout(InArchive(side));
 
@@ -951,8 +971,8 @@ public partial class CommanderApp
         {
             // A Space-measured folder shows its byte total in place of "<DIR>"; while the
             // walk is still running it counts up live with a trailing "…".
-            string sizeText = MeasuredDir(e) is (var b, var done)
-                ? FileSystem.ByteCount(b) + (done ? "" : "…")
+            string sizeText = item.Measured >= 0
+                ? FileSystem.ByteCount(item.Measured) + (item.MeasureDone ? "" : "…")
                 : FileSystem.SizeLabel(e);
             row.AddChild(Ui.Mono(sizeText, 11f, metaFg).TextAlign(TextAlign.Right).GridColumn(sizeCol));
         }

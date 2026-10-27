@@ -39,8 +39,8 @@ public class KeptRowTests
         return t;
     }
 
-    private static VirtualListElement<FileEntry> List(DiffViewTests.Fixture t, char side) =>
-        t.Field<Ref<VirtualListElement<FileEntry>>>(side == 'L' ? "_vlistL" : "_vlistR").Current
+    private static VirtualListElement<CommanderApp.PaneRowItem> List(DiffViewTests.Fixture t, char side) =>
+        t.Field<Ref<VirtualListElement<CommanderApp.PaneRowItem>>>(side == 'L' ? "_vlistL" : "_vlistR").Current
         ?? throw new Xunit.Sdk.XunitException($"the {side} pane has no list");
 
     /// <summary>The realized rows by the name they show.</summary>
@@ -115,6 +115,30 @@ public class KeptRowTests
 
         Assert.Equal(Nocturne.MarkRed, NameLabel(Rows(t, 'L')[Name(5)]).ResolvedInherited.TextColor);
         Assert.Contains(ItemNames(bridge), n => n.StartsWith(Name(5) + ",", System.StringComparison.Ordinal) && n.EndsWith(", marked", System.StringComparison.Ordinal));
+    }
+
+    /// <summary>A mark is in the row's item, not in the rows' shape: Insert makes the row it
+    /// marked and the row the cursor reached, and keeps every other row. In the shape, every row
+    /// on screen was made again for each mark.</summary>
+    [Fact]
+    public void AnInsert_MakesTheRowItMarkedAndTheRowTheCursorReached_AndKeepsTheRest()
+    {
+        using var t = Open();
+        t.PutCursorOn('L', Name(3));
+        var before = Rows(t, 'L');
+
+        t.Press(KeyCode.Insert);
+        t.Session.PumpFrames(1);
+
+        var after = Rows(t, 'L');
+        Assert.Equal(before.Keys, after.Keys);
+        foreach (var (name, row) in after)
+        {
+            if (name == Name(3) || name == Name(4)) Assert.NotSame(before[name], row);
+            else Assert.Same(before[name], row);
+        }
+        Assert.Equal(Nocturne.MarkRed, NameLabel(after[Name(3)]).ResolvedInherited.TextColor);
+        Assert.Equal(Nocturne.Text, NameLabel(after[Name(4)]).ResolvedInherited.TextColor);
     }
 
     private static List<string> ItemNames(HultUI.Headless.HeadlessAccessibilityBridge bridge)

@@ -469,7 +469,7 @@ Vesper with the parts (headless, 1240×820, 400 files a pane eight folders deep,
 frames; NativeAOT within 2 %): a cursor key in Detail 210 → 34 KB (−84 %), elements patched 169 →
 7, and the other pane is not touched; with the F3 partner ring 218 → 44 (−80 %); Brief 199 → 37
 (−81 %); Thumbnails 219 → 58 and 257 → 94 (−74 %, −63 %); a mark 362 → 190 (−47 %: a mark still
-makes every visible row again); Tab 207 → 105 (−49 %); a folder in and out 554 → 273 (−51 %); a
+made every visible row again, until round 6 put it in the row's item: 191 → 42); Tab 207 → 105 (−49 %); a folder in and out 554 → 273 (−51 %); a
 filter character 365 → 209 (−43 %); a walk with the preview panel 329 → 73 (−78 %). With a reader
 the same bytes come off and the same accessibility trees are built. A key's time on NativeAOT
 −7…−21 %: the two frames are most of it.
