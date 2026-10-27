@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 7b next (the TextArea highlight layer + find; steps 1–6 and 7a landed). User
-  (2026-10-27): pause the loop when weekly plan usage reaches 90 % (`get_usage`; 82 % after step 7a, ~1–2 % a step). The survey's eight reports are
+- **Phase:** build — round 6, step 7c next (the user's rich text table probe; steps 1–7b landed). User (2026-10-27):
+  pause the loop when weekly plan usage reaches 90 % (`get_usage`; 85 % after step 7b, ~1–3 % a step). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -109,6 +109,10 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
    `SelectEnvironment`; open/close view-only); meridian-find-typing with option b, the user-approved TextArea highlight layer (a: exact merge, 1,528.7 → 615.3
    KB/char; b: a TextArea highlight layer, ~−90 %, also for Junction's `DecorateFileBody`). Suite row: find typing and
    Enter in a 2,000-line highlighted TextArea.
+7c. **richtext-table-scroll-depth** (5 with 1; user, 2026-10-27) — three weeks ago the user made a rich text example
+    with a 300-row × 10-column table that rendered much slower scrolled down than at the top. The sample is gone:
+    rebuild it, count work (layout/measure/shape calls, rows and cells visited, hit tests, a11y) and frame time at the
+    top, middle and bottom, find the O(position) cost, fix it if it clears a bar, and pin it with a suite row.
 8. **runtime-element-layout-state** (4, 1 reviews; r6-4 Candidate 1) — `_layout`, `MeasureCache`, cache constraints and
    `FlexPlan` (228 B) move to an object made on first layout; throwaway rebuild copies (48–87 per key) never get one.
    Expected per key: Meridian History −16…−20 %, Junction summary −17 %, Meridian URL −15 %, Vesper Brief −12 %, Aperture
@@ -253,6 +257,10 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 8bcf3b14 | meridian-history-selection-offscreen | Bug fix: History's arrows scroll the selection into view. Bytes per key past the screen 51 → 76 KB (the on-screen cost); earlier History walk numbers were partly off-screen. |
 | 6 | 44e9254a | meridian-popover-builds | Popovers open/close view-only; a pick builds once (Promote + Flash folded). Method open + pick 636 → 217 KB (−66 %), builds 3 → 2, parts 8 → 0, min −18 % JIT / −10 % AOT; environment −41 %; operator −63 %. |
 | 6 | 65190e72 | app-modal-cards-dialog-role (Meridian) | Approved (user, question 5). The environment prompt's card is `Dialog "New key"`: a text change with UIA 10.5 → 0.4 KB, trees 1 → 0. No other role-less modal card. Step 7a: 27 scenes identical but the intended History scroll and dialog; suite 0/0 ×2 JIT + AOT. |
+| 6 | eac5f19b | span-transparent-keeps-text-colour | Pixel fix (pre-existing bug): a span with a transparent colour no longer recolours the text under it. Merged find tints had painted text in the editor colour where a match started with a token (an unstable sort decided ties) or ran into the next one. Non-overlapping span lists draw exactly as before; goldens byte-identical. |
+| 6 | 9947adaf | textarea-highlight-layer (API) | Approved (user, question 3b). **Public `TextHighlight(int Start, int Length, Color Background)` record struct (12 B; `TextSpan` is 40) and `TextAreaElement.Highlights` (`IReadOnlyList<TextHighlight>?`, fluent `.Highlights(list)`)**: same list by reference costs nothing, a new list marks paint only; each row merges spans and highlights per line by index (a highlight is a background-only span after the selection fill, under the text); nothing copied, 0 B a row, not exposed to readers. New suite rows: find typing 0.725 → 0.460 ms JIT (0.791 → 0.489 AOT), 333 → 54 KB; find Enter 0.657 → 0.391, 305 → 26 KB. ELEMENTS.md. |
+| 6 | 3eec43f7 | meridian-find-typing | Spans stay one list across keys; matches go to `Highlights`, kept between builds by search key. 2,000-line response: typing 1,529 → 132 KB/key, min 3.01 → 2.25 ms JIT / 3.09 → 1.87 AOT; Enter 1,458 → 65; 19,000 lines: typing 14,009 → 730 KB, 11.6 → 3.0 ms JIT / 14.1 → 3.4 AOT, Enter 13,414 → 172; gen-2 per 240 keys 24–108 → 0; layouts per key 1 (the find bar), body line passes and shapes 0. |
+| 6 | c5586b3f | junction-files-find-highlights | The same in Junction Files; line starts computed once per file with the text (fixes a selection seed in a match-less file using the previous file's starts). 6,000-line C#: typing 7,089 → 145 KB/key (7.3 → 2.7 ms JIT, 8.4 → 2.9 AOT), Enter 7,023 → 80, repaint with find open 7,140 → 186. Step 7b pixels: suite 159 scenarios A/A = A/B; Meridian/Junction scenes differ only where text now keeps its token colour (eac5f19b). Suite: no row slower in both runs (TableView 10k sort +5–6 % AOT only, its known placement effect). |
 
 ## Examined, not worth it
 
@@ -399,7 +407,7 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
    the app steps 5, 7 and 10.] → **yes, make them dialogs** (2026-10-27).
 6. **popover-menu-role** (from step 7a): Meridian's (and Junction's) popover menus are read as Buttons named after every
    row. A menu role with items (like the context menu's) would change what readers hear. [Yes, as the context menu.]
-   → **open**.
+   → **yes, make them menus** (2026-10-27; with step 10, Meridian's half included).
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -593,3 +601,11 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   per key — keep big content as one string and splice; don't copy text to count things — compare serialized state in
   place; a popover opening is view-only; when the app, not the list, owns the keys, the app scrolls the list; check
   the selection is on screen before trusting walk numbers. Usage 82 %.
+- 2026-10-27: the user answered question 6 yes (popover menus become menus, with step 10) and added step 7c (a 300×10
+  rich text table that rendered slower scrolled down).
+- 2026-10-27: round 6 step 7b landed (eac5f19b..c5586b3f): `TextAreaElement.Highlights`; Meridian and Junction find hand
+  the body only their matches (2,000-line find typing −91 %, 19,000-line −95 % and 11.6 → 3.0 ms, Junction 6,000-line
+  −98 %; gen-2 collections gone). Pixel fix on the way: transparent spans no longer recolour text, so match text keeps
+  its token colour. Guideline notes: don't merge transient tints into a document's span list — use `Highlights` and
+  keep the spans the same list; memoize the highlight list by query, options, current match and document; compute
+  line starts once per document; span arrays copied per key reach the LOH and cost gen-2 GCs. Usage 85 %.
