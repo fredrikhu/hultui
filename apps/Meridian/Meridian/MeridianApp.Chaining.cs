@@ -33,8 +33,9 @@ public partial class MeridianApp
         }
     }
 
+    // Compared in place: this runs on every build of the tab, a keystroke in a row's field too.
     private bool PreviewStale(RequestTab tab) =>
-        tab.ResultSnapshot != null && tab.ResultSnapshot != tab.Doc.Serialize();
+        tab.ResultSnapshot != null && !tab.Doc.SerializesTo(tab.ResultSnapshot);
 
     // ── The Assertions sub-tab: rows with a live preview ─────────────────
 

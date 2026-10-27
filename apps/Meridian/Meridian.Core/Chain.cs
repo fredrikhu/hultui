@@ -20,12 +20,14 @@ public static class Chain
     public static Node Analyze(string path, ReqDocument doc)
     {
         var uses = new List<string>();
+        // The names only: the sub-tabs ask on every build of the editor, and a request body's
+        // literal text is most of the document.
         void Collect(string? template)
         {
             if (template == null) return;
-            foreach (var seg in VariableResolver.Tokenize(template))
-                if (seg.IsVariable && !seg.Text.StartsWith('$') && !uses.Contains(seg.Text))
-                    uses.Add(seg.Text);
+            foreach (var name in VariableResolver.VariableNames(template))
+                if (!name.StartsWith('$') && !uses.Contains(name))
+                    uses.Add(name);
         }
         Collect(doc.Url);
         foreach (var header in doc.Headers) Collect(header.Value);
