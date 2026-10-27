@@ -352,11 +352,16 @@ public partial class MeridianApp
         backdrop.Background(Azimuth.Alpha(Azimuth.Bg, 0.62));
         backdrop.On<ClickEvent>(e => { e.StopPropagation = true; CancelDialog(); });
 
+        // A dialog named by its title, directly inside the backdrop, so the backdrop is no button
+        // (AccessibilityTreeBuilder.InferRole): a reader heard the prompt inside a button named
+        // after all of its text, twice (the card was a second one), and a text change in it built
+        // the window's whole accessibility tree. The click beside the card and Escape still close it.
         var card = Flex.Column(gap: Azimuth.S3)
             .Width(420).Padding(new Thickness(Azimuth.S4))
             .Background(Azimuth.Surface)
             .BorderColor(Azimuth.BorderStrong).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius2);
+            .CornerRadius(Azimuth.Radius2)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName(dialog.Title);
         card.On<ClickEvent>(e => e.StopPropagation = true);
 
         card.AddChild(Text.New(dialog.Title).FontSize(13.5f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Text));
