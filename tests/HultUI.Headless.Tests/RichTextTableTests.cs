@@ -349,4 +349,44 @@ public class RichTextTableTests
         rig.Press(KeyCode.Backspace);
         Assert.Equal("a\nb", rig.State.Document.ToPlainText());
     }
+
+    // ── Long tables ──
+
+    [Fact]
+    public void ALongTable_DrawsWhatIsOnScreen_AtItsBottomAsAtItsTop()
+    {
+        // 300 rows of 10 short cells, as a user's example held: a frame at the bottom drew no
+        // more than one at the top — no cell, and no grid line, of the rows above the view.
+        var cells = new List<RichBlock>(3_000);
+        for (int r = 0; r < 300; r++)
+            for (int c = 0; c < 10; c++)
+                cells.Add(RichBlock.Cell(r, c, r == 0 ? $"Column {c + 1}" : $"cell {r}.{c}"));
+        using var session = HeadlessSession.Create(1200, 800, options: new HeadlessOptions { RecordDrawCalls = true });
+        var editor = RichTextEditor.New(new RichDocument([P("Before the table"), .. cells])).FlexGrow(1);
+        session.Window.SetRoot(Flex.Column().FlexGrow(1).Padding(8).Children(editor));
+        session.PumpFrame();
+
+        (int Paragraphs, int Rects) Frame(float depth)
+        {
+            editor.ScrollOffsetY = float.MaxValue;
+            editor.ScrollOffsetY *= depth;
+            editor.MarkPaintDirty();
+            session.Window.RenderLog.Clear();
+            session.PumpFrame();
+            var log = session.Window.RenderLog;
+            return (log.Named("DrawParagraph").Count(), log.Named("DrawRect").Count());
+        }
+
+        var top = Frame(0);
+        var middle = Frame(0.5f);
+        var bottom = Frame(1);
+        // The paragraph above the table is on screen at the top only; a row is ten cells.
+        Assert.InRange(middle.Paragraphs, top.Paragraphs - 20, top.Paragraphs + 20);
+        Assert.InRange(bottom.Paragraphs, top.Paragraphs - 20, top.Paragraphs + 20);
+        // The grid: the header's tint, a line under each row on screen and the 11 between and
+        // beside the columns — not one for each of the table's 301 row edges.
+        Assert.InRange(top.Rects, 1, 60);
+        Assert.InRange(middle.Rects, 1, 60);
+        Assert.InRange(bottom.Rects, 1, 60);
+    }
 }
