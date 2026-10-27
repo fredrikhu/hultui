@@ -1303,7 +1303,7 @@ public partial class CommanderApp
         // A backgrounded transfer shows a compact indicator here.
         else if (_op is { } op && !_progressOpen)
         {
-            int pct = op.TotalBytes > 0 ? (int)(100 * op.TotalBytesDone / op.TotalBytes) : 0;
+            int pct = TransferPercent(op);   // what CmdKey compares
             string verb = op.IsPack ? "packing" : op.IsMove ? "moving" : "copying";
             row.AddChild(Ui.Mono($"▶ {verb} {pct}% · {op.Done}/{op.Items.Count}", 11.5f, Nocturne.Accent300));
         }

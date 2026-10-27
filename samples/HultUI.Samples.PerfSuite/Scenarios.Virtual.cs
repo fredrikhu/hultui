@@ -365,7 +365,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
     private static readonly string[] ChromeTabIcons = ["squares-four", "git-commit", "git-diff", "pencil", "git-branch", "tag", "folders"];
     private static readonly string[] ChromeRepos = ["hultui", "junction-notes", "vesper", "meridian"];
 
-    private static Element TitleBar()
+    internal static Element TitleBar()
     {
         var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(0, 0, 0, 14)).Children(
             Text.New("Junction").FontSize(13f).FontWeight(FontWeight.Medium),
@@ -398,7 +398,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                 .Children(Phosphor.Draw(icon, 13f, Ui.Muted));
     }
 
-    private static Element Sidebar()
+    internal static Element Sidebar()
     {
         var aside = Flex.Column(gap: 2).Width(266).FlexShrink(0).FlexGrow(1).Padding(new Thickness(12, 10))
             .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 1, 0, 0));
@@ -444,7 +444,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                     .Children(Phosphor.Draw("plus", 14f, Ui.Muted)));
     }
 
-    private static Element Toolbar()
+    internal static Element Toolbar()
     {
         var tabs = Flex.Row(gap: 2).FlexShrink(0).Padding(new Thickness(3)).AlignItems(AlignItems.Center)
             .BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(6f);

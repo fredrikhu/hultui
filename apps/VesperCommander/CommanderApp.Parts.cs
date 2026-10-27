@@ -22,10 +22,12 @@ public partial class CommanderApp
     //    header when the pointer crosses the sort columns (ColumnsDirty, with no build of the
     //    window);
     //  - what a view-only build (MarkViewDirty: a cursor move, a mark, type-to-find, Tab, a grid
-    //    scrolled, a listing, a thumbnail or a preview landing) can change that a part shows,
-    //    which MarkViewDirty compares with what the part was built from: which pane is active
-    //    (the trails), the mark count, the filter, the files cut and the thumbnails still
-    //    decoding (the footers), and the filter, a notice and the open prompt (the command line);
+    //    scrolled, a listing, a thumbnail or a preview landing, a worker's progress tick) can
+    //    change that a part shows, which MarkViewDirty compares with what the part was built
+    //    from: which pane is active (the trails), the mark count, the filter, the files cut and
+    //    the thumbnails still decoding (the footers), and the filter, a notice, the open prompt
+    //    and a backgrounded transfer's progress (the command line). A folder-size walk's tick
+    //    builds the footers outright (ProgressDirty);
     //  - a signal or a loader its build reads: the footer reads its pane's listing, so a listing
     //    that lands builds it again.
     //
@@ -175,11 +177,20 @@ public partial class CommanderApp
         ViewOf(side) == ViewMode.Thumbnails && _thumbsCache != null ? _thumbsCache.PendingCount : 0);
 
     /// <summary>The command line shows the filter and its matches in the active pane, a notice,
-    /// or the open prompt in the active pane's folder.</summary>
-    private readonly record struct CmdKey(string Search, char Active, string? OpenIn, string? Notice);
+    /// the open prompt in the active pane's folder, or a backgrounded transfer's percent and count
+    /// (-1 when none shows), which its worker's ticks move.</summary>
+    private readonly record struct CmdKey(string Search, char Active, string? OpenIn, string? Notice,
+        int TransferPercent, int TransferDone);
     private CmdKey _cmdKey;
-    private CmdKey CmdKeyNow() =>
-        new(_search, _search.Length > 0 ? _active : '\0', _cmdActive ? Dir(_active) : null, _notice);
+    private CmdKey CmdKeyNow()
+    {
+        int percent = -1, done = -1;
+        if (_op is { } op && !_progressOpen) (percent, done) = (TransferPercent(op), op.Done);
+        return new(_search, _search.Length > 0 ? _active : '\0', _cmdActive ? Dir(_active) : null, _notice, percent, done);
+    }
+
+    private static int TransferPercent(TransferOp op) =>
+        op.TotalBytes > 0 ? (int)(100 * op.TotalBytesDone / op.TotalBytes) : 0;
 
     /// <summary>A pane's path trail, or the pill of a result set that replaced it.</summary>
     private Element BuildTrail(char side)

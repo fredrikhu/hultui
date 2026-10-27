@@ -1455,7 +1455,7 @@ public partial class CommanderApp : Component, IDisposable
         {
             long total = FileSystem.DirectorySize(path,
                 cancelled: () => ds.Cancelled,
-                report: n => { ds.Set(n); Repaint(); });
+                report: n => { ds.Set(n); Repaint(sizes: true); });
             ds.Set(total);
             ds.Done = true;
             Application.InvokeOnMainThread(MarkDirty);
@@ -2055,14 +2055,44 @@ public partial class CommanderApp : Component, IDisposable
             System.Threading.Thread.Sleep(50);
     }
 
-    // Throttled repaint request from the background worker (~40ms cadence).
+    // Throttled repaint request from a background worker (~40 ms cadence): a copy or move, a pack,
+    // an add into an archive, a folder-size walk. On the application's clock, which a headless
+    // test moves by hand, not the wall's.
+    //
+    // View-only (MarkViewDirty): the progress dialog and the rows are the view's, and of the parts
+    // only two show a worker's progress — the command line a backgrounded transfer's percent and
+    // count (CmdKey), and the footers a folder's measured size, which a walk says it moved with
+    // sizes: true. A full MarkDirty here built the app and all eleven parts on every tick, about 25
+    // ticks a second for the whole copy: 211 KB a tick with the copy in the background (29 KB
+    // view-only), 284 KB with its dialog open (100 KB; the dialog is built with the view).
     private long _lastRepaintTick;
-    private void Repaint()
+    private bool _repainted;
+    private volatile bool _sizesMoved;
+    private Action? _progressDirty;
+
+    private void Repaint(bool sizes = false)
     {
-        var now = Environment.TickCount64;
-        if (now - _lastRepaintTick < 40) return;
+        if (sizes) _sizesMoved = true;
+        long now = _app.Time.GetTimestamp();
+        if (_repainted && _app.Time.GetElapsedTime(_lastRepaintTick, now) < RepaintInterval) return;
+        _repainted = true;
         _lastRepaintTick = now;
-        Application.InvokeOnMainThread(MarkDirty);
+        Application.InvokeOnMainThread(_progressDirty ??= ProgressDirty);
+    }
+
+    private static readonly TimeSpan RepaintInterval = TimeSpan.FromMilliseconds(40);
+
+    /// <summary>A worker's tick, on the UI thread: the view, the footers when a folder's measured
+    /// size moved, and the command line through MarkViewDirty's compare.</summary>
+    private void ProgressDirty()
+    {
+        if (_sizesMoved)
+        {
+            _sizesMoved = false;
+            _paneParts[0].FootRevision.Value++;
+            _paneParts[1].FootRevision.Value++;
+        }
+        MarkViewDirty();
     }
 
     /// <summary>Resolve an overwrite conflict from the dialog. For the background

@@ -344,6 +344,58 @@ public class PartTests
         Assert.Null(Text(Part(t, "left footer"), "decoding", required: false, within: true));
     }
 
+    /// <summary>A copy's worker asks for a repaint about every 40 ms, on the application's clock.
+    /// Each tick rebuilds the window — the progress dialog is the view's — and no part, but the
+    /// command line while the copy runs in the background (it shows the percent and the count),
+    /// and the footers for a folder-size walk's tick (they show the measured size). A tick used
+    /// to build all eleven parts: 211 KB a tick in the background (29 KB now), about 25 ticks a
+    /// second for the whole copy.</summary>
+    [Fact]
+    public void AWorkersTick_BuildsTheViewAndOnlyThePartsThatShowIt()
+    {
+        using var t = Open();
+        var opType = typeof(CommanderApp).GetNestedType("TransferOp", BindingFlags.NonPublic)!;
+        var op = Activator.CreateInstance(opType, t.Rows('L').Where(e => !e.IsParent).Take(5).ToList())!;
+        opType.GetField("TotalBytes")!.SetValue(op, 1000L);
+        opType.GetField("DestDir")!.SetValue(op, t.Right);
+        t.SetField("_op", op);
+        t.SetField("_progressOpen", true);
+        FullRebuild(t);
+        t.Session.PumpFrames(2);
+        void Tick(long done)
+        {
+            opType.GetField("TotalBytesDone")!.SetValue(op, done);
+            t.Invoke("Repaint", false);
+        }
+
+        Step(t, "a tick with the dialog open", () => Tick(250), window: true);
+        Assert.NotNull(Text(t.Root, "25%"));
+        t.Invoke("BackgroundTransfer");
+        t.Session.PumpFrames(2);
+        Step(t, "a tick in the background", () => Tick(500), window: true, "command line");
+        Assert.NotNull(Text(Part(t, "command line"), "▶ copying 50% · 0/5"));
+        Step(t, "a tick the line does not show", () => Tick(505), window: true);
+        Step(t, "a folder-size walk's tick", () => t.Invoke("Repaint", true), window: true, "left footer", "right footer");
+
+        // Ticks come at most every 40 ms of the application's clock: two in one frame build once,
+        // and one 16 ms later none.
+        int builds = Builds(t);
+        Tick(600); Tick(700);
+        t.Session.PumpFrame();
+        Assert.Equal(1, Builds(t) - builds);
+        Tick(800);
+        t.Session.PumpFrame();
+        Assert.Equal(1, Builds(t) - builds);
+        t.Session.PumpFrames(3);
+        Tick(900);
+        t.Session.PumpFrame();
+        Assert.Equal(2, Builds(t) - builds);
+        Assert.NotNull(Text(Part(t, "command line"), "▶ copying 90% · 0/5"));
+
+        t.SetField("_op", null);
+        FullRebuild(t);
+    }
+
     /// <summary>Walking an overlay's list — the drive picker, the bookmark manager — rebuilds the
     /// overlay and no part.</summary>
     [Fact]

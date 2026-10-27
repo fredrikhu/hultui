@@ -474,6 +474,17 @@ filter character 365 → 209 (−43 %); a walk with the preview panel 329 → 73
 the same bytes come off and the same accessibility trees are built. A key's time on NativeAOT
 −7…−21 %: the two frames are most of it.
 
+A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
+asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
+for the whole copy, though a tick moves only the progress the view shows and, of the parts, the
+command line (a copy running in the background shows its percent and count) and the footers (a
+folder's measured size). The tick now takes `MarkViewDirty()`, with the percent and the count in
+the command line's compare, and a folder-size walk builds the footers outright (round 6, step 5;
+headless, JIT): 211 → 29 KB a tick in the background, 284 → 100 KB with the progress dialog open,
+which the view builds. Throttle such ticks on `Application.Time`, as `Build()` is not a clock says,
+so a headless test counts them exactly. The perf suite pins it: `component/worker tick beside kept
+parts, every part built` against `…, view only`.
+
 ### Hand back the elements a key does not change
 
 What the reconciler does for a kept host it does for any live element a build hands back: it
