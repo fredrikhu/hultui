@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 6 next (steps 1–5 landed). The survey's eight reports are
+- **Phase:** build — round 6, step 7 next (steps 1–6 landed). User (2026-10-27): pause the loop when weekly plan usage
+  reaches 90 % (`get_usage`; 80 % after step 6, ~1 % a step). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -149,6 +150,10 @@ Re-ranked by the next survey.
 
 - **vesper-coalesce-markdirty** (6/8, low) — 115 app doubles in the suite, each ~189 KB; a folder Enter/Backspace builds
   the app 3 times (−25 % per folder change).
+- **vesper-brief-marks-and-filter-rows** (6/8, leads from r6 step 6) — Brief still keeps marks in its shape (a mark
+  remakes every Brief cell); type-to-find remakes every row (rows matched by index, the filter shifts them); Space
+  with a reader builds a whole a11y tree per key because the footer's "n marked" label is added and removed, not
+  re-texted.
 - **vesper-key-rest-bytes** (6/8, trace first) — 5.3–6.2 KB per Vesper key outside builds and frames (14–17 % of a Detail
   key), probably the cursor's preview load.
 - **terminal-noop-scrollback-wheel** + **terminal-row-strings-by-content** (2/Terminal, low; r6-2) — a no-op notch draws a
@@ -235,6 +240,11 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | ed13b156 | vesper-free-label-per-build | Free space cached per folder and listing generation: queries per Insert/type-to-find key 1 → 0 (bytes and time flat locally, ~20 µs a query; the gain is on network shares); not stale after copy, move, delete or refresh. |
 | 6 | 1b3ebdf7 | app-modal-cards-dialog-role (Vesper) | Approved (user, question 5). Vesper's overlay cards are `Dialog` named by their title. With UIA, on top of the above: transfer tick 171 → 101 KB, trees 0.78 → 0; find walk 331 → 318, trees 0.10 → 0. |
 | 6 | e7f840ad | dialog-focus-when-nothing-focusable | Approved (user, question 5). A dialog with nothing to focus is focusable (`TabIndex -1`) and takes the focus, not the scrim; recording, UIA and AT-SPI (in-process) tests. 10 scenes for the step: pixels and focus identical; a11y differs only as intended (two content-named Buttons → `Dialog "<title>"`, the selected find result told as selected). Suite 0/0 JIT + AOT. |
+| 6 | 9f1b0995 | vesper-marks-in-row-shape | Mark, cut and measured size in a 24 B `PaneRowItem`. Insert 191.4 → 41.5 KB/key JIT (−78 %, min −20 %), AOT 189.1 → 40.5 (−79 %, −12 %); rows 30 → 2.5; Space −83 %; with a reader −79 %. Type-to-find flat (rows matched by index; +1 % with a reader). |
+| 6 | 3bf54bc9 | vesper-zebra-row-index | The zebra tint takes the index from the row's item: `IndexOfPath` per full rebuild 59 → ≤ 4; zebra + type-to-find 279.7 → 203.2 KB (−27 %). |
+| 6 | 59a953ff | vesper-own-selection-revisit | Re-opens 68817800 (DECISIONS.md): Detail lists draw the cursor with `.SelectionHighlight`; rows draw it while zebra is on or a drag hovers a folder in that pane. Detail Down 35.1 → 23.3 KB (−34 % JIT and AOT, min −12 %/−5 %), rows 2.3 → 0.3; F3 partner −26 %. Fix: the context-menu key's box from `CursorRowBox` (the old unscrolled layout box opened the menu below the window in a scrolled list). |
+| 6 | cdd2c1ac | composite-row-kept-cards (Thumbnails) | Rows keyed by place; unchanged tiles handed back into their own row's place. Down 88.3 → 42.9 KB (−51 %), tiles 11 → 3; Right −38 %; Insert 315.7 → 56.3 (−82 %). |
+| 6 | 53aea1b3 | vesper-find-result-label | Reader bug fix: results read as their row shows them ("f000.txt, 10 B", "deep.txt, in sub, 2 B"), not `Hit { … }`. Step 6 overall (AOT): Detail −34 %, Insert −81 %, Space −84 %, Thumbnails Down −52 %. 35 scenes × dark/light × zebra off/on identical (pixels, a11y, focus) but the intended find-result names; suite 0/0 ×2. |
 
 ## Examined, not worth it
 
@@ -557,3 +567,11 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   `Application.Time`; keep a find's current match out of the rows' shape and `InvalidateRow` the old and new rows; a
   one-argument `RenderWith` with `IndexOf` per row is O(items × rows) — use item rows with `SelectedIndex`; cache OS
   queries per listing generation, not per build. Step agent: 574k tokens (six items is about the most for one agent).
+- 2026-10-27: round 6 step 6 landed (9f1b0995..53aea1b3): marks live in the row item (Insert −79 %, Space −84 %), the
+  zebra tint reads the row's index, Detail lists draw the cursor (−34 %; fixes the context-menu key's box in a
+  scrolled list), Thumbnails keep unchanged tiles (−51 % Down), find results read as their rows show them. Guideline
+  notes: put state only some rows show in the item, including the row's index — never look the index up in the
+  template (O(rows²)); keep item structs small; let the list draw a background-or-ring selection and switch to
+  row-drawn (in the rows' shape) while anything else paints that row; position against a row with `ScreenBorderBox`,
+  not `Layout.AbsoluteBorderBox`; for card rows, key rows by place and hand a card back only into its own place.
+  User asked to pause at 90 % weekly usage; 80 % now.
