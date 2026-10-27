@@ -105,6 +105,51 @@ public class FindDialogTests
         }
     }
 
+    /// <summary>Past 60 hits the results are a virtual list of item rows: a key makes the two rows
+    /// the selection moves between and keeps the rest, which show what a remake of all of them
+    /// shows; a click on a kept row picks its own hit. Each row used to be made again on every key
+    /// and look its own place up in the results (two IndexOf walks a row).</summary>
+    [Fact]
+    public void AKeyInALongResultList_MakesTheTwoRowsTheSelectionMovesBetween()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 200; i++) t.WriteLeft($"f{i:000}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F7, KeyModifiers.Alt);
+        t.SetField("_findPattern", ".txt");
+        t.Invoke("RunFind");
+        t.Session.PumpUntil(() => !t.Field<bool>("_findSearching"), System.TimeSpan.FromSeconds(30));
+        t.Session.PumpFrames(3);
+        var listRef = t.Field<object>("_findVList");
+        HultUI.Core.Elements.Element List() =>
+            (HultUI.Core.Elements.Element)listRef.GetType().GetProperty("Current")!.GetValue(listRef)!;
+        string Rows() => string.Join("\n", List().Children.Skip(1).OrderBy(r => r.ScreenBorderBox.Y).Select(r =>
+            $"{((HultUI.Core.Elements.BoxElement)r).BorderColor} {HultUI.Headless.LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(r).First().Content}"));
+        Assert.Equal(200, t.Field<System.Collections.IList>("_findResults").Count);
+
+        foreach (var key in new[] { KeyCode.Down, KeyCode.Down, KeyCode.Down, KeyCode.Up, KeyCode.PageDown })
+        {
+            int made = t.App.FindRowsMade;
+            t.Press(key);
+            t.Session.PumpFrames(2);
+            if (key != KeyCode.PageDown) Assert.Equal(2, t.App.FindRowsMade - made);
+            string kept = Rows();
+            List().GetType().GetMethod("InvalidateRows")!.Invoke(List(), null);
+            t.MarkDirty();
+            t.Session.PumpFrames(2);
+            Assert.Equal(Rows(), kept);
+        }
+
+        // A kept row's click picks its own hit.
+        var top = List().ScreenBorderBox.Y;
+        var row = List().Children.Skip(1).OrderBy(r => r.ScreenBorderBox.Y).First(r => r.ScreenBorderBox.Y > top + 40);
+        string name = HultUI.Headless.LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(row).First().Content;
+        t.Session.Window.Click(row);
+        t.Session.PumpFrames(3);
+        Assert.False(t.Field<bool>("_findOpen"));
+        Assert.Equal(name, t.Field<List<FindEngine.Hit>>("_findResults")[t.Field<int>("_findSel")].Name);
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
     private static readonly List<string> _tmp = new();
 

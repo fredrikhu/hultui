@@ -32,7 +32,7 @@ public partial class CommanderApp
     private bool _pendingFindFocus;
     private bool _pendingFindScroll;   // keyboard nav moved _findSel → reveal it after build
     private readonly Ref<TextInputElement> _findPatternRef = new();
-    private readonly Ref<VirtualListElement<FindEngine.Hit>> _findVList = new();
+    private readonly Ref<VirtualListElement<FindRowItem>> _findVList = new();
     private readonly Ref<ScrollViewElement> _findScrollRef = new();   // the inline (small-set) list
 
     // Dialog size (session-remembered) and the live corner-grip drag. Width sizes the card;
@@ -92,7 +92,7 @@ public partial class CommanderApp
         _findOpen = true;
         _findPattern = ""; _findContains = "";
         _findRecursive = false;
-        _findResults.Clear();
+        _findResults.Clear(); _findSearchGen++;
         _findSel = 0; _findScanned = 0; _findApproxTotal = 0; _findDenied = 0;
         _findSearching = false;
         _pendingFindFocus = true;
@@ -121,7 +121,7 @@ public partial class CommanderApp
     private void RunFind()
     {
         StopFind();
-        _findResults.Clear();
+        _findResults.Clear(); _findSearchGen++;
         _findIncoming.Clear();
         _findSel = 0; _findScanned = 0; _findApproxTotal = 0; _findDenied = 0;
         if (_findPattern.Length == 0 && _findContains.Length == 0) { MarkDirty(); return; }
@@ -390,20 +390,71 @@ public partial class CommanderApp
             var scroll = ScrollView.Vertical().MaxHeight(_findListH).Padding(new Thickness(6, 6, 6, 6)).WithRef(_findScrollRef);
             var col = Flex.Column(gap: 0);
             for (int i = 0; i < _findResults.Count; i++)
-                col.AddChild(FindResultRow(_findResults[i], i == _findSel));
+                col.AddChild(FindResultRow(_findResults[i], i == _findSel, i));
             scroll.AddChild(col);
             return scroll;
         }
 
-        // Fresh snapshot each build so the VirtualList re-realizes visible rows against
-        // current state (the reference-equality gotcha).
-        return VirtualListElement<FindEngine.Hit>.New()
+        // Item rows: the list keeps a row while its hit, its place and whether it is selected are
+        // what they were, so a key makes the two rows the selection moves between. The rows used
+        // to be made again on every key, each looking its own place up in the results (two
+        // IndexOf walks a row, up to 2,000 hits: O(results × rows) a key). What else a row shows
+        // — the pattern's tint, the folder it is shown relative to, the row height — makes them
+        // all again when it changes.
+        var shape = (_findPattern, _findMatchCase, _findRegex, Dir(_findSide), RowHeight);
+        if (shape != _findRowShape)
+        {
+            _findVList.Current?.InvalidateRows();
+            _findRowShape = shape;
+        }
+        return VirtualListElement<FindRowItem>.New()
             .ItemHeight((int)RowHeight)
-            .Items(_findResults.ToList())
-            .RenderWith(h => FindResultRow(h, _findResults.IndexOf(h) == _findSel))
+            .Items(FindRowItems())
+            .SelectedIndex(_findSel)
+            .RenderWith((item, selected) => FindResultRow(item.Hit, selected, item.Index))
+            // What the items were named when they were the hits themselves (the list's fallback,
+            // the item's ToString). One delegate from build to build, so the list keeps the labels.
+            .AccessibleItemLabel(FindItemLabel)
             .WithRef(_findVList)
             .Height(_findListH)
             .Padding(new Thickness(6, 6, 6, 6));
+    }
+
+    /// <summary>A row of the find results as its list sees it: the hit and its place among the
+    /// results (a click picks it by place). Whether it is selected is the list's.</summary>
+    private readonly record struct FindRowItem(FindEngine.Hit Hit, int Index);
+
+    /// <summary>The results as the list's items, over a copy of them taken when they changed: the
+    /// mounted list reads its items between builds, and the results grow and clear under it.</summary>
+    private sealed class FindRows(FindEngine.Hit[] hits, int search) : IReadOnlyList<FindRowItem>
+    {
+        public readonly int Search = search;
+        public int Count => hits.Length;
+        public FindRowItem this[int index] => new(hits[index], index);
+
+        public IEnumerator<FindRowItem> GetEnumerator()
+        {
+            for (int i = 0; i < hits.Length; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private static readonly Func<FindRowItem, string?> FindItemLabel = item => item.Hit.ToString();
+
+    private FindRows? _findRows;
+    /// <summary>Bumped whenever the results are cleared, so a copy of the last search's is not
+    /// taken for this one's.</summary>
+    private int _findSearchGen;
+    private (string, bool, bool, string, float) _findRowShape;
+
+    /// <summary>The results as items: the same copy while they are what they were (a key walk
+    /// copies nothing), a new one when hits landed or a search started.</summary>
+    private FindRows FindRowItems()
+    {
+        if (_findRows is not { } rows || rows.Search != _findSearchGen || rows.Count != _findResults.Count)
+            _findRows = rows = new FindRows(_findResults.ToArray(), _findSearchGen);
+        return rows;
     }
 
     /// <summary>The matched span in a result name, coloured accent so the match stands out.
@@ -432,8 +483,12 @@ public partial class CommanderApp
         catch { return null; }
     }
 
-    private Element FindResultRow(FindEngine.Hit h, bool selected)
+    /// <summary>One result: what it shows is its hit, whether it is selected, the pattern's tint and
+    /// the folder searched (see <see cref="BuildFindBody"/>); <paramref name="index"/> is its place,
+    /// which a click selects.</summary>
+    private Element FindResultRow(FindEngine.Hit h, bool selected, int index)
     {
+        FindRowsMade++;
         // Reserve the 1px border on every row (transparent when unselected) so selecting
         // one doesn't nudge its contents inward.
         // Icon · name · size, the size slot only on a file so a folder's name runs to the
@@ -474,10 +529,12 @@ public partial class CommanderApp
         if (!h.IsDir)
             row.AddChild(Ui.Mono(FileSystem.ByteCount(h.Size), 10.5f, Nocturne.On(0.45)).GridColumn(2));
 
-        int idx = _findResults.IndexOf(h);
-        row.OnClick(_ => { _findSel = idx; JumpFindResult(_findSide); });
+        row.OnClick(_ => { _findSel = index; JumpFindResult(_findSide); });
         return row;
     }
+
+    /// <summary>Result rows made so far, for tests.</summary>
+    internal int FindRowsMade { get; private set; }
 
     /// <summary>Parent folder shown relative to the search root when possible (e.g. "src\vfs").</summary>
     private string RelativeParent(string parentDir)
