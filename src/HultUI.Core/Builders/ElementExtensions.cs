@@ -191,6 +191,9 @@ public static class ElementExtensions
     public static TextAreaElement OnTextChanged(this TextAreaElement el, Action<string> handler) { el.TextChanged = handler; return el; }
     public static TextAreaElement ReadOnly(this TextAreaElement el, bool value = true) { el.ReadOnly = value; return el; }
     public static TextAreaElement Spans(this TextAreaElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
+    /// <summary>Sets <see cref="TextAreaElement.Highlights"/>: backgrounds over the spans, such as
+    /// find matches.</summary>
+    public static TextAreaElement Highlights(this TextAreaElement el, IReadOnlyList<TextHighlight>? highlights) { el.Highlights = highlights; return el; }
     public static TextInputElement Spans(this TextInputElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
 
     // ──── Checkbox properties ────

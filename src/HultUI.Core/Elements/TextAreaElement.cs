@@ -77,6 +77,13 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     private int[] _spanReach = [];
     private readonly List<TextSpan> _lineSpans = [];
 
+    // The same for Highlights, a list of its own: a find step hands the area another list of
+    // highlights and keeps its spans, so only the highlights are indexed again.
+    private IReadOnlyList<TextHighlight>? _highlights;
+    private IReadOnlyList<TextHighlight>? _highlightReachOf;
+    private int _highlightReachCount;
+    private int[] _highlightReach = [];
+
     // The text of each line drawn last frame, from line _shownFrom on, cut by version
     // _shownVersion of the line starts: a frame that draws the same lines — a caret blink, a
     // selection drag, a wheel step that moves most of them — draws the same strings instead of
@@ -239,8 +246,30 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// <para>Sorted by start. They may overlap, as a search tint's background over a syntax
     /// colour does. The list is indexed the first time it is drawn — where each line's spans
     /// begin — and kept by reference: to change the spans, hand a new list rather than
-    /// changing this one in place.</para></summary>
+    /// changing this one in place.</para>
+    /// <para>Find matches go in <see cref="Highlights"/>, not here: merged into these, every
+    /// find key copied and sorted every span of the document.</para></summary>
     public IReadOnlyList<TextSpan>? Spans { get; set; }
+
+    /// <summary>Backgrounds over <see cref="Spans"/> — find matches, say — in whole-buffer UTF-16
+    /// offsets: a layer of its own, so a find key hands the area its matches and keeps its spans.
+    /// <para>Each is drawn behind the text of its range, after the selection and in start order
+    /// with the spans' own backgrounds (a span before a highlight that starts where it does). A
+    /// highlight never changes the colour of the text under it, its shaping or its wrapping:
+    /// another list draws the area again and lays nothing out.</para>
+    /// <para>Sorted by start; they may overlap. Kept by reference, as the spans are: to change
+    /// them hand a new list, and the same list each build when they have not changed (the same
+    /// list again costs nothing). Not text attributes: a reader is not told about them.</para></summary>
+    public IReadOnlyList<TextHighlight>? Highlights
+    {
+        get => _highlights;
+        set
+        {
+            if (ReferenceEquals(_highlights, value)) return;
+            _highlights = value;
+            MarkPaintDirty();
+        }
+    }
 
     public IClipboard? Clipboard { get; set; }
     public ITextInputHost? TextInputHost { get; set; }
@@ -1944,29 +1973,86 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
     /// <para>Read from the first span that can reach the line, found by a binary search on
     /// the running maximum of the spans' ends, not from the first span: each line drawn of a
     /// 23,000-span JSON response walked ~11,500 spans to its own, 600,000 a frame. One list
-    /// serves every line; the renderer reads it during its DrawText call only.</para></summary>
+    /// serves every line; the renderer reads it during its DrawText call only.</para>
+    ///
+    /// <para><see cref="Highlights"/> that reach the line come in with them, as background-only
+    /// spans in start order (a span first at an equal start), found the same way in their own
+    /// index: the renderer draws backgrounds in list order and lets a background-only span leave
+    /// the text its colour. Each span and highlight is read once.</para></summary>
     internal List<TextSpan>? SpansForLine(int lineStart, int lineEnd)
     {
-        if (Spans is not { Count: > 0 } spans)
+        var spans = Spans is { Count: > 0 } s ? s : null;
+        var highlights = _highlights is { Count: > 0 } h ? h : null;
+        int spanCount = 0, highlightCount = 0;
+        if (spans is null)
         {
             if (_spanReachOf is not null) { _spanReachOf = null; _spanReach = []; }
-            return null;
         }
-        int count = spans.Count;
-        if (!ReferenceEquals(_spanReachOf, spans) || _spanReachCount != count)
+        else
         {
-            // A list much shorter than the last gets an array of its own size, so a large
-            // response once shown does not keep its index for good.
-            if (_spanReach.Length < count || _spanReach.Length > 4 * count)
-                _spanReach = new int[count];
-            int r = int.MinValue;
-            for (int k = 0; k < count; k++)
-                _spanReach[k] = r = Math.Max(r, spans[k].End);
-            _spanReachOf = spans;
-            _spanReachCount = count;
+            spanCount = spans.Count;
+            if (!ReferenceEquals(_spanReachOf, spans) || _spanReachCount != spanCount)
+            {
+                _spanReach = Reach(_spanReach, spanCount);
+                int r = int.MinValue;
+                for (int k = 0; k < spanCount; k++)
+                    _spanReach[k] = r = Math.Max(r, spans[k].End);
+                _spanReachOf = spans;
+                _spanReachCount = spanCount;
+            }
         }
+        if (highlights is null)
+        {
+            if (_highlightReachOf is not null) { _highlightReachOf = null; _highlightReach = []; }
+        }
+        else
+        {
+            highlightCount = highlights.Count;
+            if (!ReferenceEquals(_highlightReachOf, highlights) || _highlightReachCount != highlightCount)
+            {
+                _highlightReach = Reach(_highlightReach, highlightCount);
+                int r = int.MinValue;
+                for (int k = 0; k < highlightCount; k++)
+                    _highlightReach[k] = r = Math.Max(r, highlights[k].End);
+                _highlightReachOf = highlights;
+                _highlightReachCount = highlightCount;
+            }
+        }
+        if (spans is null && highlights is null) return null;
 
-        var reach = _spanReach;
+        var result = _lineSpans;
+        result.Clear();
+        int si = FirstReaching(_spanReach, spanCount, lineStart);
+        int hi = FirstReaching(_highlightReach, highlightCount, lineStart);
+        bool hasSpan = NextOnLine(spans, ref si, spanCount, lineStart, lineEnd, out var span);
+        bool hasHighlight = NextOnLine(highlights, ref hi, highlightCount, lineStart, lineEnd, out var highlight);
+        while (hasSpan || hasHighlight)
+        {
+            if (hasSpan && (!hasHighlight || span.Start <= highlight.Start))
+            {
+                int start = Math.Max(span.Start, lineStart);
+                result.Add(new TextSpan(start - lineStart, Math.Min(span.End, lineEnd) - start, span.Color, span.Background));
+                hasSpan = NextOnLine(spans, ref si, spanCount, lineStart, lineEnd, out span);
+            }
+            else
+            {
+                int start = Math.Max(highlight.Start, lineStart);
+                result.Add(new TextSpan(start - lineStart, Math.Min(highlight.End, lineEnd) - start, default, highlight.Background));
+                hasHighlight = NextOnLine(highlights, ref hi, highlightCount, lineStart, lineEnd, out highlight);
+            }
+        }
+        return result.Count == 0 ? null : result;
+
+        // A list much shorter than the last gets an array of its own size, so a large response
+        // once shown does not keep its index for good.
+        static int[] Reach(int[] reach, int count) =>
+            reach.Length < count || reach.Length > 4 * count ? new int[count] : reach;
+    }
+
+    // The first entry whose running maximum end passes `lineStart`: the first that can reach a
+    // line starting there.
+    private static int FirstReaching(int[] reach, int count, int lineStart)
+    {
         int lo = 0, hi = count;
         while (lo < hi)
         {
@@ -1974,20 +2060,40 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             if (reach[mid] <= lineStart) lo = mid + 1;
             else hi = mid;
         }
+        return lo;
+    }
 
-        var result = _lineSpans;
-        result.Clear();
-        for (int k = lo; k < count; k++)
+    // The next span from `k` on with characters in [lineStart, lineEnd), reading each span once.
+    private static bool NextOnLine(IReadOnlyList<TextSpan>? spans, ref int k, int count, int lineStart, int lineEnd,
+        out TextSpan found)
+    {
+        while (k < count)
         {
-            var s = spans[k];
-            if (s.End <= lineStart) continue;      // before this line; a longer one before it reaches it
-            if (s.Start >= lineEnd) break;         // sorted ⇒ nothing left overlaps
-            int start = Math.Max(s.Start, lineStart);
-            int end = Math.Min(s.End, lineEnd);
-            if (end <= start) continue;
-            result.Add(new TextSpan(start - lineStart, end - start, s.Color, s.Background));
+            var s = spans![k++];
+            if (s.End <= lineStart) continue;           // before this line; a longer one before it reaches it
+            if (s.Start >= lineEnd) { k = count; break; }   // sorted ⇒ nothing left overlaps
+            if (Math.Min(s.End, lineEnd) <= Math.Max(s.Start, lineStart)) continue;
+            found = s;
+            return true;
         }
-        return result.Count == 0 ? null : result;
+        found = default;
+        return false;
+    }
+
+    private static bool NextOnLine(IReadOnlyList<TextHighlight>? highlights, ref int k, int count, int lineStart,
+        int lineEnd, out TextHighlight found)
+    {
+        while (k < count)
+        {
+            var h = highlights![k++];
+            if (h.End <= lineStart) continue;
+            if (h.Start >= lineEnd) { k = count; break; }
+            if (Math.Min(h.End, lineEnd) <= Math.Max(h.Start, lineStart)) continue;
+            found = h;
+            return true;
+        }
+        found = default;
+        return false;
     }
 
     // Fills _shown with the text of visual lines [first..last] (null for an empty one): last
@@ -2090,6 +2196,7 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
             TextChanged = area.TextChanged;
             ReadOnly = area.ReadOnly;
             Spans = area.Spans;
+            Highlights = area.Highlights;
             MiddleClickAutoScroll = area.MiddleClickAutoScroll;
 
             // Preserve the caret / selection across a reconcile patch. The Text setter

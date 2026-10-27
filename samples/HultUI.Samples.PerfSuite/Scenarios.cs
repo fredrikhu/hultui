@@ -9,6 +9,7 @@ static partial class Scenarios
     public static IEnumerable<Scenario> All() =>
         Layout()
             .Concat(TextScenarios())
+            .Concat(FindInTextAreaScenarios())
             .Concat(Scroll())
             .Concat(Virtual())
             .Concat(Components())

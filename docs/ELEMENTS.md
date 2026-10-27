@@ -1453,10 +1453,11 @@ TextArea.New("initial text")       // pre-filled; caret at the end
     .PlaceholderText("Notes…")
     .OnTextChanged(t => _notes = t)
     .ReadOnly()                    // selectable and scrollable, not editable
-    .Spans(highlightSpans);        // IReadOnlyList<TextSpan>, colour and decoration per range
+    .Spans(highlightSpans)         // IReadOnlyList<TextSpan>, colour and decoration per range
+    .Highlights(findMatches);      // IReadOnlyList<TextHighlight>, a background per range
 ```
 
-Those four are the only fluent members; everything else is a property.
+Those five are the only fluent members; everything else is a property.
 
 | Property | Type | Notes |
 |---|---|---|
@@ -1470,7 +1471,8 @@ Undo and redo work as in `TextInputElement` — Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, `
 `Redo()`, the right-click menu — and a line break typed with Enter counts as typing, so a new
 line's first word starts a step of its own. A read-only area ignores both keys and has no Undo
 in its menu.
-| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives. Sorted by start, may overlap (a tint over a token). Indexed when first drawn and kept by reference: hand a new list to change them, and the same list each build when they have not changed |
+| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring. Sorted by start, may overlap (a tint over a token). Indexed when first drawn and kept by reference: hand a new list to change them, and the same list each build when they have not changed |
+| `Highlights` | `IReadOnlyList<TextHighlight>?` | backgrounds over the spans, such as find matches (`TextHighlight(Start, Length, Background)`); see **Find matches are highlights** below. Sorted by start, may overlap; kept by reference as the spans are |
 | `ScrollOffsetY`, `ScrollSpeed`, `Scrollbar*` | | vertical only |
 | `TextChanged` | `Action<string>?` | |
 
@@ -1502,6 +1504,30 @@ Both scroll only if the target is off screen, and both resolve through the wrap 
 the true visual row. Prefer the offset form for anything that already holds an offset
 (a search hit, a selection): when the whole body is one logical line — minified JSON, a
 long log line — every hit is on line 0 and the line form has nothing to say.
+
+**Find matches are highlights.** `Highlights` is a layer of backgrounds over `Spans`, in the
+same whole-text offsets: `TextHighlight(Start, Length, Background)`. Hand the area your syntax
+spans once and keep handing it the same list; hand a find step's matches to `Highlights`:
+
+```csharp
+area.Spans = syntaxSpans;                       // the same list on every build
+area.Highlights = search.HasHits ? tints : null; // a new list when the matches or the current one move
+```
+
+A highlight is only a background: it never changes the colour of the text under it, its
+shaping or its wrapping, so another list draws the area again and lays nothing out, and the
+same list again costs nothing. The area draws each row's highlights with its spans, after the
+selection's fill and under the text, in start order with the spans' own backgrounds (a span
+first where both start together). Readers are not told about them; they are not text
+attributes.
+
+Until round 6 of plan 17, Meridian and Junction merged their find tints into a copy of every
+syntax span and sorted it, on every find key and every Enter: 1.5 MB a key over a 2,000-line
+JSON response, 14 MB over a 19,000-line one, 7 MB over a 6,000-line source file, with a gen-2
+collection every four to six keys. With the layer: 132, 730 and 145 KB a key, Enter 65, 172
+and 80 KB, no gen-2; a key takes 25–76 % less time, an Enter 43–89 %. Keep the list between builds
+while the query, its options, the current match and the text stay the same, as
+`TextSearch.Decorate`'s callers do for rows.
 
 **Reconciliation** keeps the caret and selection when the incoming text is the same
 string, so a rebuild mid-edit is safe; a rebuild that *replaces* the element (a changed
@@ -1703,7 +1729,7 @@ _find.Service();
 
 | Member | Meaning |
 |---|---|
-| `Search` | the `TextSearch` — tint lines with `Search.Decorate`, rebind with `Search.Bind` |
+| `Search` | the `TextSearch` — tint row views' lines with `Search.Decorate`, a `TextArea` body with its `Highlights`; rebind with `Search.Bind` |
 | `IsOpen`, `Open()`, `Close()`, `Next()`, `Previous()` | what the keys and buttons do |
 | `HandleKey(e)` | Ctrl+F, Escape, Enter / Shift+Enter, Alt+C, Alt+R, and `n` / `p` with `LetterKeys` |
 | `Service()` | focus the field, give the body the keyboard back, reveal the current match |
@@ -1743,6 +1769,25 @@ again: on a 3,000-line file 35 rows and 330 KB an Enter, 2.5 rows and 69 KB now,
 own rebuild made view-only (an owner with kept parts gives the bar the rebuild that leaves them:
 nothing a part shows moves with a find step, and a full one built Vesper's title bar and command
 line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6).
+
+**A TextArea body takes the matches as highlights.** One `TextArea` over a whole document
+(Meridian's response, Junction's Files view) has one span list for the document, so the matches
+go to its `Highlights`, in the document's offsets, and the spans stay the list they were:
+
+```csharp
+var tints = new TextHighlight[s.Hits.Count];
+for (int i = 0; i < tints.Length; i++)
+{
+    var h = s.Hits[i];
+    tints[i] = new TextHighlight(lineStarts[h.Line] + h.Start, h.Length, i == s.Index ? currentTint : hitTint);
+}
+area.Spans = syntax;          // untouched by the search
+area.Highlights = tints;      // kept while query, options, Index and Hits.Count stay the same
+```
+
+Work the line starts out once per document, not per build. Merging the tints into the spans
+instead copies and sorts every span of the document on every key (see **Find matches are
+highlights** under TextAreaElement).
 
 `new FindBar(search, onChanged)` puts a bar over a search something else owns — a terminal
 searches its own scrollback. That search tells its owner through its own callback, which the bar
