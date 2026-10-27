@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 4 next (the build order below; steps 1–3 landed). The survey's eight reports are
+- **Phase:** build — round 6, step 4c (follow-up: defer dfd1a5b5's trigger past start-up) running, then step 5
+  (steps 1–3, 4a, 4b landed). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -226,6 +227,8 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 0af738d9 | richtext-insert-one-pass | `InsertInline` builds text with one `string.Concat` and spans with `RichSpans.Insert` (counting pass, exact builder, `MoveToImmutable`); same `Add` order; identity kept where the old code returned the block (undo coalescing compares by reference). 600-span typing 514.8 → 327.9 KB/key (−36 %, JIT = AOT), auto-height editor −10 %, other rich typing −4…−5 %. Suite 0/0 ×2 (one +6 % JIT row reads −2 % on rerun). 20,000 random inserts equal to the old slices; 300 extra spans 92,400 → 14,400 B. |
 | 6 | 8b6c3950 | paint-blob-key-by-words-text | `ShapedRun.GlyphsFollowText` (internal; set by ShapeByWords unless `composeNow`; never letter-spaced or RTL; `ShapedRun` stays 56 B) — the run-blob map hashes (face, size, text) and equal flagged texts match without reading glyphs; a miss builds its blob from the words (`ComposeGlyphsInto`) through a context buffer made on first use (≤ 4,096 glyphs); `ComposeDigits` takes a span; `GlyphsDrawn`/`PrefixMeasurer` read `GlyphCount`. On top of step 1, KB/op (JIT = AOT within 1 %): scroll/jump 10.5 → 3.0 (−71 %), scroll wheels −41…−57 %, TextArea resize −34 %, richtext/wheel −27 %, text/wrap 294.1 → 221.4 (−25 %), long TextArea open −16 %, popover open −11 %, ellipsis −10 %; 39 rows down, none up; window/open −3.4 %. Time 0/0 JIT + AOT ×2 (text/wrap min −6.4 % JIT, −2.2 % AOT; hit-only frames within noise). Pixels: 151 rows × 7 frames A/A = A/B (512 MB glyph cache); goldens byte-identical. Not the round 3 side map nor the round 4 cached hash. |
 | 6 | 55e24c16 | dialog-scrim-button-role | Approved (user, reader-visible). `InferRole` makes no Button of a clickable box with a direct Dialog-role child (`HoldsDialog`); an explicit role still wins. Meridian's in-tree Options backdrop has no node (the card is its parent's child); `Dialog.Show`'s overlay-root scrim is an unnamed UIA Pane / AT-SPI panel with no Invoke; dialog role/name, click-outside, Escape and hit-testing unchanged. Probe per tick, recording/UIA/AT-SPI: dialog 283.5/283.9/1,081 → 1.2/1.4/400 KB, in-tree modal 259.9/260.3/1,058 → 1.0/1.1/1.3, trees 40 → 0, Name events 80 → 40; palette key Name events 2 → 1 (UIA 454.2 → 441.2). Four new suite rows 260 → 0.8–1.2 KB/op, min −18…−22 % JIT, −25…−29 % AOT; suite 0 slower, 4 faster. Audit 0 STALE in 2,749, 0 mismatches. WSL 22 projects pass. |
+| 6 | f9bceb6d | sdl-custom-frame-maximized-dpi | Correctness: `MaximizedFrameInset(dpi)` = `GetSystemMetricsForDpi(SM_C?FRAME + SM_CXPADDEDBORDER, GetDpiForWindow)` for NCCALCSIZE, the maximized caption margin and the Alt+Space menu. `MaximizedFrameInsetTests` match `AdjustWindowRectExForDpi` at 96–192 DPI (4/5 fail on the old metrics); `WindowPlacementTests` checks a maximized Borderless client covers the work area on every monitor. Not reproduced on a window: only the 1440p @100 % monitor was attached (system DPI 96); maximize on both monitors, the DPI hop and Snap Layouts on a lower-DPI monitor still to check. Suite 0/0. |
+| 6 | dfd1a5b5 | gl-thread-walk-after-first-frame | On Windows + NVIDIA (`GL_VENDOR`) after the first GL frame: start and join a no-op thread, mark paint-dirty, present once more; the walk starts after the next swap (a thread before the first frame, glFlush or glFinish don't set it off). AOT Meridian first send's slowest frame 62.6/61.1 → 5.7/3.6 ms (bridge on 61.5 → 2.4); time to first present unchanged (Meridian 226–236, Junction 222–228, Vesper 244–249 ms); the frame ~45 ms after the first waits out the walk (56–69 ms). **Regression:** Junction's first repository frame +115–117 ms instead of +94–97 (its own loading threads used to set the walk off at ~+0.5 s with no frame waiting) → follow-up 4c. `GLDriverThreadWalkTests` (VulkanProbe `--first-thread`: 0.2/0.1 ms after a pool burst; reverted 0.2/56.6). 0 guard events over ~100 windows; no `nvlddmkm` events. Suite 0/0. |
 
 ## Examined, not worth it
 
@@ -369,7 +372,7 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
    the same cost (~260 KB per text change over 1,000 rows with UIA). Give each card `.AccessibleRole(Dialog)` and a
    name: readers then hear a dialog where today they hear a button. Also: a dialog with nothing focusable focuses the
    scrim, now an unnamed pane (was a button reading the dialog's text) — focus the dialog instead. [Yes to both, in
-   the app steps 5, 7 and 10.] → **open**.
+   the app steps 5, 7 and 10.] → **yes, make them dialogs** (2026-10-27).
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -527,3 +530,12 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   user question 5 (app modal cards without a role). Guideline notes: give a modal card `.AccessibleRole(Dialog)` and a
   name and put it directly in its clickable backdrop; a Button or Tab with no name of its own around other content
   blocks name patches beneath it — name it or keep it small.
+- 2026-10-27: the user answered question 5 yes: the apps' modal cards get the Dialog role and a name (steps 5, 7, 10);
+  a dialog with nothing focusable focuses the dialog (framework half with step 5).
+- 2026-10-27: round 6 step 4 landed (f9bceb6d, dfd1a5b5): maximized custom frames inset at the window's DPI (unit-tested
+  against `AdjustWindowRectExForDpi`; the 4K monitor wasn't attached, so the two-monitor checks are still open), and on
+  NVIDIA GL the one-time driver thread walk is set off right after the first frame (Meridian first send 62 → 4–6 ms).
+  Junction's first repository frame came ~20 ms later, so the orchestrator sent follow-up 4c: defer the trigger until
+  start-up settles. Guideline notes: on NVIDIA GL a slow frame ~45 ms after the first is the driver's once-per-process
+  thread walk; when timing a "first action", check whether the process already walked; custom chrome reads frame
+  metrics at the window's DPI (`GetSystemMetricsForDpi`).
