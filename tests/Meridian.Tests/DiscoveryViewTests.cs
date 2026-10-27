@@ -244,7 +244,11 @@ public class DiscoveryViewTests : IClassFixture<TestHttpServer>, IDisposable
 
             // The button names the real action: three declared endpoints.
             Assert.True(Contains(session, "Promote 3 to collection"), "the promote button must say what it does");
+            int builds = app.Builds;
             Click(session, "disc-promote");
+            // Once, by the toast that says so: the promote's own rebuild made it twice.
+            Assert.Equal(1, app.Builds - builds);
+            Assert.True(Contains(session, "Wrote 3 files."), "the toast should say what was written");
 
             var written = Directory.GetFiles(_root, "*.req", SearchOption.AllDirectories)
                 .Select(Path.GetFileName).ToList();

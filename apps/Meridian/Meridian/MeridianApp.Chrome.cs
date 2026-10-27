@@ -30,9 +30,9 @@ public partial class MeridianApp
     //
     // Safe by default, then: a rebuild builds the parts too. Only paths that change nothing a part
     // shows say so, with MarkViewDirty — edits to the open request (DocEdited, unless the edit is
-    // the one that makes the request unsaved: the tree marks that), the sub-tabs, the URL box
-    // opening and closing, History's walk, search and filters, and the environment table's
-    // values. The response's own controls — its tabs, pretty/raw and the find bar — rebuild the
+    // the one that makes the request unsaved: the tree marks that; a method picked too), the
+    // sub-tabs, the URL box opening and closing, a popover opening and closing, History's walk,
+    // search and filters, and the environment table's values. The response's own controls — its tabs, pretty/raw and the find bar — rebuild the
     // response alone (ResponseDirty). PartTests holds every part input to what a full build of
     // the parts makes.
 

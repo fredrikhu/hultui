@@ -317,7 +317,7 @@ public partial class MeridianApp
             _popoverX = box.X;
             _popoverY = box.Y + box.Height + 4f;
             _popover = Methods.Select(m => (m, (Action)(() => SetMethod(m)))).ToList();
-            MarkDirty();
+            MarkViewDirty();   // the popover is the window's own, no part shows it
         });
         bar.AddChild(method);
 
@@ -384,8 +384,9 @@ public partial class MeridianApp
     private void SetMethod(string method)
     {
         if (ActiveTab is not { } tab) return;
+        bool wasDirty = tab.Dirty;
         tab.Doc.SetRequestLine(method, tab.Doc.Url ?? "");
-        MarkDirty();
+        DocEdited(tab, wasDirty);   // the editor shows the method; the tree shows the file's
     }
 
     /// <summary>The URL rendered as literals + variable chips: resolved chips in
@@ -717,6 +718,22 @@ public partial class MeridianApp
         Ui.Button(ButtonVariant.Secondary, label, onClick, automationId, style: Ui.Small);
 
     // ── Popover (method picker) ──────────────────────────────────────────
+    //
+    // Opening and closing a popover rebuild the window's view only: the popover is built by the
+    // app, beside the parts, and no part shows it. A pick runs its action, which builds what it
+    // changes — the editor for a method or an operator, everything for an environment — and the
+    // pick builds again only when the action did not, to take the popover down. Each pick built the
+    // window twice and the parts as well (plan 17 round 6: 3 window builds and 8 part builds for an
+    // open and a pick, 611 KB).
+
+    /// <summary>Runs a popover row's action, which has already taken the popover off
+    /// (<see cref="_popover"/> null), and rebuilds the view when the action built nothing.</summary>
+    private void Pick(Action action)
+    {
+        int builds = Builds;
+        action();
+        if (Builds == builds) MarkViewDirty();
+    }
 
     private Element BuildPopover(IReadOnlyList<(string Label, Action Run)> items)
     {
@@ -728,7 +745,7 @@ public partial class MeridianApp
         layer.Position.Type = PositionType.Absolute;
         layer.Position.Top = Dimension.Px(0);
         layer.Position.Left = Dimension.Px(0);
-        layer.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; MarkDirty(); });
+        layer.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; MarkViewDirty(); });
 
         var menu = Flex.Column(gap: 0)
             .Width(140).Padding(new Thickness(4))
@@ -747,7 +764,7 @@ public partial class MeridianApp
                 .AutomationId("popover-" + label);
             row.AddChild(Ui.Mono(label, 11f, Azimuth.MethodColor(label)).FontWeight(FontWeight.SemiBold));
             var action = run;
-            row.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; action(); MarkDirty(); });
+            row.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; Pick(action); });
             row.HoverBg(Azimuth.Raised, Color.Transparent);
             menu.AddChild(row);
         }

@@ -140,7 +140,7 @@ public partial class MeridianApp
             _popoverY = box.Y + box.Height + 4f;
             _popover = Directives.AssertOps
                 .Select(o => (o, (Action)(() => RewriteAssert(tab, opIndex, op: o)))).ToList();
-            MarkDirty();
+            MarkViewDirty();
         });
         row.AddChild(op);
 

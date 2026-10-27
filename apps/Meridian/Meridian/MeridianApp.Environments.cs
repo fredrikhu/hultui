@@ -308,7 +308,7 @@ public partial class MeridianApp
         _popoverX = Math.Max(8f, _window.LayoutWidth - 300f);
         _popoverY = 42f;
         _popover = items;
-        MarkDirty();
+        MarkViewDirty();
     }
 
     // ── Minimal modal input dialog (Backdrop + card) ─────────────────────
