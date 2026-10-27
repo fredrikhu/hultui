@@ -88,10 +88,10 @@ public class FilesFindTests
             Find(session, app, "needle");
 
             string text = BodyText(app);
-            var tinted = BodySpans(app).Where(s => IsFindTint(s.Background)).ToList();
+            var tinted = BodyTints(app).Where(h => IsFindTint(h.Background)).ToList();
             Assert.Equal(3, tinted.Count);
-            foreach (var span in tinted)
-                Assert.Equal("needle", text.Substring(span.Start, span.Length));
+            foreach (var tint in tinted)
+                Assert.Equal("needle", text.Substring(tint.Start, tint.Length));
         });
     }
 
@@ -102,13 +102,13 @@ public class FilesFindTests
         {
             Find(session, app, "needle");
 
-            var first = BodySpans(app).Where(s => IsFindTint(s.Background)).ToList();
+            var first = BodyTints(app).Where(h => IsFindTint(h.Background)).ToList();
             Assert.Equal(Theme.Nocturne.FindCurrentBg, first[0].Background);
             Assert.Equal(Theme.Nocturne.FindHitBg, first[1].Background);
 
             Press(session, KeyCode.Enter);
 
-            var second = BodySpans(app).Where(s => IsFindTint(s.Background)).ToList();
+            var second = BodyTints(app).Where(h => IsFindTint(h.Background)).ToList();
             Assert.Equal(Theme.Nocturne.FindHitBg, second[0].Background);
             Assert.Equal(Theme.Nocturne.FindCurrentBg, second[1].Background);
         });
@@ -146,13 +146,15 @@ public class FilesFindTests
         }, record: true);
     }
 
-    /// <summary>Syntax colouring survives a search: a match carries a background only, so the
-    /// grammar's foregrounds are all still asked for.</summary>
+    /// <summary>Syntax colouring survives a search: the matches are the body's highlights, a
+    /// background over its spans, which the search leaves as they are — the same list, not a
+    /// copy with the tints merged in, as it was until round 6 of plan 17.</summary>
     [Fact]
     public void SyntaxColourSurvivesASearch()
     {
         Hosted((session, app) =>
         {
+            var spans = Body(app).Spans;
             var before = BodySpans(app).Where(s => s.Color != default).ToList();
             Assert.NotEmpty(before);
 
@@ -165,12 +167,50 @@ public class FilesFindTests
             // which says nothing about whether the grammar's colours came through with it —
             // so it cannot mask the assertion below. CI caught this once in a hundred-odd
             // runs; it has never reproduced locally.
-            session.PumpUntil(() => BodySpans(app).Any(s => IsFindTint(s.Background)),
+            session.PumpUntil(() => BodyTints(app).Any(h => IsFindTint(h.Background)),
                 TimeSpan.FromSeconds(20));
 
             var after = BodySpans(app);
             foreach (var s in before) Assert.Contains(after, a => a.Color == s.Color);
-            Assert.Contains(after, s => IsFindTint(s.Background));
+            Assert.Same(spans, Body(app).Spans);
+            Assert.DoesNotContain(after, s => IsFindTint(s.Background));
+        });
+    }
+
+    /// <summary>
+    /// Where each line starts in the body's text is worked out once, with the text, when the
+    /// file is shown — before any search, for a selection to be turned back into a line — and
+    /// find keys, Enter and rebuilds read the same array; it used to be worked out by the tinting
+    /// pass, so a selection in a file no search had matched in yet was read against the line
+    /// starts of the file searched before it. The tints are kept between rebuilds the same way:
+    /// until round 6 of plan 17 every repaint of the pane merged them into a copy of every span.
+    /// </summary>
+    [Fact]
+    public void TheLineStartsAreTheFilesOwn_WorkedOutOnceWhenItIsShown()
+    {
+        Hosted((session, app) =>
+        {
+            var starts = LineStarts(app);
+            string text = BodyText(app);
+            var expected = new List<int> { 0 };
+            for (int i = 0; i < text.Length; i++) if (text[i] == '\n') expected.Add(i + 1);
+            Assert.Equal(expected, starts);
+
+            Find(session, app, "needle");
+            session.Window.TypeText(" t");
+            session.PumpFrames(2);
+            Press(session, KeyCode.Backspace);
+            Press(session, KeyCode.Backspace);
+            Press(session, KeyCode.Enter);
+            var tints = Body(app).Highlights;
+            MarkDirty(app);
+            session.PumpFrames(2);
+
+            Assert.Equal(3, Search(app).Hits.Count);
+            Assert.Same(starts, LineStarts(app));
+            // A rebuild that changes neither the file nor the search hands the body the same tints.
+            Assert.NotNull(tints);
+            Assert.Same(tints, Body(app).Highlights);
         });
     }
 
@@ -194,12 +234,12 @@ public class FilesFindTests
         Hosted((session, app) =>
         {
             Find(session, app, "needle");
-            Assert.Contains(BodySpans(app), s => IsFindTint(s.Background));
+            Assert.Contains(BodyTints(app), h => IsFindTint(h.Background));
 
             Press(session, KeyCode.Escape);
 
             Assert.False(Open(app));
-            Assert.DoesNotContain(BodySpans(app), s => IsFindTint(s.Background));
+            Assert.DoesNotContain(BodyTints(app), h => IsFindTint(h.Background));
         });
     }
 
@@ -297,6 +337,12 @@ public class FilesFindTests
     private static string BodyText(JunctionApp app) => Body(app).Text;
 
     private static IReadOnlyList<TextSpan> BodySpans(JunctionApp app) => Body(app).Spans ?? [];
+
+    private static IReadOnlyList<TextHighlight> BodyTints(JunctionApp app) => Body(app).Highlights ?? [];
+
+    private static int[] LineStarts(JunctionApp app) =>
+        (int[])typeof(JunctionApp).GetField("_fileLineStarts", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!;
 
     private static float ScrollY(JunctionApp app) => Body(app).ScrollOffsetY;
 

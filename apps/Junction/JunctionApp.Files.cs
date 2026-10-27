@@ -766,13 +766,13 @@ public partial class JunctionApp
         // per file so scroll/selection reset when the selection changes.
         BindFilesSearch(content, lines);
         var (text, spans) = FileBodyTextAndSpans(content, lines);
-        spans = DecorateFileBody(lines, spans);
         var wrap = Box.New().FlexGrow(1).Overflow(Overflow.Hidden).Background(Nocturne.Bg)
             .Padding(new Thickness(6, 12, 6, 12));
         var area = TextArea.New(text).ReadOnly().FlexGrow(1)
             .FontFamily(CodeFont).FontSize(DiffCodeSize).TextColor(Nocturne.On(0.85)).LineHeight(1.5f);
         area.ScrollbarWidth = 7f;
         if (spans != null) area.Spans(spans);
+        area.Highlights(FilesHighlights());
         area.Key = "filebody:" + (_filesSelPath ?? "");
         area.IsFocusable = true;
         area.TabIndex = 0;
@@ -781,8 +781,9 @@ public partial class JunctionApp
         return wrap;
     }
 
-    // Whole-file text + syntax spans in absolute offsets, memoized on the content
-    // instance so a plain rebuild (e.g. moving the tree cursor) doesn't re-flatten.
+    // Whole-file text + syntax spans in absolute offsets, and where each line starts in it,
+    // memoized on the content instance so a plain rebuild (e.g. moving the tree cursor) doesn't
+    // re-flatten.
     private FileContent? _fileBodyMemo;
     private string _fileBodyText = "";
     private IReadOnlyList<TextSpan>? _fileBodySpans;
@@ -792,23 +793,27 @@ public partial class JunctionApp
         if (ReferenceEquals(content, _fileBodyMemo)) return (_fileBodyText, _fileBodySpans);
 
         var text = string.Join("\n", lines);
+        var starts = new int[lines.Length];
+        int offset = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            starts[i] = offset;
+            offset += lines[i].Length + 1;   // +1 for the '\n' join separator
+        }
         List<TextSpan>? flat = null;
         if (content.Spans is { } perLine)
         {
             flat = [];
-            int offset = 0;
             for (int i = 0; i < lines.Length; i++)
-            {
                 if (i < perLine.Length && perLine[i] is { } lineSpans)
                     foreach (var s in lineSpans)
-                        flat.Add(new TextSpan(offset + s.Start, s.Length, s.Color, s.Background));
-                offset += lines[i].Length + 1;   // +1 for the '\n' join separator
-            }
+                        flat.Add(new TextSpan(starts[i] + s.Start, s.Length, s.Color, s.Background));
         }
 
         _fileBodyMemo = content;
         _fileBodyText = text;
         _fileBodySpans = flat;
+        _fileLineStarts = starts;
         return (text, flat);
     }
 
@@ -932,62 +937,55 @@ public partial class JunctionApp
     }
 
     /// <summary>
-    /// Start offsets of every line in the flattened text, memoized alongside it. Rebuilt only
-    /// when the file changes — a search re-runs on every keystroke, and recomputing this each
-    /// time would make a large file's find field lag behind the typing.
+    /// Start offsets of every line in the flattened text, worked out with it once per file
+    /// (FileBodyTextAndSpans): the highlights, the reveal and a selection's line read them.
     /// </summary>
-    private string[]? _fileLineStartsFor;
     private int[] _fileLineStarts = [];
 
-    private int[] LineStarts(string[] lines)
-    {
-        if (ReferenceEquals(_fileLineStartsFor, lines)) return _fileLineStarts;
-        var starts = new int[lines.Length];
-        int offset = 0;
-        for (int i = 0; i < lines.Length; i++)
-        {
-            starts[i] = offset;
-            offset += lines[i].Length + 1;   // +1 for the newline the join puts back
-        }
-        _fileLineStartsFor = lines;
-        _fileLineStarts = starts;
-        return starts;
-    }
-
     /// <summary>
-    /// Adds the search's tinting to the file's syntax spans, both in absolute offsets.
+    /// The search's matches as the body's highlights, in absolute offsets: a layer over the
+    /// syntax spans, which the body keeps from key to key.
     ///
-    /// <para>Not <see cref="TextSearch.Decorate"/>: that answers per line, against
-    /// line-relative syntax spans, which is what a row-per-line view has. Here there is one
-    /// span list over the whole file, so the matches are translated to absolute offsets and
-    /// appended. A match carries only a background, so it layers over the syntax colour
-    /// already there rather than replacing it.</para>
+    /// <para>Not <see cref="TextSearch.Decorate"/>: that answers per line, against line-relative
+    /// syntax spans, which is what a row-per-line view has. Until round 6 of plan 17 the tints
+    /// were merged into the syntax spans here, copied and sorted with every one of them on every
+    /// build of the pane while a search had matches, find keys and Enter included. Kept between
+    /// builds while the file and the search stay the same: the pane rebuilds on every repaint,
+    /// and the same list again costs the body nothing.</para>
     /// </summary>
-    private IReadOnlyList<TextSpan>? DecorateFileBody(string[] lines, IReadOnlyList<TextSpan>? syntax)
+    private IReadOnlyList<TextHighlight>? FilesHighlights()
     {
         var search = _filesFind.Search;
-        if (!search.HasHits) return syntax;
+        if (!search.HasHits) return null;
 
-        var starts = LineStarts(lines);
+        var starts = _fileLineStarts;
+        // The tints are the scheme's: another one tints the same matches anew.
+        Color hitTint = Nocturne.FindHitBg, currentTint = Nocturne.FindCurrentBg;
+        var key = (search.Query, search.MatchCase, search.UseRegex, search.Index, search.Hits.Count, hitTint, currentTint);
+        if (_filesHighlights is not null && ReferenceEquals(_filesHighlightsStarts, starts) && _filesHighlightsSearch == key)
+            return _filesHighlights;
+
+        var hits = search.Hits;
+        int count = 0;
+        for (int i = 0; i < hits.Count; i++)
+            if (hits[i].Length > 0 && hits[i].Line < starts.Length) count++;   // nothing to tint
         var current = search.Current;
-        var merged = syntax is null ? new List<TextSpan>() : new List<TextSpan>(syntax);
-        foreach (var hit in search.Hits)
+        var tints = new TextHighlight[count];
+        int n = 0;
+        for (int i = 0; i < hits.Count; i++)
         {
-            if (hit.Length <= 0 || hit.Line >= starts.Length) continue;   // nothing to tint
+            var hit = hits[i];
+            if (hit.Length <= 0 || hit.Line >= starts.Length) continue;
             bool isCurrent = current is { } c && c.Line == hit.Line && c.Start == hit.Start;
-            merged.Add(new TextSpan(starts[hit.Line] + hit.Start, hit.Length, default,
-                isCurrent ? Nocturne.FindCurrentBg : Nocturne.FindHitBg));
+            tints[n++] = new TextHighlight(starts[hit.Line] + hit.Start, hit.Length, isCurrent ? currentTint : hitTint);
         }
-        // Back into offset order. TextAreaElement slices the list per visible line and stops
-        // at the first span that starts past the end of that line, so a tint appended after
-        // the syntax spans sits behind the stop and is never drawn — every match but the one
-        // on the last decorated line went missing, which looked like search not highlighting
-        // at all. The tints still overlap the syntax spans they sit inside; that is the point
-        // of them (background over foreground) and the renderer handles it. Only the ordering
-        // was wrong.
-        merged.Sort(static (a, b) => a.Start.CompareTo(b.Start));
-        return merged;
+        (_filesHighlights, _filesHighlightsStarts, _filesHighlightsSearch) = (tints, starts, key);
+        return tints;
     }
+
+    private IReadOnlyList<TextHighlight>? _filesHighlights;
+    private int[]? _filesHighlightsStarts;
+    private (string Query, bool MatchCase, bool UseRegex, int Index, int Count, Color Hit, Color Current) _filesHighlightsSearch;
 
     /// <summary>
     /// Brings the current match on screen.
