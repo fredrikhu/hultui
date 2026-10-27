@@ -5,8 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 4c (follow-up: defer dfd1a5b5's trigger past start-up) running, then step 5
-  (steps 1–3, 4a, 4b landed). The survey's eight reports are
+- **Phase:** build — round 6, step 5 next (steps 1–4 landed, 4c included). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -229,6 +228,7 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 55e24c16 | dialog-scrim-button-role | Approved (user, reader-visible). `InferRole` makes no Button of a clickable box with a direct Dialog-role child (`HoldsDialog`); an explicit role still wins. Meridian's in-tree Options backdrop has no node (the card is its parent's child); `Dialog.Show`'s overlay-root scrim is an unnamed UIA Pane / AT-SPI panel with no Invoke; dialog role/name, click-outside, Escape and hit-testing unchanged. Probe per tick, recording/UIA/AT-SPI: dialog 283.5/283.9/1,081 → 1.2/1.4/400 KB, in-tree modal 259.9/260.3/1,058 → 1.0/1.1/1.3, trees 40 → 0, Name events 80 → 40; palette key Name events 2 → 1 (UIA 454.2 → 441.2). Four new suite rows 260 → 0.8–1.2 KB/op, min −18…−22 % JIT, −25…−29 % AOT; suite 0 slower, 4 faster. Audit 0 STALE in 2,749, 0 mismatches. WSL 22 projects pass. |
 | 6 | f9bceb6d | sdl-custom-frame-maximized-dpi | Correctness: `MaximizedFrameInset(dpi)` = `GetSystemMetricsForDpi(SM_C?FRAME + SM_CXPADDEDBORDER, GetDpiForWindow)` for NCCALCSIZE, the maximized caption margin and the Alt+Space menu. `MaximizedFrameInsetTests` match `AdjustWindowRectExForDpi` at 96–192 DPI (4/5 fail on the old metrics); `WindowPlacementTests` checks a maximized Borderless client covers the work area on every monitor. Not reproduced on a window: only the 1440p @100 % monitor was attached (system DPI 96); maximize on both monitors, the DPI hop and Snap Layouts on a lower-DPI monitor still to check. Suite 0/0. |
 | 6 | dfd1a5b5 | gl-thread-walk-after-first-frame | On Windows + NVIDIA (`GL_VENDOR`) after the first GL frame: start and join a no-op thread, mark paint-dirty, present once more; the walk starts after the next swap (a thread before the first frame, glFlush or glFinish don't set it off). AOT Meridian first send's slowest frame 62.6/61.1 → 5.7/3.6 ms (bridge on 61.5 → 2.4); time to first present unchanged (Meridian 226–236, Junction 222–228, Vesper 244–249 ms); the frame ~45 ms after the first waits out the walk (56–69 ms). **Regression:** Junction's first repository frame +115–117 ms instead of +94–97 (its own loading threads used to set the walk off at ~+0.5 s with no frame waiting) → follow-up 4c. `GLDriverThreadWalkTests` (VulkanProbe `--first-thread`: 0.2/0.1 ms after a pool burst; reverted 0.2/56.6). 0 guard events over ~100 windows; no `nvlddmkm` events. Suite 0/0. |
+| 6 | b788b2ef | gl-thread-walk-after-first-frame (4c) | The trigger waits 200 ms after the first frame, then for the window to rest (nothing to draw, no tween, no posted work, not minimized); one new loop deadline `IdleDeadline.DriverThreadWalk`, counted only while ahead. AOT, alternated ×2 vs bc78f875: Junction first repository frame +153/+116 → +94/+96 ms (the regression gone); Meridian first send slowest frame 2.4–2.8 ms at ~1.07 s and ~0.34 s after start; time to first present flat; the walk now runs at +242–252 ms and no frame in any app waits for it; idle 0 loop passes from ~1.1 s to 15.8 s. 500 ms settle let a 0.34 s send meet the walk (60–64 ms). Still exposed: a request within ~0.3 s of showing, or an app that never rests. Suite 0/0. 0 guard events over 50 launches; 0 `nvlddmkm`/TDR events. |
 
 ## Examined, not worth it
 
@@ -539,3 +539,7 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   start-up settles. Guideline notes: on NVIDIA GL a slow frame ~45 ms after the first is the driver's once-per-process
   thread walk; when timing a "first action", check whether the process already walked; custom chrome reads frame
   metrics at the window's DPI (`GetSystemMetricsForDpi`).
+- 2026-10-27: step 4c landed (b788b2ef): the walk's trigger waits 200 ms and then for the window to rest, so Junction's
+  first repository frame is back at +94–96 ms and Meridian's first send stays at 2.4–2.8 ms; no frame waits for the
+  walk; idle stays at 0 wakes. Guideline note: one-time work set off on purpose goes at the first rest after start-up,
+  not right after the first frame — start-up threads of the app's own may still be loading.
