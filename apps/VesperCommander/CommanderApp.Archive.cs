@@ -283,7 +283,7 @@ public partial class CommanderApp
         footer.AddChild(SecondaryButton("Cancel", ClosePasswordPrompt));
         footer.AddChild(PrimaryButton("Unlock", SubmitPassword));
         card.AddChild(footer);
-        return Backdrop(card, topAligned: true, topPad: 90f);
+        return Backdrop(card, "Password required", topAligned: true, topPad: 90f);
     }
 
     // ── Archive error state (in-pane, replaces the listing) ──────────────

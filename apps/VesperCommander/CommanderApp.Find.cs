@@ -292,7 +292,7 @@ public partial class CommanderApp
         card.AddChild(BuildFindBody());
         card.AddChild(BuildFindFooter());
         card.AddChild(FindResizeGrip());   // absolute — pinned to the card's corner, over the footer
-        return Backdrop(card, topAligned: true, topPad: 70f);
+        return Backdrop(card, "Find files", topAligned: true, topPad: 70f);
     }
 
     private Element FindInputRow(string icon, string value, string placeholder,

@@ -255,9 +255,11 @@ keystroke raises one Name change (the "… more" line's), not two: UIA 454.2 →
 2,000 commands. A reader closes a dialog with Escape, or with a control of its own; the click
 outside still closes it, and hit-testing is the element tree's, which this does not touch. The
 rule looks at the backdrop's children only, which is where `Dialog.Show` puts its panel and where
-Meridian puts its card. Junction's and Vesper's modal backdrops (and Meridian's environment prompt)
-hold cards with no role, so they are still buttons named after the whole card, until their apps
-give the cards the Dialog role.
+Meridian puts its card. Junction's modal backdrops (and Meridian's environment prompt) hold cards
+with no role, so they are still buttons named after the whole card, until their apps give the
+cards the Dialog role. Vesper's cards have it since round 6, step 5 (each named by its title, in
+`CommanderApp.Backdrop`): a copy's progress tick built the window's whole tree before, and is
+patched now (ten ticks 50 ms apart: 10 trees → 0).
 
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
