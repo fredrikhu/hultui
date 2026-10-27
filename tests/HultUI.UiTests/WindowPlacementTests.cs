@@ -66,6 +66,13 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
             Assert.True(IsWindowVisible(hwnd));
             Assert.Equal(width, window.LayoutWidth);   // drawn at the size it is shown at
             Assert.Equal(normal with { Maximized = true }, window.Placement);
+            // The custom frame's client is the work area to the pixel: Windows hangs a maximized
+            // window over each edge by its frame at the monitor's DPI, and the frame takes off
+            // exactly that. Inset at the system DPI instead, it left a 3 px strip of frame on a
+            // monitor scaled below the primary, and cut 3 px of content on one scaled above.
+            if (style == WindowStyle.Borderless)
+                Assert.Equal(((int)area.X, (int)area.Y, (int)(area.X + area.Width), (int)(area.Y + area.Height)),
+                    ClientOnScreen(hwnd));
 
             window.Restore();
             app.RunFrame(TimeSpan.Zero, forceRender: true);
@@ -192,6 +199,15 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
         return new WindowPlacement(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, IsZoomed(window.NativeHandle));
     }
 
+    /// <summary>The client rectangle in screen pixels: left, top, right, bottom.</summary>
+    private static (int, int, int, int) ClientOnScreen(nint hwnd)
+    {
+        GetClientRect(hwnd, out var c);
+        var origin = new POINT();
+        ClientToScreen(hwnd, ref origin);
+        return (origin.X, origin.Y, origin.X + c.Right - c.Left, origin.Y + c.Bottom - c.Top);
+    }
+
     private static bool Cloaked(nint hwnd) =>
         DwmGetWindowAttribute(hwnd, 14 /* DWMWA_CLOAKED */, out int cloaked, sizeof(int)) == 0 && cloaked != 0;
 
@@ -213,6 +229,9 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     private struct RECT { public int Left, Top, Right, Bottom; }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
 
     private delegate bool MonitorEnumProc(nint monitor, nint hdc, nint clip, nint data);
@@ -220,6 +239,8 @@ public sealed class WindowPlacementTests(ITestOutputHelper output)
     [DllImport("user32")] private static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc proc, nint data);
     [DllImport("user32", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfoW(nint monitor, ref MONITORINFO info);
     [DllImport("user32")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+    [DllImport("user32")] private static extern bool GetClientRect(nint hwnd, out RECT rect);
+    [DllImport("user32")] private static extern bool ClientToScreen(nint hwnd, ref POINT point);
     [DllImport("user32")] private static extern bool IsZoomed(nint hwnd);
     [DllImport("user32")] private static extern bool IsIconic(nint hwnd);
     [DllImport("user32")] private static extern bool IsWindowVisible(nint hwnd);

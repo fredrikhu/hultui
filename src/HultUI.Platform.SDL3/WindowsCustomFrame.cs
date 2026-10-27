@@ -267,8 +267,8 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private void ExtendFrame()
     {
         // The margin is measured from the window-rect top. Maximized, the rect
-        // (and with it the frame's first SM_CYFRAME + SM_CXPADDEDBORDER px) sits
-        // off-screen, which would leave the bottom of the maximize button outside
+        // (and with it the frame's first SM_CYFRAME + SM_CXPADDEDBORDER px at the
+        // window's DPI, see MaximizedFrameInset) sits off-screen, which would leave the bottom of the maximize button outside
         // the caption region — and Windows only honours HTMAXBUTTON for the Snap
         // Layouts flyout inside that region — so grow the margin by the clipped
         // frame. Re-applied on maximize/restore transitions (see WM_SIZE).
@@ -278,9 +278,35 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         int px = _captionHeightPx;
         if (IsFullscreen) px = 0;
         else if (IsZoomed(_hwnd))
-            px += GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            px += MaximizedFrameInset().Y;
         var margins = new MARGINS { CyTopHeight = px };
         DwmExtendFrameIntoClientArea(_hwnd, ref margins);
+    }
+
+    /// <summary>
+    /// How far past each edge of the monitor's work area Windows puts this window when it is
+    /// maximized: its sizing frame plus the padded border, at the window's own DPI.
+    ///
+    /// <para>Not <c>GetSystemMetrics</c>, which answers at the system DPI — the scale of the
+    /// primary monitor when the user signed in. On a desk with a 4K monitor at 150 % and a
+    /// 1440p one at 100 %, that is 11 px where the window on the 1440p monitor hangs 8 px
+    /// over: the client came out 3 px short on every edge, a strip of frame that the screen
+    /// edge and corner (the close button's) fell on. On a monitor scaled above the system
+    /// DPI it was the other way round, and 3 px of content went off the screen.</para>
+    /// </summary>
+    private (int X, int Y) MaximizedFrameInset() => MaximizedFrameInset(GetDpiForWindow(_hwnd));
+
+    /// <inheritdoc cref="MaximizedFrameInset()"/>
+    internal static (int X, int Y) MaximizedFrameInset(uint dpi)
+    {
+        // A window GetDpiForWindow cannot answer for: the system DPI's frame, as before.
+        if (dpi == 0)
+        {
+            int border = GetSystemMetrics(SM_CXPADDEDBORDER);
+            return (GetSystemMetrics(SM_CXFRAME) + border, GetSystemMetrics(SM_CYFRAME) + border);
+        }
+        int padded = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+        return (GetSystemMetricsForDpi(SM_CXFRAME, dpi) + padded, GetSystemMetricsForDpi(SM_CYFRAME, dpi) + padded);
     }
 
     /// <summary>Sets the DWM caption height (physical px) so the maximize button
@@ -421,8 +447,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // content isn't clipped off the edges of the screen.
         if (IsZoomed(hwnd))
         {
-            int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            var (fx, fy) = MaximizedFrameInset();
             p->rgrc0.Left += fx;
             p->rgrc0.Top += fy;
             p->rgrc0.Right -= fx;
@@ -589,9 +614,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
             // Alt+Space: below the top-left corner of the visible caption,
             // like the native menu.
             GetWindowRect(hwnd, out RECT wr);
-            int inset = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            x = wr.Left + (zoomed ? inset : 0);
-            y = wr.Top + (zoomed ? inset : 0) + _captionHeightPx;
+            var inset = zoomed ? MaximizedFrameInset() : default;
+            x = wr.Left + inset.X;
+            y = wr.Top + inset.Y + _captionHeightPx;
         }
 
         // TPM_RETURNCMD runs the menu loop and hands the choice back instead of
@@ -706,6 +731,12 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [DllImport("user32")]
     private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32")]
+    private static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+    [DllImport("user32")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
 
     [DllImport("user32")]
     private static extern bool IsZoomed(IntPtr hWnd);
