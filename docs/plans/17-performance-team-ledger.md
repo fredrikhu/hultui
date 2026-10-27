@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 7 next (steps 1–6 landed). User (2026-10-27): pause the loop when weekly plan usage
-  reaches 90 % (`get_usage`; 80 % after step 6, ~1 % a step). The survey's eight reports are
+- **Phase:** build — round 6, step 7b next (the TextArea highlight layer + find; steps 1–6 and 7a landed). User
+  (2026-10-27): pause the loop when weekly plan usage reaches 90 % (`get_usage`; 82 % after step 7a, ~1–2 % a step). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -154,6 +154,10 @@ Re-ranked by the next survey.
   remakes every Brief cell); type-to-find remakes every row (rows matched by index, the filter shifts them); Space
   with a reader builds a whole a11y tree per key because the footer's "n marked" label is added and removed, not
   re-texted.
+- **meridian-leads** (8/6, from r6 step 7a) — an assertion field loses focus on its first keystroke after a send (a
+  bug); submitting the environment prompt builds the window twice.
+- **a11y-textarea-keystroke-tree** (7, lead from r6 step 7a) — with a reader every TextArea keystroke builds the whole
+  a11y tree (by design in `Window.cs`), ~+23 KB per key at 89k characters.
 - **vesper-key-rest-bytes** (6/8, trace first) — 5.3–6.2 KB per Vesper key outside builds and frames (14–17 % of a Detail
   key), probably the cursor's preview load.
 - **terminal-noop-scrollback-wheel** + **terminal-row-strings-by-content** (2/Terminal, low; r6-2) — a no-op notch draws a
@@ -245,6 +249,10 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 59a953ff | vesper-own-selection-revisit | Re-opens 68817800 (DECISIONS.md): Detail lists draw the cursor with `.SelectionHighlight`; rows draw it while zebra is on or a drag hovers a folder in that pane. Detail Down 35.1 → 23.3 KB (−34 % JIT and AOT, min −12 %/−5 %), rows 2.3 → 0.3; F3 partner −26 %. Fix: the context-menu key's box from `CursorRowBox` (the old unscrolled layout box opened the menu below the window in a scrolled list). |
 | 6 | cdd2c1ac | composite-row-kept-cards (Thumbnails) | Rows keyed by place; unchanged tiles handed back into their own row's place. Down 88.3 → 42.9 KB (−51 %), tiles 11 → 3; Right −38 %; Insert 315.7 → 56.3 (−82 %). |
 | 6 | 53aea1b3 | vesper-find-result-label | Reader bug fix: results read as their row shows them ("f000.txt, 10 B", "deep.txt, in sub, 2 B"), not `Hit { … }`. Step 6 overall (AOT): Detail −34 %, Insert −81 %, Space −84 %, Thumbnails Down −52 %. 35 scenes × dark/light × zebra off/on identical (pixels, a11y, focus) but the intended find-result names; suite 0/0 ×2. |
+| 6 | cf7c7d8b | meridian-body-edit-in-place | The body stays one string when its block ends the file; a body keystroke splices it; other edits leave it packed and the reparse reads it without copying; `Chain.Analyze` → `Tokenize` no longer copies the body twice per build; the Assertions tab's stale-banner check compares in place (`SerializesTo`). 89k body typing 1,894 → 237 KB/key (−87 % JIT, −88 % AOT), min −11…−12 %, gen-0 per 240 keys 26 → 3; URL typing with an 89k body 1,129 → 64 (−94 %), assertion typing 1,492 → 76 (−95 %). 16 saved files byte-identical; an old-`SetBody` copy checks 15 documents through 22 edits. |
+| 6 | 8bcf3b14 | meridian-history-selection-offscreen | Bug fix: History's arrows scroll the selection into view. Bytes per key past the screen 51 → 76 KB (the on-screen cost); earlier History walk numbers were partly off-screen. |
+| 6 | 44e9254a | meridian-popover-builds | Popovers open/close view-only; a pick builds once (Promote + Flash folded). Method open + pick 636 → 217 KB (−66 %), builds 3 → 2, parts 8 → 0, min −18 % JIT / −10 % AOT; environment −41 %; operator −63 %. |
+| 6 | 65190e72 | app-modal-cards-dialog-role (Meridian) | Approved (user, question 5). The environment prompt's card is `Dialog "New key"`: a text change with UIA 10.5 → 0.4 KB, trees 1 → 0. No other role-less modal card. Step 7a: 27 scenes identical but the intended History scroll and dialog; suite 0/0 ×2 JIT + AOT. |
 
 ## Examined, not worth it
 
@@ -389,6 +397,9 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
    name: readers then hear a dialog where today they hear a button. Also: a dialog with nothing focusable focuses the
    scrim, now an unnamed pane (was a button reading the dialog's text) — focus the dialog instead. [Yes to both, in
    the app steps 5, 7 and 10.] → **yes, make them dialogs** (2026-10-27).
+6. **popover-menu-role** (from step 7a): Meridian's (and Junction's) popover menus are read as Buttons named after every
+   row. A menu role with items (like the context menu's) would change what readers hear. [Yes, as the context menu.]
+   → **open**.
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -575,3 +586,10 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   row-drawn (in the rows' shape) while anything else paints that row; position against a row with `ScreenBorderBox`,
   not `Layout.AbsoluteBorderBox`; for card rows, key rows by place and hand a card back only into its own place.
   User asked to pause at 90 % weekly usage; 80 % now.
+- 2026-10-27: round 6 step 7a landed (cf7c7d8b..65190e72): Meridian body typing at 89k characters −87…−88 % (gen-0 GCs
+  26 → 3 per 240 keys; URL and assertion typing with that body −94…−95 %), History scrolls to its selection (a bug),
+  popovers open view-only and a pick builds once (−41…−66 %), the environment prompt is a dialog. Question 6 for the
+  user (popover menus read as buttons). Guideline notes: a model that re-derives everything per edit is O(document)
+  per key — keep big content as one string and splice; don't copy text to count things — compare serialized state in
+  place; a popover opening is view-only; when the app, not the list, owns the keys, the app scrolls the list; check
+  the selection is on screen before trusting walk numbers. Usage 82 %.
