@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Testing;
@@ -65,11 +66,65 @@ public class ParagraphAllocationTests
         });
         long listGrowth = ListOf(40) - ListOf(10);
 
-        // Each line: its text ("abcdefgh ") and the same trimmed, 40 B each; a list of its one run
-        // with room for one (32 + 32 B); the run, sharing its word's glyphs (56 B); and the line.
-        // Its font runs go into a list the pipeline keeps: one made for each line was 120 B more,
-        // and the list of its runs grown to room for four 24 B more.
-        Assert.Equal(30L * (40 + 40 + 64 + 56 + lineBytes) + listGrowth, b - a);
+        // Each line: its text trimmed ("abcdefgh"), 40 B, cut out of the paragraph once (the line
+        // as it stands, "abcdefgh ", cut out first was 40 B more); a list of its one run with room
+        // for one (32 + 32 B); the run, sharing its word's glyphs (56 B); and the line. Its font
+        // runs go into a list the pipeline keeps: one made for each line was 120 B more, and the
+        // list of its runs grown to room for four 24 B more.
+        Assert.Equal(30L * (40 + 64 + 56 + lineBytes) + listGrowth, b - a);
+    }
+
+    [Fact]
+    public void AnEllipsizedLabel_CutsOneStringForItsLine()
+    {
+        // The same label truncated nine characters further on, each at widths it was not laid out
+        // at before: its line's text is the prefix and the mark in one string, 16 B longer for the
+        // nine characters. The prefix cut out first and then joined to the mark was a second
+        // string, 32 B in all.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        string text = Lines(10);
+        // 6 a character, the mark one of them: room for 19 or 28 characters and the mark, both
+        // ending in the same "a" of a word cut short.
+        float shortWidth = 6f * 20 + 3, longWidth = 6f * 29 + 3;
+        Assert.Equal(19 + 1, Line(shortWidth).Length);
+        Assert.Equal(28 + 1, Line(longWidth).Length);
+        long a = Allocations.Least(() => Line(shortWidth += 0.001f));
+        long b = Allocations.Least(() => Line(longWidth += 0.001f));
+        Assert.Equal(16, b - a);
+
+        TextLine Line(float width) =>
+            Assert.Single(pipeline.Layout(text, Style, width, maxLines: 1, TextOverflow.Ellipsis).Lines);
+    }
+
+    public static TheoryData<string, bool> TextThatFits => new()
+    {
+        { "plain", false },
+        { "styled", true },
+        { "BiDi", false },
+    };
+
+    [Theory]
+    [MemberData(nameof(TextThatFits))]
+    public void EllipsisOnTextThatFits_AllocatesWhatClipDoes(string path, bool styled)
+    {
+        // Text that wraps into its lines with nothing cut off, at widths not laid out at before:
+        // Ellipsis tests the last line and leaves the layout as it is, as Clip does. The test
+        // handed the line builder as a lambda made a closure and a delegate on every layout with
+        // Ellipsis: 136 B a layout more than Clip on the plain path, 152 styled, 160 BiDi.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        string text = path == "BiDi" ? Lines(9) + " שלום" : Lines(10);
+        TextSpan[]? spans = styled ? [new TextSpan(9, 8, new(0, 0, 0, 255), Weight: FontWeight.Bold)] : null;
+        float width = 60f;
+        var clip = pipeline.Layout(text, Style, width, null, TextOverflow.Clip, spans);
+        var ellipsis = pipeline.Layout(text, Style, width, null, TextOverflow.Ellipsis, spans);
+        Assert.Equal(10, clip.Lines.Count);
+        Assert.Equal(clip.Lines.Count, ellipsis.Lines.Count);
+        Assert.Equal(clip.Lines[^1].Width, ellipsis.Lines[^1].Width);
+
+        long clipBytes = Allocations.Least(() => pipeline.Layout(text, Style, width += 0.001f, null, TextOverflow.Clip, spans));
+        long ellipsisBytes = Allocations.Least(() =>
+            pipeline.Layout(text, Style, width += 0.001f, null, TextOverflow.Ellipsis, spans));
+        Assert.Equal(clipBytes, ellipsisBytes);
     }
 
     [Fact]
