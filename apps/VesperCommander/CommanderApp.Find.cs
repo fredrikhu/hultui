@@ -412,9 +412,11 @@ public partial class CommanderApp
             .Items(FindRowItems())
             .SelectedIndex(_findSel)
             .RenderWith((item, selected) => FindResultRow(item.Hit, selected, item.Index))
-            // What the items were named when they were the hits themselves (the list's fallback,
-            // the item's ToString). One delegate from build to build, so the list keeps the labels.
-            .AccessibleItemLabel(FindItemLabel)
+            // Each result is read out as its row shows it (FindResultLabel); it was the Hit record's
+            // ToString, every field and the full path. One delegate from build to build, so the
+            // list keeps the labels; the folder they are relative to is in the rows' shape, and a
+            // change lets them go with the rows.
+            .AccessibleItemLabel(_findItemLabel ??= item => FindResultLabel(item.Hit))
             .WithRef(_findVList)
             .Height(_findListH)
             .Padding(new Thickness(6, 6, 6, 6));
@@ -440,7 +442,26 @@ public partial class CommanderApp
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    private static readonly Func<FindRowItem, string?> FindItemLabel = item => item.Hit.ToString();
+    private Func<FindRowItem, string?>? _findItemLabel;
+
+    /// <summary>A result as a screen reader says it, which is what its row shows: the name, a
+    /// folder said to be one, where it is (the folder relative to the one searched, or the archive
+    /// and the folder inside it; nothing when it is the searched folder itself), the content hits
+    /// and a file's size.</summary>
+    internal string FindResultLabel(FindEngine.Hit h)
+    {
+        var sb = new System.Text.StringBuilder(h.Name);
+        if (h.IsDir) sb.Append(", folder");
+        string where = ArchivePath.TryParse(h.ParentDir) is { } ap
+            ? (ap.Internal.Length > 0
+                ? System.IO.Path.Combine(System.IO.Path.GetFileName(ap.ArchiveFile), ap.Internal)
+                : System.IO.Path.GetFileName(ap.ArchiveFile))
+            : RelativeParent(h.ParentDir);
+        if (where.Length > 0) sb.Append(", in ").Append(where);
+        if (h.ContentHits > 0) sb.Append(", ").Append(h.ContentHits).Append(h.ContentHits == 1 ? " hit" : " hits");
+        if (!h.IsDir) sb.Append(", ").Append(FileSystem.ByteCount(h.Size));
+        return sb.ToString();
+    }
 
     private FindRows? _findRows;
     /// <summary>Bumped whenever the results are cleared, so a copy of the last search's is not

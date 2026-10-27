@@ -150,6 +150,42 @@ public class FindDialogTests
         Assert.Equal(name, t.Field<List<FindEngine.Hit>>("_findResults")[t.Field<int>("_findSel")].Name);
     }
 
+    /// <summary>Past 60 hits the results are a virtual list, which names each item to assistive
+    /// technology itself: as its row shows it — the name, a folder said to be one, the folder it
+    /// is in relative to the one searched, and a file's size. They were read out as the Hit
+    /// record's ToString(), every field and the full path.</summary>
+    [Fact]
+    public void ALongResultList_NamesEachResultAsItsRowShowsIt()
+    {
+        using var t = new DiffViewTests.Fixture();
+        for (int i = 0; i < 70; i++) t.WriteLeft($"f{i:000}.txt", "x");
+        Directory.CreateDirectory(Path.Combine(t.Left, "sub"));
+        File.WriteAllText(Path.Combine(t.Left, "sub", "deep.txt"), "xy");
+        Directory.CreateDirectory(Path.Combine(t.Left, "notes.txt"));   // a folder the pattern matches
+        t.Open();
+        var bridge = t.Session.Window.InstallAccessibilityBridge();
+        t.Press(KeyCode.F7, KeyModifiers.Alt);
+        t.SetField("_findPattern", ".txt");
+        t.SetField("_findRecursive", true);
+        t.Invoke("RunFind");
+        t.Session.PumpUntil(() => !t.Field<bool>("_findSearching"), System.TimeSpan.FromSeconds(30));
+        t.Session.PumpFrames(3);
+        Assert.Equal(72, t.Field<System.Collections.IList>("_findResults").Count);
+
+        var names = new List<string>();
+        void Walk(HultUI.Core.Accessibility.AccessibilityNode node)
+        {
+            if (node.Role == HultUI.Core.Accessibility.AccessibilityRole.ListItem) names.Add(node.Name ?? "");
+            foreach (var child in node.Children) Walk(child);
+        }
+        Walk(bridge.CurrentTree!);
+
+        Assert.Contains($"f000.txt, {FileSystem.ByteCount(1)}", names);
+        Assert.Contains($"deep.txt, in sub, {FileSystem.ByteCount(2)}", names);
+        Assert.Contains("notes.txt, folder", names);
+        Assert.DoesNotContain(names, n => n.StartsWith("Hit {", System.StringComparison.Ordinal));
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
     private static readonly List<string> _tmp = new();
 
