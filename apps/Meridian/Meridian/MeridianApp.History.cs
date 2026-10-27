@@ -102,11 +102,13 @@ public partial class MeridianApp
                 _historyCursor = Math.Min(_historyCursor + 1, rows.Count - 1);
                 _historySelection = rows[_historyCursor];
                 MarkViewDirty();
+                RevealHistoryCursor();
                 return true;
             case KeyCode.Up when rows.Count > 0:
                 _historyCursor = Math.Max(_historyCursor - 1, 0);
                 _historySelection = rows[_historyCursor];
                 MarkViewDirty();
+                RevealHistoryCursor();
                 return true;
             case KeyCode.Enter when _historyCursor >= 0 && _historyCursor < rows.Count:
                 _historySelection = rows[_historyCursor];
@@ -122,6 +124,14 @@ public partial class MeridianApp
                 return false;
         }
     }
+
+    /// <summary>Scrolls the list so the keyboard cursor's row is on screen. The arrows come to the
+    /// app, not to the list, which is not focused and so does not follow them: a walk past the
+    /// bottom left the selection below the screen. By the row's place, since the rows are one
+    /// height and the cursor's may not have been made yet; after the build, which patches the list
+    /// on screen, so the ref holds the live one.</summary>
+    private void RevealHistoryCursor() =>
+        _historyListRef.Current?.ScrollRangeIntoView(_historyCursor * Azimuth.RowRun, Azimuth.RowRun);
 
     private bool AnyFilterActive =>
         _filterMethod != null || _filterFailuresOnly || _filterTodayOnly || _filterEnv != null;
