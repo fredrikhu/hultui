@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 5 next (steps 1–4 landed, 4c included). The survey's eight reports are
+- **Phase:** build — round 6, step 6 next (steps 1–5 landed). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -229,6 +229,12 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | f9bceb6d | sdl-custom-frame-maximized-dpi | Correctness: `MaximizedFrameInset(dpi)` = `GetSystemMetricsForDpi(SM_C?FRAME + SM_CXPADDEDBORDER, GetDpiForWindow)` for NCCALCSIZE, the maximized caption margin and the Alt+Space menu. `MaximizedFrameInsetTests` match `AdjustWindowRectExForDpi` at 96–192 DPI (4/5 fail on the old metrics); `WindowPlacementTests` checks a maximized Borderless client covers the work area on every monitor. Not reproduced on a window: only the 1440p @100 % monitor was attached (system DPI 96); maximize on both monitors, the DPI hop and Snap Layouts on a lower-DPI monitor still to check. Suite 0/0. |
 | 6 | dfd1a5b5 | gl-thread-walk-after-first-frame | On Windows + NVIDIA (`GL_VENDOR`) after the first GL frame: start and join a no-op thread, mark paint-dirty, present once more; the walk starts after the next swap (a thread before the first frame, glFlush or glFinish don't set it off). AOT Meridian first send's slowest frame 62.6/61.1 → 5.7/3.6 ms (bridge on 61.5 → 2.4); time to first present unchanged (Meridian 226–236, Junction 222–228, Vesper 244–249 ms); the frame ~45 ms after the first waits out the walk (56–69 ms). **Regression:** Junction's first repository frame +115–117 ms instead of +94–97 (its own loading threads used to set the walk off at ~+0.5 s with no frame waiting) → follow-up 4c. `GLDriverThreadWalkTests` (VulkanProbe `--first-thread`: 0.2/0.1 ms after a pool burst; reverted 0.2/56.6). 0 guard events over ~100 windows; no `nvlddmkm` events. Suite 0/0. |
 | 6 | b788b2ef | gl-thread-walk-after-first-frame (4c) | The trigger waits 200 ms after the first frame, then for the window to rest (nothing to draw, no tween, no posted work, not minimized); one new loop deadline `IdleDeadline.DriverThreadWalk`, counted only while ahead. AOT, alternated ×2 vs bc78f875: Junction first repository frame +153/+116 → +94/+96 ms (the regression gone); Meridian first send slowest frame 2.4–2.8 ms at ~1.07 s and ~0.34 s after start; time to first present flat; the walk now runs at +242–252 ms and no frame in any app waits for it; idle 0 loop passes from ~1.1 s to 15.8 s. 500 ms settle let a 0.34 s send meet the walk (60–64 ms). Still exposed: a request within ~0.3 s of showing, or an app that never rests. Suite 0/0. 0 guard events over 50 launches; 0 `nvlddmkm`/TDR events. |
+| 6 | 9484d992 | vesper-transfer-progress-rebuilds | `Repaint()` goes view-only with the transfer's percent/count in `CmdKey`; throttle on `Application.Time`. Backgrounded copy 209 → 28 KB a tick JIT (206 → 28 AOT, −86 %), 1.31 → 1.13 ms (−13…−14 %); dialog open 282 → 100 KB (−64 %); part builds per tick 11 → 0.04, footers (and free-space queries) 2 → 0. Suite rows `component/worker tick beside kept parts, every part built` vs `…, view only`: 193.0 vs 54.6 KB/op. |
+| 6 | b3fc6be5 | find-step-current-match-rows (Vesper) | The current match is index + line, out of the rows' shape; `InvalidateRow` on the old and new rows; FindBar on `MarkViewDirty` (reader and Vesper's diff view). Reader Enter 330 → 69 KB (−79 %), rows made 35.5 → 2.5, parts 2 → 0; time over 400 Enters −31 % JIT / −14 % AOT. ELEMENTS.md FindBar note. |
+| 6 | c55e6b7a | vesper-find-results-item-rows | Find results on item rows with `SelectedIndex` (no `IndexOf` per row): 401 hits 405 → 317 KB/key (−22 %), rows 18 → 2.3; with UIA 611 → 331; time −1…−3 % (the win grows with hits). The selected result is now told as selected. |
+| 6 | ed13b156 | vesper-free-label-per-build | Free space cached per folder and listing generation: queries per Insert/type-to-find key 1 → 0 (bytes and time flat locally, ~20 µs a query; the gain is on network shares); not stale after copy, move, delete or refresh. |
+| 6 | 1b3ebdf7 | app-modal-cards-dialog-role (Vesper) | Approved (user, question 5). Vesper's overlay cards are `Dialog` named by their title. With UIA, on top of the above: transfer tick 171 → 101 KB, trees 0.78 → 0; find walk 331 → 318, trees 0.10 → 0. |
+| 6 | e7f840ad | dialog-focus-when-nothing-focusable | Approved (user, question 5). A dialog with nothing to focus is focusable (`TabIndex -1`) and takes the focus, not the scrim; recording, UIA and AT-SPI (in-process) tests. 10 scenes for the step: pixels and focus identical; a11y differs only as intended (two content-named Buttons → `Dialog "<title>"`, the selected find result told as selected). Suite 0/0 JIT + AOT. |
 
 ## Examined, not worth it
 
@@ -543,3 +549,11 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   first repository frame is back at +94–96 ms and Meridian's first send stays at 2.4–2.8 ms; no frame waits for the
   walk; idle stays at 0 wakes. Guideline note: one-time work set off on purpose goes at the first rest after start-up,
   not right after the first frame — start-up threads of the app's own may still be loading.
+- 2026-10-27: round 6 step 5 landed (9484d992..e7f840ad, six commits): Vesper's transfer tick −86 %, find Enter −79 %, find
+  results −22 % (−46 % with UIA), free space no longer queried per key, overlay cards are dialogs, and a dialog with
+  nothing to focus takes the focus. Found: find-result items are read as the `Hit` record's `ToString()`
+  ("Hit { FullPath = … }") — the orchestrator folds a real item label (the path) into step 6 as a reader bug fix.
+  Guideline notes: a worker's progress tick is view-only — put what it moves in the part's compare key, throttle on
+  `Application.Time`; keep a find's current match out of the rows' shape and `InvalidateRow` the old and new rows; a
+  one-argument `RenderWith` with `IndexOf` per row is O(items × rows) — use item rows with `SelectedIndex`; cache OS
+  queries per listing generation, not per build. Step agent: 574k tokens (six items is about the most for one agent).
