@@ -62,6 +62,13 @@ using HultUI.WebView.WebView2;
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
 //
+// --first-thread (with --renderer=default: GL) draws the first frame and runs the loop for 300 ms,
+// then starts eight thread-pool workers, as an app's first request does, and prints the time of
+// the two frames drawn after them. NVIDIA's GL driver walks every thread on the system once a
+// process, after the first present that follows a thread starting, and the frame after that
+// present waits it out (~55 ms) unless the framework set the walk off as the window first
+// showed (SDL3Window.StartDriverThreadWalk).
+//
 // --video-frame-bytes --clip=<file> plays the clip through MpvBackend in the real loop and prints
 // the managed bytes the UI thread allocates per drawn frame, the least of five rounds of 60 frames,
 // then the brightness of the video in two captures of the swapchain (HULTUI_VULKAN_CAPTURE, one
@@ -81,6 +88,7 @@ internal static class Program
         if (args.Contains("--disposed-images")) return DisposedImages(renderer);
         if (args.Contains("--frame-counter")) return FrameCounter(renderer);
         if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
+        if (args.Contains("--first-thread")) return FirstThread(renderer);
         if (args.Contains("--video-frame-bytes"))
             return VideoFrameBytes(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
@@ -643,6 +651,45 @@ internal static class Program
         }
         Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"probe: {least:0.0} bytes a frame"));
+        Console.WriteLine("probe: done");
+        return 0;
+    }
+
+    private static int FirstThread(RendererKind renderer)
+    {
+        using var app = Foreground.NoActivate(new Application("vulkan-probe", 320, 200, renderer: renderer));
+        var changing = Box.New().Width(40f).Height(20f).Background(Color.FromHex("#FF8800"));
+        app.SetRoot(Flex.Column().FlexGrow(1).Padding(16f).Background(Color.FromHex("#141418")).Children(changing));
+
+        // The first frame as Run draws it, then the loop for 300 ms, drawing what it is asked to.
+        app.RunFrame(TimeSpan.FromMilliseconds(16));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < 300)
+        {
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+            Thread.Sleep(5);
+        }
+
+        // Eight pool workers, all started before the frames: an app's first request.
+        ThreadPool.GetMinThreads(out int workers, out int io);
+        ThreadPool.SetMinThreads(Math.Max(workers, 12), io);
+        var started = new CountdownEvent(8);
+        var release = new ManualResetEventSlim();
+        for (int i = 0; i < 8; i++) ThreadPool.UnsafeQueueUserWorkItem(_ => { started.Signal(); release.Wait(); }, null);
+        started.Wait();
+        release.Set();
+
+        var took = new double[2];
+        for (int i = 0; i < took.Length; i++)
+        {
+            changing.MarkPaintDirty();
+            long at = System.Diagnostics.Stopwatch.GetTimestamp();
+            app.RunFrame(TimeSpan.FromMilliseconds(16));
+            took[i] = System.Diagnostics.Stopwatch.GetElapsedTime(at).TotalMilliseconds;
+            Thread.Sleep(8);
+        }
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: frames after the pool grew {took[0]:0.0} ms, {took[1]:0.0} ms"));
         Console.WriteLine("probe: done");
         return 0;
     }

@@ -651,6 +651,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // Disable driver-level vsync — on Wayland the compositor handles
         // vsync, and swap interval 1 can block during interactive resize.
         SDL_GL_SetSwapInterval(0);
+        if (OperatingSystem.IsWindows())
+        {
+            var getString = (delegate* unmanaged<uint, byte*>)GetGLProcAddress("glGetString");
+            _nvidiaGL = getString != null
+                && Utf8OrFallback(getString(0x1F00 /* GL_VENDOR */)).StartsWith("NVIDIA", StringComparison.Ordinal);
+        }
         StartupTrace.Mark("gl context");
 
         // Create SkiaSharp surface with SDL3 GL proc resolver, adopting the preloaded
@@ -1652,6 +1658,42 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
     }
     private bool _shown;
+
+    /// <summary>
+    /// Brings NVIDIA's one-time thread walk forward to right after the first frame. Call once the
+    /// window is shown; true when the caller should present one more frame now.
+    ///
+    /// <para>NVIDIA's GL driver on Windows walks every thread on the system once per process
+    /// (a Toolhelp snapshot, two passes of <c>Thread32Next</c> over the ~7,500 threads of a
+    /// desktop, hundreds of <c>OpenThread</c>), on its own thread, right after the first present
+    /// that follows a thread starting in the process — any thread, made after the first frame (one
+    /// made before the first present does not count). The UI thread's next GL call waits it out:
+    /// 55–75 ms. Left alone, that is the second frame of the first thing the user does that starts
+    /// a thread: Meridian's first response (its send starts 8), a first palette open while the
+    /// thread pool grows. It never comes again in the process. So a no-op thread starts and ends
+    /// here, and the caller's next frame (the same picture again) sets the walk off while the
+    /// window has only just appeared: the frame after that one waits instead, ~45 ms after the
+    /// first. The first frame's present is handed on before the walk starts.</para>
+    ///
+    /// <para>Only the first GL window of the process, only on Windows, only when the driver is
+    /// NVIDIA's: Vulkan has no walk, and other drivers were not seen to make one.</para>
+    /// </summary>
+    internal bool StartDriverThreadWalk()
+    {
+        if (s_driverThreadWalkStarted || !_nvidiaGL || _glContext == null || !OperatingSystem.IsWindows())
+            return false;
+        s_driverThreadWalkStarted = true;
+        var thread = new Thread(static () => { }) { IsBackground = true };
+        thread.Start();
+        thread.Join();
+        return true;
+    }
+
+    /// <summary>The GL driver is NVIDIA's (GL_VENDOR), read once when the context is made, on Windows.</summary>
+    private bool _nvidiaGL;
+
+    /// <summary>The driver's thread walk was set off (<see cref="StartDriverThreadWalk"/>); once a process.</summary>
+    private static bool s_driverThreadWalkStarted;
 
     /// <summary>Frames presented, for the live-resize watch to tell whether its call drew one.</summary>
     private long _presents;

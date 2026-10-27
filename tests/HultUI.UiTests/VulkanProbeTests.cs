@@ -849,7 +849,7 @@ public sealed class VulkanProbeTests
     /// Runs the probe with <paramref name="environment"/> on top of this process's, minus the
     /// variables that would change what is being tested. A null value removes one.
     /// </summary>
-    private static (int ExitCode, string Output) RunProbe(Dictionary<string, string?> environment, string arguments = "")
+    internal static (int ExitCode, string Output) RunProbe(Dictionary<string, string?> environment, string arguments = "")
     {
         var start = new ProcessStartInfo(SamplePath.VulkanProbe(), arguments)
         {

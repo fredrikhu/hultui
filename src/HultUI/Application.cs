@@ -935,6 +935,11 @@ public sealed class Application : IDisposable
                 _firstFrameTraced = true;
                 StartupTrace.Mark("first frame shown");
             }
+            // The GL driver's one-time walk of the system's threads, set off now that the window
+            // shows rather than in the first response to the user (SDL3Window.StartDriverThreadWalk):
+            // the platform starts a thread, and the picture is presented once more.
+            if (window.PlatformWindow is SDL3Window sdl && sdl.StartDriverThreadWalk())
+                window.Root?.MarkPaintDirty();
             anyRendered = true;
         }
         return anyRendered;
