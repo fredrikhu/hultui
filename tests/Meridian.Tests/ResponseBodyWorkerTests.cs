@@ -263,43 +263,52 @@ public class ResponseBodyWorkerTests : IDisposable
         });
     }
 
-    /// <summary>With find open, a rebuild that changes neither the spans nor the search hands
-    /// the body the same list — the app rebuilds whole on every keystroke in the URL, and the
-    /// merge copied and sorted every span each time — and moving to the next match makes a
-    /// new one, with the current tint moved.</summary>
+    /// <summary>Find hands the body its matches as highlights and leaves its syntax spans as
+    /// they are: until round 6 of plan 17 they were merged into a copy of every span, sorted, on
+    /// every key and every Enter. With find open, a rebuild that changes neither the text nor the
+    /// search hands the body the same highlights — the app rebuilds whole on every keystroke in
+    /// the URL — and moving to the next match makes new ones, with the current tint moved.</summary>
     [Fact]
-    public void ARebuildWithFindOpenKeepsTheMergedSpans()
+    public void ARebuildWithFindOpenKeepsTheHighlights_AndFindKeepsTheSpans()
     {
         Hosted((session, app) =>
         {
             Arrive(app, Json(150, seed: 11));
             session.PumpFrames(2);
-            int syntax = Body(session)!.Spans!.Count;
+            var syntax = Body(session)!.Spans;
+            Assert.NotNull(syntax);
             session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
             session.PumpFrames(2);
             session.Window.TypeText("customer-0");
             session.PumpFrames(3);
 
-            var merged = Body(session)!.Spans;
-            Assert.Equal(syntax + 150, merged!.Count);
+            var tints = Body(session)!.Highlights;
+            Assert.Equal(150, tints!.Count);
+            Assert.Same(syntax, Body(session)!.Spans);
 
             MarkDirty(app);
             session.PumpFrame();
-            Assert.Same(merged, Body(session)!.Spans);
+            Assert.Same(tints, Body(session)!.Highlights);
 
             session.Window.PressKey(KeyCode.Enter);
             session.PumpFrames(2);
-            var next = Body(session)!.Spans;
-            Assert.NotSame(merged, next);
-            Assert.Equal(merged.Count, next!.Count);
-            Assert.False(merged.SequenceEqual(next), "the current match's tint did not move");
+            var next = Body(session)!.Highlights;
+            Assert.NotSame(tints, next);
+            Assert.Equal(tints.Count, next!.Count);
+            Assert.False(tints.SequenceEqual(next), "the current match's tint did not move");
+            Assert.Same(syntax, Body(session)!.Spans);
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(2);
+            Assert.Null(Body(session)!.Highlights);
+            Assert.Same(syntax, Body(session)!.Spans);
         });
     }
 
-    /// <summary>The kept merge belongs to the text it tinted: the next response, plain text with
-    /// as many hits for the same query and no syntax spans either, gets its own tints.</summary>
+    /// <summary>The kept highlights belong to the text they tint: the next response, plain text
+    /// with as many hits for the same query and no syntax spans either, gets its own.</summary>
     [Fact]
-    public void TheKeptMergeIsTheShownTexts()
+    public void TheKeptHighlightsAreTheShownTexts()
     {
         Hosted((session, app) =>
         {
@@ -309,12 +318,12 @@ public class ResponseBodyWorkerTests : IDisposable
             session.PumpFrames(2);
             session.Window.TypeText("needle");
             session.PumpFrames(3);
-            Assert.Equal(10, Assert.Single(Body(session)!.Spans!).Start);
+            Assert.Equal(10, Assert.Single(Body(session)!.Highlights!).Start);
 
             Arrive(app, "needle first\nbeta\n", "text/plain");
             session.PumpFrames(3);
             Assert.StartsWith("needle", Body(session)!.Text);
-            Assert.Equal(0, Assert.Single(Body(session)!.Spans!).Start);
+            Assert.Equal(0, Assert.Single(Body(session)!.Highlights!).Start);
         });
     }
 
