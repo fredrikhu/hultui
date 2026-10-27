@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** survey — round 6: spawn the eight experts (Phase `survey` in the brief), reviewing round 5's build.
+- **Phase:** survey — round 6: the eight experts were spawned 2026-10-27 (reports land as `17-reports/r6-k-<area>.md`);
+  when all eight have returned, merge them here, rank round 6's build order and set Phase `build`.
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
   [the archive](17-performance-team-ledger-archive.md) (search it, don't read it whole), and the brief has
@@ -295,29 +296,13 @@ From the round 1 surveys (details in `17-reports/`):
 
 ## Needs the user
 
-Round 5 questions (asked 2026-10-25 on resume). Recommendations in brackets.
+Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
-1. **layout-virtuallist-selection-highlight:** may a VirtualList draw the selected row's highlight itself, opt
-   in per list, so an app's rows no longer show the selection and a selection move makes no rows again? A
-   visual API: fill, optional ring, corner radius, drawn under the row. Junction History −30 % bytes per key,
-   Tags −54 %, suite item-row walk −36 %. [Yes, opt in, adopted one list at a time like item rows.] → **yes, opt in** (2026-10-25).
-2. **a11y-overlay-live:** may the bridges tell changes inside open context menus, dropdown lists, dialogs and
-   the command palette (selection moves, name/value and children changes; menu items get real bounds)? New
-   UIA and AT-SPI events for changes that are silent today. [Yes.] → **yes** (2026-10-25).
-3. **TextArea document as one string** (declined in rounds 3 and 4: a rope changes the public `Text`): new
-   evidence — typing above 42,500 characters triggers a gen-2 GC every 14–17 keys at app-sized heaps. [Not
-   now: take the LOH-threshold half of runtime-gc-gen0-budget-and-loh-threshold first; revisit chunked
-   storage only if documents above ~256k characters matter.] → **threshold first; add option B to Waiting**
-   (2026-10-25: keep `Text`/`OnTextChanged`, add a read-only `Document` view and `OnDocumentChanged(TextChange)`;
-   options A same API / B additive / C breaking were written up for the user).
 5. **junction-history-row-selection-pixels** (from r5 step 9): Junction History can adopt the list-drawn selection
    (survey −30 % per key) only if two things move out of its rows, which changes pixels: the caret row's "Details →"/
    "Compare →" affordance (it sits in the row's flow, so that row's subject ellipsis comes earlier) and the hover tint
    (unselected rows tint under the pointer, the selected one doesn't). May the affordance become an overlay at the
    row's end and the list own the hover tint? [Ask when convenient; not blocking.] → **open**.
-4. **vesper-detail-resize-stale** (not perf): in Detail view a resize never rebuilds, so the path trail's
-   truncation stays stale until the next key; e6a432fa's fit comparison runs only in grid views. Fix it in
-   step 8? [Yes, small.] → **yes** (2026-10-25).
 
 Reminder (expert 8): Aperture signed in to jellyfin.home 3 more times this round as device
 "aperture-survey"; the user should remove those devices and revoke the API key when the work is done.
@@ -441,3 +426,5 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   log to 2026-10-25; 218 Landed rows and 83 log entries checked before and after); the brief gained "Keeping token
   use down" (excerpt briefs, quiet commands, 3600 s fallback wake-ups, read once per session) and release step 5
   (each round starts in a fresh context). Round → 6, Phase → survey; round 6 starts in a cleared context.
+- 2026-10-27: round 6 survey started in a fresh context; round 5's answered questions 1–4 moved to the archive. The
+  eight experts run in their own worktrees, reviewing 643eb07b..f31194ab.

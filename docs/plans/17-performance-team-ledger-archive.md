@@ -403,6 +403,27 @@ Answered:
 Decided by the orchestrator: idle wake-ups count as a bar (brief updated); a change aimed
 at per-frame allocation checks its bytes on AOT too (brief updated).
 
+## Needs the user, round 5
+
+Round 5 questions 1–4 (asked and answered 2026-10-25; question 5 stays open in the ledger). Recommendations in brackets.
+
+1. **layout-virtuallist-selection-highlight:** may a VirtualList draw the selected row's highlight itself, opt
+   in per list, so an app's rows no longer show the selection and a selection move makes no rows again? A
+   visual API: fill, optional ring, corner radius, drawn under the row. Junction History −30 % bytes per key,
+   Tags −54 %, suite item-row walk −36 %. [Yes, opt in, adopted one list at a time like item rows.] → **yes, opt in** (2026-10-25).
+2. **a11y-overlay-live:** may the bridges tell changes inside open context menus, dropdown lists, dialogs and
+   the command palette (selection moves, name/value and children changes; menu items get real bounds)? New
+   UIA and AT-SPI events for changes that are silent today. [Yes.] → **yes** (2026-10-25).
+3. **TextArea document as one string** (declined in rounds 3 and 4: a rope changes the public `Text`): new
+   evidence — typing above 42,500 characters triggers a gen-2 GC every 14–17 keys at app-sized heaps. [Not
+   now: take the LOH-threshold half of runtime-gc-gen0-budget-and-loh-threshold first; revisit chunked
+   storage only if documents above ~256k characters matter.] → **threshold first; add option B to Waiting**
+   (2026-10-25: keep `Text`/`OnTextChanged`, add a read-only `Document` view and `OnDocumentChanged(TextChange)`;
+   options A same API / B additive / C breaking were written up for the user).
+4. **vesper-detail-resize-stale** (not perf): in Detail view a resize never rebuilds, so the path trail's
+   truncation stays stale until the next key; e6a432fa's fit comparison runs only in grid views. Fix it in
+   step 8? [Yes, small.] → **yes** (2026-10-25).
+
 ## Log, 2026-10-07 to 2026-10-25
 
 - 2026-10-07: brief, ledger and `scripts/perf/idle-gate.ps1` written; round 1 survey started.
