@@ -62,12 +62,16 @@ using HultUI.WebView.WebView2;
 // --frame-bytes repaints one box a frame and prints the managed bytes a frame allocates, the
 // least of five rounds of 120 frames.
 //
-// --first-thread (with --renderer=default: GL) draws the first frame and runs the loop for 300 ms,
-// then starts eight thread-pool workers, as an app's first request does, and prints the time of
-// the two frames drawn after them. NVIDIA's GL driver walks every thread on the system once a
+// --first-thread (with --renderer=default: GL) draws the first frame and runs the loop for 1 s,
+// drawing only what it is asked to, then starts eight thread-pool workers, as an app's first
+// request does, and prints the time of the two frames drawn after them, and when the loop drew a
+// frame the probe did not ask for. NVIDIA's GL driver walks every thread on the system once a
 // process, after the first present that follows a thread starting, and the frame after that
-// present waits it out (~55 ms) unless the framework set the walk off as the window first
-// showed (SDL3Window.StartDriverThreadWalk).
+// present waits it out (~55 ms) unless the framework set the walk off before: once the window has
+// settled (0.2 s after its first frame) and rests, with a frame of its own
+// (SDL3Window.StartDriverThreadWalk). --first-thread-busy keeps the window drawing a new frame
+// every pass for 0.8 s first, then lets it rest for 0.4 s, and prints the frames drawn unasked
+// while it rested.
 //
 // --video-frame-bytes --clip=<file> plays the clip through MpvBackend in the real loop and prints
 // the managed bytes the UI thread allocates per drawn frame, the least of five rounds of 60 frames,
@@ -88,7 +92,8 @@ internal static class Program
         if (args.Contains("--disposed-images")) return DisposedImages(renderer);
         if (args.Contains("--frame-counter")) return FrameCounter(renderer);
         if (args.Contains("--frame-bytes")) return FrameBytes(renderer);
-        if (args.Contains("--first-thread")) return FirstThread(renderer);
+        if (args.Contains("--first-thread-busy")) return FirstThread(renderer, busyMs: 800);
+        if (args.Contains("--first-thread")) return FirstThread(renderer, busyMs: 0);
         if (args.Contains("--video-frame-bytes"))
             return VideoFrameBytes(renderer, args.First(a => a.StartsWith("--clip="))["--clip=".Length..]);
         if (args.Contains("--minimize")) return MinimizeAndRestore(renderer);
@@ -655,20 +660,32 @@ internal static class Program
         return 0;
     }
 
-    private static int FirstThread(RendererKind renderer)
+    private static int FirstThread(RendererKind renderer, int busyMs)
     {
         using var app = Foreground.NoActivate(new Application("vulkan-probe", 320, 200, renderer: renderer));
         var changing = Box.New().Width(40f).Height(20f).Background(Color.FromHex("#FF8800"));
         app.SetRoot(Flex.Column().FlexGrow(1).Padding(16f).Background(Color.FromHex("#141418")).Children(changing));
 
-        // The first frame as Run draws it, then the loop for 300 ms, drawing what it is asked to.
+        // The first frame as Run draws it; with busyMs, a new frame every pass for that long; then
+        // the loop until 1 s after the first frame (busy: 0.4 s after the work), drawing only what
+        // it is asked to, so every frame it draws is one the probe did not ask for.
         app.RunFrame(TimeSpan.FromMilliseconds(16));
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        while (clock.ElapsedMilliseconds < 300)
+        while (clock.ElapsedMilliseconds < busyMs)
         {
+            changing.MarkPaintDirty();
             app.RunFrame(TimeSpan.FromMilliseconds(16));
             Thread.Sleep(5);
         }
+        var unasked = new List<double>();
+        long restUntil = busyMs > 0 ? busyMs + 400 : 1000;
+        while (clock.ElapsedMilliseconds < restUntil)
+        {
+            if (app.RunFrame(TimeSpan.FromMilliseconds(16))) unasked.Add(clock.Elapsed.TotalMilliseconds);
+            Thread.Sleep(5);
+        }
+        Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"probe: frames drawn unasked from {busyMs} ms: {unasked.Count}, at {string.Join(" ", unasked.Select(t => t.ToString("0", System.Globalization.CultureInfo.InvariantCulture)))} ms after the first"));
 
         // Eight pool workers, all started before the frames: an app's first request.
         ThreadPool.GetMinThreads(out int workers, out int io);

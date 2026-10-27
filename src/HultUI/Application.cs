@@ -36,6 +36,19 @@ public sealed class Application : IDisposable
     private bool _firstFrameTraced;
     private Action<IPlatformWindow>? _onWindowClose;
 
+    /// <summary>The window whose GL driver's one-time thread walk waits to be set off, once it has
+    /// settled and rests (<see cref="SetOffDriverThreadWalkIfResting"/>); null when none waits.</summary>
+    private Window? _driverWalkWindow;
+    /// <summary>When <see cref="_driverWalkWindow"/> has settled, on the platform's clock.</summary>
+    private long _driverWalkAt;
+
+    /// <summary>How long after its first frame a window's GL driver walk waits at least, and then
+    /// for the window to rest: past the work an app does as it shows (Junction draws its repository
+    /// view ~95 ms after the first frame and rests from ~0.18 s to ~0.5 s), and before a user's
+    /// first request (the walk, 45–90 ms, was over by ~0.29 s, before a Meridian send at 0.34 s;
+    /// waiting 500 ms instead, that send's second frame waited it out, 60–64 ms).</summary>
+    internal const int DriverWalkSettleMs = 200;
+
     /// <summary>The windowing platform this application runs on.</summary>
     internal IWindowingPlatform Platform => _platform;
 
@@ -521,6 +534,8 @@ public sealed class Application : IDisposable
         // catches up after the inspected window goes idle mid-interval.
         _inspectorHost?.Tick();
 
+        if (_driverWalkWindow is not null) SetOffDriverThreadWalkIfResting();
+
         bool anyRendered = allowRender && RenderDirtyWindows(forceRender);
 
         // Clean up closed windows
@@ -716,7 +731,42 @@ public sealed class Application : IDisposable
         // (SDL3Window.PollDisplayColor): the slider for SDR content brightness sends no message.
         if (_platform is SdlWindowingPlatform && SDL3Window.NextDisplayColorPoll is { } poll)
             Earliest(ref at, ref deadline, poll, IdleDeadline.DisplayColor);
+        // The GL driver's thread walk, set off once the window has settled. Only while that is to
+        // come: once it has, a pass that finds the window resting sets it off, and one that finds
+        // it busy leaves it to the pass after the work, which the work's own frames or deadlines
+        // bring (a due deadline here would spin the loop while a tween waits out its delay).
+        if (_driverWalkWindow is not null && _driverWalkAt > _platform.TimeProvider.GetTimestamp())
+            Earliest(ref at, ref deadline, _driverWalkAt, IdleDeadline.DriverThreadWalk);
         return at;
+    }
+
+    /// <summary>
+    /// Sets the GL driver's one-time thread walk off (<c>SDL3Window.StartDriverThreadWalk</c>) once
+    /// the window it waits for has settled and rests: nothing to draw in any window, no tween, no
+    /// work posted. Its frame (the same picture again) is drawn with this pass when one may be, else
+    /// with the next. Left to come with the user's first request, the walk made that request's
+    /// second frame wait ~60 ms (Meridian's first send); set off right after the first frame, it
+    /// made the frame ~45 ms after it wait, Junction's first frame of its repository view.
+    /// </summary>
+    private void SetOffDriverThreadWalkIfResting()
+    {
+        var window = _driverWalkWindow!;
+        if (!window.IsOpen)
+        {
+            // Another GL window takes it up with its own first frame.
+            _driverWalkWindow = null;
+            return;
+        }
+        if (_platform.TimeProvider.GetTimestamp() < _driverWalkAt
+            || AnyWindowNeedsRender()
+            || AnimationManager.HasActiveAnimations
+            || !_mainThreadQueue.IsEmpty
+            // A minimized window draws nothing, and the walk waits for a present: its restore.
+            || window.PlatformWindow.IsMinimized)
+            return;
+        _driverWalkWindow = null;
+        if (window.PlatformWindow is SDL3Window sdl && sdl.StartDriverThreadWalk())
+            window.Root?.MarkPaintDirty();
     }
 
     // ──── A host's own loop (HultUI.WinForms): what Run does between frames, for a pump that is
@@ -935,11 +985,15 @@ public sealed class Application : IDisposable
                 _firstFrameTraced = true;
                 StartupTrace.Mark("first frame shown");
             }
-            // The GL driver's one-time walk of the system's threads, set off now that the window
-            // shows rather than in the first response to the user (SDL3Window.StartDriverThreadWalk):
-            // the platform starts a thread, and the picture is presented once more.
-            if (window.PlatformWindow is SDL3Window sdl && sdl.StartDriverThreadWalk())
-                window.Root?.MarkPaintDirty();
+            // The GL driver's one-time walk of the system's threads, to be set off once this
+            // window has settled and rests rather than in the first response to the user
+            // (SetOffDriverThreadWalkIfResting).
+            if (_driverWalkWindow is null && window.PlatformWindow is SDL3Window { WantsDriverThreadWalk: true })
+            {
+                _driverWalkWindow = window;
+                _driverWalkAt = _platform.TimeProvider.GetTimestamp()
+                    + DriverWalkSettleMs * _platform.TimeProvider.TimestampFrequency / 1000;
+            }
             anyRendered = true;
         }
         return anyRendered;
