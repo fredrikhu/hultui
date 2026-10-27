@@ -53,6 +53,8 @@ public static class Dialog
         if (panel.Role == AccessibilityRole.None) panel.Role = AccessibilityRole.Dialog;
         scrim.ReplaceChildren(panel);
 
+        // A box with a click is a button to a reader, but not one around a dialog: the scrim is
+        // the dialog's backdrop, a node of no role and no name (AccessibilityTreeBuilder.InferRole).
         if (options.DismissOnScrimClick)
             scrim.On<ClickEvent>(_ => controller.Close(default!));
         // Last in line: the panel and everything in it see Escape first, and one that stops it

@@ -237,6 +237,28 @@ move is — or by its leading edge at once, when no refresh came in the last 100
 consequences, both of the coalescing: a reader asking within 100 ms reads the old bounds, and a
 node removed within the wait never had its new bounds told.
 
+A dialog's backdrop is no button (2026-10-27, plan 17 round 6; the user approved what a reader
+hears). A box with a click is inferred to be a button, named from its content, but not a box
+one of whose children has the role `Dialog` (`AccessibilityTreeBuilder.InferRole`): that box is
+the dialog's backdrop, and its click closes the dialog. It gets no role and no name, so a backdrop
+in the app's own tree (Meridian's Options) is no node and the dialog is its parent's child, and
+`Dialog.Show`'s scrim, which as the root of its overlay always has a node, is an unnamed UIA Pane
+(AT-SPI panel) holding the dialog, with no Invoke. The dialog's own role, name and node are as
+they were (no bridge exposes a modal state). Before, a reader heard every dialog and every command
+palette inside a button named after all of their text (2,182 characters over 2,000 commands),
+whose name changed with every keystroke; and a name change inside it was under an ancestor named
+from its content, so it was never patched: a label ticking in a dialog every 50 ms over 1,000 rows
+built the window's tree on every tick (UIA 283.9 → 1.4 KB a tick, AT-SPI 1,081 → 400, trees 40 →
+0 in 40), and any label change in Meridian's Options did too (UIA 260.3 → 1.1 KB, AT-SPI 1,058 →
+1.3; the in-place layout refresh failed there on "a node with children changed"). A palette
+keystroke raises one Name change (the "… more" line's), not two: UIA 454.2 → 441.2 KB a key over
+2,000 commands. A reader closes a dialog with Escape, or with a control of its own; the click
+outside still closes it, and hit-testing is the element tree's, which this does not touch. The
+rule looks at the backdrop's children only, which is where `Dialog.Show` puts its panel and where
+Meridian puts its card. Junction's and Vesper's modal backdrops (and Meridian's environment prompt)
+hold cards with no role, so they are still buttons named after the whole card, until their apps
+give the cards the Dialog role.
+
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
 views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),

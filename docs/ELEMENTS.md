@@ -185,9 +185,21 @@ clicks it, so the element has to select itself on click. `TabsElement` sets it o
 **A `BoxElement` with a click handler is announced as a button.** When no role is set, the
 tree builder infers one from the element type, and the last rule is "a box with an
 `OnClick` is a `Button`", named from the text inside it. That is right for a clickable
-card and wrong for a row whose click merely selects it, or a backdrop whose click closes a
-dialog: give those an explicit `.AccessibleRole(...)`. An explicit role always wins over
-inference.
+card and wrong for a row whose click merely selects it: give that an explicit
+`.AccessibleRole(...)`. An explicit role always wins over inference.
+
+**A backdrop is not a button when its card is a dialog.** A box with a click whose child
+has the role `Dialog` is the dialog's backdrop: it gets no role and no name, so in your own
+tree it is no node at all and the dialog is its parent's child; `Dialog.Show`'s scrim, the
+root of its overlay, is an unnamed pane (UIA) or panel (AT-SPI) holding the dialog. The
+click still closes the dialog, and Escape still does. For a modal you keep in your own
+tree, give the card `.AccessibleRole(AccessibilityRole.Dialog).AccessibleName("…")` and put
+it directly in the backdrop. Without that the backdrop is a button named after all the
+card's text: a reader hears the whole modal as one button, told again whenever any text in
+it changes, and every such change builds the window's whole accessibility tree, 260 KB per
+change over 1,000 rows with UIA (1,058 KB with AT-SPI), where the card's label is otherwise
+patched for about 1 KB (plan 17, round 6). The rule looks at the backdrop's children only,
+not further down.
 
 ### Tree
 

@@ -651,9 +651,25 @@ public static partial class AccessibilityTreeBuilder
         CanvasElement => AccessibilityRole.Group,
         // A button is a button whether or not anything has subscribed to its click yet.
         ButtonElement => AccessibilityRole.Button,
-        BoxElement box when box.HasEventHandler<ClickEvent>() => AccessibilityRole.Button,
+        BoxElement box when box.HasEventHandler<ClickEvent>() && !HoldsDialog(box) => AccessibilityRole.Button,
         _ => AccessibilityRole.None
     };
+
+    /// <summary>
+    /// Whether a child of <paramref name="box"/> has the role <see cref="AccessibilityRole.Dialog"/>:
+    /// the box is the dialog's backdrop, and its click closes the dialog (<c>Dialog.Show</c>'s scrim, a
+    /// modal an app keeps in its own tree). It is no button: a reader heard the dialog inside one named
+    /// after all of the dialog's text, told again with every change of that text, and a change of a
+    /// name inside it could not be patched (<see cref="NamedFromContentAbove"/>), so each one built the
+    /// whole tree. A reader closes a dialog with Escape, or with a control of its own.
+    /// </summary>
+    private static bool HoldsDialog(Element box)
+    {
+        var children = box.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            if (children[i].Role == AccessibilityRole.Dialog) return true;
+        return false;
+    }
 
     /// <summary>
     /// Resolves the accessible name. Explicit AccessibleName wins.

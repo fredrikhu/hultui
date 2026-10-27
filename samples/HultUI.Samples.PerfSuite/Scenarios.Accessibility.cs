@@ -1,8 +1,11 @@
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Dialogs;
 using HultUI.Core.Elements;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 using HultUI.Headless;
 
 namespace PerfSuite;
@@ -206,6 +209,24 @@ static partial class Scenarios
                 return ProgressTicks(bar);
             });
 
+        yield return new Scenario("a11y/label ticking in a dialog over 1,000 rows, bridge on",
+            "A label in an open dialog (Dialog.Show, whose scrim a click closes) changes every 50 ms over 1,000 rows while an accessibility client listens, as a fetch's progress does: the trees a tick builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var tick = MountDialogTick(ctx);
+                return LabelTicks(ctx, tick, _ => ToldName(bridge.CurrentTree, tick));
+            });
+
+        yield return new Scenario("a11y/label ticking in an in-tree modal over 1,000 rows, bridge on",
+            "A label in a modal card the app keeps in its own tree (a Dialog-role card on a backdrop whose click closes it, as Meridian's Options) changes every 50 ms over 1,000 rows while an accessibility client listens: the trees a tick builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var tick = MountInTreeModal(ctx);
+                return LabelTicks(ctx, tick, _ => ToldName(bridge.CurrentTree, tick));
+            });
+
         yield return new Scenario("a11y/caret walk in rich text beside 300 rows, bridge on",
             "Right and Left in a 20-block rich text editor beside 300 rows while a reader listens: each caret move told, and the trees a key builds",
             ctx =>
@@ -268,6 +289,69 @@ static partial class Scenarios
             Text.New("Downloading").FontSize(13f), bar,
             ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000))));
     }
+
+    /// <summary>A dialog open over 1,000 rows (<see cref="Dialog.Show{TResult}"/>, whose scrim a click
+    /// closes), its second line a label for the steps to change; past its fade-in.</summary>
+    private static TextElement MountDialogTick(Ctx ctx)
+    {
+        ctx.Mount(Busy(ctx, Text.New("Dialogs").FontSize(13f)));
+        var tick = Text.New(TickText(-1)).FontSize(13f);
+        Dialog.Show<bool>(ctx.Window.Window, c => Flex.Column(gap: 10).Width(Dimension.Px(420)).Padding(20)
+            .Background(Color.White).CornerRadius(10f).Children(
+                Text.New("Fetching origin").FontSize(18f).FontWeight(FontWeight.Bold), tick,
+                Flex.Row(gap: 8).JustifyContent(JustifyContent.FlexEnd).Children(
+                    Button.New("Cancel", ButtonVariant.Secondary).OnClick(_ => c.Close(false)))));
+        ctx.Pump(10);   // past its 120 ms fade-in
+        return tick;
+    }
+
+    /// <summary>A modal card the app keeps in its own tree over 1,000 rows, as Meridian's Options: a
+    /// card of role Dialog on a backdrop over the whole window, whose click would close it. Its second
+    /// line is a label for the steps to change.</summary>
+    private static TextElement MountInTreeModal(Ctx ctx)
+    {
+        var tick = Text.New(TickText(-1)).FontSize(13f);
+        var card = Flex.Column(gap: 8).Width(Dimension.Px(420)).Padding(16).Background(Color.White)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName("Options")
+            .Children(Text.New("Options").FontSize(14f), tick,
+                Checkbox.New(false, "Wrap lines"), Checkbox.New(true, "Follow redirects"));
+        card.On<HultUI.Core.Events.ClickEvent>(e => e.StopPropagation = true);
+        var backdrop = Box.New().Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .Background(new Color(0, 0, 0, 120)).Children(card);
+        backdrop.Position.Type = PositionType.Absolute;
+        backdrop.Position.Top = Dimension.Px(0);
+        backdrop.Position.Left = Dimension.Px(0);
+        backdrop.On<HultUI.Core.Events.ClickEvent>(e => e.StopPropagation = true);
+        ctx.Mount(Box.New().FlexGrow(1).Children(ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)), backdrop));
+        return tick;
+    }
+
+    private static string TickText(int step) => $"Fetching {step % 100 + 1} of 100";
+
+    /// <summary>Each step changes the label, 50 ms apart, as a fetch's progress does; the figure is
+    /// the trees a tick builds.</summary>
+    private static Op LabelTicks(Ctx ctx, TextElement tick, Func<int, string?> told)
+    {
+        int treesBefore = 0;
+        return new Op
+        {
+            Run = step =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                tick.Content = TickText(step);
+            },
+            FrameDelta = TimeSpan.FromMilliseconds(50),
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/tick",
+            Check = told,
+        };
+    }
+
+    /// <summary>Null when the bridge's tree names <paramref name="text"/>'s node by its content.</summary>
+    private static string? ToldName(AccessibilityNode? tree, TextElement text)
+        => Find(tree, text) is not { } node ? "the bridge's tree has no node for the label"
+            : node.Name == text.Content ? null : $"the bridge's tree names the label \"{node.Name}\", not \"{text.Content}\"";
 
     /// <summary>Each step moves the bar a thousandth, one 60 Hz frame apart.</summary>
     private static Op ProgressTicks(ProgressBarElement bar) => new()
@@ -705,6 +789,22 @@ static partial class Scenarios
                     Check = _ => palette.IsOpen && palette.Query.Length == 1 && palette.Matches.Count is > 0 and < 2_000
                         ? null : $"the palette's query is \"{palette.Query}\" with {palette.Matches.Count} matches",
                 };
+            });
+
+        yield return new Scenario("a11y/label ticking in a dialog over 1,000 rows, UIA",
+            "A label in an open dialog (Dialog.Show, whose scrim a click closes) changes every 50 ms over 1,000 rows with the UIA bridge, as a fetch's progress does: what a tick tells, and the trees it builds",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return LabelTicks(ctx, MountDialogTick(ctx), Applied(rig));
+            });
+
+        yield return new Scenario("a11y/label ticking in an in-tree modal over 1,000 rows, UIA",
+            "A label in a modal card the app keeps in its own tree (a Dialog-role card on a backdrop whose click closes it, as Meridian's Options) changes every 50 ms over 1,000 rows with the UIA bridge: what a tick tells, and the trees it builds",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return LabelTicks(ctx, MountInTreeModal(ctx), Applied(rig));
             });
     }
 
