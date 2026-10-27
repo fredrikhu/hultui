@@ -147,6 +147,43 @@ static partial class Scenarios
                 };
             });
 
+        // A 300-row, 10-column table of short cells, as a user's example held: scrolled to its
+        // bottom a frame ought to cost what one at its top does, so a gap between the twins is
+        // work that grows with the rows above the view.
+        foreach (var (where, bottom) in new[] { ("top", false), ("bottom", true) })
+        {
+            yield return new Scenario($"richtext/wheel at the {where} of a 300x10 table",
+                $"Wheel at the {where} of a 3,000-cell table: only the rows on screen are drawn",
+                ctx =>
+                {
+                    var editor = MountTable(ctx);
+                    // At the bottom, the walk's first twenty steps go down and end at the end.
+                    if (bottom)
+                    {
+                        editor.ScrollOffsetY = float.MaxValue;
+                        for (int step = 20; step < 40; step++) ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3);
+                    }
+                    ctx.Pump();
+                    float before = 0;
+                    return new Op
+                    {
+                        Reset = _ => before = editor.ScrollOffsetY,
+                        Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
+                        Check = _ => editor.ScrollOffsetY != before ? null : "the wheel did not scroll the editor",
+                    };
+                }) { Width = 1200, Height = 800 };
+
+            yield return new Scenario($"richtext/redraw at the {where} of a 300x10 table",
+                $"Draw a 3,000-cell table scrolled to its {where} again, nothing changed",
+                ctx =>
+                {
+                    var editor = MountTable(ctx);
+                    if (bottom) editor.ScrollOffsetY = float.MaxValue;
+                    ctx.Pump();
+                    return new Op { Run = _ => editor.MarkPaintDirty() };
+                }) { Width = 1200, Height = 800 };
+        }
+
         yield return new Scenario("richtext/type in an auto-height editor",
             "Type in a 1,000-block editor that grows with its document inside a scroll view: measured, then drawn",
             ctx =>
@@ -191,6 +228,17 @@ static partial class Scenarios
         ctx.Window.Click(editor);
         ctx.Pump();
         return editor;
+    }
+
+    // A focused editor holding a paragraph and a 300x10 table of one- and two-word cells under a
+    // header row.
+    private static RichTextEditorElement MountTable(Ctx ctx)
+    {
+        var cells = new List<RichBlock>(3_000);
+        for (int r = 0; r < 300; r++)
+            for (int c = 0; c < 10; c++)
+                cells.Add(RichBlock.Cell(r, c, r == 0 ? $"Column {c + 1}" : Ui.Paragraph(ctx.Rng, 1 + (r + c) % 2)));
+        return MountEditor(ctx, new RichDocument([RichBlock.Paragraph("Before the table"), .. cells]));
     }
 
     // A long document shaped like real notes: headings every twenty blocks, paragraphs with a
