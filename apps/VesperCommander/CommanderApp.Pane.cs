@@ -773,9 +773,9 @@ public partial class CommanderApp
 
     private Element BuildList(char side, IReadOnlyList<FileEntry> list, bool active)
     {
-        // The cursor is the list's selection, so a key that only moves it makes the two rows it
-        // moved between rather than every row on screen in both panes. Only the active pane
-        // renders a cursor (design: the caret follows focus).
+        // The cursor is the list's selection, so a key that only moves it makes no row (or the
+        // two rows it moved between, while the rows draw it) rather than every row on screen in
+        // both panes. Only the active pane renders a cursor (design: the caret follows focus).
         int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, list.Count - 1));
 
         // The row F3 would compare the active pane's cursor against. Only in the inactive
@@ -809,6 +809,7 @@ public partial class CommanderApp
             .ItemHeight((int)RowHeight)
             .Items(new PaneRowItems(this, side, list))
             .SelectedIndex(active && list.Count > 0 ? cur : -1)
+            .SelectionHighlight(ListDrawsCursor(side) ? CursorHighlight : null)
             .RenderWith((item, cursor) => FileRow(side, item, cursor, partnerPath))
             // The list names its rows to assistive tech by this alone, off-screen ones included.
             // Without it each row was read out as the FileEntry record's ToString(). It reads the
@@ -820,6 +821,23 @@ public partial class CommanderApp
     }
 
     private static readonly Func<PaneRowItem, string?> FileLabelOfItem = item => FileLabel(item.Entry, item.Marked);
+
+    /// <summary>
+    /// Whether a pane's Detail list draws its cursor itself (<see cref="CursorHighlight"/>, under
+    /// the cursor's row), and makes its rows as though none had the cursor: then a key that
+    /// moves the cursor makes no row, where two rows drawing it made two. The rows draw it while
+    /// something else can paint the cursor's row: the zebra tint (an odd row's tint would cover
+    /// the list's box) or a drag over a folder in this pane (the drop tint takes the cursor
+    /// row's background). Each is in the rows' shape, so the rows are made again when it comes
+    /// or goes.
+    /// </summary>
+    private bool ListDrawsCursor(char side) =>
+        !_settings.Zebra && !(_dropTarget is { } drop && drop.Side == side);
+
+    /// <summary>The cursor as <see cref="FileRow"/> draws it — the accent fill and its 1 px ring
+    /// on the row's border box, square-cornered — for the list to draw instead.</summary>
+    private static RowHighlight CursorHighlight =>
+        new(Nocturne.Alpha(Nocturne.Accent500, 0.13), default, Nocturne.Accent600, 1f);
 
     /// <summary>
     /// A Detail row as the pane's list keeps it: its entry and its index among the rows (which

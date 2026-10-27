@@ -1350,7 +1350,13 @@ drawn on the next frame and makes no row; turning it on or off makes the selecte
 `.SelectionHighlight(null)` leaves the selection to the rows. On the perf suite's walk a step
 makes 1 row instead of 3 and allocates 16 KB instead of 25 (`virtual/selection walk 1,000 item
 rows, the list draws the highlight`); Junction's Tags table, whose caret's tint is the list's,
-makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87.
+makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87. A list can
+take it only while nothing else paints the selected row: Vesper's Detail panes let the list draw
+the cursor (an accent fill and a 1 px ring, square-cornered) and go back to rows that draw it
+while the zebra tint is on or a drag hovers a folder in the pane, either of which would paint over
+the list's box; each is in the rows' shape, so the switch makes the rows again (Detail Down 35 →
+23 KB a key). Something that needs the selected row's place — a menu opened under it — works it out
+from the list (`ScreenContentBox`, `ItemHeight`, `ScrollOffsetY`), since no row is made selected.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change

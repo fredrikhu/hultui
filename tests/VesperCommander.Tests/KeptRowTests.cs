@@ -64,8 +64,14 @@ public class KeptRowTests
         t.Session.PumpFrames(2);
     }
 
+    /// <summary>The cursor as the rows drew it, for the list to draw under the cursor's row.</summary>
+    private static RowHighlight CursorHighlight =>
+        new(Nocturne.Alpha(Nocturne.Accent500, 0.13), default, Nocturne.Accent600, 1f);
+
+    /// <summary>The list draws the cursor, under the cursor's row, and makes its rows without it:
+    /// a key that moves the cursor makes no row in either pane, and the box moves.</summary>
     [Fact]
-    public void ACursorMove_MakesTheTwoRowsItMovedBetween_AndKeepsTheRest()
+    public void ACursorMove_MakesNoRow_TheListDrawsTheCursor()
     {
         using var t = Open();
         t.PutCursorOn('L', Name(3));
@@ -76,18 +82,87 @@ public class KeptRowTests
         t.Session.PumpFrames(1);
 
         var leftAfter = Rows(t, 'L');
-        foreach (var (name, row) in leftAfter)
-        {
-            if (name == Name(3) || name == Name(4)) Assert.NotSame(left[name], row);
-            else if (left.TryGetValue(name, out var before)) Assert.Same(before, row);
-        }
+        Assert.All(leftAfter, r => Assert.Same(left[r.Key], r.Value));
         Assert.All(Rows(t, 'R'), r => Assert.Same(right[r.Key], r.Value));
 
-        // The ring moved, and the list tells assistive technology which entry the cursor is on.
-        Assert.Equal(Nocturne.Accent600, ((BoxElement)leftAfter[Name(4)]).BorderColor);
-        Assert.Equal(Color.Transparent, ((BoxElement)leftAfter[Name(3)]).BorderColor);
+        // The list draws the cursor; no row draws a ring or a fill of its own. The list tells
+        // assistive technology which entry the cursor is on, and the inactive pane has none.
+        Assert.Equal(CursorHighlight, List(t, 'L').SelectionHighlight);
+        Assert.All(leftAfter.Values, r => Assert.Equal(Color.Transparent, ((BoxElement)r).BorderColor));
+        Assert.All(leftAfter.Values, r => Assert.Equal(Color.Transparent, ((BoxElement)r).BackgroundColor));
         Assert.Equal(t.Cursor('L'), List(t, 'L').SelectedIndex);
+        Assert.Equal(Name(4), t.Rows('L')[List(t, 'L').SelectedIndex].Name);
         Assert.Equal(-1, List(t, 'R').SelectedIndex);
+    }
+
+    /// <summary>With the zebra tint the rows draw the cursor (an odd row's tint would cover the
+    /// list's box): a key makes the two rows the cursor moved between, and keeps the rest.</summary>
+    [Fact]
+    public void WithTheZebraTint_ACursorMove_MakesTheTwoRowsItMovedBetween_AndKeepsTheRest()
+    {
+        using var t = Open();
+        var settings = t.Field<Settings>("_settings");
+        bool zebra = settings.Zebra;
+        try
+        {
+            settings.Zebra = true;
+            t.PutCursorOn('L', Name(3));
+            var left = Rows(t, 'L');
+
+            t.Press(KeyCode.Down);
+            t.Session.PumpFrames(1);
+
+            var leftAfter = Rows(t, 'L');
+            foreach (var (name, row) in leftAfter)
+            {
+                if (name == Name(3) || name == Name(4)) Assert.NotSame(left[name], row);
+                else if (left.TryGetValue(name, out var before)) Assert.Same(before, row);
+            }
+            Assert.Null(List(t, 'L').SelectionHighlight);
+            Assert.Equal(Nocturne.Accent600, ((BoxElement)leftAfter[Name(4)]).BorderColor);
+            Assert.Equal(Nocturne.Alpha(Nocturne.Accent500, 0.13), ((BoxElement)leftAfter[Name(4)]).BackgroundColor);
+            Assert.Equal(Color.Transparent, ((BoxElement)leftAfter[Name(3)]).BorderColor);
+        }
+        finally { settings.Zebra = zebra; }
+    }
+
+    /// <summary>A drag over a folder in the pane tints that folder's row in place of the cursor's
+    /// fill, so while it lasts the rows draw the cursor; the list takes it back after.</summary>
+    [Fact]
+    public void ADragOverAFolderHere_HasTheRowsDrawTheCursor()
+    {
+        using var t = Open();
+        t.PutCursorOn('L', "docs");
+        Assert.NotNull(List(t, 'L').SelectionHighlight);
+
+        t.SetField("_dropTarget", ('L', Path.Combine(t.Left, "docs")));
+        Rebuild(t);
+        var docs = (BoxElement)Rows(t, 'L')["docs"];
+        Assert.Null(List(t, 'L').SelectionHighlight);
+        Assert.Equal(Nocturne.Accent600, docs.BorderColor);
+        Assert.Equal(Nocturne.Alpha(Nocturne.Accent, 0.28), docs.BackgroundColor);
+
+        t.SetField("_dropTarget", null);
+        Rebuild(t);
+        Assert.Equal(CursorHighlight, List(t, 'L').SelectionHighlight);
+        Assert.Equal(Color.Transparent, ((BoxElement)Rows(t, 'L')["docs"]).BorderColor);
+    }
+
+    /// <summary>The context-menu key opens under the cursor's row: with the list drawing the
+    /// cursor, the box is worked out from the list, and it is the row's box on screen — also
+    /// once the list has scrolled.</summary>
+    [Fact]
+    public void TheCursorRowBox_IsTheCursorsRowOnScreen()
+    {
+        using var t = Open();
+        t.PutCursorOn('L', Name(3));
+        t.Session.PumpFrames(1);
+        Assert.Equal(Rows(t, 'L')[Name(3)].ScreenBorderBox, ((Rect?)t.Invoke("CursorRowBox", 'L'))!.Value);
+
+        t.Press(KeyCode.End);                      // the last row, which scrolls the list
+        t.Session.PumpFrames(2);
+        Assert.True(List(t, 'L').ScrollOffsetY > 0);
+        Assert.Equal(Rows(t, 'L')[Name(Files - 1)].ScreenBorderBox, ((Rect?)t.Invoke("CursorRowBox", 'L'))!.Value);
     }
 
     [Fact]
@@ -118,10 +193,10 @@ public class KeptRowTests
     }
 
     /// <summary>A mark is in the row's item, not in the rows' shape: Insert makes the row it
-    /// marked and the row the cursor reached, and keeps every other row. In the shape, every row
-    /// on screen was made again for each mark.</summary>
+    /// marked (the list draws the cursor, so its move makes none), and keeps every other row. In
+    /// the shape, every row on screen was made again for each mark.</summary>
     [Fact]
-    public void AnInsert_MakesTheRowItMarkedAndTheRowTheCursorReached_AndKeepsTheRest()
+    public void AnInsert_MakesTheRowItMarked_AndKeepsTheRest()
     {
         using var t = Open();
         t.PutCursorOn('L', Name(3));
@@ -134,11 +209,12 @@ public class KeptRowTests
         Assert.Equal(before.Keys, after.Keys);
         foreach (var (name, row) in after)
         {
-            if (name == Name(3) || name == Name(4)) Assert.NotSame(before[name], row);
+            if (name == Name(3)) Assert.NotSame(before[name], row);
             else Assert.Same(before[name], row);
         }
         Assert.Equal(Nocturne.MarkRed, NameLabel(after[Name(3)]).ResolvedInherited.TextColor);
         Assert.Equal(Nocturne.Text, NameLabel(after[Name(4)]).ResolvedInherited.TextColor);
+        Assert.Equal(Name(4), t.Rows('L')[List(t, 'L').SelectedIndex].Name);
     }
 
     private static List<string> ItemNames(HultUI.Headless.HeadlessAccessibilityBridge bridge)

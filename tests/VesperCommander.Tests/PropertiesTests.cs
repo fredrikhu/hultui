@@ -258,15 +258,13 @@ public class PropertiesTests
     private static List<string>? Scope(DiffViewTests.Fixture t) =>
         (List<string>?)t.Invoke("ShellScope", 'L', "Properties");
 
-    /// <summary>Where a named row is on screen. Read off the cursor row's own Ref rather than
-    /// computed from a row height — putting the cursor on it is what makes the app hand out
-    /// that rectangle, and rows don't move when the cursor does.</summary>
+    /// <summary>Where a named row is on screen. Read off the app's own cursor row box (the one
+    /// the context-menu key opens under) rather than computed here — putting the cursor on it is
+    /// what makes the app hand out that rectangle, and rows don't move when the cursor does.</summary>
     private static HultUI.Core.Primitives.Rect RowRect(DiffViewTests.Fixture t, char side, string name)
     {
         t.PutCursorOn(side, name);
-        var reference = t.Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.BoxElement>>(
-            side == 'L' ? "_cursorRowL" : "_cursorRowR");
-        return reference.Current!.Layout.AbsoluteBorderBox;
+        return ((HultUI.Core.Primitives.Rect?)t.Invoke("CursorRowBox", side))!.Value;
     }
 
     /// <summary>What a menu opened on <paramref name="row"/> acts on, as full paths.</summary>
