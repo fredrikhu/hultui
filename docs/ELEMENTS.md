@@ -1710,6 +1710,31 @@ call `onChanged` and then called it again, two builds for every Enter or F3 and 
 over a selection, the first before the step had asked for its reveal (Vesper's reader, find Enter:
 two builds a step → one). Don't make the bar's `TextSearch` call `MarkDirty` itself too.
 
+**Keep the current match out of the rows' shape.** A body on item rows tints its matches with
+`Search.Decorate`, the current one in a colour of its own. What every row shows — the query, its
+options, the number of matches — belongs in the shape that makes every row again
+(`InvalidateRows()`, see **Rows that show only their item**); the current match does not: only
+two rows show that it moved. Tell the list the line it left and the line it reached, at the top
+of the build, as `InvalidateRow` is told any highlight that moves:
+
+```csharp
+var s = _find.Search;
+var hit = s.Index >= 0 && s.Index < s.Hits.Count ? (s.Index, s.Hits[s.Index].Line) : (-1, -1);
+if (hit != _hitWas && _listRef.Current is { } list)
+{
+    list.InvalidateRow(_hitWas.Line);   // -1 does nothing
+    list.InvalidateRow(hit.Line);
+}
+_hitWas = hit;
+```
+
+The index and the line, not the line alone: two matches on one line move the tint within it.
+Vesper's reader had the index in its shape, so every Enter, F3 or `n` made every row on screen
+again: on a 3,000-line file 35 rows and 330 KB an Enter, 2.5 rows and 69 KB now, with the bar's
+own rebuild made view-only (an owner with kept parts gives the bar the rebuild that leaves them:
+nothing a part shows moves with a find step, and a full one built Vesper's title bar and command
+line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6).
+
 `new FindBar(search, onChanged)` puts a bar over a search something else owns — a terminal
 searches its own scrollback. That search tells its owner through its own callback, which the bar
 cannot hold back, so give it one that does not rebuild what `onChanged` rebuilds (the terminal's

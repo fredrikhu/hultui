@@ -530,11 +530,13 @@ public partial class CommanderApp
         // change how tall a row is.
         var shape = (ViewerWrap, _viewerPan.Offset, ViewerCodeWidth());
         // And what else a row shows: the syntax colouring once it lands, and find's query,
-        // options and current match. The rows are on item rows, so a rebuild keeps every row on
+        // options and match count. The rows are on item rows, so a rebuild keeps every row on
         // screen unless one of these changed. An item is only a line's index; the lines come
         // with something already handled: another text (a file, or the same file re-indented) is
         // another list (keyed by it), new lines and the text face reset the heights above, and
         // another colour scheme is another Theme object, which makes a list's rows again by itself.
+        // The current match is tinted on its own line only, so a step to the next one (Enter, F3,
+        // n) makes the line it left and the line it reached, not every row on screen.
         var look = new ViewerRowLook(_viewerHl, ViewerFindShape());
         bool remake = look != _viewerRowLook;
         _viewerRowLook = look;
@@ -546,8 +548,10 @@ public partial class CommanderApp
             remake = true;
             _viewerRowShape = shape;
         }
-        if (remake && _viewerScrollRef.Current is VirtualListElement<int> mounted)
-            mounted.InvalidateRows();
+        var hit = CurrentHit(_viewerFind.Search);
+        if (_viewerScrollRef.Current is VirtualListElement<int> mounted)
+            RemakeForFind(mounted, remake, _viewerHit, hit);
+        _viewerHit = hit;
 
         var list = VirtualListElement<int>.New()
             .ItemHeight(DiffLineH)
@@ -592,14 +596,17 @@ public partial class CommanderApp
     /// <summary>What the viewer's rows show besides their line index, as the rows on screen were
     /// made with it (see <see cref="BuildViewerBody"/>).</summary>
     private readonly record struct ViewerRowLook(
-        IReadOnlyList<TextSpan>[]? Highlight, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find);
+        IReadOnlyList<TextSpan>[]? Highlight, (string Query, bool MatchCase, bool Regex, int Hits) Find);
 
     private ViewerRowLook _viewerRowLook;
+    private (int Index, int Line) _viewerHit = (-1, -1);
 
-    private (string, bool, bool, int, int) ViewerFindShape()
+    /// <summary>What find tints on every row: the query, its options and how many matches there
+    /// are. The current match is not in it: it is tinted on one line (see <see cref="RemakeForFind"/>).</summary>
+    private (string, bool, bool, int) ViewerFindShape()
     {
         var s = _viewerFind.Search;
-        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
+        return (s.Query, s.MatchCase, s.UseRegex, s.Hits.Count);
     }
 
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>

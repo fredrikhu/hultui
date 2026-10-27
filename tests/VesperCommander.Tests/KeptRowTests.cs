@@ -521,6 +521,44 @@ public class KeptRowTests
         Assert.Contains(ViewerLabel(ViewerRows(t)[0]).Spans ?? [], s => s.Background == Nocturne.FindHitBg || s.Background == Nocturne.FindCurrentBg);
     }
 
+    /// <summary>A step of find (Enter in its field) makes the row the current match left and the
+    /// row it reached, and keeps every other row on screen; the kept rows show what a remake of all
+    /// of them shows; and the step builds the window and no part. The current match was in the
+    /// rows' shape, so every Enter or F3 made every row on screen again (35 rows, 330 KB an Enter
+    /// on a 3,000-line file), and the bar's full build made the title bar and the command line too.</summary>
+    [Fact]
+    public void TheViewer_AFindStepMakesTheTwoRowsTheMatchMovesBetween_AndNoPart()
+    {
+        using var t = OpenViewer("a.txt");
+        t.Press(KeyCode.F, KeyModifiers.Ctrl);
+        t.Session.Window.TypeText("needle");
+        t.Session.PumpFrames(2);
+        string Tints() => string.Join("\n", ViewerRows(t).Select(r =>
+            string.Join(",", (ViewerLabel(r).Spans ?? []).Where(s => s.Background != default(Color))
+                .Select(s => $"{s.Start}+{s.Length}:{(s.Background == Nocturne.FindCurrentBg ? "current" : "hit")}"))));
+
+        for (int step = 0; step < 3; step++)
+        {
+            var before = ViewerRows(t).ToList();
+            int builds = t.Field<int>("_builds"), parts = t.App.PartBuilds;
+            t.Press(KeyCode.Enter);
+            t.Session.PumpFrames(2);
+            var after = ViewerRows(t).ToList();
+            var made = after.Where(r => !before.Contains(r)).ToList();
+            Assert.Equal(2, made.Count);
+            Assert.Equal(1, t.Field<int>("_builds") - builds);
+            Assert.Equal(0, t.App.PartBuilds - parts);
+
+            // The current match is on the second of the two rows made, and every row on screen is
+            // what a remake of all of them makes.
+            Assert.Contains("current", Tints().Split('\n')[step + 1]);
+            string kept = Tints();
+            ((VirtualListElement<int>)t.Field<Ref<ScrollViewElement>>("_viewerScrollRef").Current!).InvalidateRows();
+            Rebuild(t);
+            Assert.Equal(Tints(), kept);
+        }
+    }
+
     [Fact]
     public void TheViewer_ColoursItsRowsWhenTheHighlightLands()
     {

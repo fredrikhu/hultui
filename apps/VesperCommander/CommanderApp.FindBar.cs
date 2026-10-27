@@ -19,8 +19,9 @@ public partial class CommanderApp
 
     /// <summary>A bar over one of the two views. The reveal lands on the same frame: both views
     /// scroll with ScrollRangeIntoView, which holds a request made before layout until the
-    /// rows are measured.</summary>
-    private FindBar NewFindBar(string placeholder, Ref<ScrollViewElement> body, Action reveal) => new(MarkDirty)
+    /// rows are measured. View-only: a step of the bar changes nothing a part shows, and a full
+    /// build made the title bar and the command line again on every Enter.</summary>
+    private FindBar NewFindBar(string placeholder, Ref<ScrollViewElement> body, Action reveal) => new(MarkViewDirty)
     {
         Placeholder = placeholder,
         FieldHeight = Ui.FieldHeight,
@@ -38,6 +39,26 @@ public partial class CommanderApp
         FindBarIcon.Next => Ui.Icon(Glyphs.ArrowDown, 12f, Nocturne.Neutral300),
         _ => Ui.Icon(Glyphs.Close, 12f, Nocturne.Neutral300),
     };
+
+    /// <summary>The current match as the rows show it: its index and the line it sits on (a row of
+    /// the view: the search's line numbers are the rows'), or -1 for both when there is none.</summary>
+    private static (int Index, int Line) CurrentHit(TextSearch search) =>
+        search.Index >= 0 && search.Index < search.Hits.Count ? (search.Index, search.Hits[search.Index].Line) : (-1, -1);
+
+    /// <summary>Makes again, before the build patches the list, every row when what all of them show
+    /// changed (<paramref name="all"/>), else the rows the current match left and reached when it
+    /// moved. The current match used to be in the rows' shape, so every Enter or F3 made every row
+    /// on screen again (the reader on a 3,000-line file: 35 rows and 330 KB an Enter, 2.5 rows and
+    /// 69 KB now).</summary>
+    private static void RemakeForFind<T>(VirtualListElement<T> list, bool all, (int Index, int Line) was, (int Index, int Line) now)
+    {
+        if (all) list.InvalidateRows();
+        else if (now != was)
+        {
+            list.InvalidateRow(was.Line);   // -1 does nothing
+            list.InvalidateRow(now.Line);
+        }
+    }
 
     /// <summary>The selection in the viewer. Its line numbers are the search's line numbers.</summary>
     private FindSelection? ViewerFindSelection() => At(_viewerGroup, lane: 0);

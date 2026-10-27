@@ -734,12 +734,13 @@ public partial class CommanderApp
         // change how tall a row is.
         var shape = (DiffWrap, _diffPan.Offset, DiffCodeWidth());
         // And what else a row shows: the change F8 last jumped to (ringed), find's query,
-        // options and current match (tinted), and the syntax colouring once it lands. The rows
+        // options and match count (tinted), and the syntax colouring once it lands. The rows
         // are on item rows, so a rebuild keeps every row whose DiffRow is unchanged; when any of
         // these changes the rows are made again. The rest comes with something already handled:
         // another comparison is another list (keyed by its generation), new rows and the text
         // face reset the heights above, and another colour scheme is another Theme object,
-        // which makes a list's rows again by itself.
+        // which makes a list's rows again by itself. The current match is tinted on its own row
+        // only, so a step to the next one makes the row it left and the row it reached.
         var look = new DiffRowLook(CurrentDiffChangeRow(), DiffFindShape(), _diffHlLeft, _diffHlRight);
         bool remake = look != _diffRowLook;
         _diffRowLook = look;
@@ -751,8 +752,10 @@ public partial class CommanderApp
             remake = true;
             _diffRowShape = shape;
         }
-        if (remake && _diffScrollRef.Current is VirtualListElement<DiffRow> mounted)
-            mounted.InvalidateRows();
+        var hit = CurrentHit(_diffFind.Search);
+        if (_diffScrollRef.Current is VirtualListElement<DiffRow> mounted)
+            RemakeForFind(mounted, remake, _diffHit, hit);
+        _diffHit = hit;
 
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffLineH)
@@ -812,10 +815,11 @@ public partial class CommanderApp
     /// <summary>What a comparison's rows show besides their own <see cref="DiffRow"/>, as the rows
     /// on screen were made with it (see <see cref="BuildDiffBody"/>).</summary>
     private readonly record struct DiffRowLook(
-        int CurrentChange, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find,
+        int CurrentChange, (string Query, bool MatchCase, bool Regex, int Hits) Find,
         IReadOnlyList<TextSpan>[]? HighlightLeft, IReadOnlyList<TextSpan>[]? HighlightRight);
 
     private DiffRowLook _diffRowLook;
+    private (int Index, int Line) _diffHit = (-1, -1);
 
     /// <summary>The row F8 last jumped to, which is ringed, or -1. Only once the user has jumped:
     /// on opening, the index already points at the first change.</summary>
@@ -823,13 +827,14 @@ public partial class CommanderApp
         _diffNavUsed && _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
             ? _diffChangeRows[_diffChangeIdx] : -1;
 
-    /// <summary>What find tints: the query and its options, the current match and how many
+    /// <summary>What find tints on every row: the query and its options and how many matches
     /// there are (the matches themselves only move with a new query, option or binding, and a
-    /// new binding comes with new rows).</summary>
-    private (string, bool, bool, int, int) DiffFindShape()
+    /// new binding comes with new rows). The current match is not in it: it is tinted on one row
+    /// (see <see cref="RemakeForFind"/>).</summary>
+    private (string, bool, bool, int) DiffFindShape()
     {
         var s = _diffFind.Search;
-        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
+        return (s.Query, s.MatchCase, s.UseRegex, s.Hits.Count);
     }
 
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>
