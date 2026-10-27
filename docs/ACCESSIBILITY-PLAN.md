@@ -261,6 +261,10 @@ cards the Dialog role. Vesper's cards have it since round 6, step 5 (each named 
 `CommanderApp.Backdrop`): a copy's progress tick built the window's whole tree before, and is
 patched now (ten ticks 50 ms apart: 10 trees → 0).
 
+A dialog with nothing focusable in it takes the focus itself (round 6, step 5): the panel, not a
+Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,
+which since the scrim stopped being a button is a pane with no name.
+
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
 views above it (`UnscrolledRect`: the element's box less a sticky shift or an overlay's origin),

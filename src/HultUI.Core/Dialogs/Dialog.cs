@@ -67,8 +67,9 @@ public static class Dialog
                 controller.Close(default!);
             });
 
-        // Somewhere for the keyboard to be when the content has nothing that takes it: keys go
-        // to the focus, and Escape has to reach the handler above. Not a Tab stop.
+        // Somewhere for the keyboard to be when a click inside the dialog lands on nothing that
+        // takes it: keys go to the focus, and Escape has to reach the handler above. Not a Tab
+        // stop. (A dialog with nothing focusable takes the keyboard itself; see below.)
         scrim.IsFocusable = true;
         scrim.TabIndex = -1;
 
@@ -77,10 +78,20 @@ public static class Dialog
         controller.Bind(host, handle);
 
         // The dialog takes the keyboard, as a modal one has to: its first control, or the
-        // dialog itself when it has none. Content that wants a particular field focuses it
-        // after this, and wins. Whatever had the focus gets it back when the dialog closes.
+        // dialog itself when it has none — the node a reader announces, a dialog named by its
+        // title (it was the scrim, which a reader hears as an unnamed pane). Not a Tab stop.
+        // Content that wants a particular field focuses it after this, and wins. Whatever had
+        // the focus gets it back when the dialog closes.
         if (!Contains(scrim, scrim.FocusManager?.FocusedElement))
-            (FocusTraversal.FindNext(panel, null) ?? scrim).Focus();
+        {
+            var first = FocusTraversal.FindNext(panel, null);
+            if (first is null && !panel.IsFocusable)
+            {
+                panel.IsFocusable = true;
+                panel.TabIndex = -1;
+            }
+            (first ?? panel).Focus();
+        }
 
         // Subtle fade-in of the whole dialog.
         scrim.Opacity = 0f;

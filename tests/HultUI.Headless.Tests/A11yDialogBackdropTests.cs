@@ -64,8 +64,14 @@ public class A11yDialogBackdropTests
             Tree = root;
             inner?.ApplyPatchedProperties(patch, root);
         }
-        public void NotifyFocusChanged(AccessibilityNode? focused) => inner?.NotifyFocusChanged(focused);
-        public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous) => inner?.NotifyFocusChanged(focused, previous);
+        /// <summary>The node the window last said has the focus.</summary>
+        public AccessibilityNode? Focused;
+        public void NotifyFocusChanged(AccessibilityNode? focused) { Focused = focused; inner?.NotifyFocusChanged(focused); }
+        public void NotifyFocusChanged(AccessibilityNode? focused, AccessibilityNode? previous)
+        {
+            Focused = focused;
+            inner?.NotifyFocusChanged(focused, previous);
+        }
 
         /// <summary>The nodes whose name every change told since <paramref name="from"/> changed.</summary>
         public List<ElementId> NamesToldSince(int from) =>
@@ -376,6 +382,94 @@ public class A11yDialogBackdropTests
             Assert.Equal(AtSpiPath(MoreLine(session)), Assert.Single(names).Split(' ')[1]);
             Assert.Equal(key % 2 == 0 ? "b" : "", palette.Query);
         }
+    }
+
+    /// <summary>A dialog with nothing focusable in it (a message, no buttons), over a field that had
+    /// the focus, past its fade-in.</summary>
+    private static (BoxElement Panel, Task<bool> Shown) OpenMessageDialog(HeadlessSession session)
+    {
+        var field = TextInput.New("behind");
+        session.Window.SetRoot(Flex.Column().Children(TextB.New("Screen"), field));
+        session.PumpFrames(2);
+        field.Focus();
+        session.PumpFrame();
+        BoxElement? panel = null;
+        var shown = Dialog.Show<bool>(session.Window.Window, _ => panel = Flex.Column(gap: 8).Width(Dimension.Px(320)).Padding(16)
+            .Background(Color.White).AccessibleName("Fetching origin")
+            .Children(TextB.New("Fetching origin"), TextB.New("This takes a moment.")));
+        for (int i = 0; i < 12; i++) session.PumpFrame();
+        return (panel!, shown);
+    }
+
+    /// <summary>A dialog with nothing to focus takes the keyboard itself: the dialog's node, named by
+    /// its title, is what a reader is told has the focus (it was the scrim, an unnamed pane since
+    /// the backdrop stopped being a button). It is no Tab stop; Escape closes it, and the field
+    /// behind gets the focus back.</summary>
+    [Fact]
+    public void ADialogWithNothingToFocus_FocusesTheDialogNode()
+    {
+        using var session = HeadlessSession.Create(1000, 700);
+        var recording = session.Window.InstallAccessibilityBridge(new Recording());
+        var (panel, shown) = OpenMessageDialog(session);
+        var scrim = Assert.Single(session.Window.OverlayContents);
+
+        Assert.Same(panel, session.Window.Window.FocusedElement);
+        Assert.Equal(panel.Id, recording.Focused?.ElementId);
+        Assert.Equal(AccessibilityRole.Dialog, recording.Focused!.Role);
+        Assert.Equal("Fetching origin", recording.Focused.Name);
+        Assert.Null(Find(recording.Tree, scrim)?.Name);
+
+        session.Window.PressKey(KeyCode.Tab);
+        session.PumpFrame();
+        Assert.Same(panel, session.Window.Window.FocusedElement);
+        session.Window.PressKey(KeyCode.Escape);
+        session.PumpFrame();
+        Assert.True(shown.IsCompleted);
+        Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+    }
+
+    [WindowsFact]
+    public void UIA_ADialogWithNothingToFocus_GetsTheFocusEvent_AsAWindowNamedByItsTitle()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(1000, 700);
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        var raised = new List<UiaRaised>();
+        using var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host) { Raised = raised.Add };
+        session.Window.InstallAccessibilityBridge(new Recording(bridge));
+        var (panel, _) = OpenMessageDialog(session);
+        var scrim = Assert.Single(session.Window.OverlayContents);
+
+        var focusEvents = raised.Where(r => r is { Kind: UiaRaisedKind.Event, Id: UiaInterop.UIA_AutomationFocusChangedEventId }).ToList();
+        Assert.Equal(panel.Id, focusEvents.Last().Element);
+        Assert.DoesNotContain(focusEvents, r => r.Element == scrim.Id);
+        var dialog = Wrapper(bridge, panel);
+        Assert.Equal(UiaInterop.UIA_WindowControlTypeId, IntProperty(dialog, UiaInterop.UIA_ControlTypePropertyId));
+        dialog.GetPropertyValue(UiaInterop.UIA_HasKeyboardFocusPropertyId, out var focused);
+        Assert.Equal(UiaVariant.VT_BOOL, focused.Vt);
+        Assert.Equal((short)-1, focused.ShortValue);
+    }
+
+    [Fact]
+    public void ATSPI_ADialogWithNothingToFocus_IsTheFocusedDialog()
+    {
+        var signals = new Signals();
+        using var session = HeadlessSession.Create(1000, 700);
+        using var atSpi = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Recording(atSpi));
+        var (panel, _) = OpenMessageDialog(session);
+        var scrim = Assert.Single(session.Window.OverlayContents);
+
+        var focused = signals.Lines.Where(l => l.StartsWith("state-changed:focused ")).ToList();
+        Assert.Contains($"state-changed:focused {AtSpiPath(panel)}", focused);
+        Assert.DoesNotContain($"state-changed:focused {AtSpiPath(scrim)}", focused);
+        var dialog = ((IAtSpiTree)atSpi).Find(AtSpiPath(panel))!;
+        Assert.Equal(AtSpiConstants.RoleDialog, dialog.Role);
+        Assert.Equal("Fetching origin", dialog.Name);
     }
 
     private static UiaFragment Wrapper(WindowsAccessibilityBridge bridge, Element element)
