@@ -299,6 +299,36 @@ public class ViewModesTests
             (e is ImageElement && e.Box.Width == Dimension.Percent(100)) || e.Children.Any(HasThumbnail);
     }
 
+    /// <summary>A row made again hands back the tiles that did not change, a tile showing its
+    /// picture among them: a cursor move along the row leaves that tile as it was.</summary>
+    [Fact]
+    public void ATileShowingItsPicture_IsHandedBackWhenItsRowIsMadeAgain()
+    {
+        using var t = new DiffViewTests.Fixture();
+        WritePng(Path.Combine(t.Left, "a-picture.png"), 200, 150);
+        for (int i = 0; i < 20; i++) t.WriteLeft($"f{i:00}.txt", "x");
+        t.Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
+        var list = t.Field<Ref<VirtualListElement<CommanderApp.ThumbRowItem>>>("_thumbVListL");
+        t.Session.PumpUntil(() => list.Current is { } l && Thumbnail(l) is not null, System.TimeSpan.FromSeconds(10));
+
+        // "..", the picture, f00, f01, …: the cursor moves along the picture's row.
+        t.PutCursorOn('L', "f00.txt");
+        var image = Thumbnail(list.Current!)!;
+        var tile = image.Parent!.Parent!;
+        tile.AutomationId = "untouched";
+        t.Press(KeyCode.Right);
+        t.Session.PumpFrames(1);
+
+        Assert.Equal("f01.txt", t.Rows('L')[t.Cursor('L')].Name);
+        Assert.Same(image, Thumbnail(list.Current!));
+        Assert.Equal("untouched", tile.AutomationId);
+
+        static ImageElement? Thumbnail(Element e) =>
+            e is ImageElement im && e.Box.Width == Dimension.Percent(100) ? im
+                : e.Children.Select(Thumbnail).FirstOrDefault(x => x is not null);
+    }
+
     // ── ThumbnailCache ───────────────────────────────────────────────────
     [Fact]
     public void ThumbnailCache_MissIsPendingThenClassifies()

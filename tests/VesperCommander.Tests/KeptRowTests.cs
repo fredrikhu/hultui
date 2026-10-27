@@ -447,8 +447,13 @@ public class KeptRowTests
     private static BoxElement TileOf(Dictionary<string, Element> rows, string name) =>
         (BoxElement)rows.Values.SelectMany(r => r.Children).Single(tile => TileName(tile) == name);
 
+    /// <summary>A cursor move in Thumbnails makes the two rows it moved between again, and each
+    /// hands back the tiles that did not change: the list patches each row in place from its new
+    /// one, and the patch makes only the two tiles the cursor moved between. A patch copies what
+    /// the build gave the tile, so a mark left on a tile that no build gave it is still there on
+    /// the tiles nothing patched.</summary>
     [Fact]
-    public void AThumbnailCursorMove_MakesTheRowsItMovedBetween_AndKeepsTheRest()
+    public void AThumbnailCursorMove_MakesTheTwoTilesItMovedBetween_AndLeavesTheRestUntouched()
     {
         using var t = Open();
         t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
@@ -458,19 +463,44 @@ public class KeptRowTests
         t.PutCursorOn('L', Name(perRow - 3));
         var before = ThumbRows(t, 'L');
         Assert.Contains("..", before.Keys);
+        var tiles = before.Values.SelectMany(r => r.Children).ToDictionary(TileName);
+        foreach (var tile in tiles.Values) tile.AutomationId = "untouched";
 
         t.Press(KeyCode.Right);                    // onto the first tile of the second row
         t.Session.PumpFrames(1);
 
         var after = ThumbRows(t, 'L');
         Assert.Equal(before.Keys, after.Keys);
-        foreach (var (first, row) in after)
+        Assert.All(after, r => Assert.Same(before[r.Key], r.Value));   // the rows were patched in place
+        foreach (var tile in after.Values.SelectMany(r => r.Children))
         {
-            if (first == ".." || first == Name(perRow - 2)) Assert.NotSame(before[first], row);
-            else Assert.Same(before[first], row);
+            string name = TileName(tile);
+            Assert.Same(tiles[name], tile);
+            if (name == Name(perRow - 3) || name == Name(perRow - 2)) Assert.Null(tile.AutomationId);
+            else Assert.Equal("untouched", tile.AutomationId);
         }
         Assert.Equal(Nocturne.Accent600, TileOf(after, Name(perRow - 2)).BorderColor);
         Assert.Equal(Color.Transparent, TileOf(after, Name(perRow - 3)).BorderColor);
+    }
+
+    /// <summary>A mark is in the grid's shape, so every row is made again, and each hands back
+    /// every tile but the one marked.</summary>
+    [Fact]
+    public void AThumbnailMark_MakesTheTileItMarked_AndLeavesTheRestUntouched()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        t.PutCursorOn('L', Name(10));
+        var tiles = ThumbRows(t, 'L').Values.SelectMany(r => r.Children).ToList();
+        foreach (var tile in tiles) tile.AutomationId = "untouched";
+
+        t.Mark('L', Name(6));
+        t.Session.PumpFrames(2);
+
+        var after = ThumbRows(t, 'L').Values.SelectMany(r => r.Children).ToList();
+        Assert.Equal(tiles, after);
+        Assert.All(after, tile => Assert.Equal(TileName(tile) == Name(6) ? null : "untouched", tile.AutomationId));
     }
 
     /// <summary>A mark is in the grid's shape: the rows are made again and the tile turns red.</summary>

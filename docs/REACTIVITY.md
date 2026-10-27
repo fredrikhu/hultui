@@ -512,6 +512,19 @@ key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the
 real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
 moves to its new column (755.8 → 229.4 KB a step).
 
+The same works inside a virtual list whose item is a row of cards (Vesper's Thumbnails, round 6
+step 6). The list makes a row when its item changes — the cursor moved onto it or off it — and
+makes it in the frame's layout, not in a build, so two of the rules read differently. **Key the
+row** (by its place: "t" and its first entry's index): a keyed row the list lets go of is held
+back and patched from the row made in its place (`TreeDiffer.TryPatch`), which is where a card
+handed back is put back untouched. **Hand a card back only into its own row's place**: the card's
+live element must still be a child of a row with the new row's key — the row being replaced. A
+card in a row still on screen belongs to that row, and one in a row that scrolled away is out of
+the tree. Keep each card with what it was made from (its entry, the cursor on it, its mark, its
+picture as the cache had it) and let them all go when anything every card shows changes (the
+sizes, the theme, a result set). A cursor move then makes the two cards it moved between: Down
+88.3 → 42.9 KB a key, cards made 11 → 3; a mark, which makes every row again, 315.7 → 56.3 KB.
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole
