@@ -5,8 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 7d next, then step 9 (steps 1–7c landed, step 8 declined). User (2026-10-27): pause
-  the loop when weekly plan usage reaches 90 % (`get_usage`; 87 % after step 8, ~1–3 % a step). The survey's eight reports are
+- **Phase:** build — round 6, **paused for usage** (88 % weekly after step 7d, 2026-10-28; the user's limit is 90 %,
+  the week resets 2026-11-01 03:00 UTC). Step 9 next (steps 1–7d landed, step 8 declined). Resume with the `/loop`
+  command below when the user says so. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -159,6 +160,12 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
 
 Re-ranked by the next survey.
 
+- **richtext-table-mid-depth-hump** (5/2, low; step 7d) — in a real window the tip draws the 300×10 table ~0.06 ms
+  (~20 %) slower than e624b076 at 25–75 % depth (render 0.18 vs 0.14 ms), equal at the top, smaller at the bottom;
+  peaks mid-table, the editor's block loop is the same in both. Unverified guesses: b688db76's per-line clip test or
+  49634ea5's visible-rows grid lines. Count before guessing; probe in scratchpad `r6b7d/` (may be gone; the sample
+  ba7b47af rebuilds it). Also: the user's own run of the sample on the tip settles their 600 → 60 curve.
+
 - **vesper-coalesce-markdirty** (6/8, low) — 115 app doubles in the suite, each ~189 KB; a folder Enter/Backspace builds
   the app 3 times (−25 % per folder change).
 - **vesper-brief-marks-and-filter-rows** (6/8, leads from r6 step 6) — Brief still keeps marks in its shape (a mark
@@ -269,6 +276,7 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 3eec43f7 | meridian-find-typing | Spans stay one list across keys; matches go to `Highlights`, kept between builds by search key. 2,000-line response: typing 1,529 → 132 KB/key, min 3.01 → 2.25 ms JIT / 3.09 → 1.87 AOT; Enter 1,458 → 65; 19,000 lines: typing 14,009 → 730 KB, 11.6 → 3.0 ms JIT / 14.1 → 3.4 AOT, Enter 13,414 → 172; gen-2 per 240 keys 24–108 → 0; layouts per key 1 (the find bar), body line passes and shapes 0. |
 | 6 | c5586b3f | junction-files-find-highlights | The same in Junction Files; line starts computed once per file with the text (fixes a selection seed in a match-less file using the previous file's starts). 6,000-line C#: typing 7,089 → 145 KB/key (7.3 → 2.7 ms JIT, 8.4 → 2.9 AOT), Enter 7,023 → 80, repaint with find open 7,140 → 186. Step 7b pixels: suite 159 scenarios A/A = A/B; Meridian/Junction scenes differ only where text now keeps its token colour (eac5f19b). Suite: no row slower in both runs (TableView 10k sort +5–6 % AOT only, its known placement effect). |
 | 6 | 0493921d, 49634ea5 | richtext-table-scroll-depth | User's case (300×10 rich text table, 1200×800): nothing grows with position at 3c709d10 — wheel 0.608/0.599/0.621 ms top/middle/bottom, cells drawn 261/270/260, 136 B per step; drawing, hit-testing and the a11y range already binary-search (since e624b076). One thing scaled: every frame drew all 301 row-edge grid lines; now only the visible stretch's (313 → 38 rectangles a frame at any depth, bottom wheel −3 %; scaling bar). Four top/bottom twin suite rows. 41 frames A/A = A/B; goldens identical; suite 0/0. |
+| 6 | ba7b47af | richtext-table-real-window | Sample only (no src change): `samples/HultUI.Samples.RichTextTable` opens the editor with the 300×10 table, focused, HUD on continuous redraw (F12 cycles). Real-window probe (GL, idle-gated, never took the foreground, WM_CLOSE) flat top to bottom at e624b076 AND at the tip, ~3,000 FPS (0.29–0.37 ms; HUD = Stopwatch within 1 %); Debug, the Fluent page's old hosting, and HUD-bounds + focused editor flat too. The user's 600 → 60 curve did not reproduce, so no bisect and no fix; their 1.7 ms at the top was already 5× the probe. Not copied: a focused foreground window, a real pointer (hover hit tests), a11y clients on a focused window, an uncommitted tree. |
 
 ## Examined, not worth it
 
@@ -637,3 +645,7 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   back to f0d3139d. Guideline notes: a field the layout pass, paint cull or hit test reads for every element stays in
   the element; per-row views belong in `VirtualList`; check an AOT time change against an A/A build. Usage 87 %
   (306k tokens, 3.2 h, most of it idle-gated timing).
+- 2026-10-28: step 7d landed as a sample (ba7b47af): a real-window probe of the user's 300×10 table is flat top to
+  bottom at e624b076 and at the tip (~3,000 FPS), so their 600 → 60 curve did not reproduce; a small mid-depth hump at
+  the tip (+0.06 ms vs e624b076) went to Waiting. Usage 88 % (180k tokens): loop paused before step 9 under the user's
+  90 % rule.
