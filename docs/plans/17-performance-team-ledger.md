@@ -5,8 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, step 8 next (steps 1–7c landed). User (2026-10-27): pause the loop when weekly plan usage
-  reaches 90 % (`get_usage`; 85 % after step 7c, ~1–3 % a step). The survey's eight reports are
+- **Phase:** build — round 6, step 7d next, then step 9 (steps 1–7c landed, step 8 declined). User (2026-10-27): pause
+  the loop when weekly plan usage reaches 90 % (`get_usage`; 87 % after step 8, ~1–3 % a step). The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -113,7 +113,14 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
     with a 300-row × 10-column table that rendered much slower scrolled down than at the top. The sample is gone:
     rebuild it, count work (layout/measure/shape calls, rows and cells visited, hit tests, a11y) and frame time at the
     top, middle and bottom, find the O(position) cost, fix it if it clears a bar, and pin it with a suite row.
-8. **runtime-element-layout-state** (4, 1 reviews; r6-4 Candidate 1) — `_layout`, `MeasureCache`, cache constraints and
+7d. **richtext-table-real-window** (3 with 5; user, 2026-10-27, after step 8) — the user's test (~2026-10-06/07: a
+    window with only the editor and the 300×10 table, DevTools overlay on continuous redraw) read 600 FPS at the top,
+    ~450 a quarter down, ~300 in the middle, ~150 three quarters, 60 at the bottom (1.7 → 16.7 ms, worse than linear);
+    7c's headless rows (CPU raster, editor-only repaint) never saw it. Real-window probe (GL, continuous redraw, FPS +
+    frame work at 0/25/50/75/100 %), positive control at e624b076 (tables arrived; b688db76 47 min later drew only
+    clipped blocks — the likely fix), then the tip; find the cause and fix if the tip reproduces; keep the probe as a
+    sample the user can scroll. Brief in scratchpad `brief-r6b7d.md`.
+8. **runtime-element-layout-state** (declined, see Examined) (4, 1 reviews; r6-4 Candidate 1) — `_layout`, `MeasureCache`, cache constraints and
    `FlexPlan` (228 B) move to an object made on first layout; throwaway rebuild copies (48–87 per key) never get one.
    Expected per key: Meridian History −16…−20 %, Junction summary −17 %, Meridian URL −15 %, Vesper Brief −12 %, Aperture
    Right −11 %; laid-out elements +28 B (Vesper window +13 KB). Time the extra pointer read on `Layout` (render, hit
@@ -293,6 +300,14 @@ From the round 6 surveys (details in `17-reports/r6-*`):
   layout-ordered-children, GPU-side, already bounded by every app, or 248 B a frame.
 - **Mounts without unmounts** (6): patched-away twins count as mounted; not a leak. Reconcile pooling (P5a) stands at
   2.4–8 % of a key.
+- **runtime-element-layout-state** (4; build step 8, declined b35a81d8, docs/DECISIONS.md): layout state in its own
+  object made Box 584 → 384 B and Text 656 → 456 B unlaid-out (+48 B laid out) and cut bytes a key −16 % Junction
+  summary, −15 % Meridian URL, −12 % Meridian History, −4…−10 % Vesper/Aperture (retained +0.9…+1.6 %; audit identical
+  in 163 scenarios), but the box read moved off the element cost `scroll/wheel 5,000-row list` +8…+14 % (flat with a
+  16 B box copy kept inline) and `layout/resize 2,000-row list` +3…+5 % on AOT (A/A ±1 %; inlining the setter still
+  +2…+4 %). Patch kept in scratchpad `r6b8/change3-final.patch`. Phase 2 lead: fields no per-element pass reads
+  (focus, a11y-observer and overlay-host references, `OverlayOrigin`, Text selection; 50–100 B a copy) can move out
+  at no time cost.
 
 From the round 5 surveys (details in `17-reports/r5-*`):
 
@@ -614,3 +629,11 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   (flat top to bottom); the grid lines were the one thing drawn whole (313 → 38 rectangles a frame); top/bottom twin
   rows pin it. Guideline note: cull every kind of drawn item by the visible stretch, decorations too (grid lines,
   separators, markers); pin with a top/bottom twin and a render-log count. Usage still 85 % (a lean step: 214k tokens).
+- 2026-10-27: the user added step 7d (after step 8): their 2026-10-06 test fell 600 → 60 FPS top to bottom in a real
+  window with continuous redraw, which 7c's headless rows can't see; a real-window probe with a positive control at
+  e624b076 settles it.
+- 2026-10-28: step 8 (runtime-element-layout-state) measured and declined (b35a81d8): −12…−16 % bytes a key in
+  Junction/Meridian, but the box read off the element cost the 5,000-row wheel +8…+14 % and AOT resize +3…+5 %; source
+  back to f0d3139d. Guideline notes: a field the layout pass, paint cull or hit test reads for every element stays in
+  the element; per-row views belong in `VirtualList`; check an AOT time change against an A/A build. Usage 87 %
+  (306k tokens, 3.2 h, most of it idle-gated timing).
