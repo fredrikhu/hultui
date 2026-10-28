@@ -362,6 +362,49 @@ back whole, nothing searches. The counter would cost 8 B on every element (the f
 padding) and +1.0–1.4 KB a key in Vesper for no work saved. Declined; revisit if a profile shows
 `SettleMove` again.
 
+### An element's layout state in its own object: measured and declined
+
+Most elements a rebuild makes are copies of kept elements. The reconciler patches the kept
+element from the copy and drops it, so the copy is never styled, measured or laid out: 48 of 55
+elements a Meridian History key makes, and all of them on a typed key. Plan 17's round 6 survey
+proposed moving the layout output and caches out of `Element`: `_layout` (72 B), `MeasureCache`
+(120 B), the layout cache (32 B) and `FlexPlan` (4 B). They would go into an object made at the
+element's first layout or measurement. An element not laid out yet would point at one shared,
+empty object, so reads need no null check. This was built in round 6, step 8 (2026-10-28).
+Measured headless, i7-14700K pinned to its P-cores, idle-gated, JIT / NativeAOT:
+
+| | Before | After |
+|---|---|---|
+| `BoxElement` / `TextElement`, not laid out | 584 / 656 B | 384 / 456 B |
+| A laid-out element | | +48 B (the reference, a 16 B copy of its border box, the object's header) |
+| Bytes a key: Junction summary typing | 75.6 / 74.2 KB | 63.7 / 62.2 KB (−16 %) |
+| Meridian URL typing | 72.6 / 71.8 KB | 62.0 / 61.2 KB (−15 %) |
+| Meridian History Down | 70.4 / 70.2 KB | 61.9 / 61.8 KB (−12 %) |
+| Vesper Brief | 33.6 / 33.7 KB | 30.1 / 30.2 KB (−10 %) |
+| Aperture grid Right, Down; Vesper Detail, Insert, folder in/out | | −9, −4; −7, −4, −4 % |
+| Junction History Down | 56.3 / 58.9 KB | 56.9 / 59.6 KB (+1 %) |
+| Settled heap: Vesper (481 elements), Meridian (171) | 1,449, 857 KB | 1,472, 865 KB (+1.6, +0.9 %) |
+| Suite: `component/edit one of 1,000 keyed rows` | | −22 % bytes, −5…−6 % min |
+
+It was exact. Box hashes and layout counts matched in all 163 suite scenarios: 512,637 layouts,
+94,939 kept subtrees, 93,744 + 492,982 measure-cache hits, the same before and after. Nothing
+wrote to the shared empty state in the nine test projects. It was declined for time:
+
+- **Painting and hit testing** read every child's box, seen or not. With the box one object
+  further, `scroll/wheel 5,000-row list` read +9…+14 % (JIT) and +8…+9 % (AOT). A 16 B copy of
+  the absolute border box kept in the element made both flat again.
+- **The layout pass** reads and writes the state of every element it visits. A full relayout
+  of 2,000 rows read +3…+5 % on NativeAOT in three pairs of runs (`layout/resize 2,000-row
+  list`, min 2.51–2.53 → 2.62–2.63 ms). An A/A build, the base with one cold change, moved the
+  same row by ±1 %. JIT read +0…+2 %. Keeping the first-write allocation out of line, so the
+  `Layout` setter inlines, still read +2…+4 % in three more pairs. Rows that lay out new rows
+  every step (`TableView`, `VirtualList`) also allocated +2…+4 % more.
+
+Revisit for fields that no per-element pass reads: the focus, accessibility-observer and
+overlay-host references, `OverlayOrigin`, and `TextElement`'s selection state. The survey put
+these at 50–100 B a copy. They can move out without these costs. The layout state cannot, unless
+the layout pass can reach it as cheaply as a field of the element.
+
 ### A smaller gen-0 budget for the apps: measured and declined
 
 The GC sizes its gen-0 budget from the CPU's cache: 17,301,504 B on this desk's i7-14700K (33 MB
