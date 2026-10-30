@@ -31,4 +31,8 @@ internal sealed class OverlayEntry
     /// <summary>Set when something in the overlay changed that its part of the accessibility tree
     /// does not have yet (its children, its layout, its place); cleared when that part is built.</summary>
     public bool A11yStale { get; set; }
+    /// <summary>Set when one of a set in the overlay was selected (a palette's chosen row): the
+    /// window's next frame builds its part of the accessibility tree at once, as for a change of
+    /// its children, and clears it.</summary>
+    public bool A11ySelected { get; set; }
 }

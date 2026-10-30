@@ -294,6 +294,71 @@ public class A11yOverlayTests
         AssertFresh(session, bridge);
     }
 
+    /// <summary>A virtual list of buttons, the first of them the signal's: its rows are elements only
+    /// from the frame that realizes them.</summary>
+    private sealed class Buttons : HultUI.Core.Components.Component
+    {
+        public readonly HultUI.Core.Reactivity.Signal<int> First = new(0);
+
+        public override Element Build()
+        {
+            var list = VirtualListElement<int>.New().ItemHeight(30)
+                .Items(Enumerable.Range(First.Value, 100).ToArray())
+                .RenderWith((i, _) => Button.New($"Row {i}"))
+                .Width(Dimension.Px(200)).Height(Dimension.Px(150));
+            list.RowsAreComposite = true;
+            return list;
+        }
+    }
+
+    [Fact]
+    public void AVirtualListInAnOverlay_IsInThePartBuiltInItsFrame_OnOpeningAndOnEachChange()
+    {
+        var (session, bridge) = Mount(Flex.Column().Children(TextB.New("Main")));
+        using var _ = session;
+        var buttons = new Buttons();
+        session.Window.Window.ShowOverlay(Flex.Column().Padding(8).Children(buttons.Mount()), 50, 50);
+        session.PumpFrame();
+        Assert.NotNull(Find(bridge.CurrentTree, n => n.Name == "Row 0"));
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        for (int first = 10; first <= 30; first += 10)
+        {
+            buttons.First.Value = first;
+            session.PumpFrame();
+            Assert.NotNull(Find(bridge.CurrentTree, n => n.Name == $"Row {first}"));
+            Assert.Null(Find(bridge.CurrentTree, n => n.Name == $"Row {first - 10}"));
+            AssertFresh(session, bridge);
+        }
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    [Fact]
+    public void ASelectedStateInAnOpenOverlay_BuildsOnlyItsPart_InThatFrame()
+    {
+        var rows = new Element[200];
+        for (int i = 0; i < rows.Length; i++) rows[i] = TextB.New($"row {i}");
+        var (session, bridge) = Mount(Flex.Column().Children(rows));
+        using var _ = session;
+        var one = Button.New("One").AccessibleSelected(true);
+        var two = Button.New("Two").AccessibleSelected(false);
+        session.Window.Window.ShowOverlay(Flex.Column().Padding(8).Children(one, two), 50, 50);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt, parts = session.Window.Window.AccessibilityOverlayPartsBuilt;
+        bridge.ClearDiffs();
+
+        one.AccessibleSelected = false;
+        two.AccessibleSelected = true;
+        session.PumpFrame();
+
+        Assert.Equal((trees, parts + 1), (session.Window.AccessibilityTreesBuilt, session.Window.Window.AccessibilityOverlayPartsBuilt));
+        Assert.Equal(2, Assert.Single(bridge.Diffs).PropertyChanged.Count(c => c.PropertyName == AccessibilityProperties.IsSelected));
+        Assert.True(Find(bridge.CurrentTree, n => n.ElementId == two.Id)!.IsSelected);
+        AssertFresh(session, bridge);
+    }
+
     [Fact]
     public void APaletteKeystroke_BuildsOnlyThePalettesPart()
     {

@@ -3472,11 +3472,6 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             var overlay = _overlays[i];
             var content = overlay.Content;
             bool seen = overlay.IsHitTestable;
-            if (seen && (content.DirtyFlags & DirtyFlags.Children) != 0)
-            {
-                changes |= OverlayChanges.Structure | OverlayChanges.Work;
-                overlay.A11yStale = true;
-            }
 
             if (!overlay.StyleResolved || (content.DirtyFlags & DirtyFlags.Style) != 0)
             {
@@ -3513,8 +3508,38 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                     overlay.A11yStale = true;
                 }
             }
+
+            // A virtual list realizes its rows as it is drawn, after the accessibility phase. In an
+            // overlay a reader sees, that would leave the part of the tree built in this frame
+            // without them, and the flags that say so end with the frame: a command palette's list
+            // was told a key late, or not at all. With a reader listening, a part about to be built
+            // gets the rows now. What realizing marks on the way up (the layout a list has just done
+            // itself) would have ended with the frame too: left set, the overlay was laid out again
+            // as it was drawn.
+            if (seen && (overlay.A11yStale || (content.DirtyFlags & DirtyFlags.Children) != 0)
+                && _accessibilityBridge.IsActive)
+            {
+                UpdateScrollContent(content);
+                ClearFlags(content, DirtyFlags.Layout);
+            }
+            if (seen && (overlay.A11ySelected || (content.DirtyFlags & DirtyFlags.Children) != 0))
+            {
+                overlay.A11ySelected = false;
+                overlay.A11yStale = true;
+                changes |= OverlayChanges.Structure | OverlayChanges.Work;
+            }
         }
         return changes;
+    }
+
+    /// <summary>What drawing does first in each scroll view under <paramref name="element"/>
+    /// (<see cref="ScrollViewElement.UpdateContentSize"/>): a list realizes the rows on screen.</summary>
+    private static void UpdateScrollContent(Element element)
+    {
+        if (element is ScrollViewElement view) view.UpdateContentSize();
+        var children = element.Children;   // by index, as in ClearFlags
+        for (int i = 0; i < children.Count; i++)
+            UpdateScrollContent(children[i]);
     }
 
     private void RenderOverlays(IRenderContext ctx)
@@ -4123,6 +4148,14 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 && element is IAccessibleItemSource { PublishesItemNodes: true })
             {
                 if (!window._a11ySelectionMoved.Contains(element)) window._a11ySelectionMoved.Add(element);
+            }
+            // One of a set was selected inside an open overlay (a palette's chosen row): only that
+            // overlay's part of the tree is built again for it, as for a change of its children. A
+            // rebuild for it built the whole window's tree on every arrow key.
+            else if (propertyName == AccessibilityProperties.IsSelected && window.OverlayHolding(element) is { } selecting)
+            {
+                selecting.A11ySelected = true;
+                element.MarkPaintDirty();   // a frame to tell it in
             }
             // A caret or a selection moved in text made on request (the rich text editor's), or
             // what its version holds besides the text changed (read-only): its new version goes on
