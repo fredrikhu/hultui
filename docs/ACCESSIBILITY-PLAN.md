@@ -712,7 +712,17 @@ providers), a UIA `ItemContainer` on virtualized lists.
   nothing. Their items have their places from the menu's measure, before its first frame is drawn
   (the tree is built in that frame, before the drawing, and gave every item a zero-height box for as
   long as the menu was open); a drawing context that measures text otherwise moves them once, and
-  tells their bounds.
+  tells their bounds. **A virtual list in an overlay (2026-10-30, plan 17 round 6 step 9):** a list
+  realizes its rows as it is drawn, after the phase, and the flags that say so end with the frame, so
+  with a reader listening the window realizes them in `PrepareOverlays` when the overlay's part is
+  stale, and a change of its rows builds the part in that frame. The command palette's result list
+  is such a list: its rows stay buttons with the names they had (`RowsAreComposite`, in a container
+  that says it is a scroll view), and those not scrolled to, with the "n more" line under them, leave
+  the tree, as in every other virtual list (the user's decision, 2026-10-27). The chosen row is now
+  told as selected, which it never was: `AccessibleSelected`, so UIA SelectionItem and AT-SPI's
+  selectable and selected states. Selecting a row from assistive technology clicks it, as for a tab,
+  and a click runs the command. A selected state changing inside an overlay builds that overlay's
+  part of the tree, in that frame; it built the window's whole tree.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

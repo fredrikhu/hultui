@@ -171,12 +171,287 @@ public sealed class CommandPaletteTests
         var many = Enumerable.Range(0, 150).Select(i => new PaletteCommand($"Branch {i}", () => { }));
         var (session, palette, _) = Open(many, maxRows: 100);
         using var _s = session;
-        Assert.NotNull(session.Window.FindByAutomationId("palette-row-99"));
-        Assert.Null(session.Window.FindByAutomationId("palette-row-100"));
-        Assert.NotNull(session.Window.FindByText("50 more — type to narrow them down"));
 
         for (int i = 0; i < 120; i++) palette.Move(1);
         Assert.Equal(99, palette.SelectedIndex);   // only what is shown can be chosen
+        session.PumpFrame();
+        Assert.NotNull(session.Window.FindByAutomationId("palette-row-99"));
+        Assert.Null(session.Window.FindByAutomationId("palette-row-100"));
+        var scroll = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        scroll.ScrollOffsetY = scroll.ContentHeight;
+        session.PumpFrame();
+        Assert.NotNull(session.Window.FindByText("50 more — type to narrow them down"));
+    }
+
+    // ──── Only the rows on screen are elements ────
+    //
+    // A keystroke built every match up to MaxRows, 100 rows for the 8 to 11 the card shows: 335 KB
+    // a key over 2,000 commands, and a reader was told the whole list removed and added. The list
+    // is a virtual one now. The rows are what they were (buttons, not list items), so the reader's
+    // tree holds the ones realized, as in any other virtual list, and they have to be there when
+    // the tree is built: a list realizes rows as it is drawn, after the frame's accessibility phase.
+
+    private static List<PaletteCommand> Mixed(int count, Action<int>? ran = null, Action? made = null) =>
+        Enumerable.Range(0, count).Select(i => new PaletteCommand($"Command {i}", () => ran?.Invoke(i))
+        {
+            Detail = i % 3 == 0 ? $"refs/heads/{i}" : null,
+            Icon = made is null ? null : () => { made(); return Box.New().Width(8).Height(8); },
+        }).ToList();
+
+    private static (HeadlessSession Session, CommandPalette Palette, HeadlessAccessibilityBridge Bridge) OpenHeard(
+        IReadOnlyList<PaletteCommand> commands)
+    {
+        var session = HeadlessSession.Create(1000, 700);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        session.Window.SetRoot(Box.New());
+        session.PumpFrames(2);
+        var palette = new CommandPalette(() => commands);
+        palette.Open(session.Window.Window);
+        session.PumpFrame();
+        return (session, palette, bridge);
+    }
+
+    private static List<AccessibilityNode> Rows(AccessibilityNode? tree) =>
+        Walk(tree!).Where(n => n.Role == AccessibilityRole.Button).ToList();
+
+    private static void AssertFresh(HeadlessSession session, HeadlessAccessibilityBridge bridge)
+    {
+        var diff = AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree());
+        Assert.True(diff.IsEmpty, $"stale: +{diff.Added.Count} -{diff.Removed.Count} "
+            + string.Join(", ", diff.PropertyChanged.Select(c => $"{c.PropertyName} of {c.Node.Role} '{c.Node.Name}'")));
+    }
+
+    [Fact]
+    public void AKeystrokeMakesOnlyTheRowsOnScreen_AndAMoveOfTheChoiceTwo()
+    {
+        int made = 0;
+        var commands = Enumerable.Range(0, 2_000).Select(i => new PaletteCommand($"{(i % 2 == 0 ? "branch" : "commit")} {i}", () => { })
+        {
+            Icon = () => { made++; return Box.New().Width(8).Height(8); },
+        });
+        var (session, palette, _) = Open(commands);
+        using var _s = session;
+
+        // Twelve rows and a bit fit; the list makes one or two more beside them.
+        Assert.InRange(made, 12, 16);
+        made = 0;
+        session.Window.TypeText("b");
+        session.PumpFrame();
+        Assert.Equal(1_000, palette.Matches.Count);
+        Assert.InRange(made, 12, 16);
+
+        made = 0;
+        session.Window.PressKey(KeyCode.Down);
+        session.PumpFrame();
+        Assert.Equal(2, made);
+    }
+
+    [Fact]
+    public void AReaderHasTheRows_OnTheFrameThePaletteOpens_AndOnTheFrameOfEachKey()
+    {
+        var (session, palette, bridge) = OpenHeard(Mixed(400));
+        using var _s = session;
+        int trees = session.Window.AccessibilityTreesBuilt;
+
+        Assert.Contains(Rows(bridge.CurrentTree), n => n.Name == "Command 0");
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+
+        foreach (var key in new[] { "1", "2", "3" })
+        {
+            session.Window.TypeText(key);
+            session.PumpFrame();
+            Assert.Contains(Rows(bridge.CurrentTree), n => n.Name == palette.Matches[0].Title);
+            Assert.Equal(palette.Matches.Take(Rows(bridge.CurrentTree).Count).Select(c => c.Title),
+                Rows(bridge.CurrentTree).Select(n => n.Name));
+            AssertFresh(session, bridge);
+        }
+        session.Window.PressKey(KeyCode.Backspace);
+        session.PumpFrame();
+        Assert.Contains(Rows(bridge.CurrentTree), n => n.Name == palette.Matches[1].Title);
+        AssertFresh(session, bridge);
+
+        // Each key built the palette's part of the tree, not the window's.
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    [Fact]
+    public void TheKeyboardWalksPastTheFold_WithTheChosenRowOnScreenAndToldAsChosen()
+    {
+        var commands = Mixed(150);
+        var (session, palette, bridge) = OpenHeard(commands);
+        using var _s = session;
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        int trees = session.Window.AccessibilityTreesBuilt;
+        var scroll = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        var look = new CommandPaletteTheme();
+
+        for (int i = 1; i <= 99; i++)
+        {
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrame();
+            Assert.Equal(i, palette.SelectedIndex);
+
+            var rows = Rows(bridge.CurrentTree);
+            var chosen = Assert.Single(rows, n => n.IsSelected == true);
+            Assert.Equal($"Command {i}", chosen.Name);
+            Assert.False(chosen.IsOffscreen);
+            Assert.InRange(rows.Count, 1, 16);
+            Assert.All(rows.Where(n => n != chosen), n => Assert.False(n.IsSelected));
+
+            // Where the summed heights say, and in the view.
+            float top = look.ListPadding.Top + commands.Take(i).Sum(c => c.Detail is null ? look.RowHeight : look.DetailRowHeight);
+            var view = scroll.Layout.AbsoluteContentBox;
+            var box = session.Window.FindByAutomationId($"palette-row-{i}")!.Element.Layout.AbsoluteBorderBox;
+            Assert.Equal(view.Y + top, box.Y, 0.5f);
+            Assert.True(box.Y - scroll.ScrollOffsetY >= view.Y - 0.5f && box.Bottom - scroll.ScrollOffsetY <= view.Bottom + 0.5f,
+                $"row {i} at {box.Y - scroll.ScrollOffsetY:0}, the list shows {view.Y:0}–{view.Bottom:0}");
+        }
+        Assert.DoesNotContain(Rows(bridge.CurrentTree), n => n.Name == "Command 0");
+
+        session.Window.PressKey(KeyCode.Down);   // no wrap: it stops at the last row shown
+        session.PumpFrame();
+        Assert.Equal(99, palette.SelectedIndex);
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+
+        for (int i = 98; i >= 0; i--)
+        {
+            session.Window.PressKey(KeyCode.Up);
+            session.PumpFrame();
+            Assert.Equal($"Command {i}", Assert.Single(Rows(bridge.CurrentTree), n => n.IsSelected == true).Name);
+        }
+        Assert.Equal(0f, scroll.ScrollOffsetY);
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void RowsJoinTheReadersTree_AsTheyAreScrolledTo()
+    {
+        var (session, _, bridge) = OpenHeard(Mixed(150));
+        using var _s = session;
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+        Assert.DoesNotContain(Rows(bridge.CurrentTree), n => n.Name == "Command 40");
+
+        var scroll = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        var box = scroll.Layout.AbsoluteContentBox;
+        for (int turn = 0; turn < 3 && scroll.ScrollOffsetY < 1500; turn++)
+            session.Window.Wheel(box.X + 50, box.Y + 50, 0, -10);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(200));
+
+        Assert.True(scroll.ScrollOffsetY > 0);
+        Assert.Contains(Rows(bridge.CurrentTree), n => n.Name == session.Window.FindByAutomationId("palette-row-40")?.Element.AccessibleName);
+        Assert.DoesNotContain(Rows(bridge.CurrentTree), n => n.Name == "Command 0");
+        AssertFresh(session, bridge);
+    }
+
+    [Fact]
+    public void ANarrowedListGoesBackToTheTop_AndShrinksTheCard_AndComesBack()
+    {
+        var (session, palette, _) = Open(Mixed(150));
+        using var _s = session;
+        var scroll = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        float full = Card(session).Layout.AbsoluteBorderBox.Height;
+
+        for (int i = 0; i < 40; i++) session.Window.PressKey(KeyCode.Down);
+        session.PumpFrame();
+        Assert.True(scroll.ScrollOffsetY > 0);
+
+        session.Window.TypeText("7");
+        session.PumpFrame();
+        Assert.Equal(0, palette.SelectedIndex);
+        Assert.Equal(0f, scroll.ScrollOffsetY);
+        Assert.Equal(palette.Matches[0].Title, session.Window.FindByAutomationId("palette-row-0")!.Element.AccessibleName);
+
+        session.Window.PressKey(KeyCode.Backspace);
+        session.Window.TypeText("149");
+        session.PumpFrame();
+        Assert.Equal(["Command 149"], palette.Matches.Select(c => c.Title));
+        Assert.True(Card(session).Layout.AbsoluteBorderBox.Height < 200f);
+        Assert.Null(session.Window.FindByAutomationId("palette-row-1"));
+
+        for (int i = 0; i < 3; i++) session.Window.PressKey(KeyCode.Backspace);
+        session.PumpFrame();
+        Assert.Equal(full, Card(session).Layout.AbsoluteBorderBox.Height, 0.5f);
+        Assert.NotNull(session.Window.FindByAutomationId("palette-row-5"));
+    }
+
+    [Fact]
+    public void NoMatchesAndBack_LeavesAListThatWorks()
+    {
+        var ran = new List<int>();
+        var (session, palette, _) = Open(Mixed(150, ran.Add));
+        using var _s = session;
+
+        session.Window.TypeText("zz");
+        session.PumpFrame();
+        Assert.NotNull(session.Window.FindByAutomationId("palette-no-match"));
+
+        session.Window.PressKey(KeyCode.Backspace);
+        session.Window.PressKey(KeyCode.Backspace);
+        session.PumpFrame();
+        Assert.Null(session.Window.FindByAutomationId("palette-no-match"));
+        for (int i = 0; i < 20; i++) session.Window.PressKey(KeyCode.Down);
+        session.PumpFrame();
+        Assert.True(FindScroll(session.Window.FindByAutomationId("palette")!.Element).ScrollOffsetY > 0);
+        session.Window.PressKey(KeyCode.Enter);
+        Assert.Equal([20], ran);
+        Assert.False(palette.IsOpen);
+    }
+
+    [Fact]
+    public void AClickRunsARowFarDownTheList()
+    {
+        var ran = new List<int>();
+        var (session, palette, _) = Open(Mixed(150, ran.Add));
+        using var _s = session;
+        for (int i = 0; i < 30; i++) session.Window.PressKey(KeyCode.Down);
+        session.PumpFrame();
+
+        session.Window.Click(session.Window.FindByAutomationId("palette-row-30")!.Element);
+
+        Assert.Equal([30], ran);
+        Assert.False(palette.IsOpen);
+    }
+
+    [Fact]
+    public void TheListKeepsItsPadding_ItsRowsTheirHeights_AndTheLineUnderThemItsOwn()
+    {
+        var look = new CommandPaletteTheme
+        {
+            ListPadding = new Thickness(10, 4, 14, 8), RowHeight = 28, DetailRowHeight = 44, Width = 500, MaxHeight = 600,
+        };
+        var commands = Mixed(50);
+        var (session, _, _) = Open(commands, Theme.Light.With(look), maxRows: 6);
+        using var _s = session;
+        var scroll = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        var view = scroll.Layout.AbsoluteBorderBox;
+
+        float y = view.Y + 10;
+        for (int i = 0; i < 6; i++)
+        {
+            var box = session.Window.FindByAutomationId($"palette-row-{i}")!.Element.Layout.AbsoluteBorderBox;
+            float height = commands[i].Detail is null ? 28 : 44;
+            Assert.Equal((view.X + 8, y, view.Width - 12, height), (box.X, box.Y, box.Width, box.Height));
+            y += height;
+        }
+
+        // Its height comes from measuring its text before it is made: as tall as it lays out, to
+        // the pixel, or the rows above would sit wrong against the end of a scrolled list.
+        var line = session.Window.FindByText("44 more — type to narrow them down")!.Element.Layout.AbsoluteBorderBox;
+        Assert.Equal(y, line.Y, 0.01f);
+        Assert.Equal(line.Bottom + 14, view.Y + scroll.ContentHeight, 0.01f);
+        Assert.Equal(view.Height, scroll.ContentHeight, 0.01f);   // and the list is as tall as its rows
+    }
+
+    [Fact]
+    public void TheLineUnderTheList_WrapsAsItWouldInACardTooNarrowForIt()
+    {
+        var (session, _, _) = Open(Mixed(50), Theme.Light.With(new CommandPaletteTheme { Width = 160 }), maxRows: 2);
+        using var _s = session;
+        var scroll = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        var line = session.Window.FindByText("48 more — type to narrow them down")!.Element.Layout.AbsoluteBorderBox;
+        Assert.True(line.Height > 40f, $"{line.Height:0.##} is one line");
+        Assert.Equal(line.Bottom + new CommandPaletteTheme().ListPadding.Bottom, scroll.Layout.AbsoluteBorderBox.Y + scroll.ContentHeight, 0.01f);
     }
 
     [Fact]

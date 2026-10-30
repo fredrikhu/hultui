@@ -1856,8 +1856,13 @@ IEnumerable<PaletteCommand> Commands() =>
 - **State:** `IsOpen`, `Query` (settable), `Matches`, `SelectedIndex`, `Move`, `Run`, `Close`,
   and `Closed`, raised however it closes — at once, not a frame later.
 - **Accessibility:** one dialog named `AccessibleName` ("Command palette"); rows are buttons
-  named "Title (Group)". Automation ids: `palette`, `palette-card`, `palette-input`,
-  `palette-row-N`, `palette-no-match`.
+  named "Title (Group)", and the chosen one is selected. Automation ids: `palette`,
+  `palette-card`, `palette-input`, `palette-row-N`, `palette-no-match`.
+- **The list is virtual:** only the rows on screen are elements, so a keystroke over a long list
+  costs what a short one does. The others are not in the accessibility tree and have no
+  `palette-row-N` until they are scrolled to, and the same goes for the "n more" line under them.
+  A test that reaches for row 40 moves the choice to it first. `Icon` is built for rows as they
+  come on screen, not for every match.
 
 **Looks** come from `Theme.CommandPalette` (`CommandPaletteTheme`): width, maximum height, offset
 from the top, scrim, card, rules, row heights (one line and two), colours of the chosen and

@@ -296,9 +296,10 @@ public class A11yDialogBackdropTests
         session.Window.SetRoot(Flex.Column().FlexGrow(1).Children(
             TextB.New("Palette"), ScrollView.New().FlexGrow(1).Children(Rows(300))));
         session.PumpFrames(2);
-        // Half match "b": past the 100 rows the palette shows, so its "… more" line changes with each key.
+        // Half match "b": past the 6 rows the palette shows, so its "… more" line, on screen under
+        // them, changes with each key.
         var commands = Enumerable.Range(0, 400).Select(i => new PaletteCommand($"{(i % 2 == 0 ? "branch" : "commit")} {i}", () => { })).ToList();
-        var palette = new CommandPalette(() => commands);
+        var palette = new CommandPalette(() => commands) { MaxRows = 6 };
         palette.Open(session.Window.Window);
         for (int i = 0; i < 12; i++) session.PumpFrame();
         Settle(session);
@@ -383,6 +384,56 @@ public class A11yDialogBackdropTests
             Assert.Equal(key % 2 == 0 ? "b" : "", palette.Query);
         }
     }
+
+    [WindowsFact]
+    public void UIA_AMoveOfThePalettesChoice_RaisesTheRowsItLeftAndReached_WithNoTree()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(1000, 700);
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        var raised = new List<UiaRaised>();
+        using var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host) { Raised = raised.Add };
+        OpenPalette(session, new Recording(bridge));
+        int trees = session.Window.AccessibilityTreesBuilt;
+        raised.Clear();
+
+        session.Window.PressKey(KeyCode.Down);
+        session.PumpFrame();
+
+        var moved = raised.Where(r => r is { Kind: UiaRaisedKind.Property, Id: UiaInterop.UIA_SelectionItemIsSelectedPropertyId })
+            .Select(r => r.Element).ToList();
+        Assert.Equal(2, moved.Count);
+        Assert.Contains(Row(session, 0).Id, moved);
+        Assert.Contains(Row(session, 1).Id, moved);
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    [Fact]
+    public void ATSPI_AMoveOfThePalettesChoice_SendsTheRowsItLeftAndReached_WithNoTree()
+    {
+        var signals = new Signals();
+        using var session = HeadlessSession.Create(1000, 700);
+        using var atSpi = new LinuxAccessibilityBridge(signals);
+        OpenPalette(session, new Recording(atSpi));
+        int trees = session.Window.AccessibilityTreesBuilt;
+        signals.Lines.Clear();
+
+        session.Window.PressKey(KeyCode.Down);
+        session.PumpFrame();
+
+        var moved = signals.Lines.Where(l => l.Contains("selected")).ToList();
+        Assert.Equal(2, moved.Count);
+        Assert.Contains(moved, l => l.Contains(AtSpiPath(Row(session, 0))));
+        Assert.Contains(moved, l => l.Contains(AtSpiPath(Row(session, 1))));
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    private static Element Row(HeadlessSession session, int index) =>
+        session.Window.FindByAutomationId($"palette-row-{index}")!.Element;
 
     /// <summary>A dialog with nothing focusable in it (a message, no buttons), over a field that had
     /// the focus, past its fade-in.</summary>
