@@ -5,9 +5,9 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, resumed 2026-10-30 at 88 % weekly (the user's limit stays 90 %: check usage at every
-  step boundary, pause rather than cross it; the week resets 2026-11-01 03:00 UTC). Step 9 next (steps 1–7d landed,
-  step 8 declined). The survey's eight reports are
+- **Phase:** build — round 6. Step 9b next (steps 1–9 landed, step 8 declined). The user lifted the 90 % rule on
+  2026-10-30 until the week's reset (2026-11-01 03:00 UTC) and said to use up the one-off $10 credit; if that runs
+  out too, wait for the reset. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -166,6 +166,13 @@ Re-ranked by the next survey.
   49634ea5's visible-rows grid lines. Count before guessing; probe in scratchpad `r6b7d/` (may be gone; the sample
   ba7b47af rebuilds it). The user's own 600 → 60 curve is closed: no slowdown in the sample on either computer
   (2026-10-30).
+- **input-wheel-noscroll-aot-shift** (4; step 9) — `input/wheel over a list that cannot scroll`, AOT only: best min
+  8.3–8.5 → 8.7–9.4 µs, median 8.7 → 10.2, after dcb40b7c + db606351, neither of which touches that path (each alone
+  8.5–8.8). Likely code placement, not proved. Re-read it at the round's last full compare; if it stays, compare with
+  an A/A build.
+- **palette-per-row-box** (1, low; step 9) — the palette's rows each keep a box for side padding, ~11 KB a key (15 of
+  65 elements), because a list's `Padding` moves its scrollbar and clip. Painting scrollbars at the padding edge would
+  remove it; not tried.
 
 - **vesper-coalesce-markdirty** (6/8, low) — 115 app doubles in the suite, each ~189 KB; a folder Enter/Backspace builds
   the app 3 times (−25 % per folder change).
@@ -278,6 +285,7 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | c5586b3f | junction-files-find-highlights | The same in Junction Files; line starts computed once per file with the text (fixes a selection seed in a match-less file using the previous file's starts). 6,000-line C#: typing 7,089 → 145 KB/key (7.3 → 2.7 ms JIT, 8.4 → 2.9 AOT), Enter 7,023 → 80, repaint with find open 7,140 → 186. Step 7b pixels: suite 159 scenarios A/A = A/B; Meridian/Junction scenes differ only where text now keeps its token colour (eac5f19b). Suite: no row slower in both runs (TableView 10k sort +5–6 % AOT only, its known placement effect). |
 | 6 | 0493921d, 49634ea5 | richtext-table-scroll-depth | User's case (300×10 rich text table, 1200×800): nothing grows with position at 3c709d10 — wheel 0.608/0.599/0.621 ms top/middle/bottom, cells drawn 261/270/260, 136 B per step; drawing, hit-testing and the a11y range already binary-search (since e624b076). One thing scaled: every frame drew all 301 row-edge grid lines; now only the visible stretch's (313 → 38 rectangles a frame at any depth, bottom wheel −3 %; scaling bar). Four top/bottom twin suite rows. 41 frames A/A = A/B; goldens identical; suite 0/0. |
 | 6 | ba7b47af | richtext-table-real-window | Sample only (no src change): `samples/HultUI.Samples.RichTextTable` opens the editor with the 300×10 table, focused, HUD on continuous redraw (F12 cycles). Real-window probe (GL, idle-gated, never took the foreground, WM_CLOSE) flat top to bottom at e624b076 AND at the tip, ~3,000 FPS (0.29–0.37 ms; HUD = Stopwatch within 1 %); Debug, the Fluent page's old hosting, and HUD-bounds + focused editor flat too. The user's 600 → 60 curve did not reproduce, so no bisect and no fix; their 1.7 ms at the top was already 5× the probe. Not copied: a focused foreground window, a real pointer (hover hit tests), a11y clients on a focused window, an uncommitted tree. The user ran the sample on both their computers on 2026-10-30: no slowdown on either, closed. |
+| 6 | dcb40b7c, db606351 | palette-virtual-rows | Approved (off-screen rows leave the tree). The palette's list is a VirtualList with `RowHeights`: only rows on screen are elements, keyed by command + index, the selection in the item; the "n more" line scrolls with the rows. An open overlay's list is told in the frame it changes (with a reader listening `PrepareOverlays` realizes its rows first) and a selected state in an overlay builds that overlay's part (over 200 rows 1 tree a change → 0 + 1 part). Suite KB/op JIT (AOT within 1.5 %): filter 2,000 361.2 → 115.8 (−68 %; suite row text is cold; warm over 120 keys 335.0 → 68.5, −80 %), typing UIA 469.5 → 144.7 (−69 %); best min −9…−14 %. Apps KB/step: Junction 300 branches typing 752.8 → 54.4 (−93 %), Down/Up 755.7 → 32.6; Meridian 200 requests 437.5 → 71.6 (−84 %), Down/Up 455.7 → 22.3; reader nodes added/removed 246.5 → 24.1 and 226.1 → 37.1, 0 window trees. Suite 0 slower JIT + AOT at ±10 %; one AOT row in Waiting (input-wheel-noscroll-aot-shift). Pixels: 110 of 116 steps identical, the other 6 an open palette after a window resize (step 9b); goldens identical. Reader: the "n more" line leaves the tree with off-screen rows; **rows now say selected or not** (question 7). 8 reverse edits caught; WSL a11y + palette 168 pass, 28 skipped. |
 
 ## Examined, not worth it
 
@@ -651,5 +659,13 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   the tip (+0.06 ms vs e624b076) went to Waiting. Usage 88 % (180k tokens): loop paused before step 9 under the user's
   90 % rule.
 - 2026-10-30: the user ran the sample on both computers: no slowdown on either, so step 7d is closed (which commit
-  removed it stays unknown; the probe was already flat at e624b076). Loop resumed at 88 % with step 9; the 90 % rule
-  stands.
+  removed it stays unknown; the probe was already flat at e624b076). Loop resumed at 88 % with step 9. The user then
+  lifted the 90 % rule until the week's reset and said to use up the one-off $10 credit.
+- 2026-10-31: round 6 step 9 landed (dcb40b7c, db606351): the command palette's rows on screen are the only elements
+  (Junction typing −93 %, Meridian −84 %, suite −68…−69 %, min −9…−14 %; 0 window trees). Found two bugs, now step 9b
+  (composite lists aren't told on their own; an open overlay misses a window resize) and question 7 for the user (rows
+  told selected). Guideline notes: a virtual list realizes rows in render, after the a11y phase, and the flags end with
+  the frame, so what a reader must see needs realizing before that phase; a list's `Padding` moves its scrollbar and
+  clip, so put vertical padding in the first and last rows and side padding in a box per row; don't use `SelectedIndex`
+  on a composite list (it builds the whole tree), carry the selection in the item; key rows by id + index, since
+  position-only keys change a mounted row's name, which builds the whole tree. Usage 90 % (439k tokens).
