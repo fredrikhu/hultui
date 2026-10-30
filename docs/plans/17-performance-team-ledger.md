@@ -130,6 +130,11 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
    CommandPalette's up-to-100 rows (CommandPalette.cs:349-357) become VirtualList item rows keyed by command with
    `RowHeights`. `PROBE_PALROWS`: palette filter over 2,000 335.3 → 52.2 KB/key (−84 %), UIA palette typing 888.8 →
    134.6 (−85 %); Junction palette 264.6 KB/step, −75 %. Replaces palette-row-keys (keying alone measured worse).
+9b. **composite-list-told-on-its-own + overlay-layout-on-window-resize** (7 with 1; found by step 9) — two bugs. (a) A
+    `RowsAreComposite` list in the window's own tree is never told by itself: its rows were missing from the tree on
+    mount and 600 ms after a change, until something else built a tree (Junction Files and Commit, Aperture Library).
+    (b) An open overlay is not laid out again on a window resize until something in it changes. Brief in scratchpad
+    `brief-r6b9b.md`.
 10. **Junction** (6/8; r6-6, r6-8, r6-1) — junction-changes-composer (summary keystroke with 200 changed files 1,324.7 KB,
     1,270 elements → ~15 KB at any count); junction-review-composer-row-kept (155 → ~40 KB/key, with a reader trees 1 → 0;
     `DraftEdited` remakes the row, JunctionApp.Review.cs:498); junction-branches-selection-highlight (Branches Down 92.7 KB,
@@ -441,6 +446,11 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
 6. **popover-menu-role** (from step 7a): Meridian's (and Junction's) popover menus are read as Buttons named after every
    row. A menu role with items (like the context menu's) would change what readers hear. [Yes, as the context menu.]
    → **yes, make them menus** (2026-10-27; with step 10, Meridian's half included).
+7. **palette-rows-told-selected** (from step 9; not blocking, kept on the branch): the brief said the palette's
+   selected row must stay told, but it never was, so step 9 added `AccessibleSelected` on every row. New reader
+   behaviour: rows gain SelectionItem and may read "not selected", and selecting a row from assistive technology
+   clicks it, which runs the command. Keep it, or take it out? [Keep: a reader then knows which row Enter runs. It's a
+   small commit to take out.]
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
