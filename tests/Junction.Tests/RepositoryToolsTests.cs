@@ -112,8 +112,16 @@ public class RepositoryToolsTests
         {
             session.Window.PressKey(KeyCode.P, KeyModifiers.Ctrl);
             session.PumpFrames(3);
+            // Only the rows on screen are elements, so each entry is typed for, as a person would.
             foreach (var label in new[] { "Worktrees…", "Submodules…", "Remotes…", "Reflog (recover lost commits)…" })
+            {
+                string query = label[..4];
+                session.Window.TypeText(query);
+                session.PumpFrames(2);
                 Assert.True(Contains(session, label), $"the palette no longer offers \"{label}\"");
+                foreach (var _ in query) session.Window.PressKey(KeyCode.Backspace);
+                session.PumpFrames(2);
+            }
             session.Window.PressKey(KeyCode.Escape);
             session.PumpFrames(2);
 
