@@ -311,6 +311,51 @@ public class CreateMergeRequestTests
         });
     }
 
+    /// <summary>A character builds the composer alone (ComposerPart), and that build is what
+    /// the list and the hint follow: the list opens and narrows, the hint comes and goes, and
+    /// the window is not built for any of it.</summary>
+    [Fact]
+    public void TypingInTheComposer_BuildsItAlone_AndItsListAndHintFollow()
+    {
+        Hosted((repo, session, app) =>
+        {
+            repo.Write("new.txt", "x\n");
+            session.Window.PressKey(KeyCode.Digit4);
+            session.PumpUntil(() => SummaryField(session) is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            var summary = SummaryField(session)!;
+            session.Window.Click(summary);
+            session.PumpFrames(2);
+
+            int builds = app.Builds;
+            foreach (var ch in "Closes #10")
+            {
+                session.Window.TypeText(ch.ToString());
+                session.PumpFrames(2);
+            }
+            // The issue list's load landing builds the part, as a character does.
+            session.PumpUntil(() => ById(session, "issue-suggestions") is not null, TimeSpan.FromSeconds(15));
+            Assert.Equal(builds, app.Builds);
+            Assert.True(TreeHas(session, "Split refunds across original tenders"));
+
+            // Picking one closes the list and the reference shows in the hint.
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Null(ById(session, "issue-suggestions"));
+            Assert.NotNull(ById(session, "closing-hint"));
+
+            // Erased back to the keyword, the hint goes, and no character built the window.
+            int window = app.Builds;
+            while (summary.Text.EndsWith(' ') || summary.Text.Contains('#'))
+            {
+                session.Window.PressKey(KeyCode.Backspace);
+                session.PumpFrames(2);
+            }
+            Assert.Null(ById(session, "closing-hint"));
+            Assert.Equal(window, app.Builds);
+        });
+    }
+
     [Fact]
     public void ABareIssueNumberInAHistorySubjectLinksToTheProject()
     {

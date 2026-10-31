@@ -11,8 +11,8 @@ namespace Junction.Tests;
 
 /// <summary>
 /// The diff's rows are flattened once and kept: a build that changes nothing they were made
-/// from — a keystroke in the commit summary beside the diff, a toast frame — flattens nothing
-/// and makes no row, and each thing the rows do depend on makes them again.
+/// from — a view-only build beside the diff, a toast frame — flattens nothing and makes no row,
+/// and each thing the rows do depend on makes them again.
 ///
 /// <para>Every build used to flatten the diff anew (a record per line, a word diff per changed
 /// pair, merged spans) and the list made every row on screen again from the new records:
@@ -25,24 +25,20 @@ namespace Junction.Tests;
 public class DiffRowKeepTests
 {
     [Fact]
-    public void TypingInTheSummary_FlattensNothing_AndMakesNoRow()
+    public void AViewOnlyBuildBesideTheDiff_FlattensNothing_AndMakesNoRow()
     {
         Hosted((session, app) =>
         {
-            var summary = Get<Ref<TextInputElement>>(app, "_summaryRef").Current!;
-            session.Window.Click(summary);
-            session.PumpFrames(2);
             var rows = Rows(app);
             int flattens = app.DiffFlattens, made = app.DiffRowsMade, builds = app.Builds;
 
-            foreach (var ch in "Fix it")
+            for (int i = 0; i < 6; i++)
             {
-                session.Window.TypeText(ch.ToString());
+                Invoke(app, "RerenderView");
                 session.PumpFrame();
             }
 
-            Assert.Equal("Fix it", Get<string>(app, "_commitSummary"));
-            Assert.True(app.Builds - builds >= 6, $"{app.Builds - builds} builds for six keystrokes");
+            Assert.True(app.Builds - builds >= 6, $"{app.Builds - builds} builds for six rebuilds");
             Assert.Equal(flattens, app.DiffFlattens);
             Assert.Equal(made, app.DiffRowsMade);
             Assert.Equal(rows, Rows(app));   // the same row elements, in the same places

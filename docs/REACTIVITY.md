@@ -408,6 +408,17 @@ same accessibility trees a key with a reader. The perf suite pins the pattern:
 (35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
 as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
 
+**A form can be a part with a signal of its own.** A field holds its own text, so a character in
+Junction's commit summary changes nothing the window shows but what reads that text. The view
+still built on every key, its lists with it, and the key cost more the more files had changed. The
+composer is now a part (round 6, step 10): a character writes the part's signal, and only the part
+builds, for its issue list and closing hint. The view's build places it, as Vesper's does (`Place`
+below), comparing the few things the part shows of the view's data, so a load that lands with no
+full rebuild behind it still reaches the commit button. Headless, 1400×900, a key and two frames:
+76.8 → 13.6 KB a character with 1 changed file, 1,320 → 13.6 KB with 200 (−99 %, and −23 % time;
+NativeAOT 1,300 → 13.2 KB, −27 %), and no window build. Check what the view reads from a field
+first: here nothing outside the composer did.
+
 Meridian keeps its title bar, rail, request tree and response pane this way (round 5, step 11),
 and adds four lessons:
 

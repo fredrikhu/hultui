@@ -28,9 +28,10 @@ public class ChromePartTests
     // ── The view-only paths ──────────────────────────────────────────────
 
     /// <summary>Every path that rebuilds the view and keeps the chrome: the selection moves and
-    /// cursors of History, Branches, Tags, Files and the Commit file list, the composer's
-    /// fields, the search boxes and the find bar. Each rebuilds the window, builds no chrome,
-    /// and leaves the chrome exactly as a full build would make it.</summary>
+    /// cursors of History, Branches, Tags, Files and the Commit file list, the search boxes and
+    /// the find bar. Each rebuilds the window, builds no chrome, and leaves the chrome exactly as
+    /// a full build would make it. A character in the composer's fields builds no window at
+    /// all.</summary>
     [Fact]
     public void ViewOnlyMoves_RebuildTheView_AndKeepTheChromeAFullBuildWouldMake()
     {
@@ -93,10 +94,16 @@ public class ChromePartTests
 
             // Changes: the composer's two fields.
             Switch(fx, KeyCode.Digit4);
-            Focus(fx, "composer-summary");
-            ViewOnly("summary typing", () => s.Window.TypeText("Fix"));
-            Focus(fx, "composer-description");
-            ViewOnly("description typing", () => s.Window.TypeText("Body"));
+            foreach (var (field, text) in new[] { ("composer-summary", "Fix"), ("composer-description", "Body") })
+            {
+                Focus(fx, field);
+                int builds = fx.App.Builds, chrome = fx.App.ChromeBuilds;
+                s.Window.TypeText(text);
+                s.PumpFrames(3);
+                Assert.Equal(builds, fx.App.Builds);
+                Assert.Equal(chrome, fx.App.ChromeBuilds);
+                AssertChromeIsAFullBuild(fx, "after typing in " + field);
+            }
         });
     }
 

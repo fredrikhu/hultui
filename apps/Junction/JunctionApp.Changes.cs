@@ -521,10 +521,16 @@ public partial class JunctionApp
         // A half-finished operation gets a pinned banner (status + Abort / Skip /
         // Continue) above the list.
         if (data.Sequencer is { } seq)
-            col.AddChild(BuildSequencerBanner(data, seq.State));
+        {
+            var banner = BuildSequencerBanner(data, seq.State);
+            banner.Key = "sequencer-banner";
+            col.AddChild(banner);
+        }
 
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(8, 8, 4, 8))
             .WithRef(_changeScrollRef);
+        // Keyed, as the banner is, so the composer's kept host goes back where it was unmarked.
+        scroll.Key = "change-list";
 
         // How many files the current selection covers, counted once for the whole build:
         // every row that offers an action labels itself with it ("Stage 3 files").
@@ -575,7 +581,8 @@ public partial class JunctionApp
         }
 
         col.AddChild(scroll);
-        col.AddChild(BuildComposer(data));
+        // The host takes the composer's place in the column: it never shrinks.
+        col.AddChild((_composerPart ??= new ComposerPart(this)).Place(data).FlexShrink(0));
         return col;
     }
 
@@ -945,15 +952,67 @@ public partial class JunctionApp
     }
 
     // ── Composer ─────────────────────────────────────────────────────────
+    //
+    // A child component, as the chrome is (see ChromePart): a character in the summary built the
+    // whole view, every row of the lists with it, for fields that hold their own text. 76 KB a
+    // key with one changed file, 1.3 MB with 200. Nothing outside the composer shows what is typed,
+    // so a character builds the composer alone (_composerRevision). It builds with the view when
+    // a full rebuild asked (_chromeRevision, safe by default) or when what it shows of the
+    // working copy moved, which the view's build compares (Place); a view-only build (a row
+    // selected, a splitter dragged) leaves it as it is. ComposerPartTests holds it to what a full
+    // build of it makes.
 
-    private Element BuildComposer(ChangesData data)
+    private readonly HultUI.Core.Reactivity.Signal<int> _composerRevision = new(0);
+    private ComposerPart? _composerPart;
+
+    /// <summary>Builds of the composer so far, for tests.</summary>
+    internal int ComposerBuilds { get; private set; }
+
+    /// <summary>All the composer shows of the working copy: what the commit button says it will
+    /// do, and the message Amend pours in.</summary>
+    private readonly record struct ComposerCounts(int Staged, int Unstaged, int Conflicted, string? HeadMessage);
+
+    private sealed class ComposerPart(JunctionApp app) : HultUI.Core.Components.Component
     {
-        int stagedCount = data.Staged.Count;
+        private ComposerCounts _counts, _builtCounts;
+        private int _builtRevision = -1;
+
+        public override HultUI.Core.Elements.Element Build()
+        {
+            _ = app._composerRevision.Value;
+            _builtCounts = _counts;
+            _builtRevision = app._chromeRevision.Peek();
+            app.ComposerBuilds++;
+            return app.BuildComposer(_counts);
+        }
+
+        /// <summary>The part's host, for the view's build to place: built again first when a full
+        /// rebuild came since it last built, or what it shows of <paramref name="data"/> moved.</summary>
+        public HultUI.Core.Components.ComponentHost Place(ChangesData data)
+        {
+            _counts = new ComposerCounts(data.Staged.Count, data.Unstaged.Count, data.Conflicted.Count, data.HeadMessage);
+            var host = Mount();
+            if (_counts != _builtCounts || _builtRevision != app._chromeRevision.Peek()) MarkDirty();
+            return host;
+        }
+    }
+
+    /// <summary>A character in one of the composer's fields: it builds again alone. The fields
+    /// hold their own text; what the build follows is the issue list and the closing hint.</summary>
+    private void ComposerTyped(bool summary, int caret)
+    {
+        NoteComposerTyping(summary, caret);
+        _composerRevision.Value++;
+    }
+
+    private Element BuildComposer(ComposerCounts counts)
+    {
+        int stagedCount = counts.Staged;
         // Nothing staged but plenty changed is the ordinary case for someone who never
         // stages, so the commit button and Ctrl+Enter take the whole worktree rather than
         // refusing. Conflicts are the exception: staging one is how you declare it resolved,
         // and doing that to a file nobody looked at is not something a commit should decide.
-        bool commitAll = stagedCount == 0 && data.Unstaged.Count > 0 && data.Conflicted.Count == 0;
+        bool commitAll = stagedCount == 0 && counts.Unstaged > 0 && counts.Conflicted == 0;
 
         var box = Flex.Column(gap: 8).FlexShrink(0)
             .Padding(new Thickness(12))
@@ -988,7 +1047,7 @@ public partial class JunctionApp
         // Summary
         var summary = TextInput.New(_commitSummary).Style(Ui.Field());
         summary.PlaceholderText("Summary (required)")
-            .OnTextChanged(q => { _commitSummary = q; NoteComposerTyping(summary: true, _summaryRef.Current?.CursorPosition ?? q.Length); MarkViewDirty(); })
+            .OnTextChanged(q => { _commitSummary = q; ComposerTyped(summary: true, _summaryRef.Current?.CursorPosition ?? q.Length); })
             .Height(Dimension.Px(34)).FlexShrink(0)
             .TextColor(Nocturne.Text).WithRef(_summaryRef);
         // Every child of the composer is keyed, and that is all-or-nothing: a keyed child
@@ -1002,7 +1061,7 @@ public partial class JunctionApp
         // The wrapper's 6px and the theme's 6px of vertical inset, and its 56px of lines.
         var desc = TextArea.New(_commitDescription).Style(Ui.Field(verticalPadding: 12f));
         desc.PlaceholderText("Description")
-            .OnTextChanged(q => { _commitDescription = q; NoteComposerTyping(summary: false, _descRef.Current?.CursorPosition ?? q.Length); MarkViewDirty(); })
+            .OnTextChanged(q => { _commitDescription = q; ComposerTyped(summary: false, _descRef.Current?.CursorPosition ?? q.Length); })
             .Height(Dimension.Px(82))
             .TextColor(Nocturne.Text).WithRef(_descRef);
         desc.Key = "composer-description";
@@ -1019,10 +1078,10 @@ public partial class JunctionApp
         // Amend, then sign. Amend is offered only where there is a commit to rewrite — a
         // repository with no commits yet has nothing behind HEAD, and `git commit --amend`
         // there fails with a message about an unborn branch.
-        if (data.HeadMessage is { Length: > 0 })
+        if (counts.HeadMessage is { Length: > 0 })
         {
             var amend = Checkbox.New(_amendCommit, "Amend last commit")
-                .OnCheckedChanged(v => ToggleAmend(v, data.HeadMessage));
+                .OnCheckedChanged(v => ToggleAmend(v, counts.HeadMessage));
             amend.LabelGap = 8f;
             amend.TextColor(Nocturne.On(0.7)).FontSize(11.5f);
             // Checked and unchecked are different rows to the reconciler; without this the
@@ -1044,10 +1103,10 @@ public partial class JunctionApp
             ? (stagedCount > 0
                 ? $"Amend last commit with {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}"
                 : commitAll
-                    ? $"Amend last commit with {data.Unstaged.Count} change{(data.Unstaged.Count == 1 ? "" : "s")}"
+                    ? $"Amend last commit with {counts.Unstaged} change{(counts.Unstaged == 1 ? "" : "s")}"
                     : "Amend last commit (message only)")
             : commitAll
-                ? $"Commit all {data.Unstaged.Count} change{(data.Unstaged.Count == 1 ? "" : "s")}"
+                ? $"Commit all {counts.Unstaged} change{(counts.Unstaged == 1 ? "" : "s")}"
                 : $"Commit {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}";
         if (_settings.Git.SignCommits) label += " (signed)";
         var button = Ui.PrimaryButton(label, _amendCommit ? Icons.PencilSimple : Icons.GitCommit, DoCommit)
