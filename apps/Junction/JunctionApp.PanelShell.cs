@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -17,14 +18,20 @@ namespace Junction;
 /// </summary>
 public partial class JunctionApp
 {
-    /// <summary>The card a panel's header, toolbar and rows go into.</summary>
-    private static BoxElement PanelCard(float width, float maxHeight)
+    /// <summary>The card a panel's header, toolbar and rows go into: a dialog named by the panel's
+    /// title, directly inside its backdrop, as every modal card in this app is. The backdrop is
+    /// then no button (AccessibilityTreeBuilder.InferRole): a reader heard the card inside a button
+    /// named after all of its text, twice (the card was a second one), and a text change in it
+    /// built the window's whole accessibility tree. The click beside the card and Escape still
+    /// close it.</summary>
+    private static BoxElement PanelCard(string title, float width, float maxHeight)
     {
         var card = Flex.Column(gap: 0)
             .Width(width).MaxHeight(maxHeight)
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
+            .CornerRadius(Nocturne.RadiusLg)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName(title);
         card.On<ClickEvent>(e => e.StopPropagation = true);
         return card;
     }

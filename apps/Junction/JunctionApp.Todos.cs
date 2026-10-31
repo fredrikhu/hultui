@@ -1,4 +1,5 @@
 using HultUI;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -135,7 +136,8 @@ public partial class JunctionApp
             .Width(600).MaxHeight(520)
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
+            .CornerRadius(Nocturne.RadiusLg)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName("To do");
         card.On<ClickEvent>(e => e.StopPropagation = true);
         card.AutomationId = "todos";
 

@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -125,7 +126,8 @@ public partial class JunctionApp
             .Padding(new Thickness(20))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
+            .CornerRadius(Nocturne.RadiusLg)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName(spec.Title);
         card.On<ClickEvent>(e => e.StopPropagation = true);
 
         // Key every child: the field and the checkbox are both optional, so without

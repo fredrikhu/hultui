@@ -1,4 +1,5 @@
 using System.Linq;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -286,7 +287,8 @@ public partial class JunctionApp
             .Width(760).MaxWidth(Dimension.Percent(94)).MaxHeight(780)
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
+            .CornerRadius(Nocturne.RadiusLg)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName("Interactive rebase");
         card.On<ClickEvent>(e => e.StopPropagation = true);
 
         card.AddChild(BuildRebaseHeader(rb));
@@ -518,7 +520,8 @@ public partial class JunctionApp
             .Width(520).MaxWidth(Dimension.Percent(100))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
+            .CornerRadius(Nocturne.RadiusLg)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName("Reword commit");
         card.On<ClickEvent>(e => e.StopPropagation = true);
 
         // Header.

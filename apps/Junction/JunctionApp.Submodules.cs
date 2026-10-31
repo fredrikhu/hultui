@@ -52,7 +52,7 @@ public partial class JunctionApp
         var list = _submodules.Value;
         var loading = _submodules.IsLoading && list.Count == 0;
 
-        var card = PanelCard(680, 580);
+        var card = PanelCard("Submodules", 680, 580);
 
         card.AddChild(BuildSubmodulesHeader());
         card.AddChild(BuildSubmodulesToolbar(list.Count));

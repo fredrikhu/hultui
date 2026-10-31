@@ -1,4 +1,5 @@
 using HultUI;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Reactivity;
@@ -191,7 +192,9 @@ public partial class JunctionApp
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusLg)
-            .Overflow(Overflow.Hidden);
+            .Overflow(Overflow.Hidden)
+            .AccessibleRole(AccessibilityRole.Dialog)
+            .AccessibleName(_mrOpen is { } shown ? $"Merge request !{shown.Iid}" : "Merge requests");
         card.On<ClickEvent>(e => e.StopPropagation = true);
         card.AutomationId = "merge-requests";
 

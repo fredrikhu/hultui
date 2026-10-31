@@ -1,4 +1,5 @@
 using System.Linq;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -49,7 +50,8 @@ public partial class JunctionApp
             .Width(520).MaxWidth(Dimension.Percent(92)).MaxHeight(768)
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
+            .CornerRadius(Nocturne.RadiusLg)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName(meta.Title);
         card.On<ClickEvent>(e => e.StopPropagation = true);
 
         // Header.

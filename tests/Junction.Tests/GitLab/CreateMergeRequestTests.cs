@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Web;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Platform;
@@ -61,7 +62,7 @@ public class CreateMergeRequestTests
             session.PumpUntil(() => TreeHas(session, "main is protected — maintainers can merge; the request waits for one of them."), TimeSpan.FromSeconds(15));
             Assert.True(TreeHas(session, "delete source"));          // the project's default, in the summary
 
-            session.Window.Click(Named(session, "Create merge request"));
+            session.Window.FindByRole(AccessibilityRole.Button, "Create merge request")!.Click();
             session.PumpUntil(() => !app.CreateMergeRequestOpen, TimeSpan.FromSeconds(10));
 
             var post = handler.Seen.Single(s => s.Request.Method == System.Net.Http.HttpMethod.Post);
@@ -77,6 +78,28 @@ public class CreateMergeRequestTests
             session.PumpUntil(() => TreeHas(session, "Created !412"), TimeSpan.FromSeconds(5));
             Assert.NotNull(Named(session, "Open"));   // the toast's action
         }, handler);
+    }
+
+    /// <summary>The card is a dialog named by its title, on a backdrop that is no button
+    /// (ModalDialogRoleTests has the other cards).</summary>
+    [Fact]
+    public void TheCardIsADialogNamedByItsTitle()
+    {
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(3);
+
+            var dialog = session.Window.FindByRole(AccessibilityRole.Dialog, "Create merge request");
+            Assert.NotNull(dialog);
+            Assert.Same(ById(session, "create-mr"), dialog.Element);
+            Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Button, "Create merge request"));
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(3);
+            Assert.Null(session.Window.FindByRole(AccessibilityRole.Dialog, "Create merge request"));
+        });
     }
 
     [Fact]

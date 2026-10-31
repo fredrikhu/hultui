@@ -38,6 +38,24 @@ public class MergeRequestsPanelTests
         });
     }
 
+    /// <summary>The panel is a dialog, on a backdrop that is no button, named for the page it shows
+    /// (ModalDialogRoleTests has the other cards).</summary>
+    [Fact]
+    public void ThePanelIsADialogNamedForItsPage()
+    {
+        Hosted((_, session, app) =>
+        {
+            app.OpenMergeRequests();
+            session.PumpUntil(() => TreeHas(session, "!412"), TimeSpan.FromSeconds(15));
+            session.PumpFrames(3);
+            Assert.NotNull(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Dialog, "Merge requests"));
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Escape);
+            session.PumpFrames(3);
+            Assert.Null(session.Window.FindByRole(HultUI.Core.Accessibility.AccessibilityRole.Dialog, "Merge requests"));
+        });
+    }
+
     [Fact]
     public void ThePanelListsWhatIsAssignedToMeThenEverythingOpen()
     {

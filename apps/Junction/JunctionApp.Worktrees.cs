@@ -60,7 +60,7 @@ public partial class JunctionApp
         var list = WorktreesFor(_activeRepoPath);
         var loading = _worktrees.IsLoading && list.Count == 0;
 
-        var card = PanelCard(640, 560);
+        var card = PanelCard("Worktrees", 640, 560);
 
         card.AddChild(BuildWorktreesHeader());
         card.AddChild(BuildWorktreesToolbar());
