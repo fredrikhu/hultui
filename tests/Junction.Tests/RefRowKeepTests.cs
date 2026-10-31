@@ -14,13 +14,14 @@ using Xunit;
 namespace Junction.Tests;
 
 /// <summary>
-/// The Branches and Tags tables keep a row until its item or its caret changes (the item-rows
-/// <c>RenderWith</c>), so a key makes the two rows it moved between instead of every row on
-/// screen; in Tags the caret is the list's own highlight (<c>SelectionHighlight</c>), so a key
-/// makes none. Their items are the tree's nodes, kept between builds while the refs, the query, the
-/// flat/tree choice and the open folders are unchanged; a branch row's item also carries its
-/// compare pick and base/head tag. Everything else a row shows is in a shape that makes the rows
-/// again. One test per input: each fails with that input left out.
+/// The Branches and Tags tables keep a row until its item changes (the item-rows
+/// <c>RenderWith</c>), and the caret is the list's own highlight (<c>SelectionHighlight</c>), so a
+/// key makes no row: in Branches the highlight is the pick's colour on a picked row, as a plain key
+/// moves the two together. Their items are the tree's nodes, kept between builds while the refs,
+/// the query, the flat/tree choice and the open folders are unchanged; a branch row's item also
+/// carries the pick's tint it draws itself (a pick away from the caret) and its base/head tag.
+/// Everything else a row shows is in a shape that makes the rows again. One test per input: each
+/// fails with that input left out.
 /// </summary>
 // Serial: the colour-scheme and display-scale tests change process-wide state (the palette and
 // the glyph caches) that other sessions draw with.
@@ -30,7 +31,7 @@ public class RefRowKeepTests
     // ── Branches: what a key keeps ───────────────────────────────────────
 
     [Fact]
-    public void APlainMove_MakesTheTwoBranchRowsItMovedBetween_AndKeepsTheRest()
+    public void APlainMove_MakesNoBranchRow_AndTheListDrawsTheCaretAndThePick()
     {
         Hosted((session, app) =>
         {
@@ -39,31 +40,96 @@ public class RefRowKeepTests
             int made = app.BranchRowsMade;
 
             Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Down);
+            Keys(session, KeyCode.Up);
 
-            Assert.Equal(2, app.BranchRowsMade - made);
+            Assert.Equal(0, app.BranchRowsMade - made);
             var after = BranchRows(session);
             Assert.Equal(before.Count, after.Count);
-            Assert.Equal(before.Count - 2, before.Zip(after).Count(p => ReferenceEquals(p.First, p.Second)));
-            Assert.Equal(Nocturne.Accent900, after[2].BackgroundColor);   // focused and picked
-            Assert.NotEqual(Nocturne.Accent900, after[1].BackgroundColor);
+            Assert.True(before.Zip(after).All(p => ReferenceEquals(p.First, p.Second)), "a row was made again");
+            Assert.All(after, r => Assert.Equal(0, r.BackgroundColor.A));
+            var list = BranchList(session);
+            Assert.Equal(2, list.SelectedIndex);
+            Assert.Equal(new RowHighlight(Nocturne.Accent900, new CornerRadius(Nocturne.RadiusRow)), list.SelectionHighlight);
+            // On screen: the caret's row carries the pick's tint, the row it left does not.
+            AssertTint(session, after[2], Nocturne.Accent900);
+            AssertNoTint(session, after[1], Nocturne.Accent900);
         });
     }
 
-    /// <summary>Ctrl+Space takes the focused branch out of the compare picks: its caret does not
-    /// move, so only its item (the pick) says it changed.</summary>
+    /// <summary>On a row the caret left, a pick is the row's to draw, and a key moving the caret
+    /// off it makes it again, in the pick's colour, and on to a row with no pick, under the
+    /// caret's own tint.</summary>
     [Fact]
-    public void UnpickingTheFocusedBranch_MakesItsRowAgain()
+    public void TheCaretLeavingAPick_MakesThatRow_AndTheHighlightGoesBackToTheCaretsTint()
     {
         Hosted((session, app) =>
         {
             Keys(session, KeyCode.Down);
-            Assert.Equal(Nocturne.Accent900, BranchRows(session)[1].BackgroundColor);
+            int made = app.BranchRowsMade;
+
+            Keys(session, KeyCode.Down, KeyModifiers.Ctrl);
+
+            Assert.Equal(1, app.BranchRowsMade - made);
+            var rows = BranchRows(session);
+            Assert.Equal(Nocturne.Accent900, rows[1].BackgroundColor);
+            Assert.Equal(0, rows[2].BackgroundColor.A);
+            Assert.Equal(new RowHighlight(Nocturne.Neutral900, new CornerRadius(Nocturne.RadiusRow)), BranchList(session).SelectionHighlight);
+            AssertTint(session, rows[1], Nocturne.Accent900);
+            AssertTint(session, rows[2], Nocturne.Neutral900);
+
+            // And back: the row's own tint goes, and the list's takes its place.
+            Keys(session, KeyCode.Up, KeyModifiers.Ctrl);
+            rows = BranchRows(session);
+            Assert.Equal(0, rows[1].BackgroundColor.A);
+            AssertTint(session, rows[1], Nocturne.Accent900);
+            AssertNoTint(session, rows[2], Nocturne.Neutral900);
+        });
+    }
+
+    /// <summary>Ctrl+Space takes the focused branch out of the compare picks: its caret does not
+    /// move and the row draws no tint, so no row is made and the list's colour says it.</summary>
+    [Fact]
+    public void UnpickingTheFocusedBranch_ChangesTheListsTint_AndMakesNoRow()
+    {
+        Hosted((session, app) =>
+        {
+            Keys(session, KeyCode.Down);
+            AssertTint(session, BranchRows(session)[1], Nocturne.Accent900);
             int made = app.BranchRowsMade;
 
             Keys(session, KeyCode.Space, KeyModifiers.Ctrl);
 
-            Assert.Equal(1, app.BranchRowsMade - made);
-            Assert.Equal(Nocturne.Neutral900, BranchRows(session)[1].BackgroundColor);
+            Assert.Equal(0, app.BranchRowsMade - made);
+            AssertTint(session, BranchRows(session)[1], Nocturne.Neutral900);
+        });
+    }
+
+    /// <summary>A folder holds no pick: the caret on one is the caret's tint, and the pick it
+    /// walked away from is back to being its own row's.</summary>
+    [Fact]
+    public void TheCaretOnAFolder_IsTheCaretsTint_AndThePickKeepsItsOwn()
+    {
+        Hosted((session, app) =>
+        {
+            // A branch beside a folder: a plain key onto the branch picks it, and the next key
+            // onto the folder leaves the pick standing.
+            var list = BranchList(session);
+            int leaf = Enumerable.Range(0, list.Items.Count - 1).First(i =>
+                list.Items[i].Node.IsFolder != list.Items[i + 1].Node.IsFolder);
+            int folder = leaf + 1;
+            if (list.Items[leaf].Node.IsFolder) (leaf, folder) = (folder, leaf);
+            void Walk(int to)
+            {
+                while (BranchList(session).SelectedIndex < to) Keys(session, KeyCode.Down);
+                while (BranchList(session).SelectedIndex > to) Keys(session, KeyCode.Up);
+            }
+            Walk(leaf);
+            Walk(folder);
+
+            list = BranchList(session);
+            Assert.Equal(new RowHighlight(Nocturne.Neutral900, new CornerRadius(Nocturne.RadiusRow)), list.SelectionHighlight);
+            Assert.Equal(Nocturne.Accent900, BranchRows(session)[leaf].BackgroundColor);
         });
     }
 
@@ -169,16 +235,18 @@ public class RefRowKeepTests
         {
             try
             {
-                var before = BranchRows(session)[0].BackgroundColor;
+                var before = BranchList(session).SelectionHighlight!.Value.Background;
                 Assert.Equal(Nocturne.Neutral900, before);
+                var border = BranchRows(session)[0].BorderColor;
 
                 Nocturne.Use("solarized-light");
                 Rebuild(app);
                 session.PumpFrames(3);
 
-                var after = BranchRows(session)[0].BackgroundColor;
+                var after = BranchList(session).SelectionHighlight!.Value.Background;
                 Assert.Equal(Nocturne.Neutral900, after);
                 Assert.NotEqual(before, after);
+                Assert.NotEqual(border, BranchRows(session)[0].BorderColor);
             }
             finally
             {
@@ -633,6 +701,20 @@ public class RefRowKeepTests
             { m.Invoke(app, null); return; }
         throw new Xunit.Sdk.XunitException("no MarkDirty to call");
     }
+
+    private static SkiaSharp.SKColor PixelOf(HeadlessSession session, BoxElement row)
+    {
+        using var shot = session.Window.CapturePixels();
+        using var bitmap = SkiaSharp.SKBitmap.FromImage(shot);
+        var box = row.WindowBorderBox;
+        return bitmap.GetPixel((int)(box.X + 8), (int)(box.Y + box.Height / 2));
+    }
+
+    private static void AssertTint(HeadlessSession session, BoxElement row, Color tint) =>
+        Assert.Equal(new SkiaSharp.SKColor(tint.R, tint.G, tint.B, tint.A), PixelOf(session, row));
+
+    private static void AssertNoTint(HeadlessSession session, BoxElement row, Color tint) =>
+        Assert.NotEqual(new SkiaSharp.SKColor(tint.R, tint.G, tint.B, tint.A), PixelOf(session, row));
 
     private static void Keys(HeadlessSession session, KeyCode key, KeyModifiers mods = KeyModifiers.None)
     {

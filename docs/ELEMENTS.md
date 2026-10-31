@@ -1350,8 +1350,11 @@ drawn on the next frame and makes no row; turning it on or off makes the selecte
 `.SelectionHighlight(null)` leaves the selection to the rows. On the perf suite's walk a step
 makes 1 row instead of 3 and allocates 16 KB instead of 25 (`virtual/selection walk 1,000 item
 rows, the list draws the highlight`); Junction's Tags table, whose caret's tint is the list's,
-makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87. A list can
-take it only while nothing else paints the selected row: Vesper's Detail panes let the list draw
+makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87. The highlight
+can change colour with what is under it: a plain key in Junction's Branches moves the caret and the
+branch picked together, so the list draws the pick's tint on a picked row and the caret's on any
+other, the row's item says only whether it draws a pick of its own, away from the caret, and a key
+makes no row (93 → 47 KB a key). A list can take it only while nothing else paints the selected row: Vesper's Detail panes let the list draw
 the cursor (an accent fill and a 1 px ring, square-cornered) and go back to rows that draw it
 while the zebra tint is on or a drag hovers a folder in the pane, either of which would paint over
 the list's box; each is in the rows' shape, so the switch makes the rows again (Detail Down 35 →

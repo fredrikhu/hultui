@@ -334,8 +334,7 @@ public class BranchesViewTests
             var name = row.Children[0].WindowBorderBox;
             session.Window.Click(name.X + 20f, name.Y + name.Height / 2f);
             session.PumpFrames(2);
-            // (A row's key carries "#f" while it holds the selection caret.)
-            Assert.True(LeafRows(PumpForList(session)).Single(r => Names(r, "backoff")).Key?.Contains("#f") == true,
+            Assert.True(Selected(PumpForList(session)) is { } selected && Names(selected, "backoff"),
                 "clicking the backoff row did not select it");
             session.Window.PressKey(KeyCode.C);
             PumpUntilCheckedOut(session, repo, "team/platform/retry/backoff");
@@ -449,6 +448,15 @@ public class BranchesViewTests
     private static List<Element> LeafRows(Element list) =>
         list.Children.Where(r => LayoutProbe.Descendants<Element>(r, e => e.Key?.StartsWith("inc:") == true).Count == 1)
             .ToList();
+
+    /// <summary>The row under the list's selection: the first row on screen's index is the
+    /// list's offset in rows.</summary>
+    private static Element? Selected(Element list)
+    {
+        var v = (VirtualListElement<JunctionApp.BranchRowItem>)list;
+        return v.Children.FirstOrDefault(r => Math.Abs(r.Layout.AbsoluteBorderBox.Y - (v.Layout.AbsoluteContentBox.Y
+            + v.SelectedIndex * v.ItemHeight - v.ScrollOffsetY)) < 1f);
+    }
 
     private static bool Names(Element row, string title) =>
         LayoutProbe.Descendants<TextElement>(row.Children[0], t => t.Content == title).Count == 1;

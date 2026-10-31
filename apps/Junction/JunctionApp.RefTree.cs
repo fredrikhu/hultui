@@ -194,7 +194,7 @@ public partial class JunctionApp
     /// virtual list positions rows (and hands assistive tech their bounds) from one item
     /// height, and the scroll-into-view maths is index × height.</summary>
     private Element RefFolderRow<T>(
-        string kind, TreeNode<T> node, int index, bool focused, float height, Action<int> select)
+        string kind, TreeNode<T> node, int index, float height, Action<int> select)
     {
         var expanded = IsFolderExpanded(kind, node);
         var remote = node.AllFlagged;
@@ -205,11 +205,10 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow)
             .BorderColor(Nocturne.On(0.06)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
-        // Focus and open state both change the row's look, and a collapsing tree moves
-        // every row below it — without a key that carries the state, a patched row keeps
-        // the previous occupant's handler and clicking one folder opens another.
-        row.Key = $"{kind}dir:{node.Path}{(focused ? "#f" : "")}{(expanded ? "#o" : "")}";
-        row.Background(focused ? Nocturne.Neutral900 : Color.Transparent);
+        // A collapsing tree moves every row below it — without a key that carries the state, a
+        // patched row keeps the previous occupant's handler and clicking one folder opens
+        // another. The caret's tint is the list's.
+        row.Key = $"{kind}dir:{node.Path}{(expanded ? "#o" : "")}";
 
         if (node.Depth > 0)
             row.AddChild(Box.New().Width(node.Depth * RefIndent).FlexShrink(0));

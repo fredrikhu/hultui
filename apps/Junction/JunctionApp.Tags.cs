@@ -249,7 +249,7 @@ public partial class JunctionApp
         // context menu select it by index). The caret is drawn by the list, under the row.
         var index = _tagRowsMemo.IndexOf(node);
         return node.IsFolder
-            ? RefFolderRow(RefKindTag, node, index, focused: false, TagRowHeight, SelectTagRow)
+            ? RefFolderRow(RefKindTag, node, index, TagRowHeight, SelectTagRow)
             : TagLeafRow(node, index);
     }
 
