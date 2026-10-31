@@ -1,7 +1,11 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.RichText;
 using HultUI.Headless;
 
@@ -218,6 +222,41 @@ static partial class Scenarios
                     Check = _ => bridge.Diffs.Count > 0 ? null : "the bridge received no change",
                 };
             });
+
+        yield return new Scenario("a11y/type in a rich text editor inside a VirtualList row, bridge on",
+            "Type and erase in a comment card that is a row of a 150-row list, under its formatting bar, while an accessibility client listens: what a key makes again, and the trees it builds",
+            ctx =>
+            {
+                ctx.Window.InstallAccessibilityBridge();
+                var card = new EditorInListRow(ctx.Rng);
+                ctx.Mount(card.Mount());
+                ctx.Pump(2);
+                ctx.Window.Click(card.Editor!);
+                ctx.Pump(2);
+                int typed = 0, treesBefore = 0;
+                return new Op
+                {
+                    // Twenty characters and twenty erased, so the paragraph stays one length.
+                    Run = step =>
+                    {
+                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                        var was = AccessibilityClients.Force;
+                        AccessibilityClients.Force = true;
+                        try
+                        {
+                            if (step % 40 < 20) { ctx.Window.TypeText(((char)('a' + step % 26)).ToString()); typed++; }
+                            else { ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace); typed--; }
+                        }
+                        finally { AccessibilityClients.Force = was; }
+                    },
+                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+                    FigureUnit = "a11y trees/key",
+                    Check = _ => card.Editor is not { } editor ? "the card's row is gone"
+                        : !ReferenceEquals(ctx.Window.Window.FocusedElement, editor) ? "the editor lost the keyboard"
+                        : editor.Document[0].Text.Length != typed ? $"the editor holds {editor.Document[0].Text.Length} characters, {typed} typed"
+                        : null,
+                };
+            });
     }
 
     // A focused editor filling the window.
@@ -287,5 +326,66 @@ static partial class Scenarios
             text.Append(marked);
         }
         return RichBlock.Paragraph(text.ToString(), [.. list]);
+    }
+
+    /// <summary>
+    /// A comment being written among a diff's rows, as Junction's review composer is: a card
+    /// holding a formatting bar and a rich text editor of fixed height is row 12 of 150 of a
+    /// <see cref="VirtualListElement{T}"/> on item rows, and an edit or a caret move rebuilds the
+    /// component that holds the list.
+    /// </summary>
+    private sealed class EditorInListRow(Random rng) : Component
+    {
+        private const int CardRow = 12, RowCount = 150;
+        private const float LineHeight = 22f, BarHeight = 28f, EditorHeight = 72f, CardHeight = 150f;
+
+        private readonly List<int> _rows = Enumerable.Range(0, RowCount).ToList();
+        private readonly string[] _lines = Enumerable.Range(0, RowCount).Select(_ => Ui.Paragraph(rng, 6)).ToArray();
+        private readonly Ref<RichTextEditorElement> _editor = new();
+        private readonly Ref<VirtualListElement<int>> _list = new();
+        private readonly Signal<int> _revision = new(0);
+        private RichTextToolbar? _bar;
+        private RichDocument _document = RichDocument.Empty;
+        private bool _edited;
+
+        public RichTextEditorElement? Editor => _editor.Current;
+
+        public override Element Build()
+        {
+            _ = _revision.Value;
+            // The card's bar follows the caret, so the row is made again.
+            if (_edited) _list.Current?.InvalidateRow(CardRow);
+            _edited = false;
+            return VirtualListElement<int>.New()
+                .ItemHeight(LineHeight)
+                .Items(_rows)
+                .RowHeights((_, i) => i == CardRow ? CardHeight : LineHeight)
+                .RenderWith((i, _) => i == CardRow ? Card() : Text.New(_lines[i]).FontSize(12f))
+                .FlexGrow(1)
+                .WithRef(_list);
+        }
+
+        private Element Card()
+        {
+            var bar = (_bar ??= new RichTextToolbar(_editor, Rebuild) { ButtonSize = BarHeight }).Build()
+                .FlexWrap(FlexWrap.NoWrap).Height(BarHeight).Overflow(Overflow.Hidden);
+            var editor = RichTextEditor.New(_document)
+                .OnDocumentChanged(d => { _document = d; Edited(); })
+                .OnSelectionChanged(Edited)
+                .Height(Dimension.Px(EditorHeight))
+                .WithRef(_editor);
+            var card = Flex.Column(gap: 6).Padding(10).Children(bar, editor);
+            card.Key = "card";
+            return card;
+        }
+
+        private void Edited()
+        {
+            _edited = true;
+            Rebuild();
+        }
+
+        // A signal write: an edit raises two changes in one event, and they come to one build.
+        private void Rebuild() => _revision.Value++;
     }
 }
