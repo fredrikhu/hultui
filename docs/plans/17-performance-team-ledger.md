@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 10a next (steps 1–9b landed, step 8 declined). The user lifted the 90 % rule on
+- **Phase:** build — round 6. Step 10b next (steps 1–10a landed, step 8 declined). The user lifted the 90 % rule on
   2026-10-30 until the week's reset (2026-11-01 03:00 UTC) and said to use up the one-off $10 credit; if that runs
   out too, wait for the reset. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
@@ -146,6 +146,8 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
 11. **virtuallist-sticky-headers + Junction Changes as a VirtualList** (1/8; r6-1 Candidate 1; user: API approved) —
     Changes with 300 files: 3,065 elements, Down 3,020 KB/key, typing 2,713 KB/char; DECISIONS.md "Junction's Changes
     list stays a scroll view, for now" named this trigger. O(changed files) → O(visible rows), −90 % or more at 300 files.
+    Also: a Changes cursor key is a full rebuild with chrome (305 KB with 21 files; step 10a) — `SelectChange` could use
+    `RerenderView`.
 12. **apps-junction-highlight-prefetch + junction-commit-diff-flatten** (5/8, 6/8; r6-5, r6-8) — tokenize only to the last
     shown hunk line / after the selection rests (JunctionApp.Highlight.cs:93-109; History 9,826 KB/key on all threads vs
     60 on the UI thread, 59/16/1.5 GCs per 100 keys → −50…−90 %); flatten a new file's diff lazily (415-file commit:
@@ -178,6 +180,9 @@ Re-ranked by the next survey.
   in the full-suite step with `DiffFindTests.EnterWalksTheMatchesAndWraps`.
 - **dropdown-follow-control-on-resize** (1, low; step 9b) — a Dropdown list or DatePicker calendar stays at its opening
   point (kept on screen) when a resize moves its control. Anchoring them changes how a press on the control behaves.
+- **junction-leads** (6/8, from step 10a) — the Create MR description could use `RichTextToolbar.IsStale`; issue-list keys
+  still `MarkDirty`; a key on a non-GitLab repo could skip the composer build (13.6 KB left); the diff's find step keeps
+  108 KB and 2.9 ms unexplained.
 - **palette-per-row-box** (1, low; step 9) — the palette's rows each keep a box for side padding, ~11 KB a key (15 of
   65 elements), because a list's `Padding` moves its scrollbar and clip. Painting scrollbars at the padding edge would
   remove it; not tried.
@@ -296,6 +301,11 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | dcb40b7c, db606351 | palette-virtual-rows | Approved (off-screen rows leave the tree). The palette's list is a VirtualList with `RowHeights`: only rows on screen are elements, keyed by command + index, the selection in the item; the "n more" line scrolls with the rows. An open overlay's list is told in the frame it changes (with a reader listening `PrepareOverlays` realizes its rows first) and a selected state in an overlay builds that overlay's part (over 200 rows 1 tree a change → 0 + 1 part). Suite KB/op JIT (AOT within 1.5 %): filter 2,000 361.2 → 115.8 (−68 %; suite row text is cold; warm over 120 keys 335.0 → 68.5, −80 %), typing UIA 469.5 → 144.7 (−69 %); best min −9…−14 %. Apps KB/step: Junction 300 branches typing 752.8 → 54.4 (−93 %), Down/Up 755.7 → 32.6; Meridian 200 requests 437.5 → 71.6 (−84 %), Down/Up 455.7 → 22.3; reader nodes added/removed 246.5 → 24.1 and 226.1 → 37.1, 0 window trees. Suite 0 slower JIT + AOT at ±10 %; one AOT row in Waiting (input-wheel-noscroll-aot-shift). Pixels: 110 of 116 steps identical, the other 6 an open palette after a window resize (step 9b); goldens identical. Reader: the "n more" line leaves the tree with off-screen rows; **rows now say selected or not** (question 7: kept, user 2026-10-31). 8 reverse edits caught; WSL a11y + palette 168 pass, 28 skipped. |
 | 6 | ed11148e, 6a1c8ab4 | composite-list-told-on-its-own | Bug fix. The tree build and the in-place refresh ask a scroll view to realize its rows as they reach it (`ScrollViewElement.RealizeForAccessibility`): a mount's rows are in that frame's tree; a change's or scroll's come with the layout refresh, in that frame or within 100 ms in a burst. Reader vs a fresh tree at rest, JIT + AOT, recording + UIA: Junction Commit opened 28 nodes missing → 0, Aperture Library +168 −168 → 0, Files keys +6 −6 → 0, Commit wheel +1 −1 → 0. Bridge off: all walks equal. Price: Aperture wheel 5.18 → 5.42 KB a notch, 8 → 9 trees in 120; composite grid still 20 per 120. `a11y/` + `virtual/` rows nothing slower. Audit 0 STALE in 2,804, 0 walk mismatches, fallbacks 75 → 85 (mostly the new tests). Pixels 161 frames × 3 views A/A 0, A/B 0. 6a1c8ab4 repairs `TheOlderEntryPointsStillReachThePanels`, broken by db606351. |
 | 6 | f76eb195 | overlay-layout-on-window-resize | Bug fix. `OnWindowResized` marks each open overlay for layout (the modal resize path goes through it too); an overlay placed at a point is kept on screen from where it was asked to be, so it goes back when the window grows. On the resize frame: Dialog scrim 800×600 → 1000×700, palette card at 320 tall 440 → 230 px; dialog, palette and menu pixels equal a fresh open at that size. `layout/resize` flat (JIT 1.675 → 1.677, AOT 2.569 → 2.586 ms), bytes equal, other resize rows within 3 %. Full suite for the step: 163 rows, bytes equal, largest rise +3.8 % in code not touched. Windows and Fedora tests green; 21 reverse-edit failures across both fixes. |
+| 6 | b22767a8 | suite row (step 10) | `a11y/type in a rich text editor inside a VirtualList row, bridge on`. With change 92084157: JIT 0.301 → 0.256 ms, 83.4 → 2.4 KB, trees 1 → 0; AOT 0.294 → 0.245, 83.1 → 2.4. |
+| 6 | 454fc82f | junction-changes-composer | The composer is a part with its own signal, placed by the view's build. KB/char none / UIA: 1 file 76.8 → 13.6 / 77.4 → 14.1, 200 files 1,320 → 13.6 / 14.1 (−99 %, min −23 / −21 % JIT, −27 / −28 % AOT); window builds 1 → 0. |
+| 6 | 92084157 | junction-review-composer-row-kept | Typing keeps the row and builds nothing: new `RichTextToolbar.IsStale` (a build only when a button would change) and `Window` asks for no tree for an element in a row of an item-publishing list (it has no node; trees stayed at 1 without it). Typing JIT 150.4 → 2.0 / 206.7 → 2.0 KB (min −16 / −20 %), AOT 148.9 → 2.1 / 204.8 → 2.1 (−20 / −20 %); caret 148.9 → 0.4 / 204.8 → 0.4; rows and trees a key 1 → 0. Focus, caret and undo survive; the editor's height is fixed. Reader gap found: question 8. |
+| 6 | a35f1797 | junction-branches-selection-highlight | The list draws the pick's tint on a picked caret row and the caret's on any other; `Tinted` in the item covers a pick away from the caret. KB/key 92.8 → 46.5 / 93.5 → 47.0 (−50 %), min −2 / −6 % JIT, −5 / −7 % AOT; rows a key 2.13 → 0.27. |
+| 6 | 9d920925 | junction-diff-find-shape | The current match is out of the rows' shape, `InvalidateRow` on the old and new rows, FindBar on `MarkViewDirty`. Enter 467.8 → 107.5 / 468.8 → 108.4 KB (−77 %), min −5 / −7 % JIT, −8 / −9 % AOT; rows 36 → 3. Step 10a: 96 scenes × 2 themes identical (pixels, a11y, focus; A/A identical); full suite 0 slower, 1 faster JIT + AOT; Junction.Tests 1,006 pass; 24 reverse edits caught; WSL not run (→ 10b). |
 
 ## Examined, not worth it
 
@@ -456,6 +466,10 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
    behaviour: rows gain SelectionItem and may read "not selected", and selecting a row from assistive technology
    clicks it, which runs the command. Keep it, or take it out? [Keep: a reader then knows which row Enter runs. It's a
    small commit to take out.] → **yes, keep it** (2026-10-31).
+8. **junction-review-composer-reader** (from step 10a; not blocking; an existing gap): a reader can't reach the comment
+   being typed in Junction's review, because the editor in that list row has no node and the row is read only as "new
+   comment". Making the list `RowsAreComposite` while reviewing would fix it but changes what a reader hears, and costs
+   a11y work per key. [Yes, fix it: a comment nobody can read back is a real gap.]
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -693,3 +707,10 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   seam for any element that makes its accessible content while drawing; ask for it only where the walk already knows it
   has a scroll view (asking at every element cost `a11y/wheel 1,000 rows, UIA` +5 %). Usage 93 % (546k tokens). Step 10
   split into 10a and 10b.
+- 2026-10-31: step 10a landed (b22767a8..f52e2184): a composer character builds the composer alone (−82…−99 %, O(files)
+  gone), typing a review comment builds nothing (150 → 2 KB, trees 1 → 0), the Branches list draws its selection (−50 %),
+  a diff find step remakes 3 rows, not 36 (−77 %). Question 8 for the user. The `EnterWalks…` flake was the repository
+  watcher's reload; settled, 10 of 10 pass. Guideline notes: a form is a part with its own signal, placed by the view's
+  build, and its compare is tested on the frame the list counts it; before a list takes the highlight, check what else
+  moves with the selection (a highlight can change colour); ask whether a key needs a build at all, since an editor
+  holds its own state. Usage 96 % (565k tokens).
