@@ -2004,7 +2004,11 @@ shadows, the gap to the anchor and the margin kept from the window's edges.
 
 **Under it**, for other anchored surfaces: `IOverlayHost.ShowAnchoredOverlay(content, anchor,
 place, …)` places an overlay with `place(contentSize, windowSize)` every frame, and swallows a
-press on the anchor that closes it. `Element.WindowBorderBox` / `WindowContentBox` say where an
+press on the anchor that closes it. `ShowOverlay(content, x, y, …)` puts one at a point and keeps
+it in the window, from that point, on opening and at each new size. Either kind is laid out again
+in the frame of a resize, so nothing an overlay does needs `Window.Resized`: a dialog's scrim
+and a palette have their new layout there, as a fresh open at that size would.
+`Element.WindowBorderBox` / `WindowContentBox` say where an
 element is in the window, overlay or not — what anything placed in the window against it wants
 (another overlay, the focus ring, a synthesized click). `ScreenBorderBox` stays in the space the
 element's own pointer events arrive in, which inside an overlay is the overlay's; dropdowns, date

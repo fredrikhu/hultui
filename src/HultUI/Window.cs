@@ -1411,6 +1411,15 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         }
         _root.MarkLayoutDirty();
         _root.MarkPaintDirty();
+        // An overlay is a root of its own, laid out against the window's size, and no flag of the
+        // root's reaches it: a dialog's scrim stayed the old window's size, its panel centred in
+        // that, and a command palette took the new size at its next key. Every resize comes through
+        // here, the frame drawn from inside the platform's modal size loop too.
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            _overlays[i].Content.MarkLayoutDirty();
+            _overlays[i].WindowResized = true;
+        }
         Resized?.Invoke();
     }
 
@@ -3222,6 +3231,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     private OverlayHandle Show(OverlayEntry entry)
     {
         var content = entry.Content;
+        entry.WantedX = entry.X;
+        entry.WantedY = entry.Y;
 
         // Set overlay host so elements inside the overlay can show/close overlays
         content.OverlayHost = this;
@@ -3243,18 +3254,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         entry.LayoutDone = true;
 
         if (entry.Place is not null)
-        {
             PlaceOverlay(entry);
-        }
         else
-        {
-            // Clamp to viewport so the overlay stays on screen
-            float vw = PlatformWindow.LayoutWidth;
-            float vh = PlatformWindow.LayoutHeight;
-            float x = entry.X + content.Layout.Width > vw ? Math.Max(0, vw - content.Layout.Width) : entry.X;
-            float y = entry.Y + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.Y;
-            MoveOverlay(entry, x, y);
-        }
+            KeepOverlayOnScreen(entry);
 
         _overlays.Add(entry);
         _root?.MarkPaintDirty();
@@ -3283,6 +3285,18 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         entry.X = x;
         entry.Y = y;
         entry.Content.OverlayOrigin = new Point(x, y);
+    }
+
+    /// <summary>Puts an overlay opened at a point where it was asked to be, as far as the window has
+    /// room for it: on opening, and at each new size of the window.</summary>
+    private void KeepOverlayOnScreen(OverlayEntry entry)
+    {
+        var content = entry.Content;
+        float vw = PlatformWindow.LayoutWidth;
+        float vh = PlatformWindow.LayoutHeight;
+        float x = entry.WantedX + content.Layout.Width > vw ? Math.Max(0, vw - content.Layout.Width) : entry.WantedX;
+        float y = entry.WantedY + content.Layout.Height > vh ? Math.Max(0, vh - content.Layout.Height) : entry.WantedY;
+        MoveOverlay(entry, x, y);
     }
 
     /// <summary>Asks an anchored overlay where it goes now: its anchor may have scrolled, the
@@ -3392,6 +3406,8 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         {
             if (_overlays[i].Id == handle.Id)
             {
+                _overlays[i].WantedX = x;
+                _overlays[i].WantedY = y;
                 MoveOverlay(_overlays[i], x, y);
                 _root?.MarkPaintDirty();
                 return;
@@ -3499,6 +3515,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             // Every frame, not only on a relayout: the anchor moves with the page under it.
             if (overlay.Place is not null)
                 PlaceOverlay(overlay);
+            else if (overlay.WindowResized)
+                KeepOverlayOnScreen(overlay);
+            overlay.WindowResized = false;
             if (overlay.Moved)
             {
                 overlay.Moved = false;
