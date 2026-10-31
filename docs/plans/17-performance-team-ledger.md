@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 9b next (steps 1–9 landed, step 8 declined). The user lifted the 90 % rule on
+- **Phase:** build — round 6. Step 10a next (steps 1–9b landed, step 8 declined). The user lifted the 90 % rule on
   2026-10-30 until the week's reset (2026-11-01 03:00 UTC) and said to use up the one-off $10 credit; if that runs
   out too, wait for the reset. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
@@ -140,7 +140,9 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
     `DraftEdited` remakes the row, JunctionApp.Review.cs:498); junction-branches-selection-highlight (Branches Down 92.7 KB,
     render 53.9 → about −50 %, as Tags 8157c282); the diff's find shape (`DiffFindShape`, JunctionApp.Diff.cs:817; round 5
     measured 440.5 KB an Enter); History's list-drawn selection, pixels approved: affordance overlay at the row end, list-owned hover tint (`PROBE_JSEL` 44.4 → 21.4 KB/key).
-    Suite row: typing in a rich text editor inside a VirtualList row with the bridge on.
+    Suite row: typing in a rich text editor inside a VirtualList row with the bridge on. Split for one agent's size:
+    10a composer, review row, Branches, diff find, suite row (brief `brief-r6b10a.md`); 10b History selection, Junction's
+    9 modal cards as Dialogs (question 5), popover menus as menus in Junction and Meridian (question 6).
 11. **virtuallist-sticky-headers + Junction Changes as a VirtualList** (1/8; r6-1 Candidate 1; user: API approved) —
     Changes with 300 files: 3,065 elements, Down 3,020 KB/key, typing 2,713 KB/char; DECISIONS.md "Junction's Changes
     list stays a scroll view, for now" named this trigger. O(changed files) → O(visible rows), −90 % or more at 300 files.
@@ -171,10 +173,11 @@ Re-ranked by the next survey.
   49634ea5's visible-rows grid lines. Count before guessing; probe in scratchpad `r6b7d/` (may be gone; the sample
   ba7b47af rebuilds it). The user's own 600 → 60 curve is closed: no slowdown in the sample on either computer
   (2026-10-30).
-- **input-wheel-noscroll-aot-shift** (4; step 9) — `input/wheel over a list that cannot scroll`, AOT only: best min
-  8.3–8.5 → 8.7–9.4 µs, median 8.7 → 10.2, after dcb40b7c + db606351, neither of which touches that path (each alone
-  8.5–8.8). Likely code placement, not proved. Re-read it at the round's last full compare; if it stays, compare with
-  an A/A build.
+- **junction-tags-test-flake** (tests; step 9b) — `TagsViewTests.ATagsKeyRebuildsOnce_AndTheListFollowsTheSelection`
+  fails in its class's runs (3 of 12 on the base, 6 of 12 with 9b) and passes alone (10 of 10). Cause not found; check it
+  in the full-suite step with `DiffFindTests.EnterWalksTheMatchesAndWraps`.
+- **dropdown-follow-control-on-resize** (1, low; step 9b) — a Dropdown list or DatePicker calendar stays at its opening
+  point (kept on screen) when a resize moves its control. Anchoring them changes how a press on the control behaves.
 - **palette-per-row-box** (1, low; step 9) — the palette's rows each keep a box for side padding, ~11 KB a key (15 of
   65 elements), because a list's `Padding` moves its scrollbar and clip. Painting scrollbars at the padding edge would
   remove it; not tried.
@@ -290,7 +293,9 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | c5586b3f | junction-files-find-highlights | The same in Junction Files; line starts computed once per file with the text (fixes a selection seed in a match-less file using the previous file's starts). 6,000-line C#: typing 7,089 → 145 KB/key (7.3 → 2.7 ms JIT, 8.4 → 2.9 AOT), Enter 7,023 → 80, repaint with find open 7,140 → 186. Step 7b pixels: suite 159 scenarios A/A = A/B; Meridian/Junction scenes differ only where text now keeps its token colour (eac5f19b). Suite: no row slower in both runs (TableView 10k sort +5–6 % AOT only, its known placement effect). |
 | 6 | 0493921d, 49634ea5 | richtext-table-scroll-depth | User's case (300×10 rich text table, 1200×800): nothing grows with position at 3c709d10 — wheel 0.608/0.599/0.621 ms top/middle/bottom, cells drawn 261/270/260, 136 B per step; drawing, hit-testing and the a11y range already binary-search (since e624b076). One thing scaled: every frame drew all 301 row-edge grid lines; now only the visible stretch's (313 → 38 rectangles a frame at any depth, bottom wheel −3 %; scaling bar). Four top/bottom twin suite rows. 41 frames A/A = A/B; goldens identical; suite 0/0. |
 | 6 | ba7b47af | richtext-table-real-window | Sample only (no src change): `samples/HultUI.Samples.RichTextTable` opens the editor with the 300×10 table, focused, HUD on continuous redraw (F12 cycles). Real-window probe (GL, idle-gated, never took the foreground, WM_CLOSE) flat top to bottom at e624b076 AND at the tip, ~3,000 FPS (0.29–0.37 ms; HUD = Stopwatch within 1 %); Debug, the Fluent page's old hosting, and HUD-bounds + focused editor flat too. The user's 600 → 60 curve did not reproduce, so no bisect and no fix; their 1.7 ms at the top was already 5× the probe. Not copied: a focused foreground window, a real pointer (hover hit tests), a11y clients on a focused window, an uncommitted tree. The user ran the sample on both their computers on 2026-10-30: no slowdown on either, closed. |
-| 6 | dcb40b7c, db606351 | palette-virtual-rows | Approved (off-screen rows leave the tree). The palette's list is a VirtualList with `RowHeights`: only rows on screen are elements, keyed by command + index, the selection in the item; the "n more" line scrolls with the rows. An open overlay's list is told in the frame it changes (with a reader listening `PrepareOverlays` realizes its rows first) and a selected state in an overlay builds that overlay's part (over 200 rows 1 tree a change → 0 + 1 part). Suite KB/op JIT (AOT within 1.5 %): filter 2,000 361.2 → 115.8 (−68 %; suite row text is cold; warm over 120 keys 335.0 → 68.5, −80 %), typing UIA 469.5 → 144.7 (−69 %); best min −9…−14 %. Apps KB/step: Junction 300 branches typing 752.8 → 54.4 (−93 %), Down/Up 755.7 → 32.6; Meridian 200 requests 437.5 → 71.6 (−84 %), Down/Up 455.7 → 22.3; reader nodes added/removed 246.5 → 24.1 and 226.1 → 37.1, 0 window trees. Suite 0 slower JIT + AOT at ±10 %; one AOT row in Waiting (input-wheel-noscroll-aot-shift). Pixels: 110 of 116 steps identical, the other 6 an open palette after a window resize (step 9b); goldens identical. Reader: the "n more" line leaves the tree with off-screen rows; **rows now say selected or not** (question 7). 8 reverse edits caught; WSL a11y + palette 168 pass, 28 skipped. |
+| 6 | dcb40b7c, db606351 | palette-virtual-rows | Approved (off-screen rows leave the tree). The palette's list is a VirtualList with `RowHeights`: only rows on screen are elements, keyed by command + index, the selection in the item; the "n more" line scrolls with the rows. An open overlay's list is told in the frame it changes (with a reader listening `PrepareOverlays` realizes its rows first) and a selected state in an overlay builds that overlay's part (over 200 rows 1 tree a change → 0 + 1 part). Suite KB/op JIT (AOT within 1.5 %): filter 2,000 361.2 → 115.8 (−68 %; suite row text is cold; warm over 120 keys 335.0 → 68.5, −80 %), typing UIA 469.5 → 144.7 (−69 %); best min −9…−14 %. Apps KB/step: Junction 300 branches typing 752.8 → 54.4 (−93 %), Down/Up 755.7 → 32.6; Meridian 200 requests 437.5 → 71.6 (−84 %), Down/Up 455.7 → 22.3; reader nodes added/removed 246.5 → 24.1 and 226.1 → 37.1, 0 window trees. Suite 0 slower JIT + AOT at ±10 %; one AOT row in Waiting (input-wheel-noscroll-aot-shift). Pixels: 110 of 116 steps identical, the other 6 an open palette after a window resize (step 9b); goldens identical. Reader: the "n more" line leaves the tree with off-screen rows; **rows now say selected or not** (question 7: kept, user 2026-10-31). 8 reverse edits caught; WSL a11y + palette 168 pass, 28 skipped. |
+| 6 | ed11148e, 6a1c8ab4 | composite-list-told-on-its-own | Bug fix. The tree build and the in-place refresh ask a scroll view to realize its rows as they reach it (`ScrollViewElement.RealizeForAccessibility`): a mount's rows are in that frame's tree; a change's or scroll's come with the layout refresh, in that frame or within 100 ms in a burst. Reader vs a fresh tree at rest, JIT + AOT, recording + UIA: Junction Commit opened 28 nodes missing → 0, Aperture Library +168 −168 → 0, Files keys +6 −6 → 0, Commit wheel +1 −1 → 0. Bridge off: all walks equal. Price: Aperture wheel 5.18 → 5.42 KB a notch, 8 → 9 trees in 120; composite grid still 20 per 120. `a11y/` + `virtual/` rows nothing slower. Audit 0 STALE in 2,804, 0 walk mismatches, fallbacks 75 → 85 (mostly the new tests). Pixels 161 frames × 3 views A/A 0, A/B 0. 6a1c8ab4 repairs `TheOlderEntryPointsStillReachThePanels`, broken by db606351. |
+| 6 | f76eb195 | overlay-layout-on-window-resize | Bug fix. `OnWindowResized` marks each open overlay for layout (the modal resize path goes through it too); an overlay placed at a point is kept on screen from where it was asked to be, so it goes back when the window grows. On the resize frame: Dialog scrim 800×600 → 1000×700, palette card at 320 tall 440 → 230 px; dialog, palette and menu pixels equal a fresh open at that size. `layout/resize` flat (JIT 1.675 → 1.677, AOT 2.569 → 2.586 ms), bytes equal, other resize rows within 3 %. Full suite for the step: 163 rows, bytes equal, largest rise +3.8 % in code not touched. Windows and Fedora tests green; 21 reverse-edit failures across both fixes. |
 
 ## Examined, not worth it
 
@@ -450,7 +455,7 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
    selected row must stay told, but it never was, so step 9 added `AccessibleSelected` on every row. New reader
    behaviour: rows gain SelectionItem and may read "not selected", and selecting a row from assistive technology
    clicks it, which runs the command. Keep it, or take it out? [Keep: a reader then knows which row Enter runs. It's a
-   small commit to take out.]
+   small commit to take out.] → **yes, keep it** (2026-10-31).
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -679,3 +684,12 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   clip, so put vertical padding in the first and last rows and side padding in a box per row; don't use `SelectedIndex`
   on a composite list (it builds the whole tree), carry the selection in the item; key rows by id + index, since
   position-only keys change a mounted row's name, which builds the whole tree. Usage 90 % (439k tokens).
+- 2026-10-31: the user answered question 7: keep the palette rows' selected state.
+- 2026-10-31: step 9b landed (6a1c8ab4, ed11148e, f76eb195): a composite list's rows reach a reader without anything else
+  building a tree (Junction Commit, Files, Aperture Library now match a fresh tree at rest; bridge off equal), and an
+  open overlay is laid out on the frame of a window resize. `input/wheel over a list that cannot scroll` read 8.5–8.6 µs
+  AOT after unrelated commits, so step 9's shift was code placement; closed. Guideline notes: app authors have nothing
+  to do for composite lists; an overlay never needs `Window.Resized`; `ScrollViewElement.RealizeForAccessibility` is the
+  seam for any element that makes its accessible content while drawing; ask for it only where the walk already knows it
+  has a scroll view (asking at every element cost `a11y/wheel 1,000 rows, UIA` +5 %). Usage 93 % (546k tokens). Step 10
+  split into 10a and 10b.
