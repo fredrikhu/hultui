@@ -1797,7 +1797,8 @@ Vesper's reader had the index in its shape, so every Enter, F3 or `n` made every
 again: on a 3,000-line file 35 rows and 330 KB an Enter, 2.5 rows and 69 KB now, with the bar's
 own rebuild made view-only (an owner with kept parts gives the bar the rebuild that leaves them:
 nothing a part shows moves with a find step, and a full one built Vesper's title bar and command
-line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6).
+line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6). Junction's
+diff the same: 36 rows and 468 KB an Enter, 3 rows and 108 KB now.
 
 **A TextArea body takes the matches as highlights.** One `TextArea` over a whole document
 (Meridian's response, Junction's Files view) has one span list for the document, so the matches

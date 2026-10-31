@@ -541,19 +541,29 @@ public partial class JunctionApp
         // threads, so while reviewing the rows are made again on every build that wove them
         // again; a caret or range move only changes the marks of the line rows it moved
         // between, which their items carry. Typing in a comment makes no row; a move of its
-        // formatting bar's buttons changes the one card holding its editor, made again alone.
+        // formatting bar's buttons changes the one card holding its editor, made again alone. A
+        // find step changes the row the current match left and the row it reached.
         var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
             Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
         // Only the list this build patches: another file's list is replaced, rows and all.
         var mountedList = _diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } m && k == listKey ? m : null;
         // `|`, not `||`: the staging snapshot is brought up to date either way.
+        var hit = DiffFindHit();
         if (DiffStageSelectionChanged() | rowShape != _diffRowShape || (review is not null && !reviewMarksOnly))
         {
             mountedList?.InvalidateRows();
             _diffRowShape = rowShape;
         }
-        else if (reviewRemakeRow >= 0)
-            mountedList?.InvalidateRow(reviewRemakeRow);
+        else
+        {
+            if (reviewRemakeRow >= 0) mountedList?.InvalidateRow(reviewRemakeRow);
+            if (hit != _diffHit)
+            {
+                mountedList?.InvalidateRow(_diffHit.Line);   // -1 does nothing
+                mountedList?.InvalidateRow(hit.Line);
+            }
+        }
+        _diffHit = hit;
 
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
@@ -806,19 +816,29 @@ public partial class JunctionApp
     /// </summary>
     private readonly record struct DiffRowShape(
         List<DiffRow> Rows, DiffInteract? Interact, bool Wrap, float PanOffset, string CodeFont, float CodeSize,
-        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find,
+        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Hits) Find,
         float Scale);
 
     private DiffRowShape _diffRowShape;
 
-    /// <summary>What find tints: the query and its options, the current match and how many
+    /// <summary>What find tints on every row: the query and its options and how many matches
     /// there are (the matches themselves only move with a new query, option or binding, and a
-    /// new binding comes with new rows).</summary>
-    private (string, bool, bool, int, int) DiffFindShape()
+    /// new binding comes with new rows). The current match is not in it: it is tinted on one
+    /// row, so a step makes the row it left and the row it reached (<see cref="DiffFindHit"/>).
+    /// With its index here every Enter or F3 made every row on screen again, 462 KB a step.</summary>
+    private (string, bool, bool, int) DiffFindShape()
     {
         var s = _diffFind.Search;
-        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
+        return (s.Query, s.MatchCase, s.UseRegex, s.Hits.Count);
     }
+
+    private (int Index, int Line) _diffHit = (-1, -1);
+
+    /// <summary>The current match as the rows show it: its index and its row (the search's line
+    /// numbers are the rows'), or -1 for both. The index too: two matches on one row move the
+    /// tint within it.</summary>
+    private (int Index, int Line) DiffFindHit() =>
+        _diffFind.Search is { Current: { } hit } s ? (s.Index, hit.Line) : (-1, -1);
 
     // The staged-line picks as the rows on screen last drew them.
     private readonly HashSet<GitDiffLine> _diffRowStageSel = new();
