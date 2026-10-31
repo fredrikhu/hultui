@@ -334,6 +334,32 @@ public class CreateMergeRequestTests
         });
     }
 
+    /// <summary>Esc closes the list and leaves the text; the next character opens it again.</summary>
+    [Fact]
+    public void EscapeClosesTheIssueList_AndTheNextCharacterOpensIt()
+    {
+        Hosted((repo, session, app) =>
+        {
+            repo.Write("new.txt", "x\n");
+            session.Window.PressKey(KeyCode.Digit4);
+            session.PumpUntil(() => SummaryField(session) is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            var summary = SummaryField(session)!;
+            session.Window.Click(summary);
+            session.Window.TypeText("Fix #1");
+            session.PumpUntil(() => ById(session, "issue-suggestions") is not null, TimeSpan.FromSeconds(15));
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(3);
+            Assert.Null(ById(session, "issue-suggestions"));
+            Assert.Equal("Fix #1", summary.Text);
+
+            session.Window.TypeText("0");
+            session.PumpFrames(3);
+            Assert.NotNull(ById(session, "issue-suggestions"));
+        });
+    }
+
     /// <summary>A character builds the composer alone (ComposerPart), and that build is what
     /// the list and the hint follow: the list opens and narrows, the hint comes and goes, and
     /// the window is not built for any of it.</summary>
