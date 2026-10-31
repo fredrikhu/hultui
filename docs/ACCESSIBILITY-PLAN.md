@@ -269,6 +269,22 @@ since round 6, step 10b, each named by its title: a character in a card's field 
 with UIA 462 → 336 KB (−27 %), trees 1.3 a key → 0.05 (the field's first character, which brings
 the footer's button to life).
 
+A menu an app draws with elements (round 6, step 10b; the user approved what a reader hears).
+`AccessibilityRole.Menu` is new: UIA's Menu control type, AT-SPI's menu. A box with a click is no
+button when a child has that role, as when one has `Dialog`, so Junction's `BuildPopover` and
+Meridian's are a Menu of MenuItems, where a reader heard the layer and the card as two buttons
+named after every row, and each row as a button. An entry directly in a Menu is selected while the
+pointer is on it (`Element.IsMenuEntry`, `IsHovered`, unless it sets `AccessibleSelected`): UIA
+SelectionItem.IsSelected, its menu the selection container, and AT-SPI `state-changed:selected`,
+patched into the applied tree with no tree built (`A11yPatchKind.Selected`), since the menu is in
+the window's own tree and a move would otherwise build all of it, 1,000 rows of History beside it.
+A MenuItem with no menu of its own now has Invoke on UIA and the click action on AT-SPI, which it
+had neither of: a menu bar's title, which expands, keeps ExpandCollapse and gets the click only on
+AT-SPI. Hover is all the selection these two menus have: they take no keyboard, as they did not
+before, and Escape and a click outside close them as they did (Escape only in Junction, where
+the window's key handler does it). A context menu, a menu bar's menu and a dropdown's list are not
+this role: they publish virtual items, which every bridge reads as a List of ListItems.
+
 A dialog with nothing focusable in it takes the focus itself (round 6, step 5): the panel, not a
 Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,
 which since the scrim stopped being a button is a pane with no name.

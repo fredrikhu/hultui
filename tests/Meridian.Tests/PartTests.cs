@@ -331,6 +331,49 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A popover is a menu to assistive technology, its rows the menu's items, directly in
+    /// the layer whose click closes it, which is then no button. The layer and the card were two
+    /// buttons named after every row. The entry under the pointer is selected, and telling it
+    /// builds no tree.</summary>
+    [Fact]
+    public void APopoverIsAMenuOfItems_AndTheEntryUnderThePointerIsSelected()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            var bridge = s.Window.InstallAccessibilityBridge();
+            s.PumpFrames(2);
+            Click(fx, "req-login");
+            Click(fx, "method-chip");
+
+            IEnumerable<HultUI.Core.Accessibility.AccessibilityNode> Walk(HultUI.Core.Accessibility.AccessibilityNode n) =>
+                n.Children.SelectMany(Walk).Prepend(n);
+            var role = (HultUI.Core.Accessibility.AccessibilityRole role) => Walk(bridge.CurrentTree!).Where(n => n.Role == role);
+            var menu = Assert.Single(role(HultUI.Core.Accessibility.AccessibilityRole.Menu));
+            Assert.Contains(menu.Children, c => c.Role == HultUI.Core.Accessibility.AccessibilityRole.MenuItem && c.Name == "PUT");
+            Assert.DoesNotContain(role(HultUI.Core.Accessibility.AccessibilityRole.Button),
+                n => n.Name is { } name && name.Contains("PUT", StringComparison.Ordinal));
+
+            HultUI.Core.Accessibility.AccessibilityNode Entry(string name) =>
+                role(HultUI.Core.Accessibility.AccessibilityRole.MenuItem).Single(n => n.Name == name);
+            Assert.False(Entry("PUT").IsSelected);
+            int trees = s.Window.AccessibilityTreesBuilt;
+            var box = s.Window.FindByAutomationId("popover-PUT")!.Element.Layout.AbsoluteBorderBox;
+            s.Window.MoveMouse(box.X + 20, box.Y + box.Height / 2);
+            s.PumpFrames(2);
+            Assert.True(Entry("PUT").IsSelected);
+            Assert.Equal(trees, s.Window.AccessibilityTreesBuilt);
+
+            // A click beside it closes it, and goes no further; a pick is the row's click.
+            s.Window.Click(900, 700);
+            s.PumpFrames(3);
+            Assert.Empty(role(HultUI.Core.Accessibility.AccessibilityRole.Menu));
+            Click(fx, "method-chip");
+            Click(fx, "popover-PUT");
+            Assert.Empty(role(HultUI.Core.Accessibility.AccessibilityRole.Menu));
+        });
+    }
+
     /// <summary>A popover — the method picker, the environment switcher, an assertion's operator —
     /// opens and closes with the window's view alone, and a pick builds the window once: what the
     /// pick changes, and the parts only where they show it (the tree's unsaved dot, the title

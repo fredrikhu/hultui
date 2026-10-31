@@ -534,7 +534,13 @@ public abstract class Element
     {
         _hovered = value;
         if (_interaction is { } s && s.Hovered != value) { s.Hovered = value; s.Recompute(this, animate: true); }
+        if (IsMenuEntry) NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
     }
+
+    /// <summary>An entry directly in a menu an app draws with elements, which is selected to a
+    /// reader while the pointer is on it. Not one in a menu bar: that bar's title has no selection.</summary>
+    internal bool IsMenuEntry => Role == AccessibilityRole.MenuItem && Parent is { Role: AccessibilityRole.Menu };
+
     internal void SetInteractionPressed(bool value)
     {
         _pressed = value;

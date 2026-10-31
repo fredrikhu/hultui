@@ -154,6 +154,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // and expose selection so it can report/move to the selected row.
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_InvokePatternId
                 => new UiaInvokeProvider(_bridge, ElementId),
+            // A menu's entry runs its command; one that opens a menu of its own (a menu bar's
+            // title) expands instead.
+            AccessibilityRole.MenuItem when patternId == UiaInterop.UIA_InvokePatternId && _expanded is null
+                => new UiaInvokeProvider(_bridge, ElementId),
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),
             // Any node carrying a toggle state offers the pattern, whatever its role — a
@@ -378,6 +382,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.ProgressBar => UiaInterop.UIA_ProgressBarControlTypeId,
         AccessibilityRole.SpinButton => UiaInterop.UIA_SpinnerControlTypeId,
         AccessibilityRole.ComboBox => UiaInterop.UIA_ComboBoxControlTypeId,
+        AccessibilityRole.Menu => UiaInterop.UIA_MenuControlTypeId,
         AccessibilityRole.MenuBar => UiaInterop.UIA_MenuBarControlTypeId,
         AccessibilityRole.MenuItem => UiaInterop.UIA_MenuItemControlTypeId,
         AccessibilityRole.ColumnHeader => UiaInterop.UIA_HeaderItemControlTypeId,

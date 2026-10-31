@@ -201,6 +201,16 @@ change over 1,000 rows with UIA (1,058 KB with AT-SPI), where the card's label i
 patched for about 1 KB (plan 17, round 6). The rule looks at the backdrop's children only,
 not further down.
 
+**A menu you draw yourself.** A short list of commands built from elements, on a box whose
+click closes it, gets `.AccessibleRole(AccessibilityRole.Menu)` on the card, directly in that
+box, and `.AccessibleRole(AccessibilityRole.MenuItem).AccessibleName(label)` on each row,
+directly in the card. The box is then no button, as a dialog's backdrop is not, and a reader
+hears a menu of items where it heard two buttons named after every row. A row is selected
+while the pointer is on it, as a context menu's item is, and that is patched into the tree with
+none built; Invoke (UIA) and the click action (AT-SPI) run its click. Junction's and Meridian's
+dropdowns are drawn this way. A `Popover` stays a dialog: it takes the keyboard, and a press
+outside it goes on to what was pressed, which is not how those two close.
+
 ### Tree
 
 | Method | Description |

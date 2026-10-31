@@ -667,23 +667,24 @@ public static partial class AccessibilityTreeBuilder
         CanvasElement => AccessibilityRole.Group,
         // A button is a button whether or not anything has subscribed to its click yet.
         ButtonElement => AccessibilityRole.Button,
-        BoxElement box when box.HasEventHandler<ClickEvent>() && !HoldsDialog(box) => AccessibilityRole.Button,
+        BoxElement box when box.HasEventHandler<ClickEvent>() && !HoldsPopup(box) => AccessibilityRole.Button,
         _ => AccessibilityRole.None
     };
 
     /// <summary>
-    /// Whether a child of <paramref name="box"/> has the role <see cref="AccessibilityRole.Dialog"/>:
-    /// the box is the dialog's backdrop, and its click closes the dialog (<c>Dialog.Show</c>'s scrim, a
-    /// modal an app keeps in its own tree). It is no button: a reader heard the dialog inside one named
-    /// after all of the dialog's text, told again with every change of that text, and a change of a
-    /// name inside it could not be patched (<see cref="NamedFromContentAbove"/>), so each one built the
-    /// whole tree. A reader closes a dialog with Escape, or with a control of its own.
+    /// Whether a child of <paramref name="box"/> has the role <see cref="AccessibilityRole.Dialog"/>
+    /// or <see cref="AccessibilityRole.Menu"/>: the box is its backdrop, and its click closes it
+    /// (<c>Dialog.Show</c>'s scrim, a modal or a menu an app keeps in its own tree). It is no button: a
+    /// reader heard the dialog inside one named after all of the dialog's text, told again with every
+    /// change of that text, and a change of a name inside it could not be patched
+    /// (<see cref="NamedFromContentAbove"/>), so each one built the whole tree. A reader closes a
+    /// dialog or a menu with Escape, or with a control of its own.
     /// </summary>
-    private static bool HoldsDialog(Element box)
+    private static bool HoldsPopup(Element box)
     {
         var children = box.Children;   // by index: foreach over the interface boxes an enumerator
         for (int i = 0; i < children.Count; i++)
-            if (children[i].Role == AccessibilityRole.Dialog) return true;
+            if (children[i].Role is AccessibilityRole.Dialog or AccessibilityRole.Menu) return true;
         return false;
     }
 
@@ -790,11 +791,13 @@ public static partial class AccessibilityTreeBuilder
         _ => element.AccessibleToggled,
     };
 
-    /// <summary>Selected, for one of a set: a radio button is when it is checked; anything
+    /// <summary>Selected, for one of a set: a radio button is when it is checked; a menu's entry
+    /// while the pointer is on it, as a context menu's item is, unless it says otherwise; anything
     /// else says so with <see cref="Element.AccessibleSelected"/>.</summary>
     internal static bool? ResolveIsSelected(Element element) => element switch
     {
         RadioButtonElement rb => rb.IsChecked,
+        { AccessibleSelected: null, IsMenuEntry: true } => element.IsHovered,
         _ => element.AccessibleSelected,
     };
 

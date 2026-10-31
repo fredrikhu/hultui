@@ -369,7 +369,9 @@ public partial class JunctionApp
     /// right-click menus use, drawn as elements and anchored to whatever button opened it
     /// (<c>_popoverX/_popoverY</c>, captured from that button's laid-out box at click time).
     /// The framework's <c>ContextMenu</c> only opens on right-click, which is why this
-    /// exists.</summary>
+    /// exists. A menu to a reader, directly in the layer that closes it, so the layer is no
+    /// button; each row an entry of it, told as selected while the pointer is on it. Before, the
+    /// layer and the menu were two buttons named after every row.</summary>
     /// <summary>Fixed menu width. The buttons that open one right-align it under
     /// themselves against this, so it never runs off the window edge.</summary>
     private const float PopoverWidth = 230f;
@@ -391,7 +393,8 @@ public partial class JunctionApp
         var menu = Flex.Column(gap: 0)
             .Width(PopoverWidth).Padding(new Thickness(5))
             .Background(Nocturne.Surface).BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusMd);
+            .CornerRadius(Nocturne.RadiusMd)
+            .AccessibleRole(AccessibilityRole.Menu);
         menu.Position.Type = PositionType.Absolute;
         menu.Position.Left = Dimension.Px(x);
         menu.Position.Top = Dimension.Px(y);
@@ -419,7 +422,8 @@ public partial class JunctionApp
 
             var row = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(7, 9, 7, 9)).CornerRadius(Nocturne.RadiusRow)
-                .Cursor(it.IsDisabled ? CursorType.Default : CursorType.Pointer);
+                .Cursor(it.IsDisabled ? CursorType.Default : CursorType.Pointer)
+                .AccessibleRole(AccessibilityRole.MenuItem).AccessibleName(it.Label);
             // Key by label: a menu never repeats one, and an entry that swaps between its
             // enabled and disabled build (the repository tools with no repo open) then
             // patches against its own previous row rather than against a neighbour.

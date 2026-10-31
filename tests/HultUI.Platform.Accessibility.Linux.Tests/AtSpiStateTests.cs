@@ -58,6 +58,24 @@ public class AtSpiStateTests
         Assert.False(Has(other, AtSpiConstants.StateSelected));
     }
 
+    /// <summary>A menu an app draws with elements: a menu of menu items, each selectable, whose
+    /// action is a click. A menu item had no action, so a reader could not run one.</summary>
+    [Fact]
+    public void AMenusEntry_IsSelectable_AndRunsAsAClick()
+    {
+        var root = BoxElement.New();
+        var menu = Box.New().AccessibleRole(AccessibilityRole.Menu);
+        menu.AddChild(Box.New().AccessibleRole(AccessibilityRole.MenuItem).AccessibleName("Add"));
+        root.AddChild(menu);
+
+        var menuNode = AccessibilityTreeBuilder.Build(root).Children[0];
+        Assert.Equal(AtSpiConstants.RoleMenu, AtSpiAccessible.RoleOf(menuNode));
+        var entry = AtSpiAccessible.From(menuNode.Children[0], isRoot: false, AtSpiConstants.RootPath, 0, 1f);
+        Assert.Equal(AtSpiConstants.RoleMenuItem, AtSpiAccessible.RoleOf(menuNode.Children[0]));
+        Assert.Equal(AtSpiActionKind.Click, entry.Action);
+        Assert.True(Has(AtSpiMarshal.StateBits(entry), AtSpiConstants.StateSelectable));
+    }
+
     [Fact]
     public void ACheckedRadioButtonIsSelected()
     {

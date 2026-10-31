@@ -340,12 +340,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         listId == default || NodeOf(listId) is not { } list
         || (uint)index >= (uint)(list.IsVirtualItemContainer ? list.Served.Count : list.Children.Count);
 
-    /// <summary>The selection container (as Simple) of a list item — its list — or of a tab —
-    /// the strip that holds it; null for anything else.</summary>
+    /// <summary>The selection container (as Simple) of a list item — its list — or of a tab or a
+    /// menu's entry — the strip or the menu that holds it; null for anything else.</summary>
     internal IntPtr ItemSelectionContainer(ElementId itemId)
     {
         if (TryResolveItem(itemId, out var listId, out _)) return NativeFragmentSimple(listId);
-        return _wrappers.TryGetValue(itemId, out var w) && w.Node.Parent is { Role: AccessibilityRole.TabList } strip
+        return _wrappers.TryGetValue(itemId, out var w) && w.Node.Parent is { Role: AccessibilityRole.TabList or AccessibilityRole.Menu } strip
             ? NativeFragmentSimple(strip.ElementId)
             : IntPtr.Zero;
     }

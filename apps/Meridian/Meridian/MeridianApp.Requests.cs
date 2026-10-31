@@ -750,7 +750,10 @@ public partial class MeridianApp
         var menu = Flex.Column(gap: 0)
             .Width(140).Padding(new Thickness(4))
             .Background(Azimuth.Surface).BorderColor(Azimuth.BorderStrong).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius2);
+            .CornerRadius(Azimuth.Radius2)
+            // A menu to a reader, directly in the layer that closes it, so the layer is no button;
+            // each row an entry of it. The layer and the menu were two buttons named after every row.
+            .AccessibleRole(AccessibilityRole.Menu);
         menu.Position.Type = PositionType.Absolute;
         menu.Position.Left = Dimension.Px(x);
         menu.Position.Top = Dimension.Px(y);
@@ -760,7 +763,7 @@ public partial class MeridianApp
         {
             var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(6, 9, 6, 9)).CornerRadius(Azimuth.Radius1).Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button).AccessibleName(label)
+                .AccessibleRole(AccessibilityRole.MenuItem).AccessibleName(label)
                 .AutomationId("popover-" + label);
             row.AddChild(Ui.Mono(label, 11f, Azimuth.MethodColor(label)).FontWeight(FontWeight.SemiBold));
             var action = run;

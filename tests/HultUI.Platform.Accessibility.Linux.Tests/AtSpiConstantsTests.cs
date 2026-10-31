@@ -39,6 +39,7 @@ public class AtSpiConstantsTests
     [InlineData(AccessibilityRole.Link, 88u, "link")]
     [InlineData(AccessibilityRole.Group, 39u, "panel")]
     [InlineData(AccessibilityRole.Application, 75u, "application")]
+    [InlineData(AccessibilityRole.Menu, 33u, "menu")]
     [InlineData(AccessibilityRole.MenuBar, 34u, "menu bar")]
     [InlineData(AccessibilityRole.MenuItem, 35u, "menu item")]
     [InlineData(AccessibilityRole.ColumnHeader, 57u, "table column header")]

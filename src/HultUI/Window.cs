@@ -169,6 +169,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     // anyway; whatever cannot be told that way rebuilds it, as every such change did: a keystroke in a
     // text input beside 200 rows built and diffed 603 nodes for one value.
     private readonly List<Element> _a11yLeafChanged = [];
+
+    // One of a set in the main tree changed its selected state: a menu's entry under the pointer. The
+    // frame marks it on the applied tree and tells it (TryPatchA11y), unless the frame rebuilds the
+    // tree anyway; a rebuild for it built the whole tree each time the pointer reached another entry.
+    private readonly List<Element> _a11yOwnSelection = [];
     // Elements whose range moved since the range refresh last told them (A11yRangeCoalesceMs): when
     // it comes due, or a leaf's patch comes first, they are patched the same way. A playing video's
     // scrubber built the whole tree two or three times a second.
@@ -201,10 +206,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     // place starts the count again.
     private int _a11yRefreshFailures, _a11yRefreshSkips;
 
-    private enum A11yPatchKind : byte { List, Text, Leaf }
+    private enum A11yPatchKind : byte { List, Text, Leaf, Selected }
 
     /// <summary>What a frame patches on the applied tree: a list whose selection moved, a text whose
-    /// caret did, or a leaf whose own properties changed; with its node and its place in the tree,
+    /// caret did, a leaf whose own properties changed, or a menu's entry whose selected state did;
+    /// with its node and its place in the tree,
     /// <see cref="PathLength"/> child indices from the root in <see cref="_a11yPaths"/>.</summary>
     private readonly record struct A11yPatchTarget(AccessibilityNode Node, Element Element, A11yPatchKind Kind,
         int PathStart, int PathLength);
@@ -841,6 +847,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             if (!AddPatchTargets(tree, _a11ySelectionMoved, A11yPatchKind.List)
                 || !AddPatchTargets(tree, _a11yTextMoved, A11yPatchKind.Text)
                 || !AddPatchTargets(tree, _a11yLeafChanged, A11yPatchKind.Leaf)
+                || !AddPatchTargets(tree, _a11yOwnSelection, A11yPatchKind.Selected)
                 || (withRanges && !AddPatchTargets(tree, _a11yRangeChanged, A11yPatchKind.Leaf)))
                 return false;
             // A leaf's node would be the rebuild's to mark focused, and to tell the bridge of.
@@ -861,6 +868,11 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                             || !AccessibilityTreeBuilder.TextSelectionChange(node, source, changes, out var next))
                             return false;
                         if (next is not null) versions.Add((node, next));
+                        break;
+                    case A11yPatchKind.Selected:
+                        if (AccessibilityTreeBuilder.ResolveIsSelected(element) is not { } selected || node.IsSelected is null)
+                            return false;
+                        if (selected != node.IsSelected) changes.Add(new PropertyChange(node, AccessibilityProperties.IsSelected));
                         break;
                     default:
                         if (!AccessibilityTreeBuilder.RemakeLeaf(element, node, _focusManager, changes, out var made)) return false;
@@ -996,6 +1008,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         Drop(_a11ySelectionMoved);
         Drop(_a11yTextMoved);
         Drop(_a11yLeafChanged);
+        Drop(_a11yOwnSelection);
         Drop(_a11yRangeChanged);
 
         void Drop(List<Element> elements)
@@ -1344,6 +1357,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         || _a11ySelectionMoved.Count > 0
         || _a11yTextMoved.Count > 0
         || _a11yLeafChanged.Count > 0
+        || _a11yOwnSelection.Count > 0
         // A coalesced layout-driven a11y refresh is due — force the trailing frame
         // so the last resize/scroll position reaches the tree once the drag stops
         // (during the drag, layout dirty already keeps frames coming).
@@ -1609,7 +1623,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         // from it. A leaf's patch tells the ranges waiting for their refresh too, as the rebuild it
         // stands for would have. A rebuild in this frame tells all of them in its diff.
         if (a11yActive && !a11yRebuild && !a11yRefreshed && (_a11ySelectionMoved.Count > 0 || _a11yTextMoved.Count > 0
-            || _a11yLeafChanged.Count > 0 || a11yRangeDue))
+            || _a11yLeafChanged.Count > 0 || _a11yOwnSelection.Count > 0 || a11yRangeDue))
         {
             bool withRanges = _a11yRangeRefreshPending && (a11yRangeDue || _a11yLeafChanged.Count > 0);
             using (_tracer.Begin("Phase", "A11y"))
@@ -1671,6 +1685,7 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         _a11ySelectionMoved.Clear();
         _a11yTextMoved.Clear();
         _a11yLeafChanged.Clear();
+        _a11yOwnSelection.Clear();
         _a11yWasActive = a11yActive;
         // Note: the Children flag is cleared with everything else by ClearAllFlags at the end
         // of the frame, below, or where a minimized window stops.
@@ -4179,6 +4194,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             {
                 selecting.A11ySelected = true;
                 element.MarkPaintDirty();   // a frame to tell it in
+            }
+            // One of a set in the main tree: a menu's entry the pointer reached or left. Its node's
+            // selected state is marked and told as a list's item's is (TryPatchA11y). Its name is
+            // not the row's text changing, so an entry with children patches as well as a leaf.
+            else if (propertyName == AccessibilityProperties.IsSelected && element.IsMenuEntry)
+            {
+                if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
             }
             // A caret or a selection moved in text made on request (the rich text editor's), or
             // what its version holds besides the text changed (read-only): its new version goes on

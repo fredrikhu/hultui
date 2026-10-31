@@ -92,6 +92,7 @@ internal static class AtSpiConstants
     public const uint RoleLabel = 29;
     public const uint RoleList = 31;
     public const uint RoleListItem = 32;
+    public const uint RoleMenu = 33;
     public const uint RoleMenuBar = 34;
     public const uint RoleMenuItem = 35;
     public const uint RoleTableColumnHeader = 57;
@@ -149,6 +150,7 @@ internal static class AtSpiConstants
         AccessibilityRole.TreeItem => RoleListItem,
         AccessibilityRole.Application => RoleApplication,
         AccessibilityRole.Document => RoleDocumentWeb,
+        AccessibilityRole.Menu => RoleMenu,
         AccessibilityRole.MenuBar => RoleMenuBar,
         AccessibilityRole.MenuItem => RoleMenuItem,
         AccessibilityRole.ColumnHeader => RoleTableColumnHeader,
@@ -168,6 +170,7 @@ internal static class AtSpiConstants
         RoleLabel => "label",
         RoleList => "list",
         RoleListItem => "list item",
+        RoleMenu => "menu",
         RoleMenuBar => "menu bar",
         RoleMenuItem => "menu item",
         RoleTableColumnHeader => "table column header",
