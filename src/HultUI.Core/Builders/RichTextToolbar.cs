@@ -34,6 +34,9 @@ public enum RichTextCommand
 /// editor's <see cref="Ref{T}"/> and a callback that rebuilds, and wire the editor's
 /// <see cref="RichTextEditorElement.SelectionChanged"/> to the same callback so the buttons follow
 /// the caret. Every command is also on <see cref="Execute"/>, for an app that draws its own.</para>
+/// <para>Most keys leave every button as it is, and a rebuild for each of them can be what makes
+/// typing slow: an app whose bar sits in a row of a list, or beside anything else that costs,
+/// rebuilds only while <see cref="IsStale"/> says the bar on screen no longer shows the editor.</para>
 /// <para>Build it <i>before</i> attaching the ref to the freshly built editor:
 /// <see cref="Element.WithRef{T}"/> points the ref at the new element at once, and that one is
 /// not the editor on screen until the rebuild is reconciled — its selection is a fresh one.</para>
@@ -93,9 +96,37 @@ public sealed class RichTextToolbar
     /// <summary>Whether the link editor is open.</summary>
     public bool IsLinkEditorOpen => _linkPopover.IsOpen;
 
+    /// <summary>Which of a bar's buttons are there, pressed and enabled, a bit per command.</summary>
+    private readonly record struct BarState(ulong Available, ulong Active, ulong Enabled);
+
+    private BarState _built;
+
+    /// <summary>
+    /// True when a build now would make other buttons than the last one made: one pressed or
+    /// released, enabled or disabled, come or gone. A typed character or a caret move that
+    /// changes none of them needs no rebuild for the bar's sake.
+    /// </summary>
+    public bool IsStale => StateOf(_editor.Current) != _built;
+
+    private BarState StateOf(RichTextEditorElement? editor)
+    {
+        BarState state = default;
+        if (editor is null) return state;
+        foreach (var command in Commands)
+        {
+            if (command is not { } c || !IsAvailable(editor, c)) continue;
+            ulong bit = 1UL << (int)c;
+            state = new BarState(state.Available | bit,
+                IsActive(editor, c) ? state.Active | bit : state.Active,
+                !editor.ReadOnly && IsEnabled(editor, c) ? state.Enabled | bit : state.Enabled);
+        }
+        return state;
+    }
+
     public Element Build()
     {
         var editor = _editor.Current;
+        _built = StateOf(editor);
         var row = Flex.Row(gap: 2).AlignItems(AlignItems.Center).FlexWrap(FlexWrap.Wrap)
             .AccessibleName("Formatting").AutomationId("richtext-toolbar");
         row.Role = Accessibility.AccessibilityRole.Group;

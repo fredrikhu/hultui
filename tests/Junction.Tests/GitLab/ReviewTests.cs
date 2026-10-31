@@ -525,13 +525,13 @@ public class ReviewTests
         });
     }
 
-    /// <summary>Typing in a comment — the composer's or a reply's — builds the window once a
-    /// character (the editor tells an edit and the caret's move in one event), leaves the chrome
-    /// as it is and keeps the woven rows: the list makes again only the card holding the editor,
-    /// whose formatting bar follows the caret. It made every row twice a character and built the
-    /// chrome three times (1.4 MB a character on a 400-line file).</summary>
+    /// <summary>Typing in a comment — the composer's or a reply's — builds nothing while its
+    /// formatting bar stays as it is: the card's row is kept, with the editor's focus, caret and
+    /// undo, and every other row and label. When a button moves (the caret into a bold word), the
+    /// window builds once, without the chrome, the list makes again the one card holding the
+    /// editor, and the element in it is still the editor.</summary>
     [Fact]
-    public void TypingAComment_BuildsOnceACharacter_AndMakesOnlyItsCardAgain()
+    public void TypingAComment_KeepsItsCard_AndAButtonMovingMakesOnlyThatCardAgain()
     {
         Hosted((repo, _, session, app) =>
         {
@@ -547,24 +547,22 @@ public class ReviewTests
                 {
                     var before = Rows(session);
                     var label = Label(session);
-                    int builds = app.Builds, chrome = app.ChromeBuilds, made = app.DiffRowsMade;
+                    var editor = Focused(session);
+                    int builds = app.Builds, made = app.DiffRowsMade;
                     session.Window.TypeText(ch.ToString());
-                    // The character's own rebuild runs as its event ends: one, and not the chrome.
-                    Assert.Equal(1, app.Builds - builds);
-                    Assert.Equal(0, app.ChromeBuilds - chrome);
                     session.PumpFrames(2);
+                    Assert.Same(editor, Focused(session));
                     // Something outside the typing — the repository's watcher seeing the review's
-                    // fetch — may rebuild the window meanwhile, and that weaves again. Otherwise the
-                    // frame makes the card again and nothing else: it is keyed, so it is made into
-                    // the row it had, every row on screen is the element it was, and every label
-                    // the list kept is kept.
-                    if (app.Builds - builds > 1) continue;
+                    // fetch — may rebuild the window meanwhile, and that weaves again; and the
+                    // first character may build, the bar having been built before the editor was
+                    // on screen. Otherwise a character builds nothing and makes no row.
+                    if (app.Builds != builds) continue;
                     quiet++;
-                    Assert.Equal(1, app.DiffRowsMade - made);
+                    Assert.Equal(made, app.DiffRowsMade);
                     Assert.Equal(before, Rows(session));
                     Assert.Same(label, Label(session));
                 }
-                Assert.True(quiet >= text.Length - 2, $"{quiet} of {text.Length} characters typed without a rebuild from elsewhere");
+                Assert.True(quiet >= text.Length - 3, $"{quiet} of {text.Length} characters typed without a rebuild from elsewhere");
                 Assert.Contains(text.Replace("*", ""), ((RichTextEditorElement)Focused(session)!).Document.ToPlainText());
                 Assert.NotNull(ById(session, card));
             }
@@ -584,17 +582,26 @@ public class ReviewTests
             TypeAndCheck("Not **this**", "review-composer");
 
             // The caret moving into the bold word lights the card's Bold button: the bar is in the
-            // card made again, and it reads the editor on screen.
+            // card made again, and it reads the editor on screen. That one key builds, once and
+            // without the chrome, and makes the one row.
+            var boldButton = () => LayoutProbe.Descendants<ButtonElement>(ById(session, "review-composer")!, b => b.AutomationId == "richtext-bold").Single();
+            Assert.NotEqual(true, boldButton().AccessibleToggled);
+            var typedIn = Focused(session);
+            int moved = 0;
             for (int i = 0; i < 2; i++)
             {
-                int builds = app.Builds, chrome = app.ChromeBuilds;
+                int builds = app.Builds, chrome = app.ChromeBuilds, made = app.DiffRowsMade;
                 session.Window.PressKey(KeyCode.Left);
-                Assert.Equal(1, app.Builds - builds);
                 Assert.Equal(0, app.ChromeBuilds - chrome);
                 session.PumpFrames(2);
+                if (app.Builds == builds) { Assert.Equal(made, app.DiffRowsMade); continue; }
+                moved++;
+                Assert.Equal(1, app.Builds - builds);
+                Assert.Equal(1, app.DiffRowsMade - made);
             }
-            var bold = LayoutProbe.Descendants<ButtonElement>(ById(session, "review-composer")!, b => b.AutomationId == "richtext-bold").Single();
-            Assert.True(bold.AccessibleToggled);
+            Assert.Equal(1, moved);
+            Assert.True(boldButton().AccessibleToggled);
+            Assert.Same(typedIn, Focused(session));
         });
     }
 

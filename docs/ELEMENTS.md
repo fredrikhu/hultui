@@ -1358,6 +1358,28 @@ the list's box; each is in the rows' shape, so the switch makes the rows again (
 23 KB a key). Something that needs the selected row's place — a menu opened under it — works it out
 from the list (`ScreenContentBox`, `ItemHeight`, `ScrollOffsetY`), since no row is made selected.
 
+**An editor in a row.** A field or a rich text editor in a row holds its own text, caret and undo,
+and an editor of fixed height leaves the row's height alone, so a key in it needs no row made and
+no build. Make the row again only when something else in it shows the change: a `RichTextToolbar`
+says so with `IsStale`, true when a build would make other buttons than the last one made.
+
+```csharp
+.OnDocumentChanged(d => { _doc = d; Edited(); })
+.OnSelectionChanged(Edited)
+
+void Edited()
+{
+    if (_bar.IsStale) { _list.Current?.InvalidateRow(CardRow); Rebuild(); }
+}
+```
+
+Nothing in a row of a list whose items stand for its rows has an accessibility node, so a key there
+builds no accessibility tree, and a reader cannot reach what the row holds: set `RowsAreComposite`
+on a list with a row a reader must work in. Junction's review composer made its row again on every
+key, and built a tree with a reader listening; kept: 150.4 → 2.0 KB a key, 206.7 → 2.0 with UIA, 1
+tree a key → 0, the key's time −16 % and −20 % (headless, JIT; NativeAOT −20 % both). The suite pins
+it: `a11y/type in a rich text editor inside a VirtualList row, bridge on`.
+
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
 and every scroll — so an item-rows list keeps each item's label while the item is equal to

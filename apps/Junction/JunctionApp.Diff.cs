@@ -540,8 +540,8 @@ public partial class JunctionApp
         // face, size and tab width, the colour scheme. The review's cards read its composer and
         // threads, so while reviewing the rows are made again on every build that wove them
         // again; a caret or range move only changes the marks of the line rows it moved
-        // between, which their items carry. Typing in a comment changes the one card holding its
-        // editor, which is made again alone.
+        // between, which their items carry. Typing in a comment makes no row; a move of its
+        // formatting bar's buttons changes the one card holding its editor, made again alone.
         var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
             Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
         // Only the list this build patches: another file's list is replaced, rows and all.

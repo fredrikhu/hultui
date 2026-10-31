@@ -4136,6 +4136,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 }
                 else window._a11yLayoutRefreshPending = true;
             }
+            // In a row of a list whose items stand for its rows, an element has no node, in this
+            // tree or the next: a rebuild for it makes the tree there is. A character in a rich text
+            // editor in such a row (Junction's review composer) built the whole tree, 58 KB a key.
+            else if (InItemRow(element)) return;
             // A range's value can move every frame (a drag, a playback): on its own schedule, when
             // the range's node is made again and patched in (TryPatchA11y), as a leaf's is.
             else if (propertyName == AccessibilityProperties.RangeValue)
@@ -4189,6 +4193,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             }
             else
                 window._a11yPropertyDirty = true;
+        }
+
+        private static bool InItemRow(Element element)
+        {
+            for (var above = element.Parent; above is not null; above = above.Parent)
+                if (above is IAccessibleItemSource { PublishesItemNodes: true }) return true;
+            return false;
         }
     }
 }

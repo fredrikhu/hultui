@@ -331,8 +331,8 @@ static partial class Scenarios
     /// <summary>
     /// A comment being written among a diff's rows, as Junction's review composer is: a card
     /// holding a formatting bar and a rich text editor of fixed height is row 12 of 150 of a
-    /// <see cref="VirtualListElement{T}"/> on item rows, and an edit or a caret move rebuilds the
-    /// component that holds the list.
+    /// <see cref="VirtualListElement{T}"/> on item rows. An edit or a caret move rebuilds the
+    /// component that holds the list only when the bar no longer shows the editor.
     /// </summary>
     private sealed class EditorInListRow(Random rng) : Component
     {
@@ -353,7 +353,6 @@ static partial class Scenarios
         public override Element Build()
         {
             _ = _revision.Value;
-            // The card's bar follows the caret, so the row is made again.
             if (_edited) _list.Current?.InvalidateRow(CardRow);
             _edited = false;
             return VirtualListElement<int>.New()
@@ -379,8 +378,11 @@ static partial class Scenarios
             return card;
         }
 
+        // The editor holds its text and caret, and the card's height does not move: only the
+        // bar can show an edit, and most keys leave every button as it is.
         private void Edited()
         {
+            if (_bar is { IsStale: false }) return;
             _edited = true;
             Rebuild();
         }

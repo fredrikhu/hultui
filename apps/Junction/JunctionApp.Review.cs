@@ -166,16 +166,18 @@ public partial class JunctionApp
 
     /// <summary>
     /// A comment being written — the composer's or a reply's — changed its text, its caret or
-    /// its selection, and nothing else did: the next build keeps the woven rows (the weave reads
-    /// no draft) and makes again only the row holding that editor, whose formatting bar follows
-    /// the caret; the chrome stays as it is.
+    /// its selection, and nothing else did. The editor holds all of that itself, and its card is
+    /// the height measured for it whatever it holds (the editor scrolls), so only its formatting
+    /// bar can show the change. While the bar is what it was nothing builds: the row is kept, with
+    /// the editor's focus, caret and undo. When a button moves, the next build keeps the woven
+    /// rows (the weave reads no draft) and makes again only the row holding that editor; the
+    /// chrome stays as it is.
     /// <para>A typed character raises the editor's DocumentChanged and SelectionChanged in one
-    /// event. Each called MarkDirty, which builds at once — two builds of the window, the chrome
-    /// three times, and the review woven twice a character (1.4 MB). Through the revision signal
-    /// the two writes come to one build at the end of the event.</para>
+    /// event: through the revision signal the two writes come to one build at the end of it.</para>
     /// </summary>
     private void DraftEdited(ReviewDraft draft)
     {
+        if (draft.Bar is { IsStale: false }) return;
         _reviewDraftEdited = draft;
         RerenderView();
     }
