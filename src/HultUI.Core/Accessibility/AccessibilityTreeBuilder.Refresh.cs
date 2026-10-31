@@ -135,6 +135,8 @@ public static partial class AccessibilityTreeBuilder
         var unscrolled = place.Unscrolled(box);
         bool offscreen = !isRoot && !RectsIntersect(clip, place.OnScreen(box));
         var scrollView = element as ScrollViewElement;
+        // A list has a node, so it comes through here, and only a scroll view pays for the ask.
+        scrollView?.RealizeForAccessibility();
         var offset = scrollView is null ? default : new Point(scrollView.ScrollOffsetX, scrollView.ScrollOffsetY);
 
         switch (Compare(element, applied, focusManager))

@@ -1434,7 +1434,11 @@ all the cards in it, and every card's own name, role and automation id would van
 the tree. `RowsAreComposite = true` says the rows carry real controls, so the builder
 walks the realized rows instead of synthesizing item nodes. The trade is that off-screen
 rows are not in the tree; they enter it as they realize, the way a scroll view's content
-does. Aperture's poster grid is the case this exists for.
+does. With a reader listening the tree asks the list for its rows before they are drawn, so
+a mount's rows are in that frame's tree, and a change's or a scroll's reach the reader with the
+layout refresh: in that frame, or within 100 ms of the last one. Nothing is needed from the
+app, and with no reader only drawing realizes a row. Aperture's poster grid is the case this
+exists for.
 
 ---
 

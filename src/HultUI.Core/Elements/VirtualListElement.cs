@@ -82,7 +82,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// realized rows instead, so each card appears with its own name, role and automation
     /// id, exactly as it would outside a list. The trade is that off-screen rows are not
     /// in the tree; they enter it as they realize, the same way a scroll view's content
-    /// does.</para>
+    /// does. A listening reader gets the rows of a mount in that frame's tree, and those of a
+    /// change or a scroll with the layout refresh: in the frame of the change, or within
+    /// its 100 ms when one came just before.</para>
     /// </summary>
     public bool RowsAreComposite { get; set; }
 
@@ -665,6 +667,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and layout so the children are renderable immediately.
         if (_visibleStart != prevStart || _visibleEnd != prevEnd)
             LayoutVisibleChildren();
+    }
+
+    /// <summary>Composite rows are what the accessibility tree reads, and drawing, which realizes
+    /// them, comes after the frame's accessibility phase: a tree built in that phase had the rows of
+    /// the frame before, or none. Item rows are served from the data and need nothing here. Only a
+    /// listening reader's walks ask; the frame's drawing then finds the rows made.</summary>
+    internal override void RealizeForAccessibility()
+    {
+        if (RowsAreComposite) UpdateContentSize();
     }
 
     /// <summary>The selection, when the list draws it (<see cref="SelectionHighlight"/>): at each

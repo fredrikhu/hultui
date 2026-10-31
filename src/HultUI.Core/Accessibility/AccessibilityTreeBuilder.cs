@@ -51,6 +51,7 @@ public static partial class AccessibilityTreeBuilder
     internal static AccessibilityNode Build(Element root, FocusManager? focusManager, float originX, float originY,
         Point scrollAbove)
     {
+        Realize(root);
         // Threaded as a negative scroll: the builder already subtracts an accumulated
         // offset from every box, which is exactly this with the other sign.
         float ox = -originX, oy = -originY;
@@ -209,9 +210,24 @@ public static partial class AccessibilityTreeBuilder
         }
     }
 
+    /// <summary>
+    /// A list whose rows are its accessible content has them as elements once they are realized,
+    /// which drawing does after the frame's accessibility phase: what a walk reads of it, it asks
+    /// for as it reaches it (<see cref="ScrollViewElement.RealizeForAccessibility"/>). The walks are
+    /// the one place that knows the tree is being read, so a frame with nothing to tell asks for
+    /// nothing, and a window nobody reads never comes here. It changes the elements, not the tree
+    /// being walked: the list's children are read after it. What realizing marks on the way up is
+    /// the frame's, and ends with it; the phase has read those flags by then.
+    /// </summary>
+    private static void Realize(Element element)
+    {
+        if (element is ScrollViewElement view) view.RealizeForAccessibility();
+    }
+
     private static void BuildChild(Element child, List<AccessibilityNode> pending, FocusManager? focusManager,
         Place place, Rect clip)
     {
+        Realize(child);
         // The child's own box sits in the parent's scroll space; its own
         // scroll (if it's a ScrollView) applies to its descendants.
         var childPlace = ChildPlace(child, place);

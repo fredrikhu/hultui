@@ -722,7 +722,19 @@ providers), a UIA `ItemContainer` on virtualized lists.
   told as selected, which it never was: `AccessibleSelected`, so UIA SelectionItem and AT-SPI's
   selectable and selected states. Selecting a row from assistive technology clicks it, as for a tab,
   and a click runs the command. A selected state changing inside an overlay builds that overlay's
-  part of the tree, in that frame; it built the window's whole tree.
+  part of the tree, in that frame; it built the window's whole tree. **A composite list in the
+  window's own tree (2026-10-31, plan 17 round 6 step 9b):** the same gap outside overlays, where
+  nothing came back for it: the tree of a mount had none of a `RowsAreComposite` list's rows, and a
+  change was told a key late or not at all (Junction's Commit list 28 nodes short on opening,
+  Aperture's library 168 cards, the Files list two rows behind at rest). The walks that read the tree,
+  the build and the layout refresh made in place, now ask a scroll view for what it draws as they
+  reach it (`ScrollViewElement.RealizeForAccessibility`), and a composite list realizes its rows
+  there; drawing then finds them made. So a mount's rows are in that frame's tree, and a change's or
+  a scroll's come with the coalesced layout refresh: in the frame of the change, or within its
+  100 ms when one came just before. That schedule is kept on purpose: a tree per key or per notch
+  would undo round 5's refresh, and the backoff's count did not move (18 trees per 120 notches in
+  Junction, 8–9 in Aperture). A list out of view, which no drawing reaches, gets its rows for a
+  reader too. Only the walks ask, so with no reader listening nothing but drawing realizes a row.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

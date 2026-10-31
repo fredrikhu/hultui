@@ -209,6 +209,13 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     internal virtual void UpdateContentSize() => UpdateScrollExtent();
 
     /// <summary>
+    /// Asked by the walks that read the accessibility tree, as they reach this view and before they
+    /// read it: what the tree takes from elements that drawing makes is made here. A plain view's
+    /// content is there already; <see cref="VirtualListElement{T}"/> overrides it.
+    /// </summary>
+    internal virtual void RealizeForAccessibility() { }
+
+    /// <summary>
     /// The render-time hook for what this view draws under its content: called inside the
     /// view's clip and scroll translation, after <see cref="UpdateContentSize"/> and before the
     /// children, in the children's coordinates. <see cref="VirtualListElement{T}"/> draws its
