@@ -492,7 +492,7 @@ file built on every key, and were looked at in the same step. They do not fit th
 Declined in that step. Worth revisiting with sticky headers in a virtual list (a framework
 feature), or when a working tree with hundreds of changed files shows up in a profile.
 
-### Junction's History keeps drawing its own selection (Vesper's panes did until round 6)
+### Junction's History kept drawing its own selection until round 6 (Vesper's panes too)
 
 Round 5, step 9 let a virtual list draw its selection itself (`SelectionHighlight`, ELEMENTS.md
 "A selection the list draws"): the rows are made unselected, so a selection move makes no row.
@@ -520,11 +520,11 @@ in the inactive pane, whose list has no selection, so it never meets the cursor;
 is off by default, and with it on (or while a drag hovers a folder in the pane, whose tint takes
 the cursor row's fill) the rows draw the cursor as before; the context-menu key works out the
 cursor row's box from the list. Detail Down −34 % a key, the same pixels in 35 scenes (dark and
-light, zebra off and on, at 1× and 1.5×). To adopt History, the affordance
-would leave the row's flow (drawn over the caret's row by the list or an overlay, or its space
-kept in every row) and the hover tint would come from the list too; both change pixels, and need
-the user. Meridian's History (step 8) is the same shape: its older rows fade with `Opacity`, which
-fades their background with them, and they tint under the pointer.
+light, zebra off and on, at 1× and 1.5×). **Junction's History took it in round 6, step 10b**: the
+user approved the pixels, the affordance is an overlay the list holds at the row's end
+(`SelectionOverlay`) and the list draws the hover tint (`HoverHighlight`). Meridian's History (step
+8) is the same shape, but its older rows fade with `Opacity`, which fades their background with
+them, and they tint under the pointer, so it still draws its own.
 
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 

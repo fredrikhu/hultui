@@ -115,7 +115,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             // Kept rows drew the selection they were made with: the one that had it and the one
             // that has it are made again. With the list drawing it, no row is: the highlight moves.
             DropRowsWhoseSelectionChanged();
-            if (_selectionHighlight is not null) MarkPaintDirty();
+            if (_selectionHighlight is not null || _selectionOverlay is not null) MarkPaintDirty();
         }
     }
     private int _selectedIndex = -1;
@@ -132,8 +132,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// its selection as a background draws a transparent one instead, and the pixels are the
     /// same when the highlight is the fill, radius and border the row drew (see
     /// <see cref="RowHighlight"/>). A row that shows its selection any other way — a bolder
-    /// label, an icon's colour, a hover tint left off the selected row, an affordance on the
-    /// selected row — cannot show it any more; such a list keeps the selection in its rows.
+    /// label, an icon's colour — cannot show it any more; such a list keeps the selection in its
+    /// rows. A hover tint left off the selected row moves to <see cref="HoverHighlight"/>, and an
+    /// affordance on the selected row to <see cref="SelectionOverlay"/>.
     /// Assistive technology reads the list's selection, not the rows', so it is told the same.
     /// </para>
     /// <para>
@@ -155,6 +156,72 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         }
     }
     private RowHighlight? _selectionHighlight;
+
+    /// <summary>
+    /// The tint drawn by the list under the row the pointer is on, as it draws
+    /// <see cref="SelectionHighlight"/>, and only under an unselected one: the selected row keeps
+    /// its highlight. Null (the default) leaves hover to the rows. Set by
+    /// <c>.HoverHighlight(…)</c>.
+    /// <para>
+    /// For rows the list keeps. A row that tints itself under the pointer has to know whether it
+    /// is selected, so it is made again each time that changes, and on a list that draws the
+    /// selection it would paint its tint over the highlight. A row with a background of its own
+    /// (a pick the list does not draw) covers the tint, as it would have left it off.
+    /// </para>
+    /// <para>
+    /// The row under the pointer is <see cref="Element.IsHovered"/>, read as the list draws (the
+    /// window draws a frame when the pointer reaches another element), so what counts is what a
+    /// row's own <c>.OnHover</c> would have seen, with one difference: a row a selection move made
+    /// again lost the pointer until the next move, and a kept row does not.
+    /// </para>
+    /// </summary>
+    public RowHighlight? HoverHighlight
+    {
+        get => _hoverHighlight;
+        set
+        {
+            if (_hoverHighlight == value) return;
+            _hoverHighlight = value;
+            MarkPaintDirty();
+        }
+    }
+    private RowHighlight? _hoverHighlight;
+
+    /// <summary>
+    /// An element the list holds over the selected row (<see cref="SelectedIndex"/>), against the
+    /// row's end and as tall as it, so what only the selected row shows — "Details →" — is not
+    /// in a row and a selection move makes no row for it: the one element moves. Null (the
+    /// default) holds nothing. Set by <c>.SelectionOverlay(…)</c>.
+    /// <para>
+    /// It is drawn over the rows, under the scroll bars, and clipped and scrolled as they are. Rows
+    /// lay out as if it were not there, so whatever reaches the end of the selected row runs
+    /// under it: give it a background (the highlight's), or the two draw over each other. It
+    /// takes no pointer: a press on it is a press on the row under it. Items of a list whose rows
+    /// are not composite have no children in the accessibility tree, and it has none either;
+    /// on composite rows it is read after them.
+    /// </para>
+    /// <para>
+    /// A rebuild may hand back the element that is on screen, which then stays, or a new one,
+    /// which is patched into it. On a selection of nothing, or past the items, it is out of the
+    /// tree until there is a selected row again.
+    /// </para>
+    /// </summary>
+    public Element? SelectionOverlay
+    {
+        get => _selectionOverlay;
+        set
+        {
+            if (ReferenceEquals(_selectionOverlay, value)) return;
+            _selectionOverlay = value;
+            MarkPaintDirty();
+        }
+    }
+    private Element? _selectionOverlay;
+
+    // The row-sized box that holds it, last of the children once there is a row to hold it over.
+    private SelectionOverlayHost? _overlayHost;
+
+    private bool OverlayShown => _selectionOverlay is not null && (uint)_selectedIndex < (uint)_items.Count;
 
     /// <summary>
     /// When true, the list manages a set of selected indices that assistive tech
@@ -660,6 +727,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // Compute which items are visible and sync children
         int prevStart = _visibleStart;
         int prevEnd = _visibleEnd;
+        HostSelectionOverlay();
         SyncVisibleItems();
 
         // Children are created during the render pass, after the normal
@@ -667,6 +735,42 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and layout so the children are renderable immediately.
         if (_visibleStart != prevStart || _visibleEnd != prevEnd)
             LayoutVisibleChildren();
+        PlaceSelectionOverlay();
+    }
+
+    /// <summary>Puts <see cref="SelectionOverlay"/> in its box, and has the window of rows realized
+    /// again when the box comes into the children or leaves them.</summary>
+    private void HostSelectionOverlay()
+    {
+        if (!OverlayShown)
+        {
+            if (_overlayHost is { Parent: not null }) _visibleStart = -1;
+            return;
+        }
+        var host = _overlayHost ??= new SelectionOverlayHost();
+        if (host.Children.Count == 0 || !ReferenceEquals(host.Children[0], _selectionOverlay))
+            host.ReplaceChildren(_selectionOverlay!);
+        if (host.Parent is null) _visibleStart = -1;
+    }
+
+    /// <summary>Lays the box out when it needs it, as a row is, and puts it over the selected row.
+    /// A move of the selection comes here and goes no further than the position: no layout.</summary>
+    private void PlaceSelectionOverlay()
+    {
+        if (!OverlayShown || _overlayHost is not { } host || !ReferenceEquals(host.Parent, this) || _childLayoutEngine is null)
+            return;
+        float height = HeightOf(_selectedIndex);
+        if (host.Box.Height != Dimension.Px(height))
+        {
+            host.Box.Height = height;
+            host.MarkLayoutDirty();
+        }
+        if ((host.DirtyFlags & DirtyFlags.Style) != 0)
+            StyleResolver.ResolveUnder(host, ResolvedInherited, _activeTheme);
+        var contentBox = Layout.AbsoluteContentBox;
+        if ((host.DirtyFlags & DirtyFlags.Layout) != 0)
+            _childLayoutEngine.PerformLayout(host, contentBox.Width, height);
+        SetAbsolutePosition(host, contentBox.X, contentBox.Y + OffsetOf(_selectedIndex));
     }
 
     /// <summary>Composite rows are what the accessibility tree reads, and drawing, which realizes
@@ -678,12 +782,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (RowsAreComposite) UpdateContentSize();
     }
 
-    /// <summary>The selection, when the list draws it (<see cref="SelectionHighlight"/>): at each
-    /// selected row on screen, under the rows, as a box would draw its own background and
-    /// border. Rows are realized by now (<see cref="UpdateContentSize"/> runs first).</summary>
+    /// <summary>The tint under the pointer (<see cref="HoverHighlight"/>) and the selection, when
+    /// the list draws them (<see cref="SelectionHighlight"/>): at the rows on screen, under them,
+    /// as a box would draw its own background and border. Rows are realized by now
+    /// (<see cref="UpdateContentSize"/> runs first).</summary>
     internal override void RenderUnderContent(IRenderContext ctx)
     {
-        if (_selectionHighlight is not { } highlight || _activeElements.Count == 0) return;
+        if (_activeElements.Count == 0) return;
+        if (_hoverHighlight is { } hover)
+        {
+            foreach (var (index, row) in _activeElements)
+                if (row.Element.IsHovered && !IsItemSelected(index))
+                    DrawHighlight(ctx, in hover, row.Element);
+        }
+        if (_selectionHighlight is not { } highlight) return;
         if (!CanSelectMultiple)
         {
             if (_selectedIndex >= 0 && _activeElements.TryGetValue(_selectedIndex, out var row))
@@ -720,6 +832,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         for (int i = 0; i < Children.Count; i++)
         {
             var child = Children[i];
+            if (child == _overlayHost) continue;   // PlaceSelectionOverlay
             if ((child.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 // Under this list, as the style pass resolves a row whenever it next passes
@@ -743,6 +856,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         for (int i = 0; i < Children.Count; i++)
         {
             var child = Children[i];
+            if (child == _overlayHost) continue;
             float targetY = child == _spacer
                 ? contentBox.Y
                 : contentBox.Y + OffsetOf(_visibleStart + (i - 1));
@@ -889,11 +1003,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             return;
         }
 
-        // Build children array: spacer + visible items in order
-        var children = new Element[1 + (newEnd - newStart)];
+        // Build children array: spacer + visible items in order, the overlay's box over them
+        var host = OverlayShown ? _overlayHost : null;
+        var children = new Element[1 + (newEnd - newStart) + (host is null ? 0 : 1)];
         children[0] = _spacer;
         for (int i = newStart; i < newEnd; i++)
             children[1 + i - newStart] = _activeElements[i].Element;
+        if (host is not null) children[^1] = host;
 
         ReplaceChildren(children);
 
@@ -902,11 +1018,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     /// <summary>Whether the children are already the spacer and rows <paramref name="start"/> to
-    /// <paramref name="end"/> as realized, in order.</summary>
+    /// <paramref name="end"/> as realized, in order, and the overlay's box when it is shown.</summary>
     private bool ChildrenAreRealized(int start, int end)
     {
         var children = Children;
-        if (children.Count != 1 + (end - start) || children[0] != _spacer)
+        var host = OverlayShown ? _overlayHost : null;
+        if (children.Count != 1 + (end - start) + (host is null ? 0 : 1) || children[0] != _spacer)
+            return false;
+        if (host is not null && children[^1] != host)
             return false;
         for (int i = start; i < end; i++)
             if (children[1 + i - start] != _activeElements[i].Element)
@@ -945,6 +1064,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             // First: it decides the selected state rows are made with, which the selection
             // below and the kept rows' check compare against.
             SelectionHighlight = vl.SelectionHighlight;
+            HoverHighlight = vl.HoverHighlight;
+            // A new overlay is patched into the one on screen, as a keyed row is; one handed back
+            // stays; anything else goes in its place on the next frame.
+            if (_selectionOverlay is not { Parent: not null } live || vl._selectionOverlay is not { } overlay
+                || ReferenceEquals(live, overlay) || !Components.TreeDiffer.TryPatch(live, overlay))
+                SelectionOverlay = vl._selectionOverlay;
             // Accessibility state is rebuilt fresh each render in declarative UIs,
             // so it must ride across the patch — otherwise the a11y selection and
             // activation wiring freeze at their first-mount values.
@@ -1028,4 +1153,23 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             }
         }
     }
+}
+
+/// <summary>Holds a list's <see cref="VirtualListElement{T}.SelectionOverlay"/>: as wide as a row,
+/// given the selected row's height, its content against the end. The pointer goes through it, and
+/// through what it holds, to the row under it.</summary>
+internal sealed class SelectionOverlayHost : BoxElement
+{
+    public SelectionOverlayHost()
+    {
+        Position.Type = PositionType.Absolute;
+        Position.Top = Dimension.Px(0);
+        Position.Left = Dimension.Px(0);
+        Box.Width = Dimension.Percent(100);
+        Flex.Direction = FlexDirection.Row;
+        Flex.JustifyContent = JustifyContent.FlexEnd;
+        Flex.AlignItems = AlignItems.Stretch;
+    }
+
+    public override bool HitTest(Point point) => false;
 }

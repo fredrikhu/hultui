@@ -1207,6 +1207,8 @@ var list = VirtualListElement<FileEntry>.New()
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
+| `.HoverHighlight(fill, radius)` | `HoverHighlight` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own — same section |
+| `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
 
 **How rows live.** With the one-argument template, the visible window plus a row or two of
 overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
@@ -1341,11 +1343,36 @@ The pixels are the same as rows that drew it when the highlight is the fill, rad
 row drew and the row's own background becomes transparent (a row with a ring keeps a transparent
 border of the ring's width, so its contents stay where they were). It fits only a selection that
 is a background. A row that shows its selection any other way cannot show it any more: a bolder
-label, an icon's colour, something only the selected row has (Junction's History names what
-Enter will do on the caret's row), or a hover tint the row leaves off its selected row (a kept
-row has no way to learn it became selected, so its hover tint would cover the highlight). Such a
-list keeps the selection in its rows. Assistive technology reads the list's selection, not the
-rows', so it is told the same either way. Another highlight from a rebuild (a theme's colour) is
+label or an icon's colour. Such a list keeps the selection in its rows. Assistive technology
+reads the list's selection, not the rows', so it is told the same either way.
+
+Two more things a row would have to be told its selection for move to the list. A row that tints
+under the pointer and leaves the tint off its selected row would keep the tint over the highlight,
+since a kept row never learns it became selected: `.HoverHighlight(fill)` has the list draw the
+tint, under the row the pointer is on (`Element.IsHovered`, what a row's own `.OnHover` sees) and
+only if that row is not selected. The pixels are a row's own, and a row with a fill of its own
+covers the tint. Something only the selected row has goes in `.SelectionOverlay(element)`: one
+element the list holds over the selected row (`SelectedIndex`), at the row's end and as tall as it,
+over the rows and under the scroll bars, scrolled and clipped as they are. A move only moves it, with
+no layout. Hand back the element on screen from a build, or a new one, which is patched into it.
+
+```csharp
+list.SelectionHighlight(onPick ? Nocturne.Accent900 : Nocturne.Neutral900)
+    .HoverHighlight(Nocturne.Neutral900)
+    .SelectionOverlay(Kept(_affordancePart, shape, () => BuildAffordance(tint), "affordance"))
+    .RenderWith((c, _) => HistoryRow(c));   // no selection, no hover, no affordance
+```
+
+The overlay leaves the row's flow, so that row lays out as the others do and a long subject runs
+under it: give it the highlight's fill (Junction's History fades the subject out over 24 px before
+the words, which leaves a difference of 1 in 255 on that strip over a short subject). It takes no
+pointer, so a press on it is a press on the row: give the row's click what it should do. Items of a
+list with item rows have no children in the accessibility tree, so it adds nothing a reader hears;
+say what it says in the row's label if it matters. On composite rows it is read after them. It is
+out of the tree while no row is selected. Junction's History took all three: a key makes no row (2 →
+0) and allocates 16 KB instead of 40; a row that stays under the pointer as the caret passes
+keeps its tint afterwards, which a row made again by the move lost until the pointer next moved.
+Another highlight from a rebuild (a theme's colour) is
 drawn on the next frame and makes no row; turning it on or off makes the selected rows again.
 `.SelectionHighlight(null)` leaves the selection to the rows. On the perf suite's walk a step
 makes 1 row instead of 3 and allocates 16 KB instead of 25 (`virtual/selection walk 1,000 item

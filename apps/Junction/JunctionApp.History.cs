@@ -131,7 +131,7 @@ public partial class JunctionApp
         public readonly HultUI.Core.Reactivity.Ref<Element> Live = new();
     }
 
-    private readonly KeptPart _includeBarPart = new(), _footerPart = new();
+    private readonly KeptPart _includeBarPart = new(), _footerPart = new(), _affordancePart = new();
 
     /// <summary>Times the include bar and the footer have been built, for tests.</summary>
     internal int HistoryPartsMade => _includeBarPart.Made + _footerPart.Made;
@@ -1066,9 +1066,9 @@ public partial class JunctionApp
             ? -1
             : IndexOfHash(commits, _selectedCommitHash);
 
-        // The list keeps a row until its commit or its focus changes, so a move makes two rows
-        // instead of every row on screen. Everything else a row shows is told here: when any of
-        // it changes, the rows on screen are made again.
+        // The list keeps a row until its commit changes, and draws what moves with the focus
+        // caret itself: the tint under it, the affordance at its end. A key makes no row. What
+        // else a row shows is told here: when any of it changes, the rows on screen are made again.
         var shape = new HistoryRowShape(data.Graph, data.Remotes, stats, IssueRules(), _compactChrome,
             _historyQuery.Trim(), data.Exhausted, GitLabRowData(), Nocturne.Theme, Ui.DisplayScale);
         // `|`, not `||`: the selection's snapshot is brought up to date either way.
@@ -1078,17 +1078,24 @@ public partial class JunctionApp
             _historyRowShape = shape;
         }
 
+        // The list's selected index is the focus caret, which a plain move and Ctrl+arrows move.
+        // The tint under it says whether the caret is on a pick: a commit of the selection, or
+        // the caret alone, which a plain row's hover tint matches so a keyboard walk stays visible.
+        bool onPick = _selectedCommitHash is { } caret && _selectedCommitHashes.Contains(caret);
+        var tint = onPick ? Nocturne.Accent900 : Nocturne.Neutral900;
+        bool comparing = _selectedCommitHashes.Count > 1;
+
         return VirtualListElement<GitCommit>.New()
             .ItemHeight((int)RowHeight)
             .Items(commits)
-            // `focused` is the list's selected index — the focus caret, which a plain move and
-            // Ctrl+arrows move. Membership of a wider selection is read live; HistoryRowSelection-
-            // Changed above remakes the rows when it is anything but the focused commit alone.
-            .RenderWith((c, focused) => HistoryRow(c,
+            .RenderWith((c, _) => HistoryRow(c,
                 data.Graph.TryGetValue(c.Hash, out var g) ? g : default,
                 stats.TryGetValue(c.Hash, out var s) ? s : (0, 0),
-                data.Remotes,
-                SelectionContains(c.Hash), focused))
+                data.Remotes))
+            .SelectionHighlight(tint)
+            .HoverHighlight(Nocturne.Neutral900)
+            .SelectionOverlay(Kept(_affordancePart, new AffordanceShape(comparing, onPick, Nocturne.Theme, Ui.DisplayScale),
+                () => BuildCommitAffordance(comparing, tint), "commit-affordance"))
             .AccessibleItemLabel(c => $"{c.Subject}, {c.AuthorName}, {c.ShortHash}")
             .OnActivateItem(c =>
             {
@@ -1102,9 +1109,35 @@ public partial class JunctionApp
             .WithRef(_commitListRef);
     }
 
+    /// <summary>What the affordance shows: which word, on which tint.</summary>
+    private readonly record struct AffordanceShape(bool Comparing, bool OnPick, object Theme, float Scale);
+
     /// <summary>
-    /// What a History row shows besides its commit and whether it has the focus — the two
-    /// things its list compares. References are compared by identity: the graph, remotes and
+    /// "Details →" or "Compare →", over the end of the focused row, naming what Enter will do (a
+    /// multi-selection compares, otherwise the focused commit opens). The list holds it, so a key
+    /// moves this one element and makes no row. A subject long enough to reach it runs under it:
+    /// it stands on the row's tint, and fades the subject out before the words. It is as tall as
+    /// the row less the row's bottom border, which goes on under it. The pointer goes through to
+    /// the row, whose click is what opens the commit.
+    /// </summary>
+    private static Element BuildCommitAffordance(bool comparing, Color tint)
+    {
+        var words = Flex.Row(gap: 4).AlignItems(AlignItems.Center).FlexShrink(0)
+            .Padding(new Thickness(0, 12, 0, 8))
+            .Background(tint)
+            .Children(
+                Text.New(comparing ? "Compare" : "Details").FontSize(11f).TextColor(Nocturne.Accent300),
+                Ui.Icon(Icons.ArrowRight, 12f, Nocturne.Accent300));
+        return Flex.Row(gap: 0).AlignItems(AlignItems.Stretch).FlexShrink(0)
+            .Margin(new Thickness(0, 0, 1, 0))
+            .Children(
+                Box.New().Width(24).FlexShrink(0).Background(Gradient.Horizontal(Nocturne.Alpha(tint, 0), tint)),
+                words);
+    }
+
+    /// <summary>
+    /// What a History row shows besides its commit, which is what its list compares. References
+    /// are compared by identity: the graph, remotes and
     /// counts are new objects when a page or a chunk of counts lands, the issue rules when the
     /// rules file changes, and GitLab's pipelines and merge requests when a refresh lands. The
     /// query and the end of the log decide which rows ask for the next page. The chips' glyphs
@@ -1136,10 +1169,11 @@ public partial class JunctionApp
 
     /// <summary>
     /// Whether the selection changed in a way the list cannot see. The list is told the focused
-    /// commit; while the selection is that commit alone, a row is selected exactly when it has
-    /// the focus, and a move needs nothing more. A wider selection (Shift, Ctrl), or one the
-    /// focus is not in, colours rows by membership and names Compare on the focused row, so any
-    /// change to it makes the rows again.
+    /// commit, and draws its tint; while the selection is that commit alone, that is all of it,
+    /// and a move needs nothing more. A wider selection (Shift, Ctrl), or one the focus is not
+    /// in, has rows draw their own membership, so a change to it makes the rows again. The caret
+    /// moving through it does not: a row keeps its fill, and the list's tint under the caret is
+    /// the pick's or the caret's own.
     /// </summary>
     private bool HistoryRowSelectionChanged()
     {
@@ -1167,7 +1201,7 @@ public partial class JunctionApp
     }
 
     private Element HistoryRow(GitCommit commit, GitGraphRow graph, (int Added, int Deleted) stat,
-        HashSet<string> remotes, bool selected, bool focused)
+        HashSet<string> remotes)
     {
         HistoryRowsMade++;
         // A row near the loaded end coming on screen is the list being scrolled towards it —
@@ -1184,15 +1218,14 @@ public partial class JunctionApp
             });
         }
 
-        // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
-        // hover-strength tint so keyboard navigation stays visible.
-        var bg = selected ? Nocturne.Accent900
-            : focused ? Nocturne.Neutral900
-            : Color.Transparent;
+        // The list draws what is under the focus caret and under the pointer. A row draws its own
+        // fill only as a member of a wider selection, where it covers the pointer's tint (the
+        // selection takes no hover) and the caret's, which is the same fill on a pick.
+        var picked = !_historyRowSelectionSingle && _historyRowSelection.Contains(commit.Hash);
         var row = Flex.Row(gap: 0)
             .AlignItems(AlignItems.Stretch)
             .Height(RowHeight)
-            .Background(bg)
+            .Background(picked ? Nocturne.Accent900 : Color.Transparent)
             .BorderColor(Nocturne.On(0.05)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
 
@@ -1248,16 +1281,6 @@ public partial class JunctionApp
 
         row.AddChild(body);
 
-        // Affordance follows the focus caret; it names what Enter will do
-        // (a multi-selection compares, otherwise the focused commit opens).
-        if (focused)
-            row.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).FlexShrink(0)
-                .Padding(new Thickness(0, 12, 0, 8))
-                .Children(
-                    Text.New(_selectedCommitHashes.Count > 1 ? "Compare" : "Details")
-                        .FontSize(11f).TextColor(Nocturne.Accent300),
-                    Ui.Icon(Icons.ArrowRight, 12f, Nocturne.Accent300)));
-
         row.OnClick(e => OnCommitRowClick(commit, e.Modifiers));
         // Right-click outside the selection collapses to that row first, then the
         // framework opens the menu; inside it the selection is left alone.
@@ -1270,8 +1293,6 @@ public partial class JunctionApp
             }
         });
         row.ContextMenu(() => CommitMenuItems(commit));
-        if (!selected)
-            row.HoverBg(Nocturne.Neutral900, bg);   // restore the focus tint on leave
 
         return row;
     }
