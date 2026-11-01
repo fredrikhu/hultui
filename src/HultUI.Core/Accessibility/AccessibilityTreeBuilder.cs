@@ -379,8 +379,9 @@ public static partial class AccessibilityTreeBuilder
         for (var above = below?.Parent; above is not null; below = above, above = above.Parent)
         {
             if (!ReferenceEquals(above, list)) continue;
+            // Past the items when they were changed in place: the list hears of it with the frame.
             int item = source.ItemOfRow(below!);
-            return item < 0 ? ItemRow.None : new ItemRow(below, item);
+            return (uint)item >= (uint)source.ItemCount ? ItemRow.None : new ItemRow(below, item);
         }
         return ItemRow.None;
     }

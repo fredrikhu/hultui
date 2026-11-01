@@ -447,6 +447,31 @@ public sealed class A11yFocusedRowTests : IDisposable
     }
 
     [Fact]
+    public void ItemsChangedInPlaceUnderTheOpenRow_AreBuiltAsTheyAre()
+    {
+        using var session = HeadlessSession.Create(700, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var rows = Enumerable.Range(0, 10).ToList();
+        var last = new Ref<ButtonElement>();
+        var list = VirtualListElement<int>.New()
+            .ItemHeight(RowHeight)
+            .Items(rows)
+            .RenderWith((i, _) => i == 9 ? Flex.Row().Children(Button.New("Last").WithRef(last)) : TextB.New($"Row {i}").FontSize(12f))
+            .FlexGrow(1);
+        var root = Flex.Column().Width(700).Height(400).Children(list);
+        session.Window.SetRoot(root);
+        Settle(session);
+        last.Current!.Focus();
+        session.PumpFrames(2);
+
+        rows.RemoveRange(5, 5);
+        root.AddChild(TextB.New("a tree comes"));
+        session.PumpFrames(2);
+
+        Assert.Equal(5, Find(bridge.CurrentTree, list.Id)!.Children.Count);
+    }
+
+    [Fact]
     public void ACompositeList_IsAsItWas()
     {
         using var session = HeadlessSession.Create(700, 400);
