@@ -817,8 +817,11 @@ public class ReviewTests
                 var node = NodeOf(bridge.CurrentTree, reply.Id)!;
                 Assert.Equal("Reply to thread", node.Name);
                 Assert.Equal(reply.Id, bridge.FocusedNode?.ElementId);
-                Assert.Equal(AccessibilityRole.ListItem, node.Parent!.Role);
-                Assert.Contains("thread", node.Parent.Name, StringComparison.Ordinal);
+                var card = node.Parent!;
+                Assert.Equal(AccessibilityRole.Group, card.Role);
+                Assert.StartsWith("Thread on ", card.Name, StringComparison.Ordinal);
+                Assert.Equal(AccessibilityRole.ListItem, card.Parent!.Role);
+                Assert.Contains("thread", card.Parent.Name, StringComparison.Ordinal);
             }
             finally { AccessibilityClients.Force = null; }
         });

@@ -891,6 +891,9 @@ public partial class JunctionApp
         if (t.Id == rv.FocusThread) card.Outline(1f, Nocturne.Accent);
         if (t.Resolved) card.Opacity(0.72f);
         card.AccessibleName = (open ? "Thread on " : "Collapsed thread on ") + t.Where;
+        // A click on it says the thread was seen, which makes no button of it: with the focus in the
+        // card, a reader finds what the card holds in a group, not the reply being written in a button.
+        card.Role = HultUI.Core.Accessibility.AccessibilityRole.Group;
 
         var first = t.Notes.Count > 0 ? t.Notes[0] : new ThreadNote("", null, "", false);
         if (!open)
