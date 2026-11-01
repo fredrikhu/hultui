@@ -76,6 +76,22 @@ static partial class Scenarios
             "The same typing when the rows show the query: the component tells the list with InvalidateRows when it changed, as a file viewer does while find is typed in, and the rows on screen are made again",
             ctx => TypeBesideRowHeightsOp(ctx, rowsTold: true));
 
+        yield return new Scenario("virtual/wheel 1,000 rows in sections",
+            "Wheel 3 notches through one list of 1,000 tagged rows of two heights, every ninth a section's header, no row held: the twin of the row below",
+            ctx => SectionWheel(ctx, held: false));
+
+        yield return new Scenario("virtual/wheel 1,000 rows in sections, sticky rows",
+            "The same wheel with .StickyRows(…): the section's header is held at the top until the next pushes it off, realized outside the window of rows",
+            ctx => SectionWheel(ctx, held: true));
+
+        yield return new Scenario("virtual/section walk 1,000 item rows",
+            "Press Down in the same list on item rows, the owning component's Build reading the selection, no row held: the twin of the row below",
+            ctx => SectionWalk(ctx, held: false));
+
+        yield return new Scenario("virtual/section walk 1,000 item rows, sticky rows",
+            "The same walk with .StickyRows(…): a move keeps the held row, and every few moves another takes its place",
+            ctx => SectionWalk(ctx, held: true));
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
