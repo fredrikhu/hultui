@@ -295,9 +295,9 @@ public partial class JunctionApp
         {
             SetChangeSelection(row);
         }
-        // Rerender, not MarkDirty: the caret drives the right pane, and a conflicted or
+        // RerenderView, not MarkDirty: the caret drives the right pane, and a conflicted or
         // image file there activates a NEW per-file loader — see SelectChange.
-        Rerender();
+        RerenderView();
     }
 
     /// <summary>Changes-list navigation, the same keys as the History list. Shift
@@ -359,11 +359,11 @@ public partial class JunctionApp
         if (i < 0) return true;
 
         var landed = ChangeTreeFor(focus.Section).Step(nodes, i, right);
-        if (landed == i) { MarkDirty(); return true; }   // it expanded or collapsed instead
+        if (landed == i) return true;   // it expanded or collapsed instead, which says so itself
         var node = nodes[landed];
         SetChangeSelection(new ChangeRef(node.Path, focus.Section, node.IsFolder));
         _pendingScrollToSelected = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 
@@ -403,9 +403,9 @@ public partial class JunctionApp
             SetChangeSelection(rows[i]);
         }
         _pendingScrollToSelected = true;
-        // Rerender for the same reason as OnChangeRowClick: the caret changed, so the
+        // RerenderView for the same reason as OnChangeRowClick: the caret changed, so the
         // right pane may now read a different per-file loader.
-        Rerender();
+        RerenderView();
     }
 
     private static int ClampToSection(List<ChangeRef> rows, int index, ChangeSection section)
@@ -883,7 +883,7 @@ public partial class JunctionApp
             if (e.Button == 2 && !_changeSelection.Contains(self))
             {
                 SetChangeSelection(self);
-                Rerender();
+                RerenderView();
             }
         });
         row.ContextMenu(() => ChangeFolderMenuItems(section, node));
@@ -952,7 +952,7 @@ public partial class JunctionApp
             if (e.Button == 2 && !_changeSelection.Contains(self))
             {
                 SetChangeSelection(self);
-                Rerender();
+                RerenderView();
             }
         });
         row.ContextMenu(() => ChangeFileMenuItems(f, isStaged));
@@ -1377,18 +1377,19 @@ public partial class JunctionApp
     // ── Actions ──────────────────────────────────────────────────────────
 
     // Both selections can activate a NEW per-file AsyncLoader (image diff / conflict
-    // document), so they must go through Rerender — a MarkDirty rebuild is untracked
-    // and the Effect would never subscribe to the new loader's signals.
+    // document), so they must go through the Effect — a MarkDirty rebuild is untracked
+    // and it would never subscribe to the new loader's signals. RerenderView: the chrome
+    // shows nothing of the selection, and neither does the composer.
     private void SelectChange(string path, bool staged)
     {
         SetChangeSelection(new ChangeRef(path, staged ? ChangeSection.Staged : ChangeSection.Unstaged));
-        Rerender();
+        RerenderView();
     }
 
     private void SelectConflict(string path)
     {
         SetChangeSelection(new ChangeRef(path, ChangeSection.Conflicted));
-        Rerender();
+        RerenderView();
     }
 
     // ── Optimistic staging ───────────────────────────────────────────────

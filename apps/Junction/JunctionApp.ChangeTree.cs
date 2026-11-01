@@ -39,7 +39,7 @@ public partial class JunctionApp
     /// lists sit in a 238–330px column beside a diff, so depth has to stay cheap.</summary>
     private const float ChangeTreeIndent = 11f;
 
-    private TreeView<GitFileChange> NewChangeTree() => NewChangeTree(() => { _changeTreeGen++; MarkDirty(); });
+    private TreeView<GitFileChange> NewChangeTree() => NewChangeTree(() => { _changeTreeGen++; RerenderView(); });
 
     private static TreeView<GitFileChange> NewChangeTree(Action onChanged) => new(onChanged)
     {

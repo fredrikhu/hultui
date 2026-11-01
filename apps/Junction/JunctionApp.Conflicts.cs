@@ -132,7 +132,7 @@ public partial class JunctionApp
             if (e.Button == 2 && !_changeSelection.Contains(self))
             {
                 SetChangeSelection(self);
-                Rerender();
+                RerenderView();
             }
         });
         row.ContextMenu(() => ConflictFileMenuItems(f));

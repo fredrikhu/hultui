@@ -47,6 +47,47 @@ public class ChangesListTests
         });
     }
 
+    /// <summary>The caret moves in the view: the title bar, the sidebar, the toolbar and the composer
+    /// show nothing of it, and were built for it, 305 KB a key with 21 files.</summary>
+    [Fact]
+    public void ACaretMove_BuildsTheView_NotTheChromeOrTheComposer()
+    {
+        WithFiles(12, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(3);
+            int chrome = app.ChromeBuilds, composer = app.ComposerBuilds, builds = app.Builds;
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Up);
+            session.PumpFrames(3);
+            // A file has nowhere to go on the right, its folder on the left; a folder closes and opens.
+            session.Window.PressKey(KeyCode.Right);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Left);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Home);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Left);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Right);
+            session.PumpFrames(3);
+            Invoke(app, "SelectChange", "src/area1/file001.cs", false);
+            session.PumpFrames(3);
+            var row = ChangeList(app).Children.First(c => c.Key is { } k && k.StartsWith("u:", StringComparison.Ordinal) && !k.Contains("#s", StringComparison.Ordinal));
+            session.Window.Click(row);
+            session.PumpFrames(3);
+            row = ChangeList(app).Children.First(c => c.Key is { } k && k.StartsWith("u:", StringComparison.Ordinal) && !k.Contains("#s", StringComparison.Ordinal));
+            session.Window.Click(row, MouseButton.Right);
+            session.PumpFrames(3);
+
+            Assert.True(app.Builds > builds);
+            Assert.Equal(chrome, app.ChromeBuilds);
+            Assert.Equal(composer, app.ComposerBuilds);
+        });
+    }
+
     [Fact]
     public void AKey_KeepsTheRowsItsRowsWereFlattenedTo()
     {
