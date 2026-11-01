@@ -76,6 +76,32 @@ public class AtSpiStateTests
         Assert.True(Has(AtSpiMarshal.StateBits(entry), AtSpiConstants.StateSelectable));
     }
 
+    /// <summary>The window patches a menu's entry the pointer reached into the tree, and the
+    /// bridge tells it as a list item's: state-changed:selected, with no new snapshot.</summary>
+    [Fact]
+    public void TheEntryThePointerReached_IsToldAsSelected()
+    {
+        var root = BoxElement.New();
+        var menu = Box.New().AccessibleRole(AccessibilityRole.Menu);
+        var item = Box.New().AccessibleRole(AccessibilityRole.MenuItem).AccessibleName("Add").AccessibleSelected(false);
+        menu.AddChild(item);
+        root.AddChild(menu);
+        var tree = AccessibilityTreeBuilder.Build(root);
+        var signals = new SignalRecorder();
+        var bridge = new LinuxAccessibilityBridge(signals);
+        bridge.ApplyChanges(AccessibilityTreeDiffer.Diff(null, tree), tree);
+        signals.Lines.Clear();
+
+        item.AccessibleSelected(true);
+        var selected = AccessibilityTreeBuilder.Build(root);
+        var patch = new TreeDiff();
+        patch.PropertyChanged.Add(new PropertyChange(selected.Children[0].Children[0], AccessibilityProperties.IsSelected));
+        bridge.ApplyPatchedProperties(patch, selected);
+
+        var line = Assert.Single(signals.Lines);
+        Assert.StartsWith("state-changed:selected ", line);
+    }
+
     [Fact]
     public void ACheckedRadioButtonIsSelected()
     {
