@@ -328,6 +328,10 @@ public static class ElementExtensions
     /// Named unlike the property it sets: a same-named extension would be unreachable, because
     /// <c>list.ItemHeightFor(f)</c> binds to invoking the delegate property instead.</summary>
     public static VirtualListElement<T> RowHeights<T>(this VirtualListElement<T> el, Func<T, int, float>? height) { el.ItemHeightFor = height; return el; }
+
+    /// <summary>The rows the list holds at the top while their section scrolls under them, each until
+    /// the next pushes it off; see <see cref="VirtualListElement{T}.StickyRowFor"/>.</summary>
+    public static VirtualListElement<T> StickyRows<T>(this VirtualListElement<T> el, Func<T, int, bool>? sticky) { el.StickyRowFor = sticky; return el; }
     public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
 

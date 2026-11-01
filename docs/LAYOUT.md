@@ -530,8 +530,10 @@ footer.Sticky(top: null, bottom: 0);   // held at the bottom until its place scr
 - **Layout does not move it.** The shift is worked out from the scroll offset whenever it is drawn,
   hit, read by a screen reader or measured (`ScreenBorderBox`), so a popover or tooltip anchored
   to a stuck header opens where the header is.
-- Outside a scroll view it stays where it is. Rows of a `VirtualListElement` are not sections; a
-  stuck group header in a virtual list is a different feature.
+- Outside a scroll view it stays where it is. Rows of a `VirtualListElement` are not sections, and
+  a row off screen is not an element: a virtual list holds its headers with `.StickyRows(…)`
+  (ELEMENTS.md, "Rows held at the top"), which keeps the header it holds realized and bounds it by
+  the next one.
 
 ---
 

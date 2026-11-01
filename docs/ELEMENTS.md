@@ -1219,6 +1219,7 @@ var list = VirtualListElement<FileEntry>.New()
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
 | `.HoverHighlight(fill, radius)` | `HoverHighlight` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own — same section |
 | `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
+| `.StickyRows(Func<T,int,bool>)` | `StickyRowFor` | the rows held at the top while the rows after them scroll under them, each until the next pushes it off — see **Rows held at the top** below |
 
 **How rows live.** With the one-argument template, the visible window plus a row or two of
 overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
@@ -1397,6 +1398,38 @@ while the zebra tint is on or a drag hovers a folder in the pane, either of whic
 the list's box; each is in the rows' shape, so the switch makes the rows again (Detail Down 35 →
 23 KB a key). Something that needs the selected row's place — a menu opened under it — works it out
 from the list (`ScreenContentBox`, `ItemHeight`, `ScrollOffsetY`), since no row is made selected.
+
+**Rows held at the top.** `.StickyRows((item, index) => item.IsHeader)` says which rows are a
+section's header in one list of rows. The list keeps the last sticky row at or above the first row
+on screen realized, however far up it stands, and holds it at the top of the list until the next
+sticky row reaches it and pushes it off, which is what `Sticky()` does for a header in a column of
+its own (LAYOUT.md "Sticky"), for rows that are not elements. The pixels are the same at every
+offset, a fractional one and a push-off among them.
+
+```csharp
+var list = VirtualListElement<Row>.New()
+    .Items(rows)
+    .RowHeights((r, _) => r.IsHeader ? HeaderHeight : RowHeight)
+    .RenderWith((r, _) => MakeRow(r))
+    .StickyRows((r, _) => r.IsHeader);
+```
+
+The function is asked once per row per invalidation, as `RowHeights` is, reads the item and the
+index, and a list without it pays for none of this. Give the row a background, or what scrolls under
+it shows through. The held row is a row like the others: told from the items, kept on item rows
+while its item is, one row beside the ones on screen, so a rebuild makes it no more often. It moves
+as a sticky element moves, when it is drawn, hit and read, never in layout, and
+`ScreenBorderBox` says where it is, so a press, a popover and a focus ring find it there.
+`.SelectionHighlight` and `.HoverHighlight` go on its background, under its content, where it is
+drawn; a selected row going by under it stays under it, and `.SelectionOverlay` goes with a selected
+held row, over it. `ScrollRangeIntoView` leaves a row clear of the row held at the top, by the row
+heights, so the header of a section nothing has realized yet counts, and it does not scroll a sticky
+row back off itself. A reader finds the held row where it is drawn: with `RowsAreComposite` it stands
+in the tree before the rows on screen, and otherwise its item's node is moved there.
+
+On the perf suite a wheel through 1,000 rows in sections and a key walk over them cost what their
+twins with no held row cost (`virtual/wheel 1,000 rows in sections, sticky rows`,
+`virtual/section walk 1,000 item rows, sticky rows`).
 
 **An editor in a row.** A field or a rich text editor in a row holds its own text, caret and undo,
 and an editor of fixed height leaves the row's height alone, so a key in it needs no row made and

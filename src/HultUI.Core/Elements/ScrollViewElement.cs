@@ -223,6 +223,21 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// </summary>
     internal virtual void RenderUnderContent(IRenderContext ctx) { }
 
+    /// <summary>
+    /// The render-time hook for what this view draws on a sticky child of its own: called with
+    /// the child in place, where it is drawn, after its own background and before its content.
+    /// <see cref="VirtualListElement{T}"/> draws a held row's highlights here.
+    /// </summary>
+    internal virtual void RenderOverStickyRow(IRenderContext ctx, Element row) { }
+
+    /// <summary>
+    /// What bounds a sticky child of this view (<see cref="Element.StickyShift"/>), where the
+    /// child's box is <paramref name="box"/> and <paramref name="view"/> is this view's content box:
+    /// everything that scrolls. <see cref="VirtualListElement{T}"/> ends it at the next sticky row.
+    /// </summary>
+    internal virtual Rect StickyRoom(in Rect box, in Rect view) =>
+        new(view.X, view.Y, MathF.Max(view.Width, ContentWidth), MathF.Max(view.Height, ContentHeight));
+
     protected float ClampX(float value)
     {
         var viewportWidth = Layout.AbsoluteContentBox.Width;
@@ -310,16 +325,17 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
 
         // A sticky header held at the top would now cover the band's top — a row revealed by
         // arrowing up would land under its own section's header. Scroll back by as much.
-        float covered = StuckHeaderReach() - (top - _scrollOffsetY);
+        float covered = StuckHeaderReach(top) - (top - _scrollOffsetY);
         if (covered > 0.5f) ScrollOffsetY = _scrollOffsetY - covered;
     }
 
     /// <summary>
     /// How far below the viewport's top edge the sticky elements held against it reach, at the
-    /// current offset; 0 when none is held. A shallow walk — sections are a level or two down —
-    /// run on a reveal, never per frame; nested scroll views hold their own.
+    /// current offset, for a reveal of the band from <paramref name="top"/>; 0 when none is held. A
+    /// shallow walk — sections are a level or two down — run on a reveal, never per frame; nested
+    /// scroll views hold their own.
     /// </summary>
-    private float StuckHeaderReach()
+    private protected virtual float StuckHeaderReach(float top)
     {
         float viewTop = Layout.AbsoluteContentBox.Y + _scrollOffsetY;
         float reach = 0f;

@@ -22,7 +22,7 @@ static partial class Scenarios
         return new Op
         {
             Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
-            Check = step => moved(step),
+            Check = step => moved(step) ?? pane.VerifyHeld(),
         };
     }
 
@@ -52,7 +52,7 @@ static partial class Scenarios
             },
             Figure = () => pane.RowsMade - madeBefore,
             FigureUnit = "rows made",
-            Check = step => pane.Selected == first + step + 1 ? null : $"the selection is on row {pane.Selected}",
+            Check = step => pane.Selected == first + step + 1 ? pane.VerifyHeld() : $"the selection is on row {pane.Selected}",
         };
     }
 
@@ -119,9 +119,29 @@ static partial class Scenarios
                 .Items(_rows)
                 .RenderWith((item, isSelected) => Row(item, isSelected))
                 .SelectedIndex(selected)
-                .FlexGrow(1)
-                .WithRef(_list);
-            return list;
+                .StickyRows(held ? HeaderRow : null);
+            return list.FlexGrow(1).WithRef(_list);
+        }
+
+        private static readonly Func<SectionRow, int, bool> HeaderRow = static (item, _) => item.Header;
+
+        /// <summary>Null when the header of the first row on screen is drawn at the top, or above it
+        /// by as much as the next header has pushed it, on a list that holds its headers.</summary>
+        public string? VerifyHeld()
+        {
+            if (!held) return null;
+            var list = _list.Current!;
+            float offset = list.ScrollOffsetY;
+            int first = 0;
+            while (first + 1 < Rows && Top(first + 1) <= offset) first++;
+            int header = first / 9 * 9;
+            var view = list.WindowContentBox;
+            float top = view.Y + MathF.Min(0f, Top(header + 9) - offset - HeaderHeight);
+            foreach (var child in list.Children)
+                if (child is BoxElement { Children.Count: > 0 } row && row.Position.Type == PositionType.Sticky
+                    && Math.Abs(row.WindowBorderBox.Y - top) < 0.5f)
+                    return null;
+            return $"no held row at {top:0.#} at offset {offset:0.#} (section of row {first})";
         }
 
         protected override void OnAfterBuild()
