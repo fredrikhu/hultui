@@ -1427,9 +1427,14 @@ heights, so the header of a section nothing has realized yet counts, and it does
 row back off itself. A reader finds the held row where it is drawn: with `RowsAreComposite` it stands
 in the tree before the rows on screen, and otherwise its item's node is moved there.
 
-On the perf suite a wheel through 1,000 rows in sections and a key walk over them cost what their
-twins with no held row cost (`virtual/wheel 1,000 rows in sections, sticky rows`,
-`virtual/section walk 1,000 item rows, sticky rows`).
+The rows below the held one are what they always were: a list without it reads the same on the perf
+suite, and with it a wheel through 1,000 rows in sections costs 0.198 ms against its twin's 0.189 and
+20.3 KB against 19.9, a key walk 0.203 ms against 0.195 and 12.3 KB against 11.8 (NativeAOT;
+`virtual/wheel 1,000 rows in sections`, `virtual/section walk 1,000 item rows`, each with and without
+`, sticky rows`). Junction's Changes list moved onto it from a scroll view of a column per section:
+a key with 300 changed files allocates 317 KB instead of 3,078 and holds 571 elements instead of
+3,160. What a scroll view gave and a list does not is the rows off screen: a reader and Tab reach
+only the ones on screen, and the held row.
 
 **An editor in a row.** A field or a rich text editor in a row holds its own text, caret and undo,
 and an editor of fixed height leaves the row's height alone, so a key in it needs no row made and
