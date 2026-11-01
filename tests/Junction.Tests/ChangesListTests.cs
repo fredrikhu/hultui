@@ -89,6 +89,24 @@ public class ChangesListTests
     }
 
     [Fact]
+    public void AHeadersButton_KeepsTheFocus_ThroughANewCount()
+    {
+        WithFiles(12, (repo, session, app) =>
+        {
+            var button = session.Window.FindByRole(AccessibilityRole.Button, "Stage all")!.Element;
+            button.Focus();
+            session.PumpFrames(2);
+            Invoke(app, "StagePaths", (IReadOnlyList<string>)["src/area0/file000.cs"]);
+            session.PumpFrames(3);
+            session.PumpUntil(() => session.Window.FindByText("CHANGES · 11") is not null, Wait);
+            session.PumpUntil(() => repo.Repo.GetStagedChanges().Count == 1, Wait);
+            session.PumpFrames(3);
+            Assert.NotNull(session.Window.FindByText("CHANGES · 11"));
+            Assert.Same(button, session.Window.Window.FocusedElement);
+        });
+    }
+
+    [Fact]
     public void AKey_KeepsTheRowsItsRowsWereFlattenedTo()
     {
         WithFiles(60, (repo, session, app) =>

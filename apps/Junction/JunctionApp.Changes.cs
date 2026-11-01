@@ -738,15 +738,15 @@ public partial class JunctionApp
         switch (item.Kind)
         {
             case ChangeListKind.ConflictsHeader:
-                return SectionHeader($"Conflicts · {item.Count}", Nocturne.DangerText, "", null, item.TopGap);
+                return SectionHeader("conflicts", $"Conflicts · {item.Count}", Nocturne.DangerText, "", null, item.TopGap);
             case ChangeListKind.StagedHeader:
-                return SectionHeader($"Staged · {item.Count}", Nocturne.Accent300, "Unstage all",
+                return SectionHeader("staged", $"Staged · {item.Count}", Nocturne.Accent300, "Unstage all",
                     item.Count > 0 ? UnstageAll : null, item.TopGap);
             case ChangeListKind.ChangesHeader:
-                return SectionHeader($"Changes · {item.Count}", Nocturne.On(0.42), "Stage all",
+                return SectionHeader("changes", $"Changes · {item.Count}", Nocturne.On(0.42), "Stage all",
                     item.Count > 0 ? StageAll : null, item.TopGap);
             case ChangeListKind.HiddenHeader:
-                return SectionHeader($"Hidden · {item.Count}", Nocturne.On(0.42), "", null, item.TopGap);
+                return SectionHeader("hidden", $"Hidden · {item.Count}", Nocturne.On(0.42), "", null, item.TopGap);
             case ChangeListKind.Folder:
                 return ChangesFolderRow(item);
             case ChangeListKind.File:
@@ -815,13 +815,15 @@ public partial class JunctionApp
             Empty: EmptyPadding + LineHeight(13f));
     }
 
-    private Element SectionHeader(string label, Color labelColor, string action, Action? onAction, bool topGap = false)
+    private Element SectionHeader(string section, string label, Color labelColor, string action, Action? onAction, bool topGap = false)
     {
         // Held at the top of the list while its section scrolls under it, on the list's own
-        // fill so the rows going by do not show through.
+        // fill so the rows going by do not show through. Keyed, so a new count patches the row
+        // on screen: its button holds the focus of whoever is staging from the keyboard.
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
             .Padding(new Thickness(topGap ? 14 : 7, 8, 5, 8))
             .Background(Nocturne.Bg);
+        row.Key = section;
         row.AddChild(Text.New(label.ToUpperInvariant()).FontSize(10f).TextColor(labelColor).FlexGrow(1));
         if (onAction != null)
             row.AddChild(Ui.GhostButton(action, null, onAction, 11f));
