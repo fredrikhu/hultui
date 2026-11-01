@@ -397,14 +397,15 @@ public sealed class A11yFocusedRowTests : IDisposable
         Assert.Equal(3_000, list.Children.Count);
         Assert.True(Find(bridge.CurrentTree, rig.EditorElement.Id)!.IsFocused);
 
-        // Keys, and a move of the list's selection, are patched into it as into any list of nodes.
+        // Keys, and a move of the list's selection to a row off screen, which makes no row, are
+        // patched into it as into any list of nodes.
         int trees = session.Window.AccessibilityTreesBuilt;
         session.Window.TypeText("x");
         session.PumpFrame();
-        rig.List.SelectedIndex = 7;
+        rig.List.SelectedIndex = 700;
         session.PumpFrame();
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
-        Assert.True(list.Children[7].IsSelected);
+        Assert.True(list.Children[700].IsSelected);
         AssertFresh(session, bridge.CurrentTree!);
 
         // A wheel is refreshed in place too.

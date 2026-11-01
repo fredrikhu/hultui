@@ -695,6 +695,55 @@ public class VirtualListStickyRowsTests
 
     // ── No cost without it ──
 
+    /// <summary>A focused control in a held header stays while the header is held, however far the
+    /// rows have scrolled under it, and loses the focus when the next header pushes it out of the
+    /// window of rows: nothing is left holding the keyboard, in the element or for a reader.</summary>
+    [Fact]
+    public void AFocusedButtonInAHeldHeader_StaysWhileItIsHeld_AndLosesTheFocusWhenItsRowGoes()
+    {
+        using var session = HeadlessSession.Create(Width, Height);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var button = new Ref<ButtonElement>();
+        var list = VirtualListElement<Entry>.New()
+            .ItemHeight(RowHeight)
+            .Items(Entries(Rows))
+            .AccessibleItemLabel(e => e.Name)
+            .RowHeights((_, index) => HeightOf(index))
+            .StickyRows((e, _) => e.Header)
+            .RenderWith((e, _) => e.Id == 0
+                ? Flex.Row().Background(HeaderFill).Children(Button.New("Stage all").WithRef(button))
+                : MakeRow(e))
+            .FlexGrow(1);
+        session.Window.SetRoot(Flex.Column().Width(Width).Height(Height).Children(list));
+        session.PumpFrames(3);
+        var focused = button.Current!;
+        focused.Focus();
+        session.PumpFrames(2);
+        Assert.Same(focused, session.Window.Window.FocusedElement);
+
+        // Held: past the window of rows the header stands above, it is still realized.
+        list.ScrollOffsetY = Top(10);
+        session.PumpFrames(2);
+        Assert.Same(focused, session.Window.Window.FocusedElement);
+        Assert.True(focused.IsHosted);
+        Assert.True(HasFocusNode(bridge.CurrentTree, focused.Id));
+
+        // The next section's rows at the top: the first header is no longer the one held.
+        list.ScrollOffsetY = Top(Section + 5);
+        session.PumpFrames(3);
+        Assert.False(focused.IsHosted);
+        Assert.Null(session.Window.Window.FocusedElement);
+
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        Assert.Null(bridge.FocusedNode);
+        Assert.False(HasFocusNode(bridge.CurrentTree, focused.Id));
+        Assert.DoesNotContain(session.Window.Window.BuildAccessibilityTree().Children, c => c.IsFocused);
+    }
+
+    private static bool HasFocusNode(AccessibilityNode? node, ElementId id) =>
+        node is not null && ((node.ElementId == id && node.IsFocused) || node.Children.Any(c => HasFocusNode(c, id)));
+
     [Fact]
     public void AListWithoutStickyRows_HasNoHeldRow_AndNoGapInItsChildren()
     {
