@@ -1655,6 +1655,8 @@ public partial class JunctionApp : Component, IDisposable
         foreach (var w in _watchers.Values) w.Dispose();
         _watchers.Clear();
         _retryPending.Clear();   // a pending retry finds nothing to do
+        _highlightNext = null;
+        _highlightCancel?.Cancel();
         DisposeMarkdown();
     }
 }

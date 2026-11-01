@@ -8,6 +8,14 @@ using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with Hul
 
 namespace HultUI.Syntax;
 
+/// <summary>Lines of a text, 1-based, both ends included.</summary>
+internal readonly record struct LineRange(int First, int Last);
+
+/// <summary>What <see cref="SyntaxHighlighter.TokenizeDiff"/> made of two versions of a file: each
+/// side's spans by line, null when it has none, and how many lines it walked.</summary>
+internal readonly record struct TokenizedDiff(IReadOnlyList<TextSpan>[]? Old, IReadOnlyList<TextSpan>[]? New,
+    int LinesWalked);
+
 /// <summary>
 /// Syntax tokenizer backed by TextMateSharp (VS Code's TextMate grammars), shared by
 /// every HultUI app that shows code — Vesper Commander's file preview and Junction's
@@ -170,6 +178,63 @@ public static class SyntaxHighlighter
     }
 
     /// <summary>
+    /// Two versions of one file tokenized for a diff, which shows a few lines of each. A line
+    /// needs every line above it, for the state they leave (a block comment opened 900 lines
+    /// up), but a diff needs nothing below its last line, and of the lines above it only that
+    /// state. So each side stops at its last shown line; a line nobody shows is walked for its
+    /// state, which saves about a fifth of its bytes and leaves no spans to keep (a diff's lines
+    /// are a few in a hundred); and the lines both versions start with are walked once. On the
+    /// spans of a line shown this is <see cref="TokenizeLines(string, string, int, CancellationToken, TimeProvider?)"/>,
+    /// and it holds a side to the same limits: a text too long for that gets none here.
+    ///
+    /// <para>A side's array ends at its last shown line, and holds spans only for lines shown.
+    /// A side with no text, or nothing shown, is null.</para>
+    /// </summary>
+    /// <param name="oldShown">The old side's lines to colour, in rising order.</param>
+    /// <param name="newShown">The new side's, likewise.</param>
+    internal static TokenizedDiff TokenizeDiff(string path, string? oldText, IReadOnlyList<LineRange> oldShown,
+        string? newText, IReadOnlyList<LineRange> newShown, int maxLines, CancellationToken cancellationToken,
+        TimeProvider clock)
+    {
+        if (oldShown.Count == 0 || oldText is not null && TooLong(oldText, maxLines)) oldText = null;
+        if (newShown.Count == 0 || newText is not null && TooLong(newText, maxLines)) newText = null;
+        if (oldText is null && newText is null) return default;
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (Gate)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var grammar = GrammarFor(path);
+            if (grammar == null) return default;
+
+            var oldLines = oldText is null ? [] : SplitLines(oldText, oldShown[^1].Last);
+            var newLines = newText is null ? [] : SplitLines(newText, newShown[^1].Last);
+            var oldSide = new Side(oldText is null ? null : Uncoloured(oldLines.Count), oldShown);
+            var newSide = new Side(newText is null ? null : Uncoloured(newLines.Count), newShown);
+            var longer = newLines.Count >= oldLines.Count ? newLines : oldLines;
+            int shared = oldText is null || newText is null ? 0 : Math.Min(SharedLines(oldText, newText), longer.Count);
+
+            var walk = new LineWalk(grammar, clock, cancellationToken);
+            IStateStack? state = null;
+            walk.Run(longer, 0, shared, ref state, ref oldSide, ref newSide);
+            var elapsed = clock.GetElapsedTime(walk.Started);
+            var sharedState = state;
+            walk.Run(newLines, shared, newLines.Count, ref state, ref newSide, ref Side.None);
+            // Each version has its whole budget, as it would alone, less the walk they shared.
+            walk.Started = clock.GetTimestamp() - (long)(elapsed.TotalSeconds * clock.TimestampFrequency);
+            walk.Run(oldLines, shared, oldLines.Count, ref sharedState, ref oldSide, ref Side.None);
+            return new TokenizedDiff(oldSide.Result, newSide.Result, walk.Lines);
+        }
+    }
+
+    private static bool TooLong(string text, int maxLines) =>
+        text.Length > MaxChars
+        || text.AsSpan().Count('\n') + (text.Length > 0 && text[^1] != '\n' ? 1 : 0) > maxLines;
+
+    /// <summary>How many whole lines two texts start with in common.</summary>
+    private static int SharedLines(string a, string b) =>
+        a.AsSpan(0, a.AsSpan().CommonPrefixLength(b)).Count('\n');
+
+    /// <summary>
     /// Flatten the per-line tokenization into a single span list whose offsets are
     /// absolute within <paramref name="text"/> — a drop-in for a Text/TextArea that
     /// holds the whole excerpt. Assumes '\n' line breaks (the preview loader
@@ -325,51 +390,110 @@ public static class SyntaxHighlighter
         var lines = SplitLines(text);
         if (lines.Count > maxLines) return null;
 
-        var result = new IReadOnlyList<TextSpan>[lines.Count];
+        var side = new Side(Uncoloured(lines.Count), EveryLine);
         IStateStack? state = null;
-        long started = clock.GetTimestamp();
-        // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
-        var lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
-        var spans = new List<TextSpan>(32);
+        new LineWalk(grammar, clock, cancellationToken).Run(lines, 0, lines.Count, ref state, ref side, ref Side.None);
+        return side.Result;
+    }
 
-        for (int i = 0; i < lines.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            result[i] = [];
-            if (clock.GetElapsedTime(started) > FileBudget) continue;
+    private static readonly LineRange[] EveryLine = [new(1, int.MaxValue)];
 
-            long lineStarted = Stopwatch.GetTimestamp();
-            ITokenizeLineResult tokenized;
-            try { tokenized = grammar.TokenizeLine(new LineText(lines[i]), state, lineBudget); }
-            catch { continue; }   // a broken grammar rule shouldn't kill the whole file
-            // A line stopped at its budget hands back the state it stopped in, part-way through
-            // the line, inside a string say, and every line after it used to be tokenized from
-            // there: a JSON body's keys and values swapped colours to its last line. The result
-            // does not say it stopped (StoppedEarly is on TextMateSharp's internal type), so a
-            // line that took its whole budget is taken to have, and the next line starts from the
-            // state this one started in, as VS Code does. The stopped line keeps the colour found
-            // before the stop.
-            if (lineBudget == TimeSpan.MaxValue || Stopwatch.GetElapsedTime(lineStarted) < lineBudget)
-                state = tokenized.RuleStack;
-
-            int lineLength = lines[i].Length;
-            spans.Clear();
-            foreach (var token in tokenized.Tokens)
-            {
-                int s = Math.Clamp(token.StartIndex, 0, lineLength);
-                int e = Math.Clamp(token.EndIndex, s, lineLength);
-                if (e <= s) continue;
-                if (ColorFor(token.Scopes) is not { } color) continue;
-
-                // Merge contiguous same-color tokens so the renderer draws fewer segments.
-                if (spans.Count > 0 && spans[^1].End == s && spans[^1].Color == color)
-                    spans[^1] = spans[^1] with { Length = spans[^1].Length + (e - s) };
-                else
-                    spans.Add(new TextSpan(s, e - s, color));
-            }
-            if (spans.Count > 0) result[i] = spans.ToArray();
-        }
+    private static IReadOnlyList<TextSpan>[] Uncoloured(int lines)
+    {
+        var result = new IReadOnlyList<TextSpan>[lines];
+        Array.Fill(result, Array.Empty<TextSpan>());
         return result;
+    }
+
+    /// <summary>What a walk fills in: one version's result, for the lines it shows.</summary>
+    private struct Side(IReadOnlyList<TextSpan>[]? result, IReadOnlyList<LineRange> shown)
+    {
+        public static Side None = new(null, []);
+
+        public readonly IReadOnlyList<TextSpan>[]? Result = result;
+        private int _range;
+
+        /// <summary>Whether this side shows a line (0-based). Asked in rising order.</summary>
+        public bool Shows(int line)
+        {
+            if (Result is null) return false;
+            while (_range < shown.Count && shown[_range].Last <= line) _range++;
+            return _range < shown.Count && shown[_range].First - 1 <= line;
+        }
+    }
+
+    /// <summary>A walk down lines, each from the state the one above left.</summary>
+    private sealed class LineWalk(IGrammar grammar, TimeProvider clock, CancellationToken cancellationToken)
+    {
+        /// <summary>What the budget of three seconds runs from.</summary>
+        public long Started = clock.GetTimestamp();
+
+        /// <summary>Lines walked so far.</summary>
+        public int Lines;
+
+        // TextMateSharp measures a line's budget on the wall clock only; MaxValue is none.
+        private readonly TimeSpan _lineBudget = clock == TimeProvider.System ? LineBudget : TimeSpan.MaxValue;
+        private readonly List<TextSpan> _spans = new(32);
+
+        /// <summary>Walks lines <paramref name="from"/> to <paramref name="to"/> from
+        /// <paramref name="state"/>. The spans of a line go to the sides that show it; a line
+        /// neither shows is walked for its state.</summary>
+        public void Run(List<ReadOnlyMemory<char>> lines, int from, int to, ref IStateStack? state,
+            ref Side first, ref Side second)
+        {
+            for (int i = from; i < to; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (clock.GetElapsedTime(Started) > FileBudget) continue;
+                Lines++;
+
+                bool inFirst = first.Shows(i), inSecond = second.Shows(i);
+                long lineStarted = Stopwatch.GetTimestamp();
+                if (!inFirst && !inSecond)
+                {
+                    IStateStack next;
+                    try { next = grammar.TokenizeLine2(new LineText(lines[i]), state, _lineBudget).RuleStack; }
+                    catch { continue; }   // a broken grammar rule shouldn't kill the whole file
+                    if (Finished(lineStarted)) state = next;
+                    continue;
+                }
+
+                ITokenizeLineResult tokenized;
+                try { tokenized = grammar.TokenizeLine(new LineText(lines[i]), state, _lineBudget); }
+                catch { continue; }   // a broken grammar rule shouldn't kill the whole file
+                if (Finished(lineStarted)) state = tokenized.RuleStack;
+
+                int lineLength = lines[i].Length;
+                _spans.Clear();
+                foreach (var token in tokenized.Tokens)
+                {
+                    int s = Math.Clamp(token.StartIndex, 0, lineLength);
+                    int e = Math.Clamp(token.EndIndex, s, lineLength);
+                    if (e <= s) continue;
+                    if (ColorFor(token.Scopes) is not { } color) continue;
+
+                    // Merge contiguous same-color tokens so the renderer draws fewer segments.
+                    if (_spans.Count > 0 && _spans[^1].End == s && _spans[^1].Color == color)
+                        _spans[^1] = _spans[^1] with { Length = _spans[^1].Length + (e - s) };
+                    else
+                        _spans.Add(new TextSpan(s, e - s, color));
+                }
+                if (_spans.Count == 0) continue;
+                var spans = _spans.ToArray();
+                if (inFirst) first.Result![i] = spans;
+                if (inSecond) second.Result![i] = spans;
+            }
+        }
+
+        // A line stopped at its budget hands back the state it stopped in, part-way through
+        // the line, inside a string say, and every line after it used to be tokenized from
+        // there: a JSON body's keys and values swapped colours to its last line. The result
+        // does not say it stopped (StoppedEarly is on TextMateSharp's internal type), so a
+        // line that took its whole budget is taken to have, and the next line starts from the
+        // state this one started in, as VS Code does. The stopped line keeps the colour found
+        // before the stop.
+        private bool Finished(long lineStarted) =>
+            _lineBudget == TimeSpan.MaxValue || Stopwatch.GetElapsedTime(lineStarted) < _lineBudget;
     }
 
     private static Color? ColorFor(List<string> scopes)
@@ -391,16 +515,17 @@ public static class SyntaxHighlighter
     }
 
     // Lines as slices of the source (no per-line string allocs); trailing '\r' is
-    // stripped so offsets line up with the raw line content.
-    private static List<ReadOnlyMemory<char>> SplitLines(string text)
+    // stripped so offsets line up with the raw line content. At most `limit` of them.
+    private static List<ReadOnlyMemory<char>> SplitLines(string text, int limit = int.MaxValue)
     {
-        var lines = new List<ReadOnlyMemory<char>>(256);
+        var lines = new List<ReadOnlyMemory<char>>(Math.Min(limit, 256));
         int start = 0;
         for (int i = 0; i < text.Length; i++)
         {
             if (text[i] != '\n') continue;
             int end = i > start && text[i - 1] == '\r' ? i - 1 : i;
             lines.Add(text.AsMemory(start, end - start));
+            if (lines.Count == limit) return lines;
             start = i + 1;
         }
         if (start < text.Length)

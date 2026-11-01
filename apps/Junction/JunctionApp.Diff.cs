@@ -480,7 +480,7 @@ public partial class JunctionApp
 
         if (interact != null) SyncStageSelection(interact);
 
-        var hl = HighlightForCurrent(diff.Path);
+        var hl = HighlightForCurrent(diff);
         // Reviewing is unified only: GitLab's positions are one column of lines, and the
         // cards need a row to follow.
         var review = ReviewRowsActive ? _review : null;

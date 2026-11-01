@@ -55,7 +55,7 @@ public class BinaryDiffViewTests
             session.PumpFrames(4);
 
             Assert.Equal(0, CacheCount(app, "_highlights"));
-            Assert.Equal(0, CacheCount(app, "_highlightsPending"));
+            Assert.Equal(0, app.HighlightsPending);
         });
     }
 

@@ -30,8 +30,7 @@ public class CommitPrefetchTests
     private static IDictionary Highlights(JunctionApp app) =>
         (IDictionary)Field(app, "_highlights")!;
 
-    private static int Pending(JunctionApp app) =>
-        ((IEnumerable<string>)Field(app, "_highlightsPending")!).Count();
+    private static int Pending(JunctionApp app) => app.HighlightsPending;
 
     /// <summary>How many files the prefetched commit detail holds.</summary>
     private static int DetailFiles(JunctionApp app)
