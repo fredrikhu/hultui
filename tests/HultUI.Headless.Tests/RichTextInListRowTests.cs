@@ -14,10 +14,15 @@ namespace HultUI.Headless.Tests;
 /// What typing in a rich text editor needs of what sits around it: a formatting bar says when it
 /// no longer shows the editor (<see cref="RichTextToolbar.IsStale"/>), so an app rebuilds for the
 /// keys that move a button and no others; and an editor in a row of a list whose items stand for
-/// its rows has no accessibility node, so its keys build no tree.
+/// its rows builds no tree for its keys, whether a reader can reach it or not.
 /// </summary>
-public class RichTextInListRowTests
+public sealed class RichTextInListRowTests : IDisposable
 {
+    // The editor tells a reader its caret only while one listens.
+    public RichTextInListRowTests() => AccessibilityClients.Force = true;
+
+    public void Dispose() => AccessibilityClients.Force = null;
+
     private static (HeadlessSession Session, RichTextToolbar Bar, RichTextEditorElement Editor) Mounted(
         IReadOnlyList<RichTextCommand?>? commands = null)
     {
@@ -104,13 +109,12 @@ public class RichTextInListRowTests
         }
     }
 
-    /// <summary>The list's items stand for its rows, so nothing in a row has a node: a key in an
-    /// editor there builds no tree, where it built one a key. The list's own items are told as
-    /// ever, and a list whose rows answer for themselves still tells what is in them.</summary>
+    /// <summary>A key in an editor in a row builds no tree, where it built one a key. A list whose
+    /// rows answer for themselves tells what is in them from the applied tree.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void AKeyInAnEditorInAListRow_BuildsATreeOnlyWhenTheTreeHoldsTheEditor(bool composite)
+    public void AKeyInAnEditorInAListRow_BuildsNoTree(bool composite)
     {
         using var session = HeadlessSession.Create(width: 700, height: 400);
         var bridge = session.Window.InstallAccessibilityBridge();
@@ -143,14 +147,8 @@ public class RichTextInListRowTests
         session.PumpFrames(2);
 
         Assert.Equal("xxxxx", editorRef.Current!.Document.ToPlainText());
-        int built = session.Window.AccessibilityTreesBuilt - trees;
-        if (composite)
-        {
-            Assert.True(built >= 5, $"{built} trees for five characters in a node of the tree");
-            return;
-        }
-        Assert.Equal(0, built);
-        Assert.True(HasNode(bridge.CurrentTree, "Item 2"));
+        Assert.Equal(0, session.Window.AccessibilityTreesBuilt - trees);
+        Assert.Equal(!composite, HasNode(bridge.CurrentTree, "Item 2"));
         var diff = AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree());
         Assert.True(diff.IsEmpty, "the keys changed a tree nothing told");
     }

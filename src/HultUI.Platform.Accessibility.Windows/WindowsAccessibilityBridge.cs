@@ -615,11 +615,11 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
-    /// item that had the selection and the one that has it; a caret or selection move in text made
-    /// on request (the rich text editor's); a leaf's change of its own name, description, value,
+    /// item that had the selection and the one that has it; a keystroke, or a caret or selection move,
+    /// in text made on request (a rich text editor's, a text area's); a leaf's change of its own name, description, value,
     /// range, toggle or expanded state, whose node the window made again and put in place of the
     /// old one. Their wrappers take the change's node and its state and raise what a diff would have
-    /// (SelectionItem.IsSelected property events, Text_TextSelectionChanged, Name, HelpText,
+    /// (SelectionItem.IsSelected property events, Text_TextChanged, Text_TextSelectionChanged, Name, HelpText,
     /// ValueValue, RangeValue, ToggleState, ExpandCollapseState), with no walk of the tree. Anything
     /// but property changes is applied as a diff.
     /// </summary>

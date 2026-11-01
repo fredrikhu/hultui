@@ -204,8 +204,15 @@ holds the caret's and the selection's offsets), puts it on the applied tree's no
 place and hands the bridges the move (`ApplyPatchedProperties`, a `TextSelection` change
 whose previous node is a stand-in carrying the old version): UIA raises
 Text_TextSelectionChanged, AT-SPI sends text-caret-moved and text-selection-changed,
-reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built. A
-move that comes with an edit is told by the edit's rebuild, as before.
+reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built.
+
+A keystroke in such a text rebuilds no tree either (2026-11-01, plan 17 round 6 step 11b):
+the rich text editor's and the text area's. Each built and diffed the whole tree: 86.1 KB a
+key in a 20-block editor beside 300 rows. The frame puts the new version on the node as for
+a caret move and hands the bridges what the diff would have listed, the text first, then
+the caret, each with the stand-in as the previous node: UIA raises Text_TextChanged and
+Text_TextSelectionChanged, AT-SPI sends text-changed from the versions' characters and
+text-caret-moved, from the published objects. Now 8.3 KB a key on both, no tree built.
 
 A change of a leaf's own properties rebuilds no tree either (2026-10-24, plan 17 round 4):
 a text input's value (a password field's bullets, never its text), a toggle (a check box,
@@ -671,7 +678,7 @@ providers), a UIA `ItemContainer` on virtualized lists.
     string by identity, the caret, the anchor, the rows and the part on screen; a keystroke
     is a text change (UIA `Text_TextChanged`, AT-SPI `text-changed` with what was inserted
     and removed, from the strings the versions hold, no tables made for it), never a value
-    change; a caret move a patch with no tree built, which it never told before; its
+    change; a keystroke and a caret move are patches with no tree built; a caret move was never told before; its
     read-only switch reaches the text a reader reads. In both, a character's box runs
     between its two caret places, so where the direction changes a box can span a run.
     Single-line text inputs are the next candidate.

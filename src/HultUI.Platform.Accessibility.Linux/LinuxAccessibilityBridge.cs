@@ -19,8 +19,8 @@ namespace HultUI.Platform.Accessibility.Linux;
 /// (<see cref="NotifyFocusChanged(AccessibilityNode?, AccessibilityNode?)"/>) sets the
 /// focused state of its two objects in it, and a list's selection move
 /// (<see cref="ApplyPatchedProperties"/>) the selected state of its two items, all on the UI
-/// thread; a caret move in text made on request is told through the same call, with nothing in
-/// the snapshot to change. The
+/// thread; a keystroke or a caret move in text made on request is told through the same call, with
+/// nothing in the snapshot to change. The
 /// <see cref="TreeDiff"/> drives which change signals to emit — the same delta
 /// the render side already computed, reused as the AT-SPI event stream.
 /// </para>
@@ -579,14 +579,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     /// <summary>
     /// Properties the window marked on the applied tree in place — a list's selection move: the
-    /// item that had the selection and the one that has it; a caret or selection move in text made
-    /// on request (the rich text editor's); a leaf's change of its own name, description, value,
+    /// item that had the selection and the one that has it; a keystroke, or a caret or selection move,
+    /// in text made on request (a rich text editor's, a text area's); a leaf's change of its own name, description, value,
     /// range, toggle or expanded state, whose node the window made again and put in its place; and
     /// a layout refresh made in place: boxes moved, nodes gone out of view or come into it, scroll
     /// views scrolled, with such leaves among them. Their objects in the published snapshot take the
     /// new state and the new node (a text's object reads its text through its source, so it has none
     /// to take; every object reads its box and offscreen state from its node) and the bridge sends
-    /// what a diff would have (state-changed:selected; text-caret-moved and text-selection-changed;
+    /// what a diff would have (state-changed:selected; text-changed, text-caret-moved and text-selection-changed;
     /// accessible-name, accessible-description, accessible-value, state-changed:checked or expanded;
     /// nothing for a move or a scroll), with no new snapshot. A list whose items are served on demand
     /// tells a move of its selection on its items (state-changed:selected, <see cref="EmitServedSelection"/>)
@@ -604,7 +604,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
                 && change.PropertyName switch
                 {
                     AccessibilityProperties.IsSelected => true,
-                    AccessibilityProperties.TextSelection => change.Node.TextSource is not null,
+                    AccessibilityProperties.Text or AccessibilityProperties.TextSelection => change.Node.TextSource is not null,
                     // Not the application's own object, which is named as the application.
                     AccessibilityProperties.Name or AccessibilityProperties.Description or AccessibilityProperties.Value
                         or AccessibilityProperties.RangeValue or AccessibilityProperties.IsToggled

@@ -149,21 +149,83 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
     }
 
+    /// <summary>A character built and diffed the whole tree (86 KB a key beside 300 rows). It is
+    /// told from the versions now, the text first and then the caret, as a diff lists them.</summary>
     [Fact]
-    public void AnEditWithItsCaret_IsToldByARebuild_AsBefore()
+    public void AnEditWithItsCaret_BuildsNoTree_AndIsToldAsADiffWouldTellIt()
     {
         using var session = HeadlessSession.Create(600, 400);
         var bridge = session.Window.InstallAccessibilityBridge();
-        var (editor, _) = Mount(session);
+        var (editor, label) = Mount(session);
+        var tree = bridge.CurrentTree!;
         int trees = session.Window.AccessibilityTreesBuilt;
         bridge.ClearDiffs();
 
         session.Window.TypeText("x");
         session.PumpFrame();
 
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Same(tree, bridge.CurrentTree);
+        var patch = Assert.Single(bridge.Diffs);
+        Assert.Equal([AccessibilityProperties.Text, AccessibilityProperties.TextSelection],
+            patch.PropertyChanged.Select(c => c.PropertyName));
+        var change = patch.PropertyChanged[0];
+        Assert.Same(NodeOf(tree, editor), change.Node);
+        Assert.StartsWith("xfirst paragraph", change.Node.Text!.Text, StringComparison.Ordinal);
+        Assert.StartsWith("first paragraph", change.Previous!.Text!.Text, StringComparison.Ordinal);
+        Assert.Equal(0, change.Previous.Text!.Caret);
+        Assert.Equal(1, change.Node.Text!.Caret);
+
+        // The next refresh compares against the marked tree: it does not tell the edit again.
+        bridge.ClearDiffs();
+        label.Content += "!";
+        session.PumpFrame();
+        Assert.DoesNotContain(bridge.Diffs.SelectMany(d => d.PropertyChanged),
+            c => c.PropertyName is AccessibilityProperties.Text or AccessibilityProperties.TextSelection);
+        Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
+    }
+
+    [Fact]
+    public void AnEditInAFrameThatRebuildsAnyway_IsToldOnce_ByTheDiff()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var (editor, label) = Mount(session);
+        int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
+
+        session.Window.TypeText("x");
+        ((Element)label.Parent!).AddChild(TextB.New("new"));
+        session.PumpFrame();
+
         Assert.Equal(trees + 1, session.Window.AccessibilityTreesBuilt);
         Assert.Equal([AccessibilityProperties.Text, AccessibilityProperties.TextSelection],
             bridge.Diffs.SelectMany(d => d.PropertyChanged).Where(c => c.Node.ElementId == editor.Id).Select(c => c.PropertyName));
+    }
+
+    [Fact]
+    public void AnEditInATextArea_BuildsNoTree_AndIsToldAsADiffWouldTellIt()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var bridge = session.Window.InstallAccessibilityBridge();
+        var area = TextArea.New("one\ntwo").Width(300f).Height(150f);
+        session.Window.SetRoot(Flex.Column().Padding(8).Children(area));
+        session.PumpFrames(2);
+        session.Window.Click(area);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        session.PumpFrame(TimeSpan.FromMilliseconds(120));
+        int trees = session.Window.AccessibilityTreesBuilt;
+        bridge.ClearDiffs();
+
+        session.Window.TypeText("x");
+        session.PumpFrame();
+
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        Assert.Equal([AccessibilityProperties.Text, AccessibilityProperties.TextSelection],
+            bridge.Diffs.SelectMany(d => d.PropertyChanged).Select(c => c.PropertyName));
+        Assert.Contains("x", NodeOf(bridge.CurrentTree!, area).Text!.Text, StringComparison.Ordinal);
+        Assert.True(AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.Window.BuildAccessibilityTree()).IsEmpty);
     }
 
     [Fact]
@@ -271,6 +333,40 @@ public sealed class A11yTextCaretPatchTests : IDisposable
         Assert.Equal((2, 1, 2), (text.Caret, text.SelectionStart, text.SelectionEnd));
     }
 
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
+    public void UIA_AKeystroke_RaisesTextChangedAndTextSelectionChanged_WithNoTreeBuilt()
+    {
+        using var hwnd = TestHwnd.Create();
+        using var session = HeadlessSession.Create(600, 400);
+        var window = session.Window.Window;
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
+        window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
+        using var bridge = new WindowsAccessibilityBridge(hwnd.Handle, host);
+        var raised = new List<UiaRaised>();
+        bridge.Raised = raised.Add;
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var (editor, _) = Mount(session);
+        int trees = session.Window.AccessibilityTreesBuilt;
+        raised.Clear();
+
+        session.Window.TypeText("x");
+        session.PumpFrame();
+
+        Assert.Equal(
+        [
+            new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextChangedEventId, editor.Id),
+            new UiaRaised(UiaRaisedKind.Event, UiaInterop.UIA_Text_TextSelectionChangedEventId, editor.Id),
+        ], raised);
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+        // A client's thread reads the new text and the moved caret.
+        var text = Task.Run(() => bridge.GetText(editor.Id)).Result!;
+        Assert.StartsWith("xfirst paragraph", text.Text, StringComparison.Ordinal);
+        Assert.Equal(1, text.Caret);
+    }
+
     // ── AT-SPI ──
 
     private sealed class Signals : IAtSpiSignals
@@ -323,6 +419,35 @@ public sealed class A11yTextCaretPatchTests : IDisposable
             $"text-selection-changed {id}",
             $"text-caret-moved {id} 1",
             $"text-selection-changed {id}",
+        ], signals.Lines);
+        Assert.Same(published, ObjectOf(bridge, editor));
+        Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+    }
+
+    [Fact]
+    public void ATSPI_AKeystroke_SendsTextChanged_FromThePublishedSnapshot_WithNoTreeBuilt()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        var signals = new Signals();
+        using var bridge = new LinuxAccessibilityBridge(signals);
+        session.Window.InstallAccessibilityBridge(new Active(bridge));
+        var (editor, _) = Mount(session);
+        var published = ObjectOf(bridge, editor);
+        int trees = session.Window.AccessibilityTreesBuilt;
+        signals.Lines.Clear();
+
+        session.Window.TypeText("x");
+        session.PumpFrame();
+        session.Window.PressKey(KeyCode.Backspace);
+        session.PumpFrame();
+
+        ulong id = editor.Id.Value;
+        Assert.Equal(
+        [
+            $"text-changed:insert {id} 0 x",
+            $"text-caret-moved {id} 1",
+            $"text-changed:delete {id} 0 x",
+            $"text-caret-moved {id} 0",
         ], signals.Lines);
         Assert.Same(published, ObjectOf(bridge, editor));
         Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
