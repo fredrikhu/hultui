@@ -763,6 +763,22 @@ providers), a UIA `ItemContainer` on virtualized lists.
   would undo round 5's refresh, and the backoff's count did not move (18 trees per 120 notches in
   Junction, 8–9 in Aperture). A list out of view, which no drawing reaches, gets its rows for a
   reader too. Only the walks ask, so with no reader listening nothing but drawing realizes a row.
+  **The row that holds the focus (2026-11-01, plan 17 round 6 step 11b):** a list that publishes one
+  node per item has no nodes for what its rows hold, so a control in a row could take the keyboard
+  with the reader told nothing: the focus was on no node. Junction's review composer is such a row,
+  and what was typed there could not be reached. That row is now read through its elements, under
+  its item's node, for as long as it holds the focus, and the items stay as they were. There is one
+  such row at most, and it needs nothing from the app: every control in an item row is reached this
+  way, with Tab or a click, whichever list it is in. A focus move into a row builds the tree that has
+  its nodes and tells the focus then, as for an element that just appeared; a move out builds the
+  tree without them; a move inside it builds none. A change in the row is patched under the item
+  (the window's way down the ancestors goes through the item's node, a child of the list's at the
+  item's index), and the layout refresh walks the row in place. Every other row still builds nothing
+  for what changes in it. A list over the limit its items are served on demand from has item nodes
+  while a row is open, since the row has to hang under one: one tree of up to its whole length as the
+  row opens, and again as it closes. An item's node now stands where its row is drawn in a list of
+  rows of more than one height too (`ItemBounds`); they all stacked at the fixed height, and a reader's
+  highlight and UIA's hit test went by that.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

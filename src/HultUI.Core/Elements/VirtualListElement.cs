@@ -99,6 +99,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// does. A listening reader gets the rows of a mount in that frame's tree, and those of a
     /// change or a scroll with the layout refresh: in the frame of the change, or within
     /// its 100 ms when one came just before.</para>
+    /// <para>Off, a row with a control in it needs nothing from the app: the row that holds the
+    /// keyboard focus is read through its elements, under its item's node, for as long as it
+    /// holds it.</para>
     /// </summary>
     public bool RowsAreComposite { get; set; }
 
@@ -211,8 +214,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// lay out as if it were not there, so whatever reaches the end of the selected row runs
     /// under it: give it a background (the highlight's), or the two draw over each other. It
     /// takes no pointer: a press on it is a press on the row under it. Items of a list whose rows
-    /// are not composite have no children in the accessibility tree, and it has none either;
-    /// on composite rows it is read after them.
+    /// are not composite have no children in the accessibility tree but the focused row's, and it
+    /// has none either; on composite rows it is read after them.
     /// </para>
     /// <para>
     /// A rebuild may hand back the element that is on screen, which then stays, or a new one,
@@ -274,11 +277,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     float IAccessibleItemSource.ItemHeight => _itemHeight;
     bool IAccessibleItemSource.PublishesItemNodes => !RowsAreComposite;
 
-    // Only for sticky rows, which an item's node follows to where it is drawn; every other list
-    // stacks them at ItemHeight, as it always did.
+    // An item's node stands where its row is drawn: what a reader's highlight shows, and what hit
+    // testing goes down through to the elements of the row that holds the focus. Rows of one height
+    // stack at ItemHeight. Without sticky rows the offsets are read as they are: a list served on
+    // demand is asked on a reader's thread.
     (float Top, float Height)? IAccessibleItemSource.ItemBounds(int index)
     {
-        if (_stickyRowFor is null) return null;
+        if (_stickyRowFor is null)
+            return _offsets is { } offsets && index + 1 < offsets.Length
+                ? (offsets[index], offsets[index + 1] - offsets[index]) : null;
         EnsureOffsets();
         EnsureStickyRows();
         return (OffsetOf(index) + (IsStickyRow(index) ? ShiftOfStickyRow(index) : 0f), HeightOf(index));
@@ -335,6 +342,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     private string? LabelOf(T item) => _accessibleLabel is { } label ? label(item) : item?.ToString();
+
+    int IAccessibleItemSource.ItemOfRow(Element row)
+    {
+        foreach (var (index, realized) in _activeElements)
+            if (ReferenceEquals(realized.Element, row)) return index;
+        return -1;
+    }
 
     void IAccessibleItemSource.ActivateItem(int index)
     {
@@ -930,11 +944,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
     /// <summary>Composite rows are what the accessibility tree reads, and drawing, which realizes
     /// them, comes after the frame's accessibility phase: a tree built in that phase had the rows of
-    /// the frame before, or none. Item rows are served from the data and need nothing here. Only a
-    /// listening reader's walks ask; the frame's drawing then finds the rows made.</summary>
+    /// the frame before, or none. Item rows are served from the data and need nothing here, but for
+    /// a keyed row held back across an invalidation, which may be the one that holds the focus, and
+    /// is read through its elements. Only a listening reader's walks ask; the frame's drawing then
+    /// finds the rows made.</summary>
     internal override void RealizeForAccessibility()
     {
-        if (RowsAreComposite) UpdateContentSize();
+        if (RowsAreComposite || _retained is not null) UpdateContentSize();
     }
 
     /// <summary>The tint under the pointer (<see cref="HoverHighlight"/>) and the selection, when

@@ -1451,12 +1451,12 @@ void Edited()
 }
 ```
 
-Nothing in a row of a list whose items stand for its rows has an accessibility node, so a key there
-builds no accessibility tree, and a reader cannot reach what the row holds: set `RowsAreComposite`
-on a list with a row a reader must work in. Junction's review composer made its row again on every
-key, and built a tree with a reader listening; kept: 150.4 → 2.0 KB a key, 206.7 → 2.0 with UIA, 1
-tree a key → 0, the key's time −16 % and −20 % (headless, JIT; NativeAOT −20 % both). The suite pins
-it: `a11y/type in a rich text editor inside a VirtualList row, bridge on`.
+The row that holds the keyboard focus is read through its elements, under its item's node, so a
+reader reaches a control in a row with nothing set: see **A row that holds the focus** below.
+Junction's review composer made its row again on every key, and built a tree with a reader
+listening; kept: 150.4 → 2.0 KB a key, 206.7 → 2.0 with UIA, 1 tree a key → 0, the key's time −16 %
+and −20 % (headless, JIT; NativeAOT −20 % both). The suite pins it:
+`a11y/type in a rich text editor inside a VirtualList row, bridge on`, and its UIA twin.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
@@ -1539,6 +1539,16 @@ a mount's rows are in that frame's tree, and a change's or a scroll's reach the 
 layout refresh: in that frame, or within 100 ms of the last one. Nothing is needed from the
 app, and with no reader only drawing realizes a row. Aperture's poster grid is the case this
 exists for.
+
+**A row that holds the focus.** A list of items can still have a control in a row: a comment being
+written among a diff's lines, a name being edited in place. Nothing needs setting. The row that
+holds the keyboard focus is read through its elements, under its item's node, for as long as it
+holds it, and every other row stays its item, so a reader keeps the whole list and gets the controls
+of the row it is in. Tab and a click reach it as they reach any control. Reach for
+`RowsAreComposite` when the rows *are* controls, not when one of them holds some: it turns each row
+into its elements for every row on screen, and takes the rows off screen out of the tree. Junction's
+review measured both. Rows that have to be read without the focus in them need `RowsAreComposite`,
+or an item label that says what they hold.
 
 ---
 

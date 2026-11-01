@@ -163,7 +163,8 @@ public static partial class AccessibilityTreeBuilder
                 {
                     made.ItemSource = items;
                     int count = items.ItemCount;
-                    if (count > MaxEagerVirtualItems) ServeOnDemand(made, items, count);
+                    if (count > MaxEagerVirtualItems && OpenRow(element, items, focusManager).Element is null)
+                        ServeOnDemand(made, items, count);
                 }
                 int start = refresh.Changes.Count;
                 AccessibilityTreeDiffer.CompareNodes(refresh.Changes, applied, made, prevAbove, currAbove);
@@ -224,7 +225,8 @@ public static partial class AccessibilityTreeBuilder
         if (element is IAccessibleItemSource { PublishesItemNodes: true } items)
         {
             if (!ReferenceEquals(node.ItemSource, items)) return refresh.Fail("a list's items");
-            if (items.ItemCount > MaxEagerVirtualItems)
+            var open = OpenRow(element, items, focusManager);
+            if (items.ItemCount > MaxEagerVirtualItems && open.Element is null)
             {
                 if (!node.IsVirtualItemContainer || node.Children.Count != 0) return refresh.Fail("a list's items");
                 // Its items' number and selection are the node's own: told as a diff tells them, and
@@ -234,7 +236,7 @@ public static partial class AccessibilityTreeBuilder
             }
             if (node.IsVirtualItemContainer) return refresh.Fail("a list's items");
             if (mustBeLeaf && items.ItemCount != 0) return refresh.Fail("a list's items");
-            return MatchItems(element, items, node, place, clip, prevAbove, currAbove, refresh);
+            return MatchItems(element, items, node, open, focusManager, place, clip, prevAbove, currAbove, refresh);
         }
         if (node.ItemSource is not null || node.IsVirtualItemContainer) return refresh.Fail("a list's items");
         if (!isRoot && ConsumesTextContent(element)) return node.Children.Count == 0 || refresh.Fail("children");
@@ -258,24 +260,27 @@ public static partial class AccessibilityTreeBuilder
         var children = element.Children;   // by index: foreach over the interface boxes an enumerator
         for (int i = 0; i < children.Count; i++)
         {
-            var child = children[i];
-            var childPlace = child.PositionRead.Type == Layout.PositionType.Sticky ? place.Shifted(child.StickyShift) : place;
-            // As BuildChild.
-            if (IsSemantic(child))
-            {
-                var nodes = node.Children;
-                if (matched >= nodes.Count || nodes[matched].ElementId != child.Id) return refresh.Fail("children");
-                int index = matched++;
-                int unused = 0;
-                if (!MatchNode(child, nodes[index], node, index, isRoot: false, focusManager, childPlace, clip,
-                        prevAbove, currAbove, refresh, ref unused))
-                    return false;
-            }
-            else if (!MatchElementChildren(child, node, ref matched, focusManager, ChildPlace(child, childPlace),
-                         ClipForChildren(child, clip, childPlace), prevAbove, currAbove, refresh))
+            if (!MatchChild(children[i], node, ref matched, focusManager, place, clip, prevAbove, currAbove, refresh))
                 return false;
         }
         return true;
+    }
+
+    /// <summary>As <see cref="BuildChild"/>: <paramref name="child"/>'s node, or its children's when
+    /// it has none, at <paramref name="matched"/> and on among <paramref name="node"/>'s children.</summary>
+    private static bool MatchChild(Element child, AccessibilityNode node, ref int matched,
+        FocusManager? focusManager, Place place, Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh)
+    {
+        var childPlace = Placed(child, place);
+        if (!IsSemantic(child))
+            return MatchElementChildren(child, node, ref matched, focusManager, ChildPlace(child, childPlace),
+                ClipForChildren(child, clip, childPlace), prevAbove, currAbove, refresh);
+        var nodes = node.Children;
+        if (matched >= nodes.Count || nodes[matched].ElementId != child.Id) return refresh.Fail("children");
+        int index = matched++;
+        int unused = 0;
+        return MatchNode(child, nodes[index], node, index, isRoot: false, focusManager, childPlace, clip,
+            prevAbove, currAbove, refresh, ref unused);
     }
 
     /// <summary>As <see cref="BuildContent"/>: one node per item of <paramref name="data"/>, each
@@ -319,9 +324,9 @@ public static partial class AccessibilityTreeBuilder
     }
 
     /// <summary>As <see cref="BuildVirtualItems"/>: one node per item of the list, which has as many
-    /// as the list has items.</summary>
-    private static bool MatchItems(Element list, IAccessibleItemSource source, AccessibilityNode listNode, Place place,
-        Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh)
+    /// as the list has items, with nothing under them but what the row <paramref name="open"/> holds.</summary>
+    private static bool MatchItems(Element list, IAccessibleItemSource source, AccessibilityNode listNode, ItemRow open,
+        FocusManager? focusManager, Place place, Rect clip, Point prevAbove, Point currAbove, LayoutRefresh refresh)
     {
         int count = source.ItemCount;
         var nodes = listNode.Children;
@@ -342,14 +347,23 @@ public static partial class AccessibilityTreeBuilder
             string? label = source.GetItemLabel(i);
             bool? toggled = source.ItemIsToggled(i);
             bool selected = source.IsItemSelected(i);
+            // Only an item with nothing under it, in either tree, is one node to make again.
+            bool holdsRow = i == open.Item || node.Children.Count != 0;
             if (node.Name != label || node.IsToggled != toggled || node.IsSelected != selected)
             {
+                if (holdsRow) return refresh.Fail("a node with children changed");
                 var made = MakeItemNode(slot, i, label, unscrolled, toggled, selected, offscreen);
                 AccessibilityTreeDiffer.CompareNodes(refresh.Changes, node, made, prevAbove, currAbove);
                 refresh.Remade.Add((listNode, i, made));
                 continue;
             }
             PlaceInPlace(node, unscrolled, offscreen, prevAbove, currAbove, refresh);
+            if (!holdsRow) continue;
+            if (i != open.Item) return refresh.Fail("a row that closed");
+            int matched = 0;
+            if (!MatchChild(open.Element!, node, ref matched, focusManager, place, clip, prevAbove, currAbove, refresh))
+                return false;
+            if (matched != node.Children.Count) return refresh.Fail("children");
         }
         return true;
     }

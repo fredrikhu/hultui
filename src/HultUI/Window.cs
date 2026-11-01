@@ -790,12 +790,26 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
 
         AccessibilityNode? previous = null, focused = null;
         FindNodes(tree, previousId, element?.Id, ref previous, ref focused);
+        // A row of a list whose items stand for its rows is read through its elements while it holds
+        // the focus (AccessibilityTreeBuilder.OpenRow), so a move into one needs the tree that has
+        // the element's node, and a move out of one the tree that does not.
+        bool opens = focused is null && element is not null && AccessibilityTreeBuilder.InItemRow(element);
+        if (opens || (ItemHolding(previous) is { } left && !ReferenceEquals(left, ItemHolding(focused))))
+            _a11yPropertyDirty = true;
         if (previous is not null && (ReferenceEquals(previous, focused) || !previous.IsFocused))
             previous = null;
         if (previous is not null) previous.IsFocused = false;
         if (focused is not null) focused.IsFocused = true;
         else if (element is not null) _a11yPendingFocusId = element.Id;
         return (previous, focused);
+    }
+
+    /// <summary>The item's node above <paramref name="node"/> in a list's node, or null.</summary>
+    private static AccessibilityNode? ItemHolding(AccessibilityNode? node)
+    {
+        for (; node?.Parent is { } parent; node = parent)
+            if (parent.ItemSource is not null) return node;
+        return null;
     }
 
     /// <summary>
@@ -940,8 +954,10 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
     /// overlay's node, a child of the root node after the root's own children (the overlay's content
     /// always has a node). Null when the element has no node there: it is in neither tree (a closed
     /// overlay's), or the tree was built otherwise than its ancestors say now (one that became semantic
-    /// since, a list whose items stand for its rows, a button whose name is the text inside, an overlay
-    /// opened since), and a rebuild makes what it makes.
+    /// since, a row of a list whose items stand for its rows that does not hold the focus any more, a
+    /// button whose name is the text inside, an overlay opened since), and a rebuild makes what it makes.
+    /// A row's elements have their nodes under their item's, a child of the list's node at the item's
+    /// index.
     /// </summary>
     private AccessibilityNode? FindNodeDown(AccessibilityNode tree, Element element)
     {
@@ -965,6 +981,13 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 var step = chain[i];
+                if (step.Parent is IAccessibleItemSource { PublishesItemNodes: true } list)
+                {
+                    int item = list.ItemOfRow(step);
+                    if ((uint)item >= (uint)node.Children.Count) return null;
+                    _a11yPaths.Add(item);
+                    node = node.Children[item];
+                }
                 if (i > 0 && !AccessibilityTreeBuilder.IsSemantic(step)) continue;
                 // By index: foreach over the interface boxes an enumerator.
                 var children = node.Children;
@@ -4154,9 +4177,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
                 else window._a11yLayoutRefreshPending = true;
             }
             // In a row of a list whose items stand for its rows, an element has no node, in this
-            // tree or the next: a rebuild for it makes the tree there is. A character in a rich text
-            // editor in such a row (Junction's review composer) built the whole tree, 58 KB a key.
-            else if (InItemRow(element)) return;
+            // tree or the next, unless the row holds the focus: a rebuild for it makes the tree there
+            // is. A change on a screen of rows a reader passes over built the whole tree.
+            else if (AccessibilityTreeBuilder.InClosedRow(element, window._focusManager.FocusedElement)) return;
             // A range's value can move every frame (a drag, a playback): on its own schedule, when
             // the range's node is made again and patched in (TryPatchA11y), as a leaf's is.
             else if (propertyName == AccessibilityProperties.RangeValue)
@@ -4219,13 +4242,6 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             }
             else
                 window._a11yPropertyDirty = true;
-        }
-
-        private static bool InItemRow(Element element)
-        {
-            for (var above = element.Parent; above is not null; above = above.Parent)
-                if (above is IAccessibleItemSource { PublishesItemNodes: true }) return true;
-            return false;
         }
     }
 }

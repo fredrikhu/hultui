@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Web;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Platform;
@@ -661,6 +662,166 @@ public class ReviewTests
             .MapJson($"PUT {Api}/projects/7781/merge_requests/412/discussions/{Thread1}",
                 "{\"id\":\"" + Thread1 + "\",\"individual_note\":false,\"notes\":[]}");
         return h;
+    }
+
+    private static AccessibilityNode? NodeOf(AccessibilityNode? node, ElementId id)
+    {
+        if (node is null) return null;
+        if (node.ElementId == id) return node;
+        foreach (var child in node.Children)
+            if (NodeOf(child, id) is { } found) return found;
+        return null;
+    }
+
+    private static IEnumerable<string?> Names(AccessibilityNode node) =>
+        node.Children.SelectMany(c => Names(c).Prepend(c.Name));
+
+    /// <summary>The composer is a row of the diff's list, whose items stand for its rows: nothing
+    /// in it had a node, so a reader was told of no focus and could not read what was typed. The
+    /// row that holds the focus is read through its elements now, and the other rows as they
+    /// were.</summary>
+    [Fact]
+    public void AReaderReachesTheCommentBeingTyped()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            var bridge = session.Window.InstallAccessibilityBridge();
+            AccessibilityClients.Force = true;
+            try
+            {
+                app.StartReview(repo.Path, 412);
+                session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+                session.PumpFrames(2);
+                session.Window.PressKey(KeyCode.Down);
+                session.PumpFrames(2);
+                session.Window.PressKey(KeyCode.C);
+                session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
+                session.PumpFrames(4);
+
+                // Its role and name, and the focus on it, told.
+                var editor = (RichTextEditorElement)Focused(session)!;
+                var node = NodeOf(bridge.CurrentTree, editor.Id)!;
+                Assert.NotNull(node);
+                Assert.Equal((AccessibilityRole.TextInput, "Comment"), (node.Role, node.Name));
+                Assert.True(node.IsFocused);
+                Assert.Equal(editor.Id, bridge.FocusedNode?.ElementId);
+
+                // In the composer's item, with what the card holds, and every other row its item.
+                var item = node.Parent!;
+                Assert.Equal((AccessibilityRole.ListItem, "new comment"), (item.Role, item.Name));
+                var names = Names(item).ToList();
+                Assert.Contains(names, n => n?.StartsWith("New comment on ", StringComparison.Ordinal) == true);
+                Assert.Contains("Add comment", names);
+                Assert.Contains("Cancel comment", names);
+                Assert.Contains("Bold", names);
+                var list = item.Parent!;
+                Assert.All(list.Children.Where(c => c != item), row =>
+                {
+                    Assert.Equal(AccessibilityRole.ListItem, row.Role);
+                    Assert.Empty(row.Children);
+                });
+                Assert.Contains(list.Children, row => row.Name?.StartsWith("hunk", StringComparison.Ordinal) == true);
+
+                // The first key brings Undo to life and makes the card again, which stays open; the
+                // rest build no tree, and a reader reads what was typed, with the caret after it.
+                session.Window.TypeText("L");
+                session.PumpFrames(2);
+                Assert.Same(editor, Focused(session));
+                session.PumpFrame(TimeSpan.FromMilliseconds(120));
+                session.PumpFrame(TimeSpan.FromMilliseconds(120));
+                Assert.NotNull(NodeOf(bridge.CurrentTree, editor.Id));
+                bridge.ClearDiffs();
+                foreach (char c in "ooks")
+                {
+                    int trees = session.Window.AccessibilityTreesBuilt, builds = app.Builds;
+                    session.Window.TypeText(c.ToString());
+                    session.PumpFrames(2);
+                    // Something outside the typing, the repository's watcher, may rebuild meanwhile.
+                    if (app.Builds == builds) Assert.Equal(trees, session.Window.AccessibilityTreesBuilt);
+                }
+                Assert.Equal(4, bridge.Diffs.SelectMany(d => d.PropertyChanged)
+                    .Count(c => c.PropertyName == AccessibilityProperties.Text && c.Node.ElementId == editor.Id));
+                node = NodeOf(bridge.CurrentTree, editor.Id)!;
+                Assert.Equal(("Looks", 5), (node.Text!.Text, node.Text.Caret));
+                session.PumpFrame(TimeSpan.FromMilliseconds(120));
+                session.PumpFrame(TimeSpan.FromMilliseconds(120));
+                var fresh = AccessibilityTreeDiffer.Diff(bridge.CurrentTree, session.Window.AccessibilityTree);
+                Assert.True(fresh.IsEmpty, "the tree is stale: " + string.Join(", ", fresh.PropertyChanged.Select(c => c.PropertyName)));
+            }
+            finally { AccessibilityClients.Force = null; }
+        });
+    }
+
+    /// <summary>A comment being written with the focus elsewhere is its item, and Tab reaches
+    /// it.</summary>
+    [Fact]
+    public void TheKeyboardReachesTheCommentAgain()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            var bridge = session.Window.InstallAccessibilityBridge();
+            AccessibilityClients.Force = true;
+            try
+            {
+                app.StartReview(repo.Path, 412);
+                session.PumpUntil(() => ById(session, "review-plus") is not null, TimeSpan.FromSeconds(20));
+                session.PumpFrames(2);
+                session.Window.PressKey(KeyCode.Down);
+                session.PumpFrames(2);
+                session.Window.PressKey(KeyCode.C);
+                session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-composer-text" }, TimeSpan.FromSeconds(10));
+                session.PumpFrames(4);
+                var editor = (RichTextEditorElement)Focused(session)!;
+                Element list = editor;
+                while (list is not ScrollViewElement { IsFocusable: true }) list = list.Parent!;
+
+                // The focus on the diff: the composer is its item.
+                list.Focus();
+                session.PumpFrames(2);
+                Assert.Null(NodeOf(bridge.CurrentTree, editor.Id));
+                Assert.Equal(list.Id, bridge.FocusedNode?.ElementId);
+
+                // Tab walks the rows' controls, each one told with its node, up to the composer's.
+                for (int i = 0; i < 20 && NodeOf(bridge.CurrentTree, editor.Id) is null; i++)
+                {
+                    session.Window.PressKey(KeyCode.Tab);
+                    session.PumpFrames(2);
+                    Assert.Equal(Focused(session)!.Id, bridge.FocusedNode?.ElementId);
+                }
+                var node = NodeOf(bridge.CurrentTree, editor.Id)!;
+                Assert.NotNull(node);
+                Assert.Equal("new comment", node.Parent!.Name);
+            }
+            finally { AccessibilityClients.Force = null; }
+        });
+    }
+
+    /// <summary>A reply is read the same way, in its thread's item.</summary>
+    [Fact]
+    public void AReaderReachesAReply_InItsThreadsItem()
+    {
+        Hosted((repo, _, session, app) =>
+        {
+            var bridge = session.Window.InstallAccessibilityBridge();
+            AccessibilityClients.Force = true;
+            try
+            {
+                app.StartReview(repo.Path, 412, focusThread: Thread1);
+                session.PumpUntil(() => ById(session, "review-reply") is not null, TimeSpan.FromSeconds(20));
+                session.PumpFrames(2);
+                session.Window.Click(ById(session, "review-reply")!);
+                session.PumpUntil(() => Focused(session) is RichTextEditorElement { AutomationId: "review-reply-text" }, TimeSpan.FromSeconds(10));
+                session.PumpFrames(4);
+
+                var reply = (RichTextEditorElement)Focused(session)!;
+                var node = NodeOf(bridge.CurrentTree, reply.Id)!;
+                Assert.Equal("Reply to thread", node.Name);
+                Assert.Equal(reply.Id, bridge.FocusedNode?.ElementId);
+                Assert.Equal(AccessibilityRole.ListItem, node.Parent!.Role);
+                Assert.Contains("thread", node.Parent.Name, StringComparison.Ordinal);
+            }
+            finally { AccessibilityClients.Force = null; }
+        });
     }
 
     /// <summary>A local clone whose origin carries <c>refs/merge-requests/412/head</c>: the

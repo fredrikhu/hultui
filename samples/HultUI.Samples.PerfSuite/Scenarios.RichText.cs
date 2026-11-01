@@ -227,23 +227,25 @@ static partial class Scenarios
             "Type and erase in a comment card that is a row of a 150-row list, under its formatting bar, while an accessibility client listens: what a key makes again, and the trees it builds",
             ctx =>
             {
-                ctx.Window.InstallAccessibilityBridge();
-                return TypeInListRow(ctx);
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return TypeInListRow(ctx, editor => ToldCaret(bridge.CurrentTree, editor));
             });
 
         yield return new Scenario("a11y/type in a rich text editor inside a VirtualList row, UIA",
             "The same comment card with the UIA bridge: what a key makes again, and the trees it builds",
             ctx =>
             {
-                UiaRig.Install(ctx.Window);
-                return TypeInListRow(ctx);
+                var rig = UiaRig.Install(ctx.Window);
+                var applied = Applied(rig);
+                return TypeInListRow(ctx, _ => applied(0));
             });
     }
 
     /// <summary>Each step a character or an erased one in a comment card that is a row of a list,
     /// twenty of each, so the paragraph stays one length. A reader listens while the key is handled
-    /// (<see cref="AccessibilityClients.Force"/>, put back after it), as for a caret walk.</summary>
-    private static Op TypeInListRow(Ctx ctx)
+    /// (<see cref="AccessibilityClients.Force"/>, put back after it), as for a caret walk, and the row
+    /// holds the focus, so the editor has a node: <paramref name="told"/> says the key reached it.</summary>
+    private static Op TypeInListRow(Ctx ctx, Func<RichTextEditorElement, string?> told)
     {
         var card = new EditorInListRow(ctx.Rng);
         ctx.Mount(card.Mount());
@@ -260,7 +262,7 @@ static partial class Scenarios
             Check = _ => card.Editor is not { } editor ? "the card's row is gone"
                 : !ReferenceEquals(ctx.Window.Window.FocusedElement, editor) ? "the editor lost the keyboard"
                 : editor.Document[0].Text.Length != typed ? $"the editor holds {editor.Document[0].Text.Length} characters, {typed} typed"
-                : null,
+                : told(editor),
         };
     }
 

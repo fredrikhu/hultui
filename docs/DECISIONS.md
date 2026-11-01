@@ -535,6 +535,27 @@ user approved the pixels, the affordance is an overlay the list holds at the row
 8) is the same shape, but its older rows fade with `Opacity`, which fades their background with
 them, and they tint under the pointer, so it still draws its own.
 
+### A list of items keeps its items when a row holds a control (round 6)
+
+A reader could not reach the comment being typed in Junction's review: the composer is a row of the
+diff's list, which publishes one node per item, so the editor had no node and the focus was on
+nothing. Two routes, at the same commit, UIA, headless:
+
+| | `RowsAreComposite` while reviewing | The row with the focus opens |
+|---|---|---|
+| The diff's lines | Those on screen only, each a button named by what it draws ("19 19 line 19;") | All of them, with their spoken labels ("line 19: …") |
+| A caret key through the diff | 134.6 KB, 0.34 trees | 120.4 KB, 0 trees, as before |
+| A wheel notch over the composer | 25.2 KB, 0.33 trees | 13.2 KB, 0 trees, as before |
+| A key in the composer | 37.0 KB, 1 tree (before the keystroke patch) | 2.7 KB, 0 trees |
+| Cost to the app | One line per list | None |
+
+`RowsAreComposite` was declined for this list: it trades every line a reader could walk to and every
+label for a row of buttons on screen, and pays a tree on every third key to do it. The row that holds
+the focus opens instead, internal to the list and the tree builder, with no API: a reader gets the
+row it is in, all the items, and every control in an item row of any list. The one thing it does not
+give is a draft read with the focus elsewhere: the row is its item then ("new comment"), and Tab goes
+back into it.
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

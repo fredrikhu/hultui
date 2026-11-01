@@ -134,8 +134,7 @@ public sealed class RichTextInListRowTests : IDisposable
         session.PumpFrames(3);
         session.Window.Click(editorRef.Current!);
         session.PumpFrames(3);
-        var tree = bridge.CurrentTree;
-        Assert.Equal(composite, HasNode(tree, "Comment"));
+        Assert.True(HasNode(bridge.CurrentTree, "Comment"));
 
         int trees = session.Window.AccessibilityTreesBuilt;
         for (int i = 0; i < 5; i++)
