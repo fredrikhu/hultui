@@ -761,7 +761,11 @@ providers), a UIA `ItemContainer` on virtualized lists.
   a scroll's come with the coalesced layout refresh: in the frame of the change, or within its
   100 ms when one came just before. That schedule is kept on purpose: a tree per key or per notch
   would undo round 5's refresh, and the backoff's count did not move (18 trees per 120 notches in
-  Junction, 8–9 in Aperture). A list out of view, which no drawing reaches, gets its rows for a
+  Junction, 8–9 in Aperture). Junction's Changes list at 300 files, composite since step 11, is on the
+  same clock: one tree per 100 ms of scrolling, 20 per 120 notches at a notch a frame. Its walk of three
+  notches every two frames reads as a tree every third step, and it is not the list: on composite rows
+  every refresh in a scroll finds other rows. Fewer would take building only the list's part of the
+  tree, as an overlay's, or a longer schedule while a wheel runs. A list out of view, which no drawing reaches, gets its rows for a
   reader too. Only the walks ask, so with no reader listening nothing but drawing realizes a row.
   **The row that holds the focus (2026-11-01, plan 17 round 6 step 11b):** a list that publishes one
   node per item has no nodes for what its rows hold, so a control in a row could take the keyboard
