@@ -5,9 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 10b next (steps 1–10a landed, step 8 declined). The user lifted the 90 % rule on
-  2026-10-30 until the week's reset (2026-11-01 03:00 UTC) and said to use up the one-off $10 credit; if that runs
-  out too, wait for the reset. The survey's eight reports are
+- **Phase:** build — round 6. Step 11 next (steps 1–10b landed, step 8 declined). The week reset on 2026-11-01 (next
+  reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
   [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). The ledger was split on 2026-10-27: older rounds are in
@@ -147,7 +146,11 @@ report lines its brief quotes (`r6-k` = `17-reports/r6-k-<area>.md`).
     Changes with 300 files: 3,065 elements, Down 3,020 KB/key, typing 2,713 KB/char; DECISIONS.md "Junction's Changes
     list stays a scroll view, for now" named this trigger. O(changed files) → O(visible rows), −90 % or more at 300 files.
     Also: a Changes cursor key is a full rebuild with chrome (305 KB with 21 files; step 10a) — `SelectChange` could use
-    `RerenderView`.
+    `RerenderView`. Brief in scratchpad `brief-r6b11.md`.
+11b. **junction-review-composer-reader** (7 with 8; user, question 8, 2026-11-01) — a reader can reach the comment being
+    typed in Junction's review. `RowsAreComposite` while reviewing is the route step 10a named; 92084157's `InItemRow`
+    (an element in a row of an item-publishing list asks for no tree) has to stay right for a list that switches. Keep
+    typing's 2 KB/key with no reader; with one, measure what telling the text costs and keep trees a key at 0 if it can.
 12. **apps-junction-highlight-prefetch + junction-commit-diff-flatten** (5/8, 6/8; r6-5, r6-8) — tokenize only to the last
     shown hunk line / after the selection rests (JunctionApp.Highlight.cs:93-109; History 9,826 KB/key on all threads vs
     60 on the UI thread, 59/16/1.5 GCs per 100 keys → −50…−90 %); flatten a new file's diff lazily (415-file commit:
@@ -180,6 +183,9 @@ Re-ranked by the next survey.
   in the full-suite step with `DiffFindTests.EnterWalksTheMatchesAndWraps`.
 - **dropdown-follow-control-on-resize** (1, low; step 9b) — a Dropdown list or DatePicker calendar stays at its opening
   point (kept on screen) when a resize moves its control. Anchoring them changes how a press on the control behaves.
+- **context-menu-read-as-list** (7, reader; step 10b) — the context menu, a menu bar's menu and a dropdown's list publish
+  virtual items and are read as a List of ListItems, while Junction's and Meridian's popover menus are now Menu and
+  MenuItem. Two readings of one kind of thing; the next survey decides whether to ask the user.
 - **junction-leads** (6/8, from step 10a) — the Create MR description could use `RichTextToolbar.IsStale`; issue-list keys
   still `MarkDirty`; a key on a non-GitLab repo could skip the composer build (13.6 KB left); the diff's find step keeps
   108 KB and 2.9 ms unexplained.
@@ -306,6 +312,10 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 92084157 | junction-review-composer-row-kept | Typing keeps the row and builds nothing: new `RichTextToolbar.IsStale` (a build only when a button would change) and `Window` asks for no tree for an element in a row of an item-publishing list (it has no node; trees stayed at 1 without it). Typing JIT 150.4 → 2.0 / 206.7 → 2.0 KB (min −16 / −20 %), AOT 148.9 → 2.1 / 204.8 → 2.1 (−20 / −20 %); caret 148.9 → 0.4 / 204.8 → 0.4; rows and trees a key 1 → 0. Focus, caret and undo survive; the editor's height is fixed. Reader gap found: question 8. |
 | 6 | a35f1797 | junction-branches-selection-highlight | The list draws the pick's tint on a picked caret row and the caret's on any other; `Tinted` in the item covers a pick away from the caret. KB/key 92.8 → 46.5 / 93.5 → 47.0 (−50 %), min −2 / −6 % JIT, −5 / −7 % AOT; rows a key 2.13 → 0.27. |
 | 6 | 9d920925 | junction-diff-find-shape | The current match is out of the rows' shape, `InvalidateRow` on the old and new rows, FindBar on `MarkViewDirty`. Enter 467.8 → 107.5 / 468.8 → 108.4 KB (−77 %), min −5 / −7 % JIT, −8 / −9 % AOT; rows 36 → 3. Step 10a: 96 scenes × 2 themes identical (pixels, a11y, focus; A/A identical); full suite 0 slower, 1 faster JIT + AOT; Junction.Tests 1,006 pass; 24 reverse edits caught; WSL not run (→ 10b). |
+| 6 | d8e28f93 | junction-history-list-drawn-selection (API) | Pixels approved. **Public additions `VirtualListElement.HoverHighlight` (`.HoverHighlight(fill, radius)`) and `SelectionOverlay` (`.SelectionOverlay(e)`)**, off by default, next to `SelectionHighlight`: the list draws the hover tint under the pointer's row unless selected, and holds one element over the selected row's end, in a box the pointer goes through; a move repositions it and lays nothing out. History's rows are made unselected with no hover; the affordance is a kept part. KB/key JIT (AOT within 1 KB), none / UIA: Down/Up 39.3 → 16.1 / 39.9 → 16.5 (−59 %), cycles −3…−5 %; Ctrl+arrows −59…−60 %, 1.014 → 0.966 ms; rows a key 2.07 → 0.07. 184 scenes: a11y and focus identical; pixels only on the caret's row (a subject runs to the words and fades over 24 px) and one hover change (a row the caret passes while the pointer stays keeps its tint; before it lost it). |
+| 6 | 1daa836d | app-modal-cards-dialog-role (Junction) | Approved (question 5). 12 cards in the 9 backdrops are `Dialog`s named by their title (the merge-request panel for its page). A character in a card's field over 1,000 rows with UIA 461.6 → 335.5 KB/key (−27 %), trees 1.33 → 0.05, min −6…−7 %; bridge off equal. Pixels and focus identical; 34 Buttons named after a card's text become 17 Dialogs named by a title. |
+| 6 | d960db3b | popover-menu-role | Approved (question 6). **New `AccessibilityRole.Menu`** (appended; UIA Menu, AT-SPI menu 33). A clickable box with a Menu child is no Button (`HoldsDialog` is now `HoldsPopup`); an entry directly in a Menu is selected under the pointer, patched into the applied tree (`A11yPatchKind.Selected`, 0 trees a move); a MenuItem without a menu of its own gets Invoke on UIA, every MenuItem the click action on AT-SPI. Not in `Popover`: neither app uses it, and its keyboard and press rules differ. Junction 16 Buttons → 4 Menus + 8 items, Meridian 48 → 6 + 36. Bytes flat. Pixels and focus identical over 194 scenes. |
+| 6 | b7f31f16, 358b5ba2 | junction-issue-list-esc | Bug fix: Esc closes the composer's issue list (-1 is no caret, not the end of the text); one scene differs, the bug's own. 358b5ba2: an AT-SPI test for a menu entry's selection, written by the orchestrator after the step's agent was stopped; reverse edit caught. Step 10b's full suite: 164 rows, JIT and AOT 0 slower, 0 faster, no row moved 2 % in bytes; three AOT `paint/tiles` rows read +5…+7 % once and +0.3…+1.7 % on 3 alternated pairs alone. WSL 22 projects pass. |
 
 ## Examined, not worth it
 
@@ -469,7 +479,8 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
 8. **junction-review-composer-reader** (from step 10a; not blocking; an existing gap): a reader can't reach the comment
    being typed in Junction's review, because the editor in that list row has no node and the row is read only as "new
    comment". Making the list `RowsAreComposite` while reviewing would fix it but changes what a reader hears, and costs
-   a11y work per key. [Yes, fix it: a comment nobody can read back is a real gap.]
+   a11y work per key. [Yes, fix it: a comment nobody can read back is a real gap.] → **yes, fix it** (2026-11-01;
+   step 11b).
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -714,3 +725,12 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   build, and its compare is tested on the frame the list counts it; before a list takes the highlight, check what else
   moves with the selection (a highlight can change colour); ask whether a key needs a build at all, since an editor
   holds its own state. Usage 96 % (565k tokens).
+- 2026-11-01: step 10b landed (d8e28f93..358b5ba2): History's list draws its caret, hover tint and affordance (−59 %, rows
+  a key 2.07 → 0.07), Junction's 12 modal cards are dialogs (UIA −27 %, trees 1.33 → 0.05), popover menus are menus, and
+  Esc closes the issue list. The plan's usage ran out on 2026-10-31 at ~08:40 with the step's work committed; the agent
+  was stopped before its report, so the orchestrator took the numbers from the commit bodies, finished the one
+  uncommitted test and re-ran the test projects. Guideline notes: move what needs a row told its selection out of the
+  row (`HoverHighlight`, `SelectionOverlay`); give a modal card the Dialog role and a name; a popover of rows gets
+  `AccessibilityRole.Menu` with MenuItem rows. Time a key behind a git process in the UI thread's cycles, not wall
+  time (a plain History key waits ~90 ms on the prefetch).
+- 2026-11-01: the user answered question 8: fix it (step 11b, after step 11).
