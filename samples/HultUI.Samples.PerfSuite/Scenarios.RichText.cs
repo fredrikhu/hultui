@@ -228,35 +228,64 @@ static partial class Scenarios
             ctx =>
             {
                 ctx.Window.InstallAccessibilityBridge();
-                var card = new EditorInListRow(ctx.Rng);
-                ctx.Mount(card.Mount());
-                ctx.Pump(2);
-                ctx.Window.Click(card.Editor!);
-                ctx.Pump(2);
-                int typed = 0, treesBefore = 0;
-                return new Op
-                {
-                    // Twenty characters and twenty erased, so the paragraph stays one length.
-                    Run = step =>
-                    {
-                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
-                        var was = AccessibilityClients.Force;
-                        AccessibilityClients.Force = true;
-                        try
-                        {
-                            if (step % 40 < 20) { ctx.Window.TypeText(((char)('a' + step % 26)).ToString()); typed++; }
-                            else { ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace); typed--; }
-                        }
-                        finally { AccessibilityClients.Force = was; }
-                    },
-                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
-                    FigureUnit = "a11y trees/key",
-                    Check = _ => card.Editor is not { } editor ? "the card's row is gone"
-                        : !ReferenceEquals(ctx.Window.Window.FocusedElement, editor) ? "the editor lost the keyboard"
-                        : editor.Document[0].Text.Length != typed ? $"the editor holds {editor.Document[0].Text.Length} characters, {typed} typed"
-                        : null,
-                };
+                return TypeInListRow(ctx);
             });
+
+        yield return new Scenario("a11y/type in a rich text editor inside a VirtualList row, UIA",
+            "The same comment card with the UIA bridge: what a key makes again, and the trees it builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                return TypeInListRow(ctx);
+            });
+    }
+
+    /// <summary>Each step a character or an erased one in a comment card that is a row of a list,
+    /// twenty of each, so the paragraph stays one length. A reader listens while the key is handled
+    /// (<see cref="AccessibilityClients.Force"/>, put back after it), as for a caret walk.</summary>
+    private static Op TypeInListRow(Ctx ctx)
+    {
+        var card = new EditorInListRow(ctx.Rng);
+        ctx.Mount(card.Mount());
+        ctx.Pump(2);
+        ctx.Window.Click(card.Editor!);
+        ctx.Pump(2);
+        int typed = 0;
+        var walk = TypeWalk(ctx, () => typed, n => typed = n);
+        return new Op
+        {
+            Run = walk.Run,
+            Figure = walk.Figure,
+            FigureUnit = walk.FigureUnit,
+            Check = _ => card.Editor is not { } editor ? "the card's row is gone"
+                : !ReferenceEquals(ctx.Window.Window.FocusedElement, editor) ? "the editor lost the keyboard"
+                : editor.Document[0].Text.Length != typed ? $"the editor holds {editor.Document[0].Text.Length} characters, {typed} typed"
+                : null,
+        };
+    }
+
+    /// <summary>Twenty characters and twenty erased; the figure is the accessibility trees a key
+    /// builds.</summary>
+    private static Op TypeWalk(Ctx ctx, Func<int> typed, Action<int> setTyped)
+    {
+        int treesBefore = 0;
+        return new Op
+        {
+            Run = step =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                var was = AccessibilityClients.Force;
+                AccessibilityClients.Force = true;
+                try
+                {
+                    if (step % 40 < 20) { ctx.Window.TypeText(((char)('a' + step % 26)).ToString()); setTyped(typed() + 1); }
+                    else { ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace); setTyped(typed() - 1); }
+                }
+                finally { AccessibilityClients.Force = was; }
+            },
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/key",
+        };
     }
 
     // A focused editor filling the window.

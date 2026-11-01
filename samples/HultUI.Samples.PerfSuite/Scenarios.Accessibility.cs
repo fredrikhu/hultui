@@ -236,6 +236,15 @@ static partial class Scenarios
                 return CaretWalk(ctx, editor, _ => ToldCaret(bridge.CurrentTree, editor));
             });
 
+        yield return new Scenario("a11y/type in rich text beside 300 rows, bridge on",
+            "Type and erase in a 20-block rich text editor beside 300 rows while a reader listens: each change of the text told, and the trees a key builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                var editor = MountCaretWalk(ctx);
+                return TypeBesideRows(ctx, editor, _ => ToldCaret(bridge.CurrentTree, editor));
+            });
+
         yield return new Scenario("a11y/caret walk in 5,000 blocks, a reader reading, bridge on",
             "Right and Left in the 5,000-block document while a reader reads the line at the caret after each move, from its own thread: the text it reads, made for each move",
             ctx =>
@@ -396,6 +405,23 @@ static partial class Scenarios
             },
             Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
             FigureUnit = "a11y trees/key",
+            Check = step => editor.Layout.AbsoluteContentBox.Height < 100
+                ? $"the editor is {editor.Layout.AbsoluteContentBox.Height:0} px high, shorter than a few lines"
+                : told(step),
+        };
+    }
+
+    /// <summary>A key of <see cref="TypeWalk"/> in an editor that keeps its height, with the caret
+    /// at the start of a paragraph it types into.</summary>
+    private static Op TypeBesideRows(Ctx ctx, Element editor, Func<int, string?> told)
+    {
+        int typed = 0;
+        var walk = TypeWalk(ctx, () => typed, n => typed = n);
+        return new Op
+        {
+            Run = walk.Run,
+            Figure = walk.Figure,
+            FigureUnit = walk.FigureUnit,
             Check = step => editor.Layout.AbsoluteContentBox.Height < 100
                 ? $"the editor is {editor.Layout.AbsoluteContentBox.Height:0} px high, shorter than a few lines"
                 : told(step),
@@ -709,6 +735,15 @@ static partial class Scenarios
                 var rig = UiaRig.Install(ctx.Window);
                 var editor = MountCaretWalk(ctx);
                 return CaretWalk(ctx, editor, Applied(rig));
+            });
+
+        yield return new Scenario("a11y/type in rich text beside 300 rows, UIA",
+            "Type and erase in a 20-block rich text editor beside 300 rows with the UIA bridge: the text and caret events, and the trees a key builds",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var editor = MountCaretWalk(ctx);
+                return TypeBesideRows(ctx, editor, Applied(rig));
             });
 
         yield return new Scenario("a11y/type in a 2,000-line TextArea, UIA",
