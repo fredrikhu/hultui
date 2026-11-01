@@ -471,9 +471,10 @@ Declined for now: each is a structural change to an action that runs once. The g
 (`RerenderView`); that changes when every Vesper handler sees its rebuild, and would be a
 change of its own, measured across the app.
 
-### Junction's Changes list stays a scroll view, for now
+### Junction's Changes list stayed a scroll view until round 6
 
-Round 5, step 8 made the Commit view's file list a virtual list of item rows, as the Files tab's
+Round 6, step 11 made it one virtual list of tagged rows, on `VirtualList.StickyRows` (below the
+reasons it was declined: what changed). Round 5, step 8 made the Commit view's file list a virtual list of item rows, as the Files tab's
 tree already was: a key on a commit of 300 files had built every row (2.0 MB a key), and now builds
 the two the cursor moved between. The Changes view's lists have the same per-key shape, one row per
 file built on every key, and were looked at in the same step. They do not fit the same change:
@@ -491,6 +492,14 @@ file built on every key, and were looked at in the same step. They do not fit th
 
 Declined in that step. Worth revisiting with sticky headers in a virtual list (a framework
 feature), or when a working tree with hundreds of changed files shows up in a profile.
+
+What changed: round 6 measured that shape at 8.8 KB per changed file on every key, and the
+framework got the feature. `.StickyRows(…)` holds a section's header among one list's rows and the
+next pushes it off, in the same pixels; the heights come from the fonts, as the Commit list's do;
+the composer had become its own component (454fc82f). One trade: a row off screen is not an element,
+so a reader finds only the rows on screen and the header held at the top, and Tab no longer reaches
+a Hidden file's Watch again button while it is off screen. The user approved that trade for Commit,
+Files and the palette, and the brief for this list.
 
 ### Junction's History kept drawing its own selection until round 6 (Vesper's panes too)
 

@@ -99,15 +99,15 @@ public partial class JunctionApp
     };
 
     // A conflict entry in the file list (no checkbox — you resolve via the pane).
-    private Element ConflictListRow(TreeNode<GitFileChange> node)
+    private Element ConflictListRow(ChangeListItem item)
     {
         // Conflicts are the third section of the same file list, so they select like
         // the other two (and never alongside them — see the one-section rule) and group
         // into the same folder tree.
+        var node = item.Node!;
         var f = node.Item;
         var self = new ChangeRef(f.Path, ChangeSection.Conflicted);
-        var selected = _changeSelection.Contains(self);
-        var focused = ChangeFocus() == self;
+        var (selected, focused) = (item.Selected, item.Focused);
         var bg = selected ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900
             : Color.Transparent;
@@ -117,7 +117,6 @@ public partial class JunctionApp
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
         row.Key = "c:" + f.Path + (selected ? "#s" : "") + (focused ? "#f" : "");
         if (bg != Color.Transparent) row.Background(bg);
-        if (focused) row.WithRef(_changeFocusRef);
 
         row.AddChild(Box.New().Width(14).FlexShrink(0)
             .Children(Ui.Icon(Icons.Warning, 12f, Nocturne.DangerIcon)));

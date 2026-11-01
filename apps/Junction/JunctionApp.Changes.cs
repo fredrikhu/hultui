@@ -1,4 +1,5 @@
 using HultUI;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -149,18 +150,15 @@ public partial class JunctionApp
     // selection set; see the field comments in JunctionApp.cs for the split and for
     // the one-section rule this list adds.
 
-    /// <summary>Every row on screen in display order — conflicts, then staged, then
-    /// unstaged, each grouped into its folder tree exactly as <see cref="BuildChangesColumn"/>
-    /// lays them out. Folder rows are rows like any other here: keyboard navigation and
-    /// Shift ranges index into this list, so a folder is somewhere the caret lands and
-    /// something a range picks up.</summary>
+    /// <summary>Every row in display order — conflicts, then staged, then unstaged, each
+    /// grouped into its folder tree exactly as the list lays them out
+    /// (<see cref="SyncChangeListRows"/>). Folder rows are rows like any other here: keyboard
+    /// navigation and Shift ranges index into this list, so a folder is somewhere the caret
+    /// lands and something a range picks up.</summary>
     private List<ChangeRef> ChangeRows(ChangesData data)
     {
-        var rows = new List<ChangeRef>();
-        foreach (var (section, files) in ChangeSections(data))
-            foreach (var node in ChangeTreeRows(section, files))
-                rows.Add(new ChangeRef(node.Path, section, node.IsFolder));
-        return rows;
+        SyncChangeListRows(data);
+        return _changeWalk;
     }
 
     /// <summary>The three lists in display order, so the row walk and the build agree
@@ -428,13 +426,6 @@ public partial class JunctionApp
         MarkDirty();   // the caret didn't move, so no new loader can be activated
     }
 
-    /// <summary>How many files a row action targets: every file the selection covers when
-    /// the row is inside it, otherwise the row's own — one for a file, all of them for a
-    /// folder. <paramref name="ownCount"/> comes from the caller's node, so labelling a
-    /// row stays O(1) and the whole list stays O(n).</summary>
-    private int ChangeActionCount(ChangeRef row, int ownCount) =>
-        _changeSelection.Contains(row) && _changeSelFileCount > 1 ? _changeSelFileCount : ownCount;
-
     /// <summary>The files a row action acts on, in list order. Mirrors the History list's
     /// right-click rule: inside a multi-file selection the action takes the selection,
     /// outside it takes the clicked row — and a folder row is the files under it.</summary>
@@ -527,45 +518,163 @@ public partial class JunctionApp
             col.AddChild(banner);
         }
 
-        var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(8, 8, 4, 8))
-            .WithRef(_changeScrollRef);
+        col.AddChild(BuildChangesList(data));
+        // The host takes the composer's place in the column: it never shrinks.
+        col.AddChild((_composerPart ??= new ComposerPart(this)).Place(data).FlexShrink(0));
+        return col;
+    }
+
+    // ── The list: a virtual list of item rows ───────────────────────────
+    //
+    // It was a scroll view of a column per section holding a row for every file and folder, so
+    // every key built all of them again: 3 MB a key with 300 changed files, 3,065 elements resolved
+    // and 2,883 patched. It is the Commit list's shape now: one virtual list of tagged rows, so only
+    // the rows on screen are elements and a key makes the rows whose item changed, the two the
+    // caret left and reached. A section's header is a row of the list, held at the top while its
+    // section scrolls under it — Stage all / Unstage all stay in reach in a long list — until the
+    // next section's header pushes it off (StickyRows), as Sticky() did in the columns. The rows
+    // keep the heights they had (ChangeRowHeights), so it looks and scrolls as it did.
+
+    private Element BuildChangesList(ChangesData data)
+    {
+        // How many files the current selection covers, counted once for the whole build: every
+        // row in a selection of several labels itself with it ("Stage 3 files"). One row, the
+        // selection of every key, is its own count: the walk over every file is for the others.
+        _changeSelFileCount = _changeSelection.Count > 1 ? ChangeSelectionPaths(data).Count : _changeSelection.Count;
+        SyncChangeListRows(data);
+
+        // Everything else a row shows is the colour scheme and the scale its glyphs are cut at.
+        var shape = new ChangeListShape(Nocturne.Theme, Ui.DisplayScale);
+        if (shape != _changeListShape)
+        {
+            _changeListShape = shape;
+            _changeScrollRef.Current?.InvalidateRows();
+        }
+
+        var list = VirtualListElement<ChangeListItem>.New()
+            .Items(new ChangeListItems(this, _changeListRows))
+            .RenderWith((item, _) => ChangeListRow(item))
+            .RowHeights(_changeRowHeight ??= (item, _) => ChangeRowHeight(item))
+            .StickyRows(ChangeRowIsHeld);
+        list.FlexGrow(1).Padding(new Thickness(8, 8, 4, 8));
+        // The rows are what a reader walks — tree items for the folders, the buttons in them — in
+        // a container that says it is a scroll view, as it did. A row off screen is not an
+        // element, so a reader no longer finds it there (the Commit list's trade).
+        list.RowsAreComposite = true;
+        list.Role = AccessibilityRole.ScrollView;
+        list.WithRef(_changeScrollRef);
         // Keyed, as the banner is, so the composer's kept host goes back where it was unmarked.
-        scroll.Key = "change-list";
+        list.Key = "change-list";
+        return list;
+    }
 
-        // How many files the current selection covers, counted once for the whole build:
-        // every row that offers an action labels itself with it ("Stage 3 files").
-        _changeSelFileCount = ChangeSelectionPaths(data).Count;
+    private readonly record struct ChangeListShape(object Theme, float Scale);
 
-        // Each section is a column of its own: its header is held at the top of the list while
-        // its rows scroll under it — Stage all / Unstage all stay in reach in a long list — and
-        // the next section's header pushes it off.
+    private ChangeListShape _changeListShape;
+    private Func<ChangeListItem, int, float>? _changeRowHeight;
+
+    /// <summary>What a row of the list is.</summary>
+    private enum ChangeListKind : byte
+    {
+        ConflictsHeader, StagedHeader, ChangesHeader, HiddenHeader,
+        Folder, File, Conflict, Hidden,
+        /// <summary>"No changes".</summary>
+        Empty,
+    }
+
+    /// <summary>
+    /// One row of the list as its list sees it: what it is, and what its look takes from the rest
+    /// of the view. A header carries its section's count and whether another section precedes it;
+    /// a hidden file its path; a folder or a file row its node, and whether it is in the selection,
+    /// under the caret, an open folder, and how many files a row action takes while it is part of
+    /// a selection of several. A key that moves the caret changes two items.
+    /// </summary>
+    private readonly record struct ChangeListItem(ChangeListKind Kind, ChangeSection Section = default,
+        TreeNode<GitFileChange>? Node = null, string? Path = null, int Count = 0, bool TopGap = false,
+        bool Expanded = false, bool Selected = false, bool Focused = false, int SelectedFiles = 0)
+    {
+        /// <summary>How many files a row action targets: every file the selection covers when the
+        /// row is inside a selection of several, otherwise the row's own.</summary>
+        public int ActionCount(int own) => SelectedFiles > 0 ? SelectedFiles : own;
+    }
+
+    private static readonly Func<ChangeListItem, int, bool> ChangeRowIsHeld = static (item, _) =>
+        item.Kind is ChangeListKind.ConflictsHeader or ChangeListKind.StagedHeader or ChangeListKind.ChangesHeader
+            or ChangeListKind.HiddenHeader;
+
+    /// <summary>The rows as the list's items, each made when the list asks for it, the selection
+    /// read then.</summary>
+    private sealed class ChangeListItems(JunctionApp app, List<ChangeListItem> rows) : IReadOnlyList<ChangeListItem>
+    {
+        public int Count => rows.Count;
+
+        public ChangeListItem this[int index]
+        {
+            get
+            {
+                var row = rows[index];
+                if (row.Node is not { } node) return row;
+                var self = new ChangeRef(node.Path, row.Section, node.IsFolder);
+                bool selected = app._changeSelection.Contains(self);
+                return row with
+                {
+                    Selected = selected,
+                    Focused = app._changeCaret == self,
+                    SelectedFiles = selected && app._changeSelFileCount > 1 ? app._changeSelFileCount : 0,
+                };
+            }
+        }
+
+        public IEnumerator<ChangeListItem> GetEnumerator()
+        {
+            for (var i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // The rows, kept while the lists and the open folders are what they were: flattened again on
+    // every key, they were a list of every row and a walk of each tree a key. The walk is the
+    // folder and file rows alone, which is what the keyboard and a Shift range index into.
+    private readonly record struct ChangeListKey(object? Conflicted, object? Staged, object? Unstaged,
+        object? Hidden, bool InSequencer, int TreeGen);
+
+    private ChangeListKey _changeListKey;
+    private List<ChangeListItem> _changeListRows = [];
+    private List<ChangeRef> _changeWalk = [];
+    private Dictionary<ChangeRef, int>? _changeRowIndex;
+    private int _changeTreeGen;
+
+    private void SyncChangeListRows(ChangesData data)
+    {
+        var key = new ChangeListKey(data.Conflicted, data.Staged, data.Unstaged, data.AssumeUnchanged,
+            data.InSequencer, _changeTreeGen);
+        if (key == _changeListKey) return;
+        _changeListKey = key;
+
+        // New lists: the items a mounted list holds go on reading the rows they were made over.
+        var rows = _changeListRows = [];
+        var walk = _changeWalk = [];
+        _changeRowIndex = null;
 
         // Conflicts first — selecting one opens its resolution pane on the right.
         if (data.Conflicted.Count > 0)
         {
-            var conflicts = SectionColumn(SectionHeader($"Conflicts · {data.Conflicted.Count}", Nocturne.DangerText, "", null));
-            AddChangeRows(conflicts, ChangeSection.Conflicted, data.Conflicted);
-            scroll.AddChild(conflicts);
+            rows.Add(new ChangeListItem(ChangeListKind.ConflictsHeader, Count: data.Conflicted.Count));
+            AddChangeRows(ChangeSection.Conflicted, data.Conflicted);
         }
 
         if (data.Staged.Count == 0 && data.Unstaged.Count == 0)
         {
             if (!data.InSequencer && data.Conflicted.Count == 0)
-                scroll.AddChild(Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
-                    .AlignItems(AlignItems.Center)
-                    .Children(Text.New("No changes").FontSize(13f).TextColor(Nocturne.On(0.45))));
+                rows.Add(new ChangeListItem(ChangeListKind.Empty));
         }
         else
         {
-            var staged = SectionColumn(SectionHeader($"Staged · {data.Staged.Count}", Nocturne.Accent300,
-                "Unstage all", data.Staged.Count > 0 ? UnstageAll : null, topGap: data.Conflicted.Count > 0));
-            AddChangeRows(staged, ChangeSection.Staged, data.Staged);
-            scroll.AddChild(staged);
-
-            var unstaged = SectionColumn(SectionHeader($"Changes · {data.Unstaged.Count}", Nocturne.On(0.42),
-                "Stage all", data.Unstaged.Count > 0 ? StageAll : null, topGap: true));
-            AddChangeRows(unstaged, ChangeSection.Unstaged, data.Unstaged);
-            scroll.AddChild(unstaged);
+            rows.Add(new ChangeListItem(ChangeListKind.StagedHeader, Count: data.Staged.Count, TopGap: data.Conflicted.Count > 0));
+            AddChangeRows(ChangeSection.Staged, data.Staged);
+            rows.Add(new ChangeListItem(ChangeListKind.ChangesHeader, Count: data.Unstaged.Count, TopGap: true));
+            AddChangeRows(ChangeSection.Unstaged, data.Unstaged);
         }
 
         // Assume-unchanged files are hidden from status, so surface them here with a
@@ -573,23 +682,138 @@ public partial class JunctionApp
         // never seen again).
         if (data.AssumeUnchanged.Count > 0)
         {
-            var hidden = SectionColumn(SectionHeader($"Hidden · {data.AssumeUnchanged.Count}", Nocturne.On(0.42),
-                "", null, topGap: data.Staged.Count > 0 || data.Unstaged.Count > 0 || data.Conflicted.Count > 0));
+            rows.Add(new ChangeListItem(ChangeListKind.HiddenHeader, Count: data.AssumeUnchanged.Count,
+                TopGap: data.Staged.Count > 0 || data.Unstaged.Count > 0 || data.Conflicted.Count > 0));
             foreach (var path in data.AssumeUnchanged)
-                hidden.AddChild(HiddenFileRow(path));
-            scroll.AddChild(hidden);
+                rows.Add(new ChangeListItem(ChangeListKind.Hidden, Path: path));
         }
+        return;
 
-        col.AddChild(scroll);
-        // The host takes the composer's place in the column: it never shrinks.
-        col.AddChild((_composerPart ??= new ComposerPart(this)).Place(data).FlexShrink(0));
-        return col;
+        // One section's tree: folder rows and file rows in one flat run.
+        void AddChangeRows(ChangeSection section, IReadOnlyList<GitFileChange> files)
+        {
+            var tree = ChangeTreeFor(section);
+            foreach (var node in ChangeTreeRows(section, files))
+            {
+                var kind = node.IsFolder ? ChangeListKind.Folder
+                    : section == ChangeSection.Conflicted ? ChangeListKind.Conflict
+                    : ChangeListKind.File;
+                rows.Add(new ChangeListItem(kind, section, node, Expanded: node.IsFolder && tree.IsExpanded(node)));
+                walk.Add(new ChangeRef(node.Path, section, node.IsFolder));
+            }
+        }
     }
 
-    /// <summary>A section of the list: its header, then its rows. A column of its own, so the
-    /// header is held only while its own rows go by.</summary>
-    private static BoxElement SectionColumn(Element header) =>
-        Flex.Column(gap: 0).FlexShrink(0).Children(header);
+    /// <summary>Where a row is among the list's rows, or -1.</summary>
+    private int ChangeListIndex(ChangeRef row)
+    {
+        if (_changeRowIndex is null)
+        {
+            _changeRowIndex = new Dictionary<ChangeRef, int>(_changeWalk.Count);
+            for (var i = 0; i < _changeListRows.Count; i++)
+                if (_changeListRows[i].Node is { } node)
+                    _changeRowIndex[new ChangeRef(node.Path, _changeListRows[i].Section, node.IsFolder)] = i;
+        }
+        return _changeRowIndex.TryGetValue(row, out var index) ? index : -1;
+    }
+
+    /// <summary>Brings the caret's row on screen. The list may not have realized it, so its band
+    /// comes from the row heights, summed in the order the list sums them.</summary>
+    private void ScrollChangeCaretIntoView()
+    {
+        if (_changeScrollRef.Current is not { } list || ChangeFocus() is not { } caret) return;
+        int index = ChangeListIndex(caret);
+        if (index < 0) return;
+        float top = 0f;
+        for (int i = 0; i < index; i++) top += ChangeRowHeight(_changeListRows[i]);
+        list.ScrollRangeIntoView(top, ChangeRowHeight(_changeListRows[index]));
+    }
+
+    /// <summary>Rows the list has made, for tests.</summary>
+    internal int ChangeRowsMade { get; private set; }
+
+    private Element ChangeListRow(ChangeListItem item)
+    {
+        ChangeRowsMade++;
+        switch (item.Kind)
+        {
+            case ChangeListKind.ConflictsHeader:
+                return SectionHeader($"Conflicts · {item.Count}", Nocturne.DangerText, "", null, item.TopGap);
+            case ChangeListKind.StagedHeader:
+                return SectionHeader($"Staged · {item.Count}", Nocturne.Accent300, "Unstage all",
+                    item.Count > 0 ? UnstageAll : null, item.TopGap);
+            case ChangeListKind.ChangesHeader:
+                return SectionHeader($"Changes · {item.Count}", Nocturne.On(0.42), "Stage all",
+                    item.Count > 0 ? StageAll : null, item.TopGap);
+            case ChangeListKind.HiddenHeader:
+                return SectionHeader($"Hidden · {item.Count}", Nocturne.On(0.42), "", null, item.TopGap);
+            case ChangeListKind.Folder:
+                return ChangesFolderRow(item);
+            case ChangeListKind.File:
+                return ChangeRow(item);
+            case ChangeListKind.Conflict:
+                return ConflictListRow(item);
+            case ChangeListKind.Hidden:
+                return HiddenFileRow(item.Path!);
+            default:
+                return Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
+                    .AlignItems(AlignItems.Center)
+                    .Children(Text.New("No changes").FontSize(13f).TextColor(Nocturne.On(0.45)));
+        }
+    }
+
+    // The heights the rows had in the scroll view, which a virtual list has to be told: each is
+    // its padding and its tallest child, measured from the faces as layout measures a line, once
+    // per display scale.
+    private readonly record struct ChangeRowSizes(float Scale, float Header, float Action, float Folder,
+        float ConflictFolder, float File, float Conflict, float Hidden, float HiddenDirectory, float Empty);
+
+    private ChangeRowSizes _changeRowSizes;
+
+    private float ChangeRowHeight(ChangeListItem item)
+    {
+        var h = ChangeRowHeights();
+        switch (item.Kind)
+        {
+            case ChangeListKind.ConflictsHeader or ChangeListKind.HiddenHeader:
+                return (item.TopGap ? 14f : 7f) + 5f + h.Header;
+            case ChangeListKind.StagedHeader or ChangeListKind.ChangesHeader:
+                return (item.TopGap ? 14f : 7f) + 5f + (item.Count > 0 ? h.Action : h.Header);
+            case ChangeListKind.Folder:
+                return item.Section == ChangeSection.Conflicted ? h.ConflictFolder : h.Folder;
+            case ChangeListKind.File:
+                return h.File;
+            case ChangeListKind.Conflict:
+                return h.Conflict;
+            case ChangeListKind.Hidden:
+                return System.IO.Path.GetFileName(item.Path!).Length < item.Path!.Length ? h.HiddenDirectory : h.Hidden;
+            default:
+                return h.Empty;
+        }
+    }
+
+    private ChangeRowSizes ChangeRowHeights()
+    {
+        float scale = Ui.DisplayScale;
+        if (_changeRowSizes.File > 0 && _changeRowSizes.Scale == scale) return _changeRowSizes;
+        const float RowPadding = 12f, IconButton = 28f, TagPadding = 6f, GhostChrome = 8f, EmptyPadding = 52f;
+        float file = MathF.Max(MathF.Max(LineHeight(12f), LineHeight(11f, Fonts.Mono, FontWeight.Bold)), Ui.IconBox(14f));
+        // No measure context yet (nothing has been drawn): what the default face gives, until a
+        // later build measures.
+        if (file <= 0)
+            return new ChangeRowSizes(scale, 13.3f, 22.6f, 27.3f, 27.3f, 28f, 30.6f, 40f, 40.6f, 69.3f);
+        float folder = MathF.Max(LineHeight(11.5f, weight: FontWeight.Medium), LineHeight(10f));
+        return _changeRowSizes = new ChangeRowSizes(scale,
+            Header: LineHeight(10f),
+            Action: MathF.Max(LineHeight(10f), GhostChrome + LineHeight(11f)),
+            Folder: RowPadding + MathF.Max(folder, Ui.IconBox(14f)),
+            ConflictFolder: RowPadding + MathF.Max(folder, Ui.IconBox(12f)),
+            File: RowPadding + file,
+            Conflict: RowPadding + MathF.Max(LineHeight(12f), MathF.Max(Ui.IconBox(12f), TagPadding + LineHeight(9.5f))),
+            Hidden: RowPadding + MathF.Max(IconButton, LineHeight(12f)),
+            HiddenDirectory: RowPadding + MathF.Max(IconButton, LineHeight(12f) + LineHeight(9.5f)),
+            Empty: EmptyPadding + LineHeight(13f));
+    }
 
     private Element SectionHeader(string label, Color labelColor, string action, Action? onAction, bool topGap = false)
     {
@@ -597,43 +821,28 @@ public partial class JunctionApp
         // fill so the rows going by do not show through.
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
             .Padding(new Thickness(topGap ? 14 : 7, 8, 5, 8))
-            .Background(Nocturne.Bg).Sticky();
+            .Background(Nocturne.Bg);
         row.AddChild(Text.New(label.ToUpperInvariant()).FontSize(10f).TextColor(labelColor).FlexGrow(1));
         if (onAction != null)
             row.AddChild(Ui.GhostButton(action, null, onAction, 11f));
         return row;
     }
 
-    /// <summary>Lays one section's tree into the column: folder rows and file rows in one
-    /// flat run, the same order <see cref="ChangeRows"/> walks for the keyboard.</summary>
-    private void AddChangeRows(Element scroll, ChangeSection section,
-        IReadOnlyList<GitFileChange> files)
-    {
-        foreach (var node in ChangeTreeRows(section, files))
-            scroll.AddChild(node.IsFolder
-                ? ChangesFolderRow(section, node, files)
-                : section == ChangeSection.Conflicted
-                    ? ConflictListRow(node)
-                    : ChangeRow(node, isStaged: section == ChangeSection.Staged));
-    }
-
     /// <summary>A folder row in one of the three lists. It selects, stages and unstages as
     /// everything below it — one checkbox for a directory is the shortcut the flat list
     /// could never offer — and its counts are the totals of the files it hides.</summary>
-    private Element ChangesFolderRow(ChangeSection section, TreeNode<GitFileChange> node,
-        IReadOnlyList<GitFileChange> files)
+    private Element ChangesFolderRow(ChangeListItem item)
     {
+        var node = item.Node!;
+        var section = item.Section;
         var tree = ChangeTreeFor(section);
         var self = new ChangeRef(node.Path, section, IsFolder: true);
-        var selected = _changeSelection.Contains(self);
-        var focused = ChangeFocus() == self;
-        var expanded = tree.IsExpanded(node);
+        var (selected, focused, expanded) = (item.Selected, item.Focused, item.Expanded);
         var bg = selected ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900
             : Color.Transparent;
-        var n = ChangeActionCount(self, node.LeafCount);
-        var under = FilesUnder(files, node.Path);
-        var (additions, deletions) = FolderTotals(under);
+        var n = item.ActionCount(node.LeafCount);
+        var (additions, deletions) = FolderTotals(node);
 
         // Conflicts have no staging checkbox — their resolution is per file — so that
         // section's folders carry the twisty alone.
@@ -660,7 +869,6 @@ public partial class JunctionApp
         // keep the previous occupant's handlers.
         row.Key = $"{section}:dir:{node.Path}{(selected ? "#s" : "")}{(focused ? "#f" : "")}{(expanded ? "#o" : "")}";
         if (bg != Color.Transparent) row.Background(bg);
-        if (focused) row.WithRef(_changeFocusRef);
 
         row.OnClick(e =>
         {
@@ -683,18 +891,20 @@ public partial class JunctionApp
         return row;
     }
 
-    private Element ChangeRow(TreeNode<GitFileChange> node, bool isStaged)
+    private Element ChangeRow(ChangeListItem item)
     {
+        var node = item.Node!;
         var f = node.Item;
-        var self = new ChangeRef(f.Path, isStaged ? ChangeSection.Staged : ChangeSection.Unstaged);
-        var selected = _changeSelection.Contains(self);
+        bool isStaged = item.Section == ChangeSection.Staged;
+        var self = new ChangeRef(f.Path, item.Section);
+        var selected = item.Selected;
         // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
         // hover-strength tint so keyboard navigation stays visible.
-        var focused = ChangeFocus() == self;
+        var focused = item.Focused;
         var bg = selected ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900
             : Color.Transparent;
-        var n = ChangeActionCount(self, 1);
+        var n = item.ActionCount(1);
         var (letter, color) = StatusLetter(f.Kind);
 
         // Checkbox · status letter · name · counts. The letter slot is a fixed track so
@@ -706,7 +916,6 @@ public partial class JunctionApp
         // FileTreeRow — the stale hover handler would otherwise clobber the highlight).
         row.Key = (isStaged ? "s:" : "u:") + f.Path + (selected ? "#s" : "") + (focused ? "#f" : "");
         if (bg != Color.Transparent) row.Background(bg);
-        if (focused) row.WithRef(_changeFocusRef);
 
         // Checkbox toggles staging without moving the selection — and acts on the whole
         // selection when this row is part of one, the same set the context menu takes.

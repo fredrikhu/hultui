@@ -216,8 +216,7 @@ public partial class JunctionApp : Component, IDisposable
     private int _changeSelFileCount;
     // Scroll the keyboard-focused file row into view (the list isn't focused, so it
     // won't follow the caret on its own).
-    private readonly Ref<ScrollViewElement> _changeScrollRef = new();
-    private readonly Ref<Element> _changeFocusRef = new();
+    private readonly Ref<VirtualListElement<ChangeListItem>> _changeScrollRef = new();
     private string _commitSummary = "";
     private string _commitDescription = "";
     private readonly Ref<TextInputElement> _summaryRef = new();
@@ -997,22 +996,11 @@ public partial class JunctionApp : Component, IDisposable
             }
             else if (View == JunctionView.Changes)
             {
-                // OnAfterBuild runs before the layout pass, so the selected row's box
-                // for this frame isn't available yet (and the file row, re-keyed on
-                // selection, is a fresh element with no prior layout at all). Read it
-                // in a post-frame callback, once the frame has been laid out.
-                _window.RequestPostFrameCallback(() => ScrollRowIntoView(_changeScrollRef, _changeFocusRef));
+                // The same list of tagged rows: its band comes from the row heights, after the
+                // frame, so the list has its new items and viewport.
+                _window.RequestPostFrameCallback(ScrollChangeCaretIntoView);
             }
         }
-    }
-
-    /// <summary>Scrolls a list so its keyboard-selected row is fully visible. Reads the
-    /// actual laid-out row box (not a fixed row height), so it works with the
-    /// variable-height palette and file rows. Call after the layout pass.</summary>
-    private static void ScrollRowIntoView(Ref<ScrollViewElement> scrollRef, Ref<Element> rowRef)
-    {
-        if (scrollRef.Current is { } scroll && rowRef.Current is { } row)
-            scroll.ScrollIntoView(row);
     }
 
     // ── View / selection actions ─────────────────────────────────────────

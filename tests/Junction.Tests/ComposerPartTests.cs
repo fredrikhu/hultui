@@ -107,7 +107,7 @@ public class ComposerPartTests
             Invoke(app, "RefreshAll");
             session.PumpUntil(() =>
             {
-                bool listed = LayoutProbe.Descendants<TextElement>(Ref<ScrollViewElement>(app, "_changeScrollRef").Current!,
+                bool listed = LayoutProbe.Descendants<TextElement>(ChangeList(app)!,
                     t => t.Content == "CHANGES · 41").Any();
                 if (listed) Assert.StartsWith("Commit all 41 changes", Button());
                 return listed;
@@ -268,8 +268,15 @@ public class ComposerPartTests
     {
         var list = new List<Element>();
         void Walk(Element e) { list.Add(e); foreach (var c in e.Children) Walk(c); }
-        if (Ref<ScrollViewElement>(app, "_changeScrollRef").Current is { } scroll) Walk(scroll);
+        if (ChangeList(app) is { } scroll) Walk(scroll);
         return list;
+    }
+
+    /// <summary>The Changes list, whatever its rows are.</summary>
+    private static Element? ChangeList(JunctionApp app)
+    {
+        var field = typeof(JunctionApp).GetField("_changeScrollRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        return (Element?)field.GetType().GetProperty("Current")!.GetValue(field);
     }
 
     private static Ref<T> Ref<T>(JunctionApp app, string field) where T : class => Get<Ref<T>>(app, field);

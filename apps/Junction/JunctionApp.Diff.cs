@@ -673,7 +673,7 @@ public partial class JunctionApp
         // Read after the frame has been laid out. OnAfterBuild is too early — the list has
         // no box for this frame yet, and on the first build it is a brand new element with
         // no prior layout at all, so the width DiffCodeWidth needs is simply not knowable
-        // here. Same reason ScrollRowIntoView defers.
+        // here. Same reason ScrollChangeCaretIntoView defers.
         _window.RequestPostFrameCallback(() =>
         {
             if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;

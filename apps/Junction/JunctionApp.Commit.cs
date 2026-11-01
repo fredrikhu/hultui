@@ -582,11 +582,9 @@ public partial class JunctionApp
     {
         float scale = Ui.DisplayScale;
         if (_commitRowHeights.File > 0 && _commitRowHeights.Scale == scale) return _commitRowHeights;
-        static float Line(float size, string family = "sans-serif", FontWeight weight = FontWeight.Regular) =>
-            TextMeasure.Measure("Ag", TextMeasure.StyleFor(size, family, weight)).Height;
-        float file = Math.Max(Line(12f), Line(11f, Fonts.Mono, FontWeight.Bold));
-        float folder = Math.Max(Line(11.5f, weight: FontWeight.Medium), Math.Max(Line(10f), Ui.IconBox(12f)));
-        float header = Line(10f);
+        float file = Math.Max(LineHeight(12f), LineHeight(11f, Fonts.Mono, FontWeight.Bold));
+        float folder = Math.Max(LineHeight(11.5f, weight: FontWeight.Medium), Math.Max(LineHeight(10f), Ui.IconBox(12f)));
+        float header = LineHeight(10f);
         // No measure context yet (nothing has been drawn): what the default face gives, until a
         // later build measures.
         if (file <= 0) return (scale, 25.3f, 27.3f, 28f);
