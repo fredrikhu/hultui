@@ -463,11 +463,7 @@ public sealed class TextPipeline
             layout = oneLine;
         }
         else
-        {
-            layout = ComputeWrapped(text, style, maxWidth, maxLines, shaped);
-            if (overflow == TextOverflow.Ellipsis)
-                layout = ApplyEllipsis(text, style, layout, maxWidth);
-        }
+            layout = ComputeWrapped(text, style, maxWidth, maxLines, overflow, shaped);
         _cache.Put(key, layout, LayoutBytes(text, layout));
         return layout;
     }
@@ -616,9 +612,26 @@ public sealed class TextPipeline
     // shapes each line it keeps; nothing here is shaped as a whole first, because
     // nothing would read it. The segments and their widths come from the string's
     // shaping-cache entry, so only the lines kept are new work at a new width.
+    //
+    // With Ellipsis, the last line of the clipped lines is rewritten with a trailing
+    // ellipsis when content was truncated. Truncation happens either because a maxLines
+    // limit dropped trailing text, or because a single unbreakable token is wider than the
+    // available width. Only the final line is touched; earlier lines keep their exact
+    // shaping and positions.
     private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        ShapedText shaped)
-        => BreakIntoLines(text, style, maxWidth, maxLines, BreakSegmentsOf(shaped, text));
+        TextOverflow overflow, ShapedText shaped)
+    {
+        var lines = RentLines();
+        var size = BreakIntoLines(lines, text, style, maxWidth, maxLines, BreakSegmentsOf(shaped, text));
+        if (overflow == TextOverflow.Ellipsis && TruncatedTail(text, lines, maxWidth, out int start, out int tailEnd))
+        {
+            string tail = text[start..tailEnd];
+            float width = WithLastLine(lines, BuildEllipsizedLine(text, tail, start, style, maxWidth,
+                ReuseAcrossWidths ? BuildPrefixWidths(tail, style) : null, MeasureString(EllipsisString, style)));
+            size = new Size(width, size.Height);
+        }
+        return new TextLayout(LayoutLines(lines), size);
+    }
 
     // ── Styled layout internals ──
     // A styled line is segments cut at metric-span boundaries, each itemized with its
@@ -842,7 +855,7 @@ public sealed class TextPipeline
     {
         var allBreaks = memo?.Breaks ?? BreakOffsets(text);
 
-        var lines = new List<TextLine>();
+        var lines = RentLines();
         int textOffset = 0;
         float lineWidth = 0;
 
@@ -899,10 +912,9 @@ public sealed class TextPipeline
             totalHeight += line.Height;
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
         }
-        var styledLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight));
-        return overflow == TextOverflow.Ellipsis && TruncatedTail(text, styledLayout, maxWidth, out int start, out int tailEnd)
-            ? WithLastLine(styledLayout, BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth, memo))
-            : styledLayout;
+        if (overflow == TextOverflow.Ellipsis && TruncatedTail(text, lines, maxWidth, out int start, out int tailEnd))
+            maxLineWidth = WithLastLine(lines, BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth, memo));
+        return new TextLayout(LayoutLines(lines), new Size(maxLineWidth, totalHeight));
     }
 
     // ── BiDi internals (docs/plans/14-bidi.md) ──
@@ -1549,7 +1561,7 @@ public sealed class TextPipeline
             : (bidi.Levels!, bidi.RtlParagraph);
         var allBreaks = bidi?.Breaks ?? BreakOffsets(text);
 
-        var lines = new List<TextLine>();
+        var lines = RentLines();
         int textOffset = 0;
         float lineWidth = 0;
 
@@ -1605,11 +1617,10 @@ public sealed class TextPipeline
             totalHeight += line.Height;
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
         }
-        var bidiLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight), rtlParagraph);
-        return overflow == TextOverflow.Ellipsis && TruncatedTail(text, bidiLayout, maxWidth, out int start, out int tailEnd)
-            ? WithLastLine(bidiLayout,
-                BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans))
-            : bidiLayout;
+        if (overflow == TextOverflow.Ellipsis && TruncatedTail(text, lines, maxWidth, out int start, out int tailEnd))
+            maxLineWidth = WithLastLine(lines,
+                BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth, bidi, spans));
+        return new TextLayout(LayoutLines(lines), new Size(maxLineWidth, totalHeight), rtlParagraph);
     }
 
     private int BidiFitPrefix(string text, int from, int to,
@@ -1732,24 +1743,10 @@ public sealed class TextPipeline
 
     private const string EllipsisString = "…"; // …
 
-    // Rewrites the last line of an already-broken (clipped) layout with a
-    // trailing ellipsis when content was truncated. Truncation happens either
-    // because a maxLines limit dropped trailing text, or because a single
-    // unbreakable token is wider than the available width. Only the final line
-    // is touched; earlier lines keep their exact shaping and positions.
-    private TextLayout ApplyEllipsis(string text, ResolvedInheritedStyle style, TextLayout clip, float maxWidth)
-    {
-        if (!TruncatedTail(text, clip, maxWidth, out int start, out int tailEnd))
-            return clip;
-        string tail = text[start..tailEnd];
-        return WithLastLine(clip, BuildEllipsizedLine(text, tail, start, style, maxWidth,
-            ReuseAcrossWidths ? BuildPrefixWidths(tail, style) : null, MeasureString(EllipsisString, style)));
-    }
-
     /// <summary>
     /// One truncation policy for all three layout paths, whose line builders differ (plain,
-    /// styled, direction-aware): whether the last line of <paramref name="clip"/> takes an
-    /// ellipsis, and the source range <c>[start, tailEnd)</c> the line that replaces it
+    /// styled, direction-aware): whether the last of the clipped <paramref name="lines"/> takes
+    /// an ellipsis, and the source range <c>[start, tailEnd)</c> the line that replaces it
     /// (<see cref="WithLastLine"/>) may draw from.
     /// </summary>
     /// <remarks>
@@ -1758,13 +1755,13 @@ public sealed class TextPipeline
     /// every styled or BiDi layout with Ellipsis whether it truncated or not, 10 % of what
     /// truncating 1,000 styled labels allocated (plan 17, round 6).
     /// </remarks>
-    private static bool TruncatedTail(string text, TextLayout clip, float maxWidth, out int start, out int tailEnd)
+    private static bool TruncatedTail(string text, List<TextLine> lines, float maxWidth, out int start, out int tailEnd)
     {
         start = tailEnd = 0;
-        if (clip.Lines.Count == 0)
+        if (lines.Count == 0)
             return false;
 
-        var last = clip.Lines[^1];
+        var last = lines[^1];
         int coveredEnd = last.Start + last.Length;
         bool droppedTail = coveredEnd < text.Length;
         // A greedy line never exceeds maxWidth unless it is a lone token that
@@ -1781,23 +1778,53 @@ public sealed class TextPipeline
         return true;
     }
 
-    // clip with its last line replaced by the ellipsized one, in the same place.
-    private static TextLayout WithLastLine(TextLayout clip, TextLine ellipsized)
+    // The clipped lines with the last replaced by the ellipsized one, in the same place, in the
+    // list they are in: no layout is made of the clipped lines. Returns the widest line now.
+    // The replacement line uses the same font metrics, so the overall height is unchanged;
+    // only the width can shrink.
+    private static float WithLastLine(List<TextLine> lines, TextLine ellipsized)
     {
-        ellipsized.OffsetY = clip.Lines[^1].OffsetY;
-
-        var lines = new List<TextLine>(clip.Lines.Count);
-        for (int i = 0; i < clip.Lines.Count - 1; i++)
-            lines.Add(clip.Lines[i]);
-        lines.Add(ellipsized);
+        ellipsized.OffsetY = lines[^1].OffsetY;
+        lines[^1] = ellipsized;
 
         float maxLineWidth = 0;
         foreach (var line in lines)
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
+        return maxLineWidth;
+    }
 
-        // The replacement line uses the same font metrics, so the overall height
-        // is unchanged; only the max width can shrink.
-        return new TextLayout(lines, new Size(maxLineWidth, clip.Size.Height), clip.IsRtlParagraph);
+    // The list the line breakers fill, kept between layouts; each layout gets an exact array of
+    // its lines (LayoutLines). A new list for each layout, at the default capacity and grown by
+    // doubling, was the layout's own, and a truncated one made a second list and a layout to
+    // replace its last line: 63 % of what truncating 1,000 styled labels allocated (plan 17,
+    // round 7). Taken while a breaker fills it, so a layout made in the middle of another's —
+    // a measure inside a break — fills a list of its own: a kept list never holds the lines of
+    // two layouts at once.
+    private List<TextLine>? _keptLines;
+
+    // A list kept no longer than this many lines: a long document's would hold its room.
+    private const int KeptLinesCapacity = 1024;
+
+    private List<TextLine> RentLines()
+    {
+        var lines = _keptLines ?? new List<TextLine>(16);
+        _keptLines = null;
+        return lines;
+    }
+
+    // The lines as the layout's own exact array, the list given back empty.
+    private TextLine[] LayoutLines(List<TextLine> lines)
+    {
+        var exact = lines.ToArray();
+        GiveBackLines(lines);
+        return exact;
+    }
+
+    private void GiveBackLines(List<TextLine> lines)
+    {
+        lines.Clear();   // holds no line alive
+        if (lines.Capacity <= KeptLinesCapacity)
+            _keptLines = lines;
     }
 
     // Builds a single line holding the longest prefix of <paramref name="tail"/>
@@ -2222,8 +2249,8 @@ public sealed class TextPipeline
 
     /// <summary>
     /// One-line Ellipsis without breaking the text into lines first: exactly what
-    /// <see cref="ComputeWrapped"/> + <see cref="ApplyEllipsis(string, ResolvedInheritedStyle, TextLayout, float)"/>
-    /// return, or null for a string where that is not proven (the caller then takes them).
+    /// <see cref="ComputeWrapped"/> returns with Ellipsis, or null for a string where that is
+    /// not proven (the caller then takes it).
     /// Only reached for a text with no newline that is wider than <paramref name="maxWidth"/>.
     /// </summary>
     private TextLayout? EllipsizeOneLine(string text, ResolvedInheritedStyle style, ShapedText shaped, float maxWidth)
@@ -2232,13 +2259,13 @@ public sealed class TextPipeline
         var e = shaped.OneLineEllipsis ??= ProveOneLineEllipsis(text, style, shaped);
         if (!e.Exact) return null;
 
-        // ApplyEllipsis on the wrap pass's one line, which starts at 0: the line rebuilt
+        // The ellipsis on the wrap pass's one line, which starts at 0: the line rebuilt
         // with an ellipsis, in a layout keeping the wrapped line's height.
         var line = BuildEllipsizedLine(text, text, 0, style, maxWidth, e.Prefixes, e.EllipsisWidth);
         return new TextLayout([line], new Size(Math.Max(0f, line.Width), e.Height));
     }
 
-    // With maxLines 1 the wrap pass keeps one line L, and ApplyEllipsis replaces it with
+    // With maxLines 1 the wrap pass keeps one line L, and the ellipsis replaces it with
     // BuildEllipsizedLine(text[L.Start..]) in a layout of L's height — unless L is the whole
     // text and fits, when the wrapped layout stands. So the shortcut is exact for a string
     // when, at every width the text overflows:
@@ -2271,22 +2298,27 @@ public sealed class TextPipeline
     /// run, where the replaced line's height depends on which fonts it reached; or a first
     /// segment of no width; or a single character — without shaping the line it replaces: the
     /// wrap pass as it is, its line measured and not shaped (<see cref="MeasureLineText"/>),
-    /// then ApplyEllipsis as it is. ApplyEllipsis reads only that line's extent, width and
-    /// height, all exact, and replaces it; where it would keep it instead (the line is the
-    /// whole text and fits) the measured layout is no layout, and the caller takes the
-    /// reference path. Null then, and on the reference path.
+    /// then the ellipsis as <see cref="ComputeWrapped"/> puts it there. That reads only the
+    /// line's extent, width and height, all exact, and replaces it; where it would keep it
+    /// instead (the line is the whole text and fits) the measured line is no line, and the
+    /// caller takes the reference path. Null then, and on the reference path.
     /// </summary>
     private TextLayout? EllipsizeMeasuredLine(string text, ResolvedInheritedStyle style, ShapedText shaped, float maxWidth)
     {
         if (!ReuseAcrossWidths) return null;
         var prefixes = PrefixWidthsOf(shaped, text, style);
         float ellipsisWidth = (shaped.OneLineEllipsis ??= ProveOneLineEllipsis(text, style, shaped)).EllipsisWidth;
-        var measured = BreakIntoLines(text, style, maxWidth, 1, BreakSegmentsOf(shaped, text), prefixes);
+        var measured = RentLines();
+        var size = BreakIntoLines(measured, text, style, maxWidth, 1, BreakSegmentsOf(shaped, text), prefixes);
         if (!TruncatedTail(text, measured, maxWidth, out int start, out int tailEnd))
+        {
+            GiveBackLines(measured);
             return null;
+        }
         string tail = text[start..tailEnd];
-        return WithLastLine(measured, BuildEllipsizedLine(text, tail, start, style, maxWidth,
+        float width = WithLastLine(measured, BuildEllipsizedLine(text, tail, start, style, maxWidth,
             start == 0 && tailEnd == text.Length ? prefixes : BuildPrefixWidths(tail, style), ellipsisWidth));
+        return new TextLayout(LayoutLines(measured), new Size(width, size.Height));
     }
 
     private bool BreakSegmentSumsArePositive(string text, ResolvedInheritedStyle style, BreakSegments segments)
@@ -2977,12 +3009,13 @@ public sealed class TextPipeline
         return new TextLayout([line], new Size(totalWidth, line.Height));
     }
 
-    // measureOnly, the whole text's prefix widths, makes every line a measured one
-    // (MeasureLineText) for EllipsizeMeasuredLine: the same pass, nothing shaped.
-    private TextLayout BreakIntoLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
-        BreakSegments? segments, PrefixWidths? measureOnly = null)
+    // The lines of text, broken greedily, into `lines` (empty), each placed under the one before;
+    // returns the size of a layout of them. measureOnly, the whole text's prefix widths, makes
+    // every line a measured one (MeasureLineText) for EllipsizeMeasuredLine: the same pass,
+    // nothing shaped.
+    private Size BreakIntoLines(List<TextLine> lines, string text, ResolvedInheritedStyle style, float maxWidth,
+        int? maxLines, BreakSegments? segments, PrefixWidths? measureOnly = null)
     {
-        var lines = new List<TextLine>();
         int textOffset = 0;
 
         var allBreaks = segments?.Offsets ?? BreakOffsets(text);
@@ -3070,7 +3103,7 @@ public sealed class TextPipeline
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
         }
 
-        return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
+        return new Size(maxLineWidth, totalHeight);
 
         TextLine NewLine(int from, int to) => measureOnly is null
             ? ShapeLineText(text, from, to, style, start: from)

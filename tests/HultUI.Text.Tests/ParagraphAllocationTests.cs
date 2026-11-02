@@ -54,19 +54,16 @@ public class ParagraphAllocationTests
         long a = Allocations.Least(() => pipeline.Layout(ten, Style, width += 0.001f, null));
         long b = Allocations.Least(() => pipeline.Layout(forty, Style, width += 0.001f, null));
 
-        // What a line keeps, and the layout's list of lines growing to 40 rather than 10.
+        // What a line keeps, and its place in the layout's exact array of lines (8 B): the list the
+        // lines are broken into is the pipeline's, kept. A list for each layout, grown to room for
+        // 64 lines rather than 16, was 576 B more (plan 17, round 7).
         var line = pipeline.Layout(ten, Style, width, null).Lines[0];
         var made = new TextLine[100];
         long lineBytes = Allocations.Least(() =>
         {
             for (int i = 0; i < made.Length; i++) made[i] = new TextLine(line.Runs, 1f, 1f, 1f, 0f);
         }) / made.Length;
-        long ListOf(int n) => Allocations.Least(() =>
-        {
-            var lines = new List<TextLine>();
-            for (int i = 0; i < n; i++) lines.Add(line);
-        });
-        long listGrowth = ListOf(40) - ListOf(10);
+        long listGrowth = 30L * IntPtr.Size;
 
         // Each line: the line; the lines of a layout share what they make their runs from. Read,
         // or made with the line on the reference path, its runs: its text trimmed ("abcdefgh"),
