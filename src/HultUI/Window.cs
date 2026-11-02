@@ -3374,6 +3374,9 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
         if (ReferenceEquals(entry.Content.AccessibilityObserver, _a11yObserver))
             entry.Content.AccessibilityObserver = null;
         A11yOverlaysChanged(entry);
+        // The slots its elements took for nodes of their own (a menu's items) go with it: the
+        // content was never added to a parent, so no unmount gives them back.
+        AccessibleOwnerSlots.ReleaseTree(entry.Content);
         if (_focusManager.FocusedElement is not { } focused || TopOf(focused) != entry.Content) return;
         _focusManager.SetFocus(entry.FocusBefore is { } before && IsInWindow(before) ? before : null);
 
