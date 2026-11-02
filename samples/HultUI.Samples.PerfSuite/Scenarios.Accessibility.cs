@@ -161,26 +161,8 @@ static partial class Scenarios
             ctx =>
             {
                 var bridge = ctx.Window.InstallAccessibilityBridge();
-                var all = Enumerable.Range(0, 200).Select(i => $"tag {i}").ToList();
-                // Made up front: the step times the refresh, not the list it is handed.
-                var filtered = Enumerable.Range(0, 40).Select(i => (IReadOnlyList<string>)all.Take(150 + i).ToList()).ToArray();
-                var list = VirtualListElement<string>.New().ItemHeight(24).Items(all).Height(Dimension.Px(200))
-                    .RenderWith((tag, selected) => Flex.Row().Padding(new Thickness(2, 8)).Children(Text.New(tag).FontSize(12f)));
-                ctx.Mount(Flex.Column().FlexGrow(1).Children(ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000)), list));
-                int treesBefore = 0;
-                return new Op
-                {
-                    Run = step =>
-                    {
-                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
-                        list.Items = filtered[(step * 7) % filtered.Length];
-                    },
-                    FrameDelta = TimeSpan.FromMilliseconds(500),
-                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
-                    FigureUnit = "a11y trees/key",
-                    Check = step => FindItems(bridge.CurrentTree, filtered[(step * 7) % filtered.Length].Count) is not null
-                        ? null : "the bridge's tree does not hold the step's items",
-                };
+                return FilterBelowRows(ctx, (_, items) => FindItems(bridge.CurrentTree, items.Count) is not null
+                    ? null : "the bridge's tree does not hold the step's items");
             });
 
         yield return new Scenario("a11y/type beside a 150-line diff, rows made in Build, bridge on",
@@ -288,6 +270,9 @@ static partial class Scenarios
         if (OperatingSystem.IsWindows())
             foreach (var scenario in UiaAccessibility())
                 yield return scenario;
+
+        foreach (var scenario in AtSpiAccessibility())
+            yield return scenario;
     }
 
     /// <summary>A progress bar over 1,000 benchmark rows in a scroll view.</summary>
@@ -560,114 +545,23 @@ static partial class Scenarios
     {
         yield return new Scenario("a11y/click checkbox in 500 rows, UIA",
             "Click a checkbox in a 500-row settings list with the UIA bridge: toggle and focus events over 1,001 nodes",
-            ctx =>
-            {
-                var rig = UiaRig.Install(ctx.Window);
-                var boxes = new CheckboxElement[500];
-                var rows = new Element[boxes.Length];
-                for (int i = 0; i < boxes.Length; i++)
-                {
-                    boxes[i] = Checkbox.New(i % 3 == 0, Ui.Label(ctx.Rng));
-                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(4, 12)).Children(
-                        boxes[i], Text.New(Ui.Paragraph(ctx.Rng, 6)).FontSize(12f).TextColor(Ui.Muted));
-                }
-                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
-                return new Op
-                {
-                    Run = step => ctx.Window.Click(boxes[step % 12]),
-                    Check = Applied(rig),
-                };
-            });
+            ctx => ClickCheckbox(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/type in TextInput, UIA",
             "Type one character into a TextInput above 200 rows with the UIA bridge: value and text events over 603 nodes",
-            ctx =>
-            {
-                var rig = UiaRig.Install(ctx.Window);
-                var input = TextInput.New("").Width(Dimension.Px(400));
-                ctx.Mount(Flex.Column(gap: 8).Padding(16).Children(
-                    Text.New("Name").FontSize(13f), input, Ui.Rows(ctx.Rng, 200)));
-                ctx.Window.Click(input);
-                ctx.Pump();
-                return new Op
-                {
-                    Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
-                    Check = Applied(rig),
-                };
-            });
+            ctx => TypeInInput(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/edit 1 label of 1,000 rows, UIA",
             "Change one row's label in 1,000 rows with the UIA bridge: one name event over 2,001 nodes",
-            ctx =>
-            {
-                var rig = UiaRig.Install(ctx.Window);
-                var labels = new List<TextElement>();
-                var rows = new Element[1_000];
-                for (int i = 0; i < rows.Length; i++)
-                {
-                    var label = Text.New(Ui.Label(ctx.Rng)).FontSize(13f);
-                    labels.Add(label);
-                    rows[i] = Flex.Row(gap: 12).FlexShrink(0).Padding(4).Children(Text.New($"{i}").FontSize(13f), label);
-                }
-                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
-                return new Op
-                {
-                    Run = step => labels[step * 37 % labels.Count].Content += " !",
-                    Check = Applied(rig),
-                };
-            });
+            ctx => EditOneLabel(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/tab through 300 fields, UIA",
             "Press Tab in a 300-field form with the UIA bridge: the focus moves, no rebuild",
-            ctx =>
-            {
-                var rig = UiaRig.Install(ctx.Window);
-                var rows = new Element[300];
-                for (int i = 0; i < rows.Length; i++)
-                    rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(3, 12)).Children(
-                        Text.New($"Field {i}").FontSize(12f).Width(Dimension.Px(80)),
-                        TextInput.New(Ui.Label(ctx.Rng)).Width(Dimension.Px(260)));
-                ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
-                ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab);
-                ctx.Pump();
-                int moves = rig.FocusMoves;
-                return new Op
-                {
-                    // Forward 20, back 20, as input/tab does: the focus stays near the top.
-                    Run = step => ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab,
-                        (step / 20) % 2 == 0 ? HultUI.Core.Events.KeyModifiers.None : HultUI.Core.Events.KeyModifiers.Shift),
-                    Check = _ =>
-                    {
-                        bool moved = rig.FocusMoves > moves;
-                        moves = rig.FocusMoves;
-                        return moved ? null : "the UIA bridge was not told the focus moved";
-                    },
-                };
-            });
+            ctx => TabThroughFields(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/wheel 1,000 rows, UIA",
             "Wheel 3 notches through 1,000 rows with the UIA bridge, each frame 120 ms apart so each rebuilds: bounds over ~130 rows on screen",
-            ctx =>
-            {
-                var rig = UiaRig.Install(ctx.Window);
-                var view = ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000));
-                ctx.Mount(view);
-                float offset = view.ScrollOffsetY;
-                var applied = Applied(rig);
-                return new Op
-                {
-                    Run = step => ctx.Window.Wheel(500, 380, 0, ((step / 20) % 2 == 0 ? -1 : 1) * 3),
-                    // Past the 100 ms a scroll's accessibility refresh waits for, so every step's
-                    // frame is a coalesced rebuild, as each one is in a slow wheel turn.
-                    FrameDelta = TimeSpan.FromMilliseconds(120),
-                    Check = step =>
-                    {
-                        bool moved = view.ScrollOffsetY != offset;
-                        offset = view.ScrollOffsetY;
-                        return moved ? applied(step) : $"the view did not scroll (offset {offset})";
-                    },
-                };
-            });
+            ctx => WheelRows(ctx, UiaRig.Install(ctx.Window)));
 
         yield return new Scenario("a11y/selection walk 1,000 rows, UIA",
             "virtual/selection walk with the UIA bridge: every Down a rebuild over the list's 1,000 item nodes, its wrapper upkeep and events",
@@ -775,24 +669,7 @@ static partial class Scenarios
             ctx =>
             {
                 UiaRig.Install(ctx.Window);
-                ctx.Mount(Busy(ctx, Text.New("Menus").FontSize(13f)));
-                var items = new ContextMenuItem[20];
-                for (int i = 0; i < items.Length; i++)
-                    items[i] = new ContextMenuItem { Label = Ui.Label(ctx.Rng), Action = () => { }, ShortcutHint = $"Ctrl+{i}" };
-                ctx.Window.Window.OpenContextMenu(items, new Point(40, 60));
-                ctx.Pump(2);
-                int treesBefore = 0;
-                return new Op
-                {
-                    Run = _ =>
-                    {
-                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
-                        ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
-                    },
-                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
-                    FigureUnit = "a11y trees/key",
-                    Check = _ => ctx.Window.OverlayContents.Count == 1 ? null : $"{ctx.Window.OverlayContents.Count} overlays open, not the menu alone",
-                };
+                return ContextMenuWalk(ctx);
             });
 
         yield return new Scenario("a11y/command palette typing over 2,000 commands, UIA",
@@ -800,30 +677,7 @@ static partial class Scenarios
             ctx =>
             {
                 UiaRig.Install(ctx.Window);
-                var commands = new List<PaletteCommand>(2_000);
-                for (int i = 0; i < 2_000; i++) commands.Add(new PaletteCommand($"{Ui.Label(ctx.Rng)} {i}", () => { }));
-                var palette = new CommandPalette(() => commands);
-                ctx.Mount(Busy(ctx, Text.New("Palette").FontSize(13f)));
-                palette.Open(ctx.Window.Window);
-                ctx.Pump(2);
-                const string letters = "rblpzchgta";
-                int treesBefore = 0;
-                return new Op
-                {
-                    Reset = _ =>
-                    {
-                        if (palette.Query.Length > 0) ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
-                    },
-                    Run = step =>
-                    {
-                        treesBefore = ctx.Window.AccessibilityTreesBuilt;
-                        ctx.Window.TypeText(letters[step % letters.Length].ToString());
-                    },
-                    Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
-                    FigureUnit = "a11y trees/key",
-                    Check = _ => palette.IsOpen && palette.Query.Length == 1 && palette.Matches.Count is > 0 and < 2_000
-                        ? null : $"the palette's query is \"{palette.Query}\" with {palette.Matches.Count} matches",
-                };
+                return PaletteTyping(ctx);
             });
 
         yield return new Scenario("a11y/label ticking in a dialog over 1,000 rows, UIA",
@@ -844,15 +698,162 @@ static partial class Scenarios
     }
 
     /// <summary>A check that the bridge applied a diff since the last time it was asked.</summary>
-    [SupportedOSPlatform("windows")]
-    private static Func<int, string?> Applied(UiaRig rig)
+    private static Func<int, string?> Applied(IBridgeRig rig)
     {
         int seen = rig.Applies;
         return _ =>
         {
             bool applied = rig.Applies > seen;
             seen = rig.Applies;
-            return applied ? null : "the UIA bridge received no change";
+            return applied ? null : $"the {rig.Name} bridge received no change";
+        };
+    }
+
+    // The steps the rows of a real bridge share, UIA's and AT-SPI's: the rig is installed first.
+
+    private static Op ClickCheckbox(Ctx ctx, IBridgeRig rig)
+    {
+        var boxes = new CheckboxElement[500];
+        var rows = new Element[boxes.Length];
+        for (int i = 0; i < boxes.Length; i++)
+        {
+            boxes[i] = Checkbox.New(i % 3 == 0, Ui.Label(ctx.Rng));
+            rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(4, 12)).Children(
+                boxes[i], Text.New(Ui.Paragraph(ctx.Rng, 6)).FontSize(12f).TextColor(Ui.Muted));
+        }
+        ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+        return new Op
+        {
+            Run = step => ctx.Window.Click(boxes[step % 12]),
+            Check = Applied(rig),
+        };
+    }
+
+    private static Op TypeInInput(Ctx ctx, IBridgeRig rig)
+    {
+        var input = TextInput.New("").Width(Dimension.Px(400));
+        ctx.Mount(Flex.Column(gap: 8).Padding(16).Children(
+            Text.New("Name").FontSize(13f), input, Ui.Rows(ctx.Rng, 200)));
+        ctx.Window.Click(input);
+        ctx.Pump();
+        return new Op
+        {
+            Run = step => ctx.Window.TypeText(((char)('a' + step % 26)).ToString()),
+            Check = Applied(rig),
+        };
+    }
+
+    private static Op EditOneLabel(Ctx ctx, IBridgeRig rig)
+    {
+        var labels = new List<TextElement>();
+        var rows = new Element[1_000];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            var label = Text.New(Ui.Label(ctx.Rng)).FontSize(13f);
+            labels.Add(label);
+            rows[i] = Flex.Row(gap: 12).FlexShrink(0).Padding(4).Children(Text.New($"{i}").FontSize(13f), label);
+        }
+        ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+        return new Op
+        {
+            Run = step => labels[step * 37 % labels.Count].Content += " !",
+            Check = Applied(rig),
+        };
+    }
+
+    private static Op TabThroughFields(Ctx ctx, IBridgeRig rig)
+    {
+        var rows = new Element[300];
+        for (int i = 0; i < rows.Length; i++)
+            rows[i] = Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(3, 12)).Children(
+                Text.New($"Field {i}").FontSize(12f).Width(Dimension.Px(80)),
+                TextInput.New(Ui.Label(ctx.Rng)).Width(Dimension.Px(260)));
+        ctx.Mount(ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+        ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab);
+        ctx.Pump();
+        int moves = rig.FocusMoves;
+        return new Op
+        {
+            // Forward 20, back 20, as input/tab does: the focus stays near the top.
+            Run = step => ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Tab,
+                (step / 20) % 2 == 0 ? HultUI.Core.Events.KeyModifiers.None : HultUI.Core.Events.KeyModifiers.Shift),
+            Check = _ =>
+            {
+                bool moved = rig.FocusMoves > moves;
+                moves = rig.FocusMoves;
+                return moved ? null : $"the {rig.Name} bridge was not told the focus moved";
+            },
+        };
+    }
+
+    private static Op WheelRows(Ctx ctx, IBridgeRig rig)
+    {
+        var view = ScrollView.New().FlexGrow(1).Children(Ui.Rows(ctx.Rng, 1_000));
+        ctx.Mount(view);
+        float offset = view.ScrollOffsetY;
+        var applied = Applied(rig);
+        return new Op
+        {
+            Run = step => ctx.Window.Wheel(500, 380, 0, ((step / 20) % 2 == 0 ? -1 : 1) * 3),
+            // Past the 100 ms a scroll's accessibility refresh waits for, so every step's
+            // frame is a coalesced rebuild, as each one is in a slow wheel turn.
+            FrameDelta = TimeSpan.FromMilliseconds(120),
+            Check = step =>
+            {
+                bool moved = view.ScrollOffsetY != offset;
+                offset = view.ScrollOffsetY;
+                return moved ? applied(step) : $"the view did not scroll (offset {offset})";
+            },
+        };
+    }
+
+    private static Op ContextMenuWalk(Ctx ctx)
+    {
+        ctx.Mount(Busy(ctx, Text.New("Menus").FontSize(13f)));
+        var items = new ContextMenuItem[20];
+        for (int i = 0; i < items.Length; i++)
+            items[i] = new ContextMenuItem { Label = Ui.Label(ctx.Rng), Action = () => { }, ShortcutHint = $"Ctrl+{i}" };
+        ctx.Window.Window.OpenContextMenu(items, new Point(40, 60));
+        ctx.Pump(2);
+        int treesBefore = 0;
+        return new Op
+        {
+            Run = _ =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+            },
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/key",
+            Check = _ => ctx.Window.OverlayContents.Count == 1 ? null : $"{ctx.Window.OverlayContents.Count} overlays open, not the menu alone",
+        };
+    }
+
+    private static Op PaletteTyping(Ctx ctx)
+    {
+        var commands = new List<PaletteCommand>(2_000);
+        for (int i = 0; i < 2_000; i++) commands.Add(new PaletteCommand($"{Ui.Label(ctx.Rng)} {i}", () => { }));
+        var palette = new CommandPalette(() => commands);
+        ctx.Mount(Busy(ctx, Text.New("Palette").FontSize(13f)));
+        palette.Open(ctx.Window.Window);
+        ctx.Pump(2);
+        const string letters = "rblpzchgta";
+        int treesBefore = 0;
+        return new Op
+        {
+            Reset = _ =>
+            {
+                if (palette.Query.Length > 0) ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace);
+            },
+            Run = step =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                ctx.Window.TypeText(letters[step % letters.Length].ToString());
+            },
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/key",
+            Check = _ => palette.IsOpen && palette.Query.Length == 1 && palette.Matches.Count is > 0 and < 2_000
+                ? null : $"the palette's query is \"{palette.Query}\" with {palette.Matches.Count} matches",
         };
     }
 }
