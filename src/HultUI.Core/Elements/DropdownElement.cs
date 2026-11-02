@@ -177,6 +177,14 @@ public class DropdownElement : Element
 
     // ──── Open / close ────
 
+    /// <summary>Opens or closes the list as Enter and Escape do: what UIA's ExpandCollapse
+    /// pattern does to a dropdown.</summary>
+    internal void SetOpenFromAssistiveTool(bool open)
+    {
+        if (open) OpenPopup();
+        else ClosePopup();
+    }
+
     private void OnPointerDown(PointerDownEvent evt)
     {
         if (evt.Button != 0) return;

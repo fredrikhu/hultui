@@ -1,7 +1,8 @@
 using Xunit;
 
-// A HeadlessSession owns process-global state: Application.Current, the static
-// AnimationManager tween list, ReactiveRuntime's scheduler, and the thread's
-// SynchronizationContext. Two sessions alive at once would corrupt each other,
-// so all tests in this assembly run sequentially.
+// A HeadlessSession switches process-global state to itself when a test drives it:
+// Application.Current, the static AnimationManager tween list, the thread's
+// SynchronizationContext; and ReactiveRuntime's scheduler is static. Sessions may
+// live side by side but are driven one thread at a time, so all tests in this
+// assembly run sequentially.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

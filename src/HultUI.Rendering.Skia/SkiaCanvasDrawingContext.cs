@@ -115,6 +115,98 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
         Canvas.DrawText(text, x, y, font, Fill(color));
     }
 
+    public void DrawText(string text, Point position, Color color, float fontSize, Color halo, float haloWidth)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        if (halo.A > 0 && haloWidth > 0)
+        {
+            var font = _owner.PooledCanvasFont;
+            font.Size = fontSize;
+            if (_owner.CanvasTypeface is { } pinned) font.Typeface = pinned;
+            float x = Bounds.X + position.X, y = Bounds.Y + position.Y + fontSize;
+            // The glyph outlines, stroked with round joins: an even rim however the text is placed.
+            using var path = font.GetTextPath(text, new SKPoint(x, y));
+            var paint = Stroke(halo, haloWidth);
+            paint.StrokeJoin = SKStrokeJoin.Round;
+            paint.StrokeCap = SKStrokeCap.Round;
+            Canvas.DrawPath(path, paint);
+        }
+        DrawText(text, position, color, fontSize);
+    }
+
+    public float MeasureText(string text, float fontSize)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        var font = _owner.PooledCanvasFont;
+        font.Size = fontSize;
+        if (_owner.CanvasTypeface is { } pinned) font.Typeface = pinned;
+        return font.MeasureText(text);
+    }
+
+    public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect, ImageSampling sampling = ImageSampling.Default)
+    {
+        var abs = new Rect(Bounds.X + destRect.X, Bounds.Y + destRect.Y, destRect.Width, destRect.Height);
+        _owner.DrawImage(source, abs, sourceRect, sampling);
+    }
+
+    public void FillPolygon(ReadOnlySpan<Point> points, Color fill)
+    {
+        if (points.Length < 3 || fill.A == 0) return;
+        _owner.FillPolygon(Offset(points, out var rented), fill);
+        Return(rented);
+    }
+
+    public void DrawPolyline(ReadOnlySpan<Point> points, Color color, float strokeWidth)
+    {
+        if (points.Length < 2 || color.A == 0) return;
+        _owner.DrawPolyline(Offset(points, out var rented), color, strokeWidth);
+        Return(rented);
+    }
+
+    // The save counts of this callback's open pushes, innermost last.
+    private readonly List<int> _saves = new();
+
+    public void PushClip(Rect rect)
+    {
+        _saves.Add(Canvas.Save());
+        Canvas.ClipRect(ToAbsSkRect(rect));
+    }
+
+    public void PushTransform(System.Numerics.Matrix3x2 m)
+    {
+        _saves.Add(Canvas.Save());
+        // The matrix is in canvas-local coordinates and every draw here adds Bounds' origin,
+        // so conjugate by that origin: T(origin) · M · T(-origin).
+        Canvas.Translate(Bounds.X, Bounds.Y);
+        var sk = new SKMatrix(m.M11, m.M21, m.M31, m.M12, m.M22, m.M32, 0f, 0f, 1f);
+        Canvas.Concat(in sk);
+        Canvas.Translate(-Bounds.X, -Bounds.Y);
+    }
+
+    public void Pop()
+    {
+        if (_saves.Count == 0) return;
+        Canvas.RestoreToCount(_saves[^1]);
+        _saves.RemoveAt(_saves.Count - 1);
+    }
+
+    public void PopAll()
+    {
+        if (_saves.Count == 0) return;
+        Canvas.RestoreToCount(_saves[0]);
+        _saves.Clear();
+    }
+
+    private ReadOnlySpan<Point> Offset(ReadOnlySpan<Point> points, out Point[] rented)
+    {
+        rented = System.Buffers.ArrayPool<Point>.Shared.Rent(points.Length);
+        for (int i = 0; i < points.Length; i++)
+            rented[i] = new Point(Bounds.X + points[i].X, Bounds.Y + points[i].Y);
+        return rented.AsSpan(0, points.Length);
+    }
+
+    private static void Return(Point[] rented) => System.Buffers.ArrayPool<Point>.Shared.Return(rented);
+
     // Coordinates in ICanvasDrawingContext are relative to Bounds
     private SKRect ToAbsSkRect(Rect r) =>
         new(Bounds.X + r.X, Bounds.Y + r.Y, Bounds.X + r.X + r.Width, Bounds.Y + r.Y + r.Height);

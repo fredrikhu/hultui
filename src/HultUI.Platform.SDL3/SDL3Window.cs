@@ -143,6 +143,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public bool ActivatedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
 
+    /// <summary>Set by the framework while it draws a frame of this window: the event watcher
+    /// then leaves a new size pending instead of resizing the surface under the frame.</summary>
+    internal bool DrawingFrame { get; set; }
+
     /// <summary>
     /// Invoked from the event watcher during a Win32 modal resize loop,
     /// when <see cref="SDL_PollEvent"/> is blocked and the main loop cannot
@@ -692,6 +696,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     if (!evt->window.windowID.Equals(window.WindowId))
                         break;
 
+                    // Inside a frame of this window (a wait in its draw pumped the size loop's
+                    // messages): resizing now disposed the canvas under it, and the rest of the
+                    // frame drew unscaled and uncleared onto a fresh one. The size stays pending
+                    // for the drag's next event or the loop's next pass, which read it.
+                    if (window.DrawingFrame)
+                    {
+                        window.ResizePending = true;
+                        break;
+                    }
+
                     bool changed = window.UpdateSize();
 
                     // Win32 enters a modal resize loop (WM_ENTERSIZEMOVE) that
@@ -818,11 +832,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             ValidateRect(GetWin32Hwnd(), 0);
     }
 
+    /// <summary>Set by <see cref="PollAllEvents"/> when SDL reported a display added, removed,
+    /// moved, rotated or re-scaled; cleared by the platform as it re-lists the monitors.</summary>
+    internal static bool DisplaysChanged { get; set; }
+
     /// <summary>
     /// Polls all SDL events and routes them to the correct window.
     /// Input events are dispatched via each window's EventTranslator.
     /// Returns false if a quit event was received.
     /// </summary>
+
     public static bool PollAllEvents(Action<SDL3Window>? onWindowClose = null)
     {
         bool quit = false;
@@ -840,6 +859,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             {
                 case (uint)SDL_EventType.SDL_EVENT_QUIT:
                     quit = true;
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_ADDED:
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_REMOVED:
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_MOVED:
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_ORIENTATION:
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED:
+                    // The desktop changed; the platform re-lists its monitors once the queue is
+                    // drained. Not routed to a window: a display event's id is a display's, and
+                    // it sits where a window event keeps its window id.
+                    DisplaysChanged = true;
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -1197,6 +1229,36 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         _normalBounds = (fit.X, fit.Y, fit.Width, fit.Height);
         // A hidden window holds the request until it is shown, so it maps maximized.
         if (fit.Maximized) SDL_MaximizeWindow(_window);
+    }
+
+    /// <summary>Every display SDL knows, in SDL window coordinates: bounds, usable bounds,
+    /// content scale, refresh rate, and which one is primary.</summary>
+    internal static List<MonitorInfo> SdlMonitors()
+    {
+        var monitors = new List<MonitorInfo>();
+        int count;
+        var ids = SDL_GetDisplays(&count);
+        if (ids == null) return monitors;
+        try
+        {
+            var primary = SDL_GetPrimaryDisplay();
+            for (int i = 0; i < count; i++)
+            {
+                var id = ids[i];
+                SDL_Rect b, u;
+                if (!SDL_GetDisplayBounds(id, &b)) continue;
+                if (!SDL_GetDisplayUsableBounds(id, &u)) u = b;
+                float scale = SDL_GetDisplayContentScale(id);
+                var mode = SDL_GetCurrentDisplayMode(id);
+                float hz = mode == null ? 0f : mode->refresh_rate;
+                string name = SDL_GetDisplayName(id) ?? $"Display {i + 1}";
+                monitors.Add(new MonitorInfo(((uint)id).ToString(System.Globalization.CultureInfo.InvariantCulture), name,
+                    new Rect(b.x, b.y, b.w, b.h), new Rect(u.x, u.y, u.w, u.h),
+                    scale > 0 ? scale : 1f, id == primary, hz));
+            }
+        }
+        finally { SDL_free(ids); }
+        return monitors;
     }
 
     /// <summary>The usable bounds of every display, in SDL window coordinates.</summary>

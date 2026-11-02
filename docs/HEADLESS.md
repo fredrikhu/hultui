@@ -150,6 +150,70 @@ window.DumpAccessibilityTree();                        // debugging
 
 A handle pairs the snapshot (`Name`, `Value`, `Role`, `Bounds`, `IsToggled`, …) with the live element. Interactions (`handle.Click()`) inject input at the element's *current* position; snapshot properties are frozen at query time — re-query after interacting.
 
+### Locators and expectations
+
+A Playwright-style layer over the same tree, on **virtual** time. A locator is lazy — it
+resolves against the current tree every time it is used — and belongs to its window, hence its
+session:
+
+```csharp
+using static HultUI.Headless.HeadlessExpect;
+
+session.GetByRole(AccessibilityRole.Button, "Save").Click();       // name: case-insensitive substring
+session.GetByLabel("Email").Fill("a@b.c");                          // select all + type
+session.GetByTestId("search-box").Press(KeyCode.Enter);             // AutomationId
+session.GetByRole(AccessibilityRole.ComboBox).SelectOption("Beta");
+session.GetByRole(AccessibilityRole.Checkbox, "Remember me").Check();
+var rows = session.GetByRole(AccessibilityRole.Group);
+rows.Filter("Beta").GetByRole(AccessibilityRole.Button, "Delete").Click();   // chained, within
+rows.First / rows.Nth(2) / rows.Count / rows.All() / rows.Resolve();
+
+Expect(session.GetByText("Saved")).ToBeVisible();                   // pumps until true
+Expect(rows).ToHaveCount(2);
+Expect(session.GetByLabel("Email"), TimeSpan.FromSeconds(1)).ToHaveValue("a@b.c");
+```
+
+- **Matching.** `GetByRole(role, name?, exact?)` and `GetByText(text, exact?)` match a name (or,
+  for text, a value) as a case-insensitive, whitespace-normalised substring; `exact: true` is
+  ordinal equality. `GetByLabel` finds a control (field, checkbox, combo, slider, button) whose
+  accessible name matches, or the first control after a matching label among its siblings —
+  HultUI has no label-for association, so the "label, then field" row is the convention.
+  `GetByTestId` is the `AutomationId`. The window's root node is searched too. On a
+  `HeadlessWindow` the text form is `GetByText(text, exact)` — the one-argument
+  `GetByText(text)` is still the eager query above.
+- **Nodes without an element are found too.** A virtual list's rows are `ListItem` nodes the
+  list makes (its realised row elements are not in the tree), and an element's described
+  content (`IAccessibleContentSource`) is nodes as well. A locator matches them like any node;
+  the `HeadlessElement` it gives pairs the node with the element that owns it (the list), and a
+  click goes to the node's own place. The eager queries above skip such nodes — use a locator
+  to find a row, or to check that a name is nowhere in the window.
+- **Strict.** An action, or an assertion on one element, that matches several fails at once
+  with `Strict mode violation`, listing each match (role, name, bounds). `ToHaveCount` is the
+  one that is not strict.
+- **Actions wait.** `Click`, `Fill`, `Press`, `Hover`, `Check`/`Uncheck`, `SelectOption` pump
+  frames until exactly one element matches and it is visible (non-empty bounds, not offscreen),
+  enabled and *stable* — the same bounds on two frames in a row — then act through the input
+  driver above (a click at the centre of `WindowBorderBox`). An element whose centre a scroll
+  view hides — partly or wholly scrolled away, a list row below the fold — is scrolled into
+  view first, and one bigger than the view is clicked at the centre of its visible part, so a
+  click never lands on whatever lies under a clipped centre. So every action costs at least one
+  frame of virtual time; a test of double-click timing uses the driver directly. A timeout says
+  what it was waiting for (`element is disabled: Button "Send" bounds=…`).
+  `SelectOption` drives a `Dropdown` the way a person does: a click to open, Home, Down, Enter.
+- **Expectations** (`HeadlessExpect.Expect(locator, timeout?)`): `ToBeVisible`, `ToBeHidden`,
+  `ToBeEnabled`, `ToBeDisabled`, `ToBeChecked(bool = true)`, `ToHaveText` (name, else value,
+  whitespace normalised), `ToContainText`, `ToHaveValue` (a field's text, a dropdown's choice),
+  `ToHaveCount`. Each asks before every frame and fails with `LocatorAssertionException`:
+  what was expected, what was found, and the matches.
+- **Timeouts are virtual.** Default 5 s of the session's clock (`session.LocatorTimeout`), or
+  per call. A wait for a 1.5 s timer takes 1.5 s of virtual time and milliseconds of real time;
+  a wait never sleeps, so it does not cover raw background threads — that is still
+  `PumpUntil`'s job.
+- **Synchronous first.** The `…Async` forms run in place and return a finished (or faulted)
+  task; the pump belongs on the test thread.
+- **Several sessions.** A locator pumps only its own session; `session.GetByX` searches the
+  primary window, `window.GetByX` another.
+
 To test the accessibility *pipeline* itself (the per-frame build/diff that feeds UIA/AT-SPI), install a recording bridge:
 
 ```csharp
@@ -208,6 +272,26 @@ using var image = window.CapturePixels();   // SKImage, layout size × scale
 
 Sessions support DPI testing: `HeadlessSession.Create(scale: 2f)` or `window.SetScale(1.5f)`.
 
+## Simulated Monitors
+
+A session has no desktop unless it is given one. `HeadlessOptions.Monitors` simulates monitors, so multi-monitor code — `Application.Monitors`, `Window.MoveToMonitor`, `Application.MonitorsChanged` — runs, and renders, on a machine with one screen:
+
+```csharp
+var desk = HeadlessMonitors.Row(taskBar: 48, (1920, 1080), (2560, 1440), (1440, 2560));
+using var session = HeadlessSession.Create(options: new HeadlessOptions { Monitors = desk });
+var images = session.CreateWindow("Images");
+images.Window.MoveToMonitor(session.Monitors[2], MonitorFit.Fullscreen);
+using var frame = images.CapturePixels();                    // 1440 × 2560: the portrait monitor
+
+session.SetMonitors(HeadlessMonitors.Row((1920, 1080)));      // unplug two
+session.PumpFrame();                                          // MonitorsChanged fires here
+```
+
+- **Placement is applied.** With monitors, a placement is fitted to the work areas and moves and resizes the surface; maximized fills the monitor's work area, full screen its bounds, and the window takes the monitor's `Scale`. Bounds are pixels, as on Windows. Without monitors, placement is only recorded, as before.
+- **Hot-plug like an OS.** `SetMonitors` moves windows off a monitor that went (onto the nearest remaining one), re-fills maximized and full-screen ones, and raises `MonitorsChanged` from the next `PumpFrame`'s event pump — not from inside `SetMonitors`.
+- **Windows-like windows, opt-in.** `HeadlessOptions.WindowsFrame = new()` makes the windows behave as HultUI's SDL3 window does on Windows, so placement code that breaks on real monitors breaks headless too: `Placement` is the outer rectangle, and a borderless window's content (`HeadlessWindow.ContentBounds`) is inset by the invisible resize borders round its sides and bottom (`ResizeBorders`, default Windows 11's: 8 px at 100 %, 11 at 150 %); `Maximize`/`Restore` of a borderless window are posted and land on the next pump, so a placement set on a shown maximized window is undone by its restore landing after the move; a move onto a monitor at another scale changes the window's scale and raises `Resized` on the next frame; `HeadlessWindow.Moved` is raised from the pump after a move, and `HeadlessWindow.MoveByUser` stands in for the person dragging the window. See `HeadlessWindowsFrame`.
+- `HeadlessMonitors.Row` stands monitors side by side, top edges aligned, the first primary (with the optional task bar); `HeadlessMonitors.Create` makes one anywhere, at any scale.
+
 **Without golden options, do not assert pixel-exact text across OSes.** Fonts come from the system (`SKFontManager.Default`), so glyphs and text metrics differ between Windows and Linux. Assert on behavior, semantics, and your own drawing — or use golden images, below, which pin the fonts.
 
 ## Golden Images
@@ -241,16 +325,34 @@ GoldenImage.Match(session.Window, "my-panel");   // Golden/my-panel.png beside t
 
 ## Test Isolation
 
-A session owns process-global state: `Application.Current`, the animation list, and the thread's `SynchronizationContext`. Two live sessions would corrupt each other, so:
+A session is a whole application: its own main-thread queue, `SynchronizationContext`, tweens, `AsyncLoader` queue and clock. Process-wide state (`Application.Current`, the animation list, the thread's `SynchronizationContext`, the UI-thread binding) follows the session the test drives, so:
 
-- **one session at a time**, created and disposed per test (`using var session = …`),
-- **disable test parallelization** in the assembly:
+- **create and dispose a session per test** (`using var session = …`),
+- **disable test parallelization** in the assembly — sessions are driven from one thread at a time:
 
 ```csharp
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 ```
 
-`Dispose` resets everything — animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored.
+`Dispose` resets everything — its animations are cancelled, `Application.Current` clears, and the previous `SynchronizationContext` (xunit's own, under xunit) is restored. A session a test failed to dispose does not stop the next one being created; it stays alive beside it, and nothing of it reaches the new one.
+
+`HeadlessSession.Created` is raised on the creating thread for every new session. Test infrastructure uses it to find a test's sessions without each test handing them over — to save each window's frame and accessibility tree when the test fails, for instance. Such a hook works on the test's thread in the middle of the test, so it has two more things to look at: `session.IsEntered` (the session the test has entered last, to enter again when it is done with the others) and `window.IsDrawingFrame` (true for code running inside a frame — a build or draw callback that threw — where no other frame can be drawn, so `CapturePixels` draws nothing and `Window.SaveFrame` waits for a later one).
+
+### Sessions side by side
+
+Two (or more) sessions may be alive at once — two desks of one system, each signed in as a different user. A session's pumps, `RunLoop`, input, `SetRoot` and `CreateWindow` *enter* its application: `Application.InvokeOnMainThread`, `await` continuations, new tweens and `AsyncLoader` loads from code on that thread go to it. Work that code starts carries it along (it flows with the `ExecutionContext`), so a worker started by session A posts to A even while the test drives B. Each session's frames step only its own tweens and drain only its own queue; disposing one leaves the other running.
+
+```csharp
+using var a = HeadlessSession.Create();
+using var b = HeadlessSession.Create();
+a.Window.SetRoot(DeskA());                 // enters A
+b.Window.SetRoot(DeskB());                 // enters B
+a.Enter();                           // before calling A's app code directly
+storeA.SignIn("reader-a");
+b.PumpUntil(() => b.Window.FindByText("Locked by reader-a") is not null);
+```
+
+Call `session.Enter()` before a test calls one session's app code directly (a store, a component's constructor); `session.Application.Post(action)` posts to a session whatever is current. Work started with no session entered (a `Thread` of its own, a callback that does not flow the `ExecutionContext`) goes to the session entered last, as does work started by a session since disposed. Only headless applications run side by side: a real window beside any other application still throws.
 
 It does not stop work already on another thread. What the framework posts back for it — an `AsyncLoader` retry still waiting out its backoff, a pooled load — goes to the application that started it, so the next session neither wakes for it nor runs it (it once did: a failed load's retry, 0.5 s after its test ended, woke whichever test came next). A test's own `Task.Run` that posts with `Application.InvokeOnMainThread` reaches whichever session is current when it lands: wait for it before the test returns. For the same reason a session's wake count (`Platform.WakeCalls`) takes wakes from any thread: assert that a call asks for no wake where the wake is asked for (`AccessibilityActionRouter.WakesAsked`), never as an unchanged count across a real sleep.
 

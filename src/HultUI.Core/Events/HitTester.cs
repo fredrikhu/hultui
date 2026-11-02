@@ -86,6 +86,28 @@ public static class HitTester
         return element.IsHitTestVisible ? element : null;
     }
 
+    /// <summary>
+    /// Maps a point in window coordinates into the untransformed layout space of
+    /// <paramref name="element"/> — the space its <c>Layout.Absolute*</c> boxes are in — by
+    /// undoing the <see cref="Element.Transform"/> of every ancestor and of the element itself,
+    /// outermost first, as hit testing does. Without transforms on the way it returns
+    /// <paramref name="windowPoint"/> unchanged. What <see cref="PointerEvent.LocalPosition"/>
+    /// is measured from, so a drag inside a scaled subtree reads in the subtree's own units.
+    /// </summary>
+    public static Point ToElementSpace(Element element, Point windowPoint)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        List<Element>? transformed = null;
+        for (var e = element; e is not null; e = e.Parent)
+            if (e.Transform is { } t && !t.IsIdentity)
+                (transformed ??= []).Add(e);
+        if (transformed is null) return windowPoint;
+        var p = windowPoint;
+        for (int i = transformed.Count - 1; i >= 0; i--)
+            p = InverseTransformPoint(transformed[i], transformed[i].Transform!.Value, p);
+        return p;
+    }
+
     private static Point InverseTransformPoint(Element element, Transform2D t, Point p)
     {
         var b = element.Layout.AbsoluteBorderBox;

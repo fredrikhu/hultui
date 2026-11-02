@@ -21,6 +21,7 @@ public sealed partial class HeadlessWindow
         _session = session;
         Window = window;
         _platform = platform;
+        _platform.Entering ??= session.Enter;
     }
 
     /// <summary>The framework window under test.</summary>
@@ -128,7 +129,11 @@ public sealed partial class HeadlessWindow
         return router;
     }
 
-    public void SetRoot(Element root) => Window.SetRoot(root);
+    public void SetRoot(Element root)
+    {
+        _session.Application.Enter();
+        Window.SetRoot(root);
+    }
 
     /// <summary>
     /// Resizes the client area, in layout units, and relayouts immediately —
@@ -149,6 +154,34 @@ public sealed partial class HeadlessWindow
     }
 
     /// <summary>
+    /// Raised from the event pump (the next <see cref="HeadlessSession.PumpFrame()"/>) after the
+    /// window's outer position changed — placed, maximized, restored, moved by the person or off
+    /// a monitor that went — as SDL's window-moved event is. Windows-like windows only
+    /// (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// </summary>
+    public event Action? Moved
+    {
+        add => _platform.Moved += value;
+        remove => _platform.Moved -= value;
+    }
+
+    /// <summary>
+    /// Where the window's content (client area) is, in screen pixels: what <c>ClientToScreen</c>
+    /// and <c>GetClientRect</c> give on Windows. Smaller than <see cref="Window.Placement"/> by the
+    /// invisible resize borders. Windows-like windows only (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// </summary>
+    public Core.Primitives.Rect ContentBounds => _platform.ContentBounds;
+
+    /// <summary>
+    /// Stands in for the person moving or resizing the window by its title bar or borders (or
+    /// snapping it): the outer rectangle, in pixels, is set as given, without fitting, and a
+    /// maximized window comes out of maximized. <see cref="Moved"/> follows from the next pump.
+    /// Windows-like windows only (<see cref="HeadlessOptions.WindowsFrame"/>).
+    /// </summary>
+    public void MoveByUser(int x, int y, int width, int height) =>
+        _platform.MoveByUser(new Core.Platform.WindowPlacement(x, y, width, height, false));
+
+    /// <summary>
     /// Renders a fresh frame and returns its pixels. The caller owns the
     /// returned image and must dispose it. Pixel dimensions are layout size ×
     /// scale. Cross-machine caution: text glyphs come from system fonts unless
@@ -161,4 +194,9 @@ public sealed partial class HeadlessWindow
         _session.RenderNow();
         return _platform.RasterSurface.Snapshot();
     }
+
+    /// <summary>Whether this window is drawing a frame now: true for code running inside one (a
+    /// build, a draw callback), where <see cref="CapturePixels"/> cannot draw another and
+    /// <c>Window.SaveFrame</c> waits for the next.</summary>
+    public bool IsDrawingFrame => Window.IsDrawingFrame;
 }

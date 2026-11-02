@@ -24,10 +24,13 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementId listId, int index)
-    : INativeSimple, INativeFragment
+    : INativeSimple, INativeFragment, IElementBound
 {
     /// <summary>UIA_E_ELEMENTNOTAVAILABLE: what an element that is gone answers.</summary>
     private const int ElementNotAvailable = unchecked((int)0x80040201);
+
+    /// <summary>An item of a list that left the tree is gone with it.</summary>
+    public bool Gone => bridge.IsGone(listId);
 
     /// <summary>The owning list, so ItemContainer can decode a startAfter item.</summary>
     public ElementId ListId => listId;
@@ -55,6 +58,7 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
         {
             UiaInterop.UIA_InvokePatternId => new UiaInvokeProvider(bridge, id),
             UiaInterop.UIA_SelectionItemPatternId => new UiaSelectionItemProvider(bridge, id),
+            UiaInterop.UIA_ScrollItemPatternId => new UiaScrollItemProvider(bridge, id),
             _ => null,
         };
         pPatternProvider = provider is null ? IntPtr.Zero : NativeProvider.Create(provider);

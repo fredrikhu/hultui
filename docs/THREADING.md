@@ -144,6 +144,16 @@ the timer's rate, about 64 frames a second: the window leaves posted work undraw
 only while a source has asked for a frame in the last 100 ms. Until round 5 of
 plan 17 such a source froze for the whole move or held drag.
 
+Any wait on the UI thread inside a frame (`Parallel.For`, `Task.Wait`, a contended
+`lock`) can pump messages on Windows, and during a live resize those raise the
+watcher's resize events. A window never draws a frame inside one of its own:
+`Window.RenderFrame` returns at once while it runs, and the live-resize frame
+asked for from inside it is left for the drag's next event (the resize stays
+pending). Nor is its surface resized under it: the new size is only noted, and
+read once the frame is over. And a frame that throws is only one bad frame: the next one starts from
+the canvas's base save count, so a clip or layer the throw left pushed does not
+hold every later frame inside it.
+
 The converse holds too: a frame must not wait for a thread that is waiting for
 that frame. mpv's core waits, for up to 200 ms after every load and seek, for the
 UI thread to draw the first frame. So the mpv backend never makes a synchronous

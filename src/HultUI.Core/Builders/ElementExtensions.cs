@@ -194,6 +194,8 @@ public static class ElementExtensions
     /// <summary>Sets <see cref="TextAreaElement.Highlights"/>: backgrounds over the spans, such as
     /// find matches.</summary>
     public static TextAreaElement Highlights(this TextAreaElement el, IReadOnlyList<TextHighlight>? highlights) { el.Highlights = highlights; return el; }
+    /// <summary>Makes the area as tall as its wrapped text; see <see cref="TextAreaElement.GrowsWithContent"/>.</summary>
+    public static TextAreaElement GrowsWithContent(this TextAreaElement el, bool value = true) { el.GrowsWithContent = value; return el; }
     public static TextInputElement Spans(this TextInputElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
 
     // ──── Checkbox properties ────

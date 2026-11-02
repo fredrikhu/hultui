@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HultUI.Rendering.Skia;
 
-public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
+public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface, ISkiaFrameCapture
 {
     private readonly GRGlInterface _glInterface;
     private readonly GRContext _grContext;
@@ -113,6 +113,24 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
     {
         _surface?.Canvas.Flush();
         _grContext.Flush();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Read from the back buffer before the swap, after which its contents are undefined.
+    /// The window's back buffer is its own under a compositor, so a window behind others reads
+    /// whole.</remarks>
+    public SKImage PresentCapturing()
+    {
+        try
+        {
+            return _surface is null
+                ? throw new InvalidOperationException("Surface not initialized — call Resize first.")
+                : SkiaFrameCapture.Copy(_surface, _width, _height);
+        }
+        finally
+        {
+            Present();
+        }
     }
 
     public void Dispose()
