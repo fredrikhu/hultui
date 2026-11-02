@@ -7,7 +7,7 @@ file after every step and commits it with the step's work. Full survey reports a
 - **Round:** 7
 - **Phase:** build — round 7, step 2 next (step 1 landed). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
   seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
-  questions 1–4 are open and block only the items marked **(user)**. Round 6 released: merge 0b8e684a, CI fixes
+  questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
   1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
   survey's start (reset 2026-11-08 03:00 UTC; extra usage off); pause at 90 % (user, 2026-10-27). The total comparison
   of rounds 1–5 is in [`17-reports/total-r1-r5.md`](17-reports/total-r1-r5.md). Older rounds are in
@@ -122,7 +122,7 @@ the report lines its brief quotes (`r7-k` = `17-reports/r7-k-<area>.md`).
    126.3 → ~2 KB a character); issue-list keys write `_composerRevision` (IssueAutocomplete.cs:158–162: 212 → ~34
    KB); the composer writes its revision only when a shown thing changes (JunctionApp.Changes.cs:1206: 13.5 → ~1.2);
    ELEMENTS.md: wire `SelectionChanged` through `IsStale`; a renamed file's old side read at the old path
-   (JunctionApp.Highlight.cs:275, colour bug). **(user, question 4)** Changes' caret drawn by the list (2 rows remade a
+   (JunctionApp.Highlight.cs:275, colour bug). **(question 4: yes)** Changes' caret drawn by the list (2 rows remade a
    caret key; with a reader ~1 tree a key from the remake; bridge off should fall as History's did).
 9. **Vesper Brief** (6; r7-6 Candidate 2, Waiting) — marks and cut in `BriefKeptCell`, out of the Brief state
    (CommanderApp.Views.cs:505, 598): Brief Insert 480.3 → ~35 KB (−93 %; 437 cells made a mark); trace Brief
@@ -131,17 +131,17 @@ the report lines its brief quotes (`r7-k` = `17-reports/r7-k-<area>.md`).
     (MeridianApp.Chaining.cs:48–58: the first key after a send drops focus, the second goes nowhere); the environment
     prompt's double build; URL typing skips the editor build while Headers, Body or Auth is open, comparing the Params
     and Chain counts and the stale banner (MeridianApp.Requests.cs:338, 448–459: 64.3 → ~7 KB a character); REACTIVITY.md:
-    a child that comes and goes ahead of same-type siblings needs a key. **(user, question 4)** History's drawn
+    a child that comes and goes ahead of same-type siblings needs a key. **(question 4: yes)** History's drawn
     selection (68.7 KB, 2.5 rows a key → −25…−30 %).
 11. **Aperture Home** (6/8; r7-6 Candidate 8, r7-8 Candidate 4) — a Home arrow builds no view, or only the shelf it
     leaves and the one it reaches, cards handed back (ApertureApp.Cursor.cs:117, ApertureApp.Home.cs:84): 64.6–68.1 →
-    ~15 KB a key (−78…−95 %; grows with each shelf). Suite row: a cursor walk over 5 shelves of 7 cards. **(user,
-    question 3)** a public kept-elements helper in Core, adopted here first.
-12. **syntax-long-line-cap** (5; r7-5 Candidate 4; **(user, question 1)**) — `LineWalk` (SyntaxHighlighter.cs:441-486)
+    ~15 KB a key (−78…−95 %; grows with each shelf). Suite row: a cursor walk over 5 shelves of 7 cards. **(question 3:
+    yes)** a public kept-elements helper in Core, adopted here first.
+12. **syntax-long-line-cap** (5; r7-5 Candidate 4; **(question 1: yes)**) — `LineWalk` (SyntaxHighlighter.cs:441-486)
     tokenizes a long line's first P characters from its start state: tokenizing a line is O(n²) (likely Onigwrap's
     per-search `GetByteCount` over the line); headless a 32k line takes 17 s (JavaScript), 27 s (C#), 0.96 s (JSON); in
     a window it colours 108–4,055 characters for 250 ms of worker time each prefetch.
-13. **context-menu-as-menu** (7; r7-7 Needs the user; **(user, question 2)**) — `ContextMenuElement` in context menus
+13. **context-menu-as-menu** (7; r7-7 Needs the user; **(question 2: yes)**) — `ContextMenuElement` in context menus
     and menu-bar menus read as Menu/MenuItem (UIA MenuItem with Invoke; AT-SPI menu, menu item); a Dropdown's popup stays
     a List. No bytes.
 
@@ -422,20 +422,20 @@ Round 7 questions (asked 2026-11-02). Recommendations in brackets.
 1. **syntax-long-line-cap** (step 12): may a line longer than P characters be coloured only on its first P (P about
    2,000; larger for JSON, which tokenizes ~17× faster)? Today a 32k-character line gets 108–4,055 coloured characters
    for 250 ms of worker time on every prefetch that reaches it, and 15–27 s in headless tests. Lines over ~4k would get
-   more colour, lines between P and ~3k less. [Yes. VS Code goes further: no colour at all over 20,000 characters.]
+   more colour, lines between P and ~3k less. [Yes. VS Code goes further: no colour at all over 20,000 characters.] → **yes, cap it** (2026-11-02).
 2. **context-menu-read-as-list** (step 13): context menus and menu-bar menus are read as a List of ListItems, while
    Junction's and Meridian's popover menus are now Menu and MenuItem. Read them as Menu/MenuItem too (UIA MenuItem with
    Invoke; AT-SPI menu, menu item), and keep a Dropdown's popup a List, as a combo box's is? Readers would hear "menu"
    where they hear "list" today. [Yes. A live NVDA or Narrator check is yours: readers follow menus by focus, and these
-   items move by selection.]
+   items move by selection.] → **yes, read them as menus** (2026-11-02; the live reader check is the user's).
 3. **A public kept-elements helper in Core** (step 11), as `Part` was for parts: Vesper Brief, Vesper Thumbnails and
    Aperture's grid each hand-roll "hand back the unchanged cells" (8 rules in REACTIVITY.md), and Brief's marks slipped
    (437 cells per mark). New public API: key, per-cell state, from the build just before only, live ref, row-place
-   check. [Yes, with Aperture Home as its first user; the others adopt it later.]
+   check. [Yes, with Aperture Home as its first user; the others adopt it later.] → **yes, add it** (2026-11-02).
 4. **List-drawn selection pixels in Meridian History and Junction Changes** (steps 8 and 10), as approved for Junction
    History in round 6: the list draws the selection (and hover tint), so a key remakes no rows. Pixels may change only
    where the selection is drawn. Meridian History −25…−30 % a key; Junction Changes' caret 2 rows a key → 0, and with a
-   reader ~1 tree a key fewer. [Yes, as Junction History.]
+   reader ~1 tree a key fewer. [Yes, as Junction History.] → **yes, both** (2026-11-02).
 
 Round 6 questions 1–9 and round 5's question 5, all answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-6).
 Recommendations in brackets.
@@ -679,3 +679,6 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
   `concurrencyLevel: 1`; on per-key paths never `foreach` over an `IReadOnlyList` nor pass a struct collection to an
   interface parameter; overlay content never mounts or unmounts, so what an unmount releases needs an explicit release
   when the overlay closes; AOT TableView 10k sort moves ±6 % with code placement, JIT is the check.
+- 2026-11-02: the user answered round 7 questions 1–4: all yes (long lines coloured on their first ~2,000
+  characters; context menus and menu-bar menus read as menus, the live reader check theirs; a public kept-elements
+  helper in Core, Aperture Home first; list-drawn selection in Meridian History and Junction Changes).
