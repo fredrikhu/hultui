@@ -583,7 +583,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// item rows it is kept while its item is, so a rebuild makes it no more often than another
     /// row. <see cref="SelectionHighlight"/> and <see cref="HoverHighlight"/> go on its background,
     /// under its content, where it is drawn; <see cref="SelectionOverlay"/> goes with it, over it.
-    /// <see cref="ScrollRangeIntoView"/> leaves a row clear of the row held at the top.
+    /// <see cref="ScrollViewElement.ScrollRangeIntoView"/> leaves a row clear of the row held at the top.
     /// With <see cref="RowsAreComposite"/> the held row is in the accessibility tree where it is
     /// drawn, before the rows on screen; otherwise its item's node is told where it is drawn.
     /// </para>

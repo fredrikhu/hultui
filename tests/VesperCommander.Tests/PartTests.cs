@@ -296,7 +296,10 @@ public class PartTests
         After("a folder measured", () =>
         {
             t.Press(KeyCode.Space);
-            s.PumpUntil(() => t.Field<System.Collections.IDictionary>("_dirSizes").Count == 1);
+            // Until the walk is done, not only started: it ends on a worker and posts its build,
+            // so a full build made before that build runs would read a total the parts don't show.
+            s.PumpUntil(() => t.Field<System.Collections.IDictionary>("_dirSizes").Values.Cast<object>()
+                .Any(d => (bool)d.GetType().GetField("Done")!.GetValue(d)!));
             s.PumpFrames(30);
         });
         After("a file added and refreshed", () =>
