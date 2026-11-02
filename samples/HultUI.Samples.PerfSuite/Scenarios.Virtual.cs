@@ -100,6 +100,14 @@ static partial class Scenarios
             "Press Down in the same grid, past the rows on screen and back: the key makes the row the cursor left and the row it reached, and the row scrolled in",
             ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6)) { Width = 1440, Height = 900 };
 
+        yield return new Scenario("virtual/image grid walk Right, 600 cards, cards handed back",
+            "The same walk with the rows keyed by their place and the cards by their films: a row made again hands back the cards the key did not change, and the patch puts them back untouched, so a key makes the two cards it moved between",
+            ctx => ImageGridWalk(ctx, KeyCode.Right, KeyCode.Left, turn: 5, keepCards: true)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("virtual/image grid walk Down, 600 cards, cards handed back",
+            "The same walk Down: the two rows the cursor moved between keep all but the card it left and the card it reached; a row scrolled in is made whole",
+            ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6, keepCards: true)) { Width = 1440, Height = 900 };
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>

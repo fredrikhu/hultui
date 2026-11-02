@@ -565,6 +565,29 @@ picture as the cache had it) and let them all go when anything every card shows 
 sizes, the theme, a result set). A cursor move then makes the two cards it moved between: Down
 88.3 → 42.9 KB a key, cards made 11 → 3; a mark, which makes every row again, 315.7 → 56.3 KB.
 
+Aperture's library is the same shape (round 6, step 13), and adds four lessons:
+
+- **Compare what the card shows, not how it got there.** A poster's state holds the picture it
+  draws, or null for the placeholder: loading and failed look the same, so a failure makes no card.
+- **Ask for what a make keeps fresh before deciding.** The picture cache is asked for every card of
+  a row made again, handed back or not: that keeps a picture on screen recent in the cache, and is
+  how a row made for a landing finds the one card that landed. A kept card keeps its image element,
+  and a card patched keeps it too, so nothing flashes.
+- **What a card needs is a row still in the list.** Its row's parent is the list: a row the list
+  let go of is out of the tree. A row on screen is not asked for its cards, since a row is made for
+  the places it holds and only a change of columns, which makes them all again, moves a place to
+  another row. Then the card moves with its place: a resize across a column count 341.5 → 118.9 KB.
+- **A kept element keeps the keyboard, and what the code thought would go.** The cursor focused its
+  ref's card after the build, but a list makes its rows in the frame, so the ref still held the
+  card the cursor left. That card used to go with its row and the focus with it; kept, it would
+  have held the keyboard one card behind the cursor. Note which place a ref's card was made for.
+  The other side is a gain: a card Tab reached no longer loses the keyboard when its row is made.
+
+Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT within 1 %: Right
+115.0 → 87.3 KB (−24 %; with UI Automation 128.1 → 87.3, and whole trees 0.34 → 0 a key), Down
+181.9 → 114.1 KB (−37 %). The suite pins it: `virtual/image grid walk Right, 600 cards` against
+`…, cards handed back` (49 → 23 KB, two cards made).
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole

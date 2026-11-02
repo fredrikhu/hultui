@@ -314,7 +314,7 @@ public class WindowFitTests
     }
 
     /// <summary>What a subtree shows: element kinds, text, names and where each element lies.</summary>
-    private static string Sig(Element e)
+    internal static string Sig(Element e)
     {
         var sb = new StringBuilder();
         void Walk(Element el, int depth)

@@ -18,10 +18,11 @@ static partial class Scenarios
     /// <summary>A walk in an <see cref="ImageGridPane"/>: <paramref name="turn"/> presses of
     /// <paramref name="key"/>, as many of <paramref name="back"/>, and again. The walk starts in the
     /// grid's second column, so Right stays on one row of cards, and Down goes past the rows on
-    /// screen. The row reports the rows of cards made a step.</summary>
-    internal static Op ImageGridWalk(Ctx ctx, KeyCode key, KeyCode back, int turn)
+    /// screen. The row reports the rows of cards made a step; with <paramref name="keepCards"/> a
+    /// row made again hands back its unchanged cards, and it reports the cards made.</summary>
+    internal static Op ImageGridWalk(Ctx ctx, KeyCode key, KeyCode back, int turn, bool keepCards = false)
     {
-        var pane = new ImageGridPane(ImageGridFilms(600));
+        var pane = new ImageGridPane(ImageGridFilms(600), keepCards);
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -38,11 +39,11 @@ static partial class Scenarios
         {
             Run = i =>
             {
-                madeBefore = pane.RowsMade;
+                madeBefore = keepCards ? pane.CardsMade : pane.RowsMade;
                 ctx.Window.PressKey(i / turn % 2 == 0 ? key : back);
             },
-            Figure = () => pane.RowsMade - madeBefore,
-            FigureUnit = "rows made",
+            Figure = () => (keepCards ? pane.CardsMade : pane.RowsMade) - madeBefore,
+            FigureUnit = keepCards ? "cards made" : "rows made",
             Check = i =>
             {
                 int steps = (i + 1) % (2 * turn), there = steps <= turn ? steps : 2 * turn - steps;
@@ -87,9 +88,12 @@ sealed record ImageGridFilm(string Id, string Title, string Line, bool Watched, 
 /// a row of cards, every card a focusable button of its own (<c>RowsAreComposite</c>), the cursor
 /// a ring on a card. The owner's Build reads the cursor, and the list keeps a row while its item,
 /// its place and the column the cursor is in there, is equal; a row a key changes is made again
-/// with every card on it, each with its picture, its caption and its badges.
+/// with every card on it, each with its picture, its caption and its badges. With
+/// <paramref name="keepCards"/> the row is keyed by its place and the cards by their films, and a
+/// row made again hands back each card whose cursor did not change (REACTIVITY.md, "Hand back the
+/// elements a key does not change"), as the app's grid does.
 /// </summary>
-sealed class ImageGridPane(List<ImageGridFilm> films) : Component
+sealed class ImageGridPane(List<ImageGridFilm> films, bool keepCards = false) : Component
 {
     private const float CardWidth = 168f, CardHeight = 252f, Caption = 46f, Gap = 16f, Pad = 24f;
     private const float Stride = CardHeight + Caption + Gap;
@@ -122,8 +126,14 @@ sealed class ImageGridPane(List<ImageGridFilm> films) : Component
     /// <summary>How many cards fit across at the scenario's window, 1440 wide.</summary>
     public const int PerRow = 7;
 
+    /// <summary>The cards made so far by place, with the cursor on them, and the live element each is.</summary>
+    private readonly Dictionary<int, (bool Cursor, Ref<BoxElement> Live)> _kept = [];
+
     /// <summary>Rows the template has made.</summary>
     public int RowsMade { get; private set; }
+
+    /// <summary>Cards the template has made.</summary>
+    public int CardsMade { get; private set; }
 
     public int Cursor => _cursor.Peek();
 
@@ -181,11 +191,29 @@ sealed class ImageGridPane(List<ImageGridFilm> films) : Component
         RowsMade++;
         var row = Flex.Row(gap: Gap).AlignItems(AlignItems.FlexStart).Height(CardHeight + Caption)
             .Padding(new Thickness(0, 0, Gap, 0));
+        if (keepCards) row.Key = "row" + r.Row;
         for (int k = 0; k < PerRow; k++)
         {
             int i = r.Row * PerRow + k;
             if (i >= films.Count) break;
-            row.AddChild(Card(films[i], i, k == r.CursorColumn));
+            bool cursor = k == r.CursorColumn;
+            if (keepCards && _kept.TryGetValue(i, out var kept) && kept.Cursor == cursor
+                && kept.Live.Current is { Parent: { } parent } live && parent.Key == row.Key
+                && ReferenceEquals(parent.Parent, _list.Current))
+            {
+                row.AddChild(live);
+                continue;
+            }
+            CardsMade++;
+            var card = Card(films[i], i, cursor);
+            if (keepCards)
+            {
+                var made = new Ref<BoxElement>();
+                card.Key = films[i].Id;
+                card.WithRef(made);
+                _kept[i] = (cursor, made);
+            }
+            row.AddChild(card);
         }
         return row;
     }
