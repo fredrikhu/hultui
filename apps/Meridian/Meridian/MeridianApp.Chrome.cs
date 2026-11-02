@@ -36,32 +36,17 @@ public partial class MeridianApp
     // response alone (ResponseDirty). PartTests holds every part input to what a full build of
     // the parts makes.
 
+    private readonly PartGroup _parts = new();
     private readonly Signal<int> _partRevision = new(0);
     private readonly Signal<int> _responseRevision = new(0);
     private Part? _titleBarPart, _railPart, _treePart, _responseRightPart, _responseBottomPart;
 
     /// <summary>Builds of the title bar, rail, tree and response panel so far, for tests.</summary>
-    internal int PartBuilds { get; private set; }
+    internal int PartBuilds => _parts.Builds;
 
-    /// <summary>A part: a build of the app's that its own effect runs, reading
-    /// <see cref="_partRevision"/> besides whatever the build reads.</summary>
-    private sealed class Part(MeridianApp app, Func<MeridianApp, Element> build, Action<MeridianApp>? afterBuild = null)
-        : Component
-    {
-        public override Element Build()
-        {
-            _ = app._partRevision.Value;
-            app.PartBuilds++;
-            return build(app);
-        }
-
-        // Not after the first build, which runs as the app's build makes the host: the part is
-        // not in the window yet, and the app's own OnAfterBuild comes once it is.
-        protected override void OnAfterBuild()
-        {
-            if (afterBuild is not null && Mount().Parent is not null) afterBuild(app);
-        }
-    }
+    // A part here is a build of the app's that its own effect runs, reading _partRevision besides
+    // whatever the build reads: each takes it as its own revision, and the app's build mounts it
+    // rather than placing it, so a full rebuild reaches the parts through the signal.
 
     // Each part's host is the flex item where the part's root used to be, so it takes the
     // root's place in the layout: a host whose root never shrank never shrinks (FlexShrink(0)
@@ -70,39 +55,39 @@ public partial class MeridianApp
     // tree and the right pane), and the pane at the bottom sizes its host from its own height
     // and floor.
 
-    private Part TitleBarPart => _titleBarPart ??= new(this, static app =>
+    private Part TitleBarPart => _titleBarPart ??= new(_parts, () =>
     {
-        var bar = app.BuildTitleBar();
+        var bar = BuildTitleBar();
         bar.Key = "titlebar";
         return bar;
-    });
+    }, own: _partRevision);
 
-    private Part RailPart => _railPart ??= new(this, static app =>
+    private Part RailPart => _railPart ??= new(_parts, () =>
     {
-        var rail = app.BuildRail();
+        var rail = BuildRail();
         rail.Key = "rail";
         rail.FlexGrow(1);
         return rail;
-    });
+    }, own: _partRevision);
 
-    private Part TreePart => _treePart ??= new(this, static app =>
+    private Part TreePart => _treePart ??= new(_parts, () =>
     {
         // As in BuildResponsePart: a part can hear the revision before the app's rebuild takes
         // it out (outside an event, a signal write runs its effects at once).
-        if (app._workspace is null) return Box.New();
-        var tree = app.BuildTree();
+        if (_workspace is null) return Box.New();
+        var tree = BuildTree();
         tree.Key = "tree";
         tree.FlexGrow(1);
         return tree;
-    });
+    }, own: _partRevision);
 
     // One part per place: the host is the pane's identity in the shell, so a flip replaces the
     // pane instead of patching one shape into the other. The find bar's work that waits for a
     // build (its field taking the keyboard, a reveal) runs after the pane's own builds as well,
     // since a find step rebuilds the pane alone.
     private Part ResponsePart(bool bottom) => bottom
-        ? _responseBottomPart ??= new(this, static app => app.BuildResponsePart(bottom: true), static app => app._responseFind.Service())
-        : _responseRightPart ??= new(this, static app => app.BuildResponsePart(bottom: false), static app => app._responseFind.Service());
+        ? _responseBottomPart ??= new(_parts, () => BuildResponsePart(bottom: true), _partRevision, _responseFind.Service)
+        : _responseRightPart ??= new(_parts, () => BuildResponsePart(bottom: false), _partRevision, _responseFind.Service);
 
     private Element BuildResponsePart(bool bottom)
     {
