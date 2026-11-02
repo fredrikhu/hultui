@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 13 next (steps 1–12 landed, step 8 declined). The week reset on 2026-11-01 (next
+- **Phase:** build — round 6. Step 14 next (steps 1–13 landed, step 8 declined). The week reset on 2026-11-01 (next
   reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
@@ -196,6 +196,10 @@ Re-ranked by the next survey.
   60 ms and 0 → 2 on big files at 33 ms (likely large git strings, unproven); a renamed file's old side is read under
   the new path, so its deletions stay plain (a bug, pre-existing); headless runs have no budget for a long line (a 30 KB
   line took over 15 s; a window keeps its 250 ms).
+- **aperture-leads** (6/8, from step 13) — Home, Detail and Discover keys still build the whole view (Home ~130 KB before
+  parts, an estimate); toasts go through the full `MarkDirty`; Down under UIA still builds 0.33 trees a key; the library
+  cursor never takes real focus, though a code comment says it does (rows are made after `OnAfterBuild`); Junction and
+  Meridian could use `Place()`.
 - **palette-per-row-box** (1, low; step 9) — the palette's rows each keep a box for side padding, ~11 KB a key (15 of
   65 elements), because a list's `Padding` moves its scrollbar and clip. Painting scrollbars at the padding edge would
   remove it; not tried.
@@ -328,6 +332,10 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | a4f798dd, daebfa76, 17504b64, 47a7b51a, 82312fa1, d546eb6e | junction-review-composer-reader | Approved (question 8). **The row that holds the focus opens:** internal, no API; its elements hang under its item's node while it holds the focus, at most one row, every other row stays its item. `RowsAreComposite` measured and declined (DECISIONS: on-screen rows only, each a button; caret key 134.6 KB and 0.34 trees vs 120.4 and 0; wheel 25.2 KB and 0.33 trees vs 13.2 and 0). Reader: editor with role and name, focus, text and caret readable, text-changed told per key, 0 trees; replies the same. Any focusable in an item row of any list is now told (before, silence), one tree per Tab in the review's selectable diff text. Bridge off: every walk same bytes, time within 2 %, 2 KB a key. UIA JIT / AOT: key 2.0 → 2.7 / 2.1 → 2.7 KB, time +3–4 %; caret 0.4 → 1.0 KB; diff walk and wheel flat; open and close 950 → 1,011 KB a step, 0.5 → 1 trees, slowest step's med +24–39 % (closing builds at once). daebfa76: a keystroke in text made on request builds no tree: `a11y/type in rich text beside 300 rows` 86.1 → 8.3 KB, −16…−26 %. Fix on the way: item boxes in mixed-height lists are where rows are drawn (205 offscreen flags corrected). 22 of 23 mutants caught; 0 STALE in 2,920 audits; 392 scenes pixels and focus identical; suite 0 slower, 2 faster JIT + AOT; Fedora passes. Check: Changes' wheel trees are 20 per 120 notches at a notch a frame, like the grid; the 47a7b51a test pins a held header's focus. |
 | 6 | 985adef7 | apps-junction-highlight-prefetch | `TokenizeDiff` (internal, HultUI.Syntax, question 10) stops each side at its last shown line, walks unshown lines for state only, and walks the lines both versions start with once. One worker, one waiting slot; a newer selection cancels; a prefetch never takes the worker from the diff on screen; 120 ms rest for the log's prefetch. KB a key all threads, JIT / AOT: History 60 ms 9,794 → 1,636 / 9,839 → 1,637 (−83 %), 500 ms −61 %; Commit files 100 ms 3,853 → 641 (−83 %), 500 ms −21 %; generated repo 17,580 → 3,564 (−80 %). Workers 673 → 47 Mc; GC pause 0.55 → 0.11 ms; GCs per 100 keys 19/4/0 → 7/4/0.8. UI thread up to +4 KB, cycles within 3 %. Colour lands earlier on Tab (336 → 150 ms) and a file key at rest (max 1,212 → 202), later on a held walk's last key (p90 +30–60 ms). Spans byte-identical over 2,081 files, 15 languages, 934,306 spans. |
 | 6 | 323a3073 | junction-commit-diff-flatten | A diff's rows are made as they're asked for; row models hold no colours, so a landing flattens nothing; find, copy, wrap and review make their rows when needed. Commit file key on the UI thread (150dcf7f): 33–100 ms 551–555 → 214–218 KB (−61 %, UIA −56 %), 500 ms 1,248 → 236 (−81 %, UIA −76 %); 8,000-line files 3,240 → 569 (−83 %, UIA −71 %), UI min −31 / −39 %; row records a key 10–35. Step 12: 421 scenes identical (pixels, a11y, focus); suite 171 rows 0/0 JIT + AOT (AOT baseline = step 11b's publish, same source, the baseline tree's publish failed); Junction 1,075, Syntax 78, Meridian 465 on the final code, Vesper 876 and Headless 1,266 before a last Junction-only edit; 28 reverse edits caught. |
+| 6 | dca932e1 | suite row (image grid) | `virtual/image grid walk Right` and `Down, 600 cards`, with twins `…, cards handed back` from 31997de7: Right 48 → 22 KB, Down 114 → 52 KB. |
+| 6 | 1f4bbda8 | aperture-resize-rebuild | A resize builds only when a build would read something new off the window; size reads sit behind one noting method. 4 px step 71.5 → 2.3 KB (−97 %), builds 1 → 0, UIA 71.9 → 2.6; Home 130.0 → 2.3; item page 77.3 → 14.1; time −1…−3 % (raster dominates headless). `WindowFitTests` walks 16 views against a forced build. |
+| 6 | 31997de7 | composite-row-kept-cards (Aperture) | A grid row made again keeps the cards that didn't change. Right 115.0 → 87.3 KB (−24 %; UIA −32 %, trees 0.34 → 0), Down 181.9 → 114.1 (−37 %), across a column count 341.5 → 118.9 (−65 %). Fix on the way: after a sort, Right focused a card out of the tree and the next key was lost. A card Tab reached now keeps the keyboard. |
+| 6 | 5765d27b, 3a8e621f, e4c2607d, df0bf30b, a267faab | public-part-in-core (API) | Approved (question 3c). **Public `Part(group, build, own, afterBuild)`, `Place(stale)`, `PartGroup.Invalidate()`** in Core (ELEMENTS.md §27). Aperture's title bar and rail on it: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 (−33 %), across a column count 118.9 → 80.8 (−32 %), no part built on any. Whole step: Right −57 %, Down −58 %, resize −97 %, across a column count −76 %. Vesper's, Meridian's and Junction's chrome and composer moved onto it with no behaviour change (scenes 35 / 27 / 421); Junction's `KeptPart` stays (a handed-back element the list patches). Suite 173 rows 0/0 JIT + AOT. Core 5,032, Headless 1,266, Aperture 329, Vesper 876, Meridian 465; Junction 1,072 of 1,075 then 31 rerun after the fix: the whole project goes in the full-suite step. Scene limits: Aperture and Meridian have one theme; the A/A control ran for Aperture only. |
 
 ## Examined, not worth it
 
@@ -781,3 +789,10 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   needs a standing clock there; walk measures need cold reps, a cache hides the first pass; Windows thread and process
   times alias paced bursts, use `QueryProcessCycleTime`. Question 10 for the user. Weekly usage 24 % (641k tokens, but
   11.3 h: three timing chains of 6–7 minute walks).
+- 2026-11-02: step 13 landed (dca932e1..b7a3ded8): Aperture's resize builds only when a build reads something new (−97 %),
+  kept cards and parts take grid keys −57…−58 %, and `Part` is public in Core with Vesper, Meridian and Junction on it.
+  Guideline notes (in REACTIVITY.md): put size reads behind one noting method and compare with the last build, and have
+  that check do what a build did besides (the cursor reveal); a build a loader asks for is a full one, or a rail badge
+  goes stale; a kept element keeps the keyboard; a ref read in `OnAfterBuild` lags a list's rows. Trap: `link.exe` fails
+  past MAX_PATH publishing the suite from the scratchpad (native-path properties in `r6b13\pub-suite.ps1`; likely step
+  12's publish failure too). Weekly usage 28 % (620k tokens, 2.9 h).
