@@ -84,11 +84,17 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // look at any entry while none is older than the last frame (a sweep on every new blob past
     // the bound was O(n²)). The map empties whole, as it did, when what two frames drew holds
     // more than MaxGlyphsKept glyphs.
-    private struct KeptBlob(nint blob, int glyphs, uint frame)
+    private struct KeptBlob(nint blob, int glyphs, uint frame, bool onBaseline)
     {
         public readonly nint Blob = blob;
-        public readonly int Glyphs = glyphs;
+        // The glyph count, its sign bit set when every glyph sits on the baseline (a y offset of
+        // 0), so the blob may be drawn with its baseline on a whole device pixel (BaselineOnPixel).
+        // In the count's sign rather than a field of its own: a bool made the entry 24 bytes, and
+        // the maps' entries 8 more each (plan 17, round 7: scroll/jump 3.0 -> 3.7 KB a step).
+        private readonly int _glyphs = onBaseline ? glyphs | int.MinValue : glyphs;
         public uint Frame = frame;
+        public readonly int Glyphs => _glyphs & int.MaxValue;
+        public readonly bool OnBaseline => _glyphs < 0;
     }
 
     // For each map: how many of its blobs this frame and the last drew, the glyphs it holds, and
@@ -280,7 +286,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // snapping, which is entirely about where a band lands on the device grid.
     private float _scale = 1f;
 
-    internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
+    internal void SetCanvas(SKCanvas canvas)
+    {
+        _canvas = canvas;
+        _deviceMatrixKnown = false;
+    }
     internal void SetGLSurface(ISkiaExternalSurface surface) => _glSurface = surface;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     internal SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
@@ -297,6 +307,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         ReleaseHeldFrames();
         Canvas.ResetMatrix();
         Canvas.Scale(scaleFactor);
+        _deviceMatrixKnown = false;
         Canvas.Clear(clearColor is { } c ? ToSkColor(c) : SKColors.Transparent);
     }
 
@@ -969,7 +980,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                 }
                 else
                 {
-                    nint blob = BuildShapedBlob(run);
+                    nint blob = BuildShapedBlob(run, out _);
                     if (blob == 0) continue;
                     r = NativeTextBlob.Bounds(blob);
                 }
@@ -1186,17 +1197,19 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             DrawRun(run, x, y);
             return;
         }
-        nint blob = SubBlob(run, start, end);
+        nint blob = SubBlob(run, start, end, out bool onBaseline);
         if (blob != 0)
         {
-            NativeTextBlob.Draw(Canvas, blob, x, y, _pooledPaint);
+            LastBlobBaseline = onBaseline ? BaselineOnPixel(y, run.FontSize) : y;
+            NativeTextBlob.Draw(Canvas, blob, x, LastBlobBaseline, _pooledPaint);
             GlyphsDrawn += end - start;
         }
         GC.KeepAlive(this);
     }
 
-    // The kept sub-blob of glyphs [start, end) of a run, at their places in the run.
-    private nint SubBlob(ShapedRun run, int start, int end)
+    // The kept sub-blob of glyphs [start, end) of a run, at their places in the run, and whether
+    // they all sit on the baseline.
+    private nint SubBlob(ShapedRun run, int start, int end, out bool onBaseline)
     {
         var cache = _subBlobCache ??= new Dictionary<SubRun, KeptBlob>(RunBlobCacheMaxSize);
         var key = new SubRun(run, start, end);
@@ -1204,6 +1217,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (!Unsafe.IsNullRef(ref kept))
         {
             _subUse.Touch(ref kept, _frame);
+            onBaseline = kept.OnBaseline;
             return kept.Blob;
         }
 
@@ -1213,18 +1227,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
         var glyphs = run.Glyphs;
+        bool flat = true;
         for (int i = start; i < end; i++)
         {
             glyphSpan[i - start] = (ushort)glyphs[i].GlyphId;
             positionSpan[i - start] = new SKPoint(glyphs[i].X, glyphs[i].Y);
+            flat &= glyphs[i].Y == 0f;
         }
         nint blob = NativeTextBlob.Make(_blobBuilder);
         if (blob != 0) BlobsMade++;
 
         if (cache.Count >= _subUse.SweepAt)
             Sweep(cache, ref _subUse);
-        cache[key] = new KeptBlob(blob, end - start, _frame);
+        cache[key] = new KeptBlob(blob, end - start, _frame, flat);
         _subUse.Added(end - start);
+        onBaseline = flat;
         return blob;
     }
 
@@ -1912,8 +1929,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     public void PushTranslate(float x, float y)
     {
-        _saveStack.Push(Canvas.Save());
+        _saveStack.Push(Canvas.Save() | MovedMatrix);
         Canvas.Translate(x, y);
+        _deviceMatrixKnown = false;
     }
 
     public void PushOpacity(float opacity)
@@ -1937,16 +1955,19 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     public void PushTransform(System.Numerics.Matrix3x2 m)
     {
-        _saveStack.Push(Canvas.Save());
+        _saveStack.Push(Canvas.Save() | MovedMatrix);
         // SKMatrix rows: (scaleX, skewX, transX), (skewY, scaleY, transY).
         var sk = new SKMatrix(m.M11, m.M21, m.M31, m.M12, m.M22, m.M32, 0f, 0f, 1f);
         Canvas.Concat(in sk);
+        _deviceMatrixKnown = false;
     }
 
     public void Pop()
     {
-        if (_saveStack.Count > 0)
-            Canvas.RestoreToCount(_saveStack.Pop());
+        if (_saveStack.Count == 0) return;
+        int save = _saveStack.Pop();
+        if ((save & MovedMatrix) != 0) _deviceMatrixKnown = false;
+        Canvas.RestoreToCount(save & ~MovedMatrix);
     }
 
     public ICanvasDrawingContext CreateCanvasContext(Rect bounds)
@@ -1957,6 +1978,78 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _canvasContext ??= new SkiaCanvasDrawingContext(this);
         _canvasContext.Bounds = bounds;
         return _canvasContext;
+    }
+
+    // ── Baselines on whole device pixels ──
+
+    /// <summary>
+    /// The baseline a blob whose glyphs all sit on it is drawn at: <paramref name="y"/> moved to
+    /// the nearest whole device pixel, where the canvas only scales and moves.
+    ///
+    /// <para>Skia's GPU text-blob cache keeps a blob's glyph vertices per text blob and per
+    /// fraction of a device pixel its origin was drawn at (<c>TextBlob::Key::Make</c> in Skia
+    /// m119, which SkiaSharp 3.119 builds), in a list per blob that every draw of it scans
+    /// (<c>BlobIDCacheEntry::findBlobIndex</c>). The blob maps here share one blob between every
+    /// run of the same face, size and text, so a cell or line drawn at many fractional heights
+    /// piled up an entry per height for as long as the blob lived: plan 17, round 7 counted
+    /// 819 → 5,815 entries scanned a frame over a 200-notch walk of a 300×10 table at 1.5×, and
+    /// 170 → 1,217 in a 13 px JSON TextArea (whose line height is fractional at any scale). On a
+    /// whole pixel each blob has an entry per fraction of x it is drawn at, which stays put.</para>
+    ///
+    /// <para>No pixel moves. Skia places a glyph drawn from its atlas ("direct mask") at
+    /// <c>floor(device y + ½)</c>, subpixel positioning being along x only while the matrix has
+    /// no skew; a glyph at the baseline lands on the same row from either y. That holds only
+    /// for glyphs on the baseline (a mark the shaper raised keeps its fraction: its row is
+    /// <c>floor(device y + offset + ½)</c>), for text Skia draws from its atlas — smaller than
+    /// 162 device pixels on the GPU, where bigger text is a distance field (256 in the raster
+    /// backend, then paths), hence the margin — and for a canvas that only scales and moves.
+    /// Anything else draws at <paramref name="y"/>.</para>
+    /// </summary>
+    private float BaselineOnPixel(float y, float fontSize)
+    {
+        if (!SnapsBaselines) return y;
+        if (!_deviceMatrixKnown) ReadDeviceMatrix();
+        if (!_baselinesSnap || fontSize * _deviceMaxScale >= MaxSnappedDeviceTextSize) return y;
+        // The device y as Skia works it out (t + s·y, in floats) and the y that maps to its whole
+        // pixel. Floats do not always map back exactly (a few in a hundred, by a few millionths of
+        // a pixel): those leave a handful of fractions per blob, not one per height.
+        float s = _deviceScaleY, t = _deviceTransY;
+        return (MathF.Floor(s * y + t + 0.5f) - t) / s;
+    }
+
+    /// <summary>Text this big or bigger, in device pixels, keeps its baseline where layout put
+    /// it (<see cref="BaselineOnPixel"/>): Skia draws it as a distance field from 162 up.</summary>
+    internal const float MaxSnappedDeviceTextSize = 128f;
+
+    // The canvas matrix as text draws read it: known until something moves the matrix (a frame,
+    // a pushed translate or transform, or popping one; the pushes that move it carry
+    // MovedMatrix on the save stack). Read once for all the text drawn under it, rather than a
+    // native call per blob.
+    private bool _deviceMatrixKnown, _baselinesSnap;
+    private float _deviceScaleY, _deviceTransY, _deviceMaxScale;
+    private const int MovedMatrix = 1 << 30;
+
+    /// <summary>Canvas matrices read for snapping baselines, for the tests that hold them to one
+    /// per move of the matrix.</summary>
+    internal long DeviceMatrixReads { get; private set; }
+
+    /// <summary>Whether blobs of glyphs on their baseline draw at a whole device pixel. Off, text
+    /// draws at the baseline layout gave it, as before: the reference the pixel tests hold it to.</summary>
+    internal bool SnapsBaselines { get; set; } = true;
+
+    /// <summary>The baseline the last text blob was drawn at, for the tests that look at it.</summary>
+    internal float LastBlobBaseline { get; private set; }
+
+    private void ReadDeviceMatrix()
+    {
+        var m = Canvas.TotalMatrix;
+        DeviceMatrixReads++;
+        _deviceMatrixKnown = true;
+        _baselinesSnap = m.SkewX == 0f && m.SkewY == 0f && m.Persp0 == 0f && m.Persp1 == 0f && m.Persp2 == 1f
+            && m.ScaleY != 0f && float.IsFinite(m.ScaleY) && float.IsFinite(m.TransY);
+        _deviceScaleY = m.ScaleY;
+        _deviceTransY = m.TransY;
+        _deviceMaxScale = MathF.Max(MathF.Abs(m.ScaleX), MathF.Abs(m.ScaleY));
     }
 
     // ── Text blob building (positioned from HarfBuzz-shaped glyphs) ──
@@ -1976,10 +2069,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             GlyphsDrawn += run.GlyphCount;
             return;
         }
-        nint blob = BuildShapedBlob(run);
+        nint blob = BuildShapedBlob(run, out bool onBaseline);
         if (blob != 0)
         {
-            NativeTextBlob.Draw(Canvas, blob, x, y, _pooledPaint);
+            LastBlobBaseline = onBaseline ? BaselineOnPixel(y, run.FontSize) : y;
+            NativeTextBlob.Draw(Canvas, blob, x, LastBlobBaseline, _pooledPaint);
             GlyphsDrawn += run.GlyphCount;
         }
         // The cache, and so the blob, stays alive until the draw has returned.
@@ -2016,18 +2110,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _runPathCache.Clear();
     }
 
-    internal nint BlobOf(ShapedRun run) => BuildShapedBlob(run);
+    internal nint BlobOf(ShapedRun run) => BuildShapedBlob(run, out _);
 
-    // The cached blob of a run, made on its first draw; 0 for a run with no glyphs.
-    private nint BuildShapedBlob(ShapedRun run)
+    // The cached blob of a run, made on its first draw; 0 for a run with no glyphs. Whether its
+    // glyphs all sit on the baseline comes with it.
+    private nint BuildShapedBlob(ShapedRun run, out bool onBaseline)
     {
         ref var kept = ref CollectionsMarshal.GetValueRefOrNullRef(_runBlobCache, run);
         if (!Unsafe.IsNullRef(ref kept))
         {
             _runUse.Touch(ref kept, _frame);
+            onBaseline = kept.OnBaseline;
             return kept.Blob;
         }
 
+        onBaseline = false;
         int count = run.GlyphCount;
         if (count == 0)
             return 0;
@@ -2046,10 +2143,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         var glyphSpan = buffer.Glyphs;
         var positionSpan = buffer.Positions;
 
+        bool flat = true;
         for (int i = 0; i < glyphs.Length; i++)
         {
             glyphSpan[i] = (ushort)glyphs[i].GlyphId;
             positionSpan[i] = new SKPoint(glyphs[i].X, glyphs[i].Y);
+            flat &= glyphs[i].Y == 0f;
         }
 
         nint blob = NativeTextBlob.Make(_blobBuilder);
@@ -2057,7 +2156,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         if (_runBlobCache.Count >= _runUse.SweepAt)
             Sweep(_runBlobCache, ref _runUse);
-        _runBlobCache[run] = new KeptBlob(blob, glyphs.Length, _frame);
+        _runBlobCache[run] = new KeptBlob(blob, glyphs.Length, _frame, flat);
+        onBaseline = flat;
         _runUse.Added(glyphs.Length);
         return blob;
     }
