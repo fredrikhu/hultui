@@ -390,34 +390,38 @@ moved by −1…−3 %.
 A rebuild makes everything its `Build()` makes. Junction's window was one component, so a key
 in History made the title bar, the sidebar and the toolbar again with the list: 128 KB of the
 182 KB a build made, for about 120 elements that show no selection. Put such parts in child
-components the parent makes once and hands to every build. A rebuild of the parent moves the
-kept host into its new tree and the reconciler puts it back; nothing inside it is built, and
-nothing around it is marked.
+components the parent makes once and hands to every build: `Part` (`HultUI.Core.Components`) is
+that component. A rebuild of the parent moves the kept host into its new tree and the reconciler
+puts it back; nothing inside it is built, and nothing around it is marked.
 
 ```csharp
+private readonly PartGroup _parts = new();
 private Part? _toolbar;
-private Part ToolbarPart => _toolbar ??= new Part(this, BuildToolbar);   // made once
+private Part ToolbarPart => _toolbar ??= new Part(_parts, BuildToolbar);   // made once
 
 public override Element Build()
 {
     var view = BuildView();
     view.Key = "view";
     // The host is the flex item where the toolbar's root used to be.
-    return Flex.Column(gap: 0).FlexGrow(1).Children(ToolbarPart.Mount().FlexShrink(0), view);
+    return Flex.Column(gap: 0).FlexGrow(1).Children(ToolbarPart.Place().FlexShrink(0), view);
 }
+
+// A rebuild builds the parts too, unless the path says it changes nothing they show.
+private new void MarkDirty() { _parts.Invalidate(); base.MarkDirty(); }
+private void MarkViewDirty() => base.MarkDirty();
 ```
 
 Three things decide whether it stays right and stays cheap:
 
 - **What the part shows has to reach it.** A part rebuilds when a signal or loader its own
-  `Build()` read changes, not when its parent does. A plain field it reads (the active
-  repository, a setting, a width breakpoint) needs a signal the part reads and the parent
-  writes. Junction's parts read one `Signal<int>` that its `MarkDirty()` and `Rerender()`
-  bump, so every rebuild builds the chrome too, and only the paths that change nothing the
-  chrome shows — selection moves, cursors, typing in a field of the view, search boxes — call
-  `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a build;
-  forgetting to opt in shows a stale toolbar, so make the safe one the default.
-- **The host takes the root's place in the layout.** `Mount()` returns the `ComponentHost`, an
+  build read changes, not when its parent does. A plain field it reads (the active repository,
+  a setting, a width breakpoint) needs the parent to say so: its `MarkDirty()` and `Rerender()`
+  call `PartGroup.Invalidate()`, so every rebuild builds the parts too, and only the paths that
+  change nothing the parts show — selection moves, cursors, typing in a field of the view, search
+  boxes — call `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a
+  build; forgetting to opt in shows a stale toolbar, so make the safe one the default.
+- **The host takes the root's place in the layout.** `Place()` returns the `ComponentHost`, an
   element between the parent and the part's root. Give it what the root had as a flex item
   (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that
   must fill its host `FlexGrow(1)` (the host is a column).
@@ -513,6 +517,15 @@ made every visible row again, until round 6 put it in the row's item: 191 → 42
 filter character 365 → 209 (−43 %); a walk with the preview panel 329 → 73 (−78 %). With a reader
 the same bytes come off and the same accessibility trees are built. A key's time on NativeAOT
 −7…−21 %: the two frames are most of it.
+
+`Part` in `HultUI.Core.Components` is Vesper's rule, public since round 6 step 13: the group's
+revision is a plain counter, read where the parent's build places the part; a signal of the part's
+own (`own:`) rebuilds it alone; `afterBuild:` runs after its builds but the first, as Meridian's
+`Service()` needs; `Place(stale: …)` takes what the parent compared for a view-only build, as
+Junction's composer compares what it shows of the working copy. Vesper's parts are on it as they
+were. Meridian's and Junction's chrome read a revision signal and are mounted, not placed: on `Part`
+with that signal as `own:` they build when they always did, and placing them would be a change of
+its own.
 
 A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
 asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second

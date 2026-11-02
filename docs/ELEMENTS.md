@@ -2214,3 +2214,51 @@ Tabs.New().Selected(_tab).OnTabChanged(i => _tab = i)
   named from its label and badge (a closable tab by those outright, so its "×" is not read; the
   close button is "Close <label>"), and the panel a `TabPanel` named after the open tab. UIA's
   SelectionItem `Select` opens a tab.
+
+---
+
+## 27. Part (a kept piece of a build)
+
+`Part` is not an element but a `Component` (`HultUI.Core.Components`): a piece of an owner's build
+that the owner keeps between its builds, such as a title bar, a rail or a toolbar. The owner makes
+it once and places it from every build; a key that changes only the view beside it costs the view
+alone. The reasoning and the traps are in [REACTIVITY.md](REACTIVITY.md), "Keep what a key does not
+change in a child component".
+
+```csharp
+private readonly PartGroup _parts = new();
+private Part? _rail;
+private Part RailPart => _rail ??= new Part(_parts, () => BuildRail().FlexGrow(1));   // made once
+
+public override Element Build()
+{
+    var view = BuildView();
+    view.Key = "view";
+    return Flex.Row(gap: 0).FlexGrow(1).Children(RailPart.Place().FlexShrink(0), view);
+}
+
+// A rebuild builds the parts too, unless the path says it changes nothing they show.
+private new void MarkDirty() { _parts.Invalidate(); base.MarkDirty(); }
+private void MarkViewDirty() => base.MarkDirty();
+```
+
+- **`new Part(group, build, own, afterBuild)`:** `build` makes the elements. `group`, a `PartGroup`
+  the owner's parts share, is what a full rebuild moves. `own` is an optional `Signal<int>` of this
+  part alone: writing it rebuilds the part with no build of the owner, for a change only the part
+  shows. `afterBuild` runs after each of its builds but the first, for work that waits for its
+  elements, such as a field taking the keyboard.
+- **`Place(stale)`:** returns the part's `ComponentHost`, built again first when the group or its
+  own signal moved since it last built, or when `stale` says so: what the owner compared, for
+  something a view-only rebuild can move. It builds there and then, inside the owner's build,
+  before the owner's `OnAfterBuild`. Call it from `Build()`, where the part's root used to be built.
+- **The host is the flex item.** Give it what the root had (`FlexShrink(0)` for a fixed bar), and
+  give a root that must fill it `FlexGrow(1)`. It carries a key of its own, so key the owner's other
+  children: a keyed list puts a kept host back with nothing marked.
+- **A part that hears a signal builds on its own.** Anything else it reads needs
+  `PartGroup.Invalidate()`, so keep that the default: every rebuild, and only the paths that change
+  nothing a part shows opt out. A rebuild a loader asks for comes through a signal, with neither
+  `MarkDirty` nor `Rerender`: if what lands can move a plain field a part reads, have `Build()`
+  invalidate the group unless the path asked for a view-only build.
+- **`Builds`:** on `Part` and on `PartGroup` (of all its parts), for tests.
+- **`Mount()`** is a `Component`'s: it hands back the host without the check. A part mounted, not
+  placed, hears a full rebuild only through a signal it reads, as Junction's chrome does.
