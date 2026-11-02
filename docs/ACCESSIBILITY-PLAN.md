@@ -424,14 +424,19 @@ Files:
       node, which reaches its whole old tree. What the signals are worked out from is noted before
       the objects take the new tree (a reordered parent's old children, an expanded state before,
       a served list's children before), so the signals are the same: the same stream, byte for
-      byte, over the perf suite's 190 scenes. The bus thread reads each
+      byte, over the perf suite's 190 scenes, and over seven test suites (1,054 app tests compared
+      with their temporary folders, ports and boxes masked) wherever the window handed the bridge the
+      same changes; a live pyatspi client's cache read the same in all 39 steps. The bus thread reads each
       property whole: a string, an array (replaced, never written over) or one word; a parent's
       children read while a reorder is applied are the old list or the new. AT-SPI apply, headless:
       a dialog's label tick over 3,006 nodes 797 → 0.2 KB, a palette key 816 → 11.4 KB, a list
       filtered below 1,000 rows 843 → 2.5 KB, a row added to 1,000 rows 808 → 25 KB (the parent's
       list of 3,000 children, made again). What is still made per node is the object of a node
       that is new: a kept tab's page coming back (900 nodes) costs 290 KB, as its nodes left the
-      tree with the page.
+      tree with the page. Time: the walk costs less than the objects it no longer makes on the
+      large trees (palette key −6…−8 %, filtered list −9…−12 %, added row −5…−8 %, dialog tick
+      flat); a kept tab's page coming back is +2.5 % on NativeAOT (its 900 objects go into and out
+      of the concurrent map).
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
