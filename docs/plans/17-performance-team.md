@@ -173,7 +173,9 @@ The ledger's **Phase** field says where the round is.
 
 Spawn the eight experts at once, each with `isolation: "worktree"` so their builds never
 share `bin/` with each other or with this worktree. Each gets this brief, its own
-section, the ledger, and the list of commits since the last survey.
+section, the ledger, and the list of commits since the last survey. The ledger's archive
+is searched, not read: an expert greps it by candidate id or commit when a candidate may
+have been landed, declined or asked about in an earlier round.
 
 Each expert:
 
@@ -271,6 +273,10 @@ Every round ends on main, with CI green, before the next round starts.
    and pushed the same way, and CI waited for again. Never start the next round on red.
 4. Record the merge commit and the CI result in the ledger, increment **Round**, set Phase
    `survey`.
+5. **Start the next round in a fresh context** (user, 2026-10-27): stop the loop, then begin
+   the survey in a new session in this worktree, or after `/clear`, with the resume command
+   in the ledger's Phase. All state is in the ledger and memory; a long session makes every
+   orchestrator turn re-read a long conversation.
 
 ### Phase `guidelines`
 
@@ -296,6 +302,30 @@ Stop the loop (`ScheduleWakeup` with `stop: true`) and report to the user: the c
 with their numbers, what was examined and declined, the **Needs the user** list, and the
 last merge into main with its CI result. The guidelines commit is merged and pushed like a
 round, with CI waited for.
+
+## Keeping token use down (user, 2026-10-27)
+
+The same work for fewer tokens. None of these rules changes what is built or how it is measured.
+
+- **Keep the ledger short.** At the start of each survey the orchestrator moves to
+  [the archive](17-performance-team-ledger-archive.md): the finished round's build order, the
+  Landed rows older than the round the survey reviews, the answered questions of finished
+  rounds (standing notes such as the API key rule stay), and log entries older than the last
+  round. Nothing is deleted. The ledger then holds only what the current round needs.
+- **Briefs quote the evidence.** A build agent's brief quotes its candidate's evidence and
+  names the exact ledger rows, commits and report lines to read. Agents do not read the whole
+  ledger, the archive or the survey reports; they search them.
+- **Keep command output short.** Build with `dotnet build -c Release -v q -nologo`; test with
+  `dotnet test ... -v q --nologo --logger "console;verbosity=minimal"`, and show only the
+  summary lines (`Passed!`/`Failed!`, errors) or the tail. Write long logs to a file in the
+  scratchpad and read the lines needed. Never print a capture JSON: compare with `--compare`
+  or a script that prints only the rows that matter.
+- **Fewer orchestrator turns.** An agent's completion notice is the wake signal; the loop's
+  fallback wake-up is 3600 s. No progress checks unless the user asks. An interim "still
+  waiting" notice gets a one-line answer with no tool calls.
+- **Read once per session.** In a running session the orchestrator re-reads only the
+  ledger's Phase and the part the step needs; the whole brief and ledger are read once per
+  fresh context. Each round starts in a fresh context (Phase `release`, step 5).
 
 ## Rules for everyone
 

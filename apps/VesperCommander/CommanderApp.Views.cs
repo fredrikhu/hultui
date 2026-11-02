@@ -4,6 +4,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using VesperCommander.Theme;
 
@@ -92,6 +93,10 @@ public partial class CommanderApp
         var shape = new ThumbRowShape(m, ResultsOf(side), Icons.DisplayScale, _dropTarget, _thumbsCache?.Landed ?? 0);
         if (ThumbRowsState(side).Changed(shape, marks, _cutPending) && ThumbVList(side).Current is { } mounted)
             mounted.InvalidateRows();
+        // A row made again keeps the tiles whose entry and state did not change (ThumbRow), as
+        // long as everything a tile shows besides those is what they were made with.
+        ThumbTilesOf(side).Prepare(new ThumbTileShape(m, ResultsOf(side), Icons.DisplayScale, _dropTarget, _app.Theme),
+            ThumbVList(side).Current, perRow * (visRows + 4));
 
         return VirtualListElement<ThumbRowItem>.New()
             .ItemHeight((int)(m.TileH + m.Gap))
@@ -233,21 +238,111 @@ public partial class CommanderApp
         return sb.ToString();
     }
 
+    /// <summary>
+    /// A row of tiles. A row made again — the cursor moved onto it or off it, a mark, a
+    /// thumbnail landing — hands back each tile whose entry, cursor, mark, cut and thumbnail are
+    /// what it was made with (REACTIVITY.md, "Hand back the elements a key does not change"): the
+    /// row is keyed by its first entry's place, so the list patches the row it replaces from it,
+    /// and the tiles are keyed by their paths, so the patch puts the live ones back untouched. A
+    /// cursor move makes the two tiles it moved between instead of both rows of them.
+    /// </summary>
     private Element ThumbRow(char side, ThumbRowItem item, ThumbM m, HashSet<string> marks)
     {
+        var tiles = ThumbTilesOf(side);
+        string key = ThumbRowKey(item.Start);
         var row = Flex.Row(gap: m.Gap).Height(m.TileH).AlignItems(AlignItems.FlexStart)
             .Padding(new Thickness(0, 10, 0, 10));
+        row.Key = key;
         for (int k = 0; k < item.Count; k++)
         {
             var e = item.List[item.Start + k];
-            row.AddChild(Tile(side, e, m, cursor: k == item.Cursor, marks.Contains(MarkKey(e))));
+            bool cursor = k == item.Cursor;
+            bool marked = marks.Contains(MarkKey(e));
+            bool cut = !marked && _cutPending.Contains(e.FullPath);
+            var (thumb, status) = TileThumb(e, m);
+            var state = new ThumbTileState(e, cursor, marked, cut, thumb, status);
+            if (tiles.TakeBack(state, key) is { } live)
+            {
+                row.AddChild(live);
+                continue;
+            }
+            var made = new Ref<BoxElement>();
+            var tile = Tile(side, e, m, cursor, marked, cut, thumb, status);
+            tile.Key = e.FullPath;
+            tile.WithRef(made);   // follows the tile to the live element it is patched into
+            row.AddChild(tile);
+            tiles.Made(state, made);
         }
         return row;
     }
 
-    private Element Tile(char side, FileEntry e, ThumbM m, bool cursor, bool marked)
+    private static readonly List<string> ThumbRowKeys = [];
+
+    /// <summary>"t" and the row's first entry's place, made once per place.</summary>
+    private static string ThumbRowKey(int start)
     {
-        bool cut = !marked && _cutPending.Contains(e.FullPath);
+        while (ThumbRowKeys.Count <= start) ThumbRowKeys.Add("t" + ThumbRowKeys.Count);
+        return ThumbRowKeys[start];
+    }
+
+    /// <summary>A tile's thumbnail and its state, for an image file; none for anything else.</summary>
+    private (IImageSource? Thumb, ThumbnailCache.Status Status) TileThumb(FileEntry e, ThumbM m)
+    {
+        if (Icons.KindFor(e) != IconKind.Image || e.IsDir) return (null, default);
+        int target = (int)(Math.Max(m.ImgW, m.ImgH) * 2f);
+        return Thumbs.Get(e.FullPath, e.Size, e.Modified, target);
+    }
+
+    /// <summary>What a tile shows besides the grid's shape: its entry, the cursor on it, a mark, a
+    /// cut, and its thumbnail as the cache had it.</summary>
+    private readonly record struct ThumbTileState(FileEntry Entry, bool Cursor, bool Marked, bool Cut,
+        IImageSource? Thumb, ThumbnailCache.Status Status);
+
+    /// <summary>What every tile shows besides its own state: the density's sizes, a result set
+    /// (the tooltips), the scale the icons are cut at, a folder a drag hovers, the theme.</summary>
+    private readonly record struct ThumbTileShape(ThumbM Metrics, ResultListing? Results, float IconScale,
+        (char Side, string Dir)? DropTarget, object? Theme);
+
+    /// <summary>
+    /// The tiles a pane's thumbnail rows were made with, by path, and the live element each is
+    /// now. A tile is handed back only into a row made again in its own row's place (its parent
+    /// carries that row's key): a row still on screen keeps its tiles, and a tile in a row that
+    /// scrolled away is out of the tree. All are let go when the shape changes; those no longer
+    /// under the list are let go once there are more than a few screens of them.
+    /// </summary>
+    private sealed class ThumbTiles
+    {
+        private readonly Dictionary<string, (ThumbTileState State, Ref<BoxElement> Live)> _kept = new(StringComparer.Ordinal);
+        private readonly List<string> _gone = [];
+        private ThumbTileShape _shape;
+        private bool _made;
+
+        public void Prepare(ThumbTileShape shape, Element? list, int keep)
+        {
+            if (!_made || !shape.Equals(_shape)) _kept.Clear();
+            _made = true;
+            _shape = shape;
+            if (_kept.Count <= keep) return;
+            foreach (var (path, kept) in _kept)
+                if (kept.Live.Current?.Parent?.Parent is not { } owner || !ReferenceEquals(owner, list)) _gone.Add(path);
+            foreach (var path in _gone) _kept.Remove(path);
+            _gone.Clear();
+        }
+
+        public BoxElement? TakeBack(in ThumbTileState state, string rowKey) =>
+            _kept.TryGetValue(state.Entry.FullPath, out var kept) && kept.State == state
+                && kept.Live.Current is { IsDetached: false, Parent: { } row } live && row.Key == rowKey
+                ? live : null;
+
+        public void Made(in ThumbTileState state, Ref<BoxElement> live) => _kept[state.Entry.FullPath] = (state, live);
+    }
+
+    private readonly ThumbTiles _thumbTilesL = new(), _thumbTilesR = new();
+    private ThumbTiles ThumbTilesOf(char side) => side == 'L' ? _thumbTilesL : _thumbTilesR;
+
+    private BoxElement Tile(char side, FileEntry e, ThumbM m, bool cursor, bool marked, bool cut,
+        IImageSource? thumb, ThumbnailCache.Status tstatus)
+    {
         Color nameFg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
         if (cut) nameFg = Nocturne.Alpha(nameFg, 0.45);
         var kind = Icons.KindFor(e);
@@ -266,8 +361,6 @@ public partial class CommanderApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
         if (kind == IconKind.Image && !e.IsDir)
         {
-            int target = (int)(Math.Max(m.ImgW, m.ImgH) * 2f);
-            var (thumb, tstatus) = Thumbs.Get(e.FullPath, e.Size, e.Modified, target);
             if (tstatus == ThumbnailCache.Status.Ready && thumb is { IsLoaded: true } src && src.IntrinsicSize.Width > 0)
             {
                 var im = Image.New(src);

@@ -315,10 +315,9 @@ public abstract class Element
             var view = scroller.Layout.AbsoluteContentBox;
             var box = Layout.AbsoluteBorderBox;
             // The parent's content box bounds it — unless the parent is the scroll view itself,
-            // whose box is only the viewport: then it is held across everything that scrolls.
-            var room = ReferenceEquals(parent, scroller)
-                ? new Rect(view.X, view.Y, MathF.Max(view.Width, scroller.ContentWidth), MathF.Max(view.Height, scroller.ContentHeight))
-                : parent.Layout.AbsoluteContentBox;
+            // whose box is only the viewport: then the view says, and a plain one holds it across
+            // everything that scrolls.
+            var room = ReferenceEquals(parent, scroller) ? scroller.StickyRoom(box, view) : parent.Layout.AbsoluteContentBox;
             float dx = Stick(box.X, box.Right, view.X + scroller.ScrollOffsetX, view.Right + scroller.ScrollOffsetX,
                 pos.Left, pos.Right, room.X, room.Right, view.Width);
             float dy = Stick(box.Y, box.Bottom, view.Y + scroller.ScrollOffsetY, view.Bottom + scroller.ScrollOffsetY,
@@ -534,7 +533,13 @@ public abstract class Element
     {
         _hovered = value;
         if (_interaction is { } s && s.Hovered != value) { s.Hovered = value; s.Recompute(this, animate: true); }
+        if (IsMenuEntry) NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
     }
+
+    /// <summary>An entry directly in a menu an app draws with elements, which is selected to a
+    /// reader while the pointer is on it. Not one in a menu bar: that bar's title has no selection.</summary>
+    internal bool IsMenuEntry => Role == AccessibilityRole.MenuItem && Parent is { Role: AccessibilityRole.Menu };
+
     internal void SetInteractionPressed(bool value)
     {
         _pressed = value;

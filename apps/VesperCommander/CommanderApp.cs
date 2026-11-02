@@ -264,8 +264,8 @@ public partial class CommanderApp : Component, IDisposable
     // filesystem-derived state.
     private PaneState? _forceStateL, _forceStateR;
 
-    private readonly Ref<VirtualListElement<FileEntry>> _vlistL = new();
-    private readonly Ref<VirtualListElement<FileEntry>> _vlistR = new();
+    private readonly Ref<VirtualListElement<PaneRowItem>> _vlistL = new();
+    private readonly Ref<VirtualListElement<PaneRowItem>> _vlistR = new();
     private bool _pendingScrollL, _pendingScrollR;
 
     // ── Pane scroll across a full-shell view ─────────────────────────────
@@ -503,7 +503,7 @@ public partial class CommanderApp : Component, IDisposable
     private int Cursor(char side) => ActiveTab(side).Cursor;
     private AsyncLoader<DirListing> Loader(char side) => side == 'L' ? _listL : _listR;
     private int Gen(char side) => side == 'L' ? _genL : _genR;
-    private Ref<VirtualListElement<FileEntry>> VList(char side) => side == 'L' ? _vlistL : _vlistR;
+    private Ref<VirtualListElement<PaneRowItem>> VList(char side) => side == 'L' ? _vlistL : _vlistR;
 
     private void SetCursor(char side, int value)
     {
@@ -1197,11 +1197,16 @@ public partial class CommanderApp : Component, IDisposable
         return -1;
     }
 
+    /// <summary>Calls of <see cref="IndexOfPath"/> on this thread. Each walks the rows, so a build
+    /// asks a few times, never once a row (the zebra tint did: O(rows²) a build); a test counts.</summary>
+    [ThreadStatic] internal static int IndexOfPathCalls;
+
     /// <summary>The row holding <paramref name="path"/>. Used wherever a row has to be found
     /// again after the list was rebuilt or recycled — a fed-in result set lists many folders
     /// at once, so a name can name several rows and only the path names one.</summary>
     private static int IndexOfPath(IReadOnlyList<FileEntry> list, string? path)
     {
+        IndexOfPathCalls++;
         if (path == null) return -1;
         for (int i = 0; i < list.Count; i++)
             if (PathEquals(list[i].FullPath, path)) return i;
@@ -1455,7 +1460,7 @@ public partial class CommanderApp : Component, IDisposable
         {
             long total = FileSystem.DirectorySize(path,
                 cancelled: () => ds.Cancelled,
-                report: n => { ds.Set(n); Repaint(); });
+                report: n => { ds.Set(n); Repaint(sizes: true); });
             ds.Set(total);
             ds.Done = true;
             Application.InvokeOnMainThread(MarkDirty);
@@ -2055,14 +2060,44 @@ public partial class CommanderApp : Component, IDisposable
             System.Threading.Thread.Sleep(50);
     }
 
-    // Throttled repaint request from the background worker (~40ms cadence).
+    // Throttled repaint request from a background worker (~40 ms cadence): a copy or move, a pack,
+    // an add into an archive, a folder-size walk. On the application's clock, which a headless
+    // test moves by hand, not the wall's.
+    //
+    // View-only (MarkViewDirty): the progress dialog and the rows are the view's, and of the parts
+    // only two show a worker's progress — the command line a backgrounded transfer's percent and
+    // count (CmdKey), and the footers a folder's measured size, which a walk says it moved with
+    // sizes: true. A full MarkDirty here built the app and all eleven parts on every tick, about 25
+    // ticks a second for the whole copy: 211 KB a tick with the copy in the background (29 KB
+    // view-only), 284 KB with its dialog open (100 KB; the dialog is built with the view).
     private long _lastRepaintTick;
-    private void Repaint()
+    private bool _repainted;
+    private volatile bool _sizesMoved;
+    private Action? _progressDirty;
+
+    private void Repaint(bool sizes = false)
     {
-        var now = Environment.TickCount64;
-        if (now - _lastRepaintTick < 40) return;
+        if (sizes) _sizesMoved = true;
+        long now = _app.Time.GetTimestamp();
+        if (_repainted && _app.Time.GetElapsedTime(_lastRepaintTick, now) < RepaintInterval) return;
+        _repainted = true;
         _lastRepaintTick = now;
-        Application.InvokeOnMainThread(MarkDirty);
+        Application.InvokeOnMainThread(_progressDirty ??= ProgressDirty);
+    }
+
+    private static readonly TimeSpan RepaintInterval = TimeSpan.FromMilliseconds(40);
+
+    /// <summary>A worker's tick, on the UI thread: the view, the footers when a folder's measured
+    /// size moved, and the command line through MarkViewDirty's compare.</summary>
+    private void ProgressDirty()
+    {
+        if (_sizesMoved)
+        {
+            _sizesMoved = false;
+            _paneParts[0].FootRevision.Value++;
+            _paneParts[1].FootRevision.Value++;
+        }
+        MarkViewDirty();
     }
 
     /// <summary>Resolve an overwrite conflict from the dialog. For the background

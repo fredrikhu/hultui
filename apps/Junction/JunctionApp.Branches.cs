@@ -274,17 +274,24 @@ public partial class JunctionApp
         // the visible ~20. The tree feeds it the same way — one flat row list of the
         // expanded nodes — so grouping costs a row per open folder, never a subtree.
         //
-        // The list keeps a row while its item and its caret are what it was made with, so a
-        // key that moves the caret makes the two rows it moved between. The items are the
-        // kept nodes (see RefRowsMemo) with what a row shows of the other rows: its compare
-        // pick and base/head tag. Everything else a row shows is in the shape: when that
-        // changes, the rows on screen are made again.
+        // The list keeps a row while its item is what it was made with. The items are the kept
+        // nodes (see RefRowsMemo) with what a row shows of the other rows: its compare pick and
+        // base/head tag. Everything else a row shows is in the shape: when that changes, the
+        // rows on screen are made again.
+        //
+        // The list draws the tint under the caret's row, the caret's or, on a picked row, the
+        // pick's: a plain key moves the caret and the pick together, from one row to the next,
+        // and makes no row (BranchRowItems leaves the pick out of the caret's row's item).
         if (BranchRowShapeChanged()) _branchScrollRef.Current?.InvalidateRows();
+
+        bool caretOnPick = _branchSel >= 0 && _branchSel < rows.Count
+            && rows[_branchSel] is { IsFolder: false } atCaret && _selectedBranches.Contains(atCaret.Item.FullName);
 
         return VirtualListElement<BranchRowItem>.New()
             .ItemHeight(BranchRowHeight)
             .Items(new BranchRowItems(this, rows))
-            .RenderWith((r, focused) => BranchRow(r, focused))
+            .SelectionHighlight(caretOnPick ? Nocturne.Accent900 : Nocturne.Neutral900, Nocturne.RadiusRow)
+            .RenderWith((r, _) => BranchRow(r))
             // The virtual list surfaces items to assistive tech by this label alone
             // (rows off-screen are never realized as elements), so it says what the
             // row says: name, current marker, ahead/behind, last commit. One delegate,
@@ -316,11 +323,12 @@ public partial class JunctionApp
 
     /// <summary>
     /// One row of the branch table as its list sees it: the node, where it stands, and what a
-    /// branch row shows of the rows around it — whether it is picked for a comparison and
-    /// whether it is the comparison's base or head. The list keeps a row while its item is
-    /// equal, so a pick, an unpick or a base or head that moves makes the rows it changes.
+    /// branch row shows of the rows around it — whether it draws a pick's tint and whether it is
+    /// the comparison's base or head. The list keeps a row while its item is equal, so a pick, an
+    /// unpick or a base or head that moves makes the rows it changes. The picked row under the
+    /// caret draws no tint of its own: the list draws it.
     /// </summary>
-    internal readonly record struct BranchRowItem(TreeNode<GitBranch> Node, int Index, bool Picked, string? Role);
+    internal readonly record struct BranchRowItem(TreeNode<GitBranch> Node, int Index, bool Tinted, string? Role);
 
     /// <summary>The branch rows as the list's items, each made when the list asks for it: a
     /// key compares the two dozen on screen, never the whole list.</summary>
@@ -338,7 +346,7 @@ public partial class JunctionApp
                 var role = app._branchCompare is { } bc
                     ? (full == bc.BaseFull ? "base" : full == bc.HeadFull ? "head" : null)
                     : null;
-                return new BranchRowItem(node, index, app._selectedBranches.Contains(full), role);
+                return new BranchRowItem(node, index, index != app._branchSel && app._selectedBranches.Contains(full), role);
             }
         }
 
@@ -392,19 +400,20 @@ public partial class JunctionApp
         return changed;
     }
 
-    private Element BranchRow(BranchRowItem r, bool focused)
+    private Element BranchRow(BranchRowItem r)
     {
         BranchRowsMade++;
         return r.Node.IsFolder
-            ? RefFolderRow(RefKindBranch, r.Node, r.Index, focused, BranchRowHeight, SelectBranch)
-            : BranchLeafRow(r.Node.Item, r.Node.Depth, r.Index, focused, r.Picked, r.Role);
+            ? RefFolderRow(RefKindBranch, r.Node, r.Index, BranchRowHeight, SelectBranch)
+            : BranchLeafRow(r.Node.Item, r.Node.Depth, r.Index, r.Tinted, r.Role);
     }
 
-    private Element BranchLeafRow(GitBranch b, int depth, int index, bool focused, bool comparePick, string? compareRole)
+    private Element BranchLeafRow(GitBranch b, int depth, int index, bool tinted, string? compareRole)
     {
         // Rows in the compare selection are highlighted; the base/head extremes tagged.
         // The focus caret (Ctrl+arrows) can sit outside the selection. Same colours
-        // as the History list: the selection is accent, the caret a neutral tint.
+        // as the History list: the selection is accent, the caret a neutral tint, and the
+        // tint under the caret is the list's (see BuildBranchList).
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
         var pb = BranchName.Parse(leaf);
         // Inside a folder, the rows above already carry the whole prefix — the remote, the
@@ -420,13 +429,8 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow)
             .BorderColor(Nocturne.On(0.06)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
-        // Focus + compare-pick in the key so a state flip replaces the row outright:
-        // the hover baseline differs per state, and a fresh element can't be left
-        // showing the other state's hover tint.
-        row.Key = b.Name + (focused ? "#f" : "") + (comparePick ? "#c" + compareRole : "");
-        row.Background(comparePick ? Nocturne.Accent900
-            : focused ? Nocturne.Neutral900
-            : Color.Transparent);
+        row.Key = b.Name + (tinted ? "#c" + compareRole : "");
+        row.Background(tinted ? Nocturne.Accent900 : Color.Transparent);
 
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         // The tree's indent lives inside this cell so every column right of it stays

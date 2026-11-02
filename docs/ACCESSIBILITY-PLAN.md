@@ -182,7 +182,7 @@ A focus move rebuilds no tree. The window marks it on the applied tree in place
 (`IsFocused` on the node that had the focus and on the one that has it) and hands
 the bridge both nodes (`NotifyFocusChanged(focused, previous)`): the UIA wrappers
 take the new state and raise HasKeyboardFocus for both, then the focus event; the
-AT-SPI snapshot's objects take it and send state-changed:focused. The next
+AT-SPI bridge's objects take it and send state-changed:focused. The next
 rebuild's diff then has nothing to say about the move. Before, both kept the
 state of the last rebuild until the next one, which reported the move late.
 
@@ -204,8 +204,15 @@ holds the caret's and the selection's offsets), puts it on the applied tree's no
 place and hands the bridges the move (`ApplyPatchedProperties`, a `TextSelection` change
 whose previous node is a stand-in carrying the old version): UIA raises
 Text_TextSelectionChanged, AT-SPI sends text-caret-moved and text-selection-changed,
-reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built. A
-move that comes with an edit is told by the edit's rebuild, as before.
+reading the offsets from the versions. Now 1.0–1.2 KB a key on both, no tree built.
+
+A keystroke in such a text rebuilds no tree either (2026-11-01, plan 17 round 6 step 11b):
+the rich text editor's and the text area's. Each built and diffed the whole tree: 86.1 KB a
+key in a 20-block editor beside 300 rows. The frame puts the new version on the node as for
+a caret move and hands the bridges what the diff would have listed, the text first, then
+the caret, each with the stand-in as the previous node: UIA raises Text_TextChanged and
+Text_TextSelectionChanged, AT-SPI sends text-changed from the versions' characters and
+text-caret-moved, from the published objects. Now 8.3 KB a key on both, no tree built.
 
 A change of a leaf's own properties rebuilds no tree either (2026-10-24, plan 17 round 4):
 a text input's value (a password field's bullets, never its text), a toggle (a check box,
@@ -236,6 +243,58 @@ it moved (its own and its neighbours') are told by the coalesced layout refresh,
 move is — or by its leading edge at once, when no refresh came in the last 100 ms. Two
 consequences, both of the coalescing: a reader asking within 100 ms reads the old bounds, and a
 node removed within the wait never had its new bounds told.
+
+A dialog's backdrop is no button (2026-10-27, plan 17 round 6; the user approved what a reader
+hears). A box with a click is inferred to be a button, named from its content, but not a box
+one of whose children has the role `Dialog` (`AccessibilityTreeBuilder.InferRole`): that box is
+the dialog's backdrop, and its click closes the dialog. It gets no role and no name, so a backdrop
+in the app's own tree (Meridian's Options) is no node and the dialog is its parent's child, and
+`Dialog.Show`'s scrim, which as the root of its overlay always has a node, is an unnamed UIA Pane
+(AT-SPI panel) holding the dialog, with no Invoke. The dialog's own role, name and node are as
+they were (no bridge exposes a modal state). Before, a reader heard every dialog and every command
+palette inside a button named after all of their text (2,182 characters over 2,000 commands),
+whose name changed with every keystroke; and a name change inside it was under an ancestor named
+from its content, so it was never patched: a label ticking in a dialog every 50 ms over 1,000 rows
+built the window's tree on every tick (UIA 283.9 → 1.4 KB a tick, AT-SPI 1,081 → 400, trees 40 →
+0 in 40), and any label change in Meridian's Options did too (UIA 260.3 → 1.1 KB, AT-SPI 1,058 →
+1.3; the in-place layout refresh failed there on "a node with children changed"). A palette
+keystroke raises one Name change (the "… more" line's), not two: UIA 454.2 → 441.2 KB a key over
+2,000 commands. A reader closes a dialog with Escape, or with a control of its own; the click
+outside still closes it, and hit-testing is the element tree's, which this does not touch. The
+rule looks at the backdrop's children only, which is where `Dialog.Show` puts its panel and where
+Meridian puts its card. A backdrop whose card has no role is still a button named after the whole
+card, so an app gives its cards the Dialog role. Vesper's cards have it since round 6, step 5 (each
+named by its title, in `CommanderApp.Backdrop`): a copy's progress tick built the window's whole
+tree before, and is patched now (ten ticks 50 ms apart: 10 trees → 0). Meridian's prompt ("New key",
+"Secret …", "Import OpenAPI", "Discover an API") has it since round 6, step 7a, named by its title
+(`BuildDialog`): a text change in it built the whole tree and is patched now (1 tree a change → 0).
+Typing in its field built none before either; what changed there is what a reader hears, a dialog
+where it heard two buttons reading the card. Junction's twelve cards (on nine backdrops: the
+confirm and prompt, Options, the merge-request panel and its create card, to-dos, the repository
+modal, the rebase card and the reword card over it, and the four panels of `PanelCard`) have it
+since round 6, step 10b, each named by its title: a character in a card's field over 1,000 rows
+with UIA 462 → 336 KB (−27 %), trees 1.3 a key → 0.05 (the field's first character, which brings
+the footer's button to life).
+
+A menu an app draws with elements (round 6, step 10b; the user approved what a reader hears).
+`AccessibilityRole.Menu` is new: UIA's Menu control type, AT-SPI's menu. A box with a click is no
+button when a child has that role, as when one has `Dialog`, so Junction's `BuildPopover` and
+Meridian's are a Menu of MenuItems, where a reader heard the layer and the card as two buttons
+named after every row, and each row as a button. An entry directly in a Menu is selected while the
+pointer is on it (`Element.IsMenuEntry`, `IsHovered`, unless it sets `AccessibleSelected`): UIA
+SelectionItem.IsSelected, its menu the selection container, and AT-SPI `state-changed:selected`,
+patched into the applied tree with no tree built (`A11yPatchKind.Selected`), since the menu is in
+the window's own tree and a move would otherwise build all of it, 1,000 rows of History beside it.
+A MenuItem with no menu of its own now has Invoke on UIA and the click action on AT-SPI, which it
+had neither of: a menu bar's title, which expands, keeps ExpandCollapse and gets the click only on
+AT-SPI. Hover is all the selection these two menus have: they take no keyboard, as they did not
+before, and Escape and a click outside close them as they did (Escape only in Junction, where
+the window's key handler does it). A context menu, a menu bar's menu and a dropdown's list are not
+this role: they publish virtual items, which every bridge reads as a List of ListItems.
+
+A dialog with nothing focusable in it takes the focus itself (round 6, step 5): the panel, not a
+Tab stop, so a reader is told the focus is on the dialog, named by its title. It was on the scrim,
+which since the scrim stopped being a button is a pane with no name.
 
 The coalesced layout refresh builds no tree either where a build would make the same nodes
 (2026-10-26, plan 17 round 5). A node keeps its box where it sits in the content of the scroll
@@ -354,6 +413,30 @@ Files:
       the node made again for it. The objects were made again for every node on every refresh to
       copy the geometry: 772 KB a wheel turn over 1,000 rows, 301 KB a key of a reader's walk
       beside details, 518 KB a label's edit beside 1,000 rows; now 0.2, 0.8 and 0.4 KB.
+    - **Objects kept by element (2026-11-02, plan 17 round 6 step 15).** The bridge keeps its
+      objects in a concurrent map by element, as the UIA bridge keeps its wrappers, instead of
+      making every object again on every apply (about 265 bytes a node). An apply walks the new
+      tree once, points each object at its node and takes what changed
+      (`AtSpiAccessible.Refresh`: what `From` would make, written only where it differs), makes
+      objects only for new nodes, keeps a parent's list of children while its children are the
+      same elements, and lets go of the objects of nodes that went (those the diff removed, then
+      any the walk did not reach): such an object answers nothing (UnknownObject) and drops its
+      node, which reaches its whole old tree. What the signals are worked out from is noted before
+      the objects take the new tree (a reordered parent's old children, an expanded state before,
+      a served list's children before), so the signals are the same: the same stream, byte for
+      byte, over the perf suite's 190 scenes, and over seven test suites (1,054 app tests compared
+      with their temporary folders, ports and boxes masked) wherever the window handed the bridge the
+      same changes; a live pyatspi client's cache read the same in all 39 steps. The bus thread reads each
+      property whole: a string, an array (replaced, never written over) or one word; a parent's
+      children read while a reorder is applied are the old list or the new. AT-SPI apply, headless:
+      a dialog's label tick over 3,006 nodes 797 → 0.2 KB, a palette key 816 → 11.4 KB, a list
+      filtered below 1,000 rows 843 → 2.5 KB, a row added to 1,000 rows 808 → 25 KB (the parent's
+      list of 3,000 children, made again). What is still made per node is the object of a node
+      that is new: a kept tab's page coming back (900 nodes) costs 290 KB, as its nodes left the
+      tree with the page. Time: the walk costs less than the objects it no longer makes on the
+      large trees (palette key −6…−8 %, filtered list −9…−12 %, added row −5…−8 %, dialog tick
+      flat); a kept tab's page coming back is +2.5 % on NativeAOT (its 900 objects go into and out
+      of the concurrent map).
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
@@ -427,7 +510,7 @@ What a screen reader gets for a list of 3,000 items:
 
 | | UI Automation | AT-SPI |
 |---|---|---|
-| The list's children | `UiaVirtualItem`s, made per navigation result, as before | `ChildCount` 3,000 (was 0); `GetChildAtIndex` makes an item's object the first time it is asked for and keeps it while the list serves its items; the snapshot still publishes the list's object alone (2 objects for the window) |
+| The list's children | `UiaVirtualItem`s, made per navigation result, as before | `ChildCount` 3,000 (was 0); `GetChildAtIndex` makes an item's object the first time it is asked for and keeps it while the list serves its items; the bridge still publishes the list's object alone (2 objects for the window) |
 | An item's name, check state | read from the list when asked | the same |
 | An item's selected state, the list's number of items | from the list's node: what the events told | the same |
 | An item's box, offscreen | from the list's viewport and scroll (`AccessibilityNode.TryGetServedItemBox`), where its node would be | the same, in device pixels |
@@ -619,7 +702,7 @@ providers), a UIA `ItemContainer` on virtualized lists.
     string by identity, the caret, the anchor, the rows and the part on screen; a keystroke
     is a text change (UIA `Text_TextChanged`, AT-SPI `text-changed` with what was inserted
     and removed, from the strings the versions hold, no tables made for it), never a value
-    change; a caret move a patch with no tree built, which it never told before; its
+    change; a keystroke and a caret move are patches with no tree built; a caret move was never told before; its
     read-only switch reaches the text a reader reads. In both, a character's box runs
     between its two caret places, so where the direction changes a box can span a run.
     Single-line text inputs are the next candidate.
@@ -681,7 +764,49 @@ providers), a UIA `ItemContainer` on virtualized lists.
   nothing. Their items have their places from the menu's measure, before its first frame is drawn
   (the tree is built in that frame, before the drawing, and gave every item a zero-height box for as
   long as the menu was open); a drawing context that measures text otherwise moves them once, and
-  tells their bounds.
+  tells their bounds. **A virtual list in an overlay (2026-10-30, plan 17 round 6 step 9):** a list
+  realizes its rows as it is drawn, after the phase, and the flags that say so end with the frame, so
+  with a reader listening the window realizes them in `PrepareOverlays` when the overlay's part is
+  stale, and a change of its rows builds the part in that frame. The command palette's result list
+  is such a list: its rows stay buttons with the names they had (`RowsAreComposite`, in a container
+  that says it is a scroll view), and those not scrolled to, with the "n more" line under them, leave
+  the tree, as in every other virtual list (the user's decision, 2026-10-27). The chosen row is now
+  told as selected, which it never was: `AccessibleSelected`, so UIA SelectionItem and AT-SPI's
+  selectable and selected states. Selecting a row from assistive technology clicks it, as for a tab,
+  and a click runs the command. A selected state changing inside an overlay builds that overlay's
+  part of the tree, in that frame; it built the window's whole tree. **A composite list in the
+  window's own tree (2026-10-31, plan 17 round 6 step 9b):** the same gap outside overlays, where
+  nothing came back for it: the tree of a mount had none of a `RowsAreComposite` list's rows, and a
+  change was told a key late or not at all (Junction's Commit list 28 nodes short on opening,
+  Aperture's library 168 cards, the Files list two rows behind at rest). The walks that read the tree,
+  the build and the layout refresh made in place, now ask a scroll view for what it draws as they
+  reach it (`ScrollViewElement.RealizeForAccessibility`), and a composite list realizes its rows
+  there; drawing then finds them made. So a mount's rows are in that frame's tree, and a change's or
+  a scroll's come with the coalesced layout refresh: in the frame of the change, or within its
+  100 ms when one came just before. That schedule is kept on purpose: a tree per key or per notch
+  would undo round 5's refresh, and the backoff's count did not move (18 trees per 120 notches in
+  Junction, 8–9 in Aperture). Junction's Changes list at 300 files, composite since step 11, is on the
+  same clock: one tree per 100 ms of scrolling, 20 per 120 notches at a notch a frame. Its walk of three
+  notches every two frames reads as a tree every third step, and it is not the list: on composite rows
+  every refresh in a scroll finds other rows. Fewer would take building only the list's part of the
+  tree, as an overlay's, or a longer schedule while a wheel runs. A list out of view, which no drawing reaches, gets its rows for a
+  reader too. Only the walks ask, so with no reader listening nothing but drawing realizes a row.
+  **The row that holds the focus (2026-11-01, plan 17 round 6 step 11b):** a list that publishes one
+  node per item has no nodes for what its rows hold, so a control in a row could take the keyboard
+  with the reader told nothing: the focus was on no node. Junction's review composer is such a row,
+  and what was typed there could not be reached. That row is now read through its elements, under
+  its item's node, for as long as it holds the focus, and the items stay as they were. There is one
+  such row at most, and it needs nothing from the app: every control in an item row is reached this
+  way, with Tab or a click, whichever list it is in. A focus move into a row builds the tree that has
+  its nodes and tells the focus then, as for an element that just appeared; a move out builds the
+  tree without them; a move inside it builds none. A change in the row is patched under the item
+  (the window's way down the ancestors goes through the item's node, a child of the list's at the
+  item's index), and the layout refresh walks the row in place. Every other row still builds nothing
+  for what changes in it. A list over the limit its items are served on demand from has item nodes
+  while a row is open, since the row has to hang under one: one tree of up to its whole length as the
+  row opens, and again as it closes. An item's node now stands where its row is drawn in a list of
+  rows of more than one height too (`ItemBounds`); they all stacked at the fixed height, and a reader's
+  highlight and UIA's hit test went by that.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

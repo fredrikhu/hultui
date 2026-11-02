@@ -76,6 +76,38 @@ static partial class Scenarios
             "The same typing when the rows show the query: the component tells the list with InvalidateRows when it changed, as a file viewer does while find is typed in, and the rows on screen are made again",
             ctx => TypeBesideRowHeightsOp(ctx, rowsTold: true));
 
+        yield return new Scenario("virtual/wheel 1,000 rows in sections",
+            "Wheel 3 notches through one list of 1,000 tagged rows of two heights, every ninth a section's header, no row held: the twin of the row below",
+            ctx => SectionWheel(ctx, held: false));
+
+        yield return new Scenario("virtual/wheel 1,000 rows in sections, sticky rows",
+            "The same wheel with .StickyRows(…): the section's header is held at the top until the next pushes it off, realized outside the window of rows",
+            ctx => SectionWheel(ctx, held: true));
+
+        yield return new Scenario("virtual/section walk 1,000 item rows",
+            "Press Down in the same list on item rows, the owning component's Build reading the selection, no row held: the twin of the row below",
+            ctx => SectionWalk(ctx, held: false));
+
+        yield return new Scenario("virtual/section walk 1,000 item rows, sticky rows",
+            "The same walk with .StickyRows(…): a move keeps the held row, and every few moves another takes its place",
+            ctx => SectionWalk(ctx, held: true));
+
+        yield return new Scenario("virtual/image grid walk Right, 600 cards",
+            "Press Right along a row of a grid of 600 image cards, a VirtualList whose item is a row of seven cards and the column the cursor is in there, as Aperture's library: the key makes the row again with its cards, their pictures, captions and badges",
+            ctx => ImageGridWalk(ctx, KeyCode.Right, KeyCode.Left, turn: 5)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("virtual/image grid walk Down, 600 cards",
+            "Press Down in the same grid, past the rows on screen and back: the key makes the row the cursor left and the row it reached, and the row scrolled in",
+            ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("virtual/image grid walk Right, 600 cards, cards handed back",
+            "The same walk with the rows keyed by their place and the cards by their films: a row made again hands back the cards the key did not change, and the patch puts them back untouched, so a key makes the two cards it moved between",
+            ctx => ImageGridWalk(ctx, KeyCode.Right, KeyCode.Left, turn: 5, keepCards: true)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("virtual/image grid walk Down, 600 cards, cards handed back",
+            "The same walk Down: the two rows the cursor moved between keep all but the card it left and the card it reached; a row scrolled in is made whole",
+            ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6, keepCards: true)) { Width = 1440, Height = 900 };
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
@@ -365,7 +397,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
     private static readonly string[] ChromeTabIcons = ["squares-four", "git-commit", "git-diff", "pencil", "git-branch", "tag", "folders"];
     private static readonly string[] ChromeRepos = ["hultui", "junction-notes", "vesper", "meridian"];
 
-    private static Element TitleBar()
+    internal static Element TitleBar()
     {
         var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center).Padding(new Thickness(0, 0, 0, 14)).Children(
             Text.New("Junction").FontSize(13f).FontWeight(FontWeight.Medium),
@@ -398,7 +430,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                 .Children(Phosphor.Draw(icon, 13f, Ui.Muted));
     }
 
-    private static Element Sidebar()
+    internal static Element Sidebar()
     {
         var aside = Flex.Column(gap: 2).Width(266).FlexShrink(0).FlexGrow(1).Padding(new Thickness(12, 10))
             .BorderColor(Ui.Line).BorderWidth(new Thickness(0, 1, 0, 0));
@@ -444,7 +476,7 @@ sealed class WalkPane(List<WalkItem> items, bool itemRows = false, bool details 
                     .Children(Phosphor.Draw("plus", 14f, Ui.Muted)));
     }
 
-    private static Element Toolbar()
+    internal static Element Toolbar()
     {
         var tabs = Flex.Row(gap: 2).FlexShrink(0).Padding(new Thickness(3)).AlignItems(AlignItems.Center)
             .BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(6f);

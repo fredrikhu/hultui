@@ -3,6 +3,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Junction.Git;
 using Junction.Theme;
@@ -38,7 +39,7 @@ public partial class JunctionApp
     /// lists sit in a 238–330px column beside a diff, so depth has to stay cheap.</summary>
     private const float ChangeTreeIndent = 11f;
 
-    private TreeView<GitFileChange> NewChangeTree() => NewChangeTree(MarkDirty);
+    private TreeView<GitFileChange> NewChangeTree() => NewChangeTree(() => { _changeTreeGen++; RerenderView(); });
 
     private static TreeView<GitFileChange> NewChangeTree(Action onChanged) => new(onChanged)
     {
@@ -96,12 +97,23 @@ public partial class JunctionApp
     }
 
     /// <summary>The additions and deletions of everything below a folder row.</summary>
-    private static (int Additions, int Deletions) FolderTotals(IReadOnlyList<GitFileChange> under)
+    private static (int Additions, int Deletions) FolderTotals(TreeNode<GitFileChange> node)
     {
+        if (!node.IsFolder) return (node.Item.Additions, node.Item.Deletions);
         var (add, del) = (0, 0);
-        foreach (var f in under) { add += f.Additions; del += f.Deletions; }
+        foreach (var child in node.Children)
+        {
+            var (a, d) = FolderTotals(child);
+            add += a;
+            del += d;
+        }
         return (add, del);
     }
+
+    /// <summary>The height of a line of text, as layout measures one; 0 before anything has been
+    /// drawn, with no measure context yet.</summary>
+    private static float LineHeight(float size, string family = "sans-serif", FontWeight weight = FontWeight.Regular) =>
+        TextMeasure.Measure("Ag", TextMeasure.StyleFor(size, family, weight)).Height;
 
     /// <summary>
     /// The chrome a folder row shares between the two lists: the indent, the twisty, the

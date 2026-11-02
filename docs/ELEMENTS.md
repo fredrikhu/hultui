@@ -185,9 +185,31 @@ clicks it, so the element has to select itself on click. `TabsElement` sets it o
 **A `BoxElement` with a click handler is announced as a button.** When no role is set, the
 tree builder infers one from the element type, and the last rule is "a box with an
 `OnClick` is a `Button`", named from the text inside it. That is right for a clickable
-card and wrong for a row whose click merely selects it, or a backdrop whose click closes a
-dialog: give those an explicit `.AccessibleRole(...)`. An explicit role always wins over
-inference.
+card and wrong for a row whose click merely selects it: give that an explicit
+`.AccessibleRole(...)`. An explicit role always wins over inference.
+
+**A backdrop is not a button when its card is a dialog.** A box with a click whose child
+has the role `Dialog` is the dialog's backdrop: it gets no role and no name, so in your own
+tree it is no node at all and the dialog is its parent's child; `Dialog.Show`'s scrim, the
+root of its overlay, is an unnamed pane (UIA) or panel (AT-SPI) holding the dialog. The
+click still closes the dialog, and Escape still does. For a modal you keep in your own
+tree, give the card `.AccessibleRole(AccessibilityRole.Dialog).AccessibleName("…")` and put
+it directly in the backdrop. Without that the backdrop is a button named after all the
+card's text: a reader hears the whole modal as one button, told again whenever any text in
+it changes, and every such change builds the window's whole accessibility tree, 260 KB per
+change over 1,000 rows with UIA (1,058 KB with AT-SPI), where the card's label is otherwise
+patched for about 1 KB (plan 17, round 6). The rule looks at the backdrop's children only,
+not further down.
+
+**A menu you draw yourself.** A short list of commands built from elements, on a box whose
+click closes it, gets `.AccessibleRole(AccessibilityRole.Menu)` on the card, directly in that
+box, and `.AccessibleRole(AccessibilityRole.MenuItem).AccessibleName(label)` on each row,
+directly in the card. The box is then no button, as a dialog's backdrop is not, and a reader
+hears a menu of items where it heard two buttons named after every row. A row is selected
+while the pointer is on it, as a context menu's item is, and that is patched into the tree with
+none built; Invoke (UIA) and the click action (AT-SPI) run its click. Junction's and Meridian's
+dropdowns are drawn this way. A `Popover` stays a dialog: it takes the keyboard, and a press
+outside it goes on to what was pressed, which is not how those two close.
 
 ### Tree
 
@@ -1195,6 +1217,9 @@ var list = VirtualListElement<FileEntry>.New()
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
+| `.HoverHighlight(fill, radius)` | `HoverHighlight` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own — same section |
+| `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
+| `.StickyRows(Func<T,int,bool>)` | `StickyRowFor` | the rows held at the top while the rows after them scroll under them, each until the next pushes it off — see **Rows held at the top** below |
 
 **How rows live.** With the one-argument template, the visible window plus a row or two of
 overscan is rebuilt on every patch — the template is re-invoked, so a rebuild of the owning
@@ -1280,7 +1305,10 @@ The model objects themselves have to be kept between rebuilds for the comparison
 nodes made again by every build (a tree flattened from a fresh filter) are new objects at
 every index, and every row is made again. Keep them while what they come from is the same.
 Junction's Files tree, moved from a scroll view of every row onto a virtual list this way,
-makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now).
+makes 2.3 rows a key in a search of 2,300 files (28 MB a key before, 0.28 MB now). Vesper's
+Detail rows carry their mark, their cut-for-a-move state and a folder's measured size in the
+item (`PaneRowItem`) rather than in the rows' shape: Insert makes the row it marked and the row
+the cursor reached instead of all 30 on screen, 191 → 42 KB a key (headless, 400 files).
 
 When the items are records the list is handed as they come (a folder's entries straight from
 the loader) and the highlight is one value that moves, the app can instead tell the list the
@@ -1326,16 +1354,109 @@ The pixels are the same as rows that drew it when the highlight is the fill, rad
 row drew and the row's own background becomes transparent (a row with a ring keeps a transparent
 border of the ring's width, so its contents stay where they were). It fits only a selection that
 is a background. A row that shows its selection any other way cannot show it any more: a bolder
-label, an icon's colour, something only the selected row has (Junction's History names what
-Enter will do on the caret's row), or a hover tint the row leaves off its selected row (a kept
-row has no way to learn it became selected, so its hover tint would cover the highlight). Such a
-list keeps the selection in its rows. Assistive technology reads the list's selection, not the
-rows', so it is told the same either way. Another highlight from a rebuild (a theme's colour) is
+label or an icon's colour. Such a list keeps the selection in its rows. Assistive technology
+reads the list's selection, not the rows', so it is told the same either way.
+
+Two more things a row would have to be told its selection for move to the list. A row that tints
+under the pointer and leaves the tint off its selected row would keep the tint over the highlight,
+since a kept row never learns it became selected: `.HoverHighlight(fill)` has the list draw the
+tint, under the row the pointer is on (`Element.IsHovered`, what a row's own `.OnHover` sees) and
+only if that row is not selected. The pixels are a row's own, and a row with a fill of its own
+covers the tint. Something only the selected row has goes in `.SelectionOverlay(element)`: one
+element the list holds over the selected row (`SelectedIndex`), at the row's end and as tall as it,
+over the rows and under the scroll bars, scrolled and clipped as they are. A move only moves it, with
+no layout. Hand back the element on screen from a build, or a new one, which is patched into it.
+
+```csharp
+list.SelectionHighlight(onPick ? Nocturne.Accent900 : Nocturne.Neutral900)
+    .HoverHighlight(Nocturne.Neutral900)
+    .SelectionOverlay(Kept(_affordancePart, shape, () => BuildAffordance(tint), "affordance"))
+    .RenderWith((c, _) => HistoryRow(c));   // no selection, no hover, no affordance
+```
+
+The overlay leaves the row's flow, so that row lays out as the others do and a long subject runs
+under it: give it the highlight's fill (Junction's History fades the subject out over 24 px before
+the words, which leaves a difference of 1 in 255 on that strip over a short subject). It takes no
+pointer, so a press on it is a press on the row: give the row's click what it should do. Items of a
+list with item rows have no children in the accessibility tree, so it adds nothing a reader hears;
+say what it says in the row's label if it matters. On composite rows it is read after them. It is
+out of the tree while no row is selected. Junction's History took all three: a key makes no row (2 →
+0) and allocates 16 KB instead of 40; a row that stays under the pointer as the caret passes
+keeps its tint afterwards, which a row made again by the move lost until the pointer next moved.
+Another highlight from a rebuild (a theme's colour) is
 drawn on the next frame and makes no row; turning it on or off makes the selected rows again.
 `.SelectionHighlight(null)` leaves the selection to the rows. On the perf suite's walk a step
 makes 1 row instead of 3 and allocates 16 KB instead of 25 (`virtual/selection walk 1,000 item
 rows, the list draws the highlight`); Junction's Tags table, whose caret's tint is the list's,
-makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87.
+makes 1.5 elements a key instead of 45.5 and allocates 41 KB a key instead of 87. The highlight
+can change colour with what is under it: a plain key in Junction's Branches moves the caret and the
+branch picked together, so the list draws the pick's tint on a picked row and the caret's on any
+other, the row's item says only whether it draws a pick of its own, away from the caret, and a key
+makes no row (93 → 47 KB a key). A list can take it only while nothing else paints the selected row: Vesper's Detail panes let the list draw
+the cursor (an accent fill and a 1 px ring, square-cornered) and go back to rows that draw it
+while the zebra tint is on or a drag hovers a folder in the pane, either of which would paint over
+the list's box; each is in the rows' shape, so the switch makes the rows again (Detail Down 35 →
+23 KB a key). Something that needs the selected row's place — a menu opened under it — works it out
+from the list (`ScreenContentBox`, `ItemHeight`, `ScrollOffsetY`), since no row is made selected.
+
+**Rows held at the top.** `.StickyRows((item, index) => item.IsHeader)` says which rows are a
+section's header in one list of rows. The list keeps the last sticky row at or above the first row
+on screen realized, however far up it stands, and holds it at the top of the list until the next
+sticky row reaches it and pushes it off, which is what `Sticky()` does for a header in a column of
+its own (LAYOUT.md "Sticky"), for rows that are not elements. The pixels are the same at every
+offset, a fractional one and a push-off among them.
+
+```csharp
+var list = VirtualListElement<Row>.New()
+    .Items(rows)
+    .RowHeights((r, _) => r.IsHeader ? HeaderHeight : RowHeight)
+    .RenderWith((r, _) => MakeRow(r))
+    .StickyRows((r, _) => r.IsHeader);
+```
+
+The function is asked once per row per invalidation, as `RowHeights` is, reads the item and the
+index, and a list without it pays for none of this. Give the row a background, or what scrolls under
+it shows through. The held row is a row like the others: told from the items, kept on item rows
+while its item is, one row beside the ones on screen, so a rebuild makes it no more often. It moves
+as a sticky element moves, when it is drawn, hit and read, never in layout, and
+`ScreenBorderBox` says where it is, so a press, a popover and a focus ring find it there.
+`.SelectionHighlight` and `.HoverHighlight` go on its background, under its content, where it is
+drawn; a selected row going by under it stays under it, and `.SelectionOverlay` goes with a selected
+held row, over it. `ScrollRangeIntoView` leaves a row clear of the row held at the top, by the row
+heights, so the header of a section nothing has realized yet counts, and it does not scroll a sticky
+row back off itself. A reader finds the held row where it is drawn: with `RowsAreComposite` it stands
+in the tree before the rows on screen, and otherwise its item's node is moved there.
+
+The rows below the held one are what they always were: a list without it reads the same on the perf
+suite, and with it a wheel through 1,000 rows in sections costs 0.198 ms against its twin's 0.189 and
+20.3 KB against 19.9, a key walk 0.203 ms against 0.195 and 12.3 KB against 11.8 (NativeAOT;
+`virtual/wheel 1,000 rows in sections`, `virtual/section walk 1,000 item rows`, each with and without
+`, sticky rows`). Junction's Changes list moved onto it from a scroll view of a column per section:
+a key with 300 changed files allocates 317 KB instead of 3,078 and holds 571 elements instead of
+3,160. What a scroll view gave and a list does not is the rows off screen: a reader and Tab reach
+only the ones on screen, and the held row.
+
+**An editor in a row.** A field or a rich text editor in a row holds its own text, caret and undo,
+and an editor of fixed height leaves the row's height alone, so a key in it needs no row made and
+no build. Make the row again only when something else in it shows the change: a `RichTextToolbar`
+says so with `IsStale`, true when a build would make other buttons than the last one made.
+
+```csharp
+.OnDocumentChanged(d => { _doc = d; Edited(); })
+.OnSelectionChanged(Edited)
+
+void Edited()
+{
+    if (_bar.IsStale) { _list.Current?.InvalidateRow(CardRow); Rebuild(); }
+}
+```
+
+The row that holds the keyboard focus is read through its elements, under its item's node, so a
+reader reaches a control in a row with nothing set: see **A row that holds the focus** below.
+Junction's review composer made its row again on every key, and built a tree with a reader
+listening; kept: 150.4 → 2.0 KB a key, 206.7 → 2.0 with UIA, 1 tree a key → 0, the key's time −16 %
+and −20 % (headless, JIT; NativeAOT −20 % both). The suite pins it:
+`a11y/type in a rich text editor inside a VirtualList row, bridge on`, and its UIA twin.
 
 The items' accessible labels follow the same contract. The accessibility tree asks for every
 item's label each time it is built — with a reader listening, after every structural change
@@ -1413,7 +1534,21 @@ all the cards in it, and every card's own name, role and automation id would van
 the tree. `RowsAreComposite = true` says the rows carry real controls, so the builder
 walks the realized rows instead of synthesizing item nodes. The trade is that off-screen
 rows are not in the tree; they enter it as they realize, the way a scroll view's content
-does. Aperture's poster grid is the case this exists for.
+does. With a reader listening the tree asks the list for its rows before they are drawn, so
+a mount's rows are in that frame's tree, and a change's or a scroll's reach the reader with the
+layout refresh: in that frame, or within 100 ms of the last one. Nothing is needed from the
+app, and with no reader only drawing realizes a row. Aperture's poster grid is the case this
+exists for.
+
+**A row that holds the focus.** A list of items can still have a control in a row: a comment being
+written among a diff's lines, a name being edited in place. Nothing needs setting. The row that
+holds the keyboard focus is read through its elements, under its item's node, for as long as it
+holds it, and every other row stays its item, so a reader keeps the whole list and gets the controls
+of the row it is in. Tab and a click reach it as they reach any control. Reach for
+`RowsAreComposite` when the rows *are* controls, not when one of them holds some: it turns each row
+into its elements for every row on screen, and takes the rows off screen out of the tree. Junction's
+review measured both. Rows that have to be read without the focus in them need `RowsAreComposite`,
+or an item label that says what they hold.
 
 ---
 
@@ -1432,10 +1567,11 @@ TextArea.New("initial text")       // pre-filled; caret at the end
     .PlaceholderText("Notes…")
     .OnTextChanged(t => _notes = t)
     .ReadOnly()                    // selectable and scrollable, not editable
-    .Spans(highlightSpans);        // IReadOnlyList<TextSpan>, colour and decoration per range
+    .Spans(highlightSpans)         // IReadOnlyList<TextSpan>, colour and decoration per range
+    .Highlights(findMatches);      // IReadOnlyList<TextHighlight>, a background per range
 ```
 
-Those four are the only fluent members; everything else is a property.
+Those five are the only fluent members; everything else is a property.
 
 | Property | Type | Notes |
 |---|---|---|
@@ -1449,7 +1585,8 @@ Undo and redo work as in `TextInputElement` — Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, `
 `Redo()`, the right-click menu — and a line break typed with Enter counts as typing, so a new
 line's first word starts a step of its own. A read-only area ignores both keys and has no Undo
 in its menu.
-| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives. Sorted by start, may overlap (a tint over a token). Indexed when first drawn and kept by reference: hand a new list to change them, and the same list each build when they have not changed |
+| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring. Sorted by start, may overlap (a tint over a token). Indexed when first drawn and kept by reference: hand a new list to change them, and the same list each build when they have not changed |
+| `Highlights` | `IReadOnlyList<TextHighlight>?` | backgrounds over the spans, such as find matches (`TextHighlight(Start, Length, Background)`); see **Find matches are highlights** below. Sorted by start, may overlap; kept by reference as the spans are |
 | `ScrollOffsetY`, `ScrollSpeed`, `Scrollbar*` | | vertical only |
 | `TextChanged` | `Action<string>?` | |
 
@@ -1481,6 +1618,30 @@ Both scroll only if the target is off screen, and both resolve through the wrap 
 the true visual row. Prefer the offset form for anything that already holds an offset
 (a search hit, a selection): when the whole body is one logical line — minified JSON, a
 long log line — every hit is on line 0 and the line form has nothing to say.
+
+**Find matches are highlights.** `Highlights` is a layer of backgrounds over `Spans`, in the
+same whole-text offsets: `TextHighlight(Start, Length, Background)`. Hand the area your syntax
+spans once and keep handing it the same list; hand a find step's matches to `Highlights`:
+
+```csharp
+area.Spans = syntaxSpans;                       // the same list on every build
+area.Highlights = search.HasHits ? tints : null; // a new list when the matches or the current one move
+```
+
+A highlight is only a background: it never changes the colour of the text under it, its
+shaping or its wrapping, so another list draws the area again and lays nothing out, and the
+same list again costs nothing. The area draws each row's highlights with its spans, after the
+selection's fill and under the text, in start order with the spans' own backgrounds (a span
+first where both start together). Readers are not told about them; they are not text
+attributes.
+
+Until round 6 of plan 17, Meridian and Junction merged their find tints into a copy of every
+syntax span and sorted it, on every find key and every Enter: 1.5 MB a key over a 2,000-line
+JSON response, 14 MB over a 19,000-line one, 7 MB over a 6,000-line source file, with a gen-2
+collection every four to six keys. With the layer: 132, 730 and 145 KB a key, Enter 65, 172
+and 80 KB, no gen-2; a key takes 25–76 % less time, an Enter 43–89 %. Keep the list between builds
+while the query, its options, the current match and the text stay the same, as
+`TextSearch.Decorate`'s callers do for rows.
 
 **Reconciliation** keeps the caret and selection when the incoming text is the same
 string, so a rebuild mid-edit is safe; a rebuild that *replaces* the element (a changed
@@ -1682,7 +1843,7 @@ _find.Service();
 
 | Member | Meaning |
 |---|---|
-| `Search` | the `TextSearch` — tint lines with `Search.Decorate`, rebind with `Search.Bind` |
+| `Search` | the `TextSearch` — tint row views' lines with `Search.Decorate`, a `TextArea` body with its `Highlights`; rebind with `Search.Bind` |
 | `IsOpen`, `Open()`, `Close()`, `Next()`, `Previous()` | what the keys and buttons do |
 | `HandleKey(e)` | Ctrl+F, Escape, Enter / Shift+Enter, Alt+C, Alt+R, and `n` / `p` with `LetterKeys` |
 | `Service()` | focus the field, give the body the keyboard back, reveal the current match |
@@ -1697,6 +1858,51 @@ the bar, which holds it for the step's own notice. Until round 5 of plan 17 a st
 call `onChanged` and then called it again, two builds for every Enter or F3 and three for Ctrl+F
 over a selection, the first before the step had asked for its reveal (Vesper's reader, find Enter:
 two builds a step → one). Don't make the bar's `TextSearch` call `MarkDirty` itself too.
+
+**Keep the current match out of the rows' shape.** A body on item rows tints its matches with
+`Search.Decorate`, the current one in a colour of its own. What every row shows — the query, its
+options, the number of matches — belongs in the shape that makes every row again
+(`InvalidateRows()`, see **Rows that show only their item**); the current match does not: only
+two rows show that it moved. Tell the list the line it left and the line it reached, at the top
+of the build, as `InvalidateRow` is told any highlight that moves:
+
+```csharp
+var s = _find.Search;
+var hit = s.Index >= 0 && s.Index < s.Hits.Count ? (s.Index, s.Hits[s.Index].Line) : (-1, -1);
+if (hit != _hitWas && _listRef.Current is { } list)
+{
+    list.InvalidateRow(_hitWas.Line);   // -1 does nothing
+    list.InvalidateRow(hit.Line);
+}
+_hitWas = hit;
+```
+
+The index and the line, not the line alone: two matches on one line move the tint within it.
+Vesper's reader had the index in its shape, so every Enter, F3 or `n` made every row on screen
+again: on a 3,000-line file 35 rows and 330 KB an Enter, 2.5 rows and 69 KB now, with the bar's
+own rebuild made view-only (an owner with kept parts gives the bar the rebuild that leaves them:
+nothing a part shows moves with a find step, and a full one built Vesper's title bar and command
+line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6). Junction's
+diff the same: 36 rows and 468 KB an Enter, 3 rows and 108 KB now.
+
+**A TextArea body takes the matches as highlights.** One `TextArea` over a whole document
+(Meridian's response, Junction's Files view) has one span list for the document, so the matches
+go to its `Highlights`, in the document's offsets, and the spans stay the list they were:
+
+```csharp
+var tints = new TextHighlight[s.Hits.Count];
+for (int i = 0; i < tints.Length; i++)
+{
+    var h = s.Hits[i];
+    tints[i] = new TextHighlight(lineStarts[h.Line] + h.Start, h.Length, i == s.Index ? currentTint : hitTint);
+}
+area.Spans = syntax;          // untouched by the search
+area.Highlights = tints;      // kept while query, options, Index and Hits.Count stay the same
+```
+
+Work the line starts out once per document, not per build. Merging the tints into the spans
+instead copies and sorts every span of the document on every key (see **Find matches are
+highlights** under TextAreaElement).
 
 `new FindBar(search, onChanged)` puts a bar over a search something else owns — a terminal
 searches its own scrollback. That search tells its owner through its own callback, which the bar
@@ -1765,8 +1971,13 @@ IEnumerable<PaletteCommand> Commands() =>
 - **State:** `IsOpen`, `Query` (settable), `Matches`, `SelectedIndex`, `Move`, `Run`, `Close`,
   and `Closed`, raised however it closes — at once, not a frame later.
 - **Accessibility:** one dialog named `AccessibleName` ("Command palette"); rows are buttons
-  named "Title (Group)". Automation ids: `palette`, `palette-card`, `palette-input`,
-  `palette-row-N`, `palette-no-match`.
+  named "Title (Group)", and the chosen one is selected. Automation ids: `palette`,
+  `palette-card`, `palette-input`, `palette-row-N`, `palette-no-match`.
+- **The list is virtual:** only the rows on screen are elements, so a keystroke over a long list
+  costs what a short one does. The others are not in the accessibility tree and have no
+  `palette-row-N` until they are scrolled to, and the same goes for the "n more" line under them.
+  A test that reaches for row 40 moves the choice to it first. `Icon` is built for rows as they
+  come on screen, not for every match.
 
 **Looks** come from `Theme.CommandPalette` (`CommandPaletteTheme`): width, maximum height, offset
 from the top, scrim, card, rules, row heights (one line and two), colours of the chosen and
@@ -1904,7 +2115,11 @@ shadows, the gap to the anchor and the margin kept from the window's edges.
 
 **Under it**, for other anchored surfaces: `IOverlayHost.ShowAnchoredOverlay(content, anchor,
 place, …)` places an overlay with `place(contentSize, windowSize)` every frame, and swallows a
-press on the anchor that closes it. `Element.WindowBorderBox` / `WindowContentBox` say where an
+press on the anchor that closes it. `ShowOverlay(content, x, y, …)` puts one at a point and keeps
+it in the window, from that point, on opening and at each new size. Either kind is laid out again
+in the frame of a resize, so nothing an overlay does needs `Window.Resized`: a dialog's scrim
+and a palette have their new layout there, as a fresh open at that size would.
+`Element.WindowBorderBox` / `WindowContentBox` say where an
 element is in the window, overlay or not — what anything placed in the window against it wants
 (another overlay, the focus ring, a synthesized click). `ScreenBorderBox` stays in the space the
 element's own pointer events arrive in, which inside an overlay is the overlay's; dropdowns, date
@@ -1999,3 +2214,51 @@ Tabs.New().Selected(_tab).OnTabChanged(i => _tab = i)
   named from its label and badge (a closable tab by those outright, so its "×" is not read; the
   close button is "Close <label>"), and the panel a `TabPanel` named after the open tab. UIA's
   SelectionItem `Select` opens a tab.
+
+---
+
+## 27. Part (a kept piece of a build)
+
+`Part` is not an element but a `Component` (`HultUI.Core.Components`): a piece of an owner's build
+that the owner keeps between its builds, such as a title bar, a rail or a toolbar. The owner makes
+it once and places it from every build; a key that changes only the view beside it costs the view
+alone. The reasoning and the traps are in [REACTIVITY.md](REACTIVITY.md), "Keep what a key does not
+change in a child component".
+
+```csharp
+private readonly PartGroup _parts = new();
+private Part? _rail;
+private Part RailPart => _rail ??= new Part(_parts, () => BuildRail().FlexGrow(1));   // made once
+
+public override Element Build()
+{
+    var view = BuildView();
+    view.Key = "view";
+    return Flex.Row(gap: 0).FlexGrow(1).Children(RailPart.Place().FlexShrink(0), view);
+}
+
+// A rebuild builds the parts too, unless the path says it changes nothing they show.
+private new void MarkDirty() { _parts.Invalidate(); base.MarkDirty(); }
+private void MarkViewDirty() => base.MarkDirty();
+```
+
+- **`new Part(group, build, own, afterBuild)`:** `build` makes the elements. `group`, a `PartGroup`
+  the owner's parts share, is what a full rebuild moves. `own` is an optional `Signal<int>` of this
+  part alone: writing it rebuilds the part with no build of the owner, for a change only the part
+  shows. `afterBuild` runs after each of its builds but the first, for work that waits for its
+  elements, such as a field taking the keyboard.
+- **`Place(stale)`:** returns the part's `ComponentHost`, built again first when the group or its
+  own signal moved since it last built, or when `stale` says so: what the owner compared, for
+  something a view-only rebuild can move. It builds there and then, inside the owner's build,
+  before the owner's `OnAfterBuild`. Call it from `Build()`, where the part's root used to be built.
+- **The host is the flex item.** Give it what the root had (`FlexShrink(0)` for a fixed bar), and
+  give a root that must fill it `FlexGrow(1)`. It carries a key of its own, so key the owner's other
+  children: a keyed list puts a kept host back with nothing marked.
+- **A part that hears a signal builds on its own.** Anything else it reads needs
+  `PartGroup.Invalidate()`, so keep that the default: every rebuild, and only the paths that change
+  nothing a part shows opt out. A rebuild a loader asks for comes through a signal, with neither
+  `MarkDirty` nor `Rerender`: if what lands can move a plain field a part reads, have `Build()`
+  invalidate the group unless the path asked for a view-only build.
+- **`Builds`:** on `Part` and on `PartGroup` (of all its parts), for tests.
+- **`Mount()`** is a `Component`'s: it hands back the host without the check. A part mounted, not
+  placed, hears a full rebuild only through a signal it reads, as Junction's chrome does.

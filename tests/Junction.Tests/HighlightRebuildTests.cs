@@ -123,7 +123,7 @@ public class HighlightRebuildTests
 
     private static IDictionary Highlights(JunctionApp app) => (IDictionary)Field(app, "_highlights")!;
 
-    private static int Pending(JunctionApp app) => ((IEnumerable<string>)Field(app, "_highlightsPending")!).Count();
+    private static int Pending(JunctionApp app) => app.HighlightsPending;
 
     private static JunctionView View(JunctionApp app) =>
         (JunctionView)typeof(JunctionApp).GetProperty("View", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;

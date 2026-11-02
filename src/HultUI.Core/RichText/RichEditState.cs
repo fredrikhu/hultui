@@ -669,12 +669,24 @@ public sealed partial class RichEditState
         return tail.Text.Length == 0 ? (ReferenceEquals(head, block) ? head with { } : head) : head.Append(tail);
     }
 
-    private static RichBlock InsertInline(RichBlock block, int offset, string text, ImmutableArray<RichSpan> spans)
+    // The block with text, carrying spans (from 0), put in at offset; into preformatted text,
+    // without them. Its text is made in one string and its spans in one array of their number
+    // (RichSpans.Insert). The block sliced at the offset and joined around the text, as it was, made
+    // four strings and four span builders a key typed, each copied out and the slices' grown by
+    // doubling: 6.4 times the bytes of the spans (plan 17, round 6). Internal for the test that holds
+    // it to those slices and joins.
+    internal static RichBlock InsertInline(RichBlock block, int offset, string text, ImmutableArray<RichSpan> spans)
     {
-        var head = block.Slice(0, offset);
-        var tail = block.Slice(offset, block.Text.Length);
-        var middle = block with { Text = text, Spans = block.IsPreformatted ? [] : spans };
-        var joined = head.Append(middle);
-        return tail.Text.Length == 0 ? joined : joined.Append(tail);
+        offset = Math.Clamp(offset, 0, block.Text.Length);
+        // Nothing put in: the block as it was, a copy of it unless the offset is its end, as joining
+        // it around nothing gave.
+        if (text.Length == 0)
+            return offset == block.Text.Length ? block : block with { };
+        return block with
+        {
+            Text = string.Concat(block.Text.AsSpan(0, offset), text, block.Text.AsSpan(offset)),
+            Spans = RichSpans.Insert(block.Spans, block.Text.Length, offset, block.IsPreformatted ? [] : spans,
+                text.Length),
+        };
     }
 }

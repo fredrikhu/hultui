@@ -89,6 +89,63 @@ internal static class RichSpans
     }
 
     /// <summary>
+    /// The spans of a block of <paramref name="length"/> characters once
+    /// <paramref name="insertedLength"/> characters carrying <paramref name="inserted"/> (from 0)
+    /// are put in at <paramref name="offset"/>: the spans before the offset, the inserted ones
+    /// moved to it, and those after it moved on past them, a span across the offset cut in two,
+    /// merged where they meet. They are the spans of the block sliced at the offset and joined
+    /// around the inserted ones (<see cref="Slice"/>, <see cref="Concat"/>), to the last one,
+    /// added in the same order, into one array made at their number.
+    /// </summary>
+    public static ImmutableArray<RichSpan> Insert(ImmutableArray<RichSpan> spans, int length, int offset,
+        ImmutableArray<RichSpan> inserted, int insertedLength)
+    {
+        var result = ImmutableArray.CreateBuilder<RichSpan>(Inserted(spans, length, offset, inserted, insertedLength, null));
+        Inserted(spans, length, offset, inserted, insertedLength, result);
+        return result.MoveToImmutable();
+    }
+
+    // Insert's spans in order, added to `into`; with none, how many Add would leave in it.
+    private static int Inserted(ImmutableArray<RichSpan> spans, int length, int offset,
+        ImmutableArray<RichSpan> inserted, int insertedLength, ImmutableArray<RichSpan>.Builder? into)
+    {
+        int count = 0;
+        RichSpan last = default;
+        foreach (var s in spans)
+        {
+            if (s.Start >= offset) break;
+            Put(Clip(s, 0, offset));
+        }
+        foreach (var s in inserted)
+            Put(s with { Start = s.Start + offset });
+        foreach (var s in spans)
+        {
+            if (s.End <= offset) continue;
+            var tail = Clip(s, offset, length);
+            Put(tail with { Start = tail.Start + insertedLength });
+        }
+        return into?.Count ?? count;
+
+        // Add, or Add's rule counted.
+        void Put(RichSpan span)
+        {
+            if (into is not null)
+            {
+                Add(into, span);
+                return;
+            }
+            if (span.Length <= 0 || span.Marks.IsNone) return;
+            if (count > 0 && last.End == span.Start && last.Marks == span.Marks)
+                last = last with { Length = last.Length + span.Length };
+            else
+            {
+                last = span;
+                count++;
+            }
+        }
+    }
+
+    /// <summary>
     /// Runs <paramref name="change"/> over the marks of every character in <c>[from, to)</c> —
     /// plain characters included, as <see cref="RichMarks.None"/> — and puts the results back.
     /// </summary>

@@ -1,4 +1,5 @@
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 
 namespace VesperCommander;
@@ -84,13 +85,30 @@ public partial class CommanderApp
     private void ShowContextMenuAtCursor(char side)
     {
         float x = 40f, y = 80f;
-        if (CursorRowRef(side).Current is { } row)
+        if (CursorRowBox(side) is { } box)
         {
-            var box = row.Layout.AbsoluteBorderBox;
             x = box.X + 24f;
             y = box.Y + box.Height;
         }
         ShowContextMenuAt(side, x, y);
+    }
+
+    /// <summary>Where the cursor's row is on screen, or null when no row has it. In Detail the
+    /// list draws the cursor (<see cref="ListDrawsCursor"/>) and its rows are made without it, so
+    /// the box is worked out from the list: its rows are one height, stacked from the top of its
+    /// content, scrolled by its offset. Elsewhere it is the row (cell, tile) that drew the cursor
+    /// — on screen, with the scroll applied: its layout box is where it would be unscrolled, and
+    /// a menu opened there once the list had scrolled opened below the window.</summary>
+    internal Rect? CursorRowBox(char side)
+    {
+        if (ViewOf(side) == ViewMode.Detail && VList(side).Current is { SelectionHighlight: not null } list)
+        {
+            if (list.SelectedIndex < 0) return null;
+            var content = list.ScreenContentBox;
+            float h = list.ItemHeight;
+            return new Rect(content.X, content.Y + list.SelectedIndex * h - list.ScrollOffsetY, content.Width, h);
+        }
+        return CursorRowRef(side).Current is { IsDetached: false } row ? row.ScreenBorderBox : null;
     }
 
     /// <summary>Open the shell menu at a point in window (layout) coordinates.

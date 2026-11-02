@@ -50,10 +50,13 @@ public partial class JunctionApp
         return loader.Value;
     }
 
-    /// <summary>The text before the caret ends in a <c>#</c> token → (token start, query).</summary>
+    /// <summary>The text before the caret ends in a <c>#</c> token → (token start, query). A caret
+    /// of -1 is no caret: the list is closed (Esc, a pick) until the next keystroke records one.
+    /// It used to read as the end of the text, where Esc's token still was, so Esc closed nothing.</summary>
     private static (int Start, string Query)? IssueTokenAt(string text, int caret)
     {
-        if (caret < 0 || caret > text.Length) caret = text.Length;
+        if (caret < 0) return null;
+        if (caret > text.Length) caret = text.Length;
         var m = IssueTrigger.Match(text[..caret]);
         // The caret the field reports can lag the character just typed by a change; the
         // end of the text is where typing happens, so it is tried too.

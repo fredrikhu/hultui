@@ -1,7 +1,11 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.RichText;
 using HultUI.Headless;
 
@@ -147,6 +151,43 @@ static partial class Scenarios
                 };
             });
 
+        // A 300-row, 10-column table of short cells, as a user's example held: scrolled to its
+        // bottom a frame ought to cost what one at its top does, so a gap between the twins is
+        // work that grows with the rows above the view.
+        foreach (var (where, bottom) in new[] { ("top", false), ("bottom", true) })
+        {
+            yield return new Scenario($"richtext/wheel at the {where} of a 300x10 table",
+                $"Wheel at the {where} of a 3,000-cell table: only the rows on screen are drawn",
+                ctx =>
+                {
+                    var editor = MountTable(ctx);
+                    // At the bottom, the walk's first twenty steps go down and end at the end.
+                    if (bottom)
+                    {
+                        editor.ScrollOffsetY = float.MaxValue;
+                        for (int step = 20; step < 40; step++) ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3);
+                    }
+                    ctx.Pump();
+                    float before = 0;
+                    return new Op
+                    {
+                        Reset = _ => before = editor.ScrollOffsetY,
+                        Run = step => ctx.Window.Wheel(500, 380, 0, WheelDirection(step) * 3),
+                        Check = _ => editor.ScrollOffsetY != before ? null : "the wheel did not scroll the editor",
+                    };
+                }) { Width = 1200, Height = 800 };
+
+            yield return new Scenario($"richtext/redraw at the {where} of a 300x10 table",
+                $"Draw a 3,000-cell table scrolled to its {where} again, nothing changed",
+                ctx =>
+                {
+                    var editor = MountTable(ctx);
+                    if (bottom) editor.ScrollOffsetY = float.MaxValue;
+                    ctx.Pump();
+                    return new Op { Run = _ => editor.MarkPaintDirty() };
+                }) { Width = 1200, Height = 800 };
+        }
+
         yield return new Scenario("richtext/type in an auto-height editor",
             "Type in a 1,000-block editor that grows with its document inside a scroll view: measured, then drawn",
             ctx =>
@@ -181,6 +222,72 @@ static partial class Scenarios
                     Check = _ => bridge.Diffs.Count > 0 ? null : "the bridge received no change",
                 };
             });
+
+        yield return new Scenario("a11y/type in a rich text editor inside a VirtualList row, bridge on",
+            "Type and erase in a comment card that is a row of a 150-row list, under its formatting bar, while an accessibility client listens: what a key makes again, and the trees it builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return TypeInListRow(ctx, editor => ToldCaret(bridge.CurrentTree, editor));
+            });
+
+        yield return new Scenario("a11y/type in a rich text editor inside a VirtualList row, UIA",
+            "The same comment card with the UIA bridge: what a key makes again, and the trees it builds",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                var applied = Applied(rig);
+                return TypeInListRow(ctx, _ => applied(0));
+            });
+    }
+
+    /// <summary>Each step a character or an erased one in a comment card that is a row of a list,
+    /// twenty of each, so the paragraph stays one length. A reader listens while the key is handled
+    /// (<see cref="AccessibilityClients.Force"/>, put back after it), as for a caret walk, and the row
+    /// holds the focus, so the editor has a node: <paramref name="told"/> says the key reached it.</summary>
+    private static Op TypeInListRow(Ctx ctx, Func<RichTextEditorElement, string?> told)
+    {
+        var card = new EditorInListRow(ctx.Rng);
+        ctx.Mount(card.Mount());
+        ctx.Pump(2);
+        ctx.Window.Click(card.Editor!);
+        ctx.Pump(2);
+        int typed = 0;
+        var walk = TypeWalk(ctx, () => typed, n => typed = n);
+        return new Op
+        {
+            Run = walk.Run,
+            Figure = walk.Figure,
+            FigureUnit = walk.FigureUnit,
+            Check = _ => card.Editor is not { } editor ? "the card's row is gone"
+                : !ReferenceEquals(ctx.Window.Window.FocusedElement, editor) ? "the editor lost the keyboard"
+                : editor.Document[0].Text.Length != typed ? $"the editor holds {editor.Document[0].Text.Length} characters, {typed} typed"
+                : told(editor),
+        };
+    }
+
+    /// <summary>Twenty characters and twenty erased; the figure is the accessibility trees a key
+    /// builds.</summary>
+    private static Op TypeWalk(Ctx ctx, Func<int> typed, Action<int> setTyped)
+    {
+        int treesBefore = 0;
+        return new Op
+        {
+            Run = step =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                var was = AccessibilityClients.Force;
+                AccessibilityClients.Force = true;
+                try
+                {
+                    if (step % 40 < 20) { ctx.Window.TypeText(((char)('a' + step % 26)).ToString()); setTyped(typed() + 1); }
+                    else { ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Backspace); setTyped(typed() - 1); }
+                }
+                finally { AccessibilityClients.Force = was; }
+            },
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/key",
+        };
     }
 
     // A focused editor filling the window.
@@ -191,6 +298,17 @@ static partial class Scenarios
         ctx.Window.Click(editor);
         ctx.Pump();
         return editor;
+    }
+
+    // A focused editor holding a paragraph and a 300x10 table of one- and two-word cells under a
+    // header row.
+    private static RichTextEditorElement MountTable(Ctx ctx)
+    {
+        var cells = new List<RichBlock>(3_000);
+        for (int r = 0; r < 300; r++)
+            for (int c = 0; c < 10; c++)
+                cells.Add(RichBlock.Cell(r, c, r == 0 ? $"Column {c + 1}" : Ui.Paragraph(ctx.Rng, 1 + (r + c) % 2)));
+        return MountEditor(ctx, new RichDocument([RichBlock.Paragraph("Before the table"), .. cells]));
     }
 
     // A long document shaped like real notes: headings every twenty blocks, paragraphs with a
@@ -239,5 +357,68 @@ static partial class Scenarios
             text.Append(marked);
         }
         return RichBlock.Paragraph(text.ToString(), [.. list]);
+    }
+
+    /// <summary>
+    /// A comment being written among a diff's rows, as Junction's review composer is: a card
+    /// holding a formatting bar and a rich text editor of fixed height is row 12 of 150 of a
+    /// <see cref="VirtualListElement{T}"/> on item rows. An edit or a caret move rebuilds the
+    /// component that holds the list only when the bar no longer shows the editor.
+    /// </summary>
+    private sealed class EditorInListRow(Random rng) : Component
+    {
+        private const int CardRow = 12, RowCount = 150;
+        private const float LineHeight = 22f, BarHeight = 28f, EditorHeight = 72f, CardHeight = 150f;
+
+        private readonly List<int> _rows = Enumerable.Range(0, RowCount).ToList();
+        private readonly string[] _lines = Enumerable.Range(0, RowCount).Select(_ => Ui.Paragraph(rng, 6)).ToArray();
+        private readonly Ref<RichTextEditorElement> _editor = new();
+        private readonly Ref<VirtualListElement<int>> _list = new();
+        private readonly Signal<int> _revision = new(0);
+        private RichTextToolbar? _bar;
+        private RichDocument _document = RichDocument.Empty;
+        private bool _edited;
+
+        public RichTextEditorElement? Editor => _editor.Current;
+
+        public override Element Build()
+        {
+            _ = _revision.Value;
+            if (_edited) _list.Current?.InvalidateRow(CardRow);
+            _edited = false;
+            return VirtualListElement<int>.New()
+                .ItemHeight(LineHeight)
+                .Items(_rows)
+                .RowHeights((_, i) => i == CardRow ? CardHeight : LineHeight)
+                .RenderWith((i, _) => i == CardRow ? Card() : Text.New(_lines[i]).FontSize(12f))
+                .FlexGrow(1)
+                .WithRef(_list);
+        }
+
+        private Element Card()
+        {
+            var bar = (_bar ??= new RichTextToolbar(_editor, Rebuild) { ButtonSize = BarHeight }).Build()
+                .FlexWrap(FlexWrap.NoWrap).Height(BarHeight).Overflow(Overflow.Hidden);
+            var editor = RichTextEditor.New(_document)
+                .OnDocumentChanged(d => { _document = d; Edited(); })
+                .OnSelectionChanged(Edited)
+                .Height(Dimension.Px(EditorHeight))
+                .WithRef(_editor);
+            var card = Flex.Column(gap: 6).Padding(10).Children(bar, editor);
+            card.Key = "card";
+            return card;
+        }
+
+        // The editor holds its text and caret, and the card's height does not move: only the
+        // bar can show an edit, and most keys leave every button as it is.
+        private void Edited()
+        {
+            if (_bar is { IsStale: false }) return;
+            _edited = true;
+            Rebuild();
+        }
+
+        // A signal write: an edit raises two changes in one event, and they come to one build.
+        private void Rebuild() => _revision.Value++;
     }
 }

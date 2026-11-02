@@ -5,7 +5,11 @@ namespace HultUI.Core.Elements;
 public interface IOverlayHost
 {
     /// <summary>Put <paramref name="content"/> on top of the window at a point in window
-    /// coordinates, above everything the normal tree draws.</summary>
+    /// coordinates, above everything the normal tree draws. It is kept in the window: as far from
+    /// that point as it has to be, on opening and at each new size of the window, and it is laid
+    /// out again at that size, so content sized in percent follows the window (a dialog's scrim).
+    /// The point does not follow anything: an overlay that goes with an element is anchored
+    /// (<see cref="ShowAnchoredOverlay"/>).</summary>
     /// <param name="content">What to show. Laid out at its own measured size.</param>
     /// <param name="x">Left edge, in window coordinates.</param>
     /// <param name="y">Top edge, in window coordinates.</param>

@@ -171,7 +171,9 @@ public partial class MeridianApp
     }
 
     /// <summary>Writes the chosen endpoints as real <c>.req</c> files. The
-    /// button says how many files — because that is what it does.</summary>
+    /// button says how many files — because that is what it does. Builds
+    /// nothing: the caller's toast saying what was written rebuilds the window,
+    /// the tree with it (a rebuild here as well built it twice a click).</summary>
     internal int PromoteToCollection(IReadOnlyList<Endpoint> endpoints)
     {
         if (_workspace is not { } ws) return 0;
@@ -194,7 +196,6 @@ public partial class MeridianApp
             }
         }
         RescanWorkspace();
-        MarkDirty();
         return written;
     }
 
@@ -274,7 +275,7 @@ public partial class MeridianApp
             panel.AddChild(BarAction($"Promote {promoteCount} to collection…", "disc-promote", () =>
             {
                 int written = PromoteToCollection(PromotionSet());
-                Flash($"Wrote {written} file{(written == 1 ? "" : "s")}.");
+                Flash($"Wrote {written} file{(written == 1 ? "" : "s")}.");   // builds the window, the tree too
             }));
             var toggle = Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.Center)
                 .Cursor(CursorType.Pointer)
@@ -468,7 +469,8 @@ public partial class MeridianApp
         panel.AddChild(BarAction($"Generate request → {Sanitize(endpoint.Group)}/", "disc-generate", () =>
         {
             int written = PromoteToCollection([captured]);
-            if (written > 0) Flash($"Wrote {OpenApi.FileNameFor(captured)}");
+            if (written > 0) Flash($"Wrote {OpenApi.FileNameFor(captured)}");   // builds the window, the tree too
+            else MarkDirty();
         }));
         return panel;
     }

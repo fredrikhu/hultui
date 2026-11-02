@@ -50,7 +50,7 @@ public partial class JunctionApp
         var list = _remoteDetails.Value;
         var loading = _remoteDetails.IsLoading && list.Count == 0;
 
-        var card = PanelCard(680, 560);
+        var card = PanelCard("Remotes", 680, 560);
 
         card.AddChild(BuildRemotesHeader());
         card.AddChild(BuildRemotesToolbar());

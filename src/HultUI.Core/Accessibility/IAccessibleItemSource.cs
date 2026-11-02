@@ -1,4 +1,5 @@
 using System.Linq;
+using HultUI.Core.Elements;
 
 namespace HultUI.Core.Accessibility;
 
@@ -49,6 +50,13 @@ public interface IAccessibleItemSource
     /// rows are made of real controls, and unrealized controls cannot be offered.</para>
     /// </summary>
     bool PublishesItemNodes => true;
+
+    /// <summary>
+    /// The item whose realized row is <paramref name="row"/>, a child of this container, or -1 when
+    /// it is no item's. For the row that holds the keyboard focus, which is read through its
+    /// elements under its item's node: a container with no rows of elements has none to find.
+    /// </summary>
+    internal int ItemOfRow(Element row) => -1;
 
     /// <summary>Fixed height of each item in layout units, used to compute item positions.</summary>
     float ItemHeight { get; }

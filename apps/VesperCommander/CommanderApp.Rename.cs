@@ -84,15 +84,18 @@ public partial class CommanderApp
         card.AddChild(RenamePreview(shown));
         card.AddChild(RenameSummary(preview));
         card.AddChild(RenameFooter(preview, canRename));
-        return Backdrop(card, topAligned: true, topPad: 46f);
+        return Backdrop(card, RenameTitle(), topAligned: true, topPad: 46f);
     }
+
+    /// <summary>The dialog's title, and its name to assistive technology.</summary>
+    private string RenameTitle() => $"Multi-rename {_renameFiles.Count} file{(_renameFiles.Count == 1 ? "" : "s")}";
 
     private Element RenameHeader()
     {
         var h = Flex.Row(gap: 12).AlignItems(AlignItems.Center).Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         h.AddChild(Ui.HeaderTile(Glyphs.Rename));
-        h.AddChild(Text.New($"Multi-rename {_renameFiles.Count} file{(_renameFiles.Count == 1 ? "" : "s")}")
+        h.AddChild(Text.New(RenameTitle())
             .FontSize(15f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text).FlexShrink(0));
         var dir = System.IO.Path.GetDirectoryName(_renameFiles[0].FullPath) ?? "";
         h.AddChild(Ui.Mono(dir, 11f, Nocturne.On(0.55)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
@@ -461,6 +464,6 @@ public partial class CommanderApp
         footer.AddChild(SecondaryButton("Close", CloseOverlays));
         footer.AddChild(Ui.PrimaryButton($"Retry {fails.Count} failed", null, RetryRename, fontSize: 12f));
         card.AddChild(footer);
-        return Backdrop(card, topAligned: true, topPad: 46f);
+        return Backdrop(card, RenameTitle(), topAligned: true, topPad: 46f);
     }
 }

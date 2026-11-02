@@ -68,7 +68,7 @@ public partial class CommanderApp
         footer.AddChild(PrimaryButton("Save", SaveOptions));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: false);
+        return Backdrop(card, "Options", topAligned: false);
     }
 
     private Element OptionsNav()

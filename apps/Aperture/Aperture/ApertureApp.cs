@@ -141,11 +141,16 @@ public sealed partial class ApertureApp : Component, IDisposable
     internal Route Current => _stack[^1];
     internal IReadOnlyList<Route> Stack => _stack;
 
-    private void Rerender() => _revision.Value++;
+    private void Rerender()
+    {
+        _parts.Invalidate();
+        _revision.Value++;
+    }
 
     // A monitor change arrives as a resize: retire the icon rasters cached for the old
     // scale, or every icon disappears until the next build. Artwork is fetched at the new
-    // scale as tiles are next built (SyncArtworkScale).
+    // scale as tiles are next built (SyncArtworkScale). Any other resize builds only when a
+    // build would read something else off the window's size (ApertureApp.WindowFit.cs).
     private void OnWindowResize()
     {
         float scale = _window.DisplayScale;
@@ -155,10 +160,13 @@ public sealed partial class ApertureApp : Component, IDisposable
             Ui.DisplayScale = scale;
             Rerender();
         }
+        else if (WindowFitChanged())
+        {
+            MarkViewDirty();
+        }
         else
         {
-            // Column counts in the poster grid are read off the window width.
-            MarkDirty();
+            FollowWindowWithoutBuild();
         }
     }
 
@@ -176,6 +184,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         Builds++;
         // Track the revision signal so Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
+        if (!_viewBuild) _parts.Invalidate();
+        _viewBuild = false;
+        StartWindowFit();
 
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
@@ -186,11 +197,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         // Full screen means the window has no chrome — so neither do we. The app's own
         // title bar is the only chrome there is here, and leaving it up would put a strip
         // of app furniture across the top of a film.
-        if (!_window.IsFullscreen)
-        {
-            var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
-            root.AddChild(titleBar);
-        }
+        if (!_window.IsFullscreen) root.AddChild(TitleBarPart.Place().FlexShrink(0));
 
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = "body";
@@ -225,8 +232,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         EnsureMyIssues();
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        var rail = BuildRail(); rail.Key = "rail";
-        row.AddChild(rail);
+        row.AddChild(RailPart.Place().FlexShrink(0));
 
         var view = Current.View switch
         {

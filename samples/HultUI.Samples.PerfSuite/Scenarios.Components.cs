@@ -5,6 +5,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
+using HultUI.Icons;
 
 namespace PerfSuite;
 
@@ -98,6 +99,14 @@ static partial class Scenarios
             "The same walk with the chrome in three child components the walk's Build hands on unchanged: a move moves their hosts into the new tree and the reconciler puts them back, building nothing in them and marking nothing around them",
             ctx => SelectionWalk(ctx, null, itemRows: true, chrome: WalkChrome.Kept));
 
+        yield return new Scenario("component/worker tick beside kept parts, every part built",
+            "A worker's progress tick, posted to the UI thread as a copy's worker posts one every 40 ms, rebuilds a window of three kept chrome parts and a progress card over 1,000 item rows with the full rebuild, which builds every part as well: Vesper's transfer repaint until plan 17's round 6",
+            ctx => WorkerTick(ctx, full: true));
+
+        yield return new Scenario("component/worker tick beside kept parts, view only",
+            "The same tick through the view-only path: the window and its progress card build, the parts stay as they are",
+            ctx => WorkerTick(ctx, full: false));
+
         yield return new Scenario("component/signal fan-out to 500 labels",
             "One Signal read by 500 Effects, each setting a label: a write updates all 500",
             ctx =>
@@ -117,6 +126,118 @@ static partial class Scenarios
                 return new Op { Run = _ => source.Value++ };
             });
     }
+
+    /// <summary>A tick posted the way a worker posts one (<c>Application.InvokeOnMainThread</c>), applied
+    /// by the frame that follows, with the full rebuild (every part builds) or the view-only one.</summary>
+    private static Op WorkerTick(Ctx ctx, bool full)
+    {
+        var window = new TickWindow(WalkItems(ctx.Rng, 1_000));
+        ctx.Mount(window.Mount());
+        ctx.Session.PumpFrame();
+        int parts = window.PartBuilds, done = window.Done;
+        Action tick = full ? window.FullTick : window.ViewTick;
+        return new Op
+        {
+            Run = _ => HultUI.Application.InvokeOnMainThread(tick),
+            Check = step =>
+            {
+                int ticks = step + 1;
+                if (window.Done != done + ticks) return $"{window.Done - done} ticks applied of {ticks}";
+                if (window.ShownDone != window.Done) return $"the card shows {window.ShownDone}, the tick is {window.Done}";
+                int built = window.PartBuilds - parts, expected = full ? 3 * ticks : 0;
+                return built == expected ? null : $"the parts were built {built} times, {expected} expected";
+            },
+        };
+    }
+}
+
+/// <summary>
+/// A window shaped like Vesper's during a copy: three chrome parts (the walk's title bar, sidebar and
+/// toolbar) kept from build to build, which build again when the revision they read moves, as every
+/// full rebuild moves it; and a view of a progress card over a list of 1,000 item rows. A tick moves
+/// the copy on and rebuilds the window; the full one moves the revision too.
+/// </summary>
+sealed class TickWindow(List<WalkItem> items) : Component
+{
+    private sealed class TickPart(TickWindow window, Func<Element> build) : Component
+    {
+        public override Element Build()
+        {
+            _ = window._revision.Value;
+            window.PartBuilds++;
+            return build();
+        }
+    }
+
+    private readonly Signal<int> _revision = new(0);
+    private TickPart? _title, _side, _tools;
+    private readonly Ref<TextElement> _count = new();
+    private Func<WalkItem, string?>? _label;
+
+    public int PartBuilds, Done;
+
+    /// <summary>What the card on screen says, for the check.</summary>
+    public int ShownDone => _count.Current is { } t && int.TryParse(t.Content.Split(' ')[0], out var n) ? n : -1;
+
+    public void FullTick()
+    {
+        Done++;
+        _revision.Value++;
+        MarkDirty();
+    }
+
+    public void ViewTick()
+    {
+        Done++;
+        MarkDirty();
+    }
+
+    public override Element Build()
+    {
+        const int Files = 400, FileBytes = 3_000_000;
+        int file = Done % Files;
+        double fileFrac = Done % 10 / 10.0, total = (double)Done / (Files * 10);
+        var card = Flex.Column(gap: 10).FlexShrink(0).Padding(16).Margin(new Thickness(12)).Width(Dimension.Px(560))
+            .BorderColor(Ui.Line).BorderWidth(1f).CornerRadius(8f).Background(Ui.CardFill).Children(
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    Phosphor.Draw("copy", 18f, Ui.Accent),
+                    Text.New("Copying").FontSize(15f).FontWeight(FontWeight.Medium),
+                    Text.New($"{Done} of {Files * 10} chunks").FontSize(11f).TextColor(Ui.Muted).WithRef(_count)),
+                Bar("File", $"file{file:000}.bin", fileFrac),
+                Bar("Total", $"{(long)(total * Files * FileBytes) >> 20} MB of {(long)Files * FileBytes >> 20} MB", total));
+        var queue = Flex.Column(gap: 0).FlexShrink(0);
+        for (int i = Math.Max(0, file - 4); i < Math.Min(Files, file + 5); i++)
+            queue.AddChild(Flex.Row(gap: 8).Height(22).AlignItems(AlignItems.Center).Children(
+                Phosphor.Draw(i < file ? "check" : i == file ? "arrow-right" : "circle-notch", 12f, Ui.Muted),
+                Text.New($"file{i:000}.bin").FontSize(12f).FlexGrow(1),
+                Text.New(i < file ? "done" : i == file ? $"{(int)(fileFrac * 100)}%" : "queued").FontSize(11f).TextColor(Ui.Muted)));
+        card.AddChild(queue);
+        var list = VirtualListElement<WalkItem>.New()
+            .ItemHeight(30f)
+            .Items(items)
+            .AccessibleItemLabel(_label ??= item => item.Subject)
+            .RenderWith((item, _) => Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(0, 16)).Children(
+                Phosphor.Draw(item.Icon, 16f, Ui.Muted),
+                Text.New(item.Subject).FontSize(13f).FlexGrow(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)))
+            .FlexGrow(1);
+        var view = Flex.Column(gap: 0).FlexGrow(1).Children(card, list);
+        view.Key = "view";
+        var tools = (_tools ??= new TickPart(this, WalkPane.Toolbar)).Mount().FlexShrink(0);
+        var main = Flex.Column(gap: 0).FlexGrow(1).Children(tools, view);
+        main.Key = "main";
+        var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch).Children(
+            (_side ??= new TickPart(this, WalkPane.Sidebar)).Mount().FlexShrink(0), main);
+        body.Key = "body";
+        return Flex.Column(gap: 0).FlexGrow(1).Children((_title ??= new TickPart(this, WalkPane.TitleBar)).Mount().FlexShrink(0), body);
+    }
+
+    private static Element Bar(string label, string detail, double fraction) =>
+        Flex.Column(gap: 5).Children(
+            Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                Text.New(label.ToUpperInvariant()).FontSize(10f).TextColor(Ui.Muted),
+                Text.New(detail).FontSize(11f).FlexGrow(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                Text.New($"{(int)(fraction * 100)}%").FontSize(10.5f).TextColor(Ui.Muted)),
+            ProgressBar.New(Math.Clamp(fraction, 0, 1)));
 }
 
 sealed record RowItem(int Id, string Label);

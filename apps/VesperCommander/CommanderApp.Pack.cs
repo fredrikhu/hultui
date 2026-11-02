@@ -444,7 +444,7 @@ public partial class CommanderApp
         footer.AddChild(PrimaryButton($"Pack {_packItems.Count} item{(_packItems.Count == 1 ? "" : "s")}", CommitPack));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: true, topPad: 70f);
+        return Backdrop(card, "Pack", topAligned: true, topPad: 70f);
     }
 
     private static Element PackSection(string label)

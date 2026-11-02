@@ -33,8 +33,9 @@ public partial class MeridianApp
         }
     }
 
+    // Compared in place: this runs on every build of the tab, a keystroke in a row's field too.
     private bool PreviewStale(RequestTab tab) =>
-        tab.ResultSnapshot != null && tab.ResultSnapshot != tab.Doc.Serialize();
+        tab.ResultSnapshot != null && !tab.Doc.SerializesTo(tab.ResultSnapshot);
 
     // ── The Assertions sub-tab: rows with a live preview ─────────────────
 
@@ -139,7 +140,7 @@ public partial class MeridianApp
             _popoverY = box.Y + box.Height + 4f;
             _popover = Directives.AssertOps
                 .Select(o => (o, (Action)(() => RewriteAssert(tab, opIndex, op: o)))).ToList();
-            MarkDirty();
+            MarkViewDirty();
         });
         row.AddChild(op);
 

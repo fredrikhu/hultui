@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Web;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Platform;
@@ -61,7 +62,7 @@ public class CreateMergeRequestTests
             session.PumpUntil(() => TreeHas(session, "main is protected — maintainers can merge; the request waits for one of them."), TimeSpan.FromSeconds(15));
             Assert.True(TreeHas(session, "delete source"));          // the project's default, in the summary
 
-            session.Window.Click(Named(session, "Create merge request"));
+            session.Window.FindByRole(AccessibilityRole.Button, "Create merge request")!.Click();
             session.PumpUntil(() => !app.CreateMergeRequestOpen, TimeSpan.FromSeconds(10));
 
             var post = handler.Seen.Single(s => s.Request.Method == System.Net.Http.HttpMethod.Post);
@@ -77,6 +78,28 @@ public class CreateMergeRequestTests
             session.PumpUntil(() => TreeHas(session, "Created !412"), TimeSpan.FromSeconds(5));
             Assert.NotNull(Named(session, "Open"));   // the toast's action
         }, handler);
+    }
+
+    /// <summary>The card is a dialog named by its title, on a backdrop that is no button
+    /// (ModalDialogRoleTests has the other cards).</summary>
+    [Fact]
+    public void TheCardIsADialogNamedByItsTitle()
+    {
+        Hosted((repo, session, app) =>
+        {
+            app.OpenCreateMergeRequest(Feature);
+            session.PumpUntil(() => ById(session, "create-mr") is not null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(3);
+
+            var dialog = session.Window.FindByRole(AccessibilityRole.Dialog, "Create merge request");
+            Assert.NotNull(dialog);
+            Assert.Same(ById(session, "create-mr"), dialog.Element);
+            Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Button, "Create merge request"));
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(3);
+            Assert.Null(session.Window.FindByRole(AccessibilityRole.Dialog, "Create merge request"));
+        });
     }
 
     [Fact]
@@ -308,6 +331,77 @@ public class CreateMergeRequestTests
             Assert.Equal("Fix #1042 ", summary.Text);
             Assert.Null(ById(session, "issue-suggestions"));
             Assert.True(TreeHas(session, "Fix #1042 (\"Split refunds across original tenders\") will close the issue when this reaches main."));
+        });
+    }
+
+    /// <summary>Esc closes the list and leaves the text; the next character opens it again.</summary>
+    [Fact]
+    public void EscapeClosesTheIssueList_AndTheNextCharacterOpensIt()
+    {
+        Hosted((repo, session, app) =>
+        {
+            repo.Write("new.txt", "x\n");
+            session.Window.PressKey(KeyCode.Digit4);
+            session.PumpUntil(() => SummaryField(session) is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            var summary = SummaryField(session)!;
+            session.Window.Click(summary);
+            session.Window.TypeText("Fix #1");
+            session.PumpUntil(() => ById(session, "issue-suggestions") is not null, TimeSpan.FromSeconds(15));
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(3);
+            Assert.Null(ById(session, "issue-suggestions"));
+            Assert.Equal("Fix #1", summary.Text);
+
+            session.Window.TypeText("0");
+            session.PumpFrames(3);
+            Assert.NotNull(ById(session, "issue-suggestions"));
+        });
+    }
+
+    /// <summary>A character builds the composer alone (ComposerPart), and that build is what
+    /// the list and the hint follow: the list opens and narrows, the hint comes and goes, and
+    /// the window is not built for any of it.</summary>
+    [Fact]
+    public void TypingInTheComposer_BuildsItAlone_AndItsListAndHintFollow()
+    {
+        Hosted((repo, session, app) =>
+        {
+            repo.Write("new.txt", "x\n");
+            session.Window.PressKey(KeyCode.Digit4);
+            session.PumpUntil(() => SummaryField(session) is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            var summary = SummaryField(session)!;
+            session.Window.Click(summary);
+            session.PumpFrames(2);
+
+            int builds = app.Builds;
+            foreach (var ch in "Closes #10")
+            {
+                session.Window.TypeText(ch.ToString());
+                session.PumpFrames(2);
+            }
+            // The issue list's load landing builds the part, as a character does.
+            session.PumpUntil(() => ById(session, "issue-suggestions") is not null, TimeSpan.FromSeconds(15));
+            Assert.Equal(builds, app.Builds);
+            Assert.True(TreeHas(session, "Split refunds across original tenders"));
+
+            // Picking one closes the list and the reference shows in the hint.
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Null(ById(session, "issue-suggestions"));
+            Assert.NotNull(ById(session, "closing-hint"));
+
+            // Erased back to the keyword, the hint goes, and no character built the window.
+            int window = app.Builds;
+            while (summary.Text.EndsWith(' ') || summary.Text.Contains('#'))
+            {
+                session.Window.PressKey(KeyCode.Backspace);
+                session.PumpFrames(2);
+            }
+            Assert.Null(ById(session, "closing-hint"));
+            Assert.Equal(window, app.Builds);
         });
     }
 

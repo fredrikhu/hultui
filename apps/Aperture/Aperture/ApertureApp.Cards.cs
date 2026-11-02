@@ -19,7 +19,11 @@ namespace Aperture;
 public sealed partial class ApertureApp
 {
     /// <summary>A poster tile: artwork, title, subline. Clicking opens the item.</summary>
-    internal Element PosterCard(MediaItem item, float width = Halide.PosterWidth, int cursorIndex = -1)
+    internal Element PosterCard(MediaItem item, float width = Halide.PosterWidth, int cursorIndex = -1) =>
+        PosterCard(item, width, cursorIndex, ShownPicture(item, ImageKind.Primary, width, MathF.Round(width * 1.5f)));
+
+    /// <summary>A poster tile drawing <paramref name="picture"/>; see <see cref="ShownPicture"/>.</summary>
+    private BoxElement PosterCard(MediaItem item, float width, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
     {
         float height = MathF.Round(width * 1.5f);
         var card = Flex.Column(gap: Halide.S2)
@@ -32,7 +36,7 @@ public sealed partial class ApertureApp
             .Tooltip(item.Name);
         MarkCursor(card, cursorIndex, item);
 
-        card.AddChild(Artwork(item, ImageKind.Primary, width, height, Halide.Radius2));
+        card.AddChild(Artwork(item, width, height, Halide.Radius2, picture));
 
         // The caption is a setting: a shelf of covers with no words under it is a real way
         // to browse, and the card's accessible name still says the title either way.
@@ -99,7 +103,31 @@ public sealed partial class ApertureApp
     /// loads or when the server has none, plus the watched tick and progress sliver. The
     /// box is always the same size, so a row of cards never reflows as pictures arrive.
     /// </summary>
-    internal Element Artwork(MediaItem item, ImageKind kind, float width, float height, float radius)
+    internal Element Artwork(MediaItem item, ImageKind kind, float width, float height, float radius) =>
+        Artwork(item, width, height, radius, ShownPicture(item, kind, width, height));
+
+    /// <summary>
+    /// The picture an artwork box of this size draws now, asked of the cache (which fetches it
+    /// when it does not have it); null for the placeholder, while it loads or when the server
+    /// has none.
+    /// </summary>
+    private HultUI.Core.Rendering.IImageSource? ShownPicture(MediaItem item, ImageKind kind, float width, float height)
+    {
+        // The box in device pixels, by the side that decides a cover fit; the server scales
+        // the other side to keep the picture's shape. A picture wider than its box (an
+        // episode's 16:9 still on a 2:3 card) is asked for by height, so it still has a
+        // pixel for every pixel drawn. Never both sides: Jellyfin's fill covers the box but
+        // rounds both sides up, and the spare pixel on the side that already fits shifts
+        // the picture by half a pixel, which is soft at one to one.
+        bool byHeight = ArtAspect(item, kind) is { } aspect && aspect > width / height * 1.005;
+        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
+        var (image, status) = _posters.Get(url, _standInScale is { } old && _posters.HasRetired
+            ? ArtworkUrl(item, kind, width, height, byHeight, old) : null);
+        return status == PosterCache.Status.Ready && image is { IsLoaded: true } ? image : null;
+    }
+
+    private Element Artwork(MediaItem item, float width, float height, float radius,
+        HultUI.Core.Rendering.IImageSource? shown)
     {
         var box = Box.New()
             .Width(width).Height(height).FlexShrink(0)
@@ -111,20 +139,9 @@ public sealed partial class ApertureApp
         box.Box.OverflowX = Overflow.Hidden;
         box.Box.OverflowY = Overflow.Hidden;
 
-        // The box in device pixels, by the side that decides a cover fit; the server scales
-        // the other side to keep the picture's shape. A picture wider than its box (an
-        // episode's 16:9 still on a 2:3 card) is asked for by height, so it still has a
-        // pixel for every pixel drawn. Never both sides: Jellyfin's fill covers the box but
-        // rounds both sides up, and the spare pixel on the side that already fits shifts
-        // the picture by half a pixel, which is soft at one to one.
-        bool byHeight = ArtAspect(item, kind) is { } aspect && aspect > width / height * 1.005;
-        var url = ArtworkUrl(item, kind, width, height, byHeight, _artworkScale);
-        var (image, status) = _posters.Get(url, _standInScale is { } old && _posters.HasRetired
-            ? ArtworkUrl(item, kind, width, height, byHeight, old) : null);
-
-        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        if (shown is not null)
         {
-            var picture = Image.New(image);
+            var picture = Image.New(shown);
             picture.Fit = ImageFit.Cover;
             box.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
         }
@@ -252,7 +269,7 @@ public sealed partial class ApertureApp
     private void OnArtworkLanded()
     {
         _artworkLanded++;
-        Rerender();
+        RerenderView();
         // A trickplay sheet is artwork too, and the card over the scrubber is the player's, which
         // the app's build does not rebuild: a sheet landing under a pointer resting on the
         // scrubber showed only when the pointer next moved. Nothing when it is not hovered.
@@ -345,9 +362,22 @@ public sealed partial class ApertureApp
 
     /// <summary>A hero's box, in layout units: the whole view beside the rail, and a height
     /// that follows the window's.</summary>
-    internal float HeroWidth => MathF.Max(1f, _window.LayoutWidth - Halide.RailWidth);
+    internal float HeroWidth => HeroWidthAt(_window.LayoutWidth);
 
-    internal float HeroHeight => Math.Clamp(_window.LayoutHeight * 0.44f, 280f, 420f);
+    internal float HeroHeight => HeroHeightAt(_window.LayoutHeight);
+
+    private static float HeroWidthAt(float windowWidth) => MathF.Max(1f, windowWidth - Halide.RailWidth);
+
+    private static float HeroHeightAt(float windowHeight) => Math.Clamp(windowHeight * 0.44f, 280f, 420f);
+
+    /// <summary>The side that decides a hero's cover fit in a window of this size, and the device
+    /// pixels asked for along it (<see cref="HeroPixels"/>).</summary>
+    private (bool ByHeight, int Pixels) HeroAsk(double? aspect, float windowWidth, float windowHeight)
+    {
+        float width = HeroWidthAt(windowWidth), height = HeroHeightAt(windowHeight);
+        bool byHeight = aspect is { } a && a > width / height * 1.005;
+        return (byHeight, HeroPixels(byHeight ? height : width, _artworkScale));
+    }
 
     /// <summary>The device pixels a hero asks for across a side <paramref name="layoutSize"/>
     /// long: what the side covers at this scale, rounded up to a <see cref="HeroStep"/>.</summary>
@@ -390,9 +420,9 @@ public sealed partial class ApertureApp
     private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) HeroArtwork(
         string? art, double? aspect, Func<int?, int?, Uri?> sized)
     {
-        float width = HeroWidth, height = HeroHeight;
-        bool byHeight = aspect is { } a && a > width / height * 1.005;
-        int pixels = HeroPixels(byHeight ? height : width, _artworkScale);
+        _fitHero = true;
+        _fitHeroAspect = aspect;
+        var (byHeight, pixels) = HeroAsk(aspect, _window.LayoutWidth, _window.LayoutHeight);
         if (art is null || (byHeight ? sized(null, pixels) : sized(pixels, null)) is not { } url)
             return _posters.Get(null);
 
@@ -539,7 +569,7 @@ public sealed partial class ApertureApp
     /// reports one card as its intrinsic width, so reading the box back would say one.</summary>
     internal int VisibleCards(float cardWidth)
     {
-        float content = _window.LayoutWidth - Halide.RailWidth - Halide.S5 * 2;
-        return Math.Max(1, (int)((content + Halide.PosterGap) / (cardWidth + Halide.PosterGap)));
+        if (!_fitCardWidths.Contains(cardWidth)) _fitCardWidths.Add(cardWidth);
+        return CardsAcross(cardWidth, _window.LayoutWidth);
     }
 }

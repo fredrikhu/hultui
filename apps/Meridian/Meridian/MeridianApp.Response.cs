@@ -345,7 +345,8 @@ public partial class MeridianApp
                 var area = TextArea.New(view.Text);
                 area.FontFamily(Fonts.Mono).FontSize(12f).TextColor(Azimuth.TextDim).FlexGrow(1);
                 area.ReadOnly = true;
-                area.Spans = DecorateResponseBody(view.LineStarts, spans);
+                area.Spans = spans;
+                area.Highlights = ResponseHighlights(view.LineStarts);
                 area.AutomationId("response-body");
                 area.WithRef(_responseBodyRef);
                 var box = Flex.Column(gap: 0).FlexGrow(1)
@@ -474,45 +475,49 @@ public partial class MeridianApp
             job.Stop.Cancel();
     }
 
-    /// <summary>Search tints merged into the syntax spans, both in absolute
-    /// offsets — and sorted, because TextArea slices the list per visible line
-    /// and stops at the first span past the line end (the lesson Junction's
-    /// Files view learned the hard way).
+    /// <summary>The search's matches as the body's highlights, in absolute offsets: a layer
+    /// over the syntax spans, which the body keeps from key to key.
     ///
-    /// <para>Kept between builds while the spans, the text and the search stay the same: the
-    /// app rebuilds whole on every keystroke in the URL or body editor, and a merge per build
-    /// copied and sorted every span and made the body index the new list again — with find
-    /// open on an 18,884-line response 9 ms and 2.9 MB a keystroke, on a 98,004-line one
-    /// coloured ~15 ms and 14.5 MB.</para></summary>
-    private IReadOnlyList<TextSpan>? DecorateResponseBody(int[] starts, IReadOnlyList<TextSpan>? syntax)
+    /// <para>Until round 6 of plan 17 the tints were merged into the syntax spans, so every find
+    /// key and every Enter copied and sorted every span of the response (1.5 MB a key on a
+    /// 2,000-line one, 14 MB on a 19,000-line one) and the body indexed the new list again.
+    /// Now a key costs a highlight for each match. Kept between builds while the text and the
+    /// search stay the same: the app rebuilds whole on every keystroke in the URL or body editor,
+    /// and the same list again costs the body nothing.</para></summary>
+    private IReadOnlyList<TextHighlight>? ResponseHighlights(int[] starts)
     {
         var search = _responseFind.Search;
-        if (!search.HasHits) return syntax;
+        if (!search.HasHits) return null;
 
         // The hits follow from the query, its options and the bound text (one per shown view,
         // so its line starts name it); the tint from the current one.
         var key = (search.Query, search.MatchCase, search.UseRegex, search.Index, search.Hits.Count);
-        if (_decorated is not null && ReferenceEquals(_decoratedSyntax, syntax)
-            && ReferenceEquals(_decoratedStarts, starts) && _decoratedSearch == key)
-            return _decorated;
+        if (_highlights is not null && ReferenceEquals(_highlightsStarts, starts) && _highlightsSearch == key)
+            return _highlights;
 
+        var hits = search.Hits;
+        int count = 0;
+        for (int i = 0; i < hits.Count; i++)
+            if (hits[i].Length > 0 && hits[i].Line < starts.Length) count++;
         var current = search.Current;
-        var merged = syntax is null ? new List<TextSpan>() : new List<TextSpan>(syntax);
-        foreach (var hit in search.Hits)
+        var hitTint = Azimuth.Alpha(Azimuth.Accent700, 0.55);
+        var currentTint = Azimuth.Alpha(Azimuth.Accent, 0.55);
+        var tints = new TextHighlight[count];
+        int n = 0;
+        for (int i = 0; i < hits.Count; i++)
         {
+            var hit = hits[i];
             if (hit.Length <= 0 || hit.Line >= starts.Length) continue;
             bool isCurrent = current is { } c && c.Line == hit.Line && c.Start == hit.Start;
-            merged.Add(new TextSpan(starts[hit.Line] + hit.Start, hit.Length, default,
-                isCurrent ? Azimuth.Alpha(Azimuth.Accent, 0.55) : Azimuth.Alpha(Azimuth.Accent700, 0.55)));
+            tints[n++] = new TextHighlight(starts[hit.Line] + hit.Start, hit.Length, isCurrent ? currentTint : hitTint);
         }
-        merged.Sort(static (a, b) => a.Start.CompareTo(b.Start));
-        (_decorated, _decoratedSyntax, _decoratedStarts, _decoratedSearch) = (merged, syntax, starts, key);
-        return merged;
+        (_highlights, _highlightsStarts, _highlightsSearch) = (tints, starts, key);
+        return tints;
     }
 
-    private IReadOnlyList<TextSpan>? _decorated, _decoratedSyntax;
-    private int[]? _decoratedStarts;
-    private (string Query, bool MatchCase, bool UseRegex, int Index, int Count) _decoratedSearch;
+    private IReadOnlyList<TextHighlight>? _highlights;
+    private int[]? _highlightsStarts;
+    private (string Query, bool MatchCase, bool UseRegex, int Index, int Count) _highlightsSearch;
 
     // ── Headers / Cookies / Timeline ─────────────────────────────────────
 

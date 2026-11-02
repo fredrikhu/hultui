@@ -78,6 +78,61 @@ public class SkiaTextSpanRenderTests
         Assert.True(inkFound, "Expected dark glyph pixels — a transparent span color must not hide the text.");
     }
 
+    private static byte[] Draw(SkiaRasterRenderSurface surface, string text, ResolvedInheritedStyle style, TextSpan[] spans)
+    {
+        var ctx = surface.RenderContext;
+        ctx.BeginFrame(400, 40, 1f, Color.White);
+        ctx.DrawText(text, new Rect(0, 0, 390, 30), style, TextOverflow.Clip, 1, spans);
+        ctx.EndFrame();
+        surface.Present();
+        return surface.ReadPixels(out _, out _, out _);
+    }
+
+    /// <summary>
+    /// A span of transparent colour over coloured ones — a find match over the tokens of a
+    /// TextArea, whose spans may overlap — leaves the text the colour they give it: the line
+    /// draws as it does without that span, pixel for pixel, whether the span starts where a
+    /// token starts (and comes first in the list, as an unstable sort by start may put it), sits
+    /// inside one, or runs out of one, across a gap and into the next. Until round 6 of plan 17
+    /// the renderer took it as the element's colour and painted those characters in it.
+    /// </summary>
+    [Fact]
+    public void ATransparentSpanOverColouredOnes_LeavesThemTheirColour()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(400, 40, 1f);
+        var style = Style(Color.Black);
+        const string text = "keyword value other";
+        TextSpan a = new(0, 7, Color.Red), b = new(8, 5, Color.Blue), c = new(14, 5, new Color(0, 160, 0, 255));
+        var tokens = Draw(surface, text, style, [a, b, c]);
+
+        foreach (var (start, length) in new[] { (0, 7), (3, 7), (8, 11), (2, 2), (6, 9) })
+        {
+            var over = new TextSpan(start, length, Color.Transparent);
+            // In start order, the transparent span first among equal starts.
+            TextSpan[] spans = [.. new[] { over, a, b, c }.OrderBy(s => s.Start)];
+            var drawn = Draw(surface, text, style, spans);
+            Assert.True(tokens.AsSpan().SequenceEqual(drawn),
+                $"a transparent span over [{start}, {start + length}) changed the colour of the text under it");
+        }
+    }
+
+    /// <summary>In a list that does not overlap, as a label's or a field's, a span of transparent
+    /// colour draws as no span: the element's colour, between spans or after the last.</summary>
+    [Fact]
+    public void ATransparentSpanBesideColouredOnes_DrawsAsNoSpan()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(400, 40, 1f);
+        var style = Style(Color.Black);
+        const string text = "keyword value other";
+        TextSpan a = new(0, 7, Color.Red), b = new(8, 5, Color.Blue);
+        var alone = Draw(surface, text, style, [a, b]);
+        var beside = Draw(surface, text, style,
+            [a, new TextSpan(7, 1, Color.Transparent), b, new TextSpan(13, 6, Color.Transparent)]);
+        Assert.True(alone.AsSpan().SequenceEqual(beside), "a transparent span between and after coloured ones changed the line");
+    }
+
     private static void AssertPixel(byte[] pixels, int rowBytes, int x, int y, byte r, byte g, byte b)
     {
         int i = y * rowBytes + x * 4;

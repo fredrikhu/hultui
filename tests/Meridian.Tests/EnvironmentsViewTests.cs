@@ -255,6 +255,61 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
 
     private static string _rootFull(MeridianApp app) => app.Workspace!.Root;
 
+    // ── The prompt ───────────────────────────────────────────────────────
+
+    /// <summary>The prompt ("New key", "Secret …", "Import OpenAPI", "Discover an API") is a dialog
+    /// named by its title, directly inside its backdrop, so the backdrop is no button: a reader
+    /// heard a button named after all of its text holding a second one, and a text change in it
+    /// (its title, here, as a tick would write it) could not be patched under a node named from its
+    /// content, so each built the window's whole accessibility tree. A click beside the card and
+    /// Escape still close it (user-approved 2026-10-27, plan 17 round 6).</summary>
+    [Fact]
+    public void ThePromptIsADialogNamedByItsTitle_AndATextChangeInItBuildsNoTree()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            session.Window.InstallAccessibilityBridge();
+            GoToEnvironments(session);
+            Click(session, "add-env-key");
+
+            var dialog = Walk(session.Window.AccessibilityTree).Single(n => n.Role == AccessibilityRole.Dialog);
+            Assert.Equal("New key", dialog.Name);
+            Assert.Contains(Walk(dialog), n => n.AutomationId == "dialog-input");
+            Assert.Contains(Walk(dialog), n => n.AutomationId == "dialog-ok");
+            Assert.DoesNotContain(Walk(session.Window.AccessibilityTree),
+                n => n.Role == AccessibilityRole.Button && n.Name?.Contains("New key") == true);
+
+            // The title, rewritten on screen: patched, no tree.
+            TextElement? title = null;
+            void Find(Element e)
+            {
+                if (title is null && e is TextElement t && t.Content == "New key") title = t;
+                foreach (var c in e.Children) Find(c);
+            }
+            Find(session.Window.FindByAutomationId("dialog-input")!.Element.Parent!);
+            Assert.NotNull(title);
+            int trees = session.Window.AccessibilityTreesBuilt;
+            for (int i = 0; i < 6; i++)
+            {
+                title!.Content = i % 2 == 0 ? "New key (1)" : "New key";
+                session.PumpFrames(2);
+            }
+            session.Window.TypeText("abc");
+            session.PumpFrames(2);
+            Assert.Equal(0, session.Window.AccessibilityTreesBuilt - trees);
+
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+
+            Click(session, "add-env-key");
+            Assert.NotNull(session.Window.FindByAutomationId("dialog-input"));
+            session.Window.Click(20, 880);   // the backdrop, beside the card
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+        });
+    }
+
     [Fact]
     public void ASecretResolvesFromTheKeyringOnSend()
     {

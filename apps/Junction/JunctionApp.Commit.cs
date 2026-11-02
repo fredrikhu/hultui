@@ -100,7 +100,9 @@ public partial class JunctionApp
         if (!HasActiveRepo) return;
         var r = range;
         var path = _activeRepoPath;
-        _commitDetail.Load(RangeDetailKey(r), () => LoadOrRetry(path, () => LoadRangeDetail(r)),
+        var key = RangeDetailKey(r);
+        SelectionMovedTo(key);
+        _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadRangeDetail(r)),
             onLoaded: PickInitialFile);
     }
 
@@ -216,8 +218,20 @@ public partial class JunctionApp
         if (string.IsNullOrEmpty(hash) || !HasActiveRepo) return;
         var h = hash;
         var path = _activeRepoPath;   // captured: the producer runs off-thread, after any switch
-        _commitDetail.Load(CommitDetailKey(h), () => LoadOrRetry(path, () => LoadDetail(path, h)),
+        var key = CommitDetailKey(h);
+        SelectionMovedTo(key);
+        _commitDetail.Load(key, () => LoadOrRetry(path, () => LoadDetail(path, h)),
             onLoaded: PickInitialFile);
+    }
+
+    // The detail last asked for. The Commit view asks on every build.
+    private string? _detailAskedFor;
+
+    private void SelectionMovedTo(string detailKey)
+    {
+        if (detailKey == _detailAskedFor) return;
+        _detailAskedFor = detailKey;
+        DropHighlightPrefetch();
     }
 
     // Runs off the UI thread.
@@ -279,8 +293,9 @@ public partial class JunctionApp
         if (!detail.DiffByPath.TryGetValue(path, out var diff) || diff.IsBinary) return;
 
         // Same arguments HighlightForCurrent will pass, so the keys agree: for a range
-        // compare the base is explicit, and for a single commit it is null → "<hash>^".
-        HighlightFor(path, ExternalDiffMode.Commit, hash, detail.RangeBaseHash);
+        // compare the base is explicit, and for a single commit it is null → "<hash>^". In
+        // the log nothing is waiting for these yet, and the reader may be passing through.
+        HighlightFor(diff, ExternalDiffMode.Commit, hash, detail.RangeBaseHash, rest: View != JunctionView.Commit);
     }
 
     // ── Header ───────────────────────────────────────────────────────────
@@ -582,11 +597,9 @@ public partial class JunctionApp
     {
         float scale = Ui.DisplayScale;
         if (_commitRowHeights.File > 0 && _commitRowHeights.Scale == scale) return _commitRowHeights;
-        static float Line(float size, string family = "sans-serif", FontWeight weight = FontWeight.Regular) =>
-            TextMeasure.Measure("Ag", TextMeasure.StyleFor(size, family, weight)).Height;
-        float file = Math.Max(Line(12f), Line(11f, Fonts.Mono, FontWeight.Bold));
-        float folder = Math.Max(Line(11.5f, weight: FontWeight.Medium), Math.Max(Line(10f), Ui.IconBox(12f)));
-        float header = Line(10f);
+        float file = Math.Max(LineHeight(12f), LineHeight(11f, Fonts.Mono, FontWeight.Bold));
+        float folder = Math.Max(LineHeight(11.5f, weight: FontWeight.Medium), Math.Max(LineHeight(10f), Ui.IconBox(12f)));
+        float header = LineHeight(10f);
         // No measure context yet (nothing has been drawn): what the default face gives, until a
         // later build measures.
         if (file <= 0) return (scale, 25.3f, 27.3f, 28f);

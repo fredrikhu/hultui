@@ -50,7 +50,7 @@ public partial class JunctionApp
         var entries = _reflog.Value;
         var loading = _reflog.IsLoading && entries.Count == 0;
 
-        var card = PanelCard(720, 600);
+        var card = PanelCard("Reflog", 720, 600);
 
         card.AddChild(BuildReflogHeader());
 

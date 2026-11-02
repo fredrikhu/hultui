@@ -39,8 +39,8 @@ public class KeptRowTests
         return t;
     }
 
-    private static VirtualListElement<FileEntry> List(DiffViewTests.Fixture t, char side) =>
-        t.Field<Ref<VirtualListElement<FileEntry>>>(side == 'L' ? "_vlistL" : "_vlistR").Current
+    private static VirtualListElement<CommanderApp.PaneRowItem> List(DiffViewTests.Fixture t, char side) =>
+        t.Field<Ref<VirtualListElement<CommanderApp.PaneRowItem>>>(side == 'L' ? "_vlistL" : "_vlistR").Current
         ?? throw new Xunit.Sdk.XunitException($"the {side} pane has no list");
 
     /// <summary>The realized rows by the name they show.</summary>
@@ -64,8 +64,14 @@ public class KeptRowTests
         t.Session.PumpFrames(2);
     }
 
+    /// <summary>The cursor as the rows drew it, for the list to draw under the cursor's row.</summary>
+    private static RowHighlight CursorHighlight =>
+        new(Nocturne.Alpha(Nocturne.Accent500, 0.13), default, Nocturne.Accent600, 1f);
+
+    /// <summary>The list draws the cursor, under the cursor's row, and makes its rows without it:
+    /// a key that moves the cursor makes no row in either pane, and the box moves.</summary>
     [Fact]
-    public void ACursorMove_MakesTheTwoRowsItMovedBetween_AndKeepsTheRest()
+    public void ACursorMove_MakesNoRow_TheListDrawsTheCursor()
     {
         using var t = Open();
         t.PutCursorOn('L', Name(3));
@@ -76,18 +82,87 @@ public class KeptRowTests
         t.Session.PumpFrames(1);
 
         var leftAfter = Rows(t, 'L');
-        foreach (var (name, row) in leftAfter)
-        {
-            if (name == Name(3) || name == Name(4)) Assert.NotSame(left[name], row);
-            else if (left.TryGetValue(name, out var before)) Assert.Same(before, row);
-        }
+        Assert.All(leftAfter, r => Assert.Same(left[r.Key], r.Value));
         Assert.All(Rows(t, 'R'), r => Assert.Same(right[r.Key], r.Value));
 
-        // The ring moved, and the list tells assistive technology which entry the cursor is on.
-        Assert.Equal(Nocturne.Accent600, ((BoxElement)leftAfter[Name(4)]).BorderColor);
-        Assert.Equal(Color.Transparent, ((BoxElement)leftAfter[Name(3)]).BorderColor);
+        // The list draws the cursor; no row draws a ring or a fill of its own. The list tells
+        // assistive technology which entry the cursor is on, and the inactive pane has none.
+        Assert.Equal(CursorHighlight, List(t, 'L').SelectionHighlight);
+        Assert.All(leftAfter.Values, r => Assert.Equal(Color.Transparent, ((BoxElement)r).BorderColor));
+        Assert.All(leftAfter.Values, r => Assert.Equal(Color.Transparent, ((BoxElement)r).BackgroundColor));
         Assert.Equal(t.Cursor('L'), List(t, 'L').SelectedIndex);
+        Assert.Equal(Name(4), t.Rows('L')[List(t, 'L').SelectedIndex].Name);
         Assert.Equal(-1, List(t, 'R').SelectedIndex);
+    }
+
+    /// <summary>With the zebra tint the rows draw the cursor (an odd row's tint would cover the
+    /// list's box): a key makes the two rows the cursor moved between, and keeps the rest.</summary>
+    [Fact]
+    public void WithTheZebraTint_ACursorMove_MakesTheTwoRowsItMovedBetween_AndKeepsTheRest()
+    {
+        using var t = Open();
+        var settings = t.Field<Settings>("_settings");
+        bool zebra = settings.Zebra;
+        try
+        {
+            settings.Zebra = true;
+            t.PutCursorOn('L', Name(3));
+            var left = Rows(t, 'L');
+
+            t.Press(KeyCode.Down);
+            t.Session.PumpFrames(1);
+
+            var leftAfter = Rows(t, 'L');
+            foreach (var (name, row) in leftAfter)
+            {
+                if (name == Name(3) || name == Name(4)) Assert.NotSame(left[name], row);
+                else if (left.TryGetValue(name, out var before)) Assert.Same(before, row);
+            }
+            Assert.Null(List(t, 'L').SelectionHighlight);
+            Assert.Equal(Nocturne.Accent600, ((BoxElement)leftAfter[Name(4)]).BorderColor);
+            Assert.Equal(Nocturne.Alpha(Nocturne.Accent500, 0.13), ((BoxElement)leftAfter[Name(4)]).BackgroundColor);
+            Assert.Equal(Color.Transparent, ((BoxElement)leftAfter[Name(3)]).BorderColor);
+        }
+        finally { settings.Zebra = zebra; }
+    }
+
+    /// <summary>A drag over a folder in the pane tints that folder's row in place of the cursor's
+    /// fill, so while it lasts the rows draw the cursor; the list takes it back after.</summary>
+    [Fact]
+    public void ADragOverAFolderHere_HasTheRowsDrawTheCursor()
+    {
+        using var t = Open();
+        t.PutCursorOn('L', "docs");
+        Assert.NotNull(List(t, 'L').SelectionHighlight);
+
+        t.SetField("_dropTarget", ('L', Path.Combine(t.Left, "docs")));
+        Rebuild(t);
+        var docs = (BoxElement)Rows(t, 'L')["docs"];
+        Assert.Null(List(t, 'L').SelectionHighlight);
+        Assert.Equal(Nocturne.Accent600, docs.BorderColor);
+        Assert.Equal(Nocturne.Alpha(Nocturne.Accent, 0.28), docs.BackgroundColor);
+
+        t.SetField("_dropTarget", null);
+        Rebuild(t);
+        Assert.Equal(CursorHighlight, List(t, 'L').SelectionHighlight);
+        Assert.Equal(Color.Transparent, ((BoxElement)Rows(t, 'L')["docs"]).BorderColor);
+    }
+
+    /// <summary>The context-menu key opens under the cursor's row: with the list drawing the
+    /// cursor, the box is worked out from the list, and it is the row's box on screen — also
+    /// once the list has scrolled.</summary>
+    [Fact]
+    public void TheCursorRowBox_IsTheCursorsRowOnScreen()
+    {
+        using var t = Open();
+        t.PutCursorOn('L', Name(3));
+        t.Session.PumpFrames(1);
+        Assert.Equal(Rows(t, 'L')[Name(3)].ScreenBorderBox, ((Rect?)t.Invoke("CursorRowBox", 'L'))!.Value);
+
+        t.Press(KeyCode.End);                      // the last row, which scrolls the list
+        t.Session.PumpFrames(2);
+        Assert.True(List(t, 'L').ScrollOffsetY > 0);
+        Assert.Equal(Rows(t, 'L')[Name(Files - 1)].ScreenBorderBox, ((Rect?)t.Invoke("CursorRowBox", 'L'))!.Value);
     }
 
     [Fact]
@@ -115,6 +190,31 @@ public class KeptRowTests
 
         Assert.Equal(Nocturne.MarkRed, NameLabel(Rows(t, 'L')[Name(5)]).ResolvedInherited.TextColor);
         Assert.Contains(ItemNames(bridge), n => n.StartsWith(Name(5) + ",", System.StringComparison.Ordinal) && n.EndsWith(", marked", System.StringComparison.Ordinal));
+    }
+
+    /// <summary>A mark is in the row's item, not in the rows' shape: Insert makes the row it
+    /// marked (the list draws the cursor, so its move makes none), and keeps every other row. In
+    /// the shape, every row on screen was made again for each mark.</summary>
+    [Fact]
+    public void AnInsert_MakesTheRowItMarked_AndKeepsTheRest()
+    {
+        using var t = Open();
+        t.PutCursorOn('L', Name(3));
+        var before = Rows(t, 'L');
+
+        t.Press(KeyCode.Insert);
+        t.Session.PumpFrames(1);
+
+        var after = Rows(t, 'L');
+        Assert.Equal(before.Keys, after.Keys);
+        foreach (var (name, row) in after)
+        {
+            if (name == Name(3)) Assert.NotSame(before[name], row);
+            else Assert.Same(before[name], row);
+        }
+        Assert.Equal(Nocturne.MarkRed, NameLabel(after[Name(3)]).ResolvedInherited.TextColor);
+        Assert.Equal(Nocturne.Text, NameLabel(after[Name(4)]).ResolvedInherited.TextColor);
+        Assert.Equal(Name(4), t.Rows('L')[List(t, 'L').SelectedIndex].Name);
     }
 
     private static List<string> ItemNames(HultUI.Headless.HeadlessAccessibilityBridge bridge)
@@ -216,6 +316,42 @@ public class KeptRowTests
         finally { settings.Zebra = zebra; }
     }
 
+    /// <summary>The zebra tint alternates on the row's index among the rows shown, which the row's
+    /// item carries: making the rows looks no path up per row (each look-up walks the rows, so
+    /// the tint cost O(rows²) a build), and under a filter it alternates on the filtered rows.</summary>
+    [Fact]
+    public void TheZebraTint_TakesTheRowsIndexFromItsItem()
+    {
+        using var t = Open();
+        var settings = t.Field<Settings>("_settings");
+        bool zebra = settings.Zebra;
+        var tint = Nocturne.Alpha(Nocturne.Text, 0.03);
+        try
+        {
+            t.PutCursorOn('L', Name(30));   // away from the rows looked at
+            var before = Rows(t, 'L');
+            settings.Zebra = true;
+            CommanderApp.IndexOfPathCalls = 0;
+            Rebuild(t);                     // the tint is in the shape: every row is made again
+
+            var rows = Rows(t, 'L');
+            Assert.True(rows.Count(r => !before.ContainsValue(r.Value)) >= 20);
+            Assert.InRange(CommanderApp.IndexOfPathCalls, 0, 4);
+            // "..", "docs", f00, f01, …: the odd rows are tinted, the parent row never.
+            Assert.Equal(tint, ((BoxElement)rows["docs"]).BackgroundColor);
+            Assert.Equal(Color.Transparent, ((BoxElement)rows[Name(0)]).BackgroundColor);
+            Assert.Equal(tint, ((BoxElement)rows[Name(1)]).BackgroundColor);
+
+            t.SetField("_search", "f1");    // "..", f10 … f19
+            Rebuild(t);
+            rows = Rows(t, 'L');
+            Assert.Equal(tint, ((BoxElement)rows[Name(10)]).BackgroundColor);
+            Assert.Equal(Color.Transparent, ((BoxElement)rows[Name(11)]).BackgroundColor);
+            Assert.Equal(tint, ((BoxElement)rows[Name(12)]).BackgroundColor);
+        }
+        finally { settings.Zebra = zebra; }
+    }
+
     [Fact]
     public void AFileCutForAMove_IsGhosted()
     {
@@ -311,8 +447,13 @@ public class KeptRowTests
     private static BoxElement TileOf(Dictionary<string, Element> rows, string name) =>
         (BoxElement)rows.Values.SelectMany(r => r.Children).Single(tile => TileName(tile) == name);
 
+    /// <summary>A cursor move in Thumbnails makes the two rows it moved between again, and each
+    /// hands back the tiles that did not change: the list patches each row in place from its new
+    /// one, and the patch makes only the two tiles the cursor moved between. A patch copies what
+    /// the build gave the tile, so a mark left on a tile that no build gave it is still there on
+    /// the tiles nothing patched.</summary>
     [Fact]
-    public void AThumbnailCursorMove_MakesTheRowsItMovedBetween_AndKeepsTheRest()
+    public void AThumbnailCursorMove_MakesTheTwoTilesItMovedBetween_AndLeavesTheRestUntouched()
     {
         using var t = Open();
         t.Press(KeyCode.F3, KeyModifiers.Ctrl);   // view: Thumbnails
@@ -322,19 +463,44 @@ public class KeptRowTests
         t.PutCursorOn('L', Name(perRow - 3));
         var before = ThumbRows(t, 'L');
         Assert.Contains("..", before.Keys);
+        var tiles = before.Values.SelectMany(r => r.Children).ToDictionary(TileName);
+        foreach (var tile in tiles.Values) tile.AutomationId = "untouched";
 
         t.Press(KeyCode.Right);                    // onto the first tile of the second row
         t.Session.PumpFrames(1);
 
         var after = ThumbRows(t, 'L');
         Assert.Equal(before.Keys, after.Keys);
-        foreach (var (first, row) in after)
+        Assert.All(after, r => Assert.Same(before[r.Key], r.Value));   // the rows were patched in place
+        foreach (var tile in after.Values.SelectMany(r => r.Children))
         {
-            if (first == ".." || first == Name(perRow - 2)) Assert.NotSame(before[first], row);
-            else Assert.Same(before[first], row);
+            string name = TileName(tile);
+            Assert.Same(tiles[name], tile);
+            if (name == Name(perRow - 3) || name == Name(perRow - 2)) Assert.Null(tile.AutomationId);
+            else Assert.Equal("untouched", tile.AutomationId);
         }
         Assert.Equal(Nocturne.Accent600, TileOf(after, Name(perRow - 2)).BorderColor);
         Assert.Equal(Color.Transparent, TileOf(after, Name(perRow - 3)).BorderColor);
+    }
+
+    /// <summary>A mark is in the grid's shape, so every row is made again, and each hands back
+    /// every tile but the one marked.</summary>
+    [Fact]
+    public void AThumbnailMark_MakesTheTileItMarked_AndLeavesTheRestUntouched()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F3, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        t.PutCursorOn('L', Name(10));
+        var tiles = ThumbRows(t, 'L').Values.SelectMany(r => r.Children).ToList();
+        foreach (var tile in tiles) tile.AutomationId = "untouched";
+
+        t.Mark('L', Name(6));
+        t.Session.PumpFrames(2);
+
+        var after = ThumbRows(t, 'L').Values.SelectMany(r => r.Children).ToList();
+        Assert.Equal(tiles, after);
+        Assert.All(after, tile => Assert.Equal(TileName(tile) == Name(6) ? null : "untouched", tile.AutomationId));
     }
 
     /// <summary>A mark is in the grid's shape: the rows are made again and the tile turns red.</summary>
@@ -519,6 +685,44 @@ public class KeptRowTests
         t.Session.Window.TypeText("needle");
         t.Session.PumpFrames(2);
         Assert.Contains(ViewerLabel(ViewerRows(t)[0]).Spans ?? [], s => s.Background == Nocturne.FindHitBg || s.Background == Nocturne.FindCurrentBg);
+    }
+
+    /// <summary>A step of find (Enter in its field) makes the row the current match left and the
+    /// row it reached, and keeps every other row on screen; the kept rows show what a remake of all
+    /// of them shows; and the step builds the window and no part. The current match was in the
+    /// rows' shape, so every Enter or F3 made every row on screen again (35 rows, 330 KB an Enter
+    /// on a 3,000-line file), and the bar's full build made the title bar and the command line too.</summary>
+    [Fact]
+    public void TheViewer_AFindStepMakesTheTwoRowsTheMatchMovesBetween_AndNoPart()
+    {
+        using var t = OpenViewer("a.txt");
+        t.Press(KeyCode.F, KeyModifiers.Ctrl);
+        t.Session.Window.TypeText("needle");
+        t.Session.PumpFrames(2);
+        string Tints() => string.Join("\n", ViewerRows(t).Select(r =>
+            string.Join(",", (ViewerLabel(r).Spans ?? []).Where(s => s.Background != default(Color))
+                .Select(s => $"{s.Start}+{s.Length}:{(s.Background == Nocturne.FindCurrentBg ? "current" : "hit")}"))));
+
+        for (int step = 0; step < 3; step++)
+        {
+            var before = ViewerRows(t).ToList();
+            int builds = t.Field<int>("_builds"), parts = t.App.PartBuilds;
+            t.Press(KeyCode.Enter);
+            t.Session.PumpFrames(2);
+            var after = ViewerRows(t).ToList();
+            var made = after.Where(r => !before.Contains(r)).ToList();
+            Assert.Equal(2, made.Count);
+            Assert.Equal(1, t.Field<int>("_builds") - builds);
+            Assert.Equal(0, t.App.PartBuilds - parts);
+
+            // The current match is on the second of the two rows made, and every row on screen is
+            // what a remake of all of them makes.
+            Assert.Contains("current", Tints().Split('\n')[step + 1]);
+            string kept = Tints();
+            ((VirtualListElement<int>)t.Field<Ref<ScrollViewElement>>("_viewerScrollRef").Current!).InvalidateRows();
+            Rebuild(t);
+            Assert.Equal(Tints(), kept);
+        }
     }
 
     [Fact]

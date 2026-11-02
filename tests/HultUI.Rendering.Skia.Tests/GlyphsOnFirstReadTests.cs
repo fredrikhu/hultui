@@ -89,4 +89,58 @@ public class GlyphsOnFirstReadTests
         Assert.True(compared > 5_000, $"compared only {compared} layouts");
         Assert.True(readLater > 5_000, $"only {readLater} runs made their glyphs when read");
     }
+
+    /// <summary>
+    /// Every two runs marked as holding glyphs that follow from their text
+    /// (<see cref="ShapedRun.GlyphsFollowText"/>, which the renderer's blob maps match by text
+    /// alone) hold the same glyphs when they hold the same text in the same face and size: over the
+    /// corpus at every width, on both paths, read straight away or after the word cache let every
+    /// word go. No letter-spaced or right-to-left run is marked.
+    /// </summary>
+    [Fact]
+    public void RunsMarkedAsFollowingTheirText_HoldTheSameGlyphs_ForTheSameText()
+    {
+        var fonts = new SkiaFontCollection();
+        var first = new Dictionary<(IResolvedFont, float, string), GlyphPosition[]>();
+        int matched = 0, marked = 0, unmarked = 0;
+        foreach (bool flushFirst in new[] { false, true })
+        foreach (bool reference in new[] { true, false })
+        {
+            var pipeline = new TextPipeline(fonts, new SkiaTextShaper()) { ComposeGlyphsWhenRead = !reference };
+            var runs = new List<(ShapedRun Run, ResolvedInheritedStyle Style)>();
+            foreach (var style in Styles)
+            foreach (var text in Texts)
+            foreach (var spans in TestSpans.Variants(text).Prepend(null))
+            foreach (var (maxLines, overflow) in Modes)
+            for (float w = 30f; w < 900f; w += 61.5f)
+                foreach (var line in pipeline.Layout(text, style, w, maxLines, overflow, spans).Lines)
+                    foreach (var run in line.Runs)
+                        runs.Add((run, style));
+
+            if (flushFirst)
+                for (int i = 0; i < 2 * 8192; i++)
+                    pipeline.Layout($"w{i:x5}", Base, float.PositiveInfinity, null);
+
+            foreach (var (run, style) in runs)
+            {
+                if (!run.GlyphsFollowText)
+                {
+                    unmarked++;
+                    continue;
+                }
+                marked++;
+                Assert.False(run.IsRtl, $"right-to-left \"{run.Text}\" is marked");
+                Assert.True(style.LetterSpacing == 0f || run.Glyphs.Length == 0, $"letter-spaced \"{run.Text}\" is marked");
+                var key = (run.Font, run.FontSize, run.Text);
+                if (first.TryGetValue(key, out var glyphs))
+                {
+                    Assert.True(glyphs.AsSpan().SequenceEqual(run.Glyphs), $"\"{run.Text}\" at {run.FontSize} in {run.Font.FamilyName}");
+                    matched++;
+                }
+                else first[key] = run.Glyphs;
+            }
+        }
+        Assert.True(matched > 20_000, $"only {matched} marked runs met another of their text");
+        Assert.True(marked > 20_000 && unmarked > 1_000, $"{marked} runs marked, {unmarked} not");
+    }
 }

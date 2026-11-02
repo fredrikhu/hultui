@@ -38,6 +38,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private float[]? _offsetsLast;
     private float[]? _offsetsSpare;
 
+    // Sticky rows, opt-in (StickyRowFor). Null means no row is held and no path below does any of
+    // this. The sticky rows' indices, ascending, are the first _stickyCount of _stickyRows, worked
+    // out with one O(n) pass per invalidation, as the offsets are, and found by binary search: a
+    // frame asks for the row to hold, and walking up to it costs a section's length.
+    private Func<T, int, bool>? _stickyRowFor;
+    private int[] _stickyRows = [];
+    private int _stickyCount;
+    private bool _stickyRowsCurrent;
+    // The row held above the window of rows, realized with them, or -1: none is, because no row
+    // is held or the held row is in the window. Children[1] when there is one, with what it
+    // leaves between it and the window after it, so the flow still puts every row where it goes.
+    private int _heldRow = -1;
+    private BoxElement? _heldGap;
+
     /// <summary>
     /// Optional accessible label for an item, used by assistive tech to name each
     /// row. Should read cheaply from item data — it may be called for every item.
@@ -82,7 +96,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// realized rows instead, so each card appears with its own name, role and automation
     /// id, exactly as it would outside a list. The trade is that off-screen rows are not
     /// in the tree; they enter it as they realize, the same way a scroll view's content
-    /// does.</para>
+    /// does. A listening reader gets the rows of a mount in that frame's tree, and those of a
+    /// change or a scroll with the layout refresh: in the frame of the change, or within
+    /// its 100 ms when one came just before.</para>
+    /// <para>Off, a row with a control in it needs nothing from the app: the row that holds the
+    /// keyboard focus is read through its elements, under its item's node, for as long as it
+    /// holds it.</para>
     /// </summary>
     public bool RowsAreComposite { get; set; }
 
@@ -113,7 +132,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             // Kept rows drew the selection they were made with: the one that had it and the one
             // that has it are made again. With the list drawing it, no row is: the highlight moves.
             DropRowsWhoseSelectionChanged();
-            if (_selectionHighlight is not null) MarkPaintDirty();
+            if (_selectionHighlight is not null || _selectionOverlay is not null) MarkPaintDirty();
         }
     }
     private int _selectedIndex = -1;
@@ -130,8 +149,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// its selection as a background draws a transparent one instead, and the pixels are the
     /// same when the highlight is the fill, radius and border the row drew (see
     /// <see cref="RowHighlight"/>). A row that shows its selection any other way — a bolder
-    /// label, an icon's colour, a hover tint left off the selected row, an affordance on the
-    /// selected row — cannot show it any more; such a list keeps the selection in its rows.
+    /// label, an icon's colour — cannot show it any more; such a list keeps the selection in its
+    /// rows. A hover tint left off the selected row moves to <see cref="HoverHighlight"/>, and an
+    /// affordance on the selected row to <see cref="SelectionOverlay"/>.
     /// Assistive technology reads the list's selection, not the rows', so it is told the same.
     /// </para>
     /// <para>
@@ -153,6 +173,72 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         }
     }
     private RowHighlight? _selectionHighlight;
+
+    /// <summary>
+    /// The tint drawn by the list under the row the pointer is on, as it draws
+    /// <see cref="SelectionHighlight"/>, and only under an unselected one: the selected row keeps
+    /// its highlight. Null (the default) leaves hover to the rows. Set by
+    /// <c>.HoverHighlight(…)</c>.
+    /// <para>
+    /// For rows the list keeps. A row that tints itself under the pointer has to know whether it
+    /// is selected, so it is made again each time that changes, and on a list that draws the
+    /// selection it would paint its tint over the highlight. A row with a background of its own
+    /// (a pick the list does not draw) covers the tint, as it would have left it off.
+    /// </para>
+    /// <para>
+    /// The row under the pointer is <see cref="Element.IsHovered"/>, read as the list draws (the
+    /// window draws a frame when the pointer reaches another element), so what counts is what a
+    /// row's own <c>.OnHover</c> would have seen, with one difference: a row a selection move made
+    /// again lost the pointer until the next move, and a kept row does not.
+    /// </para>
+    /// </summary>
+    public RowHighlight? HoverHighlight
+    {
+        get => _hoverHighlight;
+        set
+        {
+            if (_hoverHighlight == value) return;
+            _hoverHighlight = value;
+            MarkPaintDirty();
+        }
+    }
+    private RowHighlight? _hoverHighlight;
+
+    /// <summary>
+    /// An element the list holds over the selected row (<see cref="SelectedIndex"/>), against the
+    /// row's end and as tall as it, so what only the selected row shows — "Details →" — is not
+    /// in a row and a selection move makes no row for it: the one element moves. Null (the
+    /// default) holds nothing. Set by <c>.SelectionOverlay(…)</c>.
+    /// <para>
+    /// It is drawn over the rows, under the scroll bars, and clipped and scrolled as they are. Rows
+    /// lay out as if it were not there, so whatever reaches the end of the selected row runs
+    /// under it: give it a background (the highlight's), or the two draw over each other. It
+    /// takes no pointer: a press on it is a press on the row under it. Items of a list whose rows
+    /// are not composite have no children in the accessibility tree but the focused row's, and it
+    /// has none either; on composite rows it is read after them.
+    /// </para>
+    /// <para>
+    /// A rebuild may hand back the element that is on screen, which then stays, or a new one,
+    /// which is patched into it. On a selection of nothing, or past the items, it is out of the
+    /// tree until there is a selected row again.
+    /// </para>
+    /// </summary>
+    public Element? SelectionOverlay
+    {
+        get => _selectionOverlay;
+        set
+        {
+            if (ReferenceEquals(_selectionOverlay, value)) return;
+            _selectionOverlay = value;
+            MarkPaintDirty();
+        }
+    }
+    private Element? _selectionOverlay;
+
+    // The row-sized box that holds it, last of the children once there is a row to hold it over.
+    private SelectionOverlayHost? _overlayHost;
+
+    private bool OverlayShown => _selectionOverlay is not null && (uint)_selectedIndex < (uint)_items.Count;
 
     /// <summary>
     /// When true, the list manages a set of selected indices that assistive tech
@@ -190,6 +276,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     int IAccessibleItemSource.ItemCount => _items.Count;
     float IAccessibleItemSource.ItemHeight => _itemHeight;
     bool IAccessibleItemSource.PublishesItemNodes => !RowsAreComposite;
+
+    // An item's node stands where its row is drawn: what a reader's highlight shows, and what hit
+    // testing goes down through to the elements of the row that holds the focus. Rows of one height
+    // stack at ItemHeight. Without sticky rows the offsets are read as they are: a list served on
+    // demand is asked on a reader's thread.
+    (float Top, float Height)? IAccessibleItemSource.ItemBounds(int index)
+    {
+        if (_stickyRowFor is null)
+            return _offsets is { } offsets && index + 1 < offsets.Length
+                ? (offsets[index], offsets[index + 1] - offsets[index]) : null;
+        EnsureOffsets();
+        EnsureStickyRows();
+        return (OffsetOf(index) + (IsStickyRow(index) ? ShiftOfStickyRow(index) : 0f), HeightOf(index));
+    }
     int IAccessibleItemSource.SelectedIndex => SelectedIndex;
     bool IAccessibleItemSource.CanSelectMultiple => CanSelectMultiple;
 
@@ -242,6 +342,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     private string? LabelOf(T item) => _accessibleLabel is { } label ? label(item) : item?.ToString();
+
+    int IAccessibleItemSource.ItemOfRow(Element row)
+    {
+        foreach (var (index, realized) in _activeElements)
+            if (ReferenceEquals(realized.Element, row)) return index;
+        return -1;
+    }
 
     void IAccessibleItemSource.ActivateItem(int index)
     {
@@ -458,6 +565,36 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     }
 
     /// <summary>
+    /// Which rows are sticky: a section's header among its rows, in one list. Set by
+    /// <c>.StickyRows((item, index) => …)</c>. Null (the default) holds no row, and a list without
+    /// it pays for none of this. Called once per row per invalidation, as
+    /// <see cref="ItemHeightFor"/> is, so it must be cheap but need not be free; it reads the item
+    /// and the index, as a row of <see cref="ItemRowTemplate"/> does.
+    /// <para>
+    /// The list keeps the last sticky row at or above the first row on screen realized, however far
+    /// above the rows on screen it stands, and holds it at the top of the list until the next
+    /// sticky row reaches it and pushes it off: what <see cref="Builders.ElementExtensions.Sticky{T}"/>
+    /// does for a header in a column of its own, for rows that are not elements. It moves as a
+    /// sticky element moves, when it is drawn, hit and read, never in layout, and it is drawn over
+    /// the other rows. Give the row a background, or what scrolls under it shows through.
+    /// </para>
+    /// <para>
+    /// Everything else a row does, a held row does. It is told from the items as any row is; on
+    /// item rows it is kept while its item is, so a rebuild makes it no more often than another
+    /// row. <see cref="SelectionHighlight"/> and <see cref="HoverHighlight"/> go on its background,
+    /// under its content, where it is drawn; <see cref="SelectionOverlay"/> goes with it, over it.
+    /// <see cref="ScrollRangeIntoView"/> leaves a row clear of the row held at the top.
+    /// With <see cref="RowsAreComposite"/> the held row is in the accessibility tree where it is
+    /// drawn, before the rows on screen; otherwise its item's node is told where it is drawn.
+    /// </para>
+    /// </summary>
+    public Func<T, int, bool>? StickyRowFor
+    {
+        get => _stickyRowFor;
+        set { _stickyRowFor = value; InvalidateItems(); }
+    }
+
+    /// <summary>
     /// Recomputes row heights when they change without the items changing — the usual cause
     /// being a resize, which re-wraps every row. Cheaper than reassigning Items, and it keeps
     /// the scroll position.
@@ -507,6 +644,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         _offsets = null;
         _labels = null;
+        _stickyRowsCurrent = false;
         _visibleStart = -1;
         _visibleEnd = -1;
         foreach (var row in _activeElements.Values)
@@ -637,6 +775,96 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return lo;
     }
 
+    // ── Sticky rows. Nothing here runs without a StickyRowFor. ──
+
+    /// <summary>Works the sticky rows out when they are not current, over the array they were in.
+    /// Returns whether they moved from the ones worked out last.</summary>
+    private bool EnsureStickyRows()
+    {
+        if (_stickyRowsCurrent) return false;
+        _stickyRowsCurrent = true;
+        int count = 0;
+        bool moved = false;
+        if (_stickyRowFor is { } sticky)
+        {
+            for (int i = 0; i < _items.Count; i++)
+            {
+                if (!sticky(_items[i], i)) continue;
+                if (count == _stickyRows.Length) Array.Resize(ref _stickyRows, Math.Max(8, count * 2));
+                moved |= count >= _stickyCount || _stickyRows[count] != i;
+                _stickyRows[count++] = i;
+            }
+        }
+        moved |= count != _stickyCount;
+        _stickyCount = count;
+        return moved;
+    }
+
+    /// <summary>The place among the sticky rows of the last one at or above <paramref name="index"/>,
+    /// or -1 when none is.</summary>
+    private int StickyPlaceOf(int index)
+    {
+        int lo = 0, hi = _stickyCount - 1, found = -1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (_stickyRows[mid] <= index) { found = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+        return found;
+    }
+
+    private bool IsStickyRow(int index) =>
+        StickyPlaceOf(index) is >= 0 and var place && _stickyRows[place] == index;
+
+    /// <summary>The row held at the offset the list is at, or -1 when no sticky row is at or above
+    /// the first row on screen.</summary>
+    private int HeldRowNow()
+    {
+        int place = StickyPlaceOf(IndexAt(_scrollOffsetY));
+        return place < 0 ? -1 : _stickyRows[place];
+    }
+
+    /// <summary>Where the room of sticky row <paramref name="place"/> ends: the next one's top, or the
+    /// end of the rows.</summary>
+    private float StickyRoomEnd(int place) =>
+        place + 1 < _stickyCount ? OffsetOf(_stickyRows[place + 1]) : TotalHeight;
+
+    /// <summary><see cref="Element.StickyShift"/> worked out from the rows, for a sticky row that
+    /// may not be an element: pushed down to the offset, never past the next sticky row.</summary>
+    private float ShiftOfStickyRow(int index)
+    {
+        float top = OffsetOf(index);
+        if (top >= _scrollOffsetY) return 0f;
+        float end = StickyRoomEnd(StickyPlaceOf(index));
+        return MathF.Min(_scrollOffsetY - top, MathF.Max(0f, end - top - HeightOf(index)));
+    }
+
+    /// <summary>A row of this list goes no further than the next sticky row. Other children of a
+    /// list do not exist, and a row the template made sticky by itself is held as any child is.</summary>
+    internal override Rect StickyRoom(in Rect box, in Rect view)
+    {
+        if (_stickyRowFor is null) return base.StickyRoom(box, view);
+        EnsureOffsets();
+        EnsureStickyRows();
+        // A little over its top, so the sum its layout box came from cannot miss the row itself.
+        float end = StickyRoomEnd(StickyPlaceOf(IndexAt(box.Y - view.Y + 0.5f)));
+        return new Rect(view.X, view.Y, MathF.Max(view.Width, ContentWidth), end);
+    }
+
+    /// <summary>The row held at the offset the list is at covers the top of the viewport, unless the
+    /// band is that row. Worked out from the rows: a reveal moves the offset first, and the rows of
+    /// that offset are realized with the next frame.</summary>
+    private protected override float StuckHeaderReach(float top)
+    {
+        if (_stickyRowFor is null) return base.StuckHeaderReach(top);
+        EnsureOffsets();
+        EnsureStickyRows();
+        int held = HeldRowNow();
+        if (held < 0 || OffsetOf(held) >= top - 0.5f) return 0f;
+        return OffsetOf(held) + ShiftOfStickyRow(held) + HeightOf(held) - _scrollOffsetY;
+    }
+
     /// <summary>The extent comes from the row geometry rather than from the children, because
     /// the children here are only the realized window onto the items. Safe to run from the
     /// layout pass: it measures and clamps, and touches no children.</summary>
@@ -658,6 +886,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // Compute which items are visible and sync children
         int prevStart = _visibleStart;
         int prevEnd = _visibleEnd;
+        HostSelectionOverlay();
         SyncVisibleItems();
 
         // Children are created during the render pass, after the normal
@@ -665,24 +894,107 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // and layout so the children are renderable immediately.
         if (_visibleStart != prevStart || _visibleEnd != prevEnd)
             LayoutVisibleChildren();
+        PlaceSelectionOverlay();
     }
 
-    /// <summary>The selection, when the list draws it (<see cref="SelectionHighlight"/>): at each
-    /// selected row on screen, under the rows, as a box would draw its own background and
-    /// border. Rows are realized by now (<see cref="UpdateContentSize"/> runs first).</summary>
+    /// <summary>Puts <see cref="SelectionOverlay"/> in its box, and has the window of rows realized
+    /// again when the box comes into the children or leaves them.</summary>
+    private void HostSelectionOverlay()
+    {
+        if (!OverlayShown)
+        {
+            if (_overlayHost is { Parent: not null }) _visibleStart = -1;
+            return;
+        }
+        var host = _overlayHost ??= new SelectionOverlayHost();
+        if (host.Children.Count == 0 || !ReferenceEquals(host.Children[0], _selectionOverlay))
+            host.ReplaceChildren(_selectionOverlay!);
+        if (host.Parent is null) _visibleStart = -1;
+    }
+
+    /// <summary>Lays the box out when it needs it, as a row is, and puts it over the selected row.
+    /// A move of the selection comes here and goes no further than the position: no layout.</summary>
+    private void PlaceSelectionOverlay()
+    {
+        if (!OverlayShown || _overlayHost is not { } host || !ReferenceEquals(host.Parent, this) || _childLayoutEngine is null)
+            return;
+        float height = HeightOf(_selectedIndex);
+        if (host.Box.Height != Dimension.Px(height))
+        {
+            host.Box.Height = height;
+            host.MarkLayoutDirty();
+        }
+        if ((host.DirtyFlags & DirtyFlags.Style) != 0)
+            StyleResolver.ResolveUnder(host, ResolvedInherited, _activeTheme);
+        var contentBox = Layout.AbsoluteContentBox;
+        if ((host.DirtyFlags & DirtyFlags.Layout) != 0)
+            _childLayoutEngine.PerformLayout(host, contentBox.Width, height);
+        float y = OffsetOf(_selectedIndex);
+        if (_stickyRowFor is not null)
+        {
+            // With a selected row that is held: where it is drawn, and over it, as it is over any
+            // row. Over any other row a held row is drawn over the box too, as over that row.
+            EnsureStickyRows();
+            bool sticky = IsStickyRow(_selectedIndex);
+            if (sticky) y += ShiftOfStickyRow(_selectedIndex);
+            host.Position.ZIndex = sticky ? 1 : 0;
+        }
+        SetAbsolutePosition(host, contentBox.X, contentBox.Y + y);
+    }
+
+    /// <summary>Composite rows are what the accessibility tree reads, and drawing, which realizes
+    /// them, comes after the frame's accessibility phase: a tree built in that phase had the rows of
+    /// the frame before, or none. Item rows are served from the data and need nothing here, but for
+    /// a keyed row held back across an invalidation, which may be the one that holds the focus, and
+    /// is read through its elements. Only a listening reader's walks ask; the frame's drawing then
+    /// finds the rows made.</summary>
+    internal override void RealizeForAccessibility()
+    {
+        if (RowsAreComposite || _retained is not null) UpdateContentSize();
+    }
+
+    /// <summary>The tint under the pointer (<see cref="HoverHighlight"/>) and the selection, when
+    /// the list draws them (<see cref="SelectionHighlight"/>): at the rows on screen, under them,
+    /// as a box would draw its own background and border. Rows are realized by now
+    /// (<see cref="UpdateContentSize"/> runs first).</summary>
     internal override void RenderUnderContent(IRenderContext ctx)
     {
-        if (_selectionHighlight is not { } highlight || _activeElements.Count == 0) return;
+        if (_activeElements.Count == 0) return;
+        if (_hoverHighlight is { } hover)
+        {
+            foreach (var (index, row) in _activeElements)
+                if (row.Element.IsHovered && !IsItemSelected(index) && !DrawsOverItsFill(row.Element))
+                    DrawHighlight(ctx, in hover, row.Element);
+        }
+        if (_selectionHighlight is not { } highlight) return;
         if (!CanSelectMultiple)
         {
-            if (_selectedIndex >= 0 && _activeElements.TryGetValue(_selectedIndex, out var row))
+            if (_selectedIndex >= 0 && _activeElements.TryGetValue(_selectedIndex, out var row)
+                && !DrawsOverItsFill(row.Element))
                 DrawHighlight(ctx, in highlight, row.Element);
             return;
         }
         if (_multiSelected.Count == 0) return;
         foreach (var (index, row) in _activeElements)
-            if (_multiSelected.Contains(index))
+            if (_multiSelected.Contains(index) && !DrawsOverItsFill(row.Element))
                 DrawHighlight(ctx, in highlight, row.Element);
+    }
+
+    /// <summary>A sticky row has a fill of its own, which would cover what is drawn under the rows,
+    /// and rows going by under it would cover it where it is held. Its highlights are drawn on
+    /// that fill (<see cref="RenderOverStickyRow"/>).</summary>
+    private bool DrawsOverItsFill(Element row) =>
+        _stickyRowFor is not null && row.PositionRead.Type == PositionType.Sticky;
+
+    internal override void RenderOverStickyRow(IRenderContext ctx, Element row)
+    {
+        if (_stickyRowFor is null) return;
+        // Which row it is, from where it is laid out: a list holds few of these.
+        bool selected = IsItemSelected(IndexAt(row.Layout.AbsoluteBorderBox.Y - Layout.AbsoluteContentBox.Y + 0.5f));
+        if (_hoverHighlight is { } hover && row.IsHovered && !selected)
+            DrawHighlight(ctx, in hover, row);
+        if (_selectionHighlight is { } highlight && selected)
+            DrawHighlight(ctx, in highlight, row);
     }
 
     // BoxElement.Render's call for a background with a uniform solid border, or none.
@@ -709,6 +1021,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         for (int i = 0; i < Children.Count; i++)
         {
             var child = Children[i];
+            if (child == _overlayHost) continue;   // PlaceSelectionOverlay
             if ((child.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 // Under this list, as the style pass resolves a row whenever it next passes
@@ -719,10 +1032,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 StyleResolver.ResolveUnder(child, ResolvedInherited, _activeTheme);
             }
 
-            // Children[0] is the spacer; item k sits at Children[1 + k].
             if ((child.DirtyFlags & DirtyFlags.Layout) != 0)
                 _childLayoutEngine.PerformLayout(child, viewportWidth,
-                    child == _spacer ? _itemHeight : HeightOf(_visibleStart + (i - 1)));
+                    child == _spacer || child == _heldGap ? _itemHeight : HeightOf(RowOfChild(i)));
         }
 
         // Position every child at its exact virtual Y coordinate.
@@ -732,13 +1044,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         for (int i = 0; i < Children.Count; i++)
         {
             var child = Children[i];
-            float targetY = child == _spacer
-                ? contentBox.Y
-                : contentBox.Y + OffsetOf(_visibleStart + (i - 1));
+            if (child == _overlayHost) continue;
+            float targetY = child == _spacer ? contentBox.Y
+                : child == _heldGap ? contentBox.Y + OffsetOf(_heldRow + 1)
+                : contentBox.Y + OffsetOf(RowOfChild(i));
 
             SetAbsolutePosition(child, contentBox.X, targetY);
         }
     }
+
+    /// <summary>The row at <paramref name="child"/> among the children: Children[0] is the spacer and
+    /// item k of the window sits at Children[1 + k], or behind a row held above the window and
+    /// its gap.</summary>
+    private int RowOfChild(int child) =>
+        _heldRow < 0 ? _visibleStart + (child - 1)
+        : child == 1 ? _heldRow
+        : _visibleStart + (child - 3);
 
     private static void SetAbsolutePosition(Element element, float targetAbsX, float targetAbsY)
     {
@@ -778,6 +1099,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 ReplaceChildren();
             _visibleStart = -1;
             _visibleEnd = -1;
+            _heldRow = -1;
             return;
         }
 
@@ -803,13 +1125,23 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             newEnd = Math.Min(_items.Count, newEnd + 2);   // overscan below
         }
 
+        // The same window holds the same row: both follow the first row on screen.
         if (newStart == _visibleStart && newEnd == _visibleEnd)
             return;
+
+        // The held row, when it stands above the window: it is realized with it.
+        int held = -1;
+        if (_stickyRowFor is not null)
+        {
+            EnsureStickyRows();
+            held = HeldRowNow();
+            if (held >= newStart) held = -1;
+        }
 
         // Return elements that are no longer visible to the recycle pool
         foreach (var (index, row) in _activeElements)
         {
-            if (index < newStart || index >= newEnd)
+            if ((index < newStart || index >= newEnd) && index != held)
             {
                 _recyclePool.Add(row.Element);
                 _dropping.Add(index);
@@ -822,83 +1154,125 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _dropping.Clear();
 
         // Create or reuse elements for newly visible items
+        if (held >= 0) RealizeRow(held);
         for (int i = newStart; i < newEnd; i++)
-        {
-            if (_activeElements.TryGetValue(i, out var live))
-            {
-                // A kept row's height can move without its item changing (a height function
-                // rebuilt with the owner); it is forced again, the way a new row is below.
-                if (_itemRowTemplate is not null && live.Element.Box.Height != Dimension.Px(HeightOf(i)))
-                {
-                    live.Element.Box.Height = HeightOf(i);
-                    live.Element.MarkLayoutDirty();
-                }
-                continue;
-            }
-
-            // Recycle: take from pool, but recreate from template
-            // (recycled element structure may differ)
-            if (_recyclePool.Count > 0)
-                _recyclePool.RemoveAt(_recyclePool.Count - 1);
-            var item = _items[i];
-            bool selected = _itemRowTemplate is not null && RowSelected(i);
-            var element = _itemRowTemplate is { } rowTemplate ? rowTemplate(item, selected) : _itemTemplate!(item);
-
-            // A keyed row that was on screen before the invalidation is patched from the
-            // fresh one and kept, the way the reconciler keeps a keyed child: same object,
-            // same focus, same caret. Its layout is stale, so it is laid out again below.
-            if (element.Key is { } key && _retained is { } retained
-                && retained.Remove(key, out var kept) && Components.TreeDiffer.TryPatch(kept, element))
-            {
-                element = kept;
-                element.MarkLayoutDirty();
-            }
-
-            // Force item to its row height, full width
-            element.Box.Height = HeightOf(i);
-            element.Flex.FlexShrink = 0;
-
-            _activeElements[i] = new Row(element, item, selected);
-        }
+            RealizeRow(i);
         // Whatever was held back and not asked for again has left the viewport for good.
         _retained = null;
 
         // Update spacer height to push items to correct virtual positions
-        _spacer.Box.Height = OffsetOf(newStart);
+        _spacer.Box.Height = OffsetOf(held >= 0 ? held : newStart);
         _spacer.Flex.FlexShrink = 0;
         _spacer.BackgroundColor = Color.Transparent;
+        if (held >= 0)
+        {
+            var gap = _heldGap ??= new BoxElement { BackgroundColor = Color.Transparent };
+            gap.Box.Height = OffsetOf(newStart) - OffsetOf(held + 1);
+            gap.Flex.FlexShrink = 0;
+        }
 
         // Kept rows, all of them, in the order they stand: only a height moved, and replacing
         // the children with themselves would tell assistive technology the structure changed.
-        if (_itemRowTemplate is not null && ChildrenAreRealized(newStart, newEnd))
+        if (_itemRowTemplate is not null && ChildrenAreRealized(newStart, newEnd, held))
         {
             MarkLayoutDirty();
             _visibleStart = newStart;
             _visibleEnd = newEnd;
+            _heldRow = held;
             return;
         }
 
-        // Build children array: spacer + visible items in order
-        var children = new Element[1 + (newEnd - newStart)];
+        // Build children array: spacer + the row held above the window and its gap + visible
+        // items in order, the overlay's box over them
+        var host = OverlayShown ? _overlayHost : null;
+        int firstRow = held >= 0 ? 3 : 1;
+        var children = new Element[firstRow + (newEnd - newStart) + (host is null ? 0 : 1)];
         children[0] = _spacer;
+        if (held >= 0)
+        {
+            children[1] = _activeElements[held].Element;
+            children[2] = _heldGap!;
+        }
         for (int i = newStart; i < newEnd; i++)
-            children[1 + i - newStart] = _activeElements[i].Element;
+            children[firstRow + i - newStart] = _activeElements[i].Element;
+        if (host is not null) children[^1] = host;
 
         ReplaceChildren(children);
 
         _visibleStart = newStart;
         _visibleEnd = newEnd;
+        _heldRow = held;
     }
 
-    /// <summary>Whether the children are already the spacer and rows <paramref name="start"/> to
-    /// <paramref name="end"/> as realized, in order.</summary>
-    private bool ChildrenAreRealized(int start, int end)
+    /// <summary>Makes row <paramref name="index"/> when it is not realized, and forces it to what the
+    /// list decides about it.</summary>
+    private void RealizeRow(int index)
+    {
+        if (_activeElements.TryGetValue(index, out var live))
+        {
+            // A kept row's height can move without its item changing (a height function
+            // rebuilt with the owner); it is forced again, the way a new row is below.
+            if (_itemRowTemplate is not null && live.Element.Box.Height != Dimension.Px(HeightOf(index)))
+            {
+                live.Element.Box.Height = HeightOf(index);
+                live.Element.MarkLayoutDirty();
+            }
+            if (_stickyRowFor is not null) MarkSticky(live.Element, index);
+            return;
+        }
+
+        // Recycle: take from pool, but recreate from template
+        // (recycled element structure may differ)
+        if (_recyclePool.Count > 0)
+            _recyclePool.RemoveAt(_recyclePool.Count - 1);
+        var item = _items[index];
+        bool selected = _itemRowTemplate is not null && RowSelected(index);
+        var element = _itemRowTemplate is { } rowTemplate ? rowTemplate(item, selected) : _itemTemplate!(item);
+
+        // A keyed row that was on screen before the invalidation is patched from the
+        // fresh one and kept, the way the reconciler keeps a keyed child: same object,
+        // same focus, same caret. Its layout is stale, so it is laid out again below.
+        if (element.Key is { } key && _retained is { } retained
+            && retained.Remove(key, out var kept) && Components.TreeDiffer.TryPatch(kept, element))
+        {
+            element = kept;
+            element.MarkLayoutDirty();
+        }
+
+        // Force item to its row height, full width
+        element.Box.Height = HeightOf(index);
+        element.Flex.FlexShrink = 0;
+        if (_stickyRowFor is not null) MarkSticky(element, index);
+
+        _activeElements[index] = new Row(element, item, selected);
+    }
+
+    /// <summary>Makes <paramref name="row"/> sticky or not, as <see cref="StickyRowFor"/> says of
+    /// <paramref name="index"/>: what the renderer, the hit tester and the accessibility tree move.</summary>
+    private void MarkSticky(Element row, int index)
+    {
+        var type = IsStickyRow(index) ? PositionType.Sticky : PositionType.Relative;
+        if (row.PositionRead.Type == type) return;
+        row.Position.Type = type;
+        if (type == PositionType.Sticky) row.Position.Top = Dimension.Px(0);
+    }
+
+    /// <summary>Whether the children are already the spacer, the row held above the window and its gap
+    /// when there is one, and rows <paramref name="start"/> to <paramref name="end"/> as realized, in
+    /// order, and the overlay's box when it is shown.</summary>
+    private bool ChildrenAreRealized(int start, int end, int held)
     {
         var children = Children;
-        if (children.Count != 1 + (end - start) || children[0] != _spacer)
+        var host = OverlayShown ? _overlayHost : null;
+        int firstRow = held >= 0 ? 3 : 1;
+        if (children.Count != firstRow + (end - start) + (host is null ? 0 : 1) || children[0] != _spacer)
+            return false;
+        if (held >= 0 && (children[1] != _activeElements[held].Element || children[2] != _heldGap))
+            return false;
+        if (host is not null && children[^1] != host)
             return false;
         for (int i = start; i < end; i++)
-            if (children[1 + i - start] != _activeElements[i].Element)
+            if (children[firstRow + i - start] != _activeElements[i].Element)
                 return false;
         return true;
     }
@@ -930,10 +1304,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 _itemHeightFor = vl._itemHeightFor;
                 _offsets = null;
             }
+            // Rows realized as sticky elements go when a list stops holding them; otherwise they
+            // are told again over the rows the patch brings, as the heights are worked out.
+            if (_stickyRowFor is not null && vl._stickyRowFor is null) InvalidateItems();
+            _stickyRowFor = vl._stickyRowFor;
 
             // First: it decides the selected state rows are made with, which the selection
             // below and the kept rows' check compare against.
             SelectionHighlight = vl.SelectionHighlight;
+            HoverHighlight = vl.HoverHighlight;
+            // A new overlay is patched into the one on screen, as a keyed row is; one handed back
+            // stays; anything else goes in its place on the next frame.
+            if (_selectionOverlay is not { Parent: not null } live || vl._selectionOverlay is not { } overlay
+                || ReferenceEquals(live, overlay) || !Components.TreeDiffer.TryPatch(live, overlay))
+                SelectionOverlay = vl._selectionOverlay;
             // Accessibility state is rebuilt fresh each render in declarative UIs,
             // so it must ride across the patch — otherwise the a11y selection and
             // activation wiring freeze at their first-mount values.
@@ -1016,5 +1400,38 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 MarkPaintDirty();
             }
         }
+
+        // The same for the sticky rows, over the rebuilt rows: moved, the window is realized
+        // again, which tells each kept row what it is.
+        if (_stickyRowFor is not null || _stickyCount > 0)
+        {
+            _stickyRowsCurrent = false;
+            if (EnsureStickyRows())
+            {
+                _visibleStart = -1;
+                _visibleEnd = -1;
+                MarkLayoutDirty();
+                MarkPaintDirty();
+            }
+        }
     }
+}
+
+/// <summary>Holds a list's <see cref="VirtualListElement{T}.SelectionOverlay"/>: as wide as a row,
+/// given the selected row's height, its content against the end. The pointer goes through it, and
+/// through what it holds, to the row under it.</summary>
+internal sealed class SelectionOverlayHost : BoxElement
+{
+    public SelectionOverlayHost()
+    {
+        Position.Type = PositionType.Absolute;
+        Position.Top = Dimension.Px(0);
+        Position.Left = Dimension.Px(0);
+        Box.Width = Dimension.Percent(100);
+        Flex.Direction = FlexDirection.Row;
+        Flex.JustifyContent = JustifyContent.FlexEnd;
+        Flex.AlignItems = AlignItems.Stretch;
+    }
+
+    public override bool HitTest(Point point) => false;
 }

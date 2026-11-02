@@ -191,6 +191,9 @@ public static class ElementExtensions
     public static TextAreaElement OnTextChanged(this TextAreaElement el, Action<string> handler) { el.TextChanged = handler; return el; }
     public static TextAreaElement ReadOnly(this TextAreaElement el, bool value = true) { el.ReadOnly = value; return el; }
     public static TextAreaElement Spans(this TextAreaElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
+    /// <summary>Sets <see cref="TextAreaElement.Highlights"/>: backgrounds over the spans, such as
+    /// find matches.</summary>
+    public static TextAreaElement Highlights(this TextAreaElement el, IReadOnlyList<TextHighlight>? highlights) { el.Highlights = highlights; return el; }
     public static TextInputElement Spans(this TextInputElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
 
     // ──── Checkbox properties ────
@@ -325,6 +328,10 @@ public static class ElementExtensions
     /// Named unlike the property it sets: a same-named extension would be unreachable, because
     /// <c>list.ItemHeightFor(f)</c> binds to invoking the delegate property instead.</summary>
     public static VirtualListElement<T> RowHeights<T>(this VirtualListElement<T> el, Func<T, int, float>? height) { el.ItemHeightFor = height; return el; }
+
+    /// <summary>The rows the list holds at the top while their section scrolls under them, each until
+    /// the next pushes it off; see <see cref="VirtualListElement{T}.StickyRowFor"/>.</summary>
+    public static VirtualListElement<T> StickyRows<T>(this VirtualListElement<T> el, Func<T, int, bool>? sticky) { el.StickyRowFor = sticky; return el; }
     public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
 
@@ -357,6 +364,20 @@ public static class ElementExtensions
     /// <summary>The list draws the selection as <paramref name="highlight"/> says, or leaves it to
     /// the rows when it is null; see <see cref="VirtualListElement{T}.SelectionHighlight"/>.</summary>
     public static VirtualListElement<T> SelectionHighlight<T>(this VirtualListElement<T> el, RowHighlight? highlight) { el.SelectionHighlight = highlight; return el; }
+
+    /// <summary>The list draws a tint under the unselected row the pointer is on, as
+    /// <see cref="SelectionHighlight{T}(VirtualListElement{T}, Color, float, Color, float)"/> draws
+    /// the selection; see <see cref="VirtualListElement{T}.HoverHighlight"/>.</summary>
+    public static VirtualListElement<T> HoverHighlight<T>(this VirtualListElement<T> el, Color background, float cornerRadius = 0f)
+    {
+        el.HoverHighlight = new RowHighlight(background, new CornerRadius(cornerRadius));
+        return el;
+    }
+
+    /// <summary>The list holds <paramref name="overlay"/> over the selected row, against its end,
+    /// so what only that row shows moves with the selection and no row is made for it; see
+    /// <see cref="VirtualListElement{T}.SelectionOverlay"/>.</summary>
+    public static VirtualListElement<T> SelectionOverlay<T>(this VirtualListElement<T> el, Element? overlay) { el.SelectionOverlay = overlay; return el; }
     public static VirtualListElement<T> CanSelectMultiple<T>(this VirtualListElement<T> el, bool value = true) { el.CanSelectMultiple = value; return el; }
     public static VirtualListElement<T> OnSelectionChanged<T>(this VirtualListElement<T> el, Action<IReadOnlyList<int>> handler) { el.OnSelectionChanged = handler; return el; }
     /// <summary>Let the focused list scroll itself with Up/Down/Page/Home/End.

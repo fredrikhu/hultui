@@ -381,6 +381,51 @@ public class HistoryTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>The arrows walk the rows past the bottom of the list and back past its top, and the
+    /// row they select stays on screen. The keys come to the app, not to the list, which is not
+    /// focused and so did not follow them: a walk of 49 keys left the selection 21 rows below the
+    /// screen (plan 17 round 6).</summary>
+    [Fact]
+    public void AWalkPastTheScreenKeepsTheSelectedRowInView()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(-200);
+        for (int i = 0; i < 120; i++)
+            HistoryLog.Append(_root, new HistoryEntry(start.AddMinutes(i), "GET",
+                $"https://api.x/v1/items/{i}", 200, 10 + i, null, null));
+        Hosted((session, app) =>
+        {
+            GoTo(session, KeyCode.Digit4);
+            var list = (HultUI.Core.Elements.ScrollViewElement)session.Window.FindByAutomationId("history-rows")!.Element;
+            float viewport = list.Layout.AbsoluteContentBox.Height;
+            int onScreen = (int)(viewport / Meridian.Theme.Azimuth.RowRun);
+            Assert.InRange(onScreen, 10, 60);
+
+            int cursor = -1;
+            void Keys(KeyCode key, int keys)
+            {
+                for (int i = 0; i < keys; i++)
+                {
+                    GoTo(session, key);
+                    cursor += key == KeyCode.Down ? 1 : -1;
+                    float top = cursor * Meridian.Theme.Azimuth.RowRun;
+                    Assert.True(top >= list.ScrollOffsetY - 0.5f
+                        && top + Meridian.Theme.Azimuth.RowRun <= list.ScrollOffsetY + viewport + 0.5f,
+                        $"row {cursor} at {top} is off the screen ({list.ScrollOffsetY}..{list.ScrollOffsetY + viewport})");
+                }
+                // The row on screen is the selected one, inside the list's box. (A list's rows
+                // are its items to assistive technology, so the row is found among its elements.)
+                var row = list.Children.Single(r => r.AutomationId == $"hist-row-{cursor}");
+                var box = list.Layout.AbsoluteContentBox;
+                Assert.InRange(row.WindowBorderBox.Y, box.Y - 0.5f, box.Y + box.Height - row.WindowBorderBox.Height + 0.5f);
+                Assert.True(Walk(session.Window.AccessibilityTree).Single(n => n.IsSelected == true).Name!
+                    .EndsWith($"/items/{119 - cursor} 200"));
+            }
+            Keys(KeyCode.Down, onScreen + 20);
+            Assert.True(list.ScrollOffsetY > 0, "the walk past the screen scrolled nothing");
+            Keys(KeyCode.Up, onScreen + 10);
+        });
+    }
+
     [Fact]
     public void AnEmptyHistorySaysSo()
     {

@@ -356,39 +356,72 @@ the real loop, a position report every 100 ms) still builds each app 0 times; th
 allocates 22,130 → 22,158 B/s in Aperture (six reports) and 22,115 → 22,472 B/s in Reel (four
 settings writes), so a check that is not due costs nothing measurable.
 
+### A resize builds only for what it changes
+
+A window dragged by hand passes through a size a frame, and layout follows it by itself: the same
+elements, new boxes. A `MarkDirty()` on `Window.Resized` makes all of them again, on every step, for
+the few things a build reads off the size. Have each build note what it read, and have the resize
+work the same out at the new size and build only when an answer changed. Vesper's grids do this
+(round 4, step 13), and Aperture (round 6, step 13):
+
+- **Put the reads behind one method that notes them.** Aperture has one question, how many cards
+  of this width fit across, asked from about a dozen places in its views, with six card widths. The
+  answer's method notes each width it was asked about, so a view added later is covered. A list of
+  the widths you know of goes stale.
+- **Compare with what the last build read, not with the last step.** Nothing was built in between.
+- **Round before you compare.** A hero's picture is asked for in steps of 128 pixels; its width
+  matters only when a step is crossed. Its box is set from the height, so the height matters at
+  every step inside the range it follows.
+- **Look for what a build did besides.** Aperture's library keeps the cursor on screen in its
+  build, so a window shrinking under the cursor scrolled because each step built. The check now
+  makes the same call itself. A state that arrives as a resize belongs in the check too: full
+  screen taken from outside the app shows only as one.
+- **Test it against a full build.** Walk each view through the sizes and compare what is on screen
+  with what a forced rebuild makes, with builds far enough apart for a missed one to show.
+
+Aperture, headless, 1440×900, a resize and two frames, NativeAOT within 1 %: a 4 px step that keeps
+the columns in the library 71.5 → 2.3 KB (−97 %), one build a step → none; the same in height; Home
+130.0 → 2.3 KB (−98 %); an item's page, whose hero asks again at a step, 77.3 → 14.1 KB (−82 %). A
+step across a column count builds as it did. Headless, the frames are most of a step, so its time
+moved by −1…−3 %.
+
 ### Keep what a key does not change in a child component
 
 A rebuild makes everything its `Build()` makes. Junction's window was one component, so a key
 in History made the title bar, the sidebar and the toolbar again with the list: 128 KB of the
 182 KB a build made, for about 120 elements that show no selection. Put such parts in child
-components the parent makes once and hands to every build. A rebuild of the parent moves the
-kept host into its new tree and the reconciler puts it back; nothing inside it is built, and
-nothing around it is marked.
+components the parent makes once and hands to every build: `Part` (`HultUI.Core.Components`) is
+that component. A rebuild of the parent moves the kept host into its new tree and the reconciler
+puts it back; nothing inside it is built, and nothing around it is marked.
 
 ```csharp
+private readonly PartGroup _parts = new();
 private Part? _toolbar;
-private Part ToolbarPart => _toolbar ??= new Part(this, BuildToolbar);   // made once
+private Part ToolbarPart => _toolbar ??= new Part(_parts, BuildToolbar);   // made once
 
 public override Element Build()
 {
     var view = BuildView();
     view.Key = "view";
     // The host is the flex item where the toolbar's root used to be.
-    return Flex.Column(gap: 0).FlexGrow(1).Children(ToolbarPart.Mount().FlexShrink(0), view);
+    return Flex.Column(gap: 0).FlexGrow(1).Children(ToolbarPart.Place().FlexShrink(0), view);
 }
+
+// A rebuild builds the parts too, unless the path says it changes nothing they show.
+private new void MarkDirty() { _parts.Invalidate(); base.MarkDirty(); }
+private void MarkViewDirty() => base.MarkDirty();
 ```
 
 Three things decide whether it stays right and stays cheap:
 
 - **What the part shows has to reach it.** A part rebuilds when a signal or loader its own
-  `Build()` read changes, not when its parent does. A plain field it reads (the active
-  repository, a setting, a width breakpoint) needs a signal the part reads and the parent
-  writes. Junction's parts read one `Signal<int>` that its `MarkDirty()` and `Rerender()`
-  bump, so every rebuild builds the chrome too, and only the paths that change nothing the
-  chrome shows — selection moves, cursors, typing in a field of the view, search boxes — call
-  `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a build;
-  forgetting to opt in shows a stale toolbar, so make the safe one the default.
-- **The host takes the root's place in the layout.** `Mount()` returns the `ComponentHost`, an
+  build read changes, not when its parent does. A plain field it reads (the active repository,
+  a setting, a width breakpoint) needs the parent to say so: its `MarkDirty()` and `Rerender()`
+  call `PartGroup.Invalidate()`, so every rebuild builds the parts too, and only the paths that
+  change nothing the parts show — selection moves, cursors, typing in a field of the view, search
+  boxes — call `MarkViewDirty()` or `RerenderView()`, which do not. Forgetting to opt out costs a
+  build; forgetting to opt in shows a stale toolbar, so make the safe one the default.
+- **The host takes the root's place in the layout.** `Place()` returns the `ComponentHost`, an
   element between the parent and the part's root. Give it what the root had as a flex item
   (`FlexShrink(0)` for a fixed bar, so a crowded row cannot squeeze it), and give a root that
   must fill its host `FlexGrow(1)` (the host is a column).
@@ -407,6 +440,17 @@ same accessibility trees a key with a reader. The perf suite pins the pattern:
 `component/list walk beside chrome built with it` (173.5 KB a step) against `… in kept parts`
 (35.2 KB), and `a11y/selection walk beside details and kept chrome parts, …` (0.6 trees a key,
 as without the chrome; 1.0 before the reconciler put kept hosts back unmarked).
+
+**A form can be a part with a signal of its own.** A field holds its own text, so a character in
+Junction's commit summary changes nothing the window shows but what reads that text. The view
+still built on every key, its lists with it, and the key cost more the more files had changed. The
+composer is now a part (round 6, step 10): a character writes the part's signal, and only the part
+builds, for its issue list and closing hint. The view's build places it, as Vesper's does (`Place`
+below), comparing the few things the part shows of the view's data, so a load that lands with no
+full rebuild behind it still reaches the commit button. Headless, 1400×900, a key and two frames:
+76.8 → 13.6 KB a character with 1 changed file, 1,320 → 13.6 KB with 200 (−99 %, and −23 % time;
+NativeAOT 1,300 → 13.2 KB, −27 %), and no window build. Check what the view reads from a field
+first: here nothing outside the composer did.
 
 Meridian keeps its title bar, rail, request tree and response pane this way (round 5, step 11),
 and adds four lessons:
@@ -469,10 +513,40 @@ Vesper with the parts (headless, 1240×820, 400 files a pane eight folders deep,
 frames; NativeAOT within 2 %): a cursor key in Detail 210 → 34 KB (−84 %), elements patched 169 →
 7, and the other pane is not touched; with the F3 partner ring 218 → 44 (−80 %); Brief 199 → 37
 (−81 %); Thumbnails 219 → 58 and 257 → 94 (−74 %, −63 %); a mark 362 → 190 (−47 %: a mark still
-makes every visible row again); Tab 207 → 105 (−49 %); a folder in and out 554 → 273 (−51 %); a
+made every visible row again, until round 6 put it in the row's item: 191 → 42); Tab 207 → 105 (−49 %); a folder in and out 554 → 273 (−51 %); a
 filter character 365 → 209 (−43 %); a walk with the preview panel 329 → 73 (−78 %). With a reader
 the same bytes come off and the same accessibility trees are built. A key's time on NativeAOT
 −7…−21 %: the two frames are most of it.
+
+`Part` in `HultUI.Core.Components` is Vesper's rule, public since round 6 step 13: the group's
+revision is a plain counter, read where the parent's build places the part; a signal of the part's
+own (`own:`) rebuilds it alone; `afterBuild:` runs after its builds but the first, as Meridian's
+`Service()` needs; `Place(stale: …)` takes what the parent compared for a view-only build, as
+Junction's composer compares what it shows of the working copy. Vesper's parts are on it as they
+were. Meridian's and Junction's chrome read a revision signal and are mounted, not placed: on `Part`
+with that signal as `own:` they build when they always did, and placing them would be a change of
+its own.
+
+Aperture's title bar and rail are its first use, and add one lesson: **a build a loader asks for is
+a full one.** A loader that lands builds the app through a signal, with no `MarkDirty()` or
+`Rerender()` to invalidate the group, and what it brought can move a plain field a part reads:
+opening a report marks it read as its loader lands, and that takes a badge off the rail. So the
+app's `Build()` invalidates the group unless the path that asked said view-only, with a flag
+`RerenderView()` and `MarkViewDirty()` set, and `Rerender()` and `MarkDirty()` still invalidate it
+themselves, since a batch can hold a view-only rebuild and a full one. Headless, 600 films, 1440×900,
+a key and two frames, NativeAOT within 1 %: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 KB
+(−33 %), a resize across a column count 118.9 → 80.8 KB (−32 %), no part built on any of them.
+
+A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
+asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
+for the whole copy, though a tick moves only the progress the view shows and, of the parts, the
+command line (a copy running in the background shows its percent and count) and the footers (a
+folder's measured size). The tick now takes `MarkViewDirty()`, with the percent and the count in
+the command line's compare, and a folder-size walk builds the footers outright (round 6, step 5;
+headless, JIT): 211 → 29 KB a tick in the background, 284 → 100 KB with the progress dialog open,
+which the view builds. Throttle such ticks on `Application.Time`, as `Build()` is not a clock says,
+so a headless test counts them exactly. The perf suite pins it: `component/worker tick beside kept
+parts, every part built` against `…, view only`.
 
 ### Hand back the elements a key does not change
 
@@ -500,6 +574,42 @@ Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 
 key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
 real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
 moves to its new column (755.8 → 229.4 KB a step).
+
+The same works inside a virtual list whose item is a row of cards (Vesper's Thumbnails, round 6
+step 6). The list makes a row when its item changes — the cursor moved onto it or off it — and
+makes it in the frame's layout, not in a build, so two of the rules read differently. **Key the
+row** (by its place: "t" and its first entry's index): a keyed row the list lets go of is held
+back and patched from the row made in its place (`TreeDiffer.TryPatch`), which is where a card
+handed back is put back untouched. **Hand a card back only into its own row's place**: the card's
+live element must still be a child of a row with the new row's key — the row being replaced. A
+card in a row still on screen belongs to that row, and one in a row that scrolled away is out of
+the tree. Keep each card with what it was made from (its entry, the cursor on it, its mark, its
+picture as the cache had it) and let them all go when anything every card shows changes (the
+sizes, the theme, a result set). A cursor move then makes the two cards it moved between: Down
+88.3 → 42.9 KB a key, cards made 11 → 3; a mark, which makes every row again, 315.7 → 56.3 KB.
+
+Aperture's library is the same shape (round 6, step 13), and adds four lessons:
+
+- **Compare what the card shows, not how it got there.** A poster's state holds the picture it
+  draws, or null for the placeholder: loading and failed look the same, so a failure makes no card.
+- **Ask for what a make keeps fresh before deciding.** The picture cache is asked for every card of
+  a row made again, handed back or not: that keeps a picture on screen recent in the cache, and is
+  how a row made for a landing finds the one card that landed. A kept card keeps its image element,
+  and a card patched keeps it too, so nothing flashes.
+- **What a card needs is a row still in the list.** Its row's parent is the list: a row the list
+  let go of is out of the tree. A row on screen is not asked for its cards, since a row is made for
+  the places it holds and only a change of columns, which makes them all again, moves a place to
+  another row. Then the card moves with its place: a resize across a column count 341.5 → 118.9 KB.
+- **A kept element keeps the keyboard, and what the code thought would go.** The cursor focused its
+  ref's card after the build, but a list makes its rows in the frame, so the ref still held the
+  card the cursor left. That card used to go with its row and the focus with it; kept, it would
+  have held the keyboard one card behind the cursor. Note which place a ref's card was made for.
+  The other side is a gain: a card Tab reached no longer loses the keyboard when its row is made.
+
+Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT within 1 %: Right
+115.0 → 87.3 KB (−24 %; with UI Automation 128.1 → 87.3, and whole trees 0.34 → 0 a key), Down
+181.9 → 114.1 KB (−37 %). The suite pins it: `virtual/image grid walk Right, 600 cards` against
+`…, cards handed back` (48 → 22 KB, two cards made).
 
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,

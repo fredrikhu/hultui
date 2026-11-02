@@ -43,6 +43,34 @@ public sealed class ReqDocument
 {
     private readonly List<SourceLine> _lines;
 
+    /// <summary>
+    /// Where the body's content is held as one entry of <see cref="_lines"/>, or -1. The entry's
+    /// text is the body's content, every line of it with the entry's terminator between them, and
+    /// stands for those lines, each ended by that terminator: it serializes to the same bytes. Only
+    /// the block that ends the document is held this way (<see cref="PackTrailingBody"/>, after a
+    /// parse or an edit; <see cref="TrySpliceBody"/>), which is where the body editor's first edit
+    /// puts it, so the entry is followed by the marker line alone and every line before it keeps
+    /// its index. <see cref="Reparse"/> reads it as it is (it is no marker line, and the body's
+    /// content is its text), and an edit that rewrites a line before it in place leaves it be; an
+    /// edit that adds or removes lines goes through <see cref="Lines"/>, which splits it back first.
+    /// </summary>
+    /// <remarks>A keystroke in an 89,000-character body split the whole body into lines, trimmed
+    /// each, and walked and joined them again to reparse the document: 1.2 MB of copies a key, and
+    /// any other edit to such a request walked and joined it again (plan 17 round 6). Now a
+    /// keystroke in the body replaces the block's content in place, and the rest copy none of it.</remarks>
+    private int _packedBody = -1;
+
+    /// <summary>The lines, each entry one line: <see cref="_lines"/> with the body's content split
+    /// back into lines if it was held as one.</summary>
+    private List<SourceLine> Lines
+    {
+        get
+        {
+            Unpack();
+            return _lines;
+        }
+    }
+
     public string? Method { get; private set; }
     public string? Url { get; private set; }
     /// <summary>1-based line of the request line, 0 when absent.</summary>
@@ -65,6 +93,23 @@ public sealed class ReqDocument
 
     public string Serialize() => LineBuffer.Join(_lines);
 
+    /// <summary>Whether <see cref="Serialize"/> would return <paramref name="text"/>, compared in
+    /// place: the stale-preview banner asks on every build of the Assertions tab, and a whole new
+    /// copy of the document a keystroke is what that cost.</summary>
+    public bool SerializesTo(string? text)
+    {
+        if (text is null) return false;
+        var rest = text.AsSpan();
+        foreach (var line in _lines)
+        {
+            if (!rest.StartsWith(line.Raw, StringComparison.Ordinal)) return false;
+            rest = rest[line.Raw.Length..];
+            if (!rest.StartsWith(line.Terminator, StringComparison.Ordinal)) return false;
+            rest = rest[line.Terminator.Length..];
+        }
+        return rest.IsEmpty;
+    }
+
     /// <summary>True once any edit method has run; cleared by <see cref="MarkSaved"/>.
     /// This is what the tab dirty dot and the footer's "● unsaved" read.</summary>
     public bool Edited { get; private set; }
@@ -75,6 +120,7 @@ public sealed class ReqDocument
     {
         var doc = new ReqDocument(LineBuffer.Split(text));
         doc.Reparse();
+        doc.PackTrailingBody();
         return doc;
     }
 
@@ -88,7 +134,7 @@ public sealed class ReqDocument
         _headers.Clear(); _asserts.Clear(); _extracts.Clear(); _errors.Clear();
 
         var doc = this;
-        var lines = doc._lines;
+        var lines = doc._lines;   // a packed body's content is read as one line (see _packedBody)
 
         for (int i = 0; i < lines.Count; i++)
         {
@@ -130,12 +176,7 @@ public sealed class ReqDocument
                         continue;
                     }
                     if (doc.Body == null)
-                    {
-                        var content = LineBuffer.Join(lines.Skip(i + 1).Take(close - i - 1));
-                        // Content excludes the closing marker line; strip the final
-                        // content line's terminator so the value is the text alone.
-                        doc.Body = new ReqBody(type, marker, TrimFinalTerminator(content, lines, i + 1, close), lineNo);
-                    }
+                        doc.Body = new ReqBody(type, marker, JoinContent(lines, i + 1, close), lineNo);
                     i = close;   // skip content + marker
                     continue;
                 }
@@ -180,7 +221,10 @@ public sealed class ReqDocument
     // ── Edits ────────────────────────────────────────────────────────────
     // Every edit rewrites only its own line(s), preserving comments, blanks,
     // unknown constructs, and each untouched line's own terminator, then
-    // reparses so the typed views stay true.
+    // reparses so the typed views stay true — except a body edit to the block
+    // that ends the document, which knows what the reparse would find
+    // (TrySpliceBody). A line rewritten in place is one before the body
+    // block (_packedBody), so its index is its line number less one.
 
     /// <summary>Replaces the request line, or inserts one at the top when the
     /// file has none.</summary>
@@ -190,7 +234,7 @@ public sealed class ReqDocument
         if (RequestLineNumber > 0)
             _lines[RequestLineNumber - 1] = _lines[RequestLineNumber - 1] with { Raw = raw };
         else
-            _lines.Insert(0, new SourceLine(raw, DominantTerminator()));
+            Lines.Insert(0, new SourceLine(raw, DominantTerminator()));
         Touch();
     }
 
@@ -216,7 +260,7 @@ public sealed class ReqDocument
 
     public void RemoveHeader(int index)
     {
-        _lines.RemoveAt(_headers[index].Line - 1);
+        Lines.RemoveAt(_headers[index].Line - 1);
         Touch();
     }
 
@@ -228,31 +272,108 @@ public sealed class ReqDocument
     /// </summary>
     public void SetBody(string type, string content)
     {
+        if (TrySpliceBody(type, content)) return;
+
         // Remove the existing block (fence line through marker line) first.
         if (Body is { } existing)
         {
             int fence = existing.Line - 1;
-            int marker = fence + 1;
-            while (marker < _lines.Count && _lines[marker].Raw.Trim() != existing.Marker) marker++;
-            _lines.RemoveRange(fence, Math.Min(marker + 1, _lines.Count) - fence);
+            int marker = FindMarker(Lines, fence + 1, existing.Marker);
+            Lines.RemoveRange(fence, (marker < 0 ? Lines.Count : marker + 1) - fence);
         }
         if (content.Length == 0 && type.Length == 0) { Touch(); return; }
 
         string chosen = "end";
         string[] contentLines = content.Length == 0 ? [] : content.ReplaceLineEndings("\n").Split('\n');
         if (contentLines.Any(l => l.Trim() == chosen))
-            chosen = $"end-{Guid.NewGuid():N}"[..12];
+            chosen = NewMarker();
 
         string term = DominantTerminator();
         EnsureFinalTerminator(term);
-        string fenceRaw = chosen == "end"
-            ? (type.Length > 0 ? $"body {type}" : "body")
-            : (type.Length > 0 ? $"body {type} until {chosen}" : $"body until {chosen}");
-        _lines.Add(new SourceLine(fenceRaw, term));
+        Lines.Add(new SourceLine(FenceLine(type, chosen), term));
         foreach (var line in contentLines)
-            _lines.Add(new SourceLine(line, term));
-        _lines.Add(new SourceLine(chosen, term));
+            Lines.Add(new SourceLine(line, term));
+        Lines.Add(new SourceLine(chosen, term));
         Touch();
+    }
+
+    /// <summary>
+    /// <see cref="SetBody"/> where the body block already ends the document — every keystroke in
+    /// the body editor but the first, which moves the block there. The result is the one the whole
+    /// path makes: the block written again at the end in the lines' prevailing ending (with the
+    /// content's own endings changed to it), and everything parsed from the lines before it as it
+    /// was, since the lines before the block are the ones it parsed and nothing follows the block.
+    /// Without the work: the content becomes one entry (<see cref="_packedBody"/>) instead of a line
+    /// each, and is the body's content as it is, so nothing is split, trimmed, joined or reparsed.
+    /// False, having changed nothing, where it does not apply.
+    /// </summary>
+    private bool TrySpliceBody(string type, string content)
+    {
+        if (Body is not { } existing || (content.Length == 0 && type.Length == 0)) return false;
+        int fence = existing.Line - 1;
+        int marker = _packedBody >= 0 ? _packedBody + 1 : FindMarker(_lines, fence + 1, existing.Marker);
+        if (marker != _lines.Count - 1) return false;   // something follows the block
+
+        // What the whole path counts once the block is out: the lines before it.
+        string term = DominantTerminator(_lines, fence);
+        // ReplaceLineEndings returns the content itself when every ending in it is already this one.
+        string text = content.ReplaceLineEndings(term);
+        string chosen = HasLine(text, "end") ? NewMarker() : "end";
+        // A marker the content holds as a line would close the block early: the whole path, which
+        // parses what it wrote, says what that means. (Not seen: a generated one.)
+        if (chosen != "end" && HasLine(text, chosen)) return false;
+        string fenceRaw = FenceLine(type, chosen);
+        var (parsedType, parsedMarker) = ParseBodyFence(fenceRaw[4..].TrimStart());
+        if (parsedMarker != chosen) return false;
+
+        if (fence > 0 && _lines[fence - 1].Terminator.Length == 0)
+            _lines[fence - 1] = _lines[fence - 1] with { Terminator = term };
+        _lines.RemoveRange(fence, _lines.Count - fence);
+        _lines.Add(new SourceLine(fenceRaw, term));
+        _packedBody = -1;
+        if (text.Length > 0)
+        {
+            _packedBody = _lines.Count;
+            _lines.Add(new SourceLine(text, term));
+        }
+        _lines.Add(new SourceLine(chosen, term));
+        Body = new ReqBody(parsedType, chosen, text, fence + 1);
+        Edited = true;
+        return true;
+    }
+
+    /// <summary>Splits the body's content back into one entry a line (see <see cref="_packedBody"/>).</summary>
+    private void Unpack()
+    {
+        if (_packedBody < 0) return;
+        var packed = _lines[_packedBody];
+        var split = packed.Raw.Split(packed.Terminator);
+        var lines = new SourceLine[split.Length];
+        for (int i = 0; i < split.Length; i++) lines[i] = new SourceLine(split[i], packed.Terminator);
+        _lines.RemoveAt(_packedBody);
+        _lines.InsertRange(_packedBody, lines);
+        _packedBody = -1;
+    }
+
+    private static string FenceLine(string type, string marker) => marker == "end"
+        ? (type.Length > 0 ? $"body {type}" : "body")
+        : (type.Length > 0 ? $"body {type} until {marker}" : $"body until {marker}");
+
+    /// <summary>A fence marker for content that holds an <c>end</c> line.</summary>
+    private static string NewMarker() => $"end-{Guid.NewGuid():N}"[..12];
+
+    /// <summary>Whether a line of <paramref name="text"/>, its white space trimmed, is
+    /// <paramref name="marker"/>: what <see cref="FindMarker"/> would stop at.</summary>
+    private static bool HasLine(string text, string marker)
+    {
+        var rest = text.AsSpan();
+        while (true)
+        {
+            int nl = rest.IndexOf('\n');
+            if ((nl < 0 ? rest : rest[..nl]).Trim().SequenceEqual(marker)) return true;
+            if (nl < 0) return false;
+            rest = rest[(nl + 1)..];
+        }
     }
 
     /// <summary>Sets the <c>auth</c> line, rewriting the existing one in place
@@ -262,7 +383,7 @@ public sealed class ReqDocument
     {
         if (Auth is { } existing)
         {
-            if (args == "none") _lines.RemoveAt(existing.Line - 1);
+            if (args == "none") Lines.RemoveAt(existing.Line - 1);
             else _lines[existing.Line - 1] = _lines[existing.Line - 1] with { Raw = $"auth {args}" };
             Touch();
             return;
@@ -270,7 +391,7 @@ public sealed class ReqDocument
         if (args == "none") { Touch(); return; }
         int after = _headers.Count > 0 ? _headers[^1].Line
             : RequestLineNumber > 0 ? RequestLineNumber
-            : _lines.Count;
+            : Lines.Count;
         InsertLine(after, $"auth {args}");
         Touch();
     }
@@ -288,7 +409,7 @@ public sealed class ReqDocument
 
     public void RemoveAssert(int index)
     {
-        _lines.RemoveAt(_asserts[index].Line - 1);
+        Lines.RemoveAt(_asserts[index].Line - 1);
         Touch();
     }
 
@@ -304,13 +425,13 @@ public sealed class ReqDocument
 
     public void RemoveExtract(int index)
     {
-        _lines.RemoveAt(_extracts[index].Line - 1);
+        Lines.RemoveAt(_extracts[index].Line - 1);
         Touch();
     }
 
     private void AddDirectiveLine(string keyword, string args, List<ReqDirective> kin)
     {
-        int insertAfter = kin.Count > 0 ? kin[^1].Line : _lines.Count;
+        int insertAfter = kin.Count > 0 ? kin[^1].Line : Lines.Count;
         InsertLine(insertAfter, $"{keyword} {args}");
         Touch();
     }
@@ -319,23 +440,44 @@ public sealed class ReqDocument
     {
         Edited = true;
         Reparse();
+        PackTrailingBody();
+    }
+
+    /// <summary>Holds the body's content as one entry (<see cref="_packedBody"/>) when its block
+    /// ends the document and its lines all end alike, as the body editor writes them. The entry is
+    /// the parsed content itself.</summary>
+    private void PackTrailingBody()
+    {
+        if (_packedBody >= 0 || Body is not { } body) return;
+        int first = body.Line, close = FindMarker(_lines, first, body.Marker);
+        if (close != _lines.Count - 1 || close - first < 2) return;
+        string term = _lines[first].Terminator;
+        for (int i = first + 1; i < close; i++)
+            if (_lines[i].Terminator != term) return;
+        _lines.RemoveRange(first + 1, close - first - 1);
+        _lines[first] = new SourceLine(body.Content, term);
+        _packedBody = first;
     }
 
     private void InsertLine(int afterLineNumber, string raw)
     {
         string term = DominantTerminator();
-        if (afterLineNumber >= _lines.Count) EnsureFinalTerminator(term);
-        _lines.Insert(Math.Min(afterLineNumber, _lines.Count), new SourceLine(raw, term));
+        if (afterLineNumber >= Lines.Count) EnsureFinalTerminator(term);
+        Lines.Insert(Math.Min(afterLineNumber, Lines.Count), new SourceLine(raw, term));
     }
 
     /// <summary>The file's prevailing line ending, for lines this edit adds.</summary>
-    private string DominantTerminator()
+    private string DominantTerminator() => DominantTerminator(Lines, Lines.Count);
+
+    /// <summary>The prevailing line ending of the first <paramref name="count"/> lines.</summary>
+    private static string DominantTerminator(List<SourceLine> lines, int count)
     {
         int crlf = 0, lf = 0;
-        foreach (var line in _lines)
+        for (int i = 0; i < count; i++)
         {
-            if (line.Terminator == "\r\n") crlf++;
-            else if (line.Terminator == "\n") lf++;
+            var terminator = lines[i].Terminator;
+            if (terminator == "\r\n") crlf++;
+            else if (terminator == "\n") lf++;
         }
         return crlf > lf ? "\r\n" : "\n";
     }
@@ -344,8 +486,8 @@ public sealed class ReqDocument
     /// appended after it.</summary>
     private void EnsureFinalTerminator(string term)
     {
-        if (_lines.Count > 0 && _lines[^1].Terminator.Length == 0)
-            _lines[^1] = _lines[^1] with { Terminator = term };
+        if (Lines.Count > 0 && Lines[^1].Terminator.Length == 0)
+            Lines[^1] = Lines[^1] with { Terminator = term };
     }
 
     private void Error(int line, string message) => _errors.Add(new ParseError(line, message));
@@ -374,18 +516,39 @@ public sealed class ReqDocument
         };
     }
 
+    /// <summary>The first line from <paramref name="from"/> that is <paramref name="marker"/> with
+    /// its white space trimmed, or -1. Trims in place: a trimmed copy of each indented line of a
+    /// body was made on every reparse.</summary>
     private static int FindMarker(List<SourceLine> lines, int from, string marker)
     {
         for (int i = from; i < lines.Count; i++)
-            if (lines[i].Raw.Trim() == marker)
+            if (lines[i].Raw.AsSpan().Trim().SequenceEqual(marker))
                 return i;
         return -1;
     }
 
-    private static string TrimFinalTerminator(string content, List<SourceLine> lines, int first, int close)
+    /// <summary>The body's content: lines <paramref name="first"/> up to <paramref name="close"/>
+    /// (the marker line) with their own terminators, the last one's left off, made in one copy — a
+    /// single line (a packed body's content among them) is its own text.</summary>
+    private static string JoinContent(List<SourceLine> lines, int first, int close)
     {
-        if (close - first <= 0) return "";
-        var last = lines[close - 1];
-        return last.Terminator.Length > 0 ? content[..^last.Terminator.Length] : content;
+        int count = close - first;
+        if (count <= 0) return "";
+        if (count == 1) return lines[first].Raw;
+        int length = -lines[close - 1].Terminator.Length;
+        for (int i = first; i < close; i++) length += lines[i].Raw.Length + lines[i].Terminator.Length;
+        return string.Create(length, (lines, first, close), static (span, at) =>
+        {
+            var (lines, first, close) = at;
+            int o = 0;
+            for (int i = first; i < close; i++)
+            {
+                lines[i].Raw.CopyTo(span[o..]);
+                o += lines[i].Raw.Length;
+                if (i == close - 1) break;
+                lines[i].Terminator.CopyTo(span[o..]);
+                o += lines[i].Terminator.Length;
+            }
+        });
     }
 }

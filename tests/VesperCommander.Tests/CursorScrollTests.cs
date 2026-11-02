@@ -83,12 +83,12 @@ public class CursorScrollTests
             => (float)typeof(CommanderApp).GetProperty("RowHeight", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .GetValue(_app)!;
 
-        private VirtualListElement<FileEntry> VList
+        private VirtualListElement<CommanderApp.PaneRowItem> VList
         {
             get
             {
                 var refField = typeof(CommanderApp).GetField("_vlistL", BindingFlags.NonPublic | BindingFlags.Instance)!;
-                var r = (HultUI.Core.Reactivity.Ref<VirtualListElement<FileEntry>>)refField.GetValue(_app)!;
+                var r = (HultUI.Core.Reactivity.Ref<VirtualListElement<CommanderApp.PaneRowItem>>)refField.GetValue(_app)!;
                 Assert.NotNull(r.Current);
                 return r.Current!;
             }

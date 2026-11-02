@@ -13,8 +13,8 @@ namespace VesperCommander.Tests;
 /// </summary>
 public class PaneScrollAcrossViewsTests
 {
-    private static VirtualListElement<FileEntry> LeftList(ViewerTests.Fixture t) =>
-        t.Field<Ref<VirtualListElement<FileEntry>>>("_vlistL").Current
+    private static VirtualListElement<CommanderApp.PaneRowItem> LeftList(ViewerTests.Fixture t) =>
+        t.Field<Ref<VirtualListElement<CommanderApp.PaneRowItem>>>("_vlistL").Current
         ?? throw new Xunit.Sdk.XunitException("the left pane has no list");
 
     /// <summary>A folder long enough to scroll, scrolled well down. Returns the offset the

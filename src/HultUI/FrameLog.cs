@@ -39,6 +39,8 @@ internal enum IdleDeadline
     DisplayColor,
     /// <summary>Work posted on the UI thread after the pass drained the queue: due now.</summary>
     Posted,
+    /// <summary>The window has settled, and the GL driver's one-time thread walk may be set off.</summary>
+    DriverThreadWalk,
     Count,
 }
 
@@ -231,6 +233,7 @@ internal static class FrameLog
         IdleDeadline.Inspector => "inspector",
         IdleDeadline.DisplayColor => "display-colour",
         IdleDeadline.Posted => "posted",
+        IdleDeadline.DriverThreadWalk => "driver-walk",
         _ => "?",
     };
 

@@ -30,50 +30,45 @@ public partial class JunctionApp
     //
     // Safe by default, then: a rebuild builds the chrome too. Only paths that change nothing
     // the chrome shows say so, with MarkViewDirty and RerenderView — the selection moves and
-    // cursors of History, Branches, Tags, Files and the Commit file list, the composer's
-    // fields and the search boxes. ChromePartTests holds every chrome input to what a full
-    // build of the chrome makes.
+    // cursors of History, Branches, Tags, Files and the Commit file list, and the search boxes.
+    // (A character in the composer's fields builds the composer alone: see ComposerPart.)
+    // ChromePartTests holds every chrome input to what a full build of the chrome makes.
 
     private readonly HultUI.Core.Reactivity.Signal<int> _chromeRevision = new(0);
-    private ChromePart? _titleBarPart, _toolbarPart, _sidebarExpandedPart, _sidebarRailPart;
+    private readonly HultUI.Core.Components.PartGroup _chromeParts = new();
+    private HultUI.Core.Components.Part? _titleBarPart, _toolbarPart, _sidebarExpandedPart, _sidebarRailPart;
 
     /// <summary>Builds of the title bar, sidebar and toolbar so far, for tests.</summary>
-    internal int ChromeBuilds { get; private set; }
+    internal int ChromeBuilds => _chromeParts.Builds;
 
-    private sealed class ChromePart(JunctionApp app, Func<Element> build) : HultUI.Core.Components.Component
-    {
-        public override Element Build()
-        {
-            _ = app._chromeRevision.Value;
-            app.ChromeBuilds++;
-            return build();
-        }
-    }
+    // A chrome part is a build of the app's that its own effect runs, reading _chromeRevision
+    // besides whatever the build reads: each takes it as its own revision, and the app's build
+    // mounts it rather than placing it, so a full rebuild reaches the parts through the signal.
 
     // Each part's host is the flex item where the part's root used to be, so it takes the
     // root's place in the layout: it never shrinks (Build gives it FlexShrink(0), as the title
     // bar, the toolbar and the sidebar have), and a sidebar fills its host's height
     // (BuildSidebar), as it filled the body row's.
 
-    private ChromePart TitleBarPart => _titleBarPart ??= new(this, () =>
+    private HultUI.Core.Components.Part TitleBarPart => _titleBarPart ??= new(_chromeParts, () =>
     {
         var bar = BuildTitleBar();
         bar.Key = "titlebar";
         return bar;
-    });
+    }, own: _chromeRevision);
 
-    private ChromePart ToolbarPart => _toolbarPart ??= new(this, () =>
+    private HultUI.Core.Components.Part ToolbarPart => _toolbarPart ??= new(_chromeParts, () =>
     {
         var bar = BuildToolbar();
         bar.Key = "toolbar";
         return bar;
-    });
+    }, own: _chromeRevision);
 
     // One part per shape: the host is the sidebar's identity in the body, so a toggle replaces
     // the expanded list with the rail instead of patching one into the other.
-    private ChromePart SidebarPart => _sidebarCollapsed
-        ? _sidebarRailPart ??= new(this, () => BuildSidebar(rail: true))
-        : _sidebarExpandedPart ??= new(this, () => BuildSidebar(rail: false));
+    private HultUI.Core.Components.Part SidebarPart => _sidebarCollapsed
+        ? _sidebarRailPart ??= new(_chromeParts, () => BuildSidebar(rail: true), _chromeRevision)
+        : _sidebarExpandedPart ??= new(_chromeParts, () => BuildSidebar(rail: false), _chromeRevision);
 
     /// <summary>Rebuilds the window, the chrome with it. Hides <c>Component.MarkDirty</c>, so
     /// every rebuild this app asks for — and every helper it hands its MarkDirty to: the

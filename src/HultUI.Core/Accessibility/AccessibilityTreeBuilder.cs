@@ -51,6 +51,7 @@ public static partial class AccessibilityTreeBuilder
     internal static AccessibilityNode Build(Element root, FocusManager? focusManager, float originX, float originY,
         Point scrollAbove)
     {
+        Realize(root);
         // Threaded as a negative scroll: the builder already subtracts an accumulated
         // offset from every box, which is exactly this with the other sign.
         float ox = -originX, oy = -originY;
@@ -61,7 +62,8 @@ public static partial class AccessibilityTreeBuilder
         // The root is the top-level visible region; descendants clipped out of it
         // (and out of any scroll view along the way) are marked offscreen.
         var childClip = ClipForChildren(root, place.OnScreen(box), place);
-        if (!TryBuildContent(root, node, childPlace, childClip) && !TryBuildVirtualItems(root, node, childPlace, childClip))
+        if (!TryBuildContent(root, node, childPlace, childClip)
+            && !TryBuildVirtualItems(root, node, focusManager, childPlace, childClip))
         {
             var pending = t_pending ??= [];
             int start = pending.Count;
@@ -188,6 +190,13 @@ public static partial class AccessibilityTreeBuilder
     {
         int start = pending.Count;
         BuildChildren(element, pending, focusManager, place, clip);
+        TakePending(node, pending, start);
+    }
+
+    /// <summary>Gives <paramref name="node"/> what waits in <paramref name="pending"/> from
+    /// <paramref name="start"/> on, in one array of the exact size.</summary>
+    private static void TakePending(AccessibilityNode node, List<AccessibilityNode> pending, int start)
+    {
         int count = pending.Count - start;
         if (count == 0) return;
         var children = new AccessibilityNode[count];
@@ -203,15 +212,33 @@ public static partial class AccessibilityTreeBuilder
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
-            // A sticky child is moved by its shift, subtree and all — to the builder, a negative scroll.
-            BuildChild(child, pending, focusManager,
-                child.PositionRead.Type == Layout.PositionType.Sticky ? place.Shifted(child.StickyShift) : place, clip);
+            BuildChild(child, pending, focusManager, Placed(child, place), clip);
         }
+    }
+
+    /// <summary>Where <paramref name="child"/> of an element at <paramref name="place"/> sits. A
+    /// sticky child is moved by its shift, subtree and all — to the builder, a negative scroll.</summary>
+    private static Place Placed(Element child, Place place) =>
+        child.PositionRead.Type == Layout.PositionType.Sticky ? place.Shifted(child.StickyShift) : place;
+
+    /// <summary>
+    /// A list whose rows are its accessible content has them as elements once they are realized,
+    /// which drawing does after the frame's accessibility phase: what a walk reads of it, it asks
+    /// for as it reaches it (<see cref="ScrollViewElement.RealizeForAccessibility"/>). The walks are
+    /// the one place that knows the tree is being read, so a frame with nothing to tell asks for
+    /// nothing, and a window nobody reads never comes here. It changes the elements, not the tree
+    /// being walked: the list's children are read after it. What realizing marks on the way up is
+    /// the frame's, and ends with it; the phase has read those flags by then.
+    /// </summary>
+    private static void Realize(Element element)
+    {
+        if (element is ScrollViewElement view) view.RealizeForAccessibility();
     }
 
     private static void BuildChild(Element child, List<AccessibilityNode> pending, FocusManager? focusManager,
         Place place, Rect clip)
     {
+        Realize(child);
         // The child's own box sits in the parent's scroll space; its own
         // scroll (if it's a ScrollView) applies to its descendants.
         var childPlace = ChildPlace(child, place);
@@ -227,7 +254,7 @@ public static partial class AccessibilityTreeBuilder
             // text-only button folded its text into its own name (which would
             // double-announce), walk the real children.
             if (!TryBuildContent(child, childNode, childPlace, childClip)
-                && !TryBuildVirtualItems(child, childNode, childPlace, childClip) && !ConsumesTextContent(child))
+                && !TryBuildVirtualItems(child, childNode, focusManager, childPlace, childClip) && !ConsumesTextContent(child))
                 BuildElementChildren(child, childNode, pending, focusManager, childPlace, childClip);
         }
         else
@@ -307,7 +334,8 @@ public static partial class AccessibilityTreeBuilder
     /// its item nodes and returns true; otherwise returns false so the caller
     /// falls back to walking realized children.
     /// </summary>
-    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, Place place, Rect clip)
+    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, FocusManager? focusManager,
+        Place place, Rect clip)
     {
         if (element is not IAccessibleItemSource source) return false;
         // A container whose rows are composite (a grid row of cards) publishes nothing of
@@ -317,16 +345,72 @@ public static partial class AccessibilityTreeBuilder
         // What a bridge asks for the items it serves on demand, without finding the list first.
         node.ItemSource = source;
         int count = source.ItemCount;
-        if (count <= MaxEagerVirtualItems)
+        var open = OpenRow(element, source, focusManager);
+        // A row that holds the focus hangs under its item's node, which a list served on demand does
+        // not have: it has item nodes for as long as the row is open.
+        if (count <= MaxEagerVirtualItems || open.Element is not null)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).
-            BuildVirtualItems(element, source, node, place, clip);
+            BuildVirtualItems(element, source, node, open, focusManager, place, clip);
         else
             // Too large to expand eagerly: mark it so the bridge provisions items on demand by
             // index instead of building/diffing them all. What is told of them, their number and
             // which are selected, the list's node carries.
             ServeOnDemand(node, source, count);
         return true;
+    }
+
+    /// <summary>A realized row of a list and the item it stands for.</summary>
+    private readonly record struct ItemRow(Element? Element, int Item)
+    {
+        public static readonly ItemRow None = new(null, -1);
+    }
+
+    /// <summary>
+    /// The row of <paramref name="list"/>, whose items stand for its rows, that holds the keyboard
+    /// focus. It is open: what it holds is read through its elements, under its item's node, as a
+    /// composite list's rows are, because the focus has to be on a node for a reader to follow it.
+    /// There is one at most, and it costs a walk up from the focused element. Every other row has
+    /// nothing but its item (<see cref="InClosedRow"/>).
+    /// </summary>
+    private static ItemRow OpenRow(Element list, IAccessibleItemSource source, FocusManager? focusManager)
+    {
+        var below = focusManager?.FocusedElement;
+        for (var above = below?.Parent; above is not null; below = above, above = above.Parent)
+        {
+            if (!ReferenceEquals(above, list)) continue;
+            // Past the items when they were changed in place: the list hears of it with the frame.
+            int item = source.ItemOfRow(below!);
+            return (uint)item >= (uint)source.ItemCount ? ItemRow.None : new ItemRow(below, item);
+        }
+        return ItemRow.None;
+    }
+
+    /// <summary>Whether <paramref name="element"/> is in a row of a list whose items stand for its
+    /// rows and the row does not hold <paramref name="focused"/>: it has no node, in this tree or
+    /// the next (<see cref="OpenRow"/>).</summary>
+    internal static bool InClosedRow(Element element, Element? focused)
+    {
+        for (var below = element; below.Parent is { } above; below = above)
+            if (above is IAccessibleItemSource { PublishesItemNodes: true } && !Holds(below, focused))
+                return true;
+        return false;
+    }
+
+    /// <summary>Whether <paramref name="element"/> is in a row of a list whose items stand for its
+    /// rows, open or not.</summary>
+    internal static bool InItemRow(Element element)
+    {
+        for (var above = element.Parent; above is not null; above = above.Parent)
+            if (above is IAccessibleItemSource { PublishesItemNodes: true }) return true;
+        return false;
+    }
+
+    private static bool Holds(Element row, Element? descendant)
+    {
+        for (; descendant is not null; descendant = descendant.Parent)
+            if (ReferenceEquals(descendant, row)) return true;
+        return false;
     }
 
     /// <summary>Marks <paramref name="node"/> as a list whose <paramref name="count"/> items are
@@ -421,7 +505,7 @@ public static partial class AccessibilityTreeBuilder
     /// hit-testing stay correct as the list scrolls.
     /// </summary>
     private static void BuildVirtualItems(Element list, IAccessibleItemSource source,
-        AccessibilityNode listNode, Place place, Rect clip)
+        AccessibilityNode listNode, ItemRow open, FocusManager? focusManager, Place place, Rect clip)
     {
         int count = source.ItemCount;
         if (count == 0) return;
@@ -439,6 +523,13 @@ public static partial class AccessibilityTreeBuilder
             var box = new Rect(content.X, content.Y + localTop, content.Width, height);
             items[i] = MakeItemNode(slot, i, source.GetItemLabel(i), place.Unscrolled(box), source.ItemIsToggled(i),
                 source.IsItemSelected(i), !RectsIntersect(clip, place.OnScreen(box)));
+        }
+        if (open.Element is { } row)
+        {
+            var pending = t_pending ??= [];
+            int start = pending.Count;
+            BuildChild(row, pending, focusManager, Placed(row, place), clip);
+            TakePending(items[open.Item], pending, start);
         }
         listNode.SetChildren(items);
     }
@@ -470,7 +561,7 @@ public static partial class AccessibilityTreeBuilder
     /// them, added to <paramref name="changes"/>. The nodes are not touched. False, adding nothing,
     /// when the node's items cannot be patched and the tree has to be built again: the list does
     /// not publish item nodes (its rows are composite), or its items are not the node's (their
-    /// number changed, or crossed <see cref="MaxEagerVirtualItems"/>). A list whose items are
+    /// number changed, or crossed <see cref="MaxEagerVirtualItems"/> with no row open). A list whose items are
     /// served on demand has no item nodes: the selection, and the items' number, are its node's own
     /// (<see cref="ServedItemChanges"/>), what to put on it added to <paramref name="served"/>.
     /// </summary>
@@ -481,13 +572,12 @@ public static partial class AccessibilityTreeBuilder
     {
         if (!source.PublishesItemNodes) return false;
         int count = source.ItemCount;
-        if (count > MaxEagerVirtualItems)
+        if (listNode.IsVirtualItemContainer)
         {
-            if (!listNode.IsVirtualItemContainer) return false;
+            if (count <= MaxEagerVirtualItems) return false;
             ServedItemChanges(listNode, source, changes, served);
             return true;
         }
-        if (listNode.IsVirtualItemContainer) return false;
         var items = listNode.Children;
         if (items.Count != count) return false;
         int start = changes.Count;
@@ -507,28 +597,31 @@ public static partial class AccessibilityTreeBuilder
     }
 
     /// <summary>
-    /// What a move of the caret or the selection changes in an applied tree's node of text that is
-    /// made on request (<see cref="IVersionedAccessibleTextSource"/>: the rich text editor's),
-    /// without building the tree again: the version the source has now, in <paramref name="next"/>
-    /// (null when it is the node's own), and the <see cref="AccessibilityProperties.TextSelection"/>
-    /// change the differ would report when its caret or selection moved, added to
-    /// <paramref name="changes"/> with a stand-in for the node as it was
-    /// (<see cref="AccessibilityNode.TextStandIn"/>). A version that differs in what is not the text
-    /// (its layout, its scroll, read-only) is put in place with nothing to tell. The node is not
-    /// touched. False, adding nothing, when the tree has to be built again: the text itself
-    /// changed, or the node carries no version of this source's kind.
+    /// What a keystroke, or a move of the caret or the selection, changes in an applied tree's node of
+    /// text that is made on request (<see cref="IVersionedAccessibleTextSource"/>: the rich text
+    /// editor's, a text area's), without building the tree again: the version the source has now, in
+    /// <paramref name="next"/> (null when it is the node's own), and the
+    /// <see cref="AccessibilityProperties.Text"/> and <see cref="AccessibilityProperties.TextSelection"/>
+    /// changes the differ would report, added to <paramref name="changes"/> in its order with a
+    /// stand-in for the node as it was (<see cref="AccessibilityNode.TextStandIn"/>). A version that
+    /// differs in what is not the text (its layout, its scroll, read-only) is put in place with
+    /// nothing to tell. The node is not touched. False, adding nothing, when the tree has to be built
+    /// again: the node carries no version of this source's kind.
     /// </summary>
-    internal static bool TextSelectionChange(AccessibilityNode node, IVersionedAccessibleTextSource source,
+    internal static bool TextChanges(AccessibilityNode node, IVersionedAccessibleTextSource source,
         List<PropertyChange> changes, out AccessibleTextVersion? next)
     {
         next = null;
         if (node.TextVersion is not { } previous) return false;
         var current = source.CurrentVersion;
         if (ReferenceEquals(current, previous)) return true;
-        if (current.GetType() != previous.GetType() || !current.SameText(previous)) return false;
+        if (current.GetType() != previous.GetType()) return false;
         next = current;
-        if (!current.SameSelection(previous))
-            changes.Add(new PropertyChange(node, AccessibilityProperties.TextSelection, node.TextStandIn(previous)));
+        bool sameText = current.SameText(previous), sameSelection = current.SameSelection(previous);
+        if (sameText && sameSelection) return true;
+        var standIn = node.TextStandIn(previous);
+        if (!sameText) changes.Add(new PropertyChange(node, AccessibilityProperties.Text, standIn));
+        if (!sameSelection) changes.Add(new PropertyChange(node, AccessibilityProperties.TextSelection, standIn));
         return true;
     }
 
@@ -651,9 +744,26 @@ public static partial class AccessibilityTreeBuilder
         CanvasElement => AccessibilityRole.Group,
         // A button is a button whether or not anything has subscribed to its click yet.
         ButtonElement => AccessibilityRole.Button,
-        BoxElement box when box.HasEventHandler<ClickEvent>() => AccessibilityRole.Button,
+        BoxElement box when box.HasEventHandler<ClickEvent>() && !HoldsPopup(box) => AccessibilityRole.Button,
         _ => AccessibilityRole.None
     };
+
+    /// <summary>
+    /// Whether a child of <paramref name="box"/> has the role <see cref="AccessibilityRole.Dialog"/>
+    /// or <see cref="AccessibilityRole.Menu"/>: the box is its backdrop, and its click closes it
+    /// (<c>Dialog.Show</c>'s scrim, a modal or a menu an app keeps in its own tree). It is no button: a
+    /// reader heard the dialog inside one named after all of the dialog's text, told again with every
+    /// change of that text, and a change of a name inside it could not be patched
+    /// (<see cref="NamedFromContentAbove"/>), so each one built the whole tree. A reader closes a
+    /// dialog or a menu with Escape, or with a control of its own.
+    /// </summary>
+    private static bool HoldsPopup(Element box)
+    {
+        var children = box.Children;   // by index: foreach over the interface boxes an enumerator
+        for (int i = 0; i < children.Count; i++)
+            if (children[i].Role is AccessibilityRole.Dialog or AccessibilityRole.Menu) return true;
+        return false;
+    }
 
     /// <summary>
     /// Resolves the accessible name. Explicit AccessibleName wins.
@@ -758,11 +868,13 @@ public static partial class AccessibilityTreeBuilder
         _ => element.AccessibleToggled,
     };
 
-    /// <summary>Selected, for one of a set: a radio button is when it is checked; anything
+    /// <summary>Selected, for one of a set: a radio button is when it is checked; a menu's entry
+    /// while the pointer is on it, as a context menu's item is, unless it says otherwise; anything
     /// else says so with <see cref="Element.AccessibleSelected"/>.</summary>
     internal static bool? ResolveIsSelected(Element element) => element switch
     {
         RadioButtonElement rb => rb.IsChecked,
+        { AccessibleSelected: null, IsMenuEntry: true } => element.IsHovered,
         _ => element.AccessibleSelected,
     };
 

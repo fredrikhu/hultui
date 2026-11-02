@@ -40,6 +40,9 @@ public sealed partial class ApertureApp
     private readonly Ref<BoxElement> _cursorCard = new();
     private bool _pendingCursorFocus;
 
+    /// <summary>The place the card in <see cref="_cursorCard"/> was made for.</summary>
+    private int _cursorCardIndex = -1;
+
     internal int CursorIndex => _cursorIndex;
     internal object? CursorEntry =>
         _cursorIndex >= 0 && _cursorIndex < _cursorItems.Count ? _cursorItems[_cursorIndex] : null;
@@ -99,7 +102,11 @@ public sealed partial class ApertureApp
     /// hand it the keyboard.</summary>
     internal T TrackCursor<T>(T card, int index) where T : BoxElement
     {
-        if (IsCursor(index)) card.WithRef(_cursorCard);
+        if (IsCursor(index))
+        {
+            card.WithRef(_cursorCard);
+            _cursorCardIndex = index;
+        }
         return card;
     }
 
@@ -117,7 +124,7 @@ public sealed partial class ApertureApp
         if (next == _cursorIndex) return true;   // at an end: the key is still ours
         _cursorIndex = next;
         _pendingCursorFocus = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 
@@ -127,7 +134,7 @@ public sealed partial class ApertureApp
         _cursorToEnd = false;
         _cursorIndex = Math.Clamp(index, 0, _cursorItems.Count - 1);
         _pendingCursorFocus = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 
@@ -141,7 +148,7 @@ public sealed partial class ApertureApp
         _cursorIndex = _cursorItems.Count - 1;
         _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
         _pendingCursorFocus = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 
@@ -215,11 +222,12 @@ public sealed partial class ApertureApp
 
     /// <summary>Hands the keyboard to the card the cursor moved to, once it is built.
     /// A card that is scrolled out of the realized window has no element to focus, and the
-    /// cursor ring is still correct — so a miss is not worth retrying.</summary>
+    /// cursor ring is still correct — so a miss is not worth retrying. A list makes its rows in
+    /// the frame, after this: the ref still holds the card the cursor left, and that one stays.</summary>
     private void FocusCursorCard()
     {
         if (!_pendingCursorFocus) return;
         _pendingCursorFocus = false;
-        _cursorCard.Current?.Focus();
+        if (_cursorCardIndex == _cursorIndex) _cursorCard.Current?.Focus();
     }
 }

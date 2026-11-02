@@ -44,6 +44,7 @@ public sealed partial class ApertureApp
         float viewportHeight = _gridList.Current?.Layout.AbsoluteContentBox.Height
             ?? Math.Max(200f, _window.LayoutHeight - Halide.TitleBarHeight - 110f);
         int visibleRows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowStride));
+        _fitGridStride = rowStride;
         var cursorKey = $"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}:{GridGenre?.Id}:{GridFavouritesOnly}";
 
         // What to have loaded: a page beyond the furthest the grid has been taken — the last
@@ -72,22 +73,16 @@ public sealed partial class ApertureApp
 
         int rowCount = asList ? items.Count : (items.Count + perRow - 1) / perRow;
 
-        // Keep the cursor on screen as the arrows walk past the realized window.
-        if (_gridList.Current is { } mounted && CursorIndex >= 0)
-        {
-            int cursorRow = CursorIndex / perRow;
-            mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
-            // A page that landed took the cursor past the rows the list has laid out (End on its
-            // way to the last item): the reveal stops at the old end, so it is made again once
-            // the list has the new rows.
-            if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
-                _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
-        }
+        RevealGridCursor(perRow, rowStride);
 
         // The list keeps a row while its item is equal — its place and the column the cursor
         // is in, so an arrow makes the row or two the cursor left and reached. Everything else
         // a row shows is in the shape, and a change makes the rows on screen again.
         if (GridRowShapeChanged(perRow)) _gridList.Current?.InvalidateRows();
+        // A row made again keeps the cards whose item, cursor and picture did not change (GridRow),
+        // as long as what every card shows besides those is what they were made with.
+        _gridCards.Prepare(new GridCardShape(_settings.Data.ShowCardTitles, Ui.DisplayScale), _gridList.Current,
+            perRow * (visibleRows + 4));
 
         var list = VirtualListElement<GridRowItem>.New();
         // Each item here is a row of posters, and every poster is its own button — so the
@@ -104,6 +99,19 @@ public sealed partial class ApertureApp
             .AutomationId("library-grid")
             .FlexGrow(1));
         return column;
+    }
+
+    /// <summary>Keeps the cursor on screen as the arrows walk past the realized window.</summary>
+    private void RevealGridCursor(int perRow, float rowStride)
+    {
+        if (_gridList.Current is not { } mounted || CursorIndex < 0) return;
+        int cursorRow = CursorIndex / perRow;
+        mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
+        // A page that landed took the cursor past the rows the list has laid out (End on its
+        // way to the last item): the reveal stops at the old end, so it is made again once
+        // the list has the new rows.
+        if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
+            _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
     }
 
     private Element BuildLibraryBar(string title, string libraryId)
@@ -357,19 +365,105 @@ public sealed partial class ApertureApp
             : GridRow(items, r.Row * perRow, perRow);
     }
 
+    /// <summary>
+    /// A row of posters. A row made again — the cursor moved onto it or off it, a picture landed —
+    /// hands back each card whose item, cursor and picture are what it was made with (REACTIVITY.md,
+    /// "Hand back the elements a key does not change"): the row is keyed by its first item's place,
+    /// so the list patches the row it replaces from it, and the cards by their items, so the patch
+    /// puts the live ones back untouched, with the pictures they show. A cursor move makes the two
+    /// cards it moved between instead of the whole of both rows.
+    /// </summary>
     private Element GridRow(IReadOnlyList<MediaItem> items, int start, int perRow)
     {
+        string key = GridRowKey(start);
         var row = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart)
             .Height(Halide.PosterHeight + Halide.PosterCaption)
             .Padding(new Thickness(0, 0, Halide.PosterGap, 0));
+        row.Key = key;
         for (int k = 0; k < perRow; k++)
         {
             int i = start + k;
             if (i >= items.Count) break;
-            row.AddChild(PosterCard(items[i], cursorIndex: i));
+            var item = items[i];
+            // Asked for a card handed back as well: a make of the row is what keeps a picture on
+            // screen recent in the cache, and what shows the one that landed.
+            var picture = ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, Halide.PosterHeight);
+            var state = new GridCardState(item, i, IsCursor(i), picture);
+            if (_gridCards.TakeBack(state, _gridList.Current) is { } live)
+            {
+                row.AddChild(live);
+                continue;
+            }
+            var made = new Ref<BoxElement>();
+            var card = PosterCard(item, Halide.PosterWidth, i, picture);
+            card.Key = item.Id;
+            card.WithRef(made);   // follows the card to the live element it is patched into
+            row.AddChild(card);
+            _gridCards.Made(state, made);
         }
         return row;
     }
+
+    private readonly List<string> _gridRowKeys = [];
+
+    /// <summary>"g" and the row's first item's place, made once per place.</summary>
+    private string GridRowKey(int start)
+    {
+        while (_gridRowKeys.Count <= start) _gridRowKeys.Add("g" + _gridRowKeys.Count);
+        return _gridRowKeys[start];
+    }
+
+    /// <summary>What a card shows besides what every card shows: its item (a watched or favourite
+    /// toggle changes the copy), its place, the cursor on it, and the picture it draws, null for
+    /// the placeholder.</summary>
+    private readonly record struct GridCardState(MediaItem Item, int Index, bool Cursor,
+        HultUI.Core.Rendering.IImageSource? Picture);
+
+    /// <summary>What every card shows: whether it has a caption, and the scale its glyphs are cut
+    /// at, which retires them. (Artwork's scale goes with that one; the pictures are compared.)</summary>
+    private readonly record struct GridCardShape(bool Titles, float Scale);
+
+    /// <summary>
+    /// The cards the grid's rows were made with, by item, and the live element each is now. A card
+    /// is handed back only while its row is still a child of the list: the row the list holds back
+    /// to patch, or, when the columns changed, one it is about to let go of. A card in a row that
+    /// scrolled away is out of the tree. A row still on screen is not asked for its cards: a row
+    /// is made for the places it holds, and only a change of columns, which makes them all again,
+    /// moves a place to another row. All are let go when the shape changes; those no longer under
+    /// the list are let go once there are more than a few screens of them.
+    /// </summary>
+    private sealed class GridCards
+    {
+        private readonly Dictionary<string, (GridCardState State, Ref<BoxElement> Live)> _kept = new(StringComparer.Ordinal);
+        private readonly List<string> _gone = [];
+        private GridCardShape _shape;
+
+        public int Count => _kept.Count;
+
+        public void Prepare(GridCardShape shape, Element? list, int keep)
+        {
+            if (shape != _shape) _kept.Clear();
+            _shape = shape;
+            if (_kept.Count <= keep) return;
+            foreach (var (id, kept) in _kept)
+                if (kept.Live.Current?.Parent?.Parent is not { } owner || !ReferenceEquals(owner, list)) _gone.Add(id);
+            foreach (var id in _gone) _kept.Remove(id);
+            _gone.Clear();
+        }
+
+        public BoxElement? TakeBack(in GridCardState state, Element? list) =>
+            _kept.TryGetValue(state.Item.Id, out var kept) && kept.State == state
+                && kept.Live.Current is { IsDetached: false, Parent: { } row } live
+                && list is not null && ReferenceEquals(row.Parent, list)
+                ? live : null;
+
+        public void Made(in GridCardState state, Ref<BoxElement> live) => _kept[state.Item.Id] = (state, live);
+    }
+
+    private readonly GridCards _gridCards = new();
+
+    /// <summary>Cards the grid remembers, for tests.</summary>
+    internal int GridCardsKept => _gridCards.Count;
 
     internal const float ListRowHeight = 68f;
 

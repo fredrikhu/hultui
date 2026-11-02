@@ -27,10 +27,11 @@ public class GlyphsOnFirstReadTests(ITestOutputHelper output)
     private static string Paragraph(int words, int seed = 0) =>
         string.Join(' ', Enumerable.Range(0, words).Select(i => Words[(i * 7 + seed) % Words.Length]));
 
-    private static TextPipeline Pipeline(bool composeWhenRead = true) =>
+    private static TextPipeline Pipeline(bool composeWhenRead = true, bool runsWhenRead = true) =>
         new(new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false), new WidthChangeEquivalenceTests.ContextShaper())
         {
             ComposeGlyphsWhenRead = composeWhenRead,
+            ComposeRunsWhenRead = runsWhenRead,
         };
 
     // The runs that are a run of several words: a one-word run shares its word's own glyphs.
@@ -105,8 +106,9 @@ public class GlyphsOnFirstReadTests(ITestOutputHelper output)
                     pipeline.Layout(text, Base, width -= 3.25f, null);
             });
         }
-        long reference = Allocated(Pipeline(composeWhenRead: false));
-        long lazy = Allocated(Pipeline());
+        // The lines' runs made with them, which is what would make the glyphs.
+        long reference = Allocated(Pipeline(composeWhenRead: false, runsWhenRead: false));
+        long lazy = Allocated(Pipeline(runsWhenRead: false));
         output.WriteLine($"40 widths of a 120-word paragraph: {reference:N0} B with glyphs made, {lazy:N0} B with glyphs made when read");
         Assert.True(lazy < reference * 0.6, $"{lazy:N0} B against {reference:N0} B with the glyphs made");
     }

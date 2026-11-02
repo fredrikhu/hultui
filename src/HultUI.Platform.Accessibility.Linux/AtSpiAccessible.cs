@@ -6,21 +6,25 @@ using HultUI.Core.Elements;
 namespace HultUI.Platform.Accessibility.Linux;
 
 /// <summary>
-/// A snapshot of one accessible object as it is exposed on the a11y
-/// bus. One is built per <see cref="AccessibilityNode"/> on each structural
-/// rebuild; the object <see cref="Path"/> is derived from the stable
-/// <see cref="ElementId"/> so a node keeps its D-Bus identity across rebuilds.
-/// What changes without a rebuild is set in place on the UI thread: the focused and
-/// selected states, and a leaf's name, description, value, range, toggle and expanded
-/// state (the window's patch). Its box and whether it is out of view are read from its node
-/// when a client asks (<see cref="Node"/>), as they are now. An item of a list whose items are
-/// served on demand has no node and is in no snapshot: its object is made when a client asks for it
-/// and reads everything from its list (<see cref="ItemOf"/>, <see cref="AtSpiServedItems"/>).
+/// One accessible object as it is exposed on the a11y bus. The bridge keeps one per
+/// <see cref="AccessibilityNode"/> for as long as its element is in the tree, and makes one only for
+/// a node that is new (plan 17, round 6); the object <see cref="Path"/> is derived from the stable
+/// <see cref="ElementId"/> so a node keeps its D-Bus identity, and its object, across applies. On
+/// each apply the bridge points the object at its node in the new tree and takes what changed
+/// (<see cref="Refresh"/>), and between applies it sets in place, on the UI thread, the focused and
+/// selected states and a leaf's name, description, value, range, toggle and expanded state (the
+/// window's patch). Its box and whether it is out of view are read from its node when a client asks
+/// (<see cref="Node"/>), as they are now. An item of a list whose items are served on demand has no
+/// node and is not among the kept objects: its object is made when a client asks for it and reads
+/// everything from its list (<see cref="ItemOf"/>, <see cref="AtSpiServedItems"/>).
 /// </summary>
 /// <remarks>
-/// The snapshot carries everything the D-Bus method handlers need to answer a
-/// query without touching the live element tree — which matters because those
-/// handlers run on the bus receive thread, not the UI thread.
+/// The object carries everything the D-Bus method handlers need to answer a query without touching
+/// the live element tree — which matters because those handlers run on the bus receive thread, not
+/// the UI thread. Each property that changes is one field, written whole on the UI thread (a string
+/// or an array replaced, never changed in place; a number or a state in one word), so a handler
+/// reading the object meanwhile reads each property as it was or as it is, as UI Automation's
+/// threads read its wrappers.
 /// </remarks>
 [SupportedOSPlatform("linux")]
 internal sealed class AtSpiAccessible
@@ -29,11 +33,20 @@ internal sealed class AtSpiAccessible
     public required string Path { get; init; }
     public required bool IsRoot { get; init; }
 
-    public uint Role { get; init; }
+    public uint Role
+    {
+        get => Volatile.Read(ref _role);
+        set => Volatile.Write(ref _role, value);
+    }
+    private uint _role;
 
-    /// <summary>The name. Changes after the snapshot is built, as <see cref="Description"/>,
+    /// <summary>The bridge's last apply that found this object's node in the tree, or made the
+    /// object. UI thread only.</summary>
+    internal int Generation;
+
+    /// <summary>The name. Changes after the object is made, as <see cref="Description"/>,
     /// <see cref="Value"/>, <see cref="Range"/>, <see cref="Toggled"/> and <see cref="Expanded"/> do:
-    /// a leaf's change of its own properties rebuilds no snapshot (plan 17, round 4), so the bridge
+    /// a leaf's change of its own properties rebuilds no tree (plan 17, round 4), so the bridge
     /// sets the new value on the UI thread, one write each, while the bus thread may read it.</summary>
     public string Name
     {
@@ -108,10 +121,15 @@ internal sealed class AtSpiAccessible
     public int Width => Box.Width;
     public int Height => Box.Height;
 
-    public bool Focusable { get; init; }
+    public bool Focusable
+    {
+        get => Volatile.Read(ref _focusable);
+        set => Volatile.Write(ref _focusable, value);
+    }
+    private bool _focusable;
 
-    /// <summary>Changes after the snapshot is built (with a list item's <see cref="Selected"/>): a
-    /// focus move rebuilds none, so the bridge sets it on the UI thread while the bus thread may
+    /// <summary>Changes between applies too (with a list item's <see cref="Selected"/>): a focus
+    /// move rebuilds no tree, so the bridge sets it on the UI thread while the bus thread may
     /// read it.</summary>
     public bool Focused
     {
@@ -119,15 +137,27 @@ internal sealed class AtSpiAccessible
         set => Volatile.Write(ref _focused, value);
     }
     private bool _focused;
-    public bool Enabled { get; init; } = true;
+
+    public bool Enabled
+    {
+        get => Volatile.Read(ref _enabled);
+        set => Volatile.Write(ref _enabled, value);
+    }
+    private bool _enabled = true;
 
     /// <summary>Whether the node is scrolled or clipped out of view, as it is now (<see cref="Node"/>).</summary>
     public bool Offscreen => ItemOf is { } items ? items.OffscreenOf(ItemIndex) : Node?.IsOffscreen ?? false;
-    public bool Selectable { get; init; }
 
-    /// <summary>Changes after the snapshot is built too, for a list's items: a move of the list's
-    /// selection rebuilds none, so the bridge sets it on the UI thread while the bus thread may
-    /// read it. An item served on demand reads it from its list's node.</summary>
+    public bool Selectable
+    {
+        get => Volatile.Read(ref _selectable);
+        set => Volatile.Write(ref _selectable, value);
+    }
+    private bool _selectable;
+
+    /// <summary>Changes between applies too, for a list's items: a move of the list's selection
+    /// rebuilds no tree, so the bridge sets it on the UI thread while the bus thread may read it.
+    /// An item served on demand reads it from its list's node.</summary>
     public bool Selected
     {
         get => ItemOf is { } items ? items.SelectedOf(ItemIndex) : Volatile.Read(ref _selected);
@@ -156,8 +186,8 @@ internal sealed class AtSpiAccessible
 
     /// <summary>A value in a range, for the Value interface: a slider's, a progress bar's, a number
     /// field's; null for anything else. Kept with the string value in one field, in an object of
-    /// its own that only those nodes get: a snapshot makes an object per node on every apply, and
-    /// the range inline would have been 56 bytes more in each, a fifth of a node's cost on AT-SPI.</summary>
+    /// its own that only those nodes get: the range inline would have been 56 bytes more in each
+    /// object, and the value and the range are read as one.</summary>
     public AccessibleRange? Range
     {
         get => (Volatile.Read(ref _value) as RangeBox)?.Range;
@@ -172,21 +202,67 @@ internal sealed class AtSpiAccessible
 
     /// <summary>The text a reader moves through (seam A1): where to read it now, or, for an object
     /// with no source, the text as the tree was built with it; both null for an object with none.</summary>
-    public AccessibleText? Text { get; init; }
-    public IAccessibleTextSource? TextSource { get; init; }
+    public AccessibleText? Text
+    {
+        get => Volatile.Read(ref _text);
+        set => Volatile.Write(ref _text, value);
+    }
+    private AccessibleText? _text;
+
+    public IAccessibleTextSource? TextSource
+    {
+        get => Volatile.Read(ref _textSource);
+        set => Volatile.Write(ref _textSource, value);
+    }
+    private IAccessibleTextSource? _textSource;
 
     /// <summary>The text now: the source's, read on the bus thread, or the built snapshot.</summary>
     public AccessibleText? CurrentText => TextSource?.AccessibleText ?? Text;
 
     /// <summary>Device pixels per layout unit, for the text's geometry.</summary>
-    public float Scale { get; init; } = 1f;
+    public float Scale
+    {
+        get => Volatile.Read(ref _scale);
+        set => Volatile.Write(ref _scale, value);
+    }
+    private float _scale = 1f;
 
-    public string ParentPath { get; init; } = AtSpiConstants.NullPath;
-    public int IndexInParent { get; init; } = -1;
-    public IReadOnlyList<string> ChildPaths { get; init; } = [];
+    public string ParentPath
+    {
+        get => Volatile.Read(ref _parentPath);
+        set => Volatile.Write(ref _parentPath, value);
+    }
+    private string _parentPath = AtSpiConstants.NullPath;
 
-    /// <summary>The action this object exposes to assistive tech, or null if none.</summary>
-    public AtSpiActionKind? Action { get; init; }
+    public int IndexInParent
+    {
+        get => Volatile.Read(ref _indexInParent);
+        set => Volatile.Write(ref _indexInParent, value);
+    }
+    private int _indexInParent = -1;
+
+    /// <summary>The paths of the children, in order. Replaced whole when the children change, never
+    /// changed in place: a handler on the bus thread may be going through the array it read. Kept
+    /// while the children's ids stay the same.</summary>
+    public IReadOnlyList<string> ChildPaths
+    {
+        get => Volatile.Read(ref _childPaths);
+        set => Volatile.Write(ref _childPaths, value);
+    }
+    private IReadOnlyList<string> _childPaths = [];
+
+    /// <summary>The action this object exposes to assistive tech, or null if none. In one byte,
+    /// written and read whole: none, or the kind plus one.</summary>
+    public AtSpiActionKind? Action
+    {
+        get
+        {
+            byte action = Volatile.Read(ref _action);
+            return action == 0 ? null : (AtSpiActionKind)(action - 1);
+        }
+        set => Volatile.Write(ref _action, value is { } kind ? (byte)((int)kind + 1) : (byte)0);
+    }
+    private byte _action;
 
     /// <summary>How many children: a list served on demand's items, however many, or the children
     /// the snapshot has.</summary>
@@ -298,8 +374,7 @@ internal sealed class AtSpiAccessible
             Focusable = node.IsFocusable,
             Focused = node.IsFocused,
             Enabled = node.IsEnabled,
-            Selectable = node.IsSelected is not null || node.Role is AccessibilityRole.RadioButton
-                or AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem,
+            Selectable = SelectableOf(node),
             // From the node's selected state, which a checked radio and a selected tab carry. It
             // was read from IsToggled, which neither ever had: no radio or tab read as selected.
             Selected = node.IsSelected == true,
@@ -316,6 +391,53 @@ internal sealed class AtSpiAccessible
         };
     }
 
+    /// <summary>
+    /// Takes what <see cref="From"/> would make for <paramref name="node"/> at this place: the node,
+    /// every property read from it, the parent and the index. Writes only what differs, each
+    /// property whole, and allocates nothing but for a range's value that changed. Not the
+    /// children's paths, which the bridge keeps or replaces after it has been through the children.
+    /// UI thread.
+    /// </summary>
+    public void Refresh(AccessibilityNode node, string parentPath, int indexInParent, float scale)
+    {
+        if (!ReferenceEquals(_node, node)) Node = node;
+        uint role = IsRoot ? AtSpiConstants.RoleApplication : RoleOf(node);
+        if (_role != role) Role = role;
+        string name = IsRoot ? ApplicationName : node.Name ?? "";
+        if (!string.Equals(_name, name)) Name = name;
+        string description = node.Description ?? "";
+        if (!string.Equals(_description, description)) Description = description;
+        var textSource = node.TextSource;
+        // The value before the range: the range's setter keeps the value it finds.
+        string? value = textSource is null ? node.Value : null;
+        if (!string.Equals(Value, value)) Value = value;
+        var range = node.Range;
+        if (Range != range) Range = range;
+        if (_focusable != node.IsFocusable) Focusable = node.IsFocusable;
+        if (_focused != node.IsFocused) Focused = node.IsFocused;
+        if (_enabled != node.IsEnabled) Enabled = node.IsEnabled;
+        bool selectable = SelectableOf(node);
+        if (_selectable != selectable) Selectable = selectable;
+        bool selected = node.IsSelected == true;
+        if (_selected != selected) Selected = selected;
+        if (FromTriState(_toggled) != node.IsToggled) Toggled = node.IsToggled;
+        if (FromTriState(_expanded) != node.Expanded) Expanded = node.Expanded;
+        var text = textSource is null ? node.Text : null;
+        if (!ReferenceEquals(_text, text)) Text = text;
+        if (!ReferenceEquals(_textSource, textSource)) TextSource = textSource;
+        if (_scale != scale) Scale = scale;
+        if (!string.Equals(_parentPath, parentPath)) ParentPath = parentPath;
+        if (_indexInParent != indexInParent) IndexInParent = indexInParent;
+        var action = ActionFor(node.Role);
+        if (Action != action) Action = action;
+    }
+
+    /// <summary>One of a set a reader can select in: a node with a selected state, a radio, a tab,
+    /// an item.</summary>
+    private static bool SelectableOf(AccessibilityNode node) =>
+        node.IsSelected is not null || node.Role is AccessibilityRole.RadioButton
+            or AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem;
+
     /// <summary>The role a reader is told, for anything but the root. A password is a role of
     /// its own on AT-SPI, where UIA has a flag on an edit control.</summary>
     public static uint RoleOf(AccessibilityNode node) =>
@@ -326,7 +448,7 @@ internal sealed class AtSpiAccessible
         AccessibilityRole.Button or AccessibilityRole.Link or AccessibilityRole.ColumnHeader => AtSpiActionKind.Click,
         AccessibilityRole.Checkbox or AccessibilityRole.Switch => AtSpiActionKind.Toggle,
         AccessibilityRole.RadioButton => AtSpiActionKind.Select,
-        AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem => AtSpiActionKind.Click,
+        AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem or AccessibilityRole.MenuItem => AtSpiActionKind.Click,
         _ => null,
     };
 }

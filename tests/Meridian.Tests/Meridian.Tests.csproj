@@ -9,6 +9,9 @@
     <!-- The app's own root namespace is Meridian, so this project's default would
          nest as Meridian.Tests.Meridian.*. Pin it. -->
     <RootNamespace>Meridian.Tests</RootNamespace>
+    <!-- As in every project that links tests/Shared/Allocations.cs: the allocation tests are about
+         the code, not what a profile lets tier 1 put on the stack. -->
+    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,6 +41,7 @@
   <ItemGroup>
     <!-- The runtime settings the app ships with (apps/AppRuntime.props). -->
     <Compile Include="..\Shared\AppRuntimeSettingsTests.cs" Link="Shared\AppRuntimeSettingsTests.cs" />
+    <Compile Include="..\Shared\Allocations.cs" Link="Shared\Allocations.cs" />
   </ItemGroup>
 
 </Project>

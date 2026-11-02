@@ -70,30 +70,60 @@ public sealed class VariableResolver(
     /// whitespace; anything else — unclosed braces, <c>{{ }}</c>, nesting — is
     /// literal text, not an error. Adjacent literals are merged.
     /// </summary>
+    /// <remarks>A literal is the text between two variables, so each is a piece of the template
+    /// (the template itself when it holds no variable): a request body's build copied it twice a
+    /// keystroke through a builder, 350 KB at 89,000 characters (plan 17 round 6).</remarks>
     public static IReadOnlyList<TemplateSegment> Tokenize(string template)
     {
         var segments = new List<TemplateSegment>();
-        var literal = new System.Text.StringBuilder();
-        int i = 0;
+        int literal = 0;
+        while (NextVariable(template, literal, out int open, out int close))
+        {
+            if (open > literal) segments.Add(new TemplateSegment(template[literal..open], false));
+            segments.Add(new TemplateSegment(template[(open + 2)..close].Trim(), true));
+            literal = close + 2;
+        }
+        if (literal < template.Length) segments.Add(new TemplateSegment(template[literal..], false));
+        return segments;
+    }
+
+    /// <summary>The names of the variables in <paramref name="template"/>, in order, as
+    /// <see cref="Tokenize"/> finds them, without the literal text between them.</summary>
+    public static IEnumerable<string> VariableNames(string template)
+    {
+        int from = 0;
+        while (NextVariable(template, from, out int open, out int close))
+        {
+            yield return template[(open + 2)..close].Trim();
+            from = close + 2;
+        }
+    }
+
+    /// <summary>The next <c>{{name}}</c> at or after <paramref name="from"/>: its braces at
+    /// <paramref name="open"/> and <paramref name="close"/>. A <c>{{</c> that opens no variable is
+    /// literal text, and the search goes on after it.</summary>
+    private static bool NextVariable(string template, int from, out int open, out int close)
+    {
+        int i = from;
         while (i < template.Length)
         {
-            int open = template.IndexOf("{{", i, StringComparison.Ordinal);
-            if (open < 0) { literal.Append(template, i, template.Length - i); break; }
-            int close = template.IndexOf("}}", open + 2, StringComparison.Ordinal);
-            string? name = close < 0 ? null : template[(open + 2)..close].Trim();
-            if (name is not { Length: > 0 } || name.Any(c => c is '{' or '}' || char.IsWhiteSpace(c)))
-            {
-                // Not a variable — the "{{" is literal; rescan after it.
-                literal.Append(template, i, open + 2 - i);
-                i = open + 2;
-                continue;
-            }
-            literal.Append(template, i, open - i);
-            if (literal.Length > 0) { segments.Add(new TemplateSegment(literal.ToString(), false)); literal.Clear(); }
-            segments.Add(new TemplateSegment(name, true));
-            i = close + 2;
+            open = template.IndexOf("{{", i, StringComparison.Ordinal);
+            if (open < 0) break;
+            close = template.IndexOf("}}", open + 2, StringComparison.Ordinal);
+            if (close < 0) break;   // no "}}" after this "{{", so none after any later one either
+            if (IsName(template.AsSpan(open + 2, close - open - 2).Trim())) return true;
+            i = open + 2;
         }
-        if (literal.Length > 0) segments.Add(new TemplateSegment(literal.ToString(), false));
-        return segments;
+        open = close = -1;
+        return false;
+    }
+
+    /// <summary>A variable's name: not empty, with no braces and no white space.</summary>
+    private static bool IsName(ReadOnlySpan<char> name)
+    {
+        if (name.IsEmpty) return false;
+        foreach (char c in name)
+            if (c is '{' or '}' || char.IsWhiteSpace(c)) return false;
+        return true;
     }
 }

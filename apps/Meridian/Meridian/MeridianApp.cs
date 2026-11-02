@@ -430,7 +430,7 @@ public partial class MeridianApp : Component, IDisposable
         foreach (var tab in _tabs)
         {
             string? onDisk = TryReadFile(tab.Path);
-            if (onDisk == null || onDisk == tab.Doc.Serialize()) continue;   // our own save, or gone
+            if (onDisk == null || tab.Doc.SerializesTo(onDisk)) continue;   // our own save, or gone
             if (!tab.Dirty)
                 tab.Doc = ReqDocument.Parse(onDisk);
             else

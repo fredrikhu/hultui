@@ -76,7 +76,7 @@ public partial class RichTextEditorElement
             if (bl.Top - bl.SpaceAbove > bottom) break;
             if (bl.Table is { } table && !ReferenceEquals(table, drawnTable))
             {
-                DrawTable(ctx, table, originX, originY);
+                DrawTable(ctx, table, originX, originY, top, bottom);
                 drawnTable = table;
             }
             DrawChrome(ctx, i, bl, originX, originY, content.Width);
@@ -175,14 +175,18 @@ public partial class RichTextEditorElement
         return slash >= 0 ? source[(slash + 1)..].TrimEnd('/', '\\') : source;
     }
 
-    // The header row's tint inside the grid, then the grid's lines over the whole table.
-    private void DrawTable(IRenderContext ctx, TableLayout t, float ox, float oy)
+    // The header row's tint inside the grid, then the grid's lines over the whole table: of its
+    // rows' lines, those in the document's visible stretch [from, to] alone, so a long table
+    // scrolled anywhere draws the lines on screen and not one for each of its rows.
+    private void DrawTable(IRenderContext ctx, TableLayout t, float ox, float oy, float from, float to)
     {
         float top = oy + t.Top, b = t.Border;
         float left = ox + t.ColumnX[0], width = t.ColumnX[^1] + b - t.ColumnX[0];
         ctx.DrawRect(new Rect(left + b, top + b, Math.Max(0, width - 2 * b), Math.Max(0, t.RowY[1] - b)), _tableHeader);
-        foreach (float y in t.RowY)
-            ctx.DrawRect(new Rect(left, top + y, width, b), _tableBorder);
+        var rowY = t.RowY;
+        int r = Array.BinarySearch(rowY, from - t.Top - b);
+        for (r = r < 0 ? ~r : r; r < rowY.Length && t.Top + rowY[r] <= to; r++)
+            ctx.DrawRect(new Rect(left, top + rowY[r], width, b), _tableBorder);
         foreach (float x in t.ColumnX)
             ctx.DrawRect(new Rect(ox + x, top, b, t.Height), _tableBorder);
     }

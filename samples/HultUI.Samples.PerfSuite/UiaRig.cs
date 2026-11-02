@@ -16,7 +16,7 @@ namespace PerfSuite;
 /// the same work on any desk.
 /// </summary>
 [SupportedOSPlatform("windows")]
-sealed class UiaRig : IAccessibilityBridge, IDisposable
+sealed class UiaRig : IBridgeRig, IAccessibilityBridge, IDisposable
 {
     private IntPtr _hwnd;
     private readonly WindowsAccessibilityBridge _bridge;
@@ -26,6 +26,8 @@ sealed class UiaRig : IAccessibilityBridge, IDisposable
         _hwnd = hwnd;
         _bridge = new WindowsAccessibilityBridge(hwnd, new NoHost());
     }
+
+    public string Name => "UIA";
 
     /// <summary>Changes the bridge has applied, diffs and in-place patches (a selection move), for a
     /// scenario's check.</summary>

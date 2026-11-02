@@ -16,64 +16,34 @@ public partial class CommanderApp
     // strips and headers on every key, the inactive pane's as well. A part keeps its elements
     // while the app rebuilds around it, and builds again when something it shows changes:
     //
-    //  - every MarkDirty in the app (_partRevision): every part builds again. Safe by default —
+    //  - every MarkDirty in the app (_parts): every part builds again. Safe by default —
     //    a rebuild for anything not named below builds all of them;
     //  - its own revision: a pane's parts when it goes to another folder (PaneDirty), its column
     //    header when the pointer crosses the sort columns (ColumnsDirty, with no build of the
     //    window);
     //  - what a view-only build (MarkViewDirty: a cursor move, a mark, type-to-find, Tab, a grid
-    //    scrolled, a listing, a thumbnail or a preview landing) can change that a part shows,
-    //    which MarkViewDirty compares with what the part was built from: which pane is active
-    //    (the trails), the mark count, the filter, the files cut and the thumbnails still
-    //    decoding (the footers), and the filter, a notice and the open prompt (the command line);
+    //    scrolled, a listing, a thumbnail or a preview landing, a worker's progress tick) can
+    //    change that a part shows, which MarkViewDirty compares with what the part was built
+    //    from: which pane is active (the trails), the mark count, the filter, the files cut and
+    //    the thumbnails still decoding (the footers), and the filter, a notice, the open prompt
+    //    and a backgrounded transfer's progress (the command line). A folder-size walk's tick
+    //    builds the footers outright (ProgressDirty);
     //  - a signal or a loader its build reads: the footer reads its pane's listing, so a listing
     //    that lands builds it again.
     //
-    // The app's build places each part (Part.Place), which builds there and then a part whose
-    // revision moved: where its elements used to be built, in the build that removes it if it
-    // no longer belongs, and before the app's OnAfterBuild, which reads one of them (the command
-    // line's field, to focus). PartTests holds every part to what a full build of them makes.
+    // The app's build places each part (HultUI.Core.Components.Part.Place), which builds there and
+    // then a part whose revision moved: where its elements used to be built, in the build that
+    // removes it if it no longer belongs, and before the app's OnAfterBuild, which reads one of
+    // them (the command line's field, to focus). PartTests holds every part to what a full build
+    // of them makes.
 
-    private int _partRevision;
+    private readonly PartGroup _parts = new();
     private readonly Signal<int> _cmdRevision = new(0);
     private Part? _chromePart, _railPart, _cmdPart;
     private readonly PaneParts[] _paneParts = [new(), new()];
 
     /// <summary>Builds of the parts so far, for tests.</summary>
-    internal int PartBuilds { get; private set; }
-
-    /// <summary>A part: a build of the app's, kept by a child component of its own, which the app's
-    /// build places and builds again when <see cref="_partRevision"/> or its own revision moved;
-    /// its own revision, and anything else its build reads, also build it on their own.</summary>
-    private sealed class Part(CommanderApp app, Func<CommanderApp, char, Element> build, char side = '\0',
-        Signal<int>? own = null) : Component
-    {
-        private int _revision = -1, _ownRevision = -1;
-
-        /// <summary>This part's builds so far, for tests.</summary>
-        public int Builds { get; private set; }
-
-        public override Element Build()
-        {
-            _revision = app._partRevision;
-            if (own is not null) _ownRevision = own.Value;
-            app.PartBuilds++;
-            Builds++;
-            return build(app, side);
-        }
-
-        /// <summary>The part's host, for the app's build to place: built again first when a
-        /// revision moved since it last built. Inside an event, the own revision's rebuild waits
-        /// for the dispatch to end, after the app's build; this one runs where the part's
-        /// elements used to be built, and the waiting one then finds nothing new.</summary>
-        public ComponentHost Place()
-        {
-            var host = Mount();
-            if (_revision != app._partRevision || (own is not null && _ownRevision != own.Peek()))
-                MarkDirty();
-            return host;
-        }
-    }
+    internal int PartBuilds => _parts.Builds;
 
     /// <summary>A pane's parts, their own revisions, and what a view-only build compares them
     /// by.</summary>
@@ -93,43 +63,43 @@ public partial class CommanderApp
     // place in the layout: none of them ever shrank (FlexShrink(0) on each host), and the rail
     // fills its host's height (FlexGrow on its root), as it filled the body row's.
 
-    private Part ChromePart => _chromePart ??= new(this, static (app, _) => app.BuildChrome());
+    private Part ChromePart => _chromePart ??= new(_parts, BuildChrome);
 
-    private Part RailPart => _railPart ??= new(this, static (app, _) => app.BuildRail().FlexGrow(1));
+    private Part RailPart => _railPart ??= new(_parts, () => BuildRail().FlexGrow(1));
 
-    private Part CmdPart => _cmdPart ??= new(this, static (app, _) =>
+    private Part CmdPart => _cmdPart ??= new(_parts, () =>
     {
-        app._cmdKey = app.CmdKeyNow();
-        return app.BuildCommandLine();
+        _cmdKey = CmdKeyNow();
+        return BuildCommandLine();
     }, own: _cmdRevision);
 
     private Part StripPart(char side) => PaneOf(side).Strip ??=
-        new(this, static (app, s) => app.BuildTabStrip(s), side, PaneOf(side).StripRevision);
+        new(_parts, () => BuildTabStrip(side), PaneOf(side).StripRevision);
 
     // One trail part per shape: the host is the trail's identity in the pane, so leaving a result
     // set replaces its pill with the path trail instead of patching one into the other.
     private Part TrailPart(char side) => ResultsOf(side) is not null
-        ? PaneOf(side).ResultsTrail ??= new(this, static (app, s) => app.BuildTrail(s), side, PaneOf(side).TrailRevision)
-        : PaneOf(side).Trail ??= new(this, static (app, s) => app.BuildTrail(s), side, PaneOf(side).TrailRevision);
+        ? PaneOf(side).ResultsTrail ??= new(_parts, () => BuildTrail(side), PaneOf(side).TrailRevision)
+        : PaneOf(side).Trail ??= new(_parts, () => BuildTrail(side), PaneOf(side).TrailRevision);
 
     private Part ColumnsPart(char side) => PaneOf(side).Columns ??=
-        new(this, static (app, s) => app.BuildListHeader(s, app.InArchive(s)), side, PaneOf(side).ColumnsRevision);
+        new(_parts, () => BuildListHeader(side, InArchive(side)), PaneOf(side).ColumnsRevision);
 
     // The footer reads the pane's listing (through Rows, as the view does): a listing that lands
     // builds it again on its own.
     private Part FootPart(char side) => PaneOf(side).Foot ??=
-        new(this, static (app, s) =>
+        new(_parts, () =>
         {
-            app.PaneOf(s).FootKey = app.FootKeyNow(s);
-            return app.BuildFooter(s, app.Rows(s));
-        }, side, PaneOf(side).FootRevision);
+            PaneOf(side).FootKey = FootKeyNow(side);
+            return BuildFooter(side, Rows(side));
+        }, PaneOf(side).FootRevision);
 
     /// <summary>Rebuilds the window, every part with it. Hides <c>Component.MarkDirty</c>, so
     /// every rebuild this app asks for — and every helper it hands its MarkDirty to: the find
     /// bars, the pans, the toasts — builds the parts as well.</summary>
     private new void MarkDirty()
     {
-        _partRevision++;
+        _parts.Invalidate();
         base.MarkDirty();
     }
 
@@ -175,11 +145,20 @@ public partial class CommanderApp
         ViewOf(side) == ViewMode.Thumbnails && _thumbsCache != null ? _thumbsCache.PendingCount : 0);
 
     /// <summary>The command line shows the filter and its matches in the active pane, a notice,
-    /// or the open prompt in the active pane's folder.</summary>
-    private readonly record struct CmdKey(string Search, char Active, string? OpenIn, string? Notice);
+    /// the open prompt in the active pane's folder, or a backgrounded transfer's percent and count
+    /// (-1 when none shows), which its worker's ticks move.</summary>
+    private readonly record struct CmdKey(string Search, char Active, string? OpenIn, string? Notice,
+        int TransferPercent, int TransferDone);
     private CmdKey _cmdKey;
-    private CmdKey CmdKeyNow() =>
-        new(_search, _search.Length > 0 ? _active : '\0', _cmdActive ? Dir(_active) : null, _notice);
+    private CmdKey CmdKeyNow()
+    {
+        int percent = -1, done = -1;
+        if (_op is { } op && !_progressOpen) (percent, done) = (TransferPercent(op), op.Done);
+        return new(_search, _search.Length > 0 ? _active : '\0', _cmdActive ? Dir(_active) : null, _notice, percent, done);
+    }
+
+    private static int TransferPercent(TransferOp op) =>
+        op.TotalBytes > 0 ? (int)(100 * op.TotalBytesDone / op.TotalBytes) : 0;
 
     /// <summary>A pane's path trail, or the pill of a result set that replaced it.</summary>
     private Element BuildTrail(char side)

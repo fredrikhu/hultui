@@ -373,7 +373,7 @@ public partial class JunctionApp
     /// than per frame. Unwrapped every row is <see cref="DiffRowHeight"/> and the list is told
     /// so directly; this only runs when wrapping, or when the review's cards are among the rows.
     /// </summary>
-    private void RebuildDiffHeights(List<DiffRow> rows, float codeWidth)
+    private void RebuildDiffHeights(IReadOnlyList<DiffRow> rows, float codeWidth)
     {
         var heights = new float[rows.Count];
         var style = TextMeasure.StyleFor(DiffCodeSize, CodeFont);
@@ -462,10 +462,8 @@ public partial class JunctionApp
         public GitDiffLine? Line { get; init; }   // unified
         public GitDiffLine? Left { get; init; }   // split
         public GitDiffLine? Right { get; init; }
-        // Syntax-highlight spans for the code cell(s), line-relative offsets.
-        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? Spans { get; init; }        // unified
-        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? LeftSpans { get; init; }    // split
-        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? RightSpans { get; init; }
+        /// <summary>Which hunk of the diff the row is in.</summary>
+        public int InHunk { get; init; }
     }
 
     // Virtualized so large diffs keep constant row height and stay cheap — a
@@ -480,19 +478,20 @@ public partial class JunctionApp
 
         if (interact != null) SyncStageSelection(interact);
 
-        var hl = HighlightForCurrent(diff.Path);
+        var hl = HighlightForCurrent(diff);
         // Reviewing is unified only: GitLab's positions are one column of lines, and the
         // cards need a row to follow.
         var review = ReviewRowsActive ? _review : null;
-        var rows = FlattenedRows(diff, _diffSplit && review is null, hl);
+        IReadOnlyList<DiffRow> rows = FlattenedRows(diff, _diffSplit && review is null, hl);
         // The review weaves its cards in and gives each line its position, into a list of its
         // own (the flattened rows are kept as they are for the next build), and marks the caret
-        // and range on it. A caret or range move keeps that list and changes only the rows whose
-        // marks moved; anything else weaves again.
+        // and range on it. It reads every row, so it is the one thing that has them all made. A
+        // caret or range move keeps that list and changes only the rows whose marks moved;
+        // anything else weaves again.
         bool reviewMarksOnly = false;
         int reviewRemakeRow = -1;
         if (review is not null)
-            rows = ReviewRowsFor(diff, rows, review, out reviewMarksOnly, out reviewRemakeRow);
+            rows = ReviewRowsFor(diff, _diffRows!.All(), review, out reviewMarksOnly, out reviewRemakeRow);
         BindDiffSelection(diff, rows);
         BindDiffSearch(diff, rows);
 
@@ -501,7 +500,7 @@ public partial class JunctionApp
         // repoints it to the live one. Ask afterwards and DiffCodeWidth reads zero, falls
         // back to the window — several times this pane's width — and concludes there is
         // nothing to scroll, on every build forever.
-        UpdateDiffPan(diff, rows, interact != null);
+        UpdateDiffPan(diff, rows.Count, interact != null);
         _diffBarBuilt = _diffPan.CanPan;
 
         // What a row looks like depends on three things the list cannot see: whether lines
@@ -537,23 +536,33 @@ public partial class JunctionApp
         // a keystroke elsewhere in the window makes no row again. Everything else a row shows is
         // gathered here, and when any of it moves the rows on screen are made again: the staging
         // marks, find's tints, wrapping, the sideways offset baked into the code cells, the code
-        // face, size and tab width, the colour scheme. The review's cards read its composer and
+        // face, size and tab width, the colour scheme, the file's colours. The review's cards read its composer and
         // threads, so while reviewing the rows are made again on every build that wove them
         // again; a caret or range move only changes the marks of the line rows it moved
-        // between, which their items carry. Typing in a comment changes the one card holding its
-        // editor, which is made again alone.
-        var rowShape = new DiffRowShape(rows, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
+        // between, which their items carry. Typing in a comment makes no row; a move of its
+        // formatting bar's buttons changes the one card holding its editor, made again alone. A
+        // find step changes the row the current match left and the row it reached.
+        var rowShape = new DiffRowShape(rows, hl, interact, _diffWrap, _diffPan.Offset, CodeFont, DiffCodeSize, TabWidth,
             Nocturne.Theme, DiffFindShape(), Ui.DisplayScale);
         // Only the list this build patches: another file's list is replaced, rows and all.
         var mountedList = _diffBodyRef.Current is VirtualListElement<DiffRow> { Key: { } k } m && k == listKey ? m : null;
         // `|`, not `||`: the staging snapshot is brought up to date either way.
+        var hit = DiffFindHit();
         if (DiffStageSelectionChanged() | rowShape != _diffRowShape || (review is not null && !reviewMarksOnly))
         {
             mountedList?.InvalidateRows();
             _diffRowShape = rowShape;
         }
-        else if (reviewRemakeRow >= 0)
-            mountedList?.InvalidateRow(reviewRemakeRow);
+        else
+        {
+            if (reviewRemakeRow >= 0) mountedList?.InvalidateRow(reviewRemakeRow);
+            if (hit != _diffHit)
+            {
+                mountedList?.InvalidateRow(_diffHit.Line);   // -1 does nothing
+                mountedList?.InvalidateRow(hit.Line);
+            }
+        }
+        _diffHit = hit;
 
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
@@ -663,7 +672,7 @@ public partial class JunctionApp
         // Read after the frame has been laid out. OnAfterBuild is too early — the list has
         // no box for this frame yet, and on the first build it is a brand new element with
         // no prior layout at all, so the width DiffCodeWidth needs is simply not knowable
-        // here. Same reason ScrollRowIntoView defers.
+        // here. Same reason ScrollChangeCaretIntoView defers.
         _window.RequestPostFrameCallback(() =>
         {
             if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
@@ -686,8 +695,9 @@ public partial class JunctionApp
     /// one was laid out, and from the window before there ever was one, since the first build
     /// after opening a file runs before any layout and still has to decide whether there is a
     /// scrollbar. Line widths are measured once per comparison; the rows are the same objects
-    /// across a rebuild and measuring is a shaping call.</summary>
-    private void UpdateDiffPan(GitFileDiff diff, List<DiffRow> rows, bool interactive)
+    /// across a rebuild and measuring is a shaping call. The lines are read from the diff: this
+    /// is what every row would be made for, on every file a reader passes.</summary>
+    private void UpdateDiffPan(GitFileDiff diff, int rowCount, bool interactive)
     {
         // A build can find the list with no layout after the first one too. Switching wrap on
         // drops the pan's scrollbar from around the list, so the list is replaced rather than
@@ -711,14 +721,36 @@ public partial class JunctionApp
         _diffPan.ViewportWidth = _diffWrap ? float.MaxValue : _diffCodeWidth;
         if (_diffWrap) { _diffPan.Reset(); return; }
 
-        var key = diff.Path + "#" + (_diffSplit ? "s" : "u") + "#" + rows.Count;
+        var key = diff.Path + "#" + (_diffSplit ? "s" : "u") + "#" + rowCount;
         if (_diffLongestFor == key) return;
         _diffLongestFor = key;
         _diffPan.Reset();
-        _diffPan.ContentWidth = HorizontalPan.MeasureWidest(
-            rows.SelectMany(r => new[] { r.Line?.Content, r.Left?.Content, r.Right?.Content })
-                .Select(c => c is null ? null : ExpandTabs(c)),
-            DiffCodeSize, CodeFont);
+        _diffPan.ContentWidth = HorizontalPan.MeasureWidest([ExpandTabs(LongestLine(diff))], DiffCodeSize, CodeFont);
+    }
+
+    /// <summary>The line of the diff with the most characters once its tabs are expanded, which
+    /// in the code font is the widest. No line is expanded to find it.</summary>
+    private string LongestLine(GitFileDiff diff)
+    {
+        string longest = "";
+        int most = 0;
+        foreach (var hunk in diff.Hunks)
+            foreach (var line in hunk.Lines)
+            {
+                if (line.Kind == DiffLineKind.HunkHeader) continue;
+                int length = ExpandedLength(line.Content);
+                if (length > most) (longest, most) = (line.Content, length);
+            }
+        return longest;
+    }
+
+    /// <summary>The length <see cref="ExpandTabs"/> gives <paramref name="text"/>.</summary>
+    private int ExpandedLength(string text)
+    {
+        if (text.IndexOf('\t') < 0) return text.Length;
+        int w = TabWidth, col = 0;
+        foreach (var c in text) col += c == '\t' ? w - col % w : 1;
+        return col;
     }
 
     // Vertical scrolling is the list's own (KeyboardScroll); sideways is not, because the
@@ -743,22 +775,158 @@ public partial class JunctionApp
 
     // ── The flattened rows, kept between builds ──────────────────────────
     //
-    // Flattening a diff makes a record per line, a word diff per changed pair and the merged
-    // spans of both: about 600 KB for a 180-line file. Every build used to do it again — every
-    // keystroke in the commit summary beside the diff, every toast and spinner frame — and the
-    // list then made every row on screen again from the new records. The rows depend on the
-    // diff, the layout, the colours of its syntax and the scheme's word-diff tint, and on
-    // nothing else; they are flattened again when one of those is a different object.
+    // Flattening a whole diff made a record per line, a word diff per changed pair and the
+    // merged spans of both: about 600 KB for a 180-line file, 3.3 KB a line. Every build used to
+    // do it again, then a new file's first build and again when its colours landed, and a reader
+    // sees about thirteen rows of it. So the list knows how many rows there are from the hunks,
+    // makes a row when it is asked for one, and a row's spans when it is drawn. What needs every
+    // row asks for them all then: a find, a copy, wrapped heights, the review's weave.
 
-    /// <summary>The rows last flattened, what they were flattened from, and their labels.</summary>
-    private sealed class DiffRowsMemo(GitFileDiff diff, bool split, FileHighlight? highlight, object theme,
-        List<DiffRow> rows)
+    /// <summary>The rows of one diff in one layout, made as they are asked for, the colours its
+    /// lines draw with, and their labels. Depends on the diff, the layout and the scheme's
+    /// word-diff tint; the file's colours are only read by <see cref="SpansOf"/>.</summary>
+    private sealed class DiffRowList : IReadOnlyList<DiffRow>
     {
-        public GitFileDiff Diff { get; } = diff;
-        public bool Split { get; } = split;
-        public FileHighlight? Highlight { get; } = highlight;
-        public object Theme { get; } = theme;
-        public List<DiffRow> Rows { get; } = rows;
+        private const int PageRows = 64;
+
+        private readonly List<GitDiffHunk> _hunks;
+        private readonly int[] _firstRow;           // of each hunk, then the count
+        private readonly bool[] _paired;            // each hunk: its changed lines are in _partners
+        private readonly DiffRow?[]?[] _pages;
+        private readonly (GitDiffLine? Left, GitDiffLine? Right)[]?[]? _pairs;   // split, each hunk
+        private readonly Dictionary<GitDiffLine, GitDiffLine> _partners = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>?> _words = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<GitDiffLine, IReadOnlyList<HultUI.Core.Rendering.TextSpan>?> _spans = new(ReferenceEqualityComparer.Instance);
+        private FileHighlight? _highlight;
+        private List<DiffRow>? _all;
+        private int _made;
+
+        public DiffRowList(GitFileDiff diff, bool split, object theme)
+        {
+            (Diff, Split, Theme) = (diff, split, theme);
+            _hunks = diff.Hunks;
+            _firstRow = new int[_hunks.Count + 1];
+            _paired = new bool[_hunks.Count];
+            if (split) _pairs = new (GitDiffLine?, GitDiffLine?)[]?[_hunks.Count];
+            int rows = 0;
+            for (int h = 0; h < _hunks.Count; h++)
+            {
+                _firstRow[h] = rows;
+                rows += 1 + (split ? SplitPairs(_hunks[h].Lines, FirstLine(_hunks[h])).Count() : _hunks[h].Lines.Count - FirstLine(_hunks[h]));
+            }
+            _firstRow[^1] = rows;
+            _pages = new DiffRow?[]?[(rows + PageRows - 1) / PageRows];
+        }
+
+        public GitFileDiff Diff { get; }
+        public bool Split { get; }
+        public object Theme { get; }
+
+        /// <summary>How many row records have been made, for tests.</summary>
+        public int Made => _made;
+
+        public int Count => _firstRow[^1];
+
+        // A list of more than 2,000 rows has its labels read on a reader's own threads: a row
+        // made there is the row, and making one touches nothing the UI thread writes.
+        public DiffRow this[int index]
+        {
+            get
+            {
+                ref var page = ref _pages[index / PageRows];
+                var rows = page ?? Interlocked.CompareExchange(ref page, new DiffRow?[PageRows], null) ?? page!;
+                ref var row = ref rows[index % PageRows];
+                return row ?? Interlocked.CompareExchange(ref row, Make(index), null) ?? row!;
+            }
+        }
+
+        public IEnumerator<DiffRow> GetEnumerator()
+        {
+            for (int i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+        /// <summary>Every row, for what reads them all and changes its copy.</summary>
+        public List<DiffRow> All()
+        {
+            if (_all is not null) return _all;
+            _all = new List<DiffRow>(Count);
+            for (int i = 0; i < Count; i++) _all.Add(this[i]);
+            return _all;
+        }
+
+        /// <summary>The first line of a hunk that is a line of the diff: the parser keeps git's
+        /// header line as the first of its lines, and it has a row of its own.</summary>
+        private static int FirstLine(GitDiffHunk hunk) =>
+            hunk.Lines.Count > 0 && hunk.Lines[0].Kind == DiffLineKind.HunkHeader ? 1 : 0;
+
+        private DiffRow Make(int index)
+        {
+            Interlocked.Increment(ref _made);
+            int h = Array.BinarySearch(_firstRow, 0, _hunks.Count, index);
+            if (h < 0) h = ~h - 1;
+            var hunk = _hunks[h];
+            int row = index - _firstRow[h];
+            if (row == 0)
+                return new DiffRow { Type = DiffRowType.Hunk, Index = index, InHunk = h, Hunk = hunk.Header, HunkRef = hunk };
+            int first = FirstLine(hunk);
+            if (!Split)
+                return new DiffRow { Type = DiffRowType.Unified, Index = index, InHunk = h, Line = hunk.Lines[first + row - 1] };
+            var (left, right) = (_pairs![h] ??= SplitPairs(hunk.Lines, first).ToArray())[row - 1];
+            return new DiffRow { Type = DiffRowType.Split, Index = index, InHunk = h, Left = left, Right = right };
+        }
+
+        /// <summary>The colours a build found for the file. Spans made with others are forgotten;
+        /// the word diffs, which are only the text's, are kept.</summary>
+        public FileHighlight? Highlight
+        {
+            get => _highlight;
+            set
+            {
+                if (ReferenceEquals(_highlight, value)) return;
+                _highlight = value;
+                _spans.Clear();
+            }
+        }
+
+        /// <summary>What a line of <paramref name="row"/> draws with: its syntax spans, and the
+        /// word diff with the line it is paired with over them. Made the first time it is drawn:
+        /// a row scrolled away and back is made again, and finds them here.</summary>
+        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? SpansOf(DiffRow row, GitDiffLine? line)
+        {
+            if (line is null) return null;
+            if (_spans.TryGetValue(line, out var known)) return known;
+            var syntax = SpansFor(_highlight, line);
+            var spans = WordsOf(line, row.InHunk) is { } ranges
+                ? MergeHighlight(syntax, ranges, line.Kind == DiffLineKind.Addition ? Nocturne.DiffAddHl : Nocturne.DiffDelHl)
+                : syntax;
+            _spans[line] = spans;
+            return spans;
+        }
+
+        // Deletion/addition lines that SplitPairs puts side by side get a word diff; the changed
+        // ranges render as brighter background spans on top of the syntax colors. Keyed by line
+        // identity: identical lines can repeat within a hunk, and each occurrence pairs with a
+        // different partner.
+        private IReadOnlyList<(int Start, int End)>? WordsOf(GitDiffLine line, int hunk)
+        {
+            if (line.Kind == DiffLineKind.Context) return null;
+            if (_words.TryGetValue(line, out var known)) return known;
+            if (!_paired[hunk])
+            {
+                _paired[hunk] = true;
+                foreach (var (l, r) in SplitPairs(_hunks[hunk].Lines, FirstLine(_hunks[hunk])))
+                    if (l is { Kind: DiffLineKind.Deletion } && r is { Kind: DiffLineKind.Addition })
+                        (_partners[l], _partners[r]) = (r, l);
+            }
+            if (!_partners.TryGetValue(line, out var partner)) return null;
+            var (left, right) = line.Kind == DiffLineKind.Deletion ? (line, partner) : (partner, line);
+            var (old, @new) = IntralineDiff.Compute(left.Content, right.Content);
+            _words[left] = old;
+            _words[right] = @new;
+            return line.Kind == DiffLineKind.Deletion ? old : @new;
+        }
 
         // What a reader hears for each row, made the first time assistive technology asks for
         // it and kept with the rows: the tree asks for every item's label each time it is built.
@@ -767,58 +935,74 @@ public partial class JunctionApp
 
         /// <summary>The list's item label for these rows (one delegate, so a build adds nothing).</summary>
         public Func<DiffRow, string?> Label => _label ??= r =>
-            (uint)r.Index < (uint)Rows.Count && ReferenceEquals(Rows[r.Index], r)
-                ? (_labels ??= new string?[Rows.Count])[r.Index] ??= DiffRowLabel(r)
+            (uint)r.Index < (uint)Count && ReferenceEquals(this[r.Index], r)
+                ? (_labels ??= new string?[Count])[r.Index] ??= DiffRowLabel(r)
                 : DiffRowLabel(r);
     }
 
-    private DiffRowsMemo? _diffRows;
+    private DiffRowList? _diffRows;
+    private int _diffRowRecords;
 
-    /// <summary>Flattenings of a diff into rows so far, for tests.</summary>
+    /// <summary>Lists of a diff's rows made so far, for tests.</summary>
     internal int DiffFlattens { get; private set; }
+
+    /// <summary>Row records made so far, for tests: what a list makes of a diff is what was asked
+    /// of it, not the size of the file.</summary>
+    internal int DiffRowRecords => _diffRowRecords + (_diffRows?.Made ?? 0);
 
     /// <summary>Diff rows the list's template has made so far, for tests.</summary>
     internal int DiffRowsMade { get; private set; }
 
     /// <summary>
     /// The diff's rows in the given layout, each knowing its position. The same list, holding
-    /// the same rows, as the last build's when the diff, the layout, the highlight and the
-    /// scheme are the same objects. Callers must not change it; the review weaves its cards
-    /// into a copy.
+    /// the same rows, as the last build's when the diff, the layout and the scheme are the same
+    /// objects. Callers must not change it; the review weaves its cards into a copy.
     /// </summary>
-    private List<DiffRow> FlattenedRows(GitFileDiff diff, bool split, FileHighlight? hl)
+    private DiffRowList FlattenedRows(GitFileDiff diff, bool split, FileHighlight? hl)
     {
-        var theme = Nocturne.Theme;   // the word diff's tint is baked into the spans
-        if (_diffRows is { } m && ReferenceEquals(m.Diff, diff) && m.Split == split
-            && ReferenceEquals(m.Highlight, hl) && ReferenceEquals(m.Theme, theme))
-            return m.Rows;
-        var rows = split ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
-        DiffFlattens++;
-        _diffRows = new DiffRowsMemo(diff, split, hl, theme, rows);
+        var theme = Nocturne.Theme;   // the word diff's tint is in the spans
+        if (_diffRows is not { } rows || !ReferenceEquals(rows.Diff, diff) || rows.Split != split
+            || !ReferenceEquals(rows.Theme, theme))
+        {
+            _diffRowRecords = DiffRowRecords;
+            rows = _diffRows = new DiffRowList(diff, split, theme);
+            DiffFlattens++;
+        }
+        rows.Highlight = hl;
         return rows;
     }
 
     /// <summary>
     /// What a diff row shows besides its item — the one thing its list compares. The rows are
     /// compared by identity (the flattened list is new when anything they were made from is);
-    /// the rest are the settings and state the row builders read, and the display scale the
-    /// staging checkboxes' glyphs are cut at (a change retires the old rasters).
+    /// the rest are the file's colours, the settings and state the row builders read, and the
+    /// display scale the staging checkboxes' glyphs are cut at (a change retires the old rasters).
     /// </summary>
     private readonly record struct DiffRowShape(
-        List<DiffRow> Rows, DiffInteract? Interact, bool Wrap, float PanOffset, string CodeFont, float CodeSize,
-        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Current, int Hits) Find,
+        IReadOnlyList<DiffRow> Rows, FileHighlight? Highlight, DiffInteract? Interact, bool Wrap, float PanOffset, string CodeFont, float CodeSize,
+        int TabWidth, object Theme, (string Query, bool MatchCase, bool Regex, int Hits) Find,
         float Scale);
 
     private DiffRowShape _diffRowShape;
 
-    /// <summary>What find tints: the query and its options, the current match and how many
+    /// <summary>What find tints on every row: the query and its options and how many matches
     /// there are (the matches themselves only move with a new query, option or binding, and a
-    /// new binding comes with new rows).</summary>
-    private (string, bool, bool, int, int) DiffFindShape()
+    /// new binding comes with new rows). The current match is not in it: it is tinted on one
+    /// row, so a step makes the row it left and the row it reached (<see cref="DiffFindHit"/>).
+    /// With its index here every Enter or F3 made every row on screen again, 462 KB a step.</summary>
+    private (string, bool, bool, int) DiffFindShape()
     {
         var s = _diffFind.Search;
-        return (s.Query, s.MatchCase, s.UseRegex, s.Index, s.Hits.Count);
+        return (s.Query, s.MatchCase, s.UseRegex, s.Hits.Count);
     }
+
+    private (int Index, int Line) _diffHit = (-1, -1);
+
+    /// <summary>The current match as the rows show it: its index and its row (the search's line
+    /// numbers are the rows'), or -1 for both. The index too: two matches on one row move the
+    /// tint within it.</summary>
+    private (int Index, int Line) DiffFindHit() =>
+        _diffFind.Search is { Current: { } hit } s ? (s.Index, hit.Line) : (-1, -1);
 
     // The staged-line picks as the rows on screen last drew them.
     private readonly HashSet<GitDiffLine> _diffRowStageSel = new();
@@ -831,71 +1015,6 @@ public partial class JunctionApp
         _diffRowStageSel.Clear();
         _diffRowStageSel.UnionWith(_stageSel);
         return true;
-    }
-
-    private static List<DiffRow> FlattenUnified(GitFileDiff diff, FileHighlight? hl)
-    {
-        var rows = new List<DiffRow>();
-        foreach (var hunk in diff.Hunks)
-        {
-            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Index = rows.Count, Hunk = hunk.Header, HunkRef = hunk });
-            var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
-            var intra = IntralineByLine(lines);
-            foreach (var line in lines)
-                rows.Add(new DiffRow { Type = DiffRowType.Unified, Index = rows.Count, Line = line, Spans = DiffSpans(hl, line, intra) });
-        }
-        return rows;
-    }
-
-    private static List<DiffRow> FlattenSplit(GitFileDiff diff, FileHighlight? hl)
-    {
-        var rows = new List<DiffRow>();
-        foreach (var hunk in diff.Hunks)
-        {
-            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Index = rows.Count, Hunk = hunk.Header, HunkRef = hunk });
-            var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
-            var intra = IntralineByLine(lines);
-            foreach (var (left, right) in SplitPairs(lines))
-                rows.Add(new DiffRow
-                {
-                    Type = DiffRowType.Split, Index = rows.Count, Left = left, Right = right,
-                    LeftSpans = left == null ? null : DiffSpans(hl, left, intra),
-                    RightSpans = right == null ? null : DiffSpans(hl, right, intra),
-                });
-        }
-        return rows;
-    }
-
-    // ── Intra-line (word-level) change emphasis ──────────────────────────
-    //
-    // Deletion/addition lines that SplitPairs puts side by side get a word
-    // diff; the changed ranges render as brighter background spans on top of
-    // the syntax colors. Keyed by line identity: identical lines can repeat
-    // within a hunk, and each occurrence pairs with a different partner.
-
-    private static Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>> IntralineByLine(
-        List<GitDiffLine> lines)
-    {
-        var byLine = new Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>>(
-            ReferenceEqualityComparer.Instance);
-        foreach (var (left, right) in SplitPairs(lines))
-        {
-            if (left is not { Kind: DiffLineKind.Deletion } || right is not { Kind: DiffLineKind.Addition })
-                continue;
-            var (old, @new) = IntralineDiff.Compute(left.Content, right.Content);
-            if (old != null) byLine[left] = old;
-            if (@new != null) byLine[right] = @new;
-        }
-        return byLine;
-    }
-
-    private static IReadOnlyList<HultUI.Core.Rendering.TextSpan>? DiffSpans(FileHighlight? hl, GitDiffLine line,
-        Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>> intra)
-    {
-        var syntax = SpansFor(hl, line);
-        if (!intra.TryGetValue(line, out var ranges)) return syntax;
-        var bg = line.Kind == DiffLineKind.Addition ? Nocturne.DiffAddHl : Nocturne.DiffDelHl;
-        return MergeHighlight(syntax, ranges, bg);
     }
 
     // Overlays background ranges onto (possibly absent) syntax spans, keeping
@@ -1001,12 +1120,12 @@ public partial class JunctionApp
         {
             DiffRowType.Hunk => HunkHeaderRow(r.Hunk, r.HunkRef, interact),
             DiffRowType.Split => SplitRow(r.Left, r.Right,
-                FoundIn(r.LeftSpans, r.Index, 0, r.Left?.Content),
-                FoundIn(r.RightSpans, r.Index, 1, r.Right?.Content), r.Index),
+                FoundIn(_diffRows!.SpansOf(r, r.Left), r.Index, 0, r.Left?.Content),
+                FoundIn(_diffRows!.SpansOf(r, r.Right), r.Index, 1, r.Right?.Content), r.Index),
             DiffRowType.Thread => ThreadCardRow(_review!, r),
             DiffRowType.Composer => ComposerRow(_review!, r),
             DiffRowType.Section => OutdatedSectionRow(),
-            _ => UnifiedRow(r.Line!, FoundIn(r.Spans, r.Index, 0, r.Line?.Content), interact, r.Index, r),
+            _ => UnifiedRow(r.Line!, FoundIn(_diffRows!.SpansOf(r, r.Line), r.Index, 0, r.Line?.Content), interact, r.Index, r),
         };
     }
 
@@ -1026,7 +1145,7 @@ public partial class JunctionApp
     /// column it is in; unified is one. Rows carrying no text of that lane — a hunk header, or
     /// the blank half opposite an add — return null and are skipped.</para>
     /// </summary>
-    private void BindDiffSearch(GitFileDiff diff, List<DiffRow> rows)
+    private void BindDiffSearch(GitFileDiff diff, IReadOnlyList<DiffRow> rows)
     {
         var key = (diff, _diffSplit, rows.Count);
         if (Equals(_diffFindKey, key)) return;
@@ -1071,7 +1190,7 @@ public partial class JunctionApp
 
     /// <summary>Points the selection groups at the rows currently on display. A different
     /// file or layout rebinds under a new key, which drops a selection that no longer maps.</summary>
-    private void BindDiffSelection(GitFileDiff diff, List<DiffRow> rows)
+    private void BindDiffSelection(GitFileDiff diff, IReadOnlyList<DiffRow> rows)
     {
         // null where a row carries no text of that side: a hunk header, or the blank half
         // opposite an add/delete. Those contribute nothing to a copy.
@@ -1172,25 +1291,27 @@ public partial class JunctionApp
         return row;
     }
 
-    private static IEnumerable<(GitDiffLine? Left, GitDiffLine? Right)> SplitPairs(List<GitDiffLine> lines)
+    /// <summary>A hunk's lines from <paramref name="first"/> on, side by side: a context line
+    /// with itself, and each run of deletions beside the additions that follow it.</summary>
+    private static IEnumerable<(GitDiffLine? Left, GitDiffLine? Right)> SplitPairs(List<GitDiffLine> lines, int first)
     {
-        var i = 0;
+        var i = first;
         while (i < lines.Count)
         {
             var cur = lines[i];
-            if (cur.Kind == DiffLineKind.Context)
+            if (cur.Kind is not (DiffLineKind.Deletion or DiffLineKind.Addition))
             {
                 yield return (cur, cur);
                 i++;
                 continue;
             }
-            var dels = new List<GitDiffLine>();
-            var adds = new List<GitDiffLine>();
-            while (i < lines.Count && lines[i].Kind == DiffLineKind.Deletion) dels.Add(lines[i++]);
-            while (i < lines.Count && lines[i].Kind == DiffLineKind.Addition) adds.Add(lines[i++]);
-            var n = Math.Max(dels.Count, adds.Count);
-            for (var k = 0; k < n; k++)
-                yield return (k < dels.Count ? dels[k] : null, k < adds.Count ? adds[k] : null);
+            int dels = i;
+            while (i < lines.Count && lines[i].Kind == DiffLineKind.Deletion) i++;
+            int adds = i;
+            while (i < lines.Count && lines[i].Kind == DiffLineKind.Addition) i++;
+            int deleted = adds - dels, added = i - adds;
+            for (var k = 0; k < Math.Max(deleted, added); k++)
+                yield return (k < deleted ? lines[dels + k] : null, k < added ? lines[adds + k] : null);
         }
     }
 

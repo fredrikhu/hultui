@@ -85,6 +85,8 @@ public static class ElementRenderer
 
         // Render self
         element.Render(ctx);
+        if (element.PositionRead.Type == PositionType.Sticky && element.Parent is ScrollViewElement parentView)
+            parentView.RenderOverStickyRow(ctx, element);
 
         // ScrollViewElement: clip + translate children, then draw scrollbars on top
         if (element is ScrollViewElement scrollView)

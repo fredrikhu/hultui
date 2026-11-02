@@ -7,6 +7,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
 namespace HultUI.Core.Builders;
@@ -40,6 +41,9 @@ namespace HultUI.Core.Builders;
 /// so do <see cref="ToggleKeys"/> — the dialog is modal, so the app's own handler never sees the
 /// key that opened it. The chosen row is kept in view. A long list shows its first
 /// <see cref="MaxRows"/> and says how many more the query would reveal.</para>
+/// <para><b>The list is virtual:</b> only the rows on screen are elements, and only they are in
+/// the accessibility tree, as buttons, the chosen one selected. The others join it as they are
+/// scrolled to.</para>
 /// <para>Its look is the theme's <see cref="CommandPaletteTheme"/>; key chips are
 /// <see cref="Kbd"/>s.</para>
 /// </remarks>
@@ -338,23 +342,21 @@ public sealed class CommandPalette
         header.AddChild(Kbd.New(ToggleKeys.Count > 0 ? ToggleKeys[0].ToString() : "Esc").FlexShrink(0));
         card.AddChild(header);
 
-        var rows = Flex.Column(gap: 0).Padding(t.ListPadding);
-        if (_matches.Count == 0)
-        {
-            rows.AddChild(Text.New(_query.Length == 0 ? "Nothing to run here" : $"No matches for \"{_query}\"")
-                .FontSize(t.MutedFontSize).TextColor(muted)
-                .Padding(new Thickness(12))
-                .AutomationId("palette-no-match"));
-        }
-        int shown = Math.Min(_matches.Count, MaxRows);
-        for (int i = 0; i < shown; i++)
-            rows.AddChild(BuildRow(_matches[i], i));
-        if (_matches.Count > shown)
-            rows.AddChild(Text.New($"{_matches.Count - shown} more — type to narrow them down")
-                .FontSize(t.MutedFontSize).TextColor(muted).Padding(new Thickness(8, 10, 8, 10)));
         // Sized to its rows, and shrinking once the card reaches its height: growing it filled the
         // card to its full height for a list of one.
-        card.AddChild(ScrollView.New().FlexShrink(1).WithRef(scrollRef).Children(rows));
+        if (_matches.Count == 0)
+        {
+            var nothing = Text.New(_query.Length == 0 ? "Nothing to run here" : $"No matches for \"{_query}\"")
+                .FontSize(t.MutedFontSize).TextColor(muted)
+                .Padding(new Thickness(12))
+                .AutomationId("palette-no-match");
+            card.AddChild(ScrollView.New().FlexShrink(1).WithRef(scrollRef)
+                .Children(Flex.Column(gap: 0).Padding(t.ListPadding).Children(nothing)));
+        }
+        else
+        {
+            card.AddChild(BuildList(scrollRef));
+        }
 
         if (Footer is { } footer)
             card.AddChild(Flex.Row(gap: 0).FlexShrink(0)
@@ -364,10 +366,99 @@ public sealed class CommandPalette
         return card;
     }
 
-    private Element BuildRow(PaletteCommand command, int index)
+    /// <summary>
+    /// The result list. Only the rows on screen are elements: a keystroke over a long list built
+    /// all <see cref="MaxRows"/> of them, 282 elements a key in Junction, for the 8 to 11 that fit
+    /// in the card, and a reader was told each key's whole list removed and added. Those off screen
+    /// join the reader's tree as they are scrolled to, as in any other virtual list. The list knows
+    /// each row's height, so it reaches every place, and the chosen row is always on screen.
+    /// </summary>
+    private VirtualListElement<ListRow> BuildList(Ref<ScrollViewElement> scrollRef)
+    {
+        int shown = Math.Min(_matches.Count, MaxRows);
+        var padding = _look.ListPadding;
+        float height = padding.Top + padding.Bottom;
+        for (int i = 0; i < shown; i++) height += RowHeight(_matches[i]);
+        if (_matches.Count > shown)
+        {
+            _moreHeight = MoreLineHeight(MoreLine(_matches.Count - shown));
+            height += _moreHeight;
+        }
+
+        var list = VirtualListElement<ListRow>.New()
+            .Items(new ListRows(_matches, shown, _selected))
+            .RowHeights(_listRowHeight ??= (row, _) => ListRowHeight(row))
+            .RenderWith(_listRow ??= (row, _) => BuildListRow(row))
+            .Height(height).FlexShrink(1);
+        // Rows that are buttons, in a container that says it is a scroll view, as they were.
+        list.RowsAreComposite = true;
+        list.Role = AccessibilityRole.ScrollView;
+        list.WithRef(scrollRef);
+        return list;
+    }
+
+    private Func<ListRow, int, float>? _listRowHeight;
+    private Func<ListRow, bool, Element>? _listRow;
+
+    /// <summary>The "n more" line's height, for the list to place it before it is made: the height
+    /// of its text, as it wraps at the width it gets in the card.</summary>
+    private float _moreHeight;
+
+    private static readonly Thickness MoreLinePadding = new(8, 10, 8, 10);
+
+    private static string MoreLine(int more) => $"{more} more — type to narrow them down";
+
+    private float MoreLineHeight(string line)
     {
         var t = _look;
-        bool selected = index == _selected;
+        const float cardBorders = 2f;
+        float width = t.Width - cardBorders - t.ListPadding.Left - t.ListPadding.Right
+            - MoreLinePadding.Left - MoreLinePadding.Right;
+        var style = _theme.ToResolvedStyle() with { FontSize = t.MutedFontSize };
+        return TextMeasure.MeasureWrapped(line, style, width).Height + MoreLinePadding.Top + MoreLinePadding.Bottom;
+    }
+
+    /// <summary>A row's height in the list: the first takes the list's top padding, and the last
+    /// its bottom padding, with them.</summary>
+    private float ListRowHeight(ListRow row)
+    {
+        float height = row.Command is { } command ? RowHeight(command) : _moreHeight;
+        if (row.Index == 0) height += _look.ListPadding.Top;
+        if (row.Last) height += _look.ListPadding.Bottom;
+        return height;
+    }
+
+    /// <summary>
+    /// One place in the list, in the box that holds the list's padding: on the list itself the
+    /// padding would clip the rows short of the list's edges and draw its scrollbar inside them.
+    /// Kept as it stands while its <see cref="ListRow"/> is equal. A keyed box that comes back
+    /// (the choice moved to or from its row, the row became the last) is patched, so a reader is
+    /// told the change on the row they had.
+    /// </summary>
+    private Element BuildListRow(ListRow row)
+    {
+        var padding = _look.ListPadding;
+        var place = Flex.Column(gap: 0).Padding(new Thickness(row.Index == 0 ? padding.Top : 0, padding.Right,
+            row.Last ? padding.Bottom : 0, padding.Left));
+        if (row.Command is { } command)
+        {
+            place.AddChild(BuildRow(command, row.Index, row.Selected));
+            // Matched by identity, not position, so a narrowed list does not hand a row the click
+            // handler of the one that used to be in its place.
+            place.Key = $"{command.Group}|{command.Title}|{row.Index}";
+        }
+        else
+        {
+            place.AddChild(Text.New(MoreLine(row.More)).FontSize(_look.MutedFontSize)
+                .TextColor(_look.Muted ?? _theme.Secondary).Padding(MoreLinePadding));
+            place.Key = "more";
+        }
+        return place;
+    }
+
+    private Element BuildRow(PaletteCommand command, int index, bool selected)
+    {
+        var t = _look;
         var normal = selected ? t.SelectedBackground ?? _theme.Primary with { A = 36 } : Color.Transparent;
         var row = Flex.Row(gap: t.RowGap).AlignItems(AlignItems.Center)
             .Height(RowHeight(command)).FlexShrink(0)
@@ -376,10 +467,8 @@ public sealed class CommandPalette
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(command.Group is { Length: > 0 } g ? $"{command.Title} ({g})" : command.Title)
+            .AccessibleSelected(selected)
             .AutomationId($"palette-row-{index}");
-        // Matched by identity, not position, so a narrowed list does not hand a row the click
-        // handler of the one that used to be in its place.
-        row.Key = $"{command.Group}|{command.Title}|{index}";
 
         var groupColor = t.Group ?? _theme.Secondary;
         if (GroupStyle == PaletteGroupStyle.Leading && command.Group is { } leading)
@@ -425,6 +514,34 @@ public sealed class CommandPalette
         text.MaxLines(1);
         text.Overflow = TextOverflow.Ellipsis;
         return text;
+    }
+
+    /// <summary>
+    /// One place in the result list: the row of <paramref name="Command"/>, or with none the line
+    /// that ends a long list and says how many <paramref name="More"/> there are. Everything a row
+    /// shows beside the theme, so that the list keeps a row while this is equal: a move of the
+    /// choice makes two rows, and a keystroke the ones whose command changed. Compared by place, so
+    /// kept rows never move among the others: moving them cost a reader more than making them.
+    /// </summary>
+    private readonly record struct ListRow(PaletteCommand? Command, int Index, bool Selected, bool Last, int More);
+
+    /// <summary>The first <paramref name="shown"/> matches and, when there are others, the line
+    /// that counts them, each made when the list asks for it. Its own snapshot of the matches: a
+    /// list holds this until it is rebuilt, and the query may have moved on by then.</summary>
+    private sealed class ListRows(IReadOnlyList<PaletteCommand> matches, int shown, int selected) : IReadOnlyList<ListRow>
+    {
+        public int Count => matches.Count > shown ? shown + 1 : shown;
+
+        public ListRow this[int index] => index < shown
+            ? new ListRow(matches[index], index, index == selected, index == Count - 1, 0)
+            : new ListRow(null, index, false, true, matches.Count - shown);
+
+        public IEnumerator<ListRow> GetEnumerator()
+        {
+            for (int i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     /// <summary>The palette's content: rebuilt from the palette's state whenever it changes.</summary>

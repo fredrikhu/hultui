@@ -221,30 +221,45 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // The same runs as glyph outlines, for TextAsOutlines.
     private readonly Dictionary<ShapedRun, SKPath?> _runPathCache = new(SameGlyphs.Instance);
 
-    /// <summary>Two runs draw the same pixels when they hold the same glyphs at the same places,
-    /// in the same face and size, whichever layout made them.</summary>
+    /// <summary>
+    /// Two runs draw the same pixels when they hold the same glyphs at the same places, in the
+    /// same face and size, whichever layout made them. Runs are matched by their text as well, and
+    /// hashed by face, size and text: two runs whose glyphs follow from their text
+    /// (<see cref="ShapedRun.GlyphsFollowText"/>: every run the word cache makes) hold the same
+    /// glyphs when they hold the same text, so a pair of them is matched without reading a glyph;
+    /// any other pair needs its glyphs equal too.
+    ///
+    /// <para>The glyphs were the key: hashed and compared on every lookup of a run new to the map,
+    /// which, since a run of several words puts its glyph array together when first read, made
+    /// that array only to find a blob made before. Every resize over wrapped or ellipsized text and
+    /// every scroll that reveals it did (plan 17, round 6: 3,885 of the 4,599 glyphs a step of
+    /// text/wrap put together, scroll/jump 10.5 KB a step). Runs of equal glyphs and other text now
+    /// make a blob each; none of the perf suite's rows draws one.</para>
+    /// </summary>
     private sealed class SameGlyphs : IEqualityComparer<ShapedRun>
     {
         public static readonly SameGlyphs Instance = new();
 
-        public bool Equals(ShapedRun? a, ShapedRun? b) =>
-            ReferenceEquals(a, b)
-            || (a is not null && b is not null && ReferenceEquals(a.Font, b.Font) && a.FontSize == b.FontSize
-                && (ReferenceEquals(a.Glyphs, b.Glyphs) || a.Glyphs.AsSpan().SequenceEqual(b.Glyphs)));
-
-        public int GetHashCode(ShapedRun run)
+        public bool Equals(ShapedRun? a, ShapedRun? b)
         {
-            var hash = new HashCode();
-            hash.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(run.Font));
-            hash.Add(run.FontSize);
-            foreach (var g in run.Glyphs)
-            {
-                hash.Add(g.GlyphId);
-                hash.Add(g.X);
-            }
-            return hash.ToHashCode();
+            if (ReferenceEquals(a, b)) return true;
+            if (a is null || b is null || !ReferenceEquals(a.Font, b.Font) || a.FontSize != b.FontSize
+                || !string.Equals(a.Text, b.Text))
+                return false;
+            return (a.GlyphsFollowText && b.GlyphsFollowText)
+                || ReferenceEquals(a.Glyphs, b.Glyphs) || a.Glyphs.AsSpan().SequenceEqual(b.Glyphs);
         }
+
+        public int GetHashCode(ShapedRun run) =>
+            HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(run.Font), run.FontSize, run.Text);
     }
+
+    // A run whose glyph array is not put together yet (most of the runs a resize or a scroll lays
+    // out) is put together here for its new blob, not as an array of its own: the blob is all a
+    // run drawn whole wants its glyphs for. Made with the first such blob and grown to the longest
+    // run, up to MaxBlobGlyphsComposed; a longer run puts its own array together, as before.
+    private GlyphPosition[]? _blobGlyphs;
+    private const int MaxBlobGlyphsComposed = 4096;
     private readonly SKFont _outlineFont = new() { Hinting = SKFontHinting.None, Subpixel = true, LinearMetrics = true };
 
     /// <summary>
@@ -887,9 +902,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
-            if (line.Runs.Count == 0) continue;
+            // The clip first: reading a line's runs makes them, and these lines draw nothing.
             float lineTop = origin.Y + line.OffsetY;
             if (lineTop > clip.Bottom + line.Height || lineTop + 2 * line.Height < clip.Top) continue;
+            if (line.Runs.Count == 0) continue;
             float baseX = origin.X + p.LineLeft(i);
             float lineY = lineTop + line.Ascent;
 
@@ -1019,13 +1035,17 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         for (int k = first; k < stop && at < drawnLength; k++)
         {
             var span = spans[k];
+            // A transparent colour colours nothing: the text keeps the colour it has there, the
+            // element's or, where spans overlap (a TextArea's may: a find match over a token),
+            // the other span's. Taken as the element's colour, a match that began at a token's
+            // start or ran into the next token painted those characters in it. Where spans do
+            // not overlap the stretches are the same either way.
+            if (span.Color.A == 0) continue;
             int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
             if (e <= at) continue;
             if (s > at) Continue(at, style.TextColor);
-            // Transparent span color = background-only span; glyphs keep the
-            // element's text color.
-            Continue(Math.Max(s, at), span.Color.A == 0 ? style.TextColor : span.Color);
+            Continue(Math.Max(s, at), span.Color);
             at = e;
         }
         if (at < drawnLength) Continue(at, style.TextColor);
@@ -1765,7 +1785,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
-            if (runs[i].Glyphs.Length != runs[i].Text.Length)
+            if (runs[i].GlyphCount != runs[i].Text.Length)
                 return MeasurerFor(style);
         return null;
     }
@@ -1953,14 +1973,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             _pooledPaint.Style = SKPaintStyle.Fill;
             Canvas.DrawPath(path, _pooledPaint);
             Canvas.Restore();
-            GlyphsDrawn += run.Glyphs.Length;
+            GlyphsDrawn += run.GlyphCount;
             return;
         }
         nint blob = BuildShapedBlob(run);
         if (blob != 0)
         {
             NativeTextBlob.Draw(Canvas, blob, x, y, _pooledPaint);
-            GlyphsDrawn += run.Glyphs.Length;
+            GlyphsDrawn += run.GlyphCount;
         }
         // The cache, and so the blob, stays alive until the draw has returned.
         GC.KeepAlive(this);
@@ -2008,10 +2028,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             return kept.Blob;
         }
 
-        // Read once: a run of several words puts its glyph array together on the first read.
-        var glyphs = run.Glyphs;
-        if (glyphs.Length == 0)
+        int count = run.GlyphCount;
+        if (count == 0)
             return 0;
+        ReadOnlySpan<GlyphPosition> glyphs = run.GlyphsComposed || count > MaxBlobGlyphsComposed
+            ? run.Glyphs
+            : ComposedForBlob(run, count);
 
         var typeface = (SKTypeface)run.Font.NativeHandle;
         _pooledFont.Typeface = typeface;
@@ -2038,6 +2060,16 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _runBlobCache[run] = new KeptBlob(blob, glyphs.Length, _frame);
         _runUse.Added(glyphs.Length);
         return blob;
+    }
+
+    // The glyphs of a run whose array is not put together yet, in the kept buffer.
+    private ReadOnlySpan<GlyphPosition> ComposedForBlob(ShapedRun run, int count)
+    {
+        if (_blobGlyphs is null || _blobGlyphs.Length < count)
+            _blobGlyphs = new GlyphPosition[System.Numerics.BitOperations.RoundUpToPowerOf2((uint)Math.Max(count, 64))];
+        var glyphs = _blobGlyphs.AsSpan(0, count);
+        run.ComposeGlyphsInto(glyphs);
+        return glyphs;
     }
 
     private void ClearRunBlobCache() => Empty(_runBlobCache, ref _runUse);

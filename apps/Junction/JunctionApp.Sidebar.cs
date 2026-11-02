@@ -12,7 +12,7 @@ namespace Junction;
 public partial class JunctionApp
 {
     /// <summary>One shape of the sidebar, the rail or the expanded list — each the build of a
-    /// chrome part of its own (see ChromePart), so toggling replaces one with the other.</summary>
+    /// chrome part of its own (see JunctionApp.Chrome.cs), so toggling replaces one with the other.</summary>
     private Element BuildSidebar(bool rail)
     {
         // One walk per sidebar build, shared by both shapes of the sidebar and by the keyboard

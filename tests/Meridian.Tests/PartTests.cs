@@ -331,6 +331,96 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>A popover is a menu to assistive technology, its rows the menu's items, directly in
+    /// the layer whose click closes it, which is then no button. The layer and the card were two
+    /// buttons named after every row. The entry under the pointer is selected, and telling it
+    /// builds no tree.</summary>
+    [Fact]
+    public void APopoverIsAMenuOfItems_AndTheEntryUnderThePointerIsSelected()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            var bridge = s.Window.InstallAccessibilityBridge();
+            s.PumpFrames(2);
+            Click(fx, "req-login");
+            Click(fx, "method-chip");
+
+            IEnumerable<HultUI.Core.Accessibility.AccessibilityNode> Walk(HultUI.Core.Accessibility.AccessibilityNode n) =>
+                n.Children.SelectMany(Walk).Prepend(n);
+            var role = (HultUI.Core.Accessibility.AccessibilityRole role) => Walk(bridge.CurrentTree!).Where(n => n.Role == role);
+            var menu = Assert.Single(role(HultUI.Core.Accessibility.AccessibilityRole.Menu));
+            Assert.Contains(menu.Children, c => c.Role == HultUI.Core.Accessibility.AccessibilityRole.MenuItem && c.Name == "PUT");
+            Assert.DoesNotContain(role(HultUI.Core.Accessibility.AccessibilityRole.Button),
+                n => n.Name is { } name && name.Contains("PUT", StringComparison.Ordinal));
+
+            HultUI.Core.Accessibility.AccessibilityNode Entry(string name) =>
+                role(HultUI.Core.Accessibility.AccessibilityRole.MenuItem).Single(n => n.Name == name);
+            Assert.False(Entry("PUT").IsSelected);
+            int trees = s.Window.AccessibilityTreesBuilt;
+            var box = s.Window.FindByAutomationId("popover-PUT")!.Element.Layout.AbsoluteBorderBox;
+            s.Window.MoveMouse(box.X + 20, box.Y + box.Height / 2);
+            s.PumpFrames(2);
+            Assert.True(Entry("PUT").IsSelected);
+            Assert.Equal(trees, s.Window.AccessibilityTreesBuilt);
+
+            // A click beside it closes it, and goes no further; a pick is the row's click.
+            s.Window.Click(900, 700);
+            s.PumpFrames(3);
+            Assert.Empty(role(HultUI.Core.Accessibility.AccessibilityRole.Menu));
+            Click(fx, "method-chip");
+            Click(fx, "popover-PUT");
+            Assert.Empty(role(HultUI.Core.Accessibility.AccessibilityRole.Menu));
+        });
+    }
+
+    /// <summary>A popover — the method picker, the environment switcher, an assertion's operator —
+    /// opens and closes with the window's view alone, and a pick builds the window once: what the
+    /// pick changes, and the parts only where they show it (the tree's unsaved dot, the title
+    /// bar's environment). An open and a pick built the window three times and the parts twice
+    /// (plan 17 round 6).</summary>
+    [Fact]
+    public void APopoverOpensAndClosesWithTheView_AndAPickBuildsOnce()
+    {
+        Hosted(fx =>
+        {
+            var s = fx.Session;
+            void Step(string name, Action act, bool parts)
+            {
+                int builds = fx.App.Builds, partBuilds = fx.App.PartBuilds;
+                act();
+                Assert.True(fx.App.Builds - builds == 1, $"{name} built the window {fx.App.Builds - builds} times");
+                if (parts) Assert.True(fx.App.PartBuilds > partBuilds, $"{name} built no part");
+                else Assert.True(fx.App.PartBuilds == partBuilds, $"{name} built {fx.App.PartBuilds - partBuilds} parts");
+                AssertPartsAreAFullBuild(fx, "after " + name);
+            }
+
+            Click(fx, "req-get-ok");
+            Step("the method picker opening", () => Click(fx, "method-chip"), parts: false);
+            Step("a method picked on a saved request", () => Click(fx, "popover-PUT"), parts: true);
+            Assert.Equal("PUT", fx.App.ActiveTab!.Doc.Method);
+            Assert.True(HasDot(TreeRow(fx, "req-get-ok")));
+            Step("the method picker opening again", () => Click(fx, "method-chip"), parts: false);
+            Step("a method picked on an unsaved request", () => Click(fx, "popover-POST"), parts: false);
+            Assert.Equal("POST", fx.App.ActiveTab!.Doc.Method);
+            Assert.Equal("Method: POST", s.Window.FindByAutomationId("method-chip")!.Element.AccessibleName);
+            Step("the method picker opening once more", () => Click(fx, "method-chip"), parts: false);
+            Step("a click beside it", () => { s.Window.Click(700, 860); s.PumpFrames(3); }, parts: false);
+            Assert.Null(s.Window.FindByAutomationId("popover-GET"));
+            Assert.Equal("POST", fx.App.ActiveTab!.Doc.Method);
+
+            Step("the environment switcher opening", () => { s.Window.PressKey(KeyCode.E, KeyModifiers.Ctrl); s.PumpFrames(3); }, parts: false);
+            Step("an environment picked", () => Click(fx, "popover-staging"), parts: true);
+            Assert.Equal("Environment: staging", Part(fx, "titlebar").Descendant("env-name").AccessibleName);
+
+            Click(fx, "subtab-assertions");
+            Click(fx, "starter-status");
+            Step("an assertion's operator popover opening", () => Click(fx, "assert-op-0"), parts: false);
+            Step("an operator picked", () => Click(fx, "popover-contains"), parts: false);
+            Assert.Equal("status contains 200", fx.App.ActiveTab!.Doc.Asserts.Single().Args);
+        });
+    }
+
     /// <summary>The environment: the title bar's chip follows a switch.</summary>
     [Fact]
     public void TheEnvironmentChip_FollowsASwitch()

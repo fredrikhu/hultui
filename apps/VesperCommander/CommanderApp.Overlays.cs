@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -14,8 +15,16 @@ public partial class CommanderApp
     // A full-shell dim backdrop (click-to-dismiss) hosting a centred Nocturne card
     // that stops click propagation. `topAligned` drops the card near the top (drive
     // picker / palette) instead of centring it.
-    private Element Backdrop(Element card, bool topAligned, float topPad = 70f)
+    /// <summary>A modal card over the window on a dim backdrop whose click closes it. The card is a
+    /// dialog to assistive technology, named <paramref name="name"/> (its title), directly inside the
+    /// backdrop, so the backdrop is no button (AccessibilityTreeBuilder.InferRole): before, a reader
+    /// heard each overlay inside a button named after all of its text, told again whenever any of it
+    /// changed, and each such change built the window's whole accessibility tree (a transfer's
+    /// progress, every tick).</summary>
+    private Element Backdrop(Element card, string name, bool topAligned, float topPad = 70f)
     {
+        card.Role = AccessibilityRole.Dialog;
+        card.AccessibleName = name;
         var backdrop = Box.New()
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
             .Background(Nocturne.Alpha(Color.FromHex("#05060c"), 0.62))
@@ -87,7 +96,7 @@ public partial class CommanderApp
             listBox.AddChild(DriveRow(side, _drives[i], i == _driveCur));
         card.AddChild(listBox);
 
-        return Backdrop(card, topAligned: true);
+        return Backdrop(card, "Select drive", topAligned: true);
     }
 
     private Element DriveRow(char side, DriveEntry d, bool cursor)
@@ -189,7 +198,7 @@ public partial class CommanderApp
             : PrimaryButton(spec.ConfirmLabel, spec.OnConfirm));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: false);
+        return Backdrop(card, spec.Title, topAligned: false);
     }
 
     // ── Name prompt (F7 new folder · Shift+F6 rename) ────────────────────
@@ -241,7 +250,7 @@ public partial class CommanderApp
             : PrimaryButton(spec.ConfirmLabel, CommitNamePrompt));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: false);
+        return Backdrop(card, spec.Title, topAligned: false);
     }
 
     // ── Overwrite conflict dialog ────────────────────────────────────────
@@ -292,7 +301,7 @@ public partial class CommanderApp
         footer.AddChild(PrimaryButton("Overwrite all", () => OverwriteDecision(true, true)));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: false);
+        return Backdrop(card, op.ArchiveTargets != null ? "Already in the archive" : "File already exists", topAligned: false);
     }
 
     private static Element CompareCell(string label, string size, string date, bool rightBorder)
@@ -362,7 +371,7 @@ public partial class CommanderApp
         footer.AddChild(SecondaryButton("Cancel", CancelTransfer));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: false);
+        return Backdrop(card, op.IsPack ? op.PackVerb : op.IsMove ? "Moving" : "Copying", topAligned: false);
     }
 
     /// <summary>" · 42 MB/s · 8s left" once there's enough signal, else "".</summary>
@@ -461,7 +470,7 @@ public partial class CommanderApp
         footer.AddChild(PrimaryButton("Done", CloseOverlays));
         card.AddChild(footer);
 
-        return Backdrop(card, topAligned: false);
+        return Backdrop(card, "Bookmarks", topAligned: false);
     }
 
     private Element BookmarkRow(int index, bool selected)

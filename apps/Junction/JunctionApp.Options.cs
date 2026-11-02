@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -100,7 +101,8 @@ public partial class JunctionApp
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusLg)
-            .Overflow(Overflow.Hidden);
+            .Overflow(Overflow.Hidden)
+            .AccessibleRole(AccessibilityRole.Dialog).AccessibleName("Options");
         card.On<ClickEvent>(e => e.StopPropagation = true);
         card.AutomationId = "options";
 

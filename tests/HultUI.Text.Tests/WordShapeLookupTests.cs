@@ -98,6 +98,40 @@ public class WordShapeLookupTests
     }
 
     [Fact]
+    public void MeasureRange_IsMeasureStringOfTheRange_ToTheBit()
+    {
+        // Every range of every text: words cut short at both ends, runs of the second font cut
+        // into, ranges of spaces alone.
+        var fonts = new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false);
+        var pipeline = new TextPipeline(fonts, new WidthChangeEquivalenceTests.ContextShaper());
+        int measured = 0;
+        foreach (var style in Styles)
+        foreach (var text in TwoPasses(Texts))
+        for (int from = 0; from <= text.Length; from++)
+        for (int to = from; to <= text.Length; to++)
+        {
+            float expected = pipeline.MeasureString(text[from..to], style);
+            float actual = pipeline.MeasureRange(text, from, to, style);
+            Assert.True(WordModel.Bits(expected) == WordModel.Bits(actual),
+                $"\"{text}\"[{from}..{to}] {style}: {actual}, expected {expected}");
+            measured++;
+        }
+        Assert.True(measured > 10_000, $"measured only {measured} ranges");
+    }
+
+    [Fact]
+    public void MeasureRange_CutsNoString()
+    {
+        // A range of two fonts' runs, its words in the cache: no string for the range, none for
+        // its runs. Cut out and itemized as a string, it was the range and each of its five runs.
+        var fonts = new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false);
+        var pipeline = new TextPipeline(fonts, new WidthChangeEquivalenceTests.ContextShaper());
+        string text = "the mixed Ελλη and latin Ελλη text";
+        pipeline.MeasureRange(text, 2, text.Length - 2, Base);
+        Assert.Equal(0, Allocations.Least(() => pipeline.MeasureRange(text, 2, text.Length - 2, Base)));
+    }
+
+    [Fact]
     public void ALaidOutLine_IsTheModelsRuns_WithLetterSpacing()
     {
         var fonts = new WidthChangeEquivalenceTests.TwoFonts(negativeDescent: false);

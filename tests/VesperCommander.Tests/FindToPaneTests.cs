@@ -498,7 +498,7 @@ public class FindToPaneTests
     /// resolve in a recycling VirtualList.</summary>
     private static IReadOnlyList<HultUI.Core.Elements.Element> ListRows(DiffViewTests.Fixture t)
     {
-        var vlist = t.Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.VirtualListElement<FileEntry>>>("_vlistL")
+        var vlist = t.Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.VirtualListElement<CommanderApp.PaneRowItem>>>("_vlistL")
             .Current ?? throw new Xunit.Sdk.XunitException("the left pane has no list");
         // The list's first child is the spacer standing in for the rows scrolled past above.
         return vlist.Children.Skip(1).ToList();

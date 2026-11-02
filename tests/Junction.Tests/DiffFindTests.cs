@@ -142,6 +142,80 @@ public class DiffFindTests
         }, content: "one\ntwo\nthree\n");
     }
 
+    /// <summary>A step makes the row the current match left and the row it reached, and within
+    /// a row (two matches on it) the one row, where its index in the rows' shape made every row
+    /// on screen again (462 KB an Enter on a 3,000-line diff). Every row is then what a remake of
+    /// all of them makes, through a whole walk and back.</summary>
+    [Fact]
+    public void AFindStep_MakesTheRowsTheCurrentMatchMovesBetween()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Find(session, app, "fox");
+            Assert.Equal(5, Search(app).Hits.Count);
+            SettleBuilds(session, app);
+
+            void Step(KeyModifiers mods, int rows, string what)
+            {
+                int made = app.DiffRowsMade;
+                Press(session, KeyCode.Enter, mods);
+                Assert.True(app.DiffRowsMade - made == rows, $"{what}: {app.DiffRowsMade - made} rows made, {rows} expected");
+                var kept = Tints(app);
+                Assert.Contains("current", kept);
+                var body = (ScrollViewElement)typeof(JunctionApp).GetField("_diffBodyRef", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .GetValue(app)!.GetType().GetProperty("Current")!.GetValue(typeof(JunctionApp)
+                    .GetField("_diffBodyRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app))!;
+                body.GetType().GetMethod("InvalidateRows")!.Invoke(body, null);
+                typeof(JunctionApp).GetMethod("RerenderView", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);
+                session.PumpFrames(2);
+                Assert.Equal(Tints(app), kept);
+            }
+
+            // The diff's three context lines hold two matches, one and two: the current match
+            // starts on the first of the first.
+            Step(KeyModifiers.None, 1, "the second on the line");
+            Step(KeyModifiers.None, 2, "on to the next line");
+            Step(KeyModifiers.None, 2, "and the next");
+            Step(KeyModifiers.None, 1, "along it");
+            Step(KeyModifiers.Shift, 1, "back along it");
+            Step(KeyModifiers.Shift, 2, "back a line");
+            Step(KeyModifiers.Shift, 2, "and another");
+        }, content: "head\nhead\nhead\nhead\nfox a and fox\nfox b\nfox c and fox\n");
+    }
+
+    /// <summary>Pumps until the window has built nothing for 300 ms: the repository's watcher sees
+    /// the fixture's last writes for a while, and its reload builds and makes every row again.</summary>
+    private static void SettleBuilds(HeadlessSession session, JunctionApp app)
+    {
+        var quiet = System.Diagnostics.Stopwatch.StartNew();
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+        int last = app.Builds;
+        while (quiet.ElapsedMilliseconds < 300 && DateTime.UtcNow < until)
+        {
+            session.PumpFrame();
+            Thread.Sleep(5);
+            if (app.Builds != last) { last = app.Builds; quiet.Restart(); }
+        }
+    }
+
+    /// <summary>What find tints on the rows on screen: each span with a background, in order.</summary>
+    private static string Tints(JunctionApp app)
+    {
+        var field = typeof(JunctionApp).GetField("_diffBodyRef", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        var list = (Element)field.GetType().GetProperty("Current")!.GetValue(field)!;
+        var sb = new System.Text.StringBuilder();
+        foreach (var row in list.Children)
+        {
+            foreach (var text in LayoutProbe.Descendants<TextElement>(row, t => t.Spans is not null))
+                foreach (var span in text.Spans!)
+                    if (span.Background != default(HultUI.Core.Primitives.Color))
+                        sb.Append(span.Start).Append('+').Append(span.Length).Append(':')
+                            .Append(span.Background == Junction.Theme.Nocturne.FindCurrentBg ? "current" : "hit").Append(' ');
+            sb.Append('\n');
+        }
+        return sb.ToString();
+    }
+
     [Fact]
     public void EnterWalksTheMatchesAndWraps()
     {
@@ -150,6 +224,7 @@ public class DiffFindTests
             Find(session, app, "line");
             int count = Search(app).Hits.Count;
             Assert.True(count >= 3, $"expected several matches to walk, got {count}");
+            SettleBuilds(session, app);
             Assert.Equal(0, Search(app).Index);
 
             // One build a step: the bar's search tells the app through the bar, which holds it

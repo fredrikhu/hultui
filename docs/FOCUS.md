@@ -222,7 +222,9 @@ so the page's own shortcuts cannot fire underneath. Any other overlay is a Tab s
 it holds the focus: Tab from a field in a popover cycles in the popover.
 
 A dialog takes the keyboard when it opens: its first control, or the dialog itself when it
-has none. Content that wants a particular field focuses it after `Dialog.Show` returns and
+has none — the panel, which a screen reader is told has the focus as a dialog named by its
+title (until 2026-10-27 the scrim took it, a pane with no name to a reader); it is not a Tab
+stop. Content that wants a particular field focuses it after `Dialog.Show` returns and
 wins. **Escape closes it** with the default result (`DialogOptions.DismissOnEscape`, on by
 default), after everything inside has had its turn: a dropdown closing its list, or a panel
 that answers on Escape and stops it, keeps the key. The panel is announced as a `Dialog` to

@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="HultUI.Platform.Accessibility.Linux.Tests" />
     <!-- Drives the bridge from a headless window, with its signals recorded (IAtSpiSignals). -->
     <InternalsVisibleTo Include="HultUI.Headless.Tests" />
+    <!-- The perf suite's AT-SPI rows: the bridge in process, its signals counted (IAtSpiSignals). -->
+    <InternalsVisibleTo Include="HultUI.Samples.PerfSuite" />
   </ItemGroup>
 
   <ItemGroup>

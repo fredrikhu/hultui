@@ -297,6 +297,46 @@ public class CacheBoundTests
     }
 
     /// <summary>
+    /// A remembered line whose runs are not made yet keeps its whole text, which can outlive the
+    /// string's entry: the first of a string's lines counts for it. Weighed as two lines, a list of
+    /// previews of long styled paragraphs, two lines of each, kept every paragraph: 600 of 80 KB, in
+    /// a bound of 12 MB.
+    /// </summary>
+    [Fact]
+    public void LongTexts_AreNotKeptAliveByARememberedLine_PastTheBound()
+    {
+        var pipeline = new TextPipeline(new StubFontCollection(), new StubTextShaper());
+        var texts = LayOutPreviews(pipeline, 600);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        Assert.True(pipeline.MemoLineCacheUse.Bytes <= TextPipeline.MemoLineCacheBytes);
+        int alive = texts.Count(t => t.IsAlive);
+        long kept = alive * 80_000L;
+        Assert.True(kept <= TextPipeline.MemoLineCacheBytes + TextPipeline.MemoCacheBytes / 2,
+            $"{alive} of {texts.Length} texts of 80 KB are alive");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference[] LayOutPreviews(TextPipeline pipeline, int count)
+    {
+        var texts = new WeakReference[count];
+        var bold = new[] { new HultUI.Core.Rendering.TextSpan(2, 3, default, Weight: FontWeight.Bold) };
+        var words = new System.Text.StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            words.Clear().Append(i).Append(' ');
+            while (words.Length < 40_000) words.Append("some words ");
+            string text = words.ToString();
+            texts[i] = new WeakReference(text);
+            foreach (float width in new[] { 400f, 390f, 380f })
+                pipeline.Layout(text, Style, width, 2, TextOverflow.Clip, bold);
+        }
+        return texts;
+    }
+
+    /// <summary>
     /// A width or a line remembered for a range of a string is keyed by its entry's number, not
     /// the entry: an entry the cache has let go is gone, though ranges of it are still there.
     /// Keyed by the entry, each kept its entry alive — levels, breaks, segment widths and the
