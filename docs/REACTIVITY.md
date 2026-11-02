@@ -356,6 +356,35 @@ the real loop, a position report every 100 ms) still builds each app 0 times; th
 allocates 22,130 → 22,158 B/s in Aperture (six reports) and 22,115 → 22,472 B/s in Reel (four
 settings writes), so a check that is not due costs nothing measurable.
 
+### A resize builds only for what it changes
+
+A window dragged by hand passes through a size a frame, and layout follows it by itself: the same
+elements, new boxes. A `MarkDirty()` on `Window.Resized` makes all of them again, on every step, for
+the few things a build reads off the size. Have each build note what it read, and have the resize
+work the same out at the new size and build only when an answer changed. Vesper's grids do this
+(round 4, step 13), and Aperture (round 6, step 13):
+
+- **Put the reads behind one method that notes them.** Aperture has one question, how many cards
+  of this width fit across, asked from about a dozen places in its views, with six card widths. The
+  answer's method notes each width it was asked about, so a view added later is covered. A list of
+  the widths you know of goes stale.
+- **Compare with what the last build read, not with the last step.** Nothing was built in between.
+- **Round before you compare.** A hero's picture is asked for in steps of 128 pixels; its width
+  matters only when a step is crossed. Its box is set from the height, so the height matters at
+  every step inside the range it follows.
+- **Look for what a build did besides.** Aperture's library keeps the cursor on screen in its
+  build, so a window shrinking under the cursor scrolled because each step built. The check now
+  makes the same call itself. A state that arrives as a resize belongs in the check too: full
+  screen taken from outside the app shows only as one.
+- **Test it against a full build.** Walk each view through the sizes and compare what is on screen
+  with what a forced rebuild makes, with builds far enough apart for a missed one to show.
+
+Aperture, headless, 1440×900, a resize and two frames, NativeAOT within 1 %: a 4 px step that keeps
+the columns in the library 71.5 → 2.3 KB (−97 %), one build a step → none; the same in height; Home
+130.0 → 2.3 KB (−98 %); an item's page, whose hero asks again at a step, 77.3 → 14.1 KB (−82 %). A
+step across a column count builds as it did. Headless, the frames are most of a step, so its time
+moved by −1…−3 %.
+
 ### Keep what a key does not change in a child component
 
 A rebuild makes everything its `Build()` makes. Junction's window was one component, so a key

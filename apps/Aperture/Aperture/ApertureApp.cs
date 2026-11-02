@@ -145,7 +145,8 @@ public sealed partial class ApertureApp : Component, IDisposable
 
     // A monitor change arrives as a resize: retire the icon rasters cached for the old
     // scale, or every icon disappears until the next build. Artwork is fetched at the new
-    // scale as tiles are next built (SyncArtworkScale).
+    // scale as tiles are next built (SyncArtworkScale). Any other resize builds only when a
+    // build would read something else off the window's size (ApertureApp.WindowFit.cs).
     private void OnWindowResize()
     {
         float scale = _window.DisplayScale;
@@ -155,10 +156,13 @@ public sealed partial class ApertureApp : Component, IDisposable
             Ui.DisplayScale = scale;
             Rerender();
         }
+        else if (WindowFitChanged())
+        {
+            MarkDirty();
+        }
         else
         {
-            // Column counts in the poster grid are read off the window width.
-            MarkDirty();
+            FollowWindowWithoutBuild();
         }
     }
 
@@ -176,6 +180,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         Builds++;
         // Track the revision signal so Rerender() re-runs Build through the Effect.
         _ = _revision.Value;
+        StartWindowFit();
 
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)

@@ -345,9 +345,22 @@ public sealed partial class ApertureApp
 
     /// <summary>A hero's box, in layout units: the whole view beside the rail, and a height
     /// that follows the window's.</summary>
-    internal float HeroWidth => MathF.Max(1f, _window.LayoutWidth - Halide.RailWidth);
+    internal float HeroWidth => HeroWidthAt(_window.LayoutWidth);
 
-    internal float HeroHeight => Math.Clamp(_window.LayoutHeight * 0.44f, 280f, 420f);
+    internal float HeroHeight => HeroHeightAt(_window.LayoutHeight);
+
+    private static float HeroWidthAt(float windowWidth) => MathF.Max(1f, windowWidth - Halide.RailWidth);
+
+    private static float HeroHeightAt(float windowHeight) => Math.Clamp(windowHeight * 0.44f, 280f, 420f);
+
+    /// <summary>The side that decides a hero's cover fit in a window of this size, and the device
+    /// pixels asked for along it (<see cref="HeroPixels"/>).</summary>
+    private (bool ByHeight, int Pixels) HeroAsk(double? aspect, float windowWidth, float windowHeight)
+    {
+        float width = HeroWidthAt(windowWidth), height = HeroHeightAt(windowHeight);
+        bool byHeight = aspect is { } a && a > width / height * 1.005;
+        return (byHeight, HeroPixels(byHeight ? height : width, _artworkScale));
+    }
 
     /// <summary>The device pixels a hero asks for across a side <paramref name="layoutSize"/>
     /// long: what the side covers at this scale, rounded up to a <see cref="HeroStep"/>.</summary>
@@ -390,9 +403,9 @@ public sealed partial class ApertureApp
     private (HultUI.Core.Rendering.IImageSource? Image, PosterCache.Status Status) HeroArtwork(
         string? art, double? aspect, Func<int?, int?, Uri?> sized)
     {
-        float width = HeroWidth, height = HeroHeight;
-        bool byHeight = aspect is { } a && a > width / height * 1.005;
-        int pixels = HeroPixels(byHeight ? height : width, _artworkScale);
+        _fitHero = true;
+        _fitHeroAspect = aspect;
+        var (byHeight, pixels) = HeroAsk(aspect, _window.LayoutWidth, _window.LayoutHeight);
         if (art is null || (byHeight ? sized(null, pixels) : sized(pixels, null)) is not { } url)
             return _posters.Get(null);
 
@@ -539,7 +552,7 @@ public sealed partial class ApertureApp
     /// reports one card as its intrinsic width, so reading the box back would say one.</summary>
     internal int VisibleCards(float cardWidth)
     {
-        float content = _window.LayoutWidth - Halide.RailWidth - Halide.S5 * 2;
-        return Math.Max(1, (int)((content + Halide.PosterGap) / (cardWidth + Halide.PosterGap)));
+        if (!_fitCardWidths.Contains(cardWidth)) _fitCardWidths.Add(cardWidth);
+        return CardsAcross(cardWidth, _window.LayoutWidth);
     }
 }

@@ -44,6 +44,7 @@ public sealed partial class ApertureApp
         float viewportHeight = _gridList.Current?.Layout.AbsoluteContentBox.Height
             ?? Math.Max(200f, _window.LayoutHeight - Halide.TitleBarHeight - 110f);
         int visibleRows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowStride));
+        _fitGridStride = rowStride;
         var cursorKey = $"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}:{GridGenre?.Id}:{GridFavouritesOnly}";
 
         // What to have loaded: a page beyond the furthest the grid has been taken — the last
@@ -72,17 +73,7 @@ public sealed partial class ApertureApp
 
         int rowCount = asList ? items.Count : (items.Count + perRow - 1) / perRow;
 
-        // Keep the cursor on screen as the arrows walk past the realized window.
-        if (_gridList.Current is { } mounted && CursorIndex >= 0)
-        {
-            int cursorRow = CursorIndex / perRow;
-            mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
-            // A page that landed took the cursor past the rows the list has laid out (End on its
-            // way to the last item): the reveal stops at the old end, so it is made again once
-            // the list has the new rows.
-            if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
-                _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
-        }
+        RevealGridCursor(perRow, rowStride);
 
         // The list keeps a row while its item is equal — its place and the column the cursor
         // is in, so an arrow makes the row or two the cursor left and reached. Everything else
@@ -104,6 +95,19 @@ public sealed partial class ApertureApp
             .AutomationId("library-grid")
             .FlexGrow(1));
         return column;
+    }
+
+    /// <summary>Keeps the cursor on screen as the arrows walk past the realized window.</summary>
+    private void RevealGridCursor(int perRow, float rowStride)
+    {
+        if (_gridList.Current is not { } mounted || CursorIndex < 0) return;
+        int cursorRow = CursorIndex / perRow;
+        mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
+        // A page that landed took the cursor past the rows the list has laid out (End on its
+        // way to the last item): the reveal stops at the old end, so it is made again once
+        // the list has the new rows.
+        if ((cursorRow + 1) * rowStride > mounted.ContentHeight)
+            _window.RequestPostFrameCallback(() => _gridList.Current?.ScrollRangeIntoView(cursorRow * rowStride, rowStride));
     }
 
     private Element BuildLibraryBar(string title, string libraryId)
