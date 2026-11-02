@@ -182,7 +182,7 @@ A focus move rebuilds no tree. The window marks it on the applied tree in place
 (`IsFocused` on the node that had the focus and on the one that has it) and hands
 the bridge both nodes (`NotifyFocusChanged(focused, previous)`): the UIA wrappers
 take the new state and raise HasKeyboardFocus for both, then the focus event; the
-AT-SPI snapshot's objects take it and send state-changed:focused. The next
+AT-SPI bridge's objects take it and send state-changed:focused. The next
 rebuild's diff then has nothing to say about the move. Before, both kept the
 state of the last rebuild until the next one, which reported the move late.
 
@@ -413,6 +413,25 @@ Files:
       the node made again for it. The objects were made again for every node on every refresh to
       copy the geometry: 772 KB a wheel turn over 1,000 rows, 301 KB a key of a reader's walk
       beside details, 518 KB a label's edit beside 1,000 rows; now 0.2, 0.8 and 0.4 KB.
+    - **Objects kept by element (2026-11-02, plan 17 round 6 step 15).** The bridge keeps its
+      objects in a concurrent map by element, as the UIA bridge keeps its wrappers, instead of
+      making every object again on every apply (about 265 bytes a node). An apply walks the new
+      tree once, points each object at its node and takes what changed
+      (`AtSpiAccessible.Refresh`: what `From` would make, written only where it differs), makes
+      objects only for new nodes, keeps a parent's list of children while its children are the
+      same elements, and lets go of the objects of nodes that went (those the diff removed, then
+      any the walk did not reach): such an object answers nothing (UnknownObject) and drops its
+      node, which reaches its whole old tree. What the signals are worked out from is noted before
+      the objects take the new tree (a reordered parent's old children, an expanded state before,
+      a served list's children before), so the signals are the same: the same stream, byte for
+      byte, over the perf suite's 190 scenes. The bus thread reads each
+      property whole: a string, an array (replaced, never written over) or one word; a parent's
+      children read while a reorder is applied are the old list or the new. AT-SPI apply, headless:
+      a dialog's label tick over 3,006 nodes 797 → 0.2 KB, a palette key 816 → 11.4 KB, a list
+      filtered below 1,000 rows 843 → 2.5 KB, a row added to 1,000 rows 808 → 25 KB (the parent's
+      list of 3,000 children, made again). What is still made per node is the object of a node
+      that is new: a kept tab's page coming back (900 nodes) costs 290 KB, as its nodes left the
+      tree with the page.
   - `NotifyFocusChanged` → emit `StateChanged::focused` true/false signals on
     the old/new nodes, and `window:activate` if needed on the root.
 
@@ -486,7 +505,7 @@ What a screen reader gets for a list of 3,000 items:
 
 | | UI Automation | AT-SPI |
 |---|---|---|
-| The list's children | `UiaVirtualItem`s, made per navigation result, as before | `ChildCount` 3,000 (was 0); `GetChildAtIndex` makes an item's object the first time it is asked for and keeps it while the list serves its items; the snapshot still publishes the list's object alone (2 objects for the window) |
+| The list's children | `UiaVirtualItem`s, made per navigation result, as before | `ChildCount` 3,000 (was 0); `GetChildAtIndex` makes an item's object the first time it is asked for and keeps it while the list serves its items; the bridge still publishes the list's object alone (2 objects for the window) |
 | An item's name, check state | read from the list when asked | the same |
 | An item's selected state, the list's number of items | from the list's node: what the events told | the same |
 | An item's box, offscreen | from the list's viewport and scroll (`AccessibilityNode.TryGetServedItemBox`), where its node would be | the same, in device pixels |
