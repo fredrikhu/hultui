@@ -269,7 +269,7 @@ public sealed partial class ApertureApp
     private void OnArtworkLanded()
     {
         _artworkLanded++;
-        Rerender();
+        RerenderView();
         // A trickplay sheet is artwork too, and the card over the scrubber is the player's, which
         // the app's build does not rebuild: a sheet landing under a pointer resting on the
         // scrubber showed only when the pointer next moved. Nothing when it is not hovered.

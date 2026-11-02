@@ -124,7 +124,7 @@ public sealed partial class ApertureApp
         if (next == _cursorIndex) return true;   // at an end: the key is still ours
         _cursorIndex = next;
         _pendingCursorFocus = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 
@@ -134,7 +134,7 @@ public sealed partial class ApertureApp
         _cursorToEnd = false;
         _cursorIndex = Math.Clamp(index, 0, _cursorItems.Count - 1);
         _pendingCursorFocus = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 
@@ -148,7 +148,7 @@ public sealed partial class ApertureApp
         _cursorIndex = _cursorItems.Count - 1;
         _cursorToEnd = _cursorTotal > _cursorItems.Count;   // before the build, which asks for the rest
         _pendingCursorFocus = true;
-        Rerender();
+        RerenderView();
         return true;
     }
 

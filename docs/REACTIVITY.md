@@ -527,6 +527,16 @@ were. Meridian's and Junction's chrome read a revision signal and are mounted, n
 with that signal as `own:` they build when they always did, and placing them would be a change of
 its own.
 
+Aperture's title bar and rail are its first use, and add one lesson: **a build a loader asks for is
+a full one.** A loader that lands builds the app through a signal, with no `MarkDirty()` or
+`Rerender()` to invalidate the group, and what it brought can move a plain field a part reads:
+opening a report marks it read as its loader lands, and that takes a badge off the rail. So the
+app's `Build()` invalidates the group unless the path that asked said view-only, with a flag
+`RerenderView()` and `MarkViewDirty()` set, and `Rerender()` and `MarkDirty()` still invalidate it
+themselves, since a batch can hold a view-only rebuild and a full one. Headless, 600 films, 1440×900,
+a key and two frames, NativeAOT within 1 %: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 KB
+(−33 %), a resize across a column count 118.9 → 80.8 KB (−32 %), no part built on any of them.
+
 A worker's progress tick is a view-only change too. Vesper's copy, pack and folder-size workers
 asked for a full rebuild about every 40 ms, so all eleven parts were built some 25 times a second
 for the whole copy, though a tick moves only the progress the view shows and, of the parts, the
