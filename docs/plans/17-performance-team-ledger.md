@@ -5,7 +5,8 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6, the full test suite (all steps 1–15 landed, step 8 declined); then release. The week reset on 2026-11-01 (next
+- **Phase:** release — round 6 (all steps 1–15 landed, step 8 declined; the full test suite passed 2026-11-02): merge
+  into main, push, wait for CI. The week reset on 2026-11-01 (next
   reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
@@ -820,3 +821,7 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   mutating the objects; replace arrays a reader may hold, never write them in place; prove a bridge change with recorded
   signal streams, masking test noise; a long-lived concurrent map costs a little on mass add and remove. All 15 build
   steps done; the full test suite next. Weekly usage 36 % (553k tokens).
+- 2026-11-02: round 6 full suite on d124755e: Windows `dotnet test HultUI.slnx -c Release` 30 projects (every test
+  project in the solution), 0 failures (UiTests skipped by their gate), 8 min; WSL Fedora (`scripts/wsl-test.sh`, CI's
+  CrossPlatform filter) 22 projects, 0 failures. Neither known flake failed. Warnings only: CS1573 (a `<param>` missing)
+  at AccessibilityTreeBuilder.Refresh.cs:130-131. main has not moved since f31194ab. Phase → release.
