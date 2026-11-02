@@ -4,9 +4,10 @@ State of [the performance team](17-performance-team.md). The orchestrator update
 file after every step and commits it with the step's work. Full survey reports are in
 [`17-reports/`](17-reports/).
 
-- **Round:** 6
-- **Phase:** release — round 6 (all steps 1–15 landed, step 8 declined; the full test suite passed 2026-11-02): merge
-  into main, push, wait for CI. The week reset on 2026-11-01 (next
+- **Round:** 7
+- **Phase:** survey — round 7, to start in a fresh context (the loop stopped 2026-11-02 after round 6's release). Round 6
+  released: merge 0b8e684a, then CI fixes merged as 1939afcb; CI run 41432647572 green (test, test-linux, docs). Round
+  6's questions 1–9 are answered; question 10 (`TokenizeDiff` public) is open, not blocking. The week reset on 2026-11-01 (next
   reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
@@ -20,7 +21,7 @@ file after every step and commits it with the step's work. Full survey reports a
   for, record it in the ledger, and commit.` Before resuming, `git fetch` and merge main if it moved.
 - **Branch:** `claude/happy-wiles-1e3e0e` (worktree `distracted-mendel-5071ba`)
 - **Review commits since:** round 6's survey reviewed 643eb07b..f31194ab (round 5's build); round 7's survey reviews
-  round 6's build, from cd3b6c8f (the last survey report) to the round 6 release.
+  round 6's build, cd3b6c8f..1939afcb (the last survey report to the round 6 release).
 - **Probe code:** round 6 surveys in session 855f4ddd's scratchpad
   `C:\Users\fredr\AppData\Local\Temp\claude\C--Users-fredr-source-repos-fredrikhu-hului-revamped--claude-worktrees-distracted-mendel-5071ba\855f4ddd-feda-4f0a-a595-a83e07af08f8\scratchpad\r6-<area>\`
   (each report names its files). Rounds 4–5 in the scratchpad of session dc3c745c (a fresh context may have another
@@ -825,3 +826,12 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   project in the solution), 0 failures (UiTests skipped by their gate), 8 min; WSL Fedora (`scripts/wsl-test.sh`, CI's
   CrossPlatform filter) 22 projects, 0 failures. Neither known flake failed. Warnings only: CS1573 (a `<param>` missing)
   at AccessibilityTreeBuilder.Refresh.cs:130-131. main has not moved since f31194ab. Phase → release.
+- 2026-11-02: round 6 merged into main as 0b8e684a (detached origin/main merge in this worktree, tree identical to the
+  tested branch, primary fast-forwarded behind the guard). CI run 41429148272 red, two faults from this round, no product
+  bug: (1) docs: docfx with `--warningsAsErrors` rejected `<see cref="ScrollRangeIntoView"/>` in step 11's `StickyRowFor`
+  (the method is `ScrollViewElement`'s) → 6dbbbe63; (2) Windows test: Vesper `PartTests.EveryValueAPartShows_ReachesIt`
+  waited only until a folder was queued for measuring; the worker set the total and Done after the last pumped frame on
+  the 2-core runner, so the full build read 6.2 K while the footer part showed ≥ 6.2 K → f0f3df8d waits for Done.
+  Merged as 1939afcb; CI run 41432647572 green (test, test-linux, docs). Guideline notes: a test that waits for a worker
+  waits for its done state, not its start; run `dotnet docfx docfx.json --warningsAsErrors` before a release when public
+  doc comments changed. Round → 7, Phase → survey; the loop stops, and round 7 starts in a fresh context.
