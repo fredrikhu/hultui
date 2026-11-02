@@ -17,8 +17,9 @@ namespace Junction.Tests;
 /// <para>Every build used to flatten the diff anew (a record per line, a word diff per changed
 /// pair, merged spans) and the list made every row on screen again from the new records:
 /// Changes, typing beside a 184-row diff, 744 KB of Build and 441 KB of rows a keystroke. The
-/// flattened rows now live until the diff, the layout, the highlight or the scheme is another
-/// object, and the list is on item rows (<c>.RenderWith((row, selected) => …)</c>), told by
+/// flattened rows now live until the diff, the layout or the scheme is another object, their
+/// colours are the highlight's when they are drawn (<see cref="DiffRowListTests"/>), and the list
+/// is on item rows (<c>.RenderWith((row, selected) => …)</c>), told by
 /// <c>InvalidateRows</c> when anything else a row shows moves.</para>
 /// </summary>
 [Collection("JunctionDiff")]
@@ -64,14 +65,17 @@ public class DiffRowKeepTests
     }
 
     /// <summary>The first build asks for the colours and draws plain; the tokenize landing is a
-    /// new highlight, and the rows are flattened again with it.</summary>
+    /// new highlight, and the rows on screen are made again with it. The rows of the list are not:
+    /// they hold no colour.</summary>
     [Fact]
-    public void TheHighlightLanding_FlattensAgainInColour()
+    public void TheHighlightLanding_MakesTheRowsOnScreenAgainInColour()
     {
         Hosted((session, app) =>
         {
+            int flattens = app.DiffFlattens, made = app.DiffRowsMade;
             session.PumpUntil(() => Coloured(app), TimeSpan.FromSeconds(20));
-            Assert.True(app.DiffFlattens >= 2, $"{app.DiffFlattens} flattenings");
+            Assert.Equal(flattens, app.DiffFlattens);
+            Assert.True(app.DiffRowsMade > made, "the rows were not made again");
         }, waitForColours: false);
     }
 
