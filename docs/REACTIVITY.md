@@ -609,7 +609,7 @@ Aperture's library is the same shape (round 6, step 13), and adds four lessons:
 Headless, 600 films with pictures, 1440×900, a key and two frames, NativeAOT within 1 %: Right
 115.0 → 87.3 KB (−24 %; with UI Automation 128.1 → 87.3, and whole trees 0.34 → 0 a key), Down
 181.9 → 114.1 KB (−37 %). The suite pins it: `virtual/image grid walk Right, 600 cards` against
-`…, cards handed back` (49 → 23 KB, two cards made).
+`…, cards handed back` (48 → 22 KB, two cards made).
 
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
