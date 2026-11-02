@@ -77,6 +77,18 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
     private SelectionUnit _groupDragUnit;          // character / word / line, set by the press that started the drag
     private int _groupDragAnchorIndex = -1;        // line the drag started on
     private (int Start, int End) _groupDragAnchorRange; // the unit it started on, within that line
+
+    // A label or group selection dragged past the edge of the view it is in scrolls that view
+    // and carries the selection on to what comes into sight, as a text editor does
+    // (TickSelectionEdgeScroll).
+    private ScrollViewElement? _selectionScroll;   // the view around the label the drag started in
+    private Point _selectionPointer;               // where the pointer last was
+    private long _selectionScrollLastMs;
+    private bool _selectionScrollStalled;          // the view is at its end: idle until the pointer moves
+
+    /// <summary>Layout units per second of scroll, per unit the pointer is past the edge of a
+    /// selection's view. Autoscroll's gain: 20 units past the edge scrolls 180 a second.</summary>
+    private const float SelectionEdgeScrollGain = AutoScrollGain;
     private bool _disposed;
 
     // ──── Post-frame callbacks ────
@@ -1396,6 +1408,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // An autoscroll moves the view with no input arriving at all, so it has to ask for
         // the frames itself — otherwise holding the pointer still would stop the scroll.
         || _autoScrollTarget is not null
+        // So does a selection held past the edge of its view.
+        || SelectionEdgeScrolling
         // An accessibility action (invoke/toggle/set-value/focus) queued from an
         // AT thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame. Platform-neutral: the
@@ -1602,6 +1616,7 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
         // Before style and layout, so this frame paints where the autoscroll has reached
         // rather than a frame behind it.
         TickAutoScroll();
+        TickSelectionEdgeScroll();
 
         // The same for a splitter, a pan or a slider following the pointer: the moves since the
         // last frame recorded where it is, and this applies the latest, once (PointerFollow).
@@ -2078,13 +2093,15 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
 
                 if (_groupDragToken is not null)
                 {
-                    UpdateGroupDrag(pos);
+                    TrackSelectionPointer(pos);
+                    UpdateGroupDrag(WithinSelectionView(pos));
                     break;
                 }
 
                 if (_textElementDragTarget is not null)
                 {
-                    _textElementDragTarget.UpdateDragPosition(pos);
+                    TrackSelectionPointer(pos);
+                    _textElementDragTarget.UpdateDragPosition(WithinSelectionView(pos));
                     break;
                 }
 
@@ -2253,6 +2270,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                     _groupDragToken = null;
                 }
 
+                if (!button.IsDown) _selectionScroll = null;
+
                 // Check overlays first, then main tree
                 var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
                 var target = overlayTarget ?? HitTester.HitTest(_root, pos);
@@ -2387,6 +2406,8 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
                         {
                             _textElementDragTarget = dragLabel;
                         }
+                        _selectionScroll = NearestScrollView(dragLabel);
+                        TrackSelectionPointer(pos);
                     }
 
                     // Record potential drag source if the element (or ancestor) is draggable
@@ -2727,6 +2748,78 @@ public sealed partial class Window : IOverlayHost, IDisposable, IAccessibilityAn
             _groupDragToken.ExtendTo(focus.SelectionIndex, before ? hit.Start : hit.End);
         }
         RepaintGroup(_groupDragToken);
+    }
+
+    // ── A selection dragged past the edge of its view ──
+
+    private static ScrollViewElement? NearestScrollView(Element element)
+    {
+        for (var e = element.Parent; e is not null; e = e.Parent)
+            if (e is ScrollViewElement view) return view;
+        return null;
+    }
+
+    private void TrackSelectionPointer(Point pos)
+    {
+        _selectionPointer = pos;
+        _selectionScrollStalled = false;
+    }
+
+    /// <summary>
+    /// <paramref name="pos"/> held inside the selection's view. Past its edge the selection
+    /// stops at the text on the edge, and the scroll brings the rest to it: extending to text the
+    /// reader cannot see would select lines they never saw go by, and a group finds no label out
+    /// there to extend to at all.
+    /// </summary>
+    private Point WithinSelectionView(Point pos)
+    {
+        if (_selectionScroll is not { IsDetached: false } view) return pos;
+        var box = view.ScreenContentBox;
+        return box.Height < 2f ? pos : new Point(pos.X, Math.Clamp(pos.Y, box.Y + 1f, box.Bottom - 1f));
+    }
+
+    /// <summary>How far the pointer is above (negative) or below (positive) the selection's view,
+    /// or 0 while it is beside or within it.</summary>
+    private float SelectionEdgeDistance(ScrollViewElement view)
+    {
+        var box = view.ScreenContentBox;
+        if (_selectionPointer.Y < box.Y) return _selectionPointer.Y - box.Y;
+        if (_selectionPointer.Y > box.Bottom) return _selectionPointer.Y - box.Bottom;
+        return 0f;
+    }
+
+    private bool SelectionEdgeScrolling =>
+        _selectionScroll is { IsDetached: false } view && !_selectionScrollStalled
+        && (_groupDragToken is not null || _textElementDragTarget is not null)
+        && SelectionEdgeDistance(view) != 0f;
+
+    /// <summary>
+    /// One frame of a selection held past the edge of its view: the view scrolls toward the
+    /// pointer, faster the further past the edge it is, and the selection extends to the text now
+    /// on the edge. Per frame rather than per move, because holding the pointer still is the
+    /// gesture — no input arrives while the view goes on scrolling.
+    /// </summary>
+    private void TickSelectionEdgeScroll()
+    {
+        long now = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        // At most a 30 fps frame's worth: the first tick past the edge can follow a long idle
+        // stretch inside the view, and none of that was time spent scrolling.
+        float dt = Math.Clamp((now - _selectionScrollLastMs) / 1000f, 0f, 1f / 30f);
+        _selectionScrollLastMs = now;
+        if (!SelectionEdgeScrolling) return;
+
+        var view = _selectionScroll!;
+        // Replaced by a rebuild rather than patched: scrolling it would move nothing on screen.
+        if (!IsAttachedToRoot(view)) { _selectionScroll = null; return; }
+
+        if (!view.ScrollBy(0f, SelectionEdgeDistance(view) * SelectionEdgeScrollGain * dt))
+        {
+            _selectionScrollStalled = true;   // at its end: nothing more until the pointer moves
+            return;
+        }
+        var at = WithinSelectionView(_selectionPointer);
+        if (_groupDragToken is not null) UpdateGroupDrag(at);
+        else _textElementDragTarget?.UpdateDragPosition(at);
     }
 
     /// <summary>

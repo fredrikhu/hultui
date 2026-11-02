@@ -346,6 +346,9 @@ Text.New("content")
 **Selection (opt-in via `.Selectable()`):**
 
 - Click-drag to select, Shift-click to extend, Ctrl+A / Ctrl+C, right-click Copy
+- A drag held above or below the scroll view the label is in scrolls that view, faster the
+  further past its edge the pointer is, and the selection follows the text that comes into
+  sight — for one long label and for a group alike
 - Double-click selects the run of same-class characters under the pointer — letters, digits
   and `_` are one class, whitespace another, punctuation and symbols a third. So a
   double-click in code yields one identifier rather than everything up to the next space,

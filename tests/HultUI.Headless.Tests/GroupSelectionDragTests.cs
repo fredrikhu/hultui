@@ -74,6 +74,23 @@ public class GroupSelectionDragTests
     }
 
     [Fact]
+    public void DragHeldBelowTheView_ScrollsIt_AndSelectsTheRowsThatComeIntoView()
+    {
+        // Past the list's edge there is no label to extend to, so before the view scrolled
+        // itself the selection simply stopped where the pointer left.
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, _) = Build(session);
+
+        session.Window.MouseDown(40f, ScreenMidY(scroll, rows[1]));
+        session.Window.MoveMouse(40f, 150f);   // below the 100-tall view
+        for (int i = 0; i < 30; i++) session.PumpFrame();   // held still: the frames scroll
+
+        Assert.True(scroll.ScrollOffsetY > 0, "the view should have scrolled toward the pointer");
+        Assert.True(rows[7].HasSelection, "row 7 was below the view when the drag left it");
+        session.Window.MouseUp(40f, 150f);
+    }
+
+    [Fact]
     public void HoverAfterDrag_DoesNotKeepSelecting()
     {
         using var session = HeadlessSession.Create(width: 200, height: 200);
