@@ -112,9 +112,11 @@ public sealed class RichTextToolbar
     {
         BarState state = default;
         if (editor is null) return state;
-        foreach (var command in Commands)
+        // By index: IsStale asks on every key, and a foreach over the list's interface boxes an enumerator.
+        var commands = Commands;
+        for (int i = 0; i < commands.Count; i++)
         {
-            if (command is not { } c || !IsAvailable(editor, c)) continue;
+            if (commands[i] is not { } c || !IsAvailable(editor, c)) continue;
             ulong bit = 1UL << (int)c;
             state = new BarState(state.Available | bit,
                 IsActive(editor, c) ? state.Active | bit : state.Active,

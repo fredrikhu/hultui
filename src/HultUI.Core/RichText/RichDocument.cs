@@ -34,7 +34,11 @@ public sealed class RichDocument : IEquatable<RichDocument>
     public RichBlock this[int block] => Blocks[block];
 
     /// <summary>The table block <paramref name="block"/> is a cell of; null outside one.</summary>
-    public RichTableRange? TableAt(int block) => RichTable.At(Blocks, block);
+    /// <remarks>A block outside a table is answered here: handing the blocks to
+    /// <see cref="RichTable.At"/>, which takes a list, boxes them, 24 B an ask, and a formatting
+    /// bar asks once a block command on every key.</remarks>
+    public RichTableRange? TableAt(int block) =>
+        (uint)block < (uint)Blocks.Length && Blocks[block].IsTableCell ? RichTable.At(Blocks, block) : null;
 
     /// <summary>Each line of <paramref name="text"/> a paragraph of its own, unstyled.</summary>
     public static RichDocument FromPlainText(string text) =>

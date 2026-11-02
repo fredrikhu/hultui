@@ -5,6 +5,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.RichText;
+using HultUI.Testing;
 using Xunit;
 using TextB = HultUI.Core.Builders.Text;
 
@@ -86,6 +87,22 @@ public sealed class RichTextInListRowTests : IDisposable
             editor.State.Select(RichSelection.Caret(0, 8));   // and back into it
             session.PumpFrame();
             Assert.True(bar.IsStale);
+        }
+    }
+
+    /// <summary>An app asks on every key whether the bar still shows the editor. A foreach over
+    /// the commands, an interface, boxed an enumerator per ask (plan 17, round 7).</summary>
+    [Fact]
+    public void AskingWhetherTheBarIsStale_AllocatesNothing()
+    {
+        var (session, bar, _) = Mounted();
+        using (session)
+        {
+            bar.Build();
+            bool stale = true;
+            double perCall = Allocations.PerCall(100, () => stale = bar.IsStale);
+            Assert.Equal(0, perCall);
+            Assert.False(stale);
         }
     }
 
