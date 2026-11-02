@@ -92,6 +92,14 @@ static partial class Scenarios
             "The same walk with .StickyRows(…): a move keeps the held row, and every few moves another takes its place",
             ctx => SectionWalk(ctx, held: true));
 
+        yield return new Scenario("virtual/image grid walk Right, 600 cards",
+            "Press Right along a row of a grid of 600 image cards, a VirtualList whose item is a row of seven cards and the column the cursor is in there, as Aperture's library: the key makes the row again with its cards, their pictures, captions and badges",
+            ctx => ImageGridWalk(ctx, KeyCode.Right, KeyCode.Left, turn: 5)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("virtual/image grid walk Down, 600 cards",
+            "Press Down in the same grid, past the rows on screen and back: the key makes the row the cursor left and the row it reached, and the row scrolled in",
+            ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6)) { Width = 1440, Height = 900 };
+
         yield return new Scenario("table/TableView 10k sort",
             "Re-sort a 10,000-row TableView (4 columns) by its text column, flipping direction each step",
             ctx =>
