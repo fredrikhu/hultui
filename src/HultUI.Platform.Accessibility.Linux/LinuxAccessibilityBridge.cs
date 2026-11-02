@@ -48,8 +48,10 @@ namespace HultUI.Platform.Accessibility.Linux;
 public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree, IDisposable
 {
     // The published objects, by element: one for every node of the applied tree but the root. Written
-    // on the UI thread, read on the bus thread.
-    private readonly ConcurrentDictionary<ElementId, AtSpiAccessible> _objects = new();
+    // on the UI thread, read on the bus thread. One lock: the UI thread is the only writer, reads take
+    // none, and Count, which every apply reads, takes them all. A default map grows its locks with its
+    // table, to 1,024–2,047 of them at a few hundred objects (17 µs a Count on a 28-thread desk).
+    private readonly ConcurrentDictionary<ElementId, AtSpiAccessible> _objects = new(concurrencyLevel: 1, capacity: 31);
     // The application's object, the root's: null before the first build (the seed root on a bus).
     private volatile AtSpiAccessible? _root;
     // The lists whose items are served on demand, by the list's element, in the tree's order: their

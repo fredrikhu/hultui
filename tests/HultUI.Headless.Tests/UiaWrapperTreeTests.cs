@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -97,6 +98,26 @@ public class UiaWrapperTreeTests
             rows[i] = Flex.Row(gap: 8).FlexShrink(0).Children(boxes[i], TextB.New($"Row {i}"));
         }
         return (boxes, ScrollView.New().FlexGrow(1).Children(Flex.Column().FlexShrink(0).Children(rows)));
+    }
+
+    /// <summary>
+    /// The map of wrappers keeps one lock however many wrappers it holds. Every apply reads its
+    /// count, which takes every lock the map has, and a map made with the defaults grows its locks
+    /// with its table: 1,792 of them at a few hundred wrappers on a 28-thread desk, 17 µs a count
+    /// (plan 17, round 7). The UI thread is its only writer; UIA's threads read without a lock.
+    /// </summary>
+    [WindowsFact]
+    public void TheMapOfWrappers_KeepsOneLock_AtThousandsOfWrappers()
+    {
+        using var rig = new Rig();
+        rig.Mount(CheckboxRows(1_000).Root);
+
+        Assert.True(rig.Bridge.Wrappers.Count() >= 2_000);
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var map = typeof(WindowsAccessibilityBridge).GetField("_wrappers", flags)!.GetValue(rig.Bridge)!;
+        var tables = map.GetType().GetField("_tables", flags)!.GetValue(map)!;
+        int locks = ((Array)tables.GetType().GetField("_locks", flags)!.GetValue(tables)!).Length;
+        Assert.Equal(1, locks);
     }
 
     [WindowsFact]

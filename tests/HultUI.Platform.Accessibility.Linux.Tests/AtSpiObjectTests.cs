@@ -1,3 +1,4 @@
+using System.Reflection;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Platform.Accessibility.Linux;
@@ -105,6 +106,33 @@ public class AtSpiObjectTests
         long oneString = Allocations.Least(() => s_kept = new string('/', path.Length));
         // Not the id's own string and then the path.
         Assert.Equal(oneString, made);
+    }
+
+    /// <summary>
+    /// The map of objects keeps one lock however many objects it holds. Every apply reads its
+    /// count, which takes every lock the map has, and a map made with the defaults grows its locks
+    /// with its table: 1,792 of them at a few hundred objects on a 28-thread desk, 17 µs a count
+    /// (plan 17, round 7). The UI thread is its only writer; the bus thread reads without a lock.
+    /// </summary>
+    [Fact]
+    public void TheMapOfObjects_KeepsOneLock_AtThousandsOfObjects()
+    {
+        var bridge = new LinuxAccessibilityBridge(new NoSignals());
+        AccessibilityNode? applied = null;
+        Apply(bridge, ref applied, Tree(Rows(1_000, out _)));
+
+        Assert.True(((IAtSpiTree)bridge).All.Count > 3_000);
+        Assert.Equal(1, LocksOf(typeof(LinuxAccessibilityBridge)
+            .GetField("_objects", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(bridge)!));
+    }
+
+    /// <summary>How many locks a <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey, TValue}"/>
+    /// holds now: the length of its tables' lock array.</summary>
+    private static int LocksOf(object map)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var tables = map.GetType().GetField("_tables", flags)!.GetValue(map)!;
+        return ((Array)tables.GetType().GetField("_locks", flags)!.GetValue(tables)!).Length;
     }
 
     [Fact]
