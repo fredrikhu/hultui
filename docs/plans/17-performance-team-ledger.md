@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 14 next (steps 1–13 landed, step 8 declined). The week reset on 2026-11-01 (next
+- **Phase:** build — round 6. Step 15 next, the last (steps 1–14 landed, step 8 declined). The week reset on 2026-11-01 (next
   reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
@@ -336,6 +336,7 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 1f4bbda8 | aperture-resize-rebuild | A resize builds only when a build would read something new off the window; size reads sit behind one noting method. 4 px step 71.5 → 2.3 KB (−97 %), builds 1 → 0, UIA 71.9 → 2.6; Home 130.0 → 2.3; item page 77.3 → 14.1; time −1…−3 % (raster dominates headless). `WindowFitTests` walks 16 views against a forced build. |
 | 6 | 31997de7 | composite-row-kept-cards (Aperture) | A grid row made again keeps the cards that didn't change. Right 115.0 → 87.3 KB (−24 %; UIA −32 %, trees 0.34 → 0), Down 181.9 → 114.1 (−37 %), across a column count 341.5 → 118.9 (−65 %). Fix on the way: after a sort, Right focused a card out of the tree and the next key was lost. A card Tab reached now keeps the keyboard. |
 | 6 | 5765d27b, 3a8e621f, e4c2607d, df0bf30b, a267faab | public-part-in-core (API) | Approved (question 3c). **Public `Part(group, build, own, afterBuild)`, `Place(stale)`, `PartGroup.Invalidate()`** in Core (ELEMENTS.md §27). Aperture's title bar and rail on it: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 (−33 %), across a column count 118.9 → 80.8 (−32 %), no part built on any. Whole step: Right −57 %, Down −58 %, resize −97 %, across a column count −76 %. Vesper's, Meridian's and Junction's chrome and composer moved onto it with no behaviour change (scenes 35 / 27 / 421); Junction's `KeptPart` stays (a handed-back element the list patches). Suite 173 rows 0/0 JIT + AOT. Core 5,032, Headless 1,266, Aperture 329, Vesper 876, Meridian 465; Junction 1,072 of 1,075 then 31 rerun after the fix: the whole project goes in the full-suite step. Scene limits: Aperture and Meridian have one theme; the A/A control ran for Aperture only. |
+| 6 | afa7116d, 61b538c3 | text-lazy-line-runs | A line on the plain or styled path keeps width, metrics and range and makes its runs on the first `TextLine.Runs` read; `TextLine` stays 56 B (one field: runs, a shared `LineSource`, or the line a copy shares with); widths from `MeasureRuns`, bit-equal to shaping; an ellipsized line measured from stack characters; caches charge a line as if its runs were made; `DrawParagraph` tests the clip first. Declined (DECISIONS): BiDi lines, and a styled paragraph's first layout with over 32 spans (600-span typing 2.33 → 2.59 ms lazy). KB/op JIT (AOT within 1 KB): text/wrap 221 → 67 (−70 %), multi-font ellipsis 1,337 → 414 (−69 %), ellipsis −57 %, styled wrap −48 %, shrink 300 overfull rows −38 %, spans bold −35 %, styled ellipsis −34 %, richtext/resize −22 %, richtext/open 4,331 → 3,480 (−20 %); mins multi-font −5/−7 %, richtext/open −6 % AOT. Retained 5,000-block document open 10.51 → 8.12 MB (−23 %), closed 4.03 → 3.43. **Moved to first draw:** wheel rows allocate more (richtext/wheel 6.3 → 8.0 KB, table 0.1 → 1.1); sessions drawing every line: time −3…+2.6 %, bytes −51…+0.9 %. Suite AOT 0/0; JIT two a11y rows +12–13 % read −1.4/−0.3 % on 3 pairs; a11y/click checkbox UIA min +5 % on a two-moded baseline, median flat. 48,000-layout hash unchanged both paths, 240,000-layout corpora match, mutations change 1,427–8,243 layouts; 175 rows × 7 frames identical; goldens identical. Text 281, Skia 337, Headless 1,266, Core 5,032, Markdown 62, Meridian 465, Vesper 876, Junction 1,075, Fedora pass; 21 reverse edits; app walks same bytes. |
 
 ## Examined, not worth it
 
@@ -796,3 +797,13 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   goes stale; a kept element keeps the keyboard; a ref read in `OnAfterBuild` lags a list's rows. Trap: `link.exe` fails
   past MAX_PATH publishing the suite from the scratchpad (native-path properties in `r6b13\pub-suite.ps1`; likely step
   12's publish failure too). Weekly usage 28 % (620k tokens, 2.9 h).
+- 2026-11-02: step 14 landed (afa7116d, 61b538c3): a text line makes its runs when first read (text/wrap −70 %, multi-font
+  ellipsis −69 %, richtext/open −20 %, a 5,000-block document holds −23 %; layouts bit-identical). Kept although sessions
+  that draw every line pay up to +2.6 % time (a drawn line itemizes and looks words up twice), as 91d48601's lazy glyphs
+  were: the suite reads 0 slower on AOT, and sessions that leave lines undrawn use a quarter to a half fewer bytes.
+  Guideline notes: anything that reads `TextLine.Runs` makes them, so test visibility first and weigh caches as if the
+  runs were made; a hot string helper turned into span overloads that pass a 60 B style by value cost 6–7 % on AOT with
+  JIT flat, so keep the hot string path, add a span method beside it, and check AOT on the rows it serves. Leads: the
+  extra measure pass for drawn lines could get cheaper (truncated labels from the prefix-width table, a styled piece's
+  font lookup cached); a font registered between a layout and its first draw would make that line's runs in the new
+  face (apps register fonts at start-up). Weekly usage ~30 % (589k tokens, 2.7 h).
