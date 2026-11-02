@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 15 next, the last (steps 1–14 landed, step 8 declined). The week reset on 2026-11-01 (next
+- **Phase:** build — round 6, the full test suite (all steps 1–15 landed, step 8 declined); then release. The week reset on 2026-11-01 (next
   reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
@@ -196,6 +196,9 @@ Re-ranked by the next survey.
   60 ms and 0 → 2 on big files at 33 ms (likely large git strings, unproven); a renamed file's old side is read under
   the new path, so its deletions stay plain (a bug, pre-existing); headless runs have no budget for a long line (a 30 KB
   line took over 15 s; a window keeps its 250 ms).
+- **atspi-kept-tab-retire** (7, low; step 15) — the kept-tab switch row with AT-SPI is +2.5–2.8 % min on AOT in three
+  sets (0.616–0.634 → 0.632–0.647 ms; JIT within noise): its 900 objects go into and out of the concurrent map. One map
+  operation instead of two on retire might recover it.
 - **aperture-leads** (6/8, from step 13) — Home, Detail and Discover keys still build the whole view (Home ~130 KB before
   parts, an estimate); toasts go through the full `MarkDirty`; Down under UIA still builds 0.33 trees a key; the library
   cursor never takes real focus, though a code comment says it does (rows are made after `OnAfterBuild`); Junction and
@@ -337,6 +340,7 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | 31997de7 | composite-row-kept-cards (Aperture) | A grid row made again keeps the cards that didn't change. Right 115.0 → 87.3 KB (−24 %; UIA −32 %, trees 0.34 → 0), Down 181.9 → 114.1 (−37 %), across a column count 341.5 → 118.9 (−65 %). Fix on the way: after a sort, Right focused a card out of the tree and the next key was lost. A card Tab reached now keeps the keyboard. |
 | 6 | 5765d27b, 3a8e621f, e4c2607d, df0bf30b, a267faab | public-part-in-core (API) | Approved (question 3c). **Public `Part(group, build, own, afterBuild)`, `Place(stale)`, `PartGroup.Invalidate()`** in Core (ELEMENTS.md §27). Aperture's title bar and rail on it: Right 87.3 → 49.2 KB (−44 %), Down 114.1 → 75.9 (−33 %), across a column count 118.9 → 80.8 (−32 %), no part built on any. Whole step: Right −57 %, Down −58 %, resize −97 %, across a column count −76 %. Vesper's, Meridian's and Junction's chrome and composer moved onto it with no behaviour change (scenes 35 / 27 / 421); Junction's `KeptPart` stays (a handed-back element the list patches). Suite 173 rows 0/0 JIT + AOT. Core 5,032, Headless 1,266, Aperture 329, Vesper 876, Meridian 465; Junction 1,072 of 1,075 then 31 rerun after the fix: the whole project goes in the full-suite step. Scene limits: Aperture and Meridian have one theme; the A/A control ran for Aperture only. |
 | 6 | afa7116d, 61b538c3 | text-lazy-line-runs | A line on the plain or styled path keeps width, metrics and range and makes its runs on the first `TextLine.Runs` read; `TextLine` stays 56 B (one field: runs, a shared `LineSource`, or the line a copy shares with); widths from `MeasureRuns`, bit-equal to shaping; an ellipsized line measured from stack characters; caches charge a line as if its runs were made; `DrawParagraph` tests the clip first. Declined (DECISIONS): BiDi lines, and a styled paragraph's first layout with over 32 spans (600-span typing 2.33 → 2.59 ms lazy). KB/op JIT (AOT within 1 KB): text/wrap 221 → 67 (−70 %), multi-font ellipsis 1,337 → 414 (−69 %), ellipsis −57 %, styled wrap −48 %, shrink 300 overfull rows −38 %, spans bold −35 %, styled ellipsis −34 %, richtext/resize −22 %, richtext/open 4,331 → 3,480 (−20 %); mins multi-font −5/−7 %, richtext/open −6 % AOT. Retained 5,000-block document open 10.51 → 8.12 MB (−23 %), closed 4.03 → 3.43. **Moved to first draw:** wheel rows allocate more (richtext/wheel 6.3 → 8.0 KB, table 0.1 → 1.1); sessions drawing every line: time −3…+2.6 %, bytes −51…+0.9 %. Suite AOT 0/0; JIT two a11y rows +12–13 % read −1.4/−0.3 % on 3 pairs; a11y/click checkbox UIA min +5 % on a two-moded baseline, median flat. 48,000-layout hash unchanged both paths, 240,000-layout corpora match, mutations change 1,427–8,243 layouts; 175 rows × 7 frames identical; goldens identical. Text 281, Skia 337, Headless 1,266, Core 5,032, Markdown 62, Meridian 465, Vesper 876, Junction 1,075, Fedora pass; 21 reverse edits; app walks same bytes. |
+| 6 | 799bcb39, 4325bac6, de3f8dbe, 2353944f | a11y-atspi-snapshot-per-diff + apps-scenario-atspi-rows | 15 AT-SPI suite rows (`AtSpiRig`: the bridge in process, signals counted; `InternalsVisibleTo` for PerfSuite). The bridge keeps its objects by element in a concurrent map; each apply walks the tree once, refreshing what changed, making objects only for new nodes, keeping a parent's child list while its children's ids are unchanged; a gone node's object answers UnknownObject and drops its node; each property written whole, arrays replaced, never written over. No API change. KB a step (JIT = AOT): dialog tick 493.8 → 1.1, palette key 967 → 139, filtered list 1,154 → 289, added row 1,085 → 289, kept-tab switch 595 → 441, 1,000 rows made 7,825 → 7,310; apply alone dialog 796.8 → 0.2. Time: `--compare` 0/0 of 190 rows JIT ×2 and AOT; large-tree mins palette −6…−8 %, filter −9…−12 %, added row −5…−8 %; **kept-tab switch +2.5–2.8 % AOT in three sets** (kept on balance; Waiting atspi-kept-tab-retire). Signals: 588,974 suite lines byte-identical; 1,300 test labels identical, 993 of 1,054 app labels (the 61 vary between runs of one build); live pyatspi 39/39. Object audit: the same 34 pre-existing mismatches. Staleness audit 0 STALE in 3,113, 0 walk mismatches over 2,014. Retained over 800 cycles: palette flat (was +8.1 KB); dialog +470 B a cycle in both builds, not the bridge. Bridge 103 Windows and Fedora, Headless a11y 213 Fedora; 5 reverse edits. |
 
 ## Examined, not worth it
 
@@ -807,3 +811,12 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   extra measure pass for drawn lines could get cheaper (truncated labels from the prefix-width table, a styled piece's
   font lookup cached); a font registered between a layout and its first draw would make that line's runs in the new
   face (apps register fonts at start-up). Weekly usage ~30 % (589k tokens, 2.7 h).
+- 2026-11-02: step 15 landed (799bcb39..2353944f): the AT-SPI bridge keeps its objects by element (dialog tick 494 →
+  1.1 KB, palette −86 %, filter −75 %, large-tree mins −5…−12 %; signals byte-identical). The agent first handed back
+  without timing or the staleness audit, leaving an audit run splicing Window.cs in the worktree; it was sent back,
+  waited for the run to restore the tree, confirmed it equal to 4325bac6, and finished both. One row slower: the
+  kept-tab switch +2.5–2.8 % on AOT, kept on balance against the large-tree wins (Waiting). Guideline notes: keep a
+  bridge's objects by element and refresh them with a walk that allocates nothing; note what the signals need before
+  mutating the objects; replace arrays a reader may hold, never write them in place; prove a bridge change with recorded
+  signal streams, masking test noise; a long-lived concurrent map costs a little on mass add and remove. All 15 build
+  steps done; the full test suite next. Weekly usage 36 % (553k tokens).
