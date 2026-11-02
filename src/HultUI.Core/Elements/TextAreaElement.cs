@@ -512,6 +512,10 @@ public partial class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScr
         {
             var touched = _touchedStarts ??= [];
             touched.Clear();
+            // A row for each hard line it touched at least, room for which at once: grown by
+            // doubling from empty, as a list too long to keep is each time, the rows of a
+            // 19,000-line text replaced took fifteen arrays and 256 KB (plan 17, round 7).
+            touched.EnsureCapacity(kept.Count - back - front);
             try
             {
                 WrapLines(touched, front, from, kept.Count - back, wrapWidth, style);

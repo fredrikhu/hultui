@@ -491,4 +491,49 @@ public class TextAreaLineWidthTests
         long small = PerKeystroke(200), large = PerKeystroke(4_000);
         Assert.True(large <= small + 64, $"{small} B a keystroke in 200 lines, {large} B in 4,000");
     }
+
+    /// <summary>
+    /// A long text replaced by one that differs at both ends — a response sent again with a time
+    /// at its top and its bottom — rewraps every line between into a list of their rows, sized for
+    /// them at once: a row a hard line at least. The list is not kept past 4,096 rows, and grown
+    /// from empty by doubling it made fifteen arrays, 256 KB, for a 76 KB answer at 19,000 lines
+    /// (plan 17, round 7). An edit in such a text sizes it for the lines the edit touched.
+    /// </summary>
+    [Fact]
+    public void ALongTextReplaced_SizesItsRowsOnce()
+    {
+        const int Count = 6_000;
+        var body = Enumerable.Range(0, Count).Select(i => $"line {i} of the body").ToArray();
+        string Text(int send) => $"sent {send}\n" + string.Join('\n', body) + $"\nsent {send}";
+        var ctx = new Quiet();
+        var (area, _) = Mount(Text(0));
+        area.Render(ctx);
+        float wrapWidth = area.Layout.AbsoluteContentBox.Width;
+        var style = area.ResolvedInherited;
+        Assert.Equal(Count + 2, area.GetLineStarts(wrapWidth, style).Count);   // a row a line
+
+        int send = 0;
+        long least = long.MaxValue;
+        for (int round = 0; round < Allocations.MaxRounds; round++)
+        {
+            area.Text = Text(++send);   // the new text itself is not counted
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            area.GetLineStarts(wrapWidth, style);
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+        // The rows of every line: one array of them (24,064 B in all; 65,840 grown by doubling).
+        Assert.True(least < Count * sizeof(int) + 1_024, $"{least:N0} B to rewrap {Count:N0} one-row lines");
+
+        // An edit typed into the middle of the text: the rows of the line it touched.
+        least = long.MaxValue;
+        int at = area.Text.IndexOf("line 3000 ", StringComparison.Ordinal) + 4;
+        for (int round = 0; round < Allocations.MaxRounds; round++)
+        {
+            Type(area, at, round % 2 == 0 ? "x" : "y");
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            area.GetLineStarts(wrapWidth, style);
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+        Assert.True(least < 1_024, $"{least:N0} B to rewrap the line an edit touched");
+    }
 }
