@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 7
-- **Phase:** build — round 7, step 2 next (step 1 landed). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
+- **Phase:** build — round 7, step 3 next (steps 1–2 landed). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
   seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
   questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
   1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
@@ -256,6 +256,9 @@ Round 6 (the round the next survey reviews; moves to the archive at round 8's su
 | 7 | 1986bed9 | a11y-bridge-map-one-lock | The objection to 4325bac6. `_objects` (AT-SPI) and `_wrappers` (UIA) made with `concurrencyLevel: 1, capacity: 31` (one writer, the UI thread; reads lock-free); `_nativeByElement` (two writers) and `AtSpiServedItems._made` (bus thread) unchanged. Kept-tab switch with AT-SPI, best min of 3 alternated pairs: AOT 0.630 → 0.605 ms (−4.0 %; a11y phase 0.280 → 0.246), JIT 0.508 → 0.475 (−6.4 %): round 6's +2.5–2.8 % won back; AT-SPI add a row and filter −3…−5 %; UIA rows within ±3.5 %. Tests read the lock array: 1 (1,792 under the reverse edit). |
 | 7 | 2aa55491 | shortcut-matches-no-enumerator | Index loops in `Shortcut.Matches` and `RichTextToolbar.StateOf`; `RichDocument.TableAt` answers non-table blocks before boxing its `ImmutableArray` into `RichTable.At` (264 B per `IsStale` with the default bar). AOT KB/key: Vesper Detail 26.4 → 21.2 (−20 %), Brief 34.0 → 28.7 (−16 %), Thumbnails −13 %, partner −13 %, Insert −11 %; Junction review typing 4.1 → 3.7 (−10 %), History −0.6 KB; CPU per key within noise. Allocation tests fail under reverse edits (240 / 32 / 264 B a call) on the JIT test build with TieredPGO off. |
 | 7 | 5000753a | a11y-overlay-owner-slot-leak | Leak closed: `RemoveOverlayAt` calls `AccessibleOwnerSlots.ReleaseTree(content)` under one lock. Not an unmount: `Show` never mounts, so unmounting would stop the component hosts of content shown again. 2,000 menu cycles with AT-SPI: slots 2,000 → 0, heap +46…+198 B a cycle → 0 (flat at 6,719 KB); recording bridge 2,000 → 0; popover, dialog and no bridge 0. Step 1: event streams before/after with ids masked equal (15,978 / 1,334 / 5,146 lines); suite `--compare` 0 slower, 0 faster JIT + AOT ×2 (AOT TableView 10k sort +4.7–6.5 %: placement, JIT flat, no step code in the row); captures 56ca60f1; Core 5,033, Headless 1,269, Linux bridge 104 (Windows and Fedora), Fedora Headless a11y 260, Vesper 876 pass. |
+| 7 | 45628641 | text-find-lazy-line-hits | A find lists a line's hits when a row first asks: a binary search into the sorted hits, kept until the next rerun (`HitsOn` keeps its type). KB/key JIT / AOT: text/find typing 54.0 → 24.9 / 53.4 → 24.2 (−54 %); Meridian response find 132.1 → 60.4 / 131.2 → 59.6 (−54 %); Junction diff find typing 853.9 → 416.7 / 849.7 → 412.5 (−51 %, min −4.7 % JIT); Vesper reader find typing 646.8 → 297.7 / 641.2 → 292.1 (−54 %). Find Enter flat at 25.5; wheels with find open and Junction find Enter within 0.1 KB and 2 % time. |
+| 7 | d748b316 | textarea-touched-rows-sized | A replaced text's touched rows sized once, to a lower bound that can't overshoot (one row per hard line touched; an edit inside a big text allocates under 1 KB). text/open highlighted JSON 268.4 → 86.3 KB (−68 %, JIT and AOT), min −3 %; Meridian resending a 19,000-line JSON 1,792.7 → 1,139.5 KB a send JIT, 1,823.0 → 1,169.8 AOT (−36 %). |
+| 7 | 73819ebd | text-exact-line-arrays | Each layout keeps an exact `TextLine[]` filled from a kept scratch list taken while filling (nested calls get their own); a truncated layout replaces its last line, no second layout (styled, BiDi and `EllipsizeMeasuredLine`). KB/op JIT (AOT within 1 KB): multi-font ellipsis 413.7 → 257.7 (−38 %), styled ellipsis 636.6 → 481.0 (−24 %), bidi and styled bidi ellipsis −9 %, wrap −9 %, styled wrap −7 %, richtext/open 3,483 → 3,263 (−6 %), resize −6 %; no row up; richtext/open JIT min +0.8…+5.4 % over three sets, medians −1.0…+2.2 %, AOT +0.9 % (noise). Retained 5,000-block document 8.12 → 7.93 MB open, 3.43 → 3.38 closed. Step 2: 48,000-layout hash 7A18AF8DE8E05271 and both 240,000-layout corpora F09E9038726E4BD6 on both builds, 0 differ; mutations change 83–41,034 layouts on every path. Suite 0/0 JIT + AOT (captures 7ac787f7). Text 293 (Windows and Fedora), Skia 337, Core 5,037, Headless 1,269, Meridian 465, Vesper 876, Junction 1,075 pass. |
 
 ## Examined, not worth it
 
@@ -682,3 +685,13 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
 - 2026-11-02: the user answered round 7 questions 1–4: all yes (long lines coloured on their first ~2,000
   characters; context menus and menu-bar menus read as menus, the live reader check theirs; a public kept-elements
   helper in Core, Aperture Home first; list-drawn selection in Meridian History and Junction Changes).
+- 2026-11-02: round 7 step 2 landed (45628641, d748b316, 73819ebd; captures 7ac787f7): find typing −51…−54 % in every
+  app's find, a replaced TextArea text −68 % (Meridian resend −36 %), truncated labels −24…−38 %, retained −2 %; bit
+  equality on all three corpora. Process: the step's agent ran `git commit --amend` after the orchestrator had
+  committed 3fc577ab, amending the ledger commit; it rebuilt the history (same tree, now d61b9ad1; unpushed commits
+  only). From now on briefs say never amend, and the orchestrator doesn't commit while a build agent runs. Guideline
+  notes: a per-call result comes from a kept scratch list taken while it is filled (nested calls get their own) and
+  keeps an exact array, never the kept list; an index rebuilt every rerun but read only for rows on screen is built on
+  first ask; a list dropped above a size and regrown on every big update gets `EnsureCapacity` with a lower bound. Left
+  open: `PipelineTextParagraph` copies the layout's lines into its own array (could share the exact array when it adds
+  no empty line).
