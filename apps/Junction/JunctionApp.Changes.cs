@@ -520,7 +520,7 @@ public partial class JunctionApp
 
         col.AddChild(BuildChangesList(data));
         // The host takes the composer's place in the column: it never shrinks.
-        col.AddChild((_composerPart ??= new ComposerPart(this)).Place(data).FlexShrink(0));
+        col.AddChild(PlaceComposer(data).FlexShrink(0));
         return col;
     }
 
@@ -1164,7 +1164,7 @@ public partial class JunctionApp
 
     // ── Composer ─────────────────────────────────────────────────────────
     //
-    // A child component, as the chrome is (see ChromePart): a character in the summary built the
+    // A child component, as the chrome is (see JunctionApp.Chrome.cs): a character in the summary built the
     // whole view, every row of the lists with it, for fields that hold their own text. 76 KB a
     // key with one changed file, 1.3 MB with 200. Nothing outside the composer shows what is typed,
     // so a character builds the composer alone (_composerRevision). It builds with the view when
@@ -1174,38 +1174,31 @@ public partial class JunctionApp
     // build of it makes.
 
     private readonly HultUI.Core.Reactivity.Signal<int> _composerRevision = new(0);
-    private ComposerPart? _composerPart;
+    private readonly HultUI.Core.Components.PartGroup _composerParts = new();
+    private HultUI.Core.Components.Part? _composerPart;
+    private ComposerCounts _composerCounts, _composerBuiltCounts;
+    private int _composerBuiltRevision = -1;
 
     /// <summary>Builds of the composer so far, for tests.</summary>
-    internal int ComposerBuilds { get; private set; }
+    internal int ComposerBuilds => _composerParts.Builds;
 
     /// <summary>All the composer shows of the working copy: what the commit button says it will
     /// do, and the message Amend pours in.</summary>
     private readonly record struct ComposerCounts(int Staged, int Unstaged, int Conflicted, string? HeadMessage);
 
-    private sealed class ComposerPart(JunctionApp app) : HultUI.Core.Components.Component
+    /// <summary>The composer's host, for the view's build to place: built again first when a full
+    /// rebuild came since it last built, or what it shows of <paramref name="data"/> moved.</summary>
+    private HultUI.Core.Components.ComponentHost PlaceComposer(ChangesData data)
     {
-        private ComposerCounts _counts, _builtCounts;
-        private int _builtRevision = -1;
-
-        public override HultUI.Core.Elements.Element Build()
+        _composerCounts = new ComposerCounts(data.Staged.Count, data.Unstaged.Count, data.Conflicted.Count, data.HeadMessage);
+        var part = _composerPart ??= new(_composerParts, () =>
         {
-            _ = app._composerRevision.Value;
-            _builtCounts = _counts;
-            _builtRevision = app._chromeRevision.Peek();
-            app.ComposerBuilds++;
-            return app.BuildComposer(_counts);
-        }
-
-        /// <summary>The part's host, for the view's build to place: built again first when a full
-        /// rebuild came since it last built, or what it shows of <paramref name="data"/> moved.</summary>
-        public HultUI.Core.Components.ComponentHost Place(ChangesData data)
-        {
-            _counts = new ComposerCounts(data.Staged.Count, data.Unstaged.Count, data.Conflicted.Count, data.HeadMessage);
-            var host = Mount();
-            if (_counts != _builtCounts || _builtRevision != app._chromeRevision.Peek()) MarkDirty();
-            return host;
-        }
+            _composerBuiltCounts = _composerCounts;
+            _composerBuiltRevision = _chromeRevision.Peek();
+            return BuildComposer(_composerCounts);
+        }, own: _composerRevision);
+        part.Mount();   // the first build, before asking what it was built from
+        return part.Place(stale: _composerCounts != _composerBuiltCounts || _composerBuiltRevision != _chromeRevision.Peek());
     }
 
     /// <summary>A character in one of the composer's fields: it builds again alone. The fields

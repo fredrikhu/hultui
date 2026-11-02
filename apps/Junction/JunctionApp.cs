@@ -816,7 +816,7 @@ public partial class JunctionApp : Component, IDisposable
         // appears at the same index, the framework would patch one subtree onto the
         // other, bleeding retained state (focus, caret, scroll) across kinds. Distinct
         // keys make each overlay reconcile only against its own kind. The title bar is a
-        // part of its own (see ChromePart), keyed by its host.
+        // part of its own (see JunctionApp.Chrome.cs), keyed by its host.
         var titleBar = TitleBarPart.Mount().FlexShrink(0);
         var body = BuildBody(); body.Key = "body";
         var root = Flex.Column(gap: 0)
@@ -1023,7 +1023,7 @@ public partial class JunctionApp : Component, IDisposable
     }
 
     /// <summary><see cref="Rerender"/> for a change the title bar, the sidebar and the toolbar
-    /// do not show — a selection or a cursor moving in the view on screen. See ChromePart.</summary>
+    /// do not show — a selection or a cursor moving in the view on screen. See JunctionApp.Chrome.cs.</summary>
     private void RerenderView() => _revision.Value++;
 
     /// <summary>Automation hook for scripted perf captures (JUNCTION_BENCH in

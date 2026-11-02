@@ -12,7 +12,7 @@ namespace Junction.Tests;
 
 /// <summary>
 /// The Changes view's composer is a child component the app keeps while it rebuilds around it
-/// (ComposerPart, JunctionApp.Changes.cs), and a character in its fields builds it alone. The
+/// (PlaceComposer, JunctionApp.Changes.cs), and a character in its fields builds it alone. The
 /// risk is what it shows moving while it is kept: a commit button that still says what it said
 /// before a file was staged, Amend pouring in an old message.
 ///
@@ -261,7 +261,9 @@ public class ComposerPartTests
     {
         var root = (Element)typeof(HultUI.Window).GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(session.Window.Window)!;
-        return LayoutProbe.Descendants<ComponentHost>(root, h => h.Component.GetType().Name == "ComposerPart").Single().Children[0];
+        var app = ((ComponentHost)root).Component;
+        var part = (Part)typeof(JunctionApp).GetField("_composerPart", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        return part.Mount().Children[0];
     }
 
     private static List<Element> ListElements(JunctionApp app)
