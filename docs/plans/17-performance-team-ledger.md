@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 6
-- **Phase:** build — round 6. Step 12 next (steps 1–11b landed, step 8 declined). The week reset on 2026-11-01 (next
+- **Phase:** build — round 6. Step 13 next (steps 1–12 landed, step 8 declined). The week reset on 2026-11-01 (next
   reset 2026-11-08 03:00 UTC; extra usage is off), and the user said to continue. The survey's eight reports are
   `17-reports/r6-*.md`; round 6 questions 1–4 were answered 2026-10-27 (all yes, see Needs the user).
   Round 5 released (61308cfd + CI fixes f31194ab, CI green); the total comparison of rounds 1–5 is in
@@ -190,7 +190,12 @@ Re-ranked by the next survey.
   still `MarkDirty`; a key on a non-GitLab repo could skip the composer build (13.6 KB left); the diff's find step keeps
   108 KB and 2.9 ms unexplained. From step 11: while a stage is in flight `ChangesView` makes new lists on every call,
   so visible rows are made again each build (~130 rows a flip; memoizing about halves it); `SelectConflict` and a
-  conflict row's right-click have no test of their own.
+  conflict row's right-click have no test of their own. From step 12: old-side state convergence between hunks (the
+  file walk could go 46 → 33 % of lines); the detail load is History's floor, ~1.6 MB a key; big files at 33 ms still
+  cost 2.8 MB a key on all threads against 873 KB at 100 ms, unexplained; gen 2 rose 0 → 0.6–1.0 per 100 keys on History
+  60 ms and 0 → 2 on big files at 33 ms (likely large git strings, unproven); a renamed file's old side is read under
+  the new path, so its deletions stay plain (a bug, pre-existing); headless runs have no budget for a long line (a 30 KB
+  line took over 15 s; a window keeps its 250 ms).
 - **palette-per-row-box** (1, low; step 9) — the palette's rows each keep a box for side padding, ~11 KB a key (15 of
   65 elements), because a list's `Padding` moves its scrollbar and clip. Painting scrollbars at the padding edge would
   remove it; not tried.
@@ -319,8 +324,10 @@ survey reviews), at the end. Rounds 1–4 are in [the archive](17-performance-te
 | 6 | d960db3b | popover-menu-role | Approved (question 6). **New `AccessibilityRole.Menu`** (appended; UIA Menu, AT-SPI menu 33). A clickable box with a Menu child is no Button (`HoldsDialog` is now `HoldsPopup`); an entry directly in a Menu is selected under the pointer, patched into the applied tree (`A11yPatchKind.Selected`, 0 trees a move); a MenuItem without a menu of its own gets Invoke on UIA, every MenuItem the click action on AT-SPI. Not in `Popover`: neither app uses it, and its keyboard and press rules differ. Junction 16 Buttons → 4 Menus + 8 items, Meridian 48 → 6 + 36. Bytes flat. Pixels and focus identical over 194 scenes. |
 | 6 | b7f31f16, 358b5ba2 | junction-issue-list-esc | Bug fix: Esc closes the composer's issue list (-1 is no caret, not the end of the text); one scene differs, the bug's own. 358b5ba2: an AT-SPI test for a menu entry's selection, written by the orchestrator after the step's agent was stopped; reverse edit caught. Step 10b's full suite: 164 rows, JIT and AOT 0 slower, 0 faster, no row moved 2 % in bytes; three AOT `paint/tiles` rows read +5…+7 % once and +0.3…+1.7 % on 3 alternated pairs alone. WSL 22 projects pass. |
 | 6 | 2be205e5, 3a8e6c9e | virtuallist-sticky-rows (API) | Approved (question 3a). **Public `.StickyRows(Func<T,int,bool>)`**: the list realizes and holds the last sticky row at or above the first visible one until the next pushes it off; paint, hit test, a11y and highlights follow it. Pixel test against a scroll view of `Sticky()` headers at 11 offsets, push-off and fractional included: identical. Suite rows with twins: sticky vs none AOT wheel 0.198 vs 0.189 ms, 20.3 vs 19.9 KB; walk 0.203 vs 0.195 ms, 12.3 vs 11.8 KB; twins flat. |
-| 6 | 90fb4df7, 02f5d183, 49bd7342 | junction-changes-virtual | Changes is a composite VirtualList of tagged rows with `RowHeights` and `StickyRows`; selection and folder moves use `RerenderView`; headers keyed so a new count keeps button focus. KB/key AOT (JIT within 1 %), 300 files: Down 3,078 → 317 (−90 %), median 4.80 → 3.60 ms (−25 %); with UIA 3,398 → 369 (−89 %), 5.39 → 3.84 (−29 %); 60 files 978 → 295 (−70 %); Stage 3,308 → 920 KB, min −30 %; reload landing 10.3 → 2.0 MB; elements 3,160 → 571; chrome builds a key 3 → 0. **Wheel at 300 files costs more, the virtualizing trade:** bytes 0.1 → 35 KB (UIA 27 → 55), time +1…+5 %, with UIA a tree every third notch (→ 11b). Suite 168 rows 0/0 JIT + AOT. 386 scenes × 2 themes: 376 identical, 10 Tab scenes have two fewer Tab stops before the composer. Reader: off-screen rows leave the tree (50,078 off-screen nodes gone, none added); Tab no longer reaches off-screen buttons (question 9). Core 5,022, Headless 1,243, Junction 1,041, Fedora a11y 98 pass; 47 reverse edits caught. |
+| 6 | 90fb4df7, 02f5d183, 49bd7342 | junction-changes-virtual | Changes is a composite VirtualList of tagged rows with `RowHeights` and `StickyRows`; selection and folder moves use `RerenderView`; headers keyed so a new count keeps button focus. KB/key AOT (JIT within 1 %), 300 files: Down 3,078 → 317 (−90 %), median 4.80 → 3.60 ms (−25 %); with UIA 3,398 → 369 (−89 %), 5.39 → 3.84 (−29 %); 60 files 978 → 295 (−70 %); Stage 3,308 → 920 KB, min −30 %; reload landing 10.3 → 2.0 MB; elements 3,160 → 571; chrome builds a key 3 → 0. **Wheel at 300 files costs more, the virtualizing trade:** bytes 0.1 → 35 KB (UIA 27 → 55), time +1…+5 %, with UIA a tree every third notch (→ 11b). Suite 168 rows 0/0 JIT + AOT. 386 scenes × 2 themes: 376 identical, 10 Tab scenes have two fewer Tab stops before the composer. Reader: off-screen rows leave the tree (50,078 off-screen nodes gone, none added); Tab no longer reaches off-screen buttons (question 9: kept, user 2026-11-01). Core 5,022, Headless 1,243, Junction 1,041, Fedora a11y 98 pass; 47 reverse edits caught. |
 | 6 | a4f798dd, daebfa76, 17504b64, 47a7b51a, 82312fa1, d546eb6e | junction-review-composer-reader | Approved (question 8). **The row that holds the focus opens:** internal, no API; its elements hang under its item's node while it holds the focus, at most one row, every other row stays its item. `RowsAreComposite` measured and declined (DECISIONS: on-screen rows only, each a button; caret key 134.6 KB and 0.34 trees vs 120.4 and 0; wheel 25.2 KB and 0.33 trees vs 13.2 and 0). Reader: editor with role and name, focus, text and caret readable, text-changed told per key, 0 trees; replies the same. Any focusable in an item row of any list is now told (before, silence), one tree per Tab in the review's selectable diff text. Bridge off: every walk same bytes, time within 2 %, 2 KB a key. UIA JIT / AOT: key 2.0 → 2.7 / 2.1 → 2.7 KB, time +3–4 %; caret 0.4 → 1.0 KB; diff walk and wheel flat; open and close 950 → 1,011 KB a step, 0.5 → 1 trees, slowest step's med +24–39 % (closing builds at once). daebfa76: a keystroke in text made on request builds no tree: `a11y/type in rich text beside 300 rows` 86.1 → 8.3 KB, −16…−26 %. Fix on the way: item boxes in mixed-height lists are where rows are drawn (205 offscreen flags corrected). 22 of 23 mutants caught; 0 STALE in 2,920 audits; 392 scenes pixels and focus identical; suite 0 slower, 2 faster JIT + AOT; Fedora passes. Check: Changes' wheel trees are 20 per 120 notches at a notch a frame, like the grid; the 47a7b51a test pins a held header's focus. |
+| 6 | 985adef7 | apps-junction-highlight-prefetch | `TokenizeDiff` (internal, HultUI.Syntax, question 10) stops each side at its last shown line, walks unshown lines for state only, and walks the lines both versions start with once. One worker, one waiting slot; a newer selection cancels; a prefetch never takes the worker from the diff on screen; 120 ms rest for the log's prefetch. KB a key all threads, JIT / AOT: History 60 ms 9,794 → 1,636 / 9,839 → 1,637 (−83 %), 500 ms −61 %; Commit files 100 ms 3,853 → 641 (−83 %), 500 ms −21 %; generated repo 17,580 → 3,564 (−80 %). Workers 673 → 47 Mc; GC pause 0.55 → 0.11 ms; GCs per 100 keys 19/4/0 → 7/4/0.8. UI thread up to +4 KB, cycles within 3 %. Colour lands earlier on Tab (336 → 150 ms) and a file key at rest (max 1,212 → 202), later on a held walk's last key (p90 +30–60 ms). Spans byte-identical over 2,081 files, 15 languages, 934,306 spans. |
+| 6 | 323a3073 | junction-commit-diff-flatten | A diff's rows are made as they're asked for; row models hold no colours, so a landing flattens nothing; find, copy, wrap and review make their rows when needed. Commit file key on the UI thread (150dcf7f): 33–100 ms 551–555 → 214–218 KB (−61 %, UIA −56 %), 500 ms 1,248 → 236 (−81 %, UIA −76 %); 8,000-line files 3,240 → 569 (−83 %, UIA −71 %), UI min −31 / −39 %; row records a key 10–35. Step 12: 421 scenes identical (pixels, a11y, focus); suite 171 rows 0/0 JIT + AOT (AOT baseline = step 11b's publish, same source, the baseline tree's publish failed); Junction 1,075, Syntax 78, Meridian 465 on the final code, Vesper 876 and Headless 1,266 before a last Junction-only edit; 28 reverse edits caught. |
 
 ## Examined, not worth it
 
@@ -490,7 +497,10 @@ Round 6 questions (asked 2026-10-27). Recommendations in brackets.
    named the palette and Commit and Files had it earlier, but not Changes by name. Rows off screen now leave the
    reader's tree there too, and Tab no longer reaches a Hidden file's "Watch again" or an off-screen "Stage all" (before,
    Tab landed on something not visible). The held header stays, with its button. [Keep: it's what every other virtual
-   list does, and the list scrolls to its selection.]
+   list does, and the list scrolls to its selection.] → **yes, keep it** (2026-11-01).
+10. **tokenize-diff-public** (from step 12; not blocking): `TokenizeDiff` in HultUI.Syntax tokenizes only the lines a diff
+    shows and is `internal`, with Junction as a friend assembly. Another diff view would want it. Make it public? [Yes,
+    but later: no second user exists, and a friend assembly costs nothing. Decide when one turns up.]
 
 Open from round 5 (questions 1–4, answered, are in [the archive](17-performance-team-ledger-archive.md#needs-the-user-round-5)).
 
@@ -744,6 +754,7 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   `AccessibilityRole.Menu` with MenuItem rows. Time a key behind a git process in the UI thread's cycles, not wall
   time (a plain History key waits ~90 ms on the prefetch).
 - 2026-11-01: the user answered question 8: fix it (step 11b, after step 11).
+- 2026-11-01: the user answered question 9: keep it.
 - 2026-11-01: step 11 landed (2be205e5..502f7798): `VirtualList.StickyRows`, and Junction's Changes list on it (Down at 300
   files −90 %, median −25…−29 %; Stage −72 %; 3,160 → 571 elements), selection moves leave the chrome alone. Wheel over
   the list pays for rows made as they scroll in (0.1 → 35 KB, time +1…+5 %), as every virtual list does. Question 9 for
@@ -760,3 +771,13 @@ From 2026-10-26; earlier entries are in [the archive](17-performance-team-ledger
   reads as a button; compare wheel tree counts at the same clock pace. Left open: a draft can't be read with focus
   elsewhere (needs API); `VirtualItemIndexAt` on a served list of mixed heights assumes one height; a list over 2,000
   builds a full-length tree as a row opens and again as it closes. Weekly usage 13 % (582k tokens).
+- 2026-11-02: step 12 landed (985adef7, 323a3073, d92f14bf): a diff tokenizes only what it can show (History −83 %,
+  Commit files −83 %, workers −93 %, GC pause −80 %; spans byte-identical over 934,306 spans) and makes its rows as
+  they're asked for (Commit file key −61…−83 %). The agent rewrote its commits along the way, so c01cda36 and 3b8c8ebd
+  are gone. Guideline notes: cancelled doesn't mean invalid, keep a result that finished; a prefetch yields to what the
+  screen waits for, and rests only when nothing says the reader stayed, so a single key stays immediate; row models hold
+  no colours, read them at draw time, so a landing touches only visible rows; a lazy `Items` list must be safe off the UI
+  thread (over 2,000 items, labels are read on reader threads); a headless clock runs with frames, so a worker's budget
+  needs a standing clock there; walk measures need cold reps, a cache hides the first pass; Windows thread and process
+  times alias paced bursts, use `QueryProcessCycleTime`. Question 10 for the user. Weekly usage 24 % (641k tokens, but
+  11.3 h: three timing chains of 6–7 minute walks).
