@@ -902,9 +902,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
-            if (line.Runs.Count == 0) continue;
+            // The clip first: reading a line's runs makes them, and these lines draw nothing.
             float lineTop = origin.Y + line.OffsetY;
             if (lineTop > clip.Bottom + line.Height || lineTop + 2 * line.Height < clip.Top) continue;
+            if (line.Runs.Count == 0) continue;
             float baseX = origin.X + p.LineLeft(i);
             float lineY = lineTop + line.Ascent;
 

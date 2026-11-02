@@ -39,10 +39,12 @@ public class ParagraphAllocationTests
         Assert.InRange(a - 10L * (8 + 20), 0, 200);
     }
 
-    [Fact]
-    public void AWrappedLine_AllocatesWhatItKeeps_AndNoListToItemizeIn()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AWrappedLine_AllocatesWhatItKeeps_AndNoListToItemizeIn(bool runsWhenRead)
     {
-        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        var pipeline = new TextPipeline(new Fonts(), new Shaper()) { ComposeRunsWhenRead = runsWhenRead };
         string ten = Lines(10), forty = Lines(40);
         float width = 60f;
         // Laid out once, so their shaping and break segments are kept; then each round at a width
@@ -66,22 +68,34 @@ public class ParagraphAllocationTests
         });
         long listGrowth = ListOf(40) - ListOf(10);
 
-        // Each line: its text trimmed ("abcdefgh"), 40 B, cut out of the paragraph once (the line
-        // as it stands, "abcdefgh ", cut out first was 40 B more); a list of its one run with room
-        // for one (32 + 32 B); the run, sharing its word's glyphs (56 B); and the line. Its font
-        // runs go into a list the pipeline keeps: one made for each line was 120 B more, and the
-        // list of its runs grown to room for four 24 B more.
-        Assert.Equal(30L * (40 + 64 + 56 + lineBytes) + listGrowth, b - a);
+        // Each line: the line; the lines of a layout share what they make their runs from. Read,
+        // or made with the line on the reference path, its runs: its text trimmed ("abcdefgh"),
+        // 40 B, cut out of the paragraph once (the line as it stands, "abcdefgh ", cut out first was
+        // 40 B more); a list of its one run with room for one (32 + 32 B); the run, sharing its
+        // word's glyphs (56 B). Its font runs go into a list the pipeline keeps: one made for each
+        // line was 120 B more, and the list of its runs grown to room for four 24 B more.
+        const long RunsBytes = 40 + 64 + 56;
+        Assert.Equal(30L * ((runsWhenRead ? 0 : RunsBytes) + lineBytes) + listGrowth, b - a);
+
+        if (runsWhenRead)
+        {
+            var read = pipeline.Layout(forty, Style, width + 7f, null).Lines;
+            Assert.All(read, l => Assert.False(l.RunsMade));
+            int next = 0;
+            Assert.Equal(RunsBytes, Allocations.Least(() => _ = read[next++ % read.Count].Runs));
+        }
     }
 
-    [Fact]
-    public void AnEllipsizedLabel_CutsOneStringForItsLine()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnEllipsizedLabel_CutsOneStringForItsLine_WhenItsLineIsRead(bool runsWhenRead)
     {
         // The same label truncated nine characters further on, each at widths it was not laid out
         // at before: its line's text is the prefix and the mark in one string, 16 B longer for the
-        // nine characters. The prefix cut out first and then joined to the mark was a second
-        // string, 32 B in all.
-        var pipeline = new TextPipeline(new Fonts(), new Shaper());
+        // nine characters, the first time its runs are read. The prefix cut out first and then
+        // joined to the mark was a second string, 32 B in all.
+        var pipeline = new TextPipeline(new Fonts(), new Shaper()) { ComposeRunsWhenRead = runsWhenRead };
         string text = Lines(10);
         // 6 a character, the mark one of them: room for 19 or 28 characters and the mark, both
         // ending in the same "a" of a word cut short.
@@ -90,6 +104,11 @@ public class ParagraphAllocationTests
         Assert.Equal(28 + 1, Line(longWidth).Length);
         long a = Allocations.Least(() => Line(shortWidth += 0.001f));
         long b = Allocations.Least(() => Line(longWidth += 0.001f));
+        Assert.Equal(runsWhenRead ? 0 : 16, b - a);
+
+        // Laid out and read.
+        a = Allocations.Least(() => _ = Line(shortWidth += 0.001f).Runs);
+        b = Allocations.Least(() => _ = Line(longWidth += 0.001f).Runs);
         Assert.Equal(16, b - a);
 
         TextLine Line(float width) =>

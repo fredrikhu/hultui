@@ -35,7 +35,29 @@ public sealed class TextLayout
 /// </summary>
 public sealed class TextLine
 {
-    public IReadOnlyList<ShapedRun> Runs { get; }
+    /// <summary>The line's shaped runs, in logical order.</summary>
+    /// <remarks>
+    /// A line the pipeline broke knows its width, metrics and extent from the start, and makes its
+    /// runs and their strings the first time this is read, from the same text in the same faces:
+    /// most lines laid out are never drawn (the lines of a paragraph off screen, the layouts at the
+    /// widths a resize passes through, the labels a list measures and does not show). Read it on
+    /// the thread that lays text out with the pipeline that made the line — the UI thread — as the
+    /// pipeline itself is used.
+    /// </remarks>
+    public IReadOnlyList<ShapedRun> Runs => _runs is LineSource or TextLine
+        ? MakeRuns()
+        : System.Runtime.CompilerServices.Unsafe.As<IReadOnlyList<ShapedRun>>(_runs);
+
+    // The runs; or, while they are not made yet, what they are made from: a LineSource, one object
+    // for the lines of a layout, or the line this one is a copy of, which keeps them for all its
+    // copies. One field for all three: one more would make every line 8 bytes bigger, and a label
+    // has a line.
+    private object _runs;
+
+    /// <summary>Whether the runs exist yet. Until they do, a reader that only weighs the line reads
+    /// <see cref="DrawnLength"/>, and reading <see cref="Runs"/> makes them.</summary>
+    internal bool RunsMade => _runs is not (LineSource or TextLine);
+
     public float Width { get; }
     public float Ascent { get; }
     public float Descent { get; }
@@ -63,7 +85,7 @@ public sealed class TextLine
 
     public TextLine(IReadOnlyList<ShapedRun> runs, float width, float ascent, float descent, float leading)
     {
-        Runs = runs;
+        _runs = runs;
         Width = width;
         Ascent = ascent;
         Descent = descent;
@@ -71,6 +93,42 @@ public sealed class TextLine
         int drawn = 0;
         for (int i = 0; i < runs.Count; i++) drawn += runs[i].Text.Length;
         DrawnLength = drawn;
+    }
+
+    // A line whose runs the pipeline makes from source when they are first read
+    // (TextPipeline.ComposeRuns): width, metrics and drawnLength are what those runs add up to.
+    internal TextLine(LineSource source, int drawnLength, float width, float ascent, float descent, float leading)
+    {
+        _runs = source;
+        Width = width;
+        Ascent = ascent;
+        Descent = descent;
+        Leading = leading;
+        DrawnLength = drawnLength;
+    }
+
+    // A line of a later layout over the same runs (TextPipeline.CopyOf): everything of line but
+    // the OffsetY that layout may have set. Runs not made yet are made once, in line.
+    internal TextLine(TextLine line)
+    {
+        _runs = line.RunsMade ? line._runs : line;
+        Width = line.Width;
+        Ascent = line.Ascent;
+        Descent = line.Descent;
+        Leading = line.Leading;
+        DrawnLength = line.DrawnLength;
+        Start = line.Start;
+        Length = line.Length;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private IReadOnlyList<ShapedRun> MakeRuns()
+    {
+        IReadOnlyList<ShapedRun> runs = _runs is TextLine line
+            ? line.Runs
+            : ((LineSource)_runs).Style.Pipeline.ComposeRuns((LineSource)_runs, Start, DrawnLength);
+        _runs = runs;
+        return runs;
     }
 
     // ── Offset ↔ x mapping (docs/plans/14-bidi.md, stage 2) ──
@@ -326,6 +384,36 @@ public sealed class TextLine
         float distanceAt = Math.Abs(RunX(run, lo, measurePrefix) - x);
         return distanceBefore <= distanceAt ? (before, distanceBefore) : (lo, distanceAt);
     }
+}
+
+/// <summary>
+/// What the lines of one layout make their runs from when they are first read
+/// (<see cref="TextLine.Runs"/>): the text they are ranges of and, on the styled path, its metric
+/// spans, a copy of the list the layout was handed, sorted and apart as that was.
+/// </summary>
+internal sealed class LineSource(LineStyle style, string text, Core.Rendering.TextSpan[]? spans)
+{
+    public readonly LineStyle Style = style;
+    public readonly string Text = text;
+    public readonly Core.Rendering.TextSpan[]? Spans = spans;
+}
+
+/// <summary>
+/// What the lines of one style have in common, held once however many layouts have such lines: a
+/// <see cref="ResolvedInheritedStyle"/> is about 60 bytes, a third of what a line not made saves.
+/// With the style go what a face is chosen by besides: the Han context of its paragraph
+/// (<see cref="ScriptLanguage.CjkContextOf"/>) and the UI culture Han without one follows.
+/// <see cref="Ellipsized"/> says a line is its range of the text, the last character's place taken
+/// by the ellipsis.
+/// </summary>
+internal sealed class LineStyle(TextPipeline pipeline, ResolvedInheritedStyle style, string? hanContext,
+    System.Globalization.CultureInfo culture, bool ellipsized)
+{
+    public readonly TextPipeline Pipeline = pipeline;
+    public readonly ResolvedInheritedStyle Style = style;
+    public readonly string? HanContext = hanContext;
+    public readonly System.Globalization.CultureInfo Culture = culture;
+    public readonly bool Ellipsized = ellipsized;
 }
 
 /// <summary>A visual x-range on one line, in line-relative coordinates.</summary>

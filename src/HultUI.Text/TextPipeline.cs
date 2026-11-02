@@ -89,14 +89,22 @@ public sealed class TextPipeline
     // line of 20 characters, 494 for one of 160).
     private static int WidthBytes(string text) => 180 + 2 * text.Length;
 
-    private static int LayoutBytes(string text, TextLayout layout)
+    // A layout weighs what it would with every line's runs made, read or not: lines made later
+    // cannot add to a weight already in the cache, so a weight of what the lines hold now would
+    // stay short of what they hold once drawn, for as long as the entry lives. A line not made yet
+    // counts a glyph a character and hands its runs in through _runsNotMade.
+    private int LayoutBytes(string text, TextLayout layout)
     {
-        int bytes = 300 + 4 * text.Length + GlyphBytes(layout);
+        int bytes = 300 + 4 * text.Length + GlyphBytes(layout) + 80 * _runsNotMade;
+        _runsNotMade = 0;
         var lines = layout.Lines;
         for (int i = 0; i < lines.Count; i++)
-            bytes += 120 + 80 * lines[i].Runs.Count;
+            bytes += 120 + (lines[i].RunsMade ? 80 * lines[i].Runs.Count : 0);
         return bytes;
     }
+
+    // How many runs the lines not made since the last LayoutBytes will make.
+    private int _runsNotMade;
 
     private static int GlyphBytes(TextLayout layout)
     {
@@ -104,7 +112,13 @@ public sealed class TextPipeline
         var lines = layout.Lines;
         for (int i = 0; i < lines.Count; i++)
         {
-            var runs = lines[i].Runs;
+            var line = lines[i];
+            if (!line.RunsMade)
+            {
+                glyphs += line.DrawnLength;
+                continue;
+            }
+            var runs = line.Runs;
             for (int r = 0; r < runs.Count; r++)
                 glyphs += runs[r].GlyphCount;
         }
@@ -200,6 +214,7 @@ public sealed class TextPipeline
         // of its text — a text area's whole document — here.
         if (_prefixView is { Holding: true } view)
             view.Release();
+        _lineSource = null;
     }
 
     private void FollowCulture()
@@ -216,6 +231,8 @@ public sealed class TextPipeline
                 _memos.Clear();
                 _memoWidths.Clear();
                 _memoLines.Clear();
+                _lineStyles?.Clear();
+                _lineStyle = null;
                 Array.Clear(_seen);
             }
             _culture = culture;
@@ -226,15 +243,18 @@ public sealed class TextPipeline
     // caller reads the runs before it itemizes again, and nothing it calls while it reads them
     // itemizes into this list (a foreach over it would throw if anything did). A new list a call
     // was 14–27 % of what styled, BiDi and fallback text allocated per layout (plan 17, round 5).
-    private List<FontRun> Itemize(string text, ResolvedInheritedStyle style)
+    private List<FontRun> Itemize(string text, ResolvedInheritedStyle style) =>
+        FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, ParagraphHanContext(),
+            Kept(_fontRuns));
+
+    private string? ParagraphHanContext()
     {
         if (!_hanContextKnown)
         {
             _hanContext = ScriptLanguage.CjkContextOf(_paragraph);
             _hanContextKnown = true;
         }
-        return FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, _hanContext,
-            Kept(_fontRuns));
+        return _hanContext;
     }
 
     private readonly List<FontRun> _fontRuns = new();
@@ -255,15 +275,21 @@ public sealed class TextPipeline
     // this way, so a line cuts out only the strings its shaped runs keep, and a measure none.
     private void ItemizeRange(string text, int from, int end, ResolvedInheritedStyle style, List<RunRange> into)
     {
-        if (!_hanContextKnown)
-        {
-            _hanContext = ScriptLanguage.CjkContextOf(_paragraph);
-            _hanContextKnown = true;
-        }
+        string? hanContext = ParagraphHanContext();
         into.Clear();
         var sink = new RangeRuns(from, into);
         FontItemizer.Itemize(text.AsSpan(from, end - from), _fonts, style.FontFamily, style.FontWeight, style.FontSlant,
-            _hanContext, ref sink);
+            hanContext, ref sink);
+    }
+
+    // The same for characters that may be no string's, in the Han context given: their runs,
+    // offset by `offset`.
+    private void ItemizeChars(ReadOnlySpan<char> text, int offset, ResolvedInheritedStyle style, string? hanContext,
+        List<RunRange> into)
+    {
+        into.Clear();
+        var sink = new RangeRuns(offset, into);
+        FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, hanContext, ref sink);
     }
 
     // A font run as where it starts and ends in the text it was itemized from.
@@ -605,9 +631,13 @@ public sealed class TextPipeline
     // keystroke in a rich text editor.
 
     private ResolvedInheritedStyle EffectiveStyleAt(
-        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, int offset)
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, int offset) =>
+        EffectiveStyleAt(style, spans, offset, FirstSpanEndingAfter(spans, offset));
+
+    // i is FirstSpanEndingAfter(spans, offset), which a piece of a line asks for twice over.
+    private static ResolvedInheritedStyle EffectiveStyleAt(
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, int offset, int i)
     {
-        int i = FirstSpanEndingAfter(spans, offset);
         if (i >= spans.Count) return style;
         var s = spans[i];
         if (!s.IsMetricAffecting || offset < s.Start) return style;
@@ -622,9 +652,12 @@ public sealed class TextPipeline
 
     // The nearest metric-span edge after <paramref name="offset"/>, clamped to limit: the end of
     // the metric span holding it, else the start of the first one after it.
-    private static int NextStyleBoundary(IReadOnlyList<Core.Rendering.TextSpan> spans, int offset, int limit)
+    private static int NextStyleBoundary(IReadOnlyList<Core.Rendering.TextSpan> spans, int offset, int limit) =>
+        NextStyleBoundary(spans, offset, limit, FirstSpanEndingAfter(spans, offset));
+
+    private static int NextStyleBoundary(IReadOnlyList<Core.Rendering.TextSpan> spans, int offset, int limit, int first)
     {
-        for (int i = FirstSpanEndingAfter(spans, offset); i < spans.Count; i++)
+        for (int i = first; i < spans.Count; i++)
         {
             var s = spans[i];
             if (s.Start >= limit) break;
@@ -653,69 +686,111 @@ public sealed class TextPipeline
         int i = from;
         while (i < to)
         {
-            int b = NextStyleBoundary(spans, i, to);
-            width += MeasureRange(text, i, b, EffectiveStyleAt(style, spans, i));
+            int first = FirstSpanEndingAfter(spans, i);
+            int b = NextStyleBoundary(spans, i, to, first);
+            width += MeasureRange(text, i, b, EffectiveStyleAt(style, spans, i, first));
             i = b;
         }
         return width;
     }
 
     private TextLine ShapeStyledLine(string text, int from, int to,
-        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans,
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, TextMemo? memo,
         bool appendEllipsis = false)
     {
         int sourceLength = to - from + (appendEllipsis ? 1 : 0);
         // Trailing whitespace is trimmed for width, as in ShapeLineText.
         while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
 
-        var runs = new List<ShapedRun>();
-        float width = 0, maxAscent = 0, maxDescent = 0, maxLeading = 0;
-        int i = from;
-        while (i < to)
+        // A first layout with many spans makes its runs now (MostSpansCopied).
+        var runs = ComposeRunsWhenRead && (memo is not null || spans.Count <= MostSpansCopied) ? null : new List<ShapedRun>();
+        var extent = StyledRuns(text, from, to, style, spans, appendEllipsis, ParagraphHanContext(), _lineRuns, runs);
+
+        if (extent.Runs == 0)
         {
-            int b = NextStyleBoundary(spans, i, to);
-            var eff = EffectiveStyleAt(style, spans, i);
-            ItemizeRange(text, i, b, eff, Kept(_lineRuns));
-            foreach (var (runStart, runEnd, font) in _lineRuns)
-            {
-                var shaped = ShapeWithSpacing(text[runStart..runEnd], font, eff.FontSize, eff.LetterSpacing);
-                shaped.OffsetX = width;
-                width += shaped.Width;
-                runs.Add(shaped);
-                // A larger-size run raises its whole line, the same max-across-runs
-                // rule font fallback already applies.
-                maxAscent = Math.Max(maxAscent, Math.Abs(font.Ascent) * eff.FontSize);
-                maxDescent = Math.Max(maxDescent, font.Descent * eff.FontSize);
-                maxLeading = Math.Max(maxLeading, font.Leading * eff.FontSize);
-            }
+            var primary = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
+            extent.Ascent = Math.Abs(primary.Ascent) * style.FontSize;
+            extent.Descent = primary.Descent * style.FontSize;
+            extent.Leading = primary.Leading * style.FontSize;
+        }
+
+        var (ascent, leading) = ApplyLineHeight(extent.Ascent, extent.Descent, extent.Leading, style.LineHeight);
+        TextLine line;
+        if (runs is not null)
+            line = new TextLine(runs, extent.Width, ascent, extent.Descent, leading);
+        else if (extent.Runs == 0)
+            line = new TextLine([], extent.Width, ascent, extent.Descent, leading);
+        else
+        {
+            _runsNotMade += extent.Runs;
+            line = new TextLine(SourceOf(text, style, spans, memo, appendEllipsis), to - from + (appendEllipsis ? 1 : 0),
+                extent.Width, ascent, extent.Descent, leading);
+        }
+        line.Start = from;
+        line.Length = sourceLength;
+        return line;
+    }
+
+    // What walking a styled line's pieces comes to: how many runs, their width side by side, and
+    // the largest of each metric over them.
+    private struct StyledExtent
+    {
+        public int Runs;
+        public float Width, Ascent, Descent, Leading;
+    }
+
+    // The runs of the styled line text[from..to], in order, and what they come to. With `into`,
+    // shaped and added to it; without, measured (MeasureRun): the same widths added in the same
+    // order, so a line's width and metrics are the same to the bit whether its runs are made with
+    // it or when read (ComposeRuns, which calls this with the Han context the line was laid out
+    // in and a list of its own).
+    private StyledExtent StyledRuns(string text, int from, int to, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan> spans, bool appendEllipsis, string? hanContext, List<RunRange> fontRuns,
+        List<ShapedRun>? into)
+    {
+        var extent = new StyledExtent();
+        for (int i = from; i < to;)
+        {
+            int first = FirstSpanEndingAfter(spans, i);
+            int b = NextStyleBoundary(spans, i, to, first);
+            var eff = EffectiveStyleAt(style, spans, i, first);
+            ItemizeChars(text.AsSpan(i, b - i), i, eff, hanContext, Kept(fontRuns));
+            foreach (var (runStart, runEnd, font) in fontRuns)
+                AddStyledRun(ref extent, text, runStart, runEnd, font, eff.FontSize, eff.LetterSpacing, into);
             i = b;
         }
-        _lineRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
 
         // The ellipsis is the element's own text, not the span's: a truncation mark
         // rendered bold because the last word happened to be bold reads as content.
         if (appendEllipsis)
-            foreach (var fr in Itemize(EllipsisString, style))
-            {
-                var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing);
-                shaped.OffsetX = width;
-                width += shaped.Width;
-                runs.Add(shaped);
-                maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * style.FontSize);
-                maxDescent = Math.Max(maxDescent, fr.Font.Descent * style.FontSize);
-                maxLeading = Math.Max(maxLeading, fr.Font.Leading * style.FontSize);
-            }
-
-        if (runs.Count == 0)
         {
-            var primary = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
-            maxAscent = Math.Abs(primary.Ascent) * style.FontSize;
-            maxDescent = primary.Descent * style.FontSize;
-            maxLeading = primary.Leading * style.FontSize;
+            ItemizeChars(EllipsisString, 0, style, hanContext, Kept(fontRuns));
+            foreach (var (runStart, runEnd, font) in fontRuns)
+                AddStyledRun(ref extent, EllipsisString, runStart, runEnd, font, style.FontSize, style.LetterSpacing, into);
+            fontRuns.Clear();
         }
+        return extent;
+    }
 
-        (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, style.LineHeight);
-        return new TextLine(runs, width, maxAscent, maxDescent, maxLeading) { Start = from, Length = sourceLength };
+    private void AddStyledRun(ref StyledExtent extent, string text, int start, int end, IResolvedFont font,
+        float fontSize, float letterSpacing, List<ShapedRun>? into)
+    {
+        if (into is null)
+            extent.Width += MeasureRun(text, start, end, font, fontSize, letterSpacing);
+        else
+        {
+            var shaped = ShapeWithSpacing(text[start..end], font, fontSize, letterSpacing);
+            shaped.OffsetX = extent.Width;
+            extent.Width += shaped.Width;
+            into.Add(shaped);
+        }
+        extent.Runs++;
+        // A larger-size run raises its whole line, the same max-across-runs
+        // rule font fallback already applies.
+        extent.Ascent = Math.Max(extent.Ascent, Math.Abs(font.Ascent) * fontSize);
+        extent.Descent = Math.Max(extent.Descent, font.Descent * fontSize);
+        extent.Leading = Math.Max(extent.Leading, font.Leading * fontSize);
     }
 
     // Styled twin of BuildEllipsizedLine: the longest styled prefix that leaves room
@@ -1023,20 +1098,26 @@ public sealed class TextPipeline
     // the whole text once it has one (LineBytes), and the objects and cache bookkeeping around
     // them. Measured with full collections, emptying the cache: within 3 % for paragraphs of 400
     // and 2,000 characters, BiDi or styled, and labels of 60 or 80.
-    private static int MemoBytes(TextMemo memo, int textLength)
+    private const int SpanBytes = 56;
+
+    private static int MemoBytes(TextMemo memo, int textLength, int wholeLineRuns = 0)
     {
         int bytes = 300 + 2 * textLength + 4 * memo.Breaks.Capacity + 4 * memo.SegmentWidths.Length;
         if (memo.Levels is { } levels) bytes += levels.Length;
-        if (memo.Spans is { } spans) bytes += 48 * spans.Length;
-        if (memo.WholeLine is { } line) bytes += LineBytes(line);
+        if (memo.Spans is { } spans) bytes += SpanBytes * spans.Length;
+        if (memo.WholeLine is { } line) bytes += LineBytes(line, wholeLineRuns);
         return bytes;
     }
 
     // A remembered line: each run's object, text and 16 bytes a glyph, and the line's entry.
     // Within 5 % of what full collections measure for lines of one run to thirty (a line of
-    // Hebrew mixed with Latin is a run a word or two), ellipsized or not.
-    private static int LineBytes(TextLine line)
+    // Hebrew mixed with Latin is a run a word or two), ellipsized or not. A line whose runs are not
+    // made yet weighs what it will once they are (LayoutBytes says why), its runsNotMade runs and a
+    // glyph a character.
+    private static int LineBytes(TextLine line, int runsNotMade)
     {
+        if (!line.RunsMade)
+            return 180 + 104 * runsNotMade + 18 * line.DrawnLength;
         int bytes = 180;
         var runs = line.Runs;
         for (int i = 0; i < runs.Count; i++)
@@ -1070,10 +1151,6 @@ public sealed class TextPipeline
     // range without it, and is false for widths.
     private readonly record struct MemoRange(int Owner, int From, int To, bool Ellipsis);
 
-    // A metric span as layout sees it: what EffectiveStyleAt and NextStyleBoundary read.
-    private readonly record struct MetricSpan(int Start, int Length, FontWeight? Weight, FontSlant? Slant, float? FontSize,
-        string? FontFamily);
-
     private sealed class TextMemo
     {
         // What its ranges are keyed by (MemoRange.Owner).
@@ -1082,14 +1159,18 @@ public sealed class TextPipeline
         public readonly byte[]? Levels;
         public readonly bool RtlParagraph;
         public readonly List<int> Breaks;
-        // The metric spans this entry was made for, in order; null without spans.
-        public readonly MetricSpan[]? Spans;
+        // The metric spans this entry was made for, in order (MetricOnly); null without spans.
+        public readonly Core.Rendering.TextSpan[]? Spans;
         // The width of segment s (Breaks[s - 1]..Breaks[s]); NaN until a pass reaches it.
         public readonly float[] SegmentWidths;
         // The line of the whole text: the one line of every width it fits.
         public TextLine? WholeLine;
+        // What its styled lines make their runs from, at every width: without and with the mark.
+        public LineSource? Lines, EllipsizedLines;
+        // Whether a line remembered without its runs has counted for the text it keeps.
+        public bool TextWeighed;
 
-        public TextMemo(int id, byte[]? levels, bool rtlParagraph, List<int> breaks, MetricSpan[]? spans)
+        public TextMemo(int id, byte[]? levels, bool rtlParagraph, List<int> breaks, Core.Rendering.TextSpan[]? spans)
         {
             Id = id;
             Levels = levels;
@@ -1101,18 +1182,30 @@ public sealed class TextPipeline
         }
     }
 
-    private static MetricSpan[]? MetricSpansOf(IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    // A metric span as layout sees it: what EffectiveStyleAt and NextStyleBoundary read, nothing a
+    // paint-only change can move.
+    private static Core.Rendering.TextSpan MetricOnly(Core.Rendering.TextSpan span) =>
+        new(span.Start, span.Length, default, default, TextDecoration.None, span.Weight, span.Slant, span.FontSize,
+            span.FontFamily);
+
+    // The metric spans in order, MetricOnly: sorted and apart, the two lookups give on them what
+    // they give on the whole list.
+    private static Core.Rendering.TextSpan[]? MetricSpansOf(IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         if (spans is null) return null;
-        var kept = new List<MetricSpan>();
+        int count = 0;
         for (int i = 0; i < spans.Count; i++)
             if (spans[i].IsMetricAffecting)
-                kept.Add(new MetricSpan(spans[i].Start, spans[i].Length, spans[i].Weight, spans[i].Slant, spans[i].FontSize,
-                    spans[i].FontFamily));
-        return kept.Count == 0 ? null : kept.ToArray();
+                count++;
+        if (count == 0) return null;
+        var kept = new Core.Rendering.TextSpan[count];
+        for (int i = 0, k = 0; k < count; i++)
+            if (spans[i].IsMetricAffecting)
+                kept[k++] = MetricOnly(spans[i]);
+        return kept;
     }
 
-    private static bool SameMetricSpans(MetricSpan[]? kept, IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    private static bool SameMetricSpans(Core.Rendering.TextSpan[]? kept, IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
         int k = 0;
         if (spans is not null)
@@ -1120,9 +1213,7 @@ public sealed class TextPipeline
             {
                 var span = spans[i];
                 if (!span.IsMetricAffecting) continue;
-                if (kept is null || k >= kept.Length
-                    || kept[k] != new MetricSpan(span.Start, span.Length, span.Weight, span.Slant, span.FontSize,
-                        span.FontFamily))
+                if (kept is null || k >= kept.Length || kept[k] != MetricOnly(span))
                     return false;
                 k++;
             }
@@ -1189,8 +1280,7 @@ public sealed class TextPipeline
     // runs, which nothing changes once the line is built (the plain path's one-line layout
     // shares its runs the same way). The layout that builds a line keeps it; later ones get
     // copies, which read everything of it but the OffsetY that layout may have set.
-    private static TextLine CopyOf(TextLine line) =>
-        new(line.Runs, line.Width, line.Ascent, line.Descent, line.Leading) { Start = line.Start, Length = line.Length };
+    private static TextLine CopyOf(TextLine line) => new(line);
 
     // A remembered line, copied for this layout, or null. No delegates here: a lambda over
     // these parameters would allocate its closure on every call, hits included.
@@ -1202,15 +1292,30 @@ public sealed class TextPipeline
     }
 
     // Remembers a line RememberedLine did not have, and hands it to the layout that built it.
-    private TextLine Remember(TextMemo memo, string text, int from, int to, bool appendEllipsis, TextLine line)
+    // runsNotMade is how many runs the line will make, when it has not made them yet.
+    private TextLine Remember(TextMemo memo, string text, int from, int to, bool appendEllipsis, TextLine line,
+        int runsNotMade = 0)
     {
         if (from == 0 && to == text.Length && !appendEllipsis)
         {
             // The entry keeps more now: it counts for it.
             memo.WholeLine = line;
-            if (ReferenceEquals(memo, _laidOutMemo)) _memos.Reweigh(_laidOutKey, MemoBytes(memo, text.Length));
+            if (ReferenceEquals(memo, _laidOutMemo)) _memos.Reweigh(_laidOutKey, MemoBytes(memo, text.Length, runsNotMade));
         }
-        else _memoLines.Add(new MemoRange(memo.Id, from, to, appendEllipsis), line, LineBytes(line));
+        else
+        {
+            int bytes = LineBytes(line, runsNotMade);
+            // A line whose runs are not made keeps the whole text and its spans, for as long as it
+            // is remembered, which can be longer than its entry is: the first of a string's lines
+            // counts for them, or a list of previews of long paragraphs, two lines of each, would
+            // keep them all by a weight of two lines.
+            if (!line.RunsMade && !memo.TextWeighed)
+            {
+                memo.TextWeighed = true;
+                bytes += 2 * text.Length + SpanBytes * (memo.Spans?.Length ?? 0);
+            }
+            _memoLines.Add(new MemoRange(memo.Id, from, to, appendEllipsis), line, bytes);
+        }
         return line;
     }
 
@@ -1274,9 +1379,12 @@ public sealed class TextPipeline
     private TextLine StyledLine(string text, int from, int to, ResolvedInheritedStyle style,
         IReadOnlyList<Core.Rendering.TextSpan> spans, TextMemo? memo, bool appendEllipsis = false)
     {
-        if (memo is null) return ShapeStyledLine(text, from, to, style, spans, appendEllipsis);
-        return RememberedLine(memo, text, from, to, appendEllipsis)
-            ?? Remember(memo, text, from, to, appendEllipsis, ShapeStyledLine(text, from, to, style, spans, appendEllipsis));
+        if (memo is null) return ShapeStyledLine(text, from, to, style, spans, null, appendEllipsis);
+        if (RememberedLine(memo, text, from, to, appendEllipsis) is { } remembered)
+            return remembered;
+        int runsBefore = _runsNotMade;
+        var line = ShapeStyledLine(text, from, to, style, spans, memo, appendEllipsis);
+        return Remember(memo, text, from, to, appendEllipsis, line, _runsNotMade - runsBefore);
     }
 
     private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, byte[] levels,
@@ -1634,7 +1742,7 @@ public sealed class TextPipeline
         if (!TruncatedTail(text, clip, maxWidth, out int start, out int tailEnd))
             return clip;
         string tail = text[start..tailEnd];
-        return WithLastLine(clip, BuildEllipsizedLine(tail, start, style, maxWidth,
+        return WithLastLine(clip, BuildEllipsizedLine(text, tail, start, style, maxWidth,
             ReuseAcrossWidths ? BuildPrefixWidths(tail, style) : null, MeasureString(EllipsisString, style)));
     }
 
@@ -1697,7 +1805,7 @@ public sealed class TextPipeline
     // followed by the ellipsis glyph. <paramref name="prefixes"/>, when the tail
     // has them, measures each candidate prefix without itemizing or shaping it
     // again; <paramref name="ellipsisWidth"/> is MeasureString of the mark.
-    private TextLine BuildEllipsizedLine(string tail, int start, ResolvedInheritedStyle style, float maxWidth,
+    private TextLine BuildEllipsizedLine(string text, string tail, int start, ResolvedInheritedStyle style, float maxWidth,
         PrefixWidths? prefixes, float ellipsisWidth)
     {
         // Binary search for the widest prefix that fits alongside the ellipsis.
@@ -1723,9 +1831,30 @@ public sealed class TextPipeline
         // it still fits.
         best = SnapPrefix(tail, best);
 
-        // One string, the prefix and the mark: the prefix cut out first was a second.
-        string content = string.Concat(tail.AsSpan(0, best), EllipsisString);
-        return ShapeLineText(content, 0, content.Length, style, start);
+        if (!ComposeRunsWhenRead)
+        {
+            string content = string.Concat(tail.AsSpan(0, best), EllipsisString);
+            return ShapeLineText(content, 0, content.Length, style, start);
+        }
+
+        // The line as characters, not a string: the runs that keep one are made when read. The
+        // width is what they will add up to (MeasureRuns), its text's own prefix and the mark.
+        int length = best + EllipsisString.Length;
+        Span<char> line = length <= 256 ? stackalloc char[length] : new char[length];
+        tail.AsSpan(0, best).CopyTo(line);
+        EllipsisString.CopyTo(line[best..]);
+        var fontRuns = Kept(_lineRuns);
+        ItemizeChars(line, 0, style, ParagraphHanContext(), fontRuns);
+        var (ascent, descent, leading) = LineMetrics(fontRuns, style);
+        float lineWidth = MeasureChars(line, fontRuns, style);
+        _runsNotMade += fontRuns.Count;
+        fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        return new TextLine(new LineSource(StyleOf(style, ellipsized: true), text, null), length, lineWidth, ascent,
+            descent, leading)
+        {
+            Start = start,
+            Length = length,
+        };
     }
 
     // ── Truncation without re-shaping ──
@@ -2105,7 +2234,7 @@ public sealed class TextPipeline
 
         // ApplyEllipsis on the wrap pass's one line, which starts at 0: the line rebuilt
         // with an ellipsis, in a layout keeping the wrapped line's height.
-        var line = BuildEllipsizedLine(text, 0, style, maxWidth, e.Prefixes, e.EllipsisWidth);
+        var line = BuildEllipsizedLine(text, text, 0, style, maxWidth, e.Prefixes, e.EllipsisWidth);
         return new TextLayout([line], new Size(Math.Max(0f, line.Width), e.Height));
     }
 
@@ -2156,7 +2285,7 @@ public sealed class TextPipeline
         if (!TruncatedTail(text, measured, maxWidth, out int start, out int tailEnd))
             return null;
         string tail = text[start..tailEnd];
-        return WithLastLine(measured, BuildEllipsizedLine(tail, start, style, maxWidth,
+        return WithLastLine(measured, BuildEllipsizedLine(text, tail, start, style, maxWidth,
             start == 0 && tailEnd == text.Length ? prefixes : BuildPrefixWidths(tail, style), ellipsisWidth));
     }
 
@@ -2435,6 +2564,30 @@ public sealed class TextPipeline
         return width;
     }
 
+    // MeasureRuns for characters that are no string's, left to right: an ellipsized line's, whose
+    // runs cut the string they keep when they are read. The same segments added in the same order.
+    private float MeasureChars(ReadOnlySpan<char> text, List<RunRange> runs, ResolvedInheritedStyle style)
+    {
+        float total = 0;
+        foreach (var (from, to, font) in runs)
+        {
+            float width = 0;
+            int glyphs = 0;
+            int fontHash = WordShapeKeyComparer.FontHash(font, style.FontSize);
+            for (int i = from; i < to;)
+            {
+                bool isSpace = text[i] == ' ';
+                int start = i;
+                while (i < to && (text[i] == ' ') == isSpace) i++;
+                var seg = ShapeSegment(text.Slice(start, i - start), start, font, style.FontSize, fontHash);
+                width += seg.Width;
+                glyphs += seg.Glyphs;
+            }
+            total += style.LetterSpacing == 0f || glyphs == 0 ? width : width + style.LetterSpacing * glyphs;
+        }
+        return total;
+    }
+
     // ShapeWithSpacing(text[from..to], …).Width without building the glyph array it would hand
     // back, or the run's string: the same segment widths added in the same order, letter spacing
     // applied the same way.
@@ -2659,22 +2812,39 @@ public sealed class TextPipeline
     {
         var segment = text.AsSpan(start, length);
         if (DigitTableFor(segment, font, fontSize) is { } digits)
-        {
-            float x = 0;
-            foreach (char c in segment)
-                x += digits.Advances[c - '0'];
-            return new WordShape(null, digits, start, x, length);
-        }
+            return DigitSegment(segment, digits, start);
 
         if (!_wordsInPlace.TryGet(new WordSpanKey(segment, font, fontSize, fontHash), out var run))
-        {
-            string word = text.Substring(start, length);
-            run = _shaper.Shape(word, font, fontSize);
-            // Put, not Add: next to the shaping a second lookup is nothing, and a key the
-            // lookup in place had missed would make Add throw.
-            _wordShapeCache.Put(new WordShapeKey(word, font, fontSize), run, WordBytes(word, run));
-        }
+            run = ShapeNewWord(text.Substring(start, length), font, fontSize);
         return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
+    }
+
+    // The same for a segment of characters that are no string's, which starts at `start` of them.
+    private WordShape ShapeSegment(ReadOnlySpan<char> segment, int start, IResolvedFont font, float fontSize, int fontHash)
+    {
+        if (DigitTableFor(segment, font, fontSize) is { } digits)
+            return DigitSegment(segment, digits, start);
+
+        if (!_wordsInPlace.TryGet(new WordSpanKey(segment, font, fontSize, fontHash), out var run))
+            run = ShapeNewWord(segment.ToString(), font, fontSize);
+        return new WordShape(run, null, start, run.Width, run.Glyphs.Length);
+    }
+
+    private static WordShape DigitSegment(ReadOnlySpan<char> segment, DigitTable digits, int start)
+    {
+        float x = 0;
+        foreach (char c in segment)
+            x += digits.Advances[c - '0'];
+        return new WordShape(null, digits, start, x, segment.Length);
+    }
+
+    private ShapedRun ShapeNewWord(string word, IResolvedFont font, float fontSize)
+    {
+        var run = _shaper.Shape(word, font, fontSize);
+        // Put, not Add: next to the shaping a second lookup is nothing, and a key the
+        // lookup in place had missed would make Add throw.
+        _wordShapeCache.Put(new WordShapeKey(word, font, fontSize), run, WordBytes(word, run));
+        return run;
     }
 
     // The proven digit table for an all-digit segment, or null when the segment isn't pure
@@ -2935,23 +3105,168 @@ public sealed class TextPipeline
         while (end > from && char.IsWhiteSpace(text[end - 1])) end--;
         var fontRuns = Kept(_lineRuns);
         ItemizeRange(text, from, end, style, fontRuns);
+        var (ascent, descent, leading) = LineMetrics(fontRuns, style);
 
-        // The line keeps this list: room for its runs and no more.
+        TextLine line;
+        if (ComposeRunsWhenRead && fontRuns.Count > 0)
+        {
+            float width = MeasureRuns(text, fontRuns, style);
+            _runsNotMade += fontRuns.Count;
+            line = new TextLine(SourceOf(text, style), end - from, width, ascent, descent, leading);
+        }
+        else
+        {
+            var runs = ShapeRuns(text, fontRuns, style.FontSize, style.LetterSpacing, out float width);
+            line = new TextLine(runs, width, ascent, descent, leading);
+        }
+        fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        line.Start = start;
+        line.Length = to - from;
+        return line;
+    }
+
+    // The shaped runs of font runs of text, side by side; the line keeps the list: room for its
+    // runs and no more.
+    private List<ShapedRun> ShapeRuns(string text, List<RunRange> fontRuns, float fontSize, float letterSpacing,
+        out float width)
+    {
         var runs = new List<ShapedRun>(fontRuns.Count);
-        float width = 0;
-
+        width = 0;
         foreach (var (runStart, runEnd, font) in fontRuns)
         {
-            var shaped = ShapeWithSpacing(text[runStart..runEnd], font, style.FontSize, style.LetterSpacing);
+            var shaped = ShapeWithSpacing(text[runStart..runEnd], font, fontSize, letterSpacing);
             shaped.OffsetX = width;
             width += shaped.Width;
             runs.Add(shaped);
         }
-
-        var (ascent, descent, leading) = LineMetrics(fontRuns, style);
-        fontRuns.Clear();   // the runs' faces are not kept alive by the scratch list
-        return new TextLine(runs, width, ascent, descent, leading) { Start = start, Length = to - from };
+        return runs;
     }
+
+    // ── Runs made when read ──
+    //
+    // A line needs its width, its metrics and its extent to be laid out. Those are what wrapping
+    // and truncating ask of it; its runs, and the strings they keep, only a draw or a caret asks
+    // for, and most lines laid out are neither: of the 450 lines a step of a resize drag over 150
+    // paragraphs breaks, 36 are drawn (plan 17, round 6). So a line is measured and not shaped
+    // (MeasureRuns adds up what ShapeRuns would, to the bit), and makes its runs the first time
+    // they are read, from what LineSource keeps. A line drawn pays for itemizing and looking its
+    // words up twice.
+
+    /// <summary>
+    /// When false, a line makes its runs with the line — the reference: the same runs, widths and
+    /// metrics, made whether anything reads them or not. When true (the default), a line on the
+    /// plain or the styled path makes them the first time they are read
+    /// (<see cref="TextLine.Runs"/>). A line on the BiDi path has them made: a right-to-left run is
+    /// measured by shaping it. Tests hold the two to the same output.
+    /// </summary>
+    internal bool ComposeRunsWhenRead { get; init; } = true;
+
+    // The source of the lines of the layout running now (BeginParagraph lets go of it, and of the
+    // text with it).
+    private LineSource? _lineSource;
+
+    private LineSource SourceOf(string text, ResolvedInheritedStyle style) =>
+        _lineSource is { } kept && ReferenceEquals(kept.Text, text)
+            ? kept
+            : _lineSource = new LineSource(StyleOf(style, ellipsized: false), text, null);
+
+    // A styled line's source: its memo's, kept for every width, whose spans are a copy already; a
+    // string's first layout has none, and copies the spans into a source of its own. Those are the
+    // list it was handed as it is now: the caller may fill that list again before the line is read.
+    //
+    // Not when it was handed many. Each key typed in a paragraph makes a string laid out for the
+    // first time, and most of the paragraph is on screen, so a copy of its spans and a second walk
+    // over them, a piece of a line at a time, is what most of its lines would pay: 600 spans, 1,300
+    // pieces, 2.33 -> 2.59 ms a key (plan 17, round 6). So many are rare, and such a paragraph laid
+    // out twice at other widths has its entry's copy.
+    internal const int MostSpansCopied = 32;
+
+    private LineSource SourceOf(string text, ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans,
+        TextMemo? memo, bool ellipsized)
+    {
+        if (memo is not null)
+        {
+            ref var kept = ref ellipsized ? ref memo.EllipsizedLines : ref memo.Lines;
+            return kept ??= new LineSource(StyleOf(style, ellipsized), text, memo.Spans);
+        }
+        if (_lineSource is not { } layout || !ReferenceEquals(layout.Text, text))
+            layout = _lineSource = new LineSource(StyleOf(style, false), text, MetricSpansOf(spans));
+        return ellipsized ? new LineSource(StyleOf(style, true), text, layout.Spans) : layout;
+    }
+
+    // Keyed by value, as the prefix measurers are: a style is a struct. The last one is looked at
+    // first: a list's labels are of one style, and hashing a style for each was 5 % of a label.
+    private Dictionary<(ResolvedInheritedStyle Style, string? HanContext, bool Ellipsized), LineStyle>? _lineStyles;
+    private LineStyle? _lineStyle;
+    private const int LineStyleCacheMaxSize = 64;
+
+    // Only reached once a line of the paragraph has itemized, so _hanContext is the paragraph's.
+    private LineStyle StyleOf(ResolvedInheritedStyle style, bool ellipsized)
+    {
+        if (_lineStyle is { } last && last.Ellipsized == ellipsized && last.HanContext == _hanContext && last.Style == style)
+            return last;
+        var styles = _lineStyles ??= new();
+        if (!styles.TryGetValue((style, _hanContext, ellipsized), out var kept))
+        {
+            if (styles.Count >= LineStyleCacheMaxSize)
+                styles.Clear();
+            styles[(style, _hanContext, ellipsized)] = kept = new LineStyle(this, style, _hanContext, _culture!, ellipsized);
+        }
+        return _lineStyle = kept;
+    }
+
+    /// <summary>
+    /// The runs of a line that kept none (<see cref="TextLine.Runs"/>), the first time they are
+    /// read: what <see cref="ShapeRuns"/> or <see cref="StyledRuns"/> gave when the line was laid
+    /// out, to the bit. Its font runs come from its own Han context and the culture it was laid out
+    /// under, and a word the word cache has let go of since is shaped again, to the same glyphs. It
+    /// uses nothing a call into the pipeline holds between two of its steps, so it may run between
+    /// any two.
+    /// </summary>
+    internal List<ShapedRun> ComposeRuns(LineSource source, int start, int drawnLength)
+    {
+        // A face the culture picks is the one the width was added up in (FollowCulture clears what
+        // is keyed on text when it changes, but this line was laid out already).
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        if (ReferenceEquals(culture, source.Style.Culture))
+            return ComposeRunsNow(source, start, drawnLength);
+        System.Globalization.CultureInfo.CurrentUICulture = source.Style.Culture;
+        try
+        {
+            return ComposeRunsNow(source, start, drawnLength);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = culture;
+        }
+    }
+
+    private List<ShapedRun> ComposeRunsNow(LineSource source, int start, int drawnLength)
+    {
+        var line = source.Style;
+        var style = line.Style;
+        string text = source.Text;
+        if (source.Spans is { } spans)
+        {
+            var styled = new List<ShapedRun>();
+            StyledRuns(text, start, start + drawnLength - (line.Ellipsized ? EllipsisString.Length : 0), style, spans,
+                line.Ellipsized, line.HanContext, _composedRuns, styled);
+            return styled;
+        }
+
+        if (line.Ellipsized)
+        {
+            text = string.Concat(text.AsSpan(start, drawnLength - EllipsisString.Length), EllipsisString);
+            start = 0;
+        }
+        ItemizeChars(text.AsSpan(start, drawnLength), start, style, line.HanContext, Kept(_composedRuns));
+        var runs = ShapeRuns(text, _composedRuns, style.FontSize, style.LetterSpacing, out _);
+        _composedRuns.Clear();   // the runs' faces are not kept alive by the scratch list
+        return runs;
+    }
+
+    // ComposeRuns' font runs: not _lineRuns, which a call into the pipeline holds across its steps.
+    private readonly List<RunRange> _composedRuns = new();
 
     // The font runs of the line being built, as ranges of its text: ShapeLineText's,
     // MeasureLineText's, and those of each piece of a styled or BiDi line. Nothing a line's
