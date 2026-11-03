@@ -199,8 +199,10 @@ public partial class MeridianApp
         row.AddChild(Ui.Mono(key, 11.5f, Azimuth.TextDim).Width(170).FlexShrink(0));
 
         // The flag is a toggle: on writes `secret <key>` into every file that has the key, off
-        // takes it out again. Either waits for Ctrl+S with the table's other edits.
-        var flag = Ui.Button(ButtonVariant.Ghost, secret ? "●" : "○", () => SetSecret(key, !secret),
+        // takes it out again, first asking what becomes of a value this machine has stored
+        // (AskUnmarkSecret). Either waits for Ctrl+S with the table's other edits.
+        var flag = Ui.Button(ButtonVariant.Ghost, secret ? "●" : "○",
+                () => { if (secret) AskUnmarkSecret(key); else SetSecret(key, true); },
                 $"secret-toggle-{key}", style: secret ? Ui.FlagOn : Ui.FlagOff)
             .Tooltip(secret ? "secret — the value lives in the OS keyring. Click to store it in the file instead"
                 : "mark secret — keep the value in the OS keyring, not the file");
@@ -219,10 +221,13 @@ public partial class MeridianApp
         return row;
     }
 
-    /// <summary>Flags or un-flags a key in every environment that has it. The values already in
-    /// the keyring stay there; un-flagged, the key resolves from the file again.</summary>
+    /// <summary>Flags or un-flags a key in every environment that has it. Un-flagged, the key
+    /// resolves from the file again, and this machine's keyring value goes on the save that writes
+    /// the files without the flag (<see cref="ForgetRemovedSecrets"/>), so no value is left behind
+    /// in the keyring with nothing to show it. <see cref="AskUnmarkSecret"/> asks first.</summary>
     internal void SetSecret(string key, bool secret)
     {
+        if (!secret && IsSecretAnywhere(key)) _removedSecrets.Add(key);
         foreach (var env in _envFiles)
             if (_envDocs.GetValueOrDefault(env.Name) is { } doc && doc.Keys.Contains(key))
             {
@@ -243,18 +248,19 @@ public partial class MeridianApp
         MarkDirty();
     }
 
-    /// <summary>Secret keys removed from every environment since the last save.</summary>
+    /// <summary>Secret keys removed from every environment, or un-flagged, since the last save.</summary>
     private readonly HashSet<string> _removedSecrets = new(StringComparer.Ordinal);
 
-    /// <summary>Forgets the keyring values of the removed secrets — the shared one and every
-    /// environment's own — once every file is saved without them. A key added back before the
-    /// save keeps its values; a file that failed to save keeps them waiting for the next save.</summary>
+    /// <summary>Forgets the keyring values of the removed and un-flagged secrets — the shared one and
+    /// every environment's own — once every file is saved without their flag. A key flagged again
+    /// before the save keeps its values; a file that failed to save keeps them waiting for the next
+    /// save.</summary>
     private void ForgetRemovedSecrets()
     {
         if (_workspace is not { } ws || _removedSecrets.Count == 0) return;
         if (_envFiles.Any(e => _envDocs.GetValueOrDefault(e.Name)?.Edited == true)) return;
         foreach (var key in _removedSecrets)
-            if (_envFiles.All(e => _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) != true))
+            if (!IsSecretAnywhere(key))
             {
                 _keyring.Delete(ws.Root, null, key);
                 foreach (var env in _envFiles) _keyring.Delete(ws.Root, env.Name, key);
@@ -343,9 +349,9 @@ public partial class MeridianApp
 
     /// <summary>A secret's cell is per machine and per environment: masked when this environment
     /// resolves it (<see cref="Secrets.Resolve"/>), with the timed reveal and where the value comes
-    /// from, the fresh-clone fix when it doesn't. Its own value wins over the shared one, so the cell
-    /// offers the step to the other: share its own value with every environment, or override the
-    /// shared one with a value for this environment alone.</summary>
+    /// from, the fresh-clone fix when it doesn't. Its menu changes or forgets the stored value, and
+    /// takes the step between an environment's own value and the shared one
+    /// (<see cref="SecretActions"/>).</summary>
     private Element BuildSecretCell(string envName, string key)
     {
         var ws = _workspace!;
@@ -362,7 +368,7 @@ public partial class MeridianApp
 
         bool revealed = _reveal is { } r && r.Env == envName && r.Key == key
             && System.Diagnostics.Stopwatch.GetTimestamp() < r.UntilTs;
-        var value = Flex.Column(gap: 0).FlexShrink(1).JustifyContent(JustifyContent.Center);
+        var value =Flex.Column(gap: 0).FlexShrink(1).JustifyContent(JustifyContent.Center);
         value.AddChild(Ui.Mono(revealed ? secret.Value : "••••••••", 11.5f, revealed ? Azimuth.Text : Azimuth.TextMuted)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
             .AutomationId($"secret-value-{key}-{envName}"));
@@ -379,31 +385,48 @@ public partial class MeridianApp
         cell.AddChild(value);
         cell.AddChild(Box.New().FlexGrow(1));
         if (!revealed)
-            cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}-{envName}", () => RevealSecret(envName, key)));
+            cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}-{envName}", () => RevealSecret(envName, key)).FlexShrink(0));
         // The rest in a menu, as on the file rows: a column holds one masked value, its source and
-        // reveal, and a row of buttons ran into the next column at a laptop's width.
+        // reveal, and a row of buttons or icons ran into the next column at a laptop's width.
         if (SecretActions(envName, key, secret) is { Count: > 0 } actions)
         {
             cell.AddChild(RowActionsButton($"{key} in {envName}", $"secret-actions-{key}-{envName}", () => actions,
-                tooltip: secret.Source == SecretSource.Keyring ? "use everywhere" : "set own value"));
+                tooltip: secret.Source switch
+                {
+                    SecretSource.Keyring => "change · forget · use everywhere",
+                    SecretSource.SharedKeyring => "set own value · change · forget the shared value",
+                    _ => "set own value",
+                }));
             RowContextMenu(cell, () => actions);
         }
         return cell;
     }
 
-    /// <summary>What a stored value's menu offers. Many secrets are one value everywhere: an own
-    /// value becomes the shared one in a click. A shared value, or one from a variable, can be
-    /// overridden with a value for this environment alone, which then wins.</summary>
+    /// <summary>What a stored value's menu offers. An own value is changed or forgotten for this
+    /// environment, and — many secrets being one value everywhere — becomes the shared one in a
+    /// click. A shared value is overridden with a value for this environment alone, which then
+    /// wins, or changed or forgotten for every environment that uses it. A value from an
+    /// environment variable is not Meridian's to change; it can only be overridden.</summary>
     private List<(string, Action)> SecretActions(string envName, string key, SecretValue secret)
     {
         var actions = new List<(string, Action)>();
-        if (secret.Source == SecretSource.Keyring)
+        switch (secret.Source)
         {
-            if (_envFiles.Any(e => e.Name != envName && _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) == true))
-                actions.Add(("Use everywhere", () => ShareSecret(envName, key)));
+            case SecretSource.Keyring:
+                actions.Add(("Change…", () => OpenChangeSecretDialog(envName, key)));
+                if (_envFiles.Any(e => e.Name != envName && _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) == true))
+                    actions.Add(("Use everywhere", () => ShareSecret(envName, key)));
+                actions.Add(("Forget", () => ConfirmForgetSecret(envName, key)));
+                break;
+            case SecretSource.SharedKeyring:
+                actions.Add(("Set own value…", () => OpenSetSecretDialog(envName, key)));
+                actions.Add(("Change shared…", () => OpenChangeSecretDialog(null, key)));
+                actions.Add(("Forget shared", () => ConfirmForgetSecret(null, key)));
+                break;
+            default:
+                actions.Add(("Set own value…", () => OpenSetSecretDialog(envName, key)));
+                break;
         }
-        else
-            actions.Add(("Set own value…", () => OpenSetSecretDialog(envName, key)));
         return actions;
     }
 
@@ -415,8 +438,11 @@ public partial class MeridianApp
             MarkDirty();
         });
 
-    private void FlashNoKeyring(string envName, string key) =>
-        Flash($"No keyring on this platform — set the environment variable {Secrets.VariableName(envName, key)} (or {key} for every environment) instead");
+    /// <param name="envName">The environment the value was for, or null for every environment.</param>
+    private void FlashNoKeyring(string? envName, string key) =>
+        Flash(envName == null
+            ? $"No keyring on this platform — set the environment variable {key} instead"
+            : $"No keyring on this platform — set the environment variable {Secrets.VariableName(envName, key)} (or {key} for every environment) instead");
 
     /// <summary>Makes <paramref name="envName"/>'s own value the shared one, and every environment
     /// then uses it: the own values of the others on this machine go too, after a confirmation that

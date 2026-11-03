@@ -109,14 +109,30 @@ file to write by hand:
   goes to the OS keyring. A value already typed into the file shows **still in
   local.env — move to keyring** (it becomes `local`'s own value), or **— clear**
   when `local` already has one.
-- A secret's cell is per environment: masked, with **reveal** for five seconds,
-  and where the value comes from — **keyring** (the environment's own),
-  **shared**, or the environment variable it was read from. Its **⋯** (or a
-  right-click on the cell) holds the rest: **Use everywhere** on an own value
-  makes it the shared value, so every environment uses it — when others have
-  values of their own it asks first and names them, since those are forgotten;
-  **Set own value…** on a shared (or variable) value gives that environment one
-  of its own.
+- A secret's cell is per environment: masked, with **reveal (5 s)**, and where
+  the value comes from — **keyring** (the environment's own), **shared**, or
+  the environment variable it was read from. Its **⋯** (or a right-click on the
+  cell) manages the stored value, acting on the keyring at once and changing
+  no file:
+  - on an own value: **Change…** asks for a new value in an empty field, never
+    showing the old one; **Use everywhere** makes it the shared value, so every
+    environment uses it — when others have values of their own it asks first
+    and names them, since those are forgotten; **Forget** asks first, then drops
+    it, and the environment falls back to the shared value or asks for one;
+  - on a shared value: **Set own value…** gives that environment one of its
+    own; **Change shared…** and **Forget shared** act on the value every
+    environment without its own uses, and their questions name those
+    environments;
+  - on a value from an environment variable: **Set own value…** only — the
+    variable is not Meridian's to change.
+- Turning **●** off when this machine stores a value asks what becomes of it:
+  **Move into local.env** writes the value each environment used into its own
+  file, as plain text anyone who can read the file or its repository can read
+  (a value with a line break can't move); **Forget value** drops it and the key
+  takes the file's value. Either way the keyring entries (shared and every
+  environment's own) go on the **Ctrl+S** that writes the files, never before,
+  and turning **○** back on before saving keeps them. No value is left behind
+  in the keyring.
 - Every edit waits in the table until **Ctrl+S**, which rewrites only the lines
   that changed.
 
