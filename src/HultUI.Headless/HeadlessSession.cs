@@ -19,7 +19,7 @@ namespace HultUI.Headless;
 /// own application with its own main-thread queue, synchronization context, tweens
 /// and clock. Process-wide state (Application.Current, the animation list, the
 /// thread's SynchronizationContext) follows the session a test drives: see
-/// <see cref="MakeCurrent"/>. Drive them from one thread at a time, and keep tests
+/// <see cref="Enter"/>. Drive them from one thread at a time, and keep tests
 /// that use sessions from running in parallel.
 /// </summary>
 public sealed partial class HeadlessSession : IDisposable

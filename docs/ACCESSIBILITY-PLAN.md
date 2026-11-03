@@ -300,7 +300,7 @@ dropdown's popup sets `List` again, as a combo box's list is a list, and is read
 the roles changed: each item keeps Invoke and SelectionItem on UIA (and Toggle for a choice in
 force), the click action and the selectable state on AT-SPI, and the menu keeps the list's
 Selection, Scroll and ItemContainer patterns as its items' selection container. A submenu's parent
-item has no ExpandCollapse, as it had none; Invoke opens its submenu. The selection moves as it did
+item expands (ExpandCollapse, from the expanded state item nodes carry since the app-support merge) and has no Invoke, as a menu bar's title; every other entry keeps Invoke. The selection moves as it did
 (round 5): the keys and the pointer select an item, told as UIA's SelectionItem.IsSelected change
 and AT-SPI's `state-changed:selected`, patched with no tree built. A MenuItem tells it by
 selection, not focus: the keyboard focus stays where it was when the menu opened, since the items

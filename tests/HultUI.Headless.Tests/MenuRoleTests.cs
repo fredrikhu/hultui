@@ -369,7 +369,10 @@ public class MenuRoleTests
             var item = Provider(bridge.NativeVirtualItem(popup.Id, i));
             Assert.Equal(0, item.GetPropertyValue(ControlType, out value));
             Assert.Equal(itemType, value.IntValue);
-            Has(item, UiaInterop.UIA_InvokePatternId);
+            // "More" opens a menu of its own: with its expanded state on the node it expands, as a
+            // menu bar's title does, instead of running a command; every other entry runs one.
+            bool opensMenu = what != Opened.Dropdown && count == 0 && i == 2;
+            Has(item, opensMenu ? UiaInterop.UIA_ExpandCollapsePatternId : UiaInterop.UIA_InvokePatternId);
             Has(item, UiaInterop.UIA_SelectionItemPatternId);
         }
     }
