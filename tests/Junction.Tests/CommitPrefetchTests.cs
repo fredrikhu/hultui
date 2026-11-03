@@ -112,7 +112,63 @@ public class CommitPrefetchTests
         });
     }
 
+    /// <summary>A held arrow loads none of the commits it passes, only the one it stops on. Each
+    /// load is four git processes and the commit's whole patch: on a real log, 1,644 KB a key on
+    /// all threads and four gen-2 collections in a hundred keys, for a tab nobody had opened.</summary>
+    [Fact]
+    public void AHeldArrow_LoadsOnlyTheCommitItStopsOn()
+    {
+        Hosted((session, app) =>
+        {
+            OpenHistory(session, app);
+            int loads = app.DetailLoads;
+            app.DetailRest = TimeSpan.FromSeconds(1);   // a key a frame, however busy the machine
+
+            for (int i = 0; i < 6; i++)
+            {
+                session.Window.PressKey(KeyCode.Down);
+                session.PumpFrames(2);
+            }
+            Assert.Equal(loads, app.DetailLoads);
+
+            var stop = (string)Field(app, "_selectedCommitHash")!;
+            session.PumpUntil(() => DetailHash(app) == stop, TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+            Assert.Equal(loads + 1, app.DetailLoads);
+            Assert.Equal(JunctionView.History, View(app));
+        });
+    }
+
+    /// <summary>The Commit tab does not wait for the rest: its own build asks at once.</summary>
+    [Fact]
+    public void TheCommitTab_AsksAtOnce_WhileTheSelectionHasNotRested()
+    {
+        Hosted((session, app) =>
+        {
+            OpenHistory(session, app);
+            app.DetailRest = TimeSpan.FromSeconds(60);
+
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(2);
+            var selected = (string)Field(app, "_selectedCommitHash")!;
+            Assert.NotEqual(selected, DetailHash(app));
+
+            session.Window.PressKey(KeyCode.Digit3);
+            session.PumpUntil(() => DetailHash(app) == selected, TimeSpan.FromSeconds(20));
+            Assert.Equal(JunctionView.Commit, View(app));
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
+
+    /// <summary>The hash of the commit whose detail is loaded.</summary>
+    private static string? DetailHash(JunctionApp app)
+    {
+        var loader = Field(app, "_commitDetail")!;
+        var value = loader.GetType().GetProperty("Value")!.GetValue(loader)!;
+        var commit = value.GetType().GetProperty("Commit")!.GetValue(value);
+        return (string?)commit?.GetType().GetProperty("Hash")!.GetValue(commit);
+    }
 
     /// <summary>Opens History and waits for a commit to be selected and its detail to
     /// arrive — the state someone is in while reading the log.</summary>
@@ -126,6 +182,13 @@ public class CommitPrefetchTests
     private static void Hosted(Action<HeadlessSession, JunctionApp> body)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
+        // Older commits for an arrow to go by.
+        for (int i = 0; i < 8; i++)
+        {
+            repo.Write("notes.txt", $"note {i}\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", $"note {i}");
+        }
         // A commit touching several files, in a language the highlighter knows — the
         // prefetch has a file to choose and something to colour.
         repo.Write("src/Program.cs", "class Program { static void Main() { } }\n");

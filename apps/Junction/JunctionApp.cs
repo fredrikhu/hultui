@@ -1068,10 +1068,10 @@ public partial class JunctionApp : Component, IDisposable
         _selectedCommitHashes.Clear();
         if (hash != null) _selectedCommitHashes.Add(hash);
         EndBranchCompare();   // any collapse (History click, repo switch) ends a branch compare
-        // Start on the commit's files and diff at the selection, not at the Commit tab.
-        // History's build asks too, but the selection can land while another tab is
-        // showing — a preloaded log picking its first commit — and this covers that.
-        PrefetchCommitDetail(hash);
+        // Start on the commit's files and diff at the selection (once it rests), not at the
+        // Commit tab. History's build asks too, but the selection can land while another tab
+        // is showing — a preloaded log picking its first commit — and this covers that.
+        PrefetchSelectionOnRest();
     }
 
     /// <summary>Clears the Branches-tab compare selection. Called when a History
@@ -1657,6 +1657,7 @@ public partial class JunctionApp : Component, IDisposable
         _retryPending.Clear();   // a pending retry finds nothing to do
         _highlightNext = null;
         _highlightCancel?.Cancel();
+        _detailRest?.Dispose();
         DisposeMarkdown();
     }
 }

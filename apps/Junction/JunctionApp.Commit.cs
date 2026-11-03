@@ -109,6 +109,7 @@ public partial class JunctionApp
     // Runs off the UI thread.
     private CommitDetail LoadRangeDetail((string BaseHash, string HeadHash) range)
     {
+        Interlocked.Increment(ref _detailLoads);
         var repo = RepoFor(_activeRepoPath);
         var commit = repo.GetCommit(range.HeadHash);
         var files = repo.GetRangeFiles(range.BaseHash, range.HeadHash);
@@ -234,9 +235,66 @@ public partial class JunctionApp
         DropHighlightPrefetch();
     }
 
+    /// <summary>
+    /// How long History's selection stays on a commit before its detail is loaded for the Commit
+    /// tab, as the highlight prefetch waits (<see cref="HighlightRest"/>). Loaded on every move, a
+    /// held arrow started four git processes a key and read each commit's whole patch: 1,644 KB a
+    /// key on all threads (33 KB on the UI thread) and four gen-2 collections in a hundred keys,
+    /// for a tab nobody had opened. The Commit tab's own build still asks at once.
+    /// </summary>
+    internal TimeSpan DetailRest { get; set; } = TimeSpan.FromMilliseconds(120);
+
+    /// <summary>Details loaded so far (the producers that ran), for tests.</summary>
+    internal int DetailLoads => _detailLoads;
+
+    private int _detailLoads;
+
+    // Started again on each move; when it runs out, the selection may have rested: a move can come
+    // between the timer running out and the UI thread hearing it, so the move's time decides.
+    private ITimer? _detailRest;
+    private SynchronizationContext? _detailRestContext;
+    private long _detailMovedAt;
+
+    /// <summary>
+    /// History's prefetch: the detail the selection would open in the Commit tab (a multi-select's
+    /// compare, or the one commit), loaded once the selection has stayed for
+    /// <see cref="DetailRest"/>. The move itself drops the highlight prefetch of the commit it
+    /// left, as an ask does.
+    /// </summary>
+    private void PrefetchSelectionOnRest()
+    {
+        if (!HasActiveRepo) return;
+        var key = SelectedRange() is { } range ? RangeDetailKey(range)
+            : _selectedCommitHash is { Length: > 0 } hash ? CommitDetailKey(hash) : null;
+        if (key is null || key == _detailAskedFor) return;
+        SelectionMovedTo(key);
+        _detailMovedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_detailRest is null)
+        {
+            _detailRestContext = SynchronizationContext.Current;
+            _detailRest = TimeProvider.System.CreateTimer(static state =>
+            {
+                var app = (JunctionApp)state!;
+                if (app._detailRestContext is { } ui) ui.Post(static s => ((JunctionApp)s!).DetailRested(), app);
+                else HultUI.Application.InvokeOnMainThread(app.DetailRested);
+            }, this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        }
+        _detailRest.Change(DetailRest, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>The rest's timer ran out. After a move since then, the rest is waited out from it.</summary>
+    private void DetailRested()
+    {
+        var left = DetailRest - System.Diagnostics.Stopwatch.GetElapsedTime(_detailMovedAt);
+        if (left > TimeSpan.Zero) { _detailRest?.Change(left, Timeout.InfiniteTimeSpan); return; }
+        if (SelectedRange() is { } range) PrefetchRangeDetail(range);
+        else PrefetchCommitDetail(_selectedCommitHash);
+    }
+
     // Runs off the UI thread.
     private CommitDetail LoadDetail(string path, string hash)
     {
+        Interlocked.Increment(ref _detailLoads);
         var repo = RepoFor(path);
         var commit = repo.GetCommit(hash);
         var files = repo.GetCommitFiles(hash);
