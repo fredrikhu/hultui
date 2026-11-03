@@ -4258,10 +4258,22 @@ public sealed class Window : IOverlayHost, IDisposable, IAccessibilityAnnouncer,
             // One of a set in the main tree: a menu's entry the pointer reached or left. Its node's
             // selected state is marked and told as a list's item's is (TryPatchA11y). Its name is
             // not the row's text changing, so an entry with children patches as well as a leaf.
-            else if (propertyName == AccessibilityProperties.IsSelected && element.IsMenuEntry)
+            // A row of a list whose rows a reader reads as they are (RowsAreComposite), told its
+            // selected state by a list that draws the selection: marked and told the same way. A
+            // rebuild for it built the whole tree on every caret key of Junction's Changes list.
+            else if (propertyName == AccessibilityProperties.IsSelected
+                && (element.IsMenuEntry || element.AccessibleSelected is not null
+                    && element.Parent is IAccessibleItemSource { PublishesItemNodes: false }))
             {
                 if (!window._a11yOwnSelection.Contains(element)) window._a11yOwnSelection.Add(element);
             }
+            // Such a list has no selected state of its own and no item nodes: what a move of its
+            // selection changes, its rows tell, made again (its children change, and the change is
+            // walked in place) or told their selected state (above). A rebuild for it built the
+            // whole tree on every key of a walk through such a list.
+            else if (propertyName == AccessibilityProperties.IsSelected
+                && element is IAccessibleItemSource { PublishesItemNodes: false } && element.AccessibleSelected is null)
+                return;
             // A keystroke, a caret or a selection moved in text made on request (a rich text
             // editor's, a text area's), or what its version holds besides the text changed
             // (read-only, its layout): its new version goes on the applied tree's node and the

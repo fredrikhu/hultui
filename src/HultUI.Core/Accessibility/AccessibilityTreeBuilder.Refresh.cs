@@ -27,6 +27,10 @@ public static partial class AccessibilityTreeBuilder
         internal readonly List<(AccessibilityNode Node, AccessibleTextVersion Version)> TextVersions = [];
         internal readonly List<(AccessibilityNode Node, int Count, int[] Selected)> Served = [];
 
+        /// <summary>The nodes whose selected state is the other one now (selected or not, before and
+        /// after).</summary>
+        internal readonly List<AccessibilityNode> SelectedFlips = [];
+
         /// <summary>The nodes a build makes that the applied tree does not have, with their parents
         /// (the applied ones), each subtree in its order: as a diff lists them.</summary>
         internal readonly List<AddedNode> Added = [];
@@ -77,6 +81,7 @@ public static partial class AccessibilityTreeBuilder
         {
             foreach (var (node, rect) in Moves) node.MoveTo(rect);
             foreach (var node in OffscreenFlips) node.IsOffscreen = !node.IsOffscreen;
+            foreach (var node in SelectedFlips) node.IsSelected = node.IsSelected != true;
             foreach (var (node, offset, viewport, content) in Scrolls) node.ReplaceScrollView(offset, viewport, content);
             foreach (var (node, version) in TextVersions) node.ReplaceTextVersion(version);
             foreach (var (node, children) in Restructured) node.ReplaceChildren(children);
@@ -89,6 +94,7 @@ public static partial class AccessibilityTreeBuilder
             Changes.Clear();
             Moves.Clear();
             OffscreenFlips.Clear();
+            SelectedFlips.Clear();
             Scrolls.Clear();
             Remade.Clear();
             TextVersions.Clear();
@@ -205,6 +211,11 @@ public static partial class AccessibilityTreeBuilder
                 refresh.TextVersions.Add((applied, current));
                 break;
             }
+            case Sameness.SelectedMoved:
+                // Selected or not, as a diff tells it: the node's state, written once the walk matched.
+                refresh.Changes.Add(new PropertyChange(applied, AccessibilityProperties.IsSelected));
+                refresh.SelectedFlips.Add(applied);
+                break;
             case Sameness.Differs:
             {
                 // What a build would make, compared as a diff compares it.
@@ -624,16 +635,17 @@ public static partial class AccessibilityTreeBuilder
         if (offscreen != node.IsOffscreen) refresh.OffscreenFlips.Add(node);
     }
 
-    private enum Sameness : byte { Same, Differs, TextMoved, Untellable }
+    private enum Sameness : byte { Same, Differs, TextMoved, SelectedMoved, Untellable }
 
     /// <summary>
     /// Whether <paramref name="node"/> is what <see cref="CreateNode(Element, FocusManager?, Rect, float, float)"/>
     /// would make of <paramref name="element"/> now, but for its box and its scroll view's fields:
     /// <see cref="Sameness.Differs"/> when something a diff compares is not,
     /// <see cref="Sameness.TextMoved"/> when only the version of its text made on request is (the
-    /// same text, a caret or a selection or a layout moved), and <see cref="Sameness.Untellable"/>
-    /// when something it does not compare is not (whether it is focusable, its text source), which
-    /// no diff tells and only a new tree carries.
+    /// same text, a caret or a selection or a layout moved), <see cref="Sameness.SelectedMoved"/>
+    /// when only its selected state is, selected or not before and after, and
+    /// <see cref="Sameness.Untellable"/> when something it does not compare is not (whether it is
+    /// focusable, its text source), which no diff tells and only a new tree carries.
     /// </summary>
     private static Sameness Compare(Element element, AccessibilityNode node, FocusManager? focusManager)
     {
@@ -651,15 +663,27 @@ public static partial class AccessibilityTreeBuilder
             || node.AutomationId != element.AutomationId
             || node.Expanded != element.AccessibleExpanded
             || node.IsPassword != (element is TextInputElement { Masked: true })
-            || node.IsSelected != ResolveIsSelected(element)
             || node.NativeContent != element.NativeAccessibleContent
             || node.Range != (element is IRangeValueElement range ? AccessibleRange.Of(range) : null))
             return Sameness.Differs;
+        // A row a composite list tells its selection (one with children: a button in it), or one of
+        // a set: its state is written in place and told, as a patch of a list's selection move tells
+        // it. A node with children whose state changed failed the walk, and a key that moved such a
+        // list's selection in a frame that changed anything else built the whole tree.
+        var selected = ResolveIsSelected(element);
+        bool selectedMoved = false;
+        if (node.IsSelected != selected)
+        {
+            if (node.IsSelected is null || selected is null) return Sameness.Differs;
+            selectedMoved = true;
+        }
+        var same = selectedMoved ? Sameness.SelectedMoved : Sameness.Same;
         if (versioned is not null)
         {
             var (was, now) = (node.TextVersion, versioned.CurrentVersion);
-            if (ReferenceEquals(was, now)) return Sameness.Same;
-            return was is not null && was.GetType() == now.GetType() && now.SameText(was) ? Sameness.TextMoved : Sameness.Differs;
+            if (ReferenceEquals(was, now)) return same;
+            return !selectedMoved && was is not null && was.GetType() == now.GetType() && now.SameText(was)
+                ? Sameness.TextMoved : Sameness.Differs;
         }
         if (textSource is not null)
         {
@@ -670,6 +694,6 @@ public static partial class AccessibilityTreeBuilder
                 || was?.SelectionStart != now?.SelectionStart || was?.SelectionEnd != now?.SelectionEnd))
                 return Sameness.Differs;
         }
-        return Sameness.Same;
+        return same;
     }
 }

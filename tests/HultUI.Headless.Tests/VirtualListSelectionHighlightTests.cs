@@ -402,18 +402,21 @@ public class VirtualListSelectionHighlightTests
     /// <summary>On composite rows a reader reads the rows themselves, and a row the list made
     /// unselected would say it is not selected: the list tells each row that says whether it is
     /// (<c>AccessibleSelected</c> set) whether its item is. A reader hears the same rows, selected
-    /// states and IsSelected changes as when the rows drew the selection, and a move makes no row.</summary>
+    /// states and IsSelected changes as when the rows drew the selection, and a move makes no row.
+    /// Neither builds a tree: the list's own selection is its rows' to tell, and a row's state is
+    /// marked on the applied tree and told from it (each built the whole tree a move).</summary>
     [Fact]
     public void OnCompositeRows_TheListTellsEachRowItsSelection_AsTheRowsToldItThemselves()
     {
-        var (byRows, madeByRows) = Walk(Draw.Rows);
-        var (byList, madeByList) = Walk(Draw.List);
+        var (byRows, madeByRows, treesByRows) = Walk(Draw.Rows);
+        var (byList, madeByList, treesByList) = Walk(Draw.List);
 
         Assert.Equal(byRows, byList);
         Assert.Equal("entry 2=False, entry 9=True | entry 9", byList[^1]);
         Assert.Equal((10, 0), (madeByRows, madeByList));
+        Assert.Equal((0, 0), (treesByRows, treesByList));
 
-        static (List<string> Steps, int Made) Walk(Draw draw)
+        static (List<string> Steps, int Made, int Trees) Walk(Draw draw)
         {
             var (session, pane) = Mount(draw, composite: true);
             using var _ = session;
@@ -421,7 +424,7 @@ public class VirtualListSelectionHighlightTests
             session.PumpFrames(2);
             bridge.ClearDiffs();
             var steps = new List<string>();
-            int made = pane.Made;
+            int made = pane.Made, trees = session.Window.AccessibilityTreesBuilt;
             foreach (int id in new[] { 1, 2, 3, 2, 9 })
             {
                 pane.Select(id);
@@ -434,7 +437,7 @@ public class VirtualListSelectionHighlightTests
                 steps.Add($"{string.Join(", ", told)} | {string.Join(", ", buttons.Where(b => b.IsSelected == true).Select(b => b.Name))}");
                 bridge.ClearDiffs();
             }
-            return (steps, pane.Made - made);
+            return (steps, pane.Made - made, session.Window.AccessibilityTreesBuilt - trees);
         }
 
         static List<AccessibilityNode> Buttons(AccessibilityNode node) =>

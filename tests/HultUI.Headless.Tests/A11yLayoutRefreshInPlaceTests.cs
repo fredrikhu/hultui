@@ -116,7 +116,7 @@ public class A11yLayoutRefreshInPlaceTests
         "nested scroll views", "overlay over a scrolled root", "content in a scroll view", "list items relabelled",
         "list selection and a ticking label", "items added to a list", "click handler added to a box",
         "rows added and removed", "rows moved", "a row made again", "composite list walk", "composite list wheel",
-        "rows changed under an overlay",
+        "rows changed under an overlay", "composite list selection walk", "composite list told selection",
     };
 
     /// <summary>The scenes whose steps add or remove nodes: a build's diff has them, and the walk tells
@@ -125,6 +125,7 @@ public class A11yLayoutRefreshInPlaceTests
     [
         "items added to a list", "click handler added to a box", "rows added and removed", "rows moved",
         "a row made again", "composite list walk", "composite list wheel", "rows changed under an overlay",
+        "composite list selection walk", "composite list told selection",
     ];
 
     public static TheoryData<string, string> FallsBack => new()
@@ -400,6 +401,50 @@ public class A11yLayoutRefreshInPlaceTests
                     {
                         int at = i;
                         s.Step($"cursor to {at}", () => { list.Items = CursorItems(200, at); list.ScrollRangeIntoView(at * 24f, 24f); });
+                    }
+                });
+            }
+            case "composite list selection walk":
+            {
+                // The list's own selection, each row made again when it is selected or no longer is.
+                var list = VirtualListElement<Commit>.New().ItemHeight(24).Items(Commits(200))
+                    .RenderWith((c, selected) => Button.New(selected ? $"{c.Subject}, selected" : c.Subject))
+                    .Height(Dimension.Px(240));
+                list.RowsAreComposite = true;
+                return With(list, s =>
+                {
+                    for (int i = 8; i < 13; i++)
+                    {
+                        int at = i;
+                        s.Step($"select {at}", () => { list.SelectedIndex = at; list.ScrollRangeIntoView(at * 24f, 24f); });
+                    }
+                });
+            }
+            case "composite list told selection":
+            {
+                // A list that draws the selection and tells its rows theirs (Junction's Changes): each row
+                // a button with a button in it, selected or not, kept as the selection moves. Each step
+                // also adds a row beside the list, so the frame walks the tree and meets the rows' state.
+                var list = VirtualListElement<Commit>.New().ItemHeight(24).Items(Commits(200))
+                    .RenderWith((c, _) => Flex.Row(gap: 8).Padding(new Thickness(2, 8)).AccessibleSelected(false)
+                        .OnClick(_ => { })
+                        .Children(TextB.New(c.Subject).FontSize(12f), Button.New("Stage")))
+                    .SelectionHighlight(new Color(40, 90, 200))
+                    .Height(Dimension.Px(240));
+                list.RowsAreComposite = true;
+                list.SelectedIndex = 7;
+                var beside = Rows(2, "beside");
+                return With(Flex.Column().Children(list, beside), s =>
+                {
+                    for (int i = 8; i < 13; i++)
+                    {
+                        int at = i;
+                        s.Step($"select {at}", () =>
+                        {
+                            list.SelectedIndex = at;
+                            list.ScrollRangeIntoView(at * 24f, 24f);
+                            beside.AddChild(OneRow($"b{at}", $"beside {at}"));
+                        });
                     }
                 });
             }

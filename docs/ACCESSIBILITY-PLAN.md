@@ -372,11 +372,14 @@ Where a build would make other nodes than a walk can, it builds the tree, as bef
 children whose own properties changed (a tab named by its label, with a close button in it), a list
 whose items cross the 2,000 served on demand, described content in another number, an overlay opened
 or closed (its own refresh), the root's own node, or a change no diff tells (whether a node is
-focusable, another text source). A frame something else asks a tree of (a property no patch takes,
-the first frame a reader is there) builds it too. A composite list's own selection move is such a
-property: it marks the frame for a build though the list's node has no selected state, and so does a
-kept composite row whose `AccessibleSelected` changes (the suite's composite walk, 1.0 tree a key);
-both are left for later.
+focusable, another text source). A node's selected state, selected or not before and after, is no
+such change: the walk writes it in place and tells it, children or not. A frame something else asks
+a tree of (a property no patch takes, the first frame a reader is there) builds it too. A composite
+list's own selection move was such a property, and a kept composite row whose `AccessibleSelected`
+changes (the suite's composite walk, 1.0 tree a key). Since round 7 step 8b the first asks nothing
+(the list's node has no selected state: its rows tell it, made again or told), and the second is
+marked on the applied tree and told as a menu entry's is (`TryPatchA11y`); Junction's Changes caret
+walk builds no tree for either.
 
 Threading: UIA may call provider methods from worker threads. Either marshal
 to the UI thread, or snapshot values onto the wrapper at construction/diff
