@@ -171,10 +171,12 @@ static partial class Scenarios
     /// <paramref name="chrome"/> the pane sits in a window's chrome (<see cref="WalkChrome"/>).
     /// The list holds <paramref name="count"/> commits. With <paramref name="composite"/> each row
     /// is a keyed button a reader reads as its own, selected or not, as the command palette's rows
-    /// are (<c>RowsAreComposite</c>).
+    /// are (<c>RowsAreComposite</c>). With <paramref name="countTrees"/> the row reports the
+    /// accessibility trees a key builds instead, and <paramref name="clear"/> runs before each key.
     /// </summary>
     internal static Op SelectionWalk(Ctx ctx, Func<int, string?>? check, Action? reset = null, bool itemRows = false,
-        WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000, bool composite = false)
+        WalkChrome chrome = WalkChrome.None, bool listHighlight = false, int count = 1_000, bool composite = false,
+        bool countTrees = false, Action? clear = null)
     {
         var pane = new WalkPane(WalkItems(ctx.Rng, count), itemRows, chrome: chrome, listHighlight: listHighlight,
             composite: composite);
@@ -188,18 +190,20 @@ static partial class Scenarios
         pane.Select(pane.LastWholeRow());
         ctx.Session.PumpFrame(WalkFrame);
         int first = pane.Selected;
-        int madeBefore = 0;
+        int madeBefore = 0, treesBefore = 0;
         return new Op
         {
             Reset = reset is null ? null : _ => reset(),
             Run = _ =>
             {
+                clear?.Invoke();
                 madeBefore = pane.RowsMade;
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
                 ctx.Window.PressKey(KeyCode.Down);
             },
             FrameDelta = WalkFrame,
-            Figure = () => pane.RowsMade - madeBefore,
-            FigureUnit = "rows made",
+            Figure = countTrees ? () => ctx.Window.AccessibilityTreesBuilt - treesBefore : () => pane.RowsMade - madeBefore,
+            FigureUnit = countTrees ? "a11y trees/key" : "rows made",
             Check = step => pane.Verify(first + step + 1) ?? pane.VerifyChrome() ?? check?.Invoke(step),
         };
     }

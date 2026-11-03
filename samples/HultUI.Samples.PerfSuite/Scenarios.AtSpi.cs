@@ -1,5 +1,6 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 
@@ -39,6 +40,15 @@ static partial class Scenarios
         yield return new Scenario("a11y/selection walk 3,000 item rows, AT-SPI",
             "The item-rows walk over 3,000 commits with the AT-SPI bridge: items served on demand, the upkeep and signals of a move and the scroll it makes",
             ctx => SelectionWalk(ctx, Applied(AtSpiRig.Install(ctx.Window)), itemRows: true, count: 3_000));
+
+        yield return new Scenario("a11y/selection walk 1,000 composite item rows, AT-SPI",
+            "The composite item-rows walk with the AT-SPI bridge, a key every 120 ms: the rows a move makes again told as objects gone and added, and the trees a key builds",
+            ctx => SelectionWalk(ctx, Applied(AtSpiRig.Install(ctx.Window)), itemRows: true, composite: true, countTrees: true));
+
+        yield return new Scenario("a11y/image grid walk Down, 600 cards, keys 100 ms apart, AT-SPI",
+            "The grid walk Down at a reader's pace with the AT-SPI bridge: the trees a key builds, the objects' upkeep and the signals of the rows made again",
+            ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6, told: Applied(AtSpiRig.Install(ctx.Window)),
+                keyEvery: GridReaderKeys)) { Width = 1440, Height = 900 };
 
         yield return new Scenario("a11y/context menu walk over 1,000 rows, AT-SPI",
             "Down through an open 20-item context menu over 1,000 rows with the AT-SPI bridge: what a move of its selection tells, and the trees a key builds",

@@ -3,6 +3,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Dialogs;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -131,6 +132,25 @@ static partial class Scenarios
                     : null,
                     reset: bridge.ClearDiffs, itemRows: true, count: 3_000);
             });
+
+        yield return new Scenario("a11y/selection walk 1,000 composite item rows, bridge on",
+            "The item-rows walk with each row a keyed button a reader reads as its own (RowsAreComposite), as the command palette's, a key every 120 ms, an accessibility client listening: a move makes the row the selection left and the one it reached, which changes the list's children; the trees a key builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return SelectionWalk(ctx, _ => bridge.Diffs.Count == 0 ? "the bridge received no change" : null,
+                    itemRows: true, composite: true, countTrees: true, clear: bridge.ClearDiffs);
+            });
+
+        yield return new Scenario("a11y/image grid walk Down, 600 cards, keys 100 ms apart, bridge on",
+            "virtual/image grid walk Down at a reader's pace, a key every 100 ms, an accessibility client listening: each key makes rows of cards again, which changes the grid's children, and scrolls a row in now and then; the trees a key builds",
+            ctx =>
+            {
+                var bridge = ctx.Window.InstallAccessibilityBridge();
+                return ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6,
+                    told: _ => bridge.Diffs.Count == 0 ? "the bridge received no change" : null,
+                    keyEvery: GridReaderKeys, clear: bridge.ClearDiffs);
+            }) { Width = 1440, Height = 900 };
 
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, bridge on",
             "Down every 60 ms through a 1,000-commit list on item rows beside a details pane the same Build makes again, in Application.Run's own loop on the virtual clock, an accessibility client listening: the trees a key builds (all under build)",
@@ -505,6 +525,10 @@ static partial class Scenarios
     /// the item (plan 17's round 4 measured Junction's History walked this way).</summary>
     private static readonly TimeSpan ReaderPace = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>A key every 100 ms: one a person holding an arrow down at a reader's pace makes, as
+    /// Aperture's grid is walked, and the coalesced layout refresh comes due on every one.</summary>
+    private static readonly TimeSpan GridReaderKeys = TimeSpan.FromMilliseconds(100);
+
     /// <summary>Null when the bridge's tree has item <paramref name="index"/> of the 1,000-item
     /// list selected, or what it has instead.</summary>
     private static string? ToldSelected(AccessibilityNode? tree, int index)
@@ -594,6 +618,11 @@ static partial class Scenarios
                 var rig = UiaRig.Install(ctx.Window);
                 return SelectionWalk(ctx, Applied(rig), itemRows: true, listHighlight: true, composite: true);
             });
+
+        yield return new Scenario("a11y/image grid walk Down, 600 cards, keys 100 ms apart, UIA",
+            "The grid walk Down at a reader's pace with the UIA bridge: the trees a key builds, the wrapper upkeep and events of the rows made again",
+            ctx => ImageGridWalk(ctx, KeyCode.Down, KeyCode.Up, turn: 6, told: Applied(UiaRig.Install(ctx.Window)),
+                keyEvery: GridReaderKeys)) { Width = 1440, Height = 900 };
 
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, UIA",
             "The real-loop walk with the UIA bridge: the trees a key builds, the bridge's upkeep and the IsSelected events (all under build)",
