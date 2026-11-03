@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 7
-- **Phase:** build — round 7, the full suite next (every build step landed: 1–13, step 8 as 8a and 8b). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
+- **Phase:** release — round 7 (every build step landed; the full suite passed on the merge with main, 7dfd2ce3). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
   seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
   questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
   1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
@@ -824,3 +824,13 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
   Aperture's grid onto the helper (later, per the user); a Home build with cards kept still costs ~33 KB a shelf;
   pre-existing: the cursor can walk past a shelf's visible page and then no card shows the ring. Every build step is
   done; Phase → full suite. Usage 80 % weekly.
+- 2026-11-03: round 7 full suite on cedb6747: Windows `dotnet test HultUI.slnx -c Release` 30 projects 0 failures
+  (Junction 1,082, Core 5,044, Headless 1,347), Fedora `wsl-test.sh` 22 projects 0 failures, docfx 0 warnings. Then
+  main had moved (f64e4674, another session's app-support merge, 25 commits, 91 files, 14 overlapping) and its own CI
+  was red (docs: InvalidCref `MakeCurrent` in HeadlessSession; Windows: 3 ConPTY tests timing out on the runner, passing
+  here). Merged main into the branch (c655b411): three conflicts, each two additions kept (the item node's role from
+  step 13 and its expanded state from app-support in `MakeItemNode` and its callers; main's `InScrollable` beside the
+  internal `MapControlType`). The full suite on the merge: Fedora 22 and Windows 29 projects clean, Headless 2 failures
+  — step 13's MenuRoleTests expected Invoke on a submenu's parent, which now expands (round 6's rule) since item nodes
+  carry an expanded state — and docfx's main-side cref. Fixed in 7dfd2ce3 (test, ACCESSIBILITY-PLAN.md, cref → `Enter`):
+  Headless 1,443 pass, docfx 0 warnings. Phase → release.
