@@ -5,11 +5,10 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** survey — round 8 started 2026-11-03 in a fresh context: round 6's Landed rows, round 7's build order and
-  answered questions and round 6's log are archived. The eight experts run in their own worktrees on 27020cdb, reviewing
-  17d4220a..df45b4a2 (reports to come as `17-reports/r8-*.md`; common brief: this session's scratchpad
-  `brief-r8-survey.md`, probes in its `r8-<area>\`). Weekly usage 81 % at the start: the user chose to run the survey
-  anyway (2026-11-03), knowing it may pass 90 %; builds wait for the reset if it does. Round 7
+- **Phase:** build — round 8, step 1 next (9 steps; question 11 open, it joins step 2 if yes). The survey's eight
+  reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad `brief-r8-survey.md`). Weekly usage 86 %
+  after the survey (it cost ~5 %): the 90 % pause applies to build steps (the user waived it for the survey only), so
+  small steps go first and the rest wait for the reset if a step would cross 90 %. Round 7
   released: main's app-support merge (f64e4674, another session) merged into the branch as c655b411 with fixes
   7dfd2ce3, then the branch merged into main as df45b4a2; CI run 41691075588 green (test, test-linux, docs). Open for
   the user, none blocking: question 10 (`TokenizeDiff` public), the live screen-reader check of menus (script in
@@ -57,14 +56,14 @@ memory `release-tagging` (≤3 tags per push).
 
 | Expert | Round | Satisfied | Review objections |
 |---|---|---|---|
-| 1. Layout | 7 | no | none (151 shared suite rows: no counted work rose; StickyRows +3 % bytes against its twin) |
-| 2. SkiaSharp: painting | 7 | no | none (43 rows differ from round 6's probe, all down; steady frames 0 B) |
-| 3. GL and Vulkan | 7 | **yes** | none (steady frame 0 B and idle 0 wakes on GL, Vulkan 8-bit and F16; the walk trigger fired 13/13; 39 guarded windows, 0 foreground takes, no new `nvlddmkm` events) |
-| 4. .NET runtime | 7 | no | **4325bac6:** the bridges' `ConcurrentDictionary` maps grow to 1,792 locks and `Count` takes all of them, twice per AT-SPI apply and once per UIA apply (36–56 / 18–28 µs at ~3,000 objects) → step 1 |
-| 5. Text pipeline | 7 | no | none (no text row rose against round 6's landed figures) |
-| 6. Reactivity and reconcile | 7 | no | none (public `Part` correct, `Place` 0 B; doubles only on one-off actions) |
-| 7. Accessibility bridges | 7 | no | none (audit: 0 STALE in 3,129; 2,050 in-place refreshes, 0 mismatches; fallbacks 135, as step 15) |
-| 8. App workloads | 7 | no | none — round 6 helped every walk: 33 round 6 walks 6,726 → 2,373 KB/key (−65 %), 47 walks −80 %; Meridian History Down +32 % pays for 8bcf3b14's scroll fix |
+| 1. Layout | 8 | **yes** | none (190 shared suite rows: no layout counter rose; 39e60064's stretched-margin branch fires only in Junction's palette, −27 % MeasureSize there) |
+| 2. SkiaSharp: painting | 8 | no | **d04464f6** (main's app-support, merged in c655b411): `BeginFrame`'s `RestoreToCount(1)` drops the Vulkan surface's drag clip (6c627f27, 1b11aeda); no shown pixel changes, but the clear and overhanging draws cover up to 255 px more each way → step 1 |
+| 3. GL and Vulkan | 8 | **yes** | none (steady frame 0 B and idle 0 wakes on GL, Vulkan 8-bit and F16, JIT and AOT; the walk fired once in 5 of 6 GL launches; 13 guarded windows, 0 foreground takes, no new `nvlddmkm` events) |
+| 4. .NET runtime | 8 | no | none (0 of 213 suite rows moved more than 0.2 KB and 2 % against step 11's captures, JIT and AOT; round 7 step 1 holds; `KeptElements` bounded) |
+| 5. Text pipeline | 8 | no | none (no text row rose; dump hash 7A18AF8DE8E05271 unchanged) |
+| 6. Reactivity and reconcile | 8 | no | none (`KeptElements` correct; moved rows O(moving rows)) |
+| 7. Accessibility bridges | 8 | no | none (audit: 0 STALE in 3,171; 5,593 in-place walks, 0 mismatches; fallbacks 128) |
+| 8. App workloads | 8 | no | none — round 7 helped the apps: 33 round 6 walks 2,373 → 2,029 KB/key (−14 %, geometric mean 0.72), 47 walks 4,894 → 4,229 (−14 %, 0.60); none worse by more than 2 % |
 
 ## Queued candidates
 
@@ -73,61 +72,127 @@ with the round 7 survey's closed-from-Waiting note).
 A build step may bundle one expert's related small candidates as separate commits. Items marked **(user)** wait for a
 decision in Needs the user; the rest of their step goes ahead.
 
+### Round 8 build order
+
+Ranked by expected win over cost: the round 7 objection first, framework before apps. Each step names the report lines
+its brief quotes (`r8-k` = `17-reports/r8-k-<area>.md`).
+
+1. **paint-beginframe-keeps-surface-clip** (2 with 3; r8-2 Review and Candidate 1) — the objection to d04464f6:
+   `SkiaRenderContext.BeginFrame` (SkiaRenderContext.cs:298-317, `RestoreToCount(1)` at :312) runs after the Vulkan
+   surface's `BeginFrame` (Window.cs:1856, then :1862) and drops its over-allocation clip (SkiaVulkanRenderSurface.cs:61-72,
+   680, 870-883); the cached `_clip` never puts it back. Probe: surface clip 1200×800 at save count 2 → count 1, device
+   clip 2400×1600, `ClipBounds` 1601×1068 layout px instead of 800×533. Restore to the save count the surface handed the
+   canvas over at (internal `SetCanvas(canvas, baseSaveCount)`; Vulkan passes 2 while it clips); a throwing frame's pushes
+   are still undone. Tests: a clipped canvas keeps `DeviceClipBounds` through `BeginFrame`; FrameRobustnessTests pass; the
+   VulkanProbe too-narrow-clip check (6c627f27) shows a difference again. Correctness; no time bar expected. Small.
+2. **a11y-walk-name-without-string** (7 with 4; r8-7 Candidate 1, r8-4 Candidate 1; folds a11y-walk-unchanged-bytes) —
+   the in-place walk's `Compare` (AccessibilityTreeBuilder.Refresh.cs:658, `node.Name != ResolveName(element)`) builds
+   every name-from-content string to compare it (`GetContentText`, AccessibilityTreeBuilder.cs:803, 821-844: a
+   `StringBuilder` and a string per control named by two or more texts); compare segment by segment instead (prototypes
+   `r8-a11y\proto-nameb.patch`, ~40 lines; `r8-dotnet\proto-namecmp.patch`, 49). Junction Changes at 300 files: a walk of
+   the unchanged 264-node tree 7.67 → 0.02 KB; caret Down 120 ms apart with tree/UIA/AT-SPI 91.4/94.1/96.3 →
+   81.6/84.3/86.5 KB (−10.2…−10.7 %); wheel a notch every 120 ms 22.8/25.4/27.3 → 16.2/18.8/20.7 (−24…−29 %); bridge
+   off flat; trees 0, the same diffs and events. Add a suite twin row (composite rows named by 2–3 texts, with a
+   reader), check bytes on AOT, rerun the staleness audit. Small, no API or reader change. **(question 11)** adds the
+   disabled-menu-item fix to this step if the user says yes.
+3. **Rich text editor blocks** (5; r8-5 Candidates 1–3, Waiting richtext-short-viewport-jitter) — (a) a paragraph keeps
+   the layout's exact `TextLine[]` (PipelineTextParagraph.cs:35-47), makes its `TextLineBox[]` on the first `Lines` read,
+   `SpansOf` returns an exact array (RichTextEditorElement.Layout.cs:105), and `RichTable.Normalize` makes no closure per
+   block (RichTable.cs:97-98): richtext/open 5,000 blocks 3,256.7 → 2,589.2 KB (−20.5 %), resize 656.2 → 543.8
+   (−17.1 %), retained with the document open 7.94 → 7.41 MB (−6.7 %); `ParagraphAllocationTests` is rewritten (28 → 0 B
+   a line). (b) `BlockLayout` (RichTextEditorElement.Layout.cs:140-176) keeps its table and picture fields in a side object
+   made only for cells and pictures and takes a text block's style from its paragraph: on top of (a) open −13.7 %,
+   resize −12.9 %, retained −4.7 %. (c) block layouts in a `List` shifted in place (Layout.cs:283-287): richtext/enter in
+   5,000 blocks 82.0 → 42.9 KB (−47.7 %). (d) the one-line short-viewport jitter fix (RichTextEditorElement.Render.cs:362-367:
+   prefer the top when `caret.Height >= viewport`). Prototypes `r8-text\proto-para2.patch`, `proto-para3.patch`,
+   `proto-blocklist.patch`. Internal, no pixel change; each its own commit.
+4. **apps-coalesce-landing-builds** (6; r8-6 Candidate 1) — a picture landing posts a build only when none is pending (an
+   `Interlocked` flag, as Vesper's `FindRepaint`) at Aperture's `PosterCache` caller (ApertureApp.cs:107) and Vesper's
+   `ThumbnailCache` caller (CommanderApp.Views.cs:52); both caches' comments say the caller coalesces (PosterCache.cs:246,
+   ThumbnailCache.cs:109). Aperture Home, 36 posters: builds 41 → 16–22, 3,590 → 1,896–2,290 KB (−36…−47 %), at most 8–9
+   builds a frame → 2–5; grid, 42 posters: 2,424 → 1,515 (−37 %); Vesper Thumbnails, 160 PNGs: builds 45 → 2–5,
+   −40…−46 %, at most 27–28 builds a frame → 1. The same pictures drawn. REACTIVITY.md: a background callback that fires
+   once per item posts one build at a time. Small.
+5. **Aperture cursor** (6/8; r8-6 Candidates 2 and 5, r8-8 Candidate 1) — (a) the library grid's cursor key moves the
+   ring on the live cards through `KeptElements`/`Live` (`MoveRingWithoutBuild`, ApertureApp.Cursor.cs:168): 600 films
+   Right 49.4 → 0.3 KB (−99 %), Down 75.7 → 23.2 (−69 %; the rest is rows scrolling in), with UIA 0 trees; focus now
+   follows the cursor, as Cursor.cs:17 says it should (today the focused element is empty, the aperture-leads bug). (b)
+   Discover the same (`MoveRingWithoutBuild` returns false off Home, Cursor.cs:170; `BuildDiscoverView`, Discover.cs:25,
+   the `string.Join` key :77): 334.2/337.6 → ~0.4 KB a key. (c) bug: the Home cursor walks onto another page of its shelf
+   and no card shows the ring (1000 px, 4 cards a page: cursors 5–7); turn `_rowPages` to the cursor's page. An Aperture
+   cursor test per view.
+6. **aperture-home-build-diet** (6; r8-6 Candidate 4) — a Home build with every card kept is 69.6 KB: (a) hand back a
+   whole shelf (`KeptElements` keyed by the row) when its heading inputs and its page's cards are unchanged: 69.6 → 30.6
+   KB, elements 46 → 4, Home open with landings coalesced 1,897 → 1,583 KB (−17 %); the heading closures capture `row`
+   and `all`, so the state must cover what the menu shows. (b) memoize each card's picture `Uri` by item, kind, pixels and
+   scale (`JellyfinLibrary.ImageUrl`, JellyfinLibrary.cs:272: 1,136 B a card → 2 B): −20 KB a build more. Medium.
+7. **vesper-cursor-no-build** (6; r8-6 Candidate 3) — a plain cursor key builds nothing (`MoveCursor`, CommanderApp.cs:1170):
+   Detail sets the mounted list's `SelectedIndex` through its ref and scrolls (17.3 → 2.2 KB, −87 %; UIA 17.7 → 2.6);
+   Brief and Thumbnails restyle the two live cells or tiles with `KeptElements.Live` and set `CursorRowRef` (Brief 31.8 →
+   0.5, Thumbnails 27.7–31.3 → 0.5, a scrolling 30-key Down walk 57.9 → 1.9; −97…−98 %); build as today on a Shift sweep,
+   zebra, a drag hover, an overlay or full shell, a cleared filter or a partner row. Compare names in the partner check
+   (`DiffTargetPath` + `IndexOfPath` cost 0.9 KB); trap: `ThumbRow` reads `item.Cursor` (CommanderApp.Views.cs:279) and
+   must read the live cursor. Medium.
+8. **apps-meridian-history-archive-part** (6/8; r8-8 Candidate 2; round 7 step 10's Left open) — a History key moves the
+   list's selection through its ref and builds only the archived-send panel as its own `Part` (MeridianApp.History.cs:188-191;
+   `BuildHistoryRealView` is 40.7 KB a call: archive 14.9, list 3.2, filter bar and footer ~22.6): Down 52.8 → ~24 KB
+   (−55 %), History search typing ~−30 %. Medium.
+9. **paint-meridian-history-faded-row-layers** (2; r8-2 Candidate 2) — measure first: `row.Opacity(0.6)` on sends older
+   than today (MeridianApp.History.cs:382) makes every visible row a bounded SaveLayer (ElementRenderer.cs:71-85), 29 a
+   frame on Down, wheel and hover (~59 render passes). Time a real GL and Vulkan History wheel frame (guarded window)
+   with and without the layers. If they are ≥ 5 % of the frame, ask the user about the pixels (glyph edges ±1–2/255, the
+   chip text over its tint); otherwise record it as examined. **(user, only if it clears 5 %)**
+
 ### Waiting
 
 Re-ranked by the next survey.
 
-- **a11y-disabled-menu-item** (7, reader bug, not perf; round 7 step 13) — a disabled context-menu or menu-bar item is
-  published as enabled: the item node always sets `isEnabled: true`. Pre-existing; noted in ACCESSIBILITY-PLAN.md.
+- **a11y-disabled-menu-item** (7, reader bug, not perf; round 7 step 13; **question 11**) — a disabled context-menu or
+  menu-bar item is published as enabled: `MakeItemNode` always sets `isEnabled: true` (AccessibilityTreeBuilder.cs:558).
+  Fix (r8-7): an additive default member `IAccessibleItemSource.ItemIsEnabled(int)`, `ContextMenuElement` answering
+  `!IsDisabled`, compared in `MatchItems` and the served-item providers; small–medium. With step 2 if the user says yes.
 - **live-reader check of menus** (user) — the six-step script in ACCESSIBILITY-PLAN.md (round 7 step 13) for Narrator,
   NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
-- **a11y-walk-unchanged-bytes** (7; round 7 step 7) — the in-place walk allocates 6.9–8.2 KB on Junction's unchanged
-  tree (likely row names made from text content). The composite-selection part of step 7's lead landed in 2357d8c8.
-- **junction-changes-leads** (6/7/8; round 7 step 8b) — the diff pane is now a caret key's main cost (~74 KB at 300
-  files); a stage with a reader still builds one tree an operation; only the caret is told to a reader, not a
-  multi-selection's other members; a reader's "select" on a folder row clicks it, which opens or closes the folder.
-- **junction-tags-test-flake** (tests; round 6 step 9b) — likely explained by round 7 step 8a: the watcher's debounced
-  change from the first `.git/index` write lands mid-walk; 63467f8e waits 600 ms of quiet before counting. Watch it in
-  the full suite. Other Junction tests pump one frame after a background git command (the same race; passed twice).
+- **junction-changes-leads** (6/7/8, reader behaviour, no perf number) — only the caret is told to a reader, not a
+  multi-selection's other members; a reader's "select" on a folder row clicks it, which opens or closes the folder. (The
+  perf parts were examined by round 8: below the bars.)
 - **junction-review-old-path** (app bug, not perf; round 7 step 8a) — the review composer sends GitLab `old_path` = the
   new path for a renamed file, because `GitFileDiff.OldPath` is never set (`RenamedFrom` now holds git's old path).
   Decide whether review positions on renamed files should carry the old path.
 - **dropdown-follow-control-on-resize** (1, correctness, low) — a Dropdown list or DatePicker calendar stays at its
   opening point when a resize moves its control; anchoring changes how a press on the control behaves. Not perf.
-- **junction-leads (remaining)** (6/8) — `ChangesView` makes new lists on every call while a stage is in flight
-  (~130 rows a flip; memoized nodes plus step 4 cover it); `SelectConflict` and a conflict row's right-click have no
-  test of their own; old-side state convergence between hunks (file walk 46 → 33 % of lines); big files' gen 2 0–1 per
-  100 keys from 1.5 MB texts (not worth it alone).
-- **aperture-leads (remaining)** (6/8) — Discover (needs Seerr) and toasts not measured; the library cursor never
-  takes real focus though a comment says it does (rows are made after `OnAfterBuild`).
-- **vesper-coalesce-markdirty** (6/8, low) — 3 app and 5 part builds per folder change, build 127 of 316 KB; two app
-  builds ~30 KB, ~−10 %: at the bar. Expert 6: drop (one-off doubles; framework coalescing would change 5 apps).
-- **runtime-element-layout-state phase 2** (1/4, low) — cold fields ~70 B per element: −2…−9 % a key, retained
-  −1.5…−2.3 %; under both bars alone.
+- **junction-leads (remaining)** (5/tests) — old-side state convergence between hunks (file walk 46 → 33 % of lines;
+  not measured); `SelectConflict` and a conflict row's right-click have no test of their own (not perf).
+- **aperture-leads (remaining)** (6/8) — toasts not measured; grid Down after step 5 is the rows scrolling in.
+- **findbar-countonscreen-foreach** (4, nit) — `CountOnScreen` loops `foreach` over `bar.Children` (32 B on AOT, 0.4 %
+  of an 8 KB Enter); fix when FindBar is next touched.
 - **terminal-noop-scrollback-wheel** + **terminal-row-strings-by-content** (2/Terminal, low) — a no-op notch draws a
-  whole terminal frame (5,440–5,682 glyphs); 10,812 B a streamed line. Only the terminal sample uses HultUI.Terminal.
-- **layout-ordered-children** (1, low) — suite rows only (wheel over 5,000 rows 4,954 hit visits); apps at most 33 hit
+  whole terminal frame (5,440–5,682 glyphs); 10,276 B a streamed line. Only the terminal sample uses HultUI.Terminal.
+- **layout-ordered-children** (1, low) — suite rows only (wheel over 5,000 rows 4,954 hit visits); apps at most 33.5 hit
   visits a move and 13 culls a frame.
-- **Suite scenarios** (8): document-switch (Junction Files 85.4 KB a key: 62 % view build, 1.23 builds a key — the
-  file's text lands and builds again — 149 measure misses a key); a held selection that starts background work needs
-  all-thread bytes (a Junction test counting detail loads pins step 8's prefetch).
+- **Suite scenarios** (8): document-switch (Junction Files 85.0 KB a key: 62 % view build, 1.23 builds a key — the
+  file's text lands and builds again — 149 measure misses a key).
 - **textarea-chunked-document** (5/4; the user chose option B on 2026-10-25) — parked: Meridian's 89k body typing is
-  241.5 KB/key, ~178 KB of it the TextArea's new string, 1–2 % of a key's time; the user's 256k-character condition is
-  unmet.
+  ~238–241 KB/key, most of it the TextArea's new string; the user's 256k-character condition is unmet.
 - **a11y-served-items-followups** — a live Orca check only (no desktop Orca here; optional).
 - **F16 kept drag targets** (3) — deferred since round 5's `nvlddmkm` errors; never repeat blind.
-- **gl-threaded-optimization-profile** (3; the user's driver setting, information only) — the walk now lands while the
-  window rests; the setting would remove only the per-frame spin (mean 149–394, max ≤ 1,198 `SwitchToThread` a paced
-  frame; Auto mode threaded in 13 of 13 app-like launches).
+- **gl-threaded-optimization-profile** (3; the user's driver setting, information only) — the walk lands while the
+  window rests; the setting would remove only the per-frame spin (round 8: mean 340–387, max ≤ 986 `SwitchToThread` a
+  paced frame in threaded launches; one AOT launch stayed single-threaded).
 - **layout-audit-padding-border** (1, tooling) — compare `LayoutResult` padding and border too; with the next audit change.
-- **layout-patch-keeps-layout-dropdown-expander** (1) — do it whenever Dropdown or Expander is touched (16/9 elements
-  per Fluent rebuild; no app uses Expander).
 - **text-open-measures-every-line (full)** (5; user: not now, 2026-10-13).
-- **richtext-short-viewport-jitter** (5/editor; RichTextEditorElement.Render.cs:362-367, a one-line fix: prefer the
-  top when `caret.Height >= viewport`), **controls-menu-max-height-scroll** (1/2; not perf),
-  **layout-virtuallist-spacer-stale** (1; invisible; with an audit).
+- **controls-menu-max-height-scroll** (1/2; not perf; a long menu also draws to the allocated edge during a Vulkan drag
+  until step 1 lands), **layout-virtuallist-spacer-stale** (1; invisible; with an audit).
 - **aperture-poster-as-hero**, **aperture-tmdb-size-fallback**, **junction-narrow-gitlab-glyphs**,
   **meridian-pane-choice-not-persisted**, **meridian-min-width-wraps** (apps; not perf).
+
+Closed from Waiting by the round 8 survey: a11y-walk-unchanged-bytes (→ step 2: the joined names), richtext-short-viewport-jitter
+(→ step 3), junction-tags-test-flake (29 tests × 6 under load, 0 failures; round 7's two full suites and CI green since
+63467f8e), vesper-coalesce-markdirty (dropped by experts 6 and 8: no double), runtime-element-layout-state phase 2 and
+layout-patch-keeps-layout-dropdown-expander (Examined), the held-selection suite scenario (pinned by
+`CommitPrefetchTests.AHeldArrow_LoadsOnlyTheCommitItStopsOn`), junction-leads' `ChangesView` lists (95c86c97) and big
+files' gen 2 (Examined), aperture-leads' Discover and the grid cursor's focus (→ step 5), junction-changes-leads' perf
+parts (Examined).
 
 ## Landed
 
@@ -169,6 +234,38 @@ Round 7 (the round the next survey reviews; moves to the archive at round 9's su
 | 7 | 31e1aaa7 | aperture-home-cursor-no-build | Aperture Home on `KeptElements`, and a cursor key builds nothing: it moves the ring on the live cards through `Live` (one ring value for the build and the move; checks the owner's latest build drew that view). AOT KB a key (before / cards kept / both): one shelf Right 63.7 / 32.9 / 0.2, Down 65.3 / 31.9 / 0.2, min 0.526 → 0.482 / 0.505 → 0.476 ms; five shelves Right 255.7 / 70.7 / 0.3, Down 249.3 / 69.3 / 0.3, min 0.801 → 0.729 / 0.784 → 0.730; builds a key 1 → 0; UIA same bytes, min −3…−12 %; JIT min −8…−29 %. Suite rows 218.4 → 38.2 → 0.3 KB, cards made 35 → 2 → 0; `--compare` 0/0 JIT + AOT (captures 80f14806). 34 Home scenes: pixels, a11y tree (bounds, offscreen) and focus identical for both routes, A/A identical. Core 5,044, Headless 1,347, Aperture 332 pass; 7 reverse edits. REACTIVITY.md "A key that moves only a ring needs no build". |
 
 ## Examined, not worth it
+
+From the round 8 surveys (details in `17-reports/r8-*`):
+
+- **runtime-element-layout-state phase 2** (1, 4): elements made × ~70 B are 4.0–7.6 % of a key's bytes in every walk,
+  retained −1.5…−2.3 %; round 7's builds made fewer copies. Under both bars; closed.
+- **layout-patch-keeps-layout-dropdown-expander** (1): a Fluent rebuild lays out 16 and 9 elements; closed.
+- **Palette rows follow their item** (1): Junction palette type+erase −7.9 %, suite −1…−2 %; would change the documented
+  `palette-row-N` automation ids.
+- **Junction Files' 149 measure misses a key, grid/edit's auto column, TableView column resize, Vesper same-names
+  misses** (1): the relayout boundary (round 5), the scenario's design, no app, small.
+- **Snapping text blobs' x fraction** (2, 3): wheel steps are whole layout pixels (40 at any scale), so only touchpad pans
+  add cache entries; snapping x moves glyphs.
+- **VirtualList realization in the render pass, History's affordance shader per key (0.7 %), palette Down's 3.7 KB of
+  overlay text, canvas and halo text, disabled buttons' groups** (2): by design, under 1 %, or no app draws them.
+- **efaf947b's pixel-frame size reads, `SaveFrame` readbacks** (3): once per video frame; only when a frame is asked for.
+- **`UiaDisconnectProvider` per drop, `_nativeLock` per lookup, `LocalPosition` O(depth), the `AsyncLocal` ambient
+  application, `KeptElements` retention (max(64, 2 × live)), a kept `TreeDiff`** (4, 7): ≤ 0.5 a key, 0 B, or bounded.
+- **Junction big files' gen 2, the CRLF third copy** (4): 0–1 per 100 keys, background GCs; split without the `Replace`
+  copy (JunctionApp.Files.cs:630) only if it ever matters.
+- **A kept touched-rows array, a long-line P per grammar, 600-span typing, TextArea typing with a reader, emoji labels on
+  the BiDi path, multi-font `LineSource`, richtext/open cache misses** (5): trades retained memory for churn (−6.7 % a
+  Meridian send), declined in DECISIONS.md or round 1, or needed.
+- **Framework batching of the main-thread drain or of `MarkDirty`** (6): an await continuation that writes and then reads
+  would see the old tree, in 5 apps; the two app sites (step 4) get the same win. **Junction Changes' diff pane as a
+  `Part`** (6): ≤ 13 of 376 KB (−3.5 %). **Kept Brief columns** (6): gone with step 7.
+- **A node-with-children's own change in place; the bridges' whole-tree pass per structural apply** (7): ≤ 4.5 % of a
+  stage, +6 % on caret keys after 4+ stages in a row; a constant factor, 0 B.
+- **Junction Changes' caret at 300 files** (6, 7, 8): 83 % render of the reached file's diff rows, which are needed; build
+  12 %; the reader 4.5 % of a stage.
+- **Commit view's all-thread rise after 3d54d779** (8): the grammars' first use moved from History's prefetch to the
+  Commit tab (bisected; the second stretch 285.6 → 293 KB, GCs equal). **Junction Files all-thread +7.5 %, Meridian's
+  method pick, History search's chrome** (8): off the UI thread, once per action, 1.7 KB.
 
 From the round 7 surveys (details in `17-reports/r7-*`):
 
@@ -327,6 +424,13 @@ From the round 1 surveys (details in `17-reports/`):
   pixel A/Bs on system fonts need an A/A control. It explains round 3's unexplained 1–4 pixel diff.
 
 ## Needs the user
+
+Round 8 question (asked 2026-11-03). Recommendations in brackets.
+
+11. **a11y-disabled-menu-item** (with step 2): disabled context-menu and menu-bar items are read as enabled. The fix
+    adds a public default interface member, `IAccessibleItemSource.ItemIsEnabled(int)` (default: enabled), which
+    `ContextMenuElement` answers from `IsDisabled`. Additive; no existing implementer has to change. [Yes: a reader bug,
+    small.]
 
 Round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in the archive
 ([round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)).
@@ -512,3 +616,12 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   (2026-10-27 to 2026-11-02). Weekly usage 81 %; asked the user, who chose to run the survey now though it may pass
   the 90 % line. The eight experts run in their own worktrees on 27020cdb, reviewing 17d4220a..df45b4a2 (101 commits,
   main's app-support merge f64e4674 included).
+- 2026-11-03: round 8 survey done (reports 8748c603..eaa1ec29, `17-reports/r8-*`). Layout and GL/Vulkan satisfied;
+  the other six not. One review objection: d04464f6 (main's app-support) drops the Vulkan surface's drag clip at every
+  `BeginFrame` (step 1). Experts 4 and 7 found the same lead independently: the in-place a11y walk builds
+  name-from-content strings to compare them (step 2; it was a11y-walk-unchanged-bytes). Round 7 helped the apps: 47
+  walks −14 % KB/key (geometric mean 0.60), none worse by more than 2 %; Aperture's walk processes now exit cleanly.
+  9 build steps (rich text blocks, picture landings coalesced, cursor keys that build nothing in Aperture and Vesper,
+  Aperture Home's build, Meridian History's archive part, a measure-first faded-rows step); one question for the user
+  (11: an additive `IAccessibleItemSource.ItemIsEnabled`). Bug found: Aperture Home's cursor walks onto a hidden shelf
+  page (step 5). Survey agents 235–375k tokens each; weekly usage 81 → 86 %. Phase → build.
