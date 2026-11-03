@@ -156,7 +156,7 @@ public sealed class CommandPalette
     {
         if (_matches.Count == 0) return;
         _selected = Math.Clamp(_selected + delta, 0, Math.Min(_matches.Count, MaxRows) - 1);
-        _view?.Changed(reveal: true);
+        _view?.Moved();
     }
 
     /// <summary>Closes the palette and runs the chosen command.</summary>
@@ -386,7 +386,8 @@ public sealed class CommandPalette
         }
 
         // The list draws the choice and the tint under the pointer, the fill and corners the rows
-        // drew, and its rows are made unselected: a move of the choice makes no row.
+        // drew, and its rows are made unselected: a move of the choice makes no row, and moves the
+        // list's selection without building the card again (View.Moved).
         var t = _look;
         var list = VirtualListElement<ListRow>.New()
             .Items(new ListRows(_matches, shown))
@@ -555,6 +556,19 @@ public sealed class CommandPalette
         {
             _reveal |= reveal;
             MarkDirty();
+        }
+
+        /// <summary>The choice moved. Only the list shows it, so the list on screen is told and
+        /// the chosen row brought into view; the card is not built again. With no list on screen
+        /// (nothing matched) it is.</summary>
+        public void Moved()
+        {
+            if (_scroll.Current is VirtualListElement<ListRow> list)
+            {
+                list.SelectedIndex = palette._selected;
+                palette.RevealSelected(list);
+            }
+            else Changed(reveal: true);
         }
 
         public override Element Build() => palette.BuildCard(_scroll);

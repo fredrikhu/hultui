@@ -1431,6 +1431,14 @@ the list's box; each is in the rows' shape, so the switch makes the rows again (
 23 KB a key). Something that needs the selected row's place — a menu opened under it — works it out
 from the list (`ScreenContentBox`, `ItemHeight`, `ScrollOffsetY`), since no row is made selected.
 
+When the list is then the only thing that shows the selection, a move need not rebuild its owner
+at all: set `SelectedIndex` on the mounted list through its ref, and scroll the row into view
+(`ScrollRangeIntoView`), as the command palette's Down does. The next build hands the list the same
+index. A Down in Junction's palette made 32 elements and allocated 32 KB a key with its rows drawing
+the choice, each in a box of its own; 14 elements and 15 KB with the list drawing it and the card
+built again; and 3.9 elements (the rows scrolled in) and 3.7 KB with neither (plan 17, round 7,
+step 5).
+
 **Rows held at the top.** `.StickyRows((item, index) => item.IsHeader)` says which rows are a
 section's header in one list of rows. The list keeps the last sticky row at or above the first row
 on screen realized, however far up it stands, and holds it at the top of the list until the next

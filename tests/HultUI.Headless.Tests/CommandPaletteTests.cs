@@ -226,7 +226,7 @@ public sealed class CommandPaletteTests
     }
 
     [Fact]
-    public void AKeystrokeMakesOnlyTheRowsOnScreen_AndAMoveOfTheChoiceNone()
+    public void AKeystrokeMakesOnlyTheRowsOnScreen_AndAMoveOfTheChoiceNone_NorTheCard()
     {
         int made = 0, cards = 0;
         var commands = Enumerable.Range(0, 2_000).Select(i => new PaletteCommand($"{(i % 2 == 0 ? "branch" : "commit")} {i}", () => { })
@@ -245,13 +245,13 @@ public sealed class CommandPaletteTests
         Assert.Equal(1_000, palette.Matches.Count);
         Assert.InRange(made, 12, 16);
 
-        // The list draws the choice: no row is made (two were), only the card, and the chosen row
-        // is still told chosen.
+        // The list draws the choice and is told where it moved: no row is made (two were), nor
+        // the card (it was, a key), and the chosen row is still told chosen.
         made = cards = 0;
         session.Window.PressKey(KeyCode.Down);
         session.PumpFrame();
         Assert.Equal(1, palette.SelectedIndex);
-        Assert.Equal((0, 1), (made, cards));
+        Assert.Equal((0, 0), (made, cards));
         Assert.Equal(true, session.Window.FindByAutomationId("palette-row-1")!.Element.AccessibleSelected);
         Assert.Equal(false, session.Window.FindByAutomationId("palette-row-0")!.Element.AccessibleSelected);
     }
