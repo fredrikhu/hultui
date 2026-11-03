@@ -567,13 +567,19 @@ replace. Four things keep it right:
   Count builds and keep the cells for the next one only.
 - **Keep the live element, not the one you built.** A changed cell is patched into the old one,
   and the element the build made is thrown away; keep a `Ref` on it, which follows the patch.
-- **Everything the cell shows is in what you compare.** The entry, the cursor, and a shape of
-  the rest (the marks, the theme, the row height, the scale) as kept rows need one.
+- **Everything the cell shows is in what you compare.** The entry, the cursor, what only some
+  cells show (a mark, a file cut for a move) kept with each cell, and a shape of what every cell
+  shows (the theme, the row height, the scale). A set in the shape makes every cell again when one
+  member changes: Brief kept its marks there until round 7 (step 9), and a mark made all 140 cells
+  on screen, 471.0 → 35.7 KB a key once each cell kept its own (NativeAOT, Insert; Space, Shift+arrows
+  the same).
 
 Vesper's Brief view this way (round 4, step 13; headless, a key and two frames, 300 files): a
 key 759.9 → 237.8 KB (−69 %), what the rest of the window's build costs; the NativeAOT app in a
 real window 1,093 → 242 KB a key. A resize that changes the columns keeps them too: each cell
-moves to its new column (755.8 → 229.4 KB a step).
+moves to its new column (755.8 → 229.4 KB a step). A type-to-find key still makes cells (about 45
+a key, 400 files): every one is an entry the filter brought into the columns on screen, which had
+no cell to hand back; none on screen before is made again.
 
 The same works inside a virtual list whose item is a row of cards (Vesper's Thumbnails, round 6
 step 6). The list makes a row when its item changes — the cursor moved onto it or off it — and

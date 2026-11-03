@@ -221,6 +221,26 @@ public partial class CommanderApp
         }
     }
 
+    /// <summary>
+    /// What a grid view's kept cells show besides their entries, the cursor and what each cell
+    /// keeps itself (Brief's marks and cut): a shape, as the last build made them with it.
+    /// <see cref="Changed"/> says whether it moved since the last build asked, and takes the new
+    /// shape either way.
+    /// </summary>
+    private sealed class ShapeState<TShape> where TShape : struct, IEquatable<TShape>
+    {
+        private TShape _shape;
+        private bool _made;
+
+        public bool Changed(TShape shape)
+        {
+            bool changed = !_made || !shape.Equals(_shape);
+            _made = true;
+            _shape = shape;
+            return changed;
+        }
+    }
+
     /// <summary>A row of tiles as a reader says it: each file's name, a folder said to be one,
     /// and the marked ones said to be marked.</summary>
     private string ThumbRowLabel(ThumbRowItem row, HashSet<string> marks)
@@ -490,19 +510,20 @@ public partial class CommanderApp
         _viewPage[Si(side)] = g.Rows * Math.Max(1, g.VisCols);
         NoteFit(side, ViewMode.Brief, brief: g.Fit);
 
-        // The cells are kept between builds. A cell shows its entry and whether the cursor is on
-        // it, and besides those only what the shape holds — the marks, the files cut for a move,
-        // a result set (the tooltips), a folder a drag hovers, the row height, the scale the
-        // icons are cut at, the theme. While all of that is unchanged, a cell whose entry and
-        // cursor are what it was made with is handed back as it is: the live element, which the
-        // reconcile puts back where it was without touching it (it is keyed by its path, so its
-        // column matches it by key), as it puts back a persistent child component. Only the
-        // cells that changed are made, and patched into the ones they replace: a key in Brief
-        // makes two cells instead of every cell on screen. Kept only from the build just before
-        // (cells another build dropped are not in the tree any more).
+        // The cells are kept between builds. A cell shows its entry, whether the cursor is on it,
+        // whether it is marked and whether it is cut for a move, and besides those only what the
+        // shape holds — a result set (the tooltips), a folder a drag hovers, the row height, the
+        // scale the icons are cut at, the theme. While the shape is unchanged, a cell whose entry,
+        // cursor, mark and cut are what it was made with is handed back as it is: the live
+        // element, which the reconcile puts back where it was without touching it (it is keyed by
+        // its path, so its column matches it by key), as it puts back a persistent child
+        // component. Only the cells that changed are made, and patched into the ones they
+        // replace: a key in Brief makes two cells instead of every cell on screen, and a mark the
+        // cell it marks. Kept only from the build just before (cells another build dropped are
+        // not in the tree any more).
         var cells = BriefCells(side);
         var shape = new BriefCellShape(rowH, Icons.DisplayScale, _app.Theme, ResultsOf(side), _dropTarget);
-        bool keep = !BriefCellsState(side).Changed(shape, marks, _cutPending) && cells.FilledBy == _builds - 1;
+        bool keep = !BriefCellsState(side).Changed(shape) && cells.FilledBy == _builds - 1;
         cells.Next.Clear();
 
         var content = Flex.Row(gap: 0).FlexShrink(0);
@@ -528,7 +549,10 @@ public partial class CommanderApp
                 if (i >= n) break;
                 var e = list[i];
                 bool cursor = cursorPath != null && PathEquals(e.FullPath, cursorPath);
+                bool marked = marks.Contains(MarkKey(e));
+                bool cut = !marked && _cutPending.Contains(e.FullPath);   // a mark shows over a cut
                 if (keep && cells.Kept.TryGetValue(e.FullPath, out var kept) && kept.Cursor == cursor
+                    && kept.Marked == marked && kept.Cut == cut
                     && kept.Entry.Equals(e) && kept.Live.Current is { IsDetached: false } live)
                 {
                     column.AddChild(live);
@@ -536,11 +560,11 @@ public partial class CommanderApp
                     continue;
                 }
                 var made = new Ref<BoxElement>();
-                var cell = BriefCell(side, e, cursor, marks.Contains(MarkKey(e)));
+                var cell = BriefCell(side, e, cursor, marked, cut);
                 cell.Key = e.FullPath;
                 cell.WithRef(made);   // follows the cell to the live element it is patched into
                 column.AddChild(cell);
-                cells.Next[e.FullPath] = new BriefKeptCell(e, cursor, made);
+                cells.Next[e.FullPath] = new BriefKeptCell(e, cursor, marked, cut, made);
             }
             content.AddChild(column);
         }
@@ -593,9 +617,11 @@ public partial class CommanderApp
 
     private static string BriefColumnKey(int c) => "col" + c;
 
-    /// <summary>A Brief cell as it was made: its entry, whether the cursor was on it, and a ref
-    /// to the live element (the cell itself, or the one it was patched into).</summary>
-    private readonly record struct BriefKeptCell(FileEntry Entry, bool Cursor, Ref<BoxElement> Live);
+    /// <summary>A Brief cell as it was made: its entry, whether the cursor was on it, whether it
+    /// was marked or cut for a move (only some cells show those, so they are the cell's and not
+    /// the shape's), and a ref to the live element (the cell itself, or the one it was patched
+    /// into).</summary>
+    private readonly record struct BriefKeptCell(FileEntry Entry, bool Cursor, bool Marked, bool Cut, Ref<BoxElement> Live);
 
     private sealed class BriefCellCache
     {
@@ -612,18 +638,17 @@ public partial class CommanderApp
 
     private readonly BriefCellCache _briefCellsL = new(), _briefCellsR = new();
     private BriefCellCache BriefCells(char side) => side == 'L' ? _briefCellsL : _briefCellsR;
-    private readonly GridState<BriefCellShape> _briefStateL = new(), _briefStateR = new();
-    private GridState<BriefCellShape> BriefCellsState(char side) => side == 'L' ? _briefStateL : _briefStateR;
+    private readonly ShapeState<BriefCellShape> _briefStateL = new(), _briefStateR = new();
+    private ShapeState<BriefCellShape> BriefCellsState(char side) => side == 'L' ? _briefStateL : _briefStateR;
 
     // Title bar + tab strip + breadcrumb + footer around the Brief list, subtracted from the
     // window height to get the column-fill height. Approximate — a few px off just shifts the
     // wrap point by one cell; kept a touch generous so the list never overflows the footer.
     private const float BriefChromeHeight = 142f;
 
-    private BoxElement BriefCell(char side, FileEntry e, bool cursor, bool marked)
+    private BoxElement BriefCell(char side, FileEntry e, bool cursor, bool marked, bool cut)
     {
         Color fg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
-        bool cut = !marked && _cutPending.Contains(e.FullPath);
         if (cut) fg = Nocturne.Alpha(fg, 0.45);
 
         var cell = Flex.Row(gap: 7).Height(RowHeight).AlignItems(AlignItems.Center)

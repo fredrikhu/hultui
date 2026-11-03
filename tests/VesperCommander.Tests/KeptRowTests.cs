@@ -557,8 +557,7 @@ public class KeptRowTests
         Assert.Equal(Color.Transparent, after[Name(3)].BorderColor);
     }
 
-    /// <summary>A mark is in the Brief grid's shape: every cell is made again, and the marked one
-    /// is red.</summary>
+    /// <summary>A mark is shown by the kept grid: the marked cell is red.</summary>
     [Fact]
     public void ABriefMark_IsShownByTheKeptGrid()
     {
@@ -567,8 +566,86 @@ public class KeptRowTests
         t.Session.PumpFrames(2);
         t.Mark('L', Name(6));
         t.Session.PumpFrames(2);
-        var name = BriefCells(t, 'L')[Name(6)].Children.OfType<TextElement>().Single();
-        Assert.Equal(Nocturne.MarkRed, name.ResolvedInherited.TextColor);
+        Assert.Equal(Nocturne.MarkRed, BriefText(BriefCells(t, 'L')[Name(6)]).ResolvedInherited.TextColor);
+    }
+
+    private static TextElement BriefText(Element cell) => cell.Children.OfType<TextElement>().Single();
+
+    /// <summary>Tags every Brief cell; a patch takes the tag off the cells a build made again.</summary>
+    private static Dictionary<string, BoxElement> TagBriefCells(DiffViewTests.Fixture t)
+    {
+        var cells = BriefCells(t, 'L');
+        foreach (var cell in cells.Values) cell.AutomationId = "untouched";
+        return cells;
+    }
+
+    /// <summary>The cells a build made again since <see cref="TagBriefCells"/>, by name; every
+    /// cell is still the same element, patched or kept.</summary>
+    private static string[] RemadeBriefCells(DiffViewTests.Fixture t, Dictionary<string, BoxElement> before)
+    {
+        var after = BriefCells(t, 'L');
+        Assert.Equal(before.Keys.Order(), after.Keys.Order());
+        foreach (var (name, cell) in after) Assert.Same(before[name], cell);
+        return [.. after.Where(c => c.Value.AutomationId != "untouched").Select(c => c.Key).Order()];
+    }
+
+    /// <summary>A mark is in its cell, not in the grid's shape: Insert makes the cell it marked and
+    /// the one the cursor moved to, Space the one it marks or unmarks, and every other cell is
+    /// handed back untouched. In the shape, each mark made every cell on screen again.</summary>
+    [Fact]
+    public void ABriefMark_MakesTheCellItMarks_AndLeavesTheRestUntouched()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        t.PutCursorOn('L', Name(3));
+
+        var before = TagBriefCells(t);
+        t.Press(KeyCode.Insert);
+        t.Session.PumpFrames(1);
+        Assert.Equal([Name(3), Name(4)], RemadeBriefCells(t, before));
+        Assert.Equal(Nocturne.MarkRed, BriefText(before[Name(3)]).ResolvedInherited.TextColor);
+        Assert.Equal(Nocturne.Text, BriefText(before[Name(4)]).ResolvedInherited.TextColor);
+
+        before = TagBriefCells(t);
+        t.Press(KeyCode.Space);
+        t.Session.PumpFrames(1);
+        Assert.Equal([Name(4)], RemadeBriefCells(t, before));
+        Assert.Equal(Nocturne.MarkRed, BriefText(before[Name(4)]).ResolvedInherited.TextColor);
+
+        before = TagBriefCells(t);
+        t.Press(KeyCode.Space);
+        t.Session.PumpFrames(1);
+        Assert.Equal([Name(4)], RemadeBriefCells(t, before));
+        Assert.Equal(Nocturne.Text, BriefText(before[Name(4)]).ResolvedInherited.TextColor);
+    }
+
+    /// <summary>A file cut for a move is in its cell too: a cut makes the cells it ghosts, a paste
+    /// (which clears the cut) makes them plain again, and a marked file, which shows its mark
+    /// over the cut, is not made for either.</summary>
+    [Fact]
+    public void ABriefCut_MakesTheCellsItGhosts_AndAPasteMakesThemPlainAgain()
+    {
+        using var t = Open();
+        t.Press(KeyCode.F2, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+        t.PutCursorOn('L', Name(1));
+        t.Mark('L', Name(8));
+        Rebuild(t);
+        var cut = t.Field<HashSet<string>>("_cutPending");
+
+        var before = TagBriefCells(t);
+        foreach (int i in new[] { 4, 6, 8 }) cut.Add(Path.Combine(t.Left, Name(i)));
+        Rebuild(t);
+        Assert.Equal([Name(4), Name(6)], RemadeBriefCells(t, before));
+        Assert.Equal(0.45f, before[Name(4)].Children[0].Opacity);
+        Assert.Equal(1f, before[Name(8)].Children[0].Opacity);
+
+        before = TagBriefCells(t);
+        cut.Clear();
+        Rebuild(t);
+        Assert.Equal([Name(4), Name(6)], RemadeBriefCells(t, before));
+        Assert.Equal(1f, before[Name(4)].Children[0].Opacity);
     }
 
     // ── The comparison ───────────────────────────────────────────────────
