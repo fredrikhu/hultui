@@ -603,18 +603,36 @@ public partial class JunctionApp
     /// <summary>
     /// One row of the list as its list sees it: what it is, and what its look takes from the rest
     /// of the view. A header carries its section's count and whether another section precedes it;
-    /// a hidden file its path; a folder or a file row its node, and whether it is an open folder,
-    /// draws a pick's fill (a row of a selection that is not the caret's row alone; the list draws
-    /// the caret), and how many files a row action takes while it is part of a selection of
-    /// several. A key that moves the caret changes no item.
+    /// a hidden file its path; a folder or a file row its node (a folder's totals with it), and
+    /// whether it is an open folder, draws a pick's fill (a row of a selection that is not the
+    /// caret's row alone; the list draws the caret), and how many files a row action takes while it
+    /// is part of a selection of several. A key that moves the caret changes no item.
+    /// <para>The node is compared by what a row shows of it and acts on (its path), not by which
+    /// object it is: a stage or an unstage makes every node again, and a row whose file, place and
+    /// counts are the same is the same row, which the list moves to where its item now stands
+    /// instead of making it again. No index is in it, for the same reason.</para>
     /// </summary>
     private readonly record struct ChangeListItem(ChangeListKind Kind, ChangeSection Section = default,
         TreeNode<GitFileChange>? Node = null, string? Path = null, int Count = 0, bool TopGap = false,
-        bool Expanded = false, bool Selected = false, int SelectedFiles = 0)
+        bool Expanded = false, bool Selected = false, int SelectedFiles = 0, int Additions = 0, int Deletions = 0)
     {
         /// <summary>How many files a row action targets: every file the selection covers when the
         /// row is inside a selection of several, otherwise the row's own.</summary>
         public int ActionCount(int own) => SelectedFiles > 0 ? SelectedFiles : own;
+
+        public bool Equals(ChangeListItem other) =>
+            Kind == other.Kind && Section == other.Section && Path == other.Path && Count == other.Count
+            && TopGap == other.TopGap && Expanded == other.Expanded && Selected == other.Selected
+            && SelectedFiles == other.SelectedFiles && Additions == other.Additions && Deletions == other.Deletions
+            && SameRow(Node, other.Node);
+
+        public override int GetHashCode() => HashCode.Combine(Kind, Section, Node?.Path, Path, Count);
+
+        private static bool SameRow(TreeNode<GitFileChange>? a, TreeNode<GitFileChange>? b) =>
+            ReferenceEquals(a, b)
+            || a is not null && b is not null && a.IsFolder == b.IsFolder && a.Depth == b.Depth
+               && a.LeafCount == b.LeafCount && a.Path == b.Path && a.Segment == b.Segment
+               && EqualityComparer<GitFileChange>.Default.Equals(a.Item, b.Item);
     }
 
     private static readonly Func<ChangeListItem, int, bool> ChangeRowIsHeld = static (item, _) =>
@@ -727,7 +745,9 @@ public partial class JunctionApp
                 var kind = node.IsFolder ? ChangeListKind.Folder
                     : section == ChangeSection.Conflicted ? ChangeListKind.Conflict
                     : ChangeListKind.File;
-                rows.Add(new ChangeListItem(kind, section, node, Expanded: node.IsFolder && tree.IsExpanded(node)));
+                var (additions, deletions) = node.IsFolder ? FolderTotals(node) : default;
+                rows.Add(new ChangeListItem(kind, section, node, Expanded: node.IsFolder && tree.IsExpanded(node),
+                    Additions: additions, Deletions: deletions));
                 walk.Add(new ChangeRef(node.Path, section, node.IsFolder));
             }
         }
@@ -870,7 +890,7 @@ public partial class JunctionApp
         var self = new ChangeRef(node.Path, section, IsFolder: true);
         var (selected, expanded) = (item.Selected, item.Expanded);
         var n = item.ActionCount(node.LeafCount);
-        var (additions, deletions) = FolderTotals(node);
+        var (additions, deletions) = (item.Additions, item.Deletions);
 
         // Conflicts have no staging checkbox — their resolution is per file — so that
         // section's folders carry the twisty alone.
@@ -1458,8 +1478,36 @@ public partial class JunctionApp
     private readonly HashSet<StageKey> _settledStage = new();
 
     /// <summary>The working copy as the user should see it: what git last told us, with
-    /// every staging that has been asked for already applied.</summary>
-    private ChangesData ChangesView => ApplyPendingStaging(_changes.Value);
+    /// every staging that has been asked for already applied.
+    ///
+    /// <para>Kept while git's answer, the stagings in flight and the repository are what they
+    /// were: made on every call, a staging in flight gave each call new lists, so the rows were
+    /// flattened again and every row on screen made again on every frame until git answered
+    /// (~130 rows a call at 300 files).</para></summary>
+    private ChangesData ChangesView
+    {
+        get
+        {
+            var data = _changes.Value;
+            if (_pendingStage.Count == 0) return data;
+            // A load's lists are new objects, and the record compares them as objects.
+            if (_changesViewOf is { } of && of == data && _changesViewGen == _pendingStageGen
+                && _changesViewRepo == _activeRepoPath)
+                return _changesView;
+            _changesView = ApplyPendingStaging(data);
+            (_changesViewOf, _changesViewGen, _changesViewRepo) = (data, _pendingStageGen, _activeRepoPath);
+            return _changesView;
+        }
+    }
+
+    private ChangesData _changesView;
+    private ChangesData? _changesViewOf;
+    private int _changesViewGen;
+    private string? _changesViewRepo;
+
+    /// <summary>Counts the changes of <see cref="_pendingStage"/>, which <see cref="ChangesView"/> is
+    /// kept across.</summary>
+    private int _pendingStageGen;
 
     /// <summary>Moves the pending files between the two lists. The file's row is carried
     /// across unchanged — it is the same file with the same counts — and so is its diff,
@@ -1511,6 +1559,7 @@ public partial class JunctionApp
     {
         foreach (var key in _settledStage) _pendingStage.Remove(key);
         _settledStage.Clear();
+        _pendingStageGen++;
         PickInitialChange(ApplyPendingStaging(data));
     }
 
@@ -1567,6 +1616,7 @@ public partial class JunctionApp
         var repoPath = _activeRepoPath;
         var keys = paths.Select(p => new StageKey(repoPath, p)).ToList();
         foreach (var key in keys) _pendingStage[key] = toStaged;
+        _pendingStageGen++;
         MarkDirty();
         _stagingChain = RunStagingAsync(keys, command, ok, fail, repoPath);
     }
@@ -1596,6 +1646,7 @@ public partial class JunctionApp
             else
             {
                 foreach (var key in keys) { _pendingStage.Remove(key); _settledStage.Remove(key); }
+                _pendingStageGen++;
                 Flash(error is null ? fail : FirstLine(error, fail));
             }
             if (PathComparer.Equals(repoPath, _activeRepoPath)) RefreshAll();

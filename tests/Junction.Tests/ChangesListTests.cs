@@ -71,6 +71,68 @@ public class ChangesListTests
         static string CaretName(JunctionApp app) => System.IO.Path.GetFileName(CaretPath(app));
     }
 
+    /// <summary>A stage moves its file between the lists at once and asks git behind it. The rows it
+    /// shifts are the rows they were, moved (a stage made every node of the tree again, and every row
+    /// on screen with it); while git has not answered, a key makes no row (the view was made again on
+    /// every call, new lists each time, and every row on screen with it); and git's answer, the same
+    /// lists, makes none.</summary>
+    [Fact]
+    public void AStage_MovesTheRowsItShifts_AndWhileItIsInFlight_AKeyMakesNoRow()
+    {
+        WithFiles(60, (repo, session, app) =>
+        {
+            var list = ChangeList(app);
+            var gate = new TaskCompletionSource();
+            typeof(JunctionApp).GetField("_stagingChain", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, gate.Task);
+            var before = Rows(list);
+            Assert.True(before.Count > 12, $"{before.Count} rows");
+
+            int made = app.ChangeRowsMade;
+            Invoke(app, "StagePaths", (IReadOnlyList<string>)["src/area5/file005.cs"]);
+            session.PumpFrames(3);
+            Assert.NotNull(session.Window.FindByText("STAGED · 1"));
+            // Made: the two headers' counts, the staged folder and file, the folders the file left.
+            Assert.InRange(app.ChangeRowsMade - made, 4, 8);
+            AssertKept(before, Rows(list), out int kept);
+            Assert.True(kept > 8, $"{kept} kept");
+
+            made = app.ChangeRowsMade;
+            var flattened = Field<object>(app, "_changeListRows");
+            session.Window.PressKey(KeyCode.Down);
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Up);
+            session.PumpFrames(3);
+            Assert.Equal(0, app.ChangeRowsMade - made);
+            Assert.Same(flattened, Field<object>(app, "_changeListRows"));
+
+            var moved = Rows(list);
+            made = app.ChangeRowsMade;
+            gate.SetResult();
+            session.PumpUntil(() => repo.Repo.GetStagedChanges().Count == 1 && Pending(app) == 0, Wait);
+            session.PumpFrames(3);
+            Assert.Equal(0, app.ChangeRowsMade - made);
+            AssertKept(moved, Rows(list), out _);
+        });
+
+        static Dictionary<string, Element> Rows(ScrollViewElement list) =>
+            list.Children.Where(c => c.Key is not null).ToDictionary(c => c.Key!);
+
+        // Every row still on screen under the key it had is the element it was.
+        static void AssertKept(Dictionary<string, Element> was, Dictionary<string, Element> now, out int kept)
+        {
+            kept = 0;
+            foreach (var (key, row) in now)
+                if (was.TryGetValue(key, out var old) && key.StartsWith("u:", StringComparison.Ordinal))
+                {
+                    Assert.Same(old, row);
+                    kept++;
+                }
+        }
+
+        static int Pending(JunctionApp app) => Count(Field<object>(app, "_pendingStage")) + Count(Field<object>(app, "_settledStage"));
+        static int Count(object set) => (int)set.GetType().GetProperty("Count")!.GetValue(set)!;
+    }
+
     /// <summary>The caret moves in the view: the title bar, the sidebar, the toolbar and the composer
     /// show nothing of it, and were built for it, 305 KB a key with 21 files.</summary>
     [Fact]

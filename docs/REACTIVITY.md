@@ -646,6 +646,15 @@ Automation 334.9 → 227.7 KB. An automation id made from the index (Meridian's 
 command palette's `palette-row-N`) is something the row shows of its place: such a list keeps its
 index in the item, and its rows are made again when they move.
 
+The same goes for an object made again with its data: an item that holds a tree node compares as
+that node, and a model that makes every node again for a change makes every row again with it. Give
+the item an `Equals` that compares what the row shows and acts on (Junction's Changes compares a
+node by its path, depth, segment, count and file, and carries a folder's totals): a stage there
+moved the rows it shifted, 4–8 made of the ~20 on screen, where it made them all. And keep a derived
+view while what it is derived from is the same: Changes made its view (git's answer with the
+stagings in flight applied) again on every call, new lists each time, so each build while git had
+not answered flattened the rows again.
+
 ---
 
 ## Component Model
