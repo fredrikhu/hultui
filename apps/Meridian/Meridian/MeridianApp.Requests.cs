@@ -109,11 +109,20 @@ public partial class MeridianApp
     {
         if (!isRoot)
         {
-            // Folders in mono — they are real directories.
-            list.AddChild(Flex.Row(gap: Azimuth.S1).Height(Azimuth.RowList).FlexShrink(0)
+            // Folders in mono — they are real directories. Rename and delete: the ⋯ at the
+            // row's end, or a right-click on the row.
+            string id = Relative(folder.Path).Replace('/', '-');
+            var row = Flex.Row(gap: Azimuth.S1).Height(Azimuth.RowList).FlexShrink(0)
                 .AlignItems(AlignItems.Center)
-                .Padding(new Thickness(0, 0, 0, Azimuth.S3 + depth * Azimuth.S3))
-                .Children(Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted)));
+                .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S3 + depth * Azimuth.S3))
+                .AccessibleRole(AccessibilityRole.Group).AccessibleName($"folder {folder.Name}")
+                .AutomationId("folder-" + id)
+                .Children(
+                    Ui.Mono(folder.Name + "/", 12f, Azimuth.TextMuted).MaxLines(1).TextOverflow(TextOverflow.Ellipsis),
+                    Box.New().FlexGrow(1),
+                    RowActionsButton($"actions for folder {folder.Name}", "folder-actions-" + id, () => FolderActions(folder)));
+            RowContextMenu(row, () => FolderActions(folder));
+            list.AddChild(row);
         }
         int childDepth = isRoot ? 0 : depth + 1;
         foreach (var sub in folder.Folders)
@@ -151,8 +160,12 @@ public partial class MeridianApp
             row.AddChild(Ui.Mono("⛓" + request.UsesCount, 8f, Azimuth.TextFaint).FlexShrink(0));
         if (openTab is { Dirty: true })
             row.AddChild(Dot(Azimuth.Accent));
+        var path = request.Path;
+        row.AddChild(RowActionsButton($"actions for {request.DisplayName}",
+            "req-actions-" + System.IO.Path.GetFileNameWithoutExtension(path), () => RequestActions(path)));
 
         row.OnClick(_ => OpenRequest(request.Path));
+        RowContextMenu(row, () => RequestActions(path));
         if (!active) row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }

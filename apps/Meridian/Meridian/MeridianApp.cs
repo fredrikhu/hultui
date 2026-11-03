@@ -59,7 +59,8 @@ public partial class MeridianApp : Component, IDisposable
 
     internal sealed class RequestTab(string path, ReqDocument doc)
     {
-        public string Path { get; } = path;
+        /// <summary>The file, which follows a rename made in the app.</summary>
+        public string Path { get; set; } = path;
         public ReqDocument Doc { get; set; } = doc;
         public bool Dirty => Doc.Edited;
         public SendResult? Result;
@@ -146,7 +147,8 @@ public partial class MeridianApp : Component, IDisposable
 
     public MeridianApp(Application app, Window window, IFileDialogs? fileDialogs = null,
         int viewerCapBytes = 1024 * 1024,
-        IKeyring? keyring = null)
+        IKeyring? keyring = null,
+        IFileTrash? trash = null)
     {
         _app = app;
         _window = window;
@@ -163,6 +165,7 @@ public partial class MeridianApp : Component, IDisposable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;
         _keyring = keyring ?? new DefaultKeyring();
+        _trash = trash ?? FileTrash.Default();
         Engine = new HttpEngine(viewerCapBytes);
         _oauth = new OAuth2(Engine);
         _responseFind = NewResponseFind();
@@ -242,6 +245,12 @@ public partial class MeridianApp : Component, IDisposable
             dialog.Key = "dialog";
             root.AddChild(dialog);
         }
+        if (_confirm is { } confirmSpec)
+        {
+            var confirm = BuildConfirm(confirmSpec);
+            confirm.Key = "confirm";
+            root.AddChild(confirm);
+        }
         if (_popover != null)
         {
             var popover = BuildPopover(_popover);
@@ -270,7 +279,16 @@ public partial class MeridianApp : Component, IDisposable
         if (_pendingDialogFocus)
         {
             _pendingDialogFocus = false;
-            _dialogRef.Current?.Focus();
+            if (_dialogRef.Current is { } field && _window.IsInTree(field))
+            {
+                field.Focus();
+                if (_dialogValue.Length > 0) field.SelectAll();   // a rename's name: typing replaces it
+            }
+        }
+        if (_pendingConfirmFocus)
+        {
+            _pendingConfirmFocus = false;
+            if (_confirmRef.Current is { } ok && _window.IsInTree(ok)) ok.Focus();
         }
         _responseFind.Service();
     }
@@ -650,6 +668,12 @@ public partial class MeridianApp : Component, IDisposable
             else if (e.Key == KeyCode.Escape) { CancelDialog(); e.StopPropagation = true; }
             return;
         }
+        if (_confirm != null)
+        {
+            if (e.Key == KeyCode.Enter) { Confirm(); e.StopPropagation = true; }
+            else if (e.Key == KeyCode.Escape) { CancelConfirm(); e.StopPropagation = true; }
+            return;
+        }
 
         // The response find bar's keys route ahead of everything else — the
         // Junction discipline, so Esc closes the bar before it cancels a send
@@ -681,6 +705,8 @@ public partial class MeridianApp : Component, IDisposable
         }
 
         if (typing) return;
+
+        if (FileShortcut(e)) { e.StopPropagation = true; return; }
 
         // The History view walks its rows with the arrows (the mock's key map).
         if (View == MeridianView.History && HandleHistoryKey(e))

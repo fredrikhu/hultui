@@ -43,6 +43,7 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
             Store[$"{workspaceRoot}|{key}"] = value;
             return true;
         }
+        public bool Delete(string workspaceRoot, string key) => Store.Remove($"{workspaceRoot}|{key}");
     }
 
     private void Hosted(Action<HeadlessSession, MeridianApp, FakeKeyring> body)
