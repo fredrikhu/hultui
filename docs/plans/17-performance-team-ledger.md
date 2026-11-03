@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 7
-- **Phase:** build — round 7, step 13 next (steps 1–7, 8a, 9, 10 and 12 landed; the rest smallest-first under the usage cap: 9, 10, 12, 13, then 8b and 11). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
+- **Phase:** build — round 7, step 8b next (steps 1–7, 8a, 9, 10, 12 and 13 landed; the rest smallest-first under the usage cap: 9, 10, 12, 13, then 8b and 11). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
   seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
   questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
   1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
@@ -149,6 +149,10 @@ the report lines its brief quotes (`r7-k` = `17-reports/r7-k-<area>.md`).
 
 Re-ranked by the next survey.
 
+- **a11y-disabled-menu-item** (7, reader bug, not perf; round 7 step 13) — a disabled context-menu or menu-bar item is
+  published as enabled: the item node always sets `isEnabled: true`. Pre-existing; noted in ACCESSIBILITY-PLAN.md.
+- **live-reader check of menus** (user) — the six-step script in ACCESSIBILITY-PLAN.md (round 7 step 13) for Narrator,
+  NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
 - **a11y-composite-selection-in-place** (7; round 7 step 7) — a composite list's own selection move and a kept
   composite row's `AccessibleSelected` still build a whole tree (suite composite walk 1.0 a key). A tested patch stops
   the list's own move from building (5 → 0 trees in a headless scene): scratchpad `r7b7\p4-composite-selection.patch`;
@@ -286,6 +290,7 @@ Round 6 (the round the next survey reviews; moves to the archive at round 8's su
 | 7 | e0ace9c9 | meridian-url-typing-skip-build | A URL character builds nothing when it moves nothing shown (Headers, Body, Auth: compare the Params and Chain counts and the stale banner). KB a character AOT: Headers 66.6 → 4.0 (−94 %), min −17 % (JIT −27 %); Body −93 %, Auth −94 %; a full query string −83 %; Params unchanged. REACTIVITY.md: a text field holds its own text, so a key builds only for what else on screen reads it. |
 | 7 | 5a9f8a54 | meridian-history-list-drawn-selection | Approved (question 4). History's list draws the selection (at 60 % for sends older than today, as the rows' own opacity); rows keep their own hover tint; `hist-row-N` ids kept; the selected send still heard as selected. Down 63.5 → 47.4 KB a key (−25 %), rows made 2 → 0; time over 400 keys AOT min 0 %, median −1 %, with a reader −5 %; JIT −4 / −8 %. Pixels: none for today's sends (3 scenes); older sends (7 scenes) only the selected row, fill 1/255 and glyph edges up to 6/255; one scene keeps a passed row's hover tint (up to 15/255, as Junction History). Step 10: 38 Meridian scenes, a11y and focus identical but the bug's own 3; suite 0/0 JIT + AOT, no allocation moved (captures 7ce5e216); Meridian 468 pass; 4 reverse edits. |
 | 7 | 49509afd | syntax-long-line-cap | Approved (question 1). A line over P characters is tokenized on its first P only (never splitting a surrogate pair), the rest plain; the cut line leaves the next line the state it started in (as a line stopped at its budget), so a long line walked only for state isn't tokenized. P internal: 2,000, and 8,000 for `source.json`, `source.json.comments`, `text.xml` (dense 2,000-character lines: JavaScript 79 ms, C# 131; 8,000: JSON 65, XML 40). One line, no budget: JavaScript 32k 16,291 ms / 13.8 MB → 79 ms / 0.9 MB, C# 26,108 → 130 ms, JSON 907 → 65 ms; window budget: JavaScript 4k–32k coloured 2,442–173 → 2,000 characters, C# 1,160–108 → 2,000, 80–130 ms a line instead of 250; diff walk below a 4k/8k/16k line window 821/789/332 → 70/39/21 ms (JavaScript/C#/JSON); Files call over 322 real `node_modules` files with long lines 89.5 → 48–49 s (all-thread bytes +3 %). Slow grammars still meet the window budget at 2,000 (SQL 849 ms, CSS 284, PowerShell 281, C++ 268, Python 246; table of 17 in DECISIONS.md). Spans: 3,206-file corpus, every line ≤ 2,000 with no longer line above identical (1,687,032 lines, 3,922,381 spans); 71 of 80 longer lines and 396 lines below them in one file changed. LongLineTests 6 (5 fail without the cap, 2 under `<=`→`<`); Syntax 84, Meridian 468, Junction 1,080/1,081: a pre-existing one-frame race in `NewWorktreeBranchTests`, fixed by the orchestrator in 8b97f424 (waits for git, as 9b96bcd9). |
+| 7 | 02a68f63, 110fcd27 | context-menu-as-menu | Approved (question 2). Suite row `a11y/menu bar walk over 1,000 rows, UIA`. `ContextMenuElement` defaults to `Role = Menu`; `DropdownElement` sets `List`; item roles from the list's role (`AccessibilityTreeBuilder.ItemRoleOf`). Context menus and menu-bar menus read UIA Menu/MenuItem (50009/50011, were 50008/50007), AT-SPI menu 33 / menu item 35, served menus over 2,000 items too; a Dropdown's popup stays List/ListItem. Items keep Invoke and SelectionItem (Toggle on a checked choice), AT-SPI click and selectable; the menu container keeps Selection, Scroll and ItemContainer only when it publishes items; submenu parents have no ExpandCollapse (Invoke opens them). Selection told by selection, not focus (IsSelected / `state-changed:selected`), patched, 0 trees. Suite 207 rows 0/0 JIT + AOT, no allocation moved (captures 7eb3279a); context-menu walk UIA 0.393 → 0.388 ms JIT, 0.5 KB, 0 trees. Event streams: context menu 58 of 104 lines differ, menu bar 86 of 167, dropdown 0 of 103 — every difference a role or control type. Audit 0 STALE in 1,717. Core 5,044, Headless 1,332, Linux bridge 104 (Windows and Fedora), Fedora Headless a11y 265, Fluent 34, Vesper 878, Junction menu tests 62 pass; goldens pass. ACCESSIBILITY-PLAN.md holds a six-step live-reader script (Narrator, NVDA, Orca) for the user. |
 
 ## Examined, not worth it
 
@@ -791,3 +796,8 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
   so no captures. Guideline note: app authors need do nothing; lines between P and what the old budget reached get
   less colour; tests that colour a long line get a bounded, deterministic result. Left open: slow grammars (SQL,
   CSS, PowerShell, C++, Python) still meet the window budget at 2,000 — a per-grammar P table is the follow-up.
+- 2026-11-03: round 7 step 13 landed (02a68f63, 110fcd27; captures 7eb3279a): context menus and menu-bar menus read as
+  Menu/MenuItem on UIA and AT-SPI; a Dropdown's popup stays a List; bytes and time flat, 0 trees a move. The user's
+  live-reader check has a script in ACCESSIBILITY-PLAN.md (if a reader stays silent on a move, moving focus to the
+  selected item would need the user's approval). Found, not fixed (Waiting a11y-disabled-menu-item): a disabled menu
+  item is published as enabled (the item node always sets `isEnabled: true`).
