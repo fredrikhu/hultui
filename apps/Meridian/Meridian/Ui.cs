@@ -110,6 +110,19 @@ public static class Ui
         return b;
     }
 
+    /// <summary>A button whose face is an icon alone, so the name a reader hears is
+    /// <paramref name="accessibleName"/>, said in full.</summary>
+    public static ButtonElement IconButton(string glyph, float size, Color color, string accessibleName,
+        Action? onClick, string? automationId = null, ButtonStyle? style = null)
+    {
+        var b = HultUI.Core.Builders.Button.New(ButtonVariant.Ghost).Style(style);
+        b.AccessibleName = accessibleName;
+        b.AddChild(Icon(glyph, size, color));
+        if (automationId != null) b.AutomationId(automationId);
+        if (onClick != null) b.OnClick(_ => onClick());
+        return b;
+    }
+
     /// <summary>The warn-coloured outline: Cancel and Abort, which interrupt rather than destroy.</summary>
     public static readonly ButtonStyle Warn = new()
     {
@@ -141,6 +154,12 @@ public static class Ui
     public static readonly ButtonStyle Remove = new()
     {
         Size = 22f, Padding = new Thickness(0), Text = Azimuth.TextFaint, FontSize = 10f, FontWeight = FontWeight.Regular,
+    };
+
+    /// <summary>A 22px icon action in the Requests tree: ＋ request, ＋ folder.</summary>
+    public static readonly ButtonStyle TreeAction = new()
+    {
+        Size = 22f, Padding = new Thickness(0),
     };
 
     /// <summary>The compare table's secret flag, on: a 22px accent ●.</summary>

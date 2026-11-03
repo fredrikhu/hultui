@@ -10,7 +10,7 @@ namespace Meridian;
 /// <remarks>
 /// The hints were typed by hand, and three said keys that did nothing: Ctrl I (import) and
 /// Ctrl N (new collection) had no handler at all, and Ctrl R ran the collection only from the
-/// Runner view while the palette offered it everywhere.
+/// Runner view while the palette offered it everywhere. Ctrl N came back with the card it names.
 /// </remarks>
 internal static class Shortcuts
 {
@@ -31,6 +31,7 @@ internal static class Shortcuts
         map.Add("view", global, "Requests · Runner · Discovery · History · Environments",
             Enumerable.Range(1, 5).Select(n => new KeyChord(KeyCode.Digit0 + (ushort)n)).ToArray()).Shown("1 – 5");
         map.Add("open", global, "Open a collection", K(KeyCode.O, ctrl));
+        map.Add("new", global, "New collection", K(KeyCode.N, ctrl));
         map.Add("save", global, "Save the request, or the environments on their view", K(KeyCode.S, ctrl));
         map.Add("close", global, "Close the tab", K(KeyCode.W, ctrl));
         map.Add("env", global, "Switch environment", K(KeyCode.E, ctrl));

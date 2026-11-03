@@ -89,19 +89,15 @@ public class MeridianAppHostTests
     }
 
     [Fact]
-    public void CardsForUnbuiltFeaturesSaySo()
+    public void EveryCardIsLive()
     {
-        // The phantom-shortcut rule: a control that does nothing must not read as
-        // live. Unbuilt cards carry "(not available yet)" in their accessible name.
+        // The phantom-shortcut rule: a control that does nothing must not read as live. Unbuilt
+        // cards carried "(not available yet)"; New collection, the last, landed 2026-11-04.
         Hosted((session, app) =>
         {
-            // New collection is the last unbuilt card (P11).
-            Assert.True(Contains(session, "New collection (not available yet)"));
-            // Everything else is live and must NOT be marked unavailable —
-            // Import OpenAPI became real in P8.
-            foreach (var live in new[] { "Open a folder", "Discover an API", "Import OpenAPI" })
-                Assert.False(Contains(session, $"{live} (not available yet)"),
-                    $"\"{live}\" is built — it must not read as unavailable");
+            Assert.False(Contains(session, "not available yet"));
+            foreach (var card in new[] { "door-open-a-folder", "door-new-collection", "door-import-openapi", "door-discover-an-api" })
+                Assert.NotNull(session.Window.FindByAutomationId(card));
         });
     }
 

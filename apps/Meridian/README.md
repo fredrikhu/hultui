@@ -53,13 +53,33 @@ requests; `{{$uuid}}` and `{{$timestamp}}` are built-ins and can't be shadowed.
 CI, read from an environment variable of the same name) — never in the
 collection.
 
+**Collections, requests and folders are made in the app** (key 1), with no
+file to write by hand:
+
+- **New collection** (the front door's card, **Ctrl+N**, or the palette) asks
+  for the folder to put it in, a name, and the API's base URL (blank is fine:
+  fill it in later on key 5). It writes `<name>/first-request.req`
+  (`GET {{base_url}}/`) and `<name>/envs/local.env` (`base_url=…`), opens the
+  collection and the request. Nothing is written until the last prompt's OK.
+- **＋** and the **folder ＋** beside **Collections** make a request or a folder
+  in the collection's root; the pair on each folder's row makes them in that
+  folder (the palette's **New request…** and **New folder…** use the root). A
+  request is `<name>.req` (the `.req` is optional when you type it), starts as
+  `GET {{base_url}}/`, and opens with its URL box taking the keyboard. A folder
+  gets a `_folder.req` for its defaults, which keeps it in the tree before its
+  first request.
+- Every name prompt refuses, before anything is written: an empty name, `/`,
+  `\`, `..`, a leading or trailing dot, a character Windows refuses
+  (`< > : " | ? *`), a Windows device name (`con`, `nul`, `com1` …), and a name
+  already taken in any letter case — plus `_folder` for a request and `envs`
+  for a folder in the root. Files are created, never overwritten.
+
 **Environments are made in the app** (key 5), with no file to write by hand:
 
 - **New environment…** (the empty state, or **＋ new environment** under the
   list) asks for a name and writes an empty `envs/<name>.env`, making `envs/`
   when the collection has none. The new environment becomes the active one.
-  Names with `/`, `\`, `..`, a leading dot or a character Windows refuses, and
-  names already taken in any letter case, are refused in the prompt.
+  Its name follows the same rules as above.
 - **＋ add key** adds a key to the active environment; a key another
   environment lacks shows **missing — add to …** in that column (a secret
   arrives as its flag alone); **✕** at a row's end removes the key from every
@@ -124,7 +144,8 @@ GitHub Actions:
 | `Ctrl+P` | command palette — every command, and every request by name |
 | `1`–`5` | Requests · Runner · Discovery · History · Environments |
 | `Ctrl+Enter` / `Esc` | send · cancel |
-| `Ctrl+O` / `Ctrl+S` / `Ctrl+W` | open a collection · save (the request, or the environments on their view) · close tab |
+| `Ctrl+O` / `Ctrl+N` | open a collection · make a new one |
+| `Ctrl+S` / `Ctrl+W` | save (the request, or the environments on their view) · close tab |
 | `Ctrl+E` | switch environment |
 | `Ctrl+R` | run the collection, from any view |
 | `Ctrl+I` | import an OpenAPI spec |

@@ -389,25 +389,16 @@ public partial class MeridianApp
         OpenDialog("New environment", "name — local, staging, ci", CreateEnvironment, EnvNameProblem);
 
     /// <summary>"local.env" and " local " both mean local: the suffix and the spaces go.</summary>
-    private static string EnvNameFrom(string input)
-    {
-        string name = input.Trim();
-        return name.EndsWith(".env", StringComparison.OrdinalIgnoreCase) ? name[..^".env".Length].TrimEnd() : name;
-    }
+    private static string EnvNameFrom(string input) => CollectionNames.Stem(input, ".env");
 
     /// <summary>Why a typed name can't be a new environment, or null when it can. The name is a
-    /// file name in envs/ and a <c>--env</c> argument, on every OS the collection is cloned to:
-    /// no separators or <c>..</c>, nothing Windows refuses in a file name, no leading dot, and
-    /// no clash with an existing environment in any letter case.</summary>
+    /// file name in envs/ and a <c>--env</c> argument, on every OS the collection is cloned to
+    /// (<see cref="CollectionNames.Problem"/>), and no clash with an existing environment in any
+    /// letter case.</summary>
     private string? EnvNameProblem(string input)
     {
         string name = EnvNameFrom(input);
-        if (name.Length == 0) return "Give the environment a name.";
-        if (name.Contains('/') || name.Contains('\\') || name.Contains(".."))
-            return "A name can't contain /, \\ or two dots in a row.";
-        if (name.Any(c => char.IsControl(c) || "<>:\"|?*".Contains(c)))
-            return "A name can't contain < > : \" | ? or *";
-        if (name.StartsWith('.')) return "A name can't start with a dot.";
+        if (CollectionNames.Problem(name, "environment") is { } problem) return problem;
         if (_envFiles.FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase)) is { } existing)
             return $"{existing.Name}.env already exists.";
         return null;

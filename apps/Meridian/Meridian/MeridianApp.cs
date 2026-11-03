@@ -448,13 +448,16 @@ public partial class MeridianApp : Component, IDisposable
     internal RequestTab? ActiveTab => _activeTab >= 0 && _activeTab < _tabs.Count ? _tabs[_activeTab] : null;
     internal int OpenTabCount => _tabs.Count;
 
-    internal void OpenRequest(string path)
+    /// <param name="editUrl">Open a new tab with its URL box open and taking the keyboard — a
+    /// request just made, whose URL is the first thing it needs.</param>
+    internal void OpenRequest(string path, bool editUrl = false)
     {
         int existing = _tabs.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0) { _activeTab = existing; MarkDirty(); return; }
         if (TryReadFile(path) is not { } text) { Flash($"Could not read {Path.GetFileName(path)}"); return; }
-        _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)));
+        _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)) { UrlEditing = editUrl });
         _activeTab = _tabs.Count - 1;
+        _pendingUrlFocus |= editUrl;
         MarkDirty();
     }
 
@@ -706,6 +709,7 @@ public partial class MeridianApp : Component, IDisposable
     private bool CtrlShortcut(KeyDownEvent e)
     {
         if (Shortcuts.Pressed("open", e)) { OpenFolder(); return true; }
+        if (Shortcuts.Pressed("new", e)) { NewCollection(); return true; }
         if (Shortcuts.Pressed("palette", e)) { TogglePalette(); return true; }
         if (Shortcuts.Pressed("env", e) && _workspace != null) { OpenEnvSwitcher(); return true; }
         if (Shortcuts.Pressed("save", e))

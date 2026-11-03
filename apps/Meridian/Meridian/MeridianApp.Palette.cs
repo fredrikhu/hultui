@@ -43,6 +43,7 @@ public partial class MeridianApp
         var list = new List<PaletteCommand>
         {
             new PaletteCommand("Open a folder…", OpenFolder) { Group = "Collection", Keys = Shortcuts.Keys("open") },
+            new PaletteCommand("New collection…", NewCollection) { Group = "Collection", Keys = Shortcuts.Keys("new") },
             new PaletteCommand("Go to Requests", () => SetView(MeridianView.Requests)) { Group = "Go", Keys = "1" },
             new PaletteCommand("Go to Runner", () => SetView(MeridianView.Runner)) { Group = "Go", Keys = "2" },
             new PaletteCommand("Go to Discovery", () => SetView(MeridianView.Discovery)) { Group = "Go", Keys = "3" },
@@ -50,8 +51,11 @@ public partial class MeridianApp
             new PaletteCommand("Go to Environments", () => SetView(MeridianView.Environments)) { Group = "Go", Keys = "5" },
         };
 
-        if (_workspace != null)
+        if (_workspace is { } ws)
         {
+            // In the collection's root, as the tree header's ＋ does; a folder's own ＋ is on its row.
+            list.Add(Command("New request…", "Collection", "", () => { SetView(MeridianView.Requests); OpenNewRequestDialog(ws.Root); }));
+            list.Add(Command("New folder…", "Collection", "", () => { SetView(MeridianView.Requests); OpenNewFolderDialog(ws.Root); }));
             list.Add(new PaletteCommand("Switch environment…", OpenEnvSwitcher) { Group = "Environment", Keys = Shortcuts.Keys("env") });
             list.Add(Command("Run the collection", "Run", Shortcuts.Keys("run"), () =>
             {
