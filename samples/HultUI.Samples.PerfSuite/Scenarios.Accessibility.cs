@@ -717,6 +717,14 @@ static partial class Scenarios
                 return ContextMenuWalk(ctx);
             });
 
+        yield return new Scenario("a11y/menu bar walk over 1,000 rows, UIA",
+            "Down through the first of five 20-item menus of a MenuBar, opened from the keyboard over 1,000 rows, with the UIA bridge: what a move of its selection tells, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                return MenuBarWalk(ctx);
+            });
+
         yield return new Scenario("a11y/command palette typing over 2,000 commands, UIA",
             "Type one letter into an open command palette over 2,000 commands and 1,000 rows with the UIA bridge (a Backspace between keys, untimed): the field's value and the new list told, and the trees a key builds",
             ctx =>
@@ -879,6 +887,35 @@ static partial class Scenarios
             Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
             FigureUnit = "a11y trees/key",
             Check = _ => ctx.Window.OverlayContents.Count == 1 ? null : $"{ctx.Window.OverlayContents.Count} overlays open, not the menu alone",
+        };
+    }
+
+    private static Op MenuBarWalk(Ctx ctx)
+    {
+        var menus = new MenuBarItem[5];
+        for (int m = 0; m < menus.Length; m++)
+        {
+            var items = new ContextMenuItem[20];
+            for (int i = 0; i < items.Length; i++)
+                items[i] = new ContextMenuItem { Label = Ui.Label(ctx.Rng), Action = () => { }, ShortcutHint = $"Ctrl+{i}" };
+            menus[m] = new MenuBarItem($"&Menu{m}", items);
+        }
+        var bar = new MenuBar(menus);
+        ctx.Mount(Busy(ctx, bar.Mount()));
+        bar.Open(0, fromKeyboard: true);
+        ctx.Pump(2);
+        int treesBefore = 0;
+        return new Op
+        {
+            Run = _ =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+            },
+            Figure = () => ctx.Window.AccessibilityTreesBuilt - treesBefore,
+            FigureUnit = "a11y trees/key",
+            Check = _ => bar.OpenIndex == 0 && ctx.Window.OverlayContents.Count == 1
+                ? null : $"menu {bar.OpenIndex} open, {ctx.Window.OverlayContents.Count} overlays, not the first menu alone",
         };
     }
 
