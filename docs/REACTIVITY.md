@@ -482,6 +482,12 @@ the header, param and body editors −64…−70 %; a History key −35 %; a fin
 response rebuilds only the pane (no window build, −12 %). The time of a key and its frames moves
 less (−1…−7 % at 25 requests): at this size the frames, not the build, are most of it.
 
+A field holds the text typed into it, so a key needs a build only for what else on screen reads
+that text. On the Headers, Body and Auth sub-tabs the URL is read only by the Params and Chain
+counts: a URL character compares the two with what the last build showed, and builds nothing when
+neither moved and the request was already unsaved (round 7, step 10: 66.6 → 4.0 KB a character
+and −17 % time on NativeAOT, −27 % on JIT; a query typed out −83 %).
+
 Vesper keeps its title bar, rail and command line, and each pane's tab strip, path trail, column
 header and footer, this way (round 5, step 12), and adds four lessons:
 

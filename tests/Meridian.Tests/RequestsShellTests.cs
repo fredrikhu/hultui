@@ -145,6 +145,58 @@ public class RequestsShellTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>On the Headers, Body and Auth sub-tabs a URL character builds the window only when
+    /// it moves the Params or the Chain count, or makes the request unsaved: the box holds the text,
+    /// and nothing else there reads the URL. Each character built the whole editor, 64 KB (plan 17
+    /// round 7). The Params sub-tab, whose rows are the URL's, still builds for every character.</summary>
+    [Fact]
+    public void AUrlCharacterBuildsOnlyWhenItMovesWhatTheEditorShows()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-get-ok");
+            int Typed(string text)
+            {
+                int builds = app.Builds;
+                foreach (var ch in text)
+                {
+                    session.Window.TypeText(ch.ToString());
+                    session.PumpFrames(2);
+                }
+                return app.Builds - builds;
+            }
+
+            foreach (var sub in new[] { "headers", "body", "auth" })
+            {
+                Click(session, "subtab-" + sub);
+                Click(session, "url-display");
+                Assert.Equal("url-input", session.Window.Window.FocusedElement?.AutomationId);
+                if (sub == "headers") Assert.Equal(1, Typed("/"));   // the request turns unsaved
+                Assert.Equal(0, Typed("v" + sub));
+                Assert.Equal(0, Typed("?"));
+                Assert.Equal(1, Typed("a"));                        // Params 1
+                Assert.Equal(0, Typed("=1&"));
+                Assert.Equal(1, Typed("b"));                        // Params 2
+                Assert.Equal(1, Typed("{{base_url}}"));             // Chain 1, at the closing braces
+                Assert.True(Contains(session, "Params 2"), "the Params count");
+                Assert.True(Contains(session, "Chain 1"), "the Chain count");
+                Assert.Equal(0, Typed("xyz"));
+                Assert.Equal("url-input", session.Window.Window.FocusedElement?.AutomationId);
+
+                // Off the box, the URL shows as typed.
+                session.Window.PressKey(KeyCode.Tab);
+                session.PumpFrames(2);
+                Assert.EndsWith($"/ok/v{sub}?a=1&b{{{{base_url}}}}xyz", app.ActiveTab!.Doc.Url);
+                Assert.True(Contains(session, $"v{sub}?a=1&b"), "the URL as typed");
+                app.ActiveTab.Doc.SetRequestLine("GET", $"{_server.Origin}/ok/");
+            }
+
+            Click(session, "subtab-params");
+            Click(session, "url-display");
+            Assert.Equal(3, Typed("xyz"));
+        });
+    }
+
     [Fact]
     public void AddingAHeaderRowEditsTheDocument()
     {

@@ -82,14 +82,18 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
             }
 
             // The URL. The first character makes the request unsaved, which the tree shows (see
-            // TheFirstEdit…): typed before the view-only keys.
+            // TheFirstEdit…): typed before the view-only keys. On the Params sub-tab, whose rows are
+            // the URL's: on Headers, Body and Auth a character that moves no count builds nothing
+            // (RequestsShellTests.AUrlCharacterBuildsOnlyWhenItMovesWhatTheEditorShows).
             Click(fx, "req-login");
+            Click(fx, "subtab-params");
             ViewOnly("the URL box opening", () => Click(fx, "url-display"));
             s.Window.TypeText("/");
             s.PumpFrames(3);
             ViewOnly("URL typing", () => s.Window.TypeText("v2"));
             ViewOnly("URL Backspace", () => s.Window.PressKey(KeyCode.Backspace));
             ViewOnly("the URL box closing", () => s.Window.Window.ClearFocus());
+            Click(fx, "subtab-headers");
 
             // Headers, the sub-tabs, the body and the assertions of the same request.
             ViewOnly("header value typing", () => { Click(fx, "header-value-0"); s.Window.TypeText("+json"); });
