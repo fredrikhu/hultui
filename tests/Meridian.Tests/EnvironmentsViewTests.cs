@@ -443,6 +443,200 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
 
     private static string _rootFull(MeridianApp app) => app.Workspace!.Root;
 
+    // ── A stored value, managed in the app ───────────────────────────────
+    // Change, forget, and what un-marking does with the value: none of it needs the OS's
+    // credential manager.
+
+    private static void Save(HeadlessSession session)
+    {
+        session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
+        session.PumpFrames(2);
+    }
+
+    private static string SaveState(HeadlessSession session) => Node(session, "env-save-state").Name!;
+
+    [Fact]
+    public void ChangeStoresANewValueAndNeverShowsTheOldOne()
+    {
+        string local = EnvText("local");
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "api_token", "old-value");
+            GoToEnvironments(session);
+            Assert.Equal("change api_token's value on this machine", Node(session, "change-secret-api_token").Name);
+
+            // A reveal under way ends when the change starts, and the field starts empty.
+            Click(session, "reveal-api_token");
+            Assert.True(Contains(session, "old-value"));
+            Click(session, "change-secret-api_token");
+            Assert.Equal("Change api_token",
+                Walk(session.Window.AccessibilityTree).Single(n => n.Role == AccessibilityRole.Dialog).Name);
+            Assert.True(string.IsNullOrEmpty(Node(session, "dialog-input").Value));
+            Assert.False(Contains(session, "old-value"), "the old value must not show while it is changed");
+
+            // Enter on the empty field is refused, not stored as an empty value.
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Contains("Type the new value", Node(session, "dialog-error").Name);
+            Assert.Equal("old-value", keyring.Get(_rootFull(app), "api_token"));
+
+            Submit(session, "new-value");
+            Assert.Null(session.Window.FindByAutomationId("dialog-input"));
+            Assert.Equal("new-value", keyring.Get(_rootFull(app), "api_token"));
+            Assert.NotNull(session.Window.FindByAutomationId("secret-value-api_token"));
+            Assert.False(Contains(session, "new-value"), "the new value stays masked");
+            Assert.True(Contains(session, "api_token changed on this machine"));
+
+            // The keyring alone changed: no file to save.
+            Assert.Equal("saved", SaveState(session));
+            Assert.Equal(local, EnvText("local"));
+        });
+    }
+
+    [Fact]
+    public void ForgetAsksNamingTheKeyThenTheCellAsksForAValueAgain()
+    {
+        string local = EnvText("local");
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "api_token", "tok-123");
+            GoToEnvironments(session);
+            Assert.Equal("forget api_token's value on this machine", Node(session, "forget-secret-api_token").Name);
+
+            Click(session, "forget-secret-api_token");
+            var confirm = Node(session, "confirm");
+            Assert.Equal("Forget api_token on this machine?", confirm.Name);
+            Assert.Contains("can't bring it back", confirm.Description);
+            Assert.Null(session.Window.FindByAutomationId("confirm-alt"));
+
+            // Cancel keeps it.
+            Click(session, "confirm-cancel");
+            Assert.Equal("tok-123", keyring.Get(_rootFull(app), "api_token"));
+            Assert.NotNull(session.Window.FindByAutomationId("secret-value-api_token"));
+
+            // Enter forgets: the cell is the fresh-machine one again, and no file changed.
+            Click(session, "forget-secret-api_token");
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("confirm"));
+            Assert.Null(keyring.Get(_rootFull(app), "api_token"));
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-api_token"));
+            Assert.Null(session.Window.FindByAutomationId("secret-value-api_token"));
+            Assert.Equal("saved", SaveState(session));
+            Assert.Equal(local, EnvText("local"));
+        });
+    }
+
+    /// <summary>Un-marking a key whose value this machine stores asks first, saying the value would
+    /// sit in the file as plain text; moved, every file that marked the key gets it on Ctrl+S, and
+    /// the keyring keeps it until then.</summary>
+    [Fact]
+    public void UnmarkingAStoredSecretAsksThenMovesTheValueIntoTheFilesOnSave()
+    {
+        Write("envs/staging.env", "base_url=https://staging.example\nsecret api_token\n");
+        string ci = EnvText("ci");
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "api_token", "tok-123");
+            GoToEnvironments(session);
+            Click(session, "secret-toggle-api_token");
+
+            // The question, before anything changes.
+            var confirm = Node(session, "confirm");
+            Assert.Equal("Stop keeping api_token secret?", confirm.Name);
+            Assert.Contains("local.env and staging.env", confirm.Description);
+            Assert.Contains("plain text", confirm.Description);
+            Assert.Equal("Move into the files", Node(session, "confirm-ok").Name);
+            Assert.Equal("Forget value", Node(session, "confirm-alt").Name);
+            Assert.Equal(true, Node(session, "secret-toggle-api_token").IsToggled);
+            Assert.Equal("saved", SaveState(session));
+
+            Click(session, "confirm-ok");
+            Assert.Equal(false, Node(session, "secret-toggle-api_token").IsToggled);
+            Assert.Equal("tok-123", Node(session, "cell-api_token-local").Value);
+            Assert.Equal("tok-123", Node(session, "cell-api_token-staging").Value);
+            Assert.Equal("tok-123", keyring.Get(_rootFull(app), "api_token"));   // nothing goes before the save
+
+            Save(session);
+            Assert.Equal($"base_url={_server.Origin}\ntimeout_ms=30000\napi_token=tok-123\n", EnvText("local"));
+            Assert.Equal("base_url=https://staging.example\napi_token=tok-123\n", EnvText("staging"));
+            Assert.Equal(ci, EnvText("ci"));
+            Assert.Null(keyring.Get(_rootFull(app), "api_token"));   // the file is the one copy now
+        });
+    }
+
+    [Fact]
+    public void UnmarkingAStoredSecretCanForgetTheValueInsteadOnSave()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "api_token", "tok-123");
+            GoToEnvironments(session);
+            Click(session, "secret-toggle-api_token");
+            Assert.Equal("Move into local.env", Node(session, "confirm-ok").Name);
+            Click(session, "confirm-alt");
+
+            Assert.Null(session.Window.FindByAutomationId("confirm"));
+            Assert.Equal(false, Node(session, "secret-toggle-api_token").IsToggled);
+            Assert.True(string.IsNullOrEmpty(Node(session, "cell-api_token-local").Value));
+            Assert.Equal("tok-123", keyring.Get(_rootFull(app), "api_token"));
+
+            Save(session);
+            Assert.Equal($"base_url={_server.Origin}\ntimeout_ms=30000\napi_token=\n", EnvText("local"));
+            Assert.Null(keyring.Get(_rootFull(app), "api_token"));
+        });
+    }
+
+    [Fact]
+    public void AnUnmarkCancelledOrUndoneBeforeTheSaveKeepsTheStoredValue()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "api_token", "tok-123");
+            GoToEnvironments(session);
+
+            // Escape: the question goes, nothing else.
+            Click(session, "secret-toggle-api_token");
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(2);
+            Assert.Null(session.Window.FindByAutomationId("confirm"));
+            Assert.Equal(true, Node(session, "secret-toggle-api_token").IsToggled);
+            Assert.Equal("saved", SaveState(session));
+
+            // Forgotten, then marked again before Ctrl+S: the value stays.
+            Click(session, "secret-toggle-api_token");
+            Click(session, "confirm-alt");
+            Click(session, "secret-toggle-api_token");
+            Assert.Equal(true, Node(session, "secret-toggle-api_token").IsToggled);
+            Save(session);
+            Assert.Contains("secret api_token", EnvText("local"));
+            Assert.Equal("tok-123", keyring.Get(_rootFull(app), "api_token"));
+            Assert.NotNull(session.Window.FindByAutomationId("secret-value-api_token"));
+        });
+    }
+
+    /// <summary>A line of a .env file can't hold a line break, so such a value is never offered
+    /// the move: forgetting it is the one way to un-mark.</summary>
+    [Fact]
+    public void AStoredValueWithALineBreakIsNeverMovedIntoTheFile()
+    {
+        Hosted((session, app, keyring) =>
+        {
+            keyring.Set(_rootFull(app), "api_token", "line one\nline two");
+            GoToEnvironments(session);
+            Click(session, "secret-toggle-api_token");
+
+            Assert.Contains("line break", Node(session, "confirm").Description);
+            Assert.Equal("Forget value", Node(session, "confirm-ok").Name);
+            Assert.Null(session.Window.FindByAutomationId("confirm-alt"));
+
+            Click(session, "confirm-ok");
+            Save(session);
+            Assert.Equal($"base_url={_server.Origin}\ntimeout_ms=30000\napi_token=\n", EnvText("local"));
+            Assert.Null(keyring.Get(_rootFull(app), "api_token"));
+        });
+    }
+
     // ── The prompt ───────────────────────────────────────────────────────
 
     /// <summary>The prompt ("New key", "Secret …", "Import OpenAPI", "Discover an API") is a dialog

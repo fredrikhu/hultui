@@ -408,15 +408,18 @@ public partial class MeridianApp
 
     // ── The confirmation (Backdrop + card, as the prompt) ────────────────
 
-    private (string Title, string Message, string Confirm, Action OnConfirm)? _confirm;
+    private (string Title, string Message, string Confirm, Action OnConfirm, (string Label, Action Run)? Alternative)? _confirm;
     private readonly Ref<ButtonElement> _confirmRef = new();
     private bool _pendingConfirmFocus;
 
     /// <summary>Asks before <paramref name="onConfirm"/> runs. Enter or the confirming button
     /// runs it; Escape, cancel or a click beside the card closes the question.</summary>
-    private void OpenConfirm(string title, string message, string confirm, Action onConfirm)
+    /// <param name="alternative">Null, or a second answer with a button of its own beside the
+    /// confirming one, for a question with two ways forward. Enter still runs the confirming one.</param>
+    private void OpenConfirm(string title, string message, string confirm, Action onConfirm,
+        (string Label, Action Run)? alternative = null)
     {
-        _confirm = (title, message, confirm, onConfirm);
+        _confirm = (title, message, confirm, onConfirm, alternative);
         _pendingConfirmFocus = true;
         MarkDirty();
     }
@@ -424,12 +427,14 @@ public partial class MeridianApp
     /// <summary>As <see cref="SubmitDialog"/>: the action finds the question already gone, and the
     /// window builds again only when the action built nothing. Enter on the focused button arrives
     /// here as its click and then at the window as a key; the second finds nothing to confirm.</summary>
-    private void Confirm()
+    private void Confirm(bool alternative = false)
     {
         if (_confirm is not { } confirm) return;
+        if (alternative && confirm.Alternative is null) return;
         _confirm = null;
         int builds = Builds;
-        confirm.OnConfirm();
+        if (alternative) confirm.Alternative!.Value.Run();
+        else confirm.OnConfirm();
         if (Builds == builds) MarkDirty();
     }
 
@@ -439,7 +444,7 @@ public partial class MeridianApp
         MarkDirty();
     }
 
-    private Element BuildConfirm((string Title, string Message, string Confirm, Action OnConfirm) confirm)
+    private Element BuildConfirm((string Title, string Message, string Confirm, Action OnConfirm, (string Label, Action Run)? Alternative) confirm)
     {
         var backdrop = Box.New()
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
@@ -468,7 +473,10 @@ public partial class MeridianApp
 
         var buttons = Flex.Row(gap: Azimuth.S2).JustifyContent(JustifyContent.FlexEnd);
         buttons.AddChild(BarAction("cancel", "confirm-cancel", CancelConfirm));
-        var ok = Ui.Button(ButtonVariant.Danger, confirm.Confirm, Confirm, "confirm-ok", style: Ui.Dialog);
+        if (confirm.Alternative is { } alternative)
+            buttons.AddChild(Ui.Button(ButtonVariant.Secondary, alternative.Label, () => Confirm(alternative: true),
+                "confirm-alt", style: Ui.Dialog));
+        var ok = Ui.Button(ButtonVariant.Danger, confirm.Confirm, () => Confirm(), "confirm-ok", style: Ui.Dialog);
         ok.WithRef(_confirmRef);
         buttons.AddChild(ok);
         card.AddChild(buttons);

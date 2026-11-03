@@ -199,8 +199,10 @@ public partial class MeridianApp
         row.AddChild(Ui.Mono(key, 11.5f, Azimuth.TextDim).Width(170).FlexShrink(0));
 
         // The flag is a toggle: on writes `secret <key>` into every file that has the key, off
-        // takes it out again. Either waits for Ctrl+S with the table's other edits.
-        var flag = Ui.Button(ButtonVariant.Ghost, secret ? "●" : "○", () => SetSecret(key, !secret),
+        // takes it out again, first asking what becomes of a value this machine has stored
+        // (AskUnmarkSecret). Either waits for Ctrl+S with the table's other edits.
+        var flag = Ui.Button(ButtonVariant.Ghost, secret ? "●" : "○",
+                () => { if (secret) AskUnmarkSecret(key); else SetSecret(key, true); },
                 $"secret-toggle-{key}", style: secret ? Ui.FlagOn : Ui.FlagOff)
             .Tooltip(secret ? "secret — the value lives in the OS keyring. Click to store it in the file instead"
                 : "mark secret — keep the value in the OS keyring, not the file");
@@ -219,10 +221,13 @@ public partial class MeridianApp
         return row;
     }
 
-    /// <summary>Flags or un-flags a key in every environment that has it. The values already in
-    /// the keyring stay there; un-flagged, the key resolves from the file again.</summary>
+    /// <summary>Flags or un-flags a key in every environment that has it. Un-flagged, the key
+    /// resolves from the file again, and this machine's keyring value goes on the save that writes
+    /// the files without the flag (<see cref="ForgetRemovedSecrets"/>), so no value is left behind
+    /// in the keyring with nothing to show it. <see cref="AskUnmarkSecret"/> asks first.</summary>
     internal void SetSecret(string key, bool secret)
     {
+        if (!secret && IsSecretAnywhere(key)) _removedSecrets.Add(key);
         foreach (var env in _envFiles)
             if (_envDocs.GetValueOrDefault(env.Name) is { } doc && doc.Keys.Contains(key))
             {
@@ -243,18 +248,18 @@ public partial class MeridianApp
         MarkDirty();
     }
 
-    /// <summary>Secret keys removed from every environment since the last save.</summary>
+    /// <summary>Secret keys removed from every environment, or un-flagged, since the last save.</summary>
     private readonly HashSet<string> _removedSecrets = new(StringComparer.Ordinal);
 
-    /// <summary>Forgets the keyring values of the removed secrets, once every file is saved without
-    /// them. A key added back before the save keeps its value; a file that failed to save keeps
-    /// them waiting for the next save.</summary>
+    /// <summary>Forgets the keyring values of the removed and un-flagged secrets, once every file is
+    /// saved without their flag. A key flagged again before the save keeps its value; a file that
+    /// failed to save keeps them waiting for the next save.</summary>
     private void ForgetRemovedSecrets()
     {
         if (_workspace is not { } ws || _removedSecrets.Count == 0) return;
         if (_envFiles.Any(e => _envDocs.GetValueOrDefault(e.Name)?.Edited == true)) return;
         foreach (var key in _removedSecrets)
-            if (_envFiles.All(e => _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) != true))
+            if (!IsSecretAnywhere(key))
                 _keyring.Delete(ws.Root, key);
         _removedSecrets.Clear();
     }
@@ -297,8 +302,8 @@ public partial class MeridianApp
     }
 
     /// <summary>A secret's cell is per-machine, not per-file: masked when the
-    /// keyring has it (with the timed reveal), the fresh-clone fix when it
-    /// doesn't. The same cell for every column — the keyring is not
+    /// keyring has it (with the timed reveal, change and forget), the fresh-clone
+    /// fix when it doesn't. The same cell for every column — the keyring is not
     /// environment-scoped.</summary>
     private Element BuildSecretCell(string envName, string key)
     {
@@ -323,12 +328,16 @@ public partial class MeridianApp
 
         bool revealed = _reveal is { } r && r.Key == key
             && System.Diagnostics.Stopwatch.GetTimestamp() < r.UntilTs;
+        // In a narrow column the tag, then the mask, give way, one line each, and the actions keep
+        // their width: they drew over the next column.
         cell.AddChild(Ui.Mono(revealed ? value : "••••••••", 11.5f, revealed ? Azimuth.Text : Azimuth.TextMuted)
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
             .AutomationId($"secret-value-{key}"));
-        cell.AddChild(Ui.Mono("keyring", 9f, Azimuth.TextFaint));
+        cell.AddChild(Ui.Mono("keyring", 9f, Azimuth.TextFaint).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexShrink(6));
         cell.AddChild(Box.New().FlexGrow(1));
         if (!revealed)
-            cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}", () => RevealSecret(key)));
+            cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}", () => RevealSecret(key)).FlexShrink(0));
+        cell.AddChild(SecretValueActions(envName, key));
         return cell;
     }
 

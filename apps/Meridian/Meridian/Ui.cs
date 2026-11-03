@@ -156,7 +156,8 @@ public static class Ui
         Size = 22f, Padding = new Thickness(0), Text = Azimuth.TextFaint, FontSize = 10f, FontWeight = FontWeight.Regular,
     };
 
-    /// <summary>A 22px icon action in the Requests tree: ＋ request, ＋ folder.</summary>
+    /// <summary>A 22px icon action in the Requests tree (＋ request, ＋ folder) and a secret's cell
+    /// (change, forget).</summary>
     public static readonly ButtonStyle TreeAction = new()
     {
         Size = 22f, Padding = new Thickness(0),

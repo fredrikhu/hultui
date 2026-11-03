@@ -90,6 +90,20 @@ file to write by hand:
   only the flag keeps its place as `key=`). A flagged key's cell then asks for
   the value, which goes to the OS keyring. A value already typed into the file
   shows **still in local.env — move to keyring** (or **— clear**).
+- A stored value's cell shows it masked, with **reveal (5 s)** and two icons:
+  **change value** (✎) asks for a new value in an empty field, never showing
+  the old one, and **forget on this machine** (eraser) asks first, naming the
+  key, then drops it from this machine's keyring; the cell asks for a value
+  again. Both act on the keyring at once and change no file. A value that
+  still resolves after a forget comes from an environment variable of the
+  key's name, which the app says it can't change.
+- Turning **●** off when this machine stores a value asks what becomes of it:
+  **Move into local.env** writes it into each file that marked the key, as
+  plain text anyone who can read the file or its repository can read (a value
+  with a line break can't move); **Forget value** drops it and the key takes
+  the file's value. Either way the keyring entry goes on the **Ctrl+S** that
+  writes the files, never before, and turning **○** back on before saving
+  keeps it. No value is left behind in the keyring.
 - Every edit waits in the table until **Ctrl+S**, which rewrites only the lines
   that changed.
 
