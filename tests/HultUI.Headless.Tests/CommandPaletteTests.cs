@@ -19,7 +19,8 @@ public sealed class CommandPaletteTests
     private static readonly KeyChord Toggle = new(KeyCode.P, KeyModifiers.Ctrl);
 
     private static (HeadlessSession Session, CommandPalette Palette, List<string> Ran) Open(
-        IEnumerable<PaletteCommand>? commands = null, Theme? theme = null, int? maxRows = null)
+        IEnumerable<PaletteCommand>? commands = null, Theme? theme = null, int? maxRows = null,
+        Func<Element>? searchIcon = null)
     {
         var session = HeadlessSession.Create(1000, 700);
         if (theme is not null) session.Application.Theme = theme;
@@ -27,7 +28,10 @@ public sealed class CommandPaletteTests
         session.PumpFrame();
         var ran = new List<string>();
         var list = (commands ?? Standard(ran)).ToList();
-        var palette = new CommandPalette(() => list) { ToggleKeys = [Toggle], MaxRows = maxRows ?? 100 };
+        var palette = new CommandPalette(() => list)
+        {
+            ToggleKeys = [Toggle], MaxRows = maxRows ?? 100, SearchIcon = searchIcon,
+        };
         palette.Open(session.Window.Window);
         session.PumpFrame();
         return (session, palette, ran);
@@ -222,14 +226,15 @@ public sealed class CommandPaletteTests
     }
 
     [Fact]
-    public void AKeystrokeMakesOnlyTheRowsOnScreen_AndAMoveOfTheChoiceTwo()
+    public void AKeystrokeMakesOnlyTheRowsOnScreen_AndAMoveOfTheChoiceNone()
     {
-        int made = 0;
+        int made = 0, cards = 0;
         var commands = Enumerable.Range(0, 2_000).Select(i => new PaletteCommand($"{(i % 2 == 0 ? "branch" : "commit")} {i}", () => { })
         {
             Icon = () => { made++; return Box.New().Width(8).Height(8); },
         });
-        var (session, palette, _) = Open(commands);
+        // The search icon is made with the card, so it counts the card's builds.
+        var (session, palette, _) = Open(commands, searchIcon: () => { cards++; return Box.New().Width(12).Height(12); });
         using var _s = session;
 
         // Twelve rows and a bit fit; the list makes one or two more beside them.
@@ -240,10 +245,59 @@ public sealed class CommandPaletteTests
         Assert.Equal(1_000, palette.Matches.Count);
         Assert.InRange(made, 12, 16);
 
-        made = 0;
+        // The list draws the choice: no row is made (two were), only the card, and the chosen row
+        // is still told chosen.
+        made = cards = 0;
         session.Window.PressKey(KeyCode.Down);
         session.PumpFrame();
-        Assert.Equal(2, made);
+        Assert.Equal(1, palette.SelectedIndex);
+        Assert.Equal((0, 1), (made, cards));
+        Assert.Equal(true, session.Window.FindByAutomationId("palette-row-1")!.Element.AccessibleSelected);
+        Assert.Equal(false, session.Window.FindByAutomationId("palette-row-0")!.Element.AccessibleSelected);
+    }
+
+    [Fact]
+    public void SelectingARowFromAssistiveTechnology_RunsIt()
+    {
+        var ran = new List<int>();
+        var (session, palette, _) = Open(Mixed(40, ran.Add));
+        using var _s = session;
+        var router = new HultUI.AccessibilityActionRouter(session.Window.Window);
+
+        // The chosen row says it is selected already, which selecting leaves alone; selecting
+        // another runs it, as a click does.
+        router.SelectElement(session.Window.FindByAutomationId("palette-row-0")!.Element.Id);
+        router.DrainPendingActions();
+        Assert.Empty(ran);
+        router.SelectElement(session.Window.FindByAutomationId("palette-row-3")!.Element.Id);
+        router.DrainPendingActions();
+        Assert.Equal([3], ran);
+        Assert.False(palette.IsOpen);
+    }
+
+    [Fact]
+    public void TheListDrawsTheChoiceAndTheTintUnderThePointer_AsTheRowsDid()
+    {
+        var look = new CommandPaletteTheme
+        {
+            SelectedBackground = new Color(40, 90, 200, 60), HoverBackground = new Color(200, 120, 30), RowCornerRadius = 5f,
+        };
+        var (session, _, _) = Open(Mixed(40), Theme.Light.With(look));
+        using var _s = session;
+        // A VirtualListElement of the palette's own row type: read through its type.
+        var list = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+        object? Read(string name) => list.GetType().GetProperty(name)!.GetValue(list);
+
+        Assert.Equal(new RowHighlight(look.SelectedBackground.Value, new CornerRadius(5f)), Read("SelectionHighlight"));
+        Assert.Equal(new RowHighlight(look.HoverBackground.Value, new CornerRadius(5f)), Read("HoverHighlight"));
+        Assert.Equal(0, Read("SelectedIndex"));
+        // No row draws a fill of its own, chosen or under the pointer.
+        var row = session.Window.FindByAutomationId("palette-row-2")!.Element;
+        var box = row.WindowBorderBox;
+        session.Window.MoveMouse(box.X + box.Width / 2, box.Y + box.Height / 2);
+        session.PumpFrame();
+        for (int i = 0; i < 6; i++)
+            Assert.Equal(Color.Transparent, ((BoxElement)session.Window.FindByAutomationId($"palette-row-{i}")!.Element).BackgroundColor);
     }
 
     [Fact]

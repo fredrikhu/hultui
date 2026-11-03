@@ -385,12 +385,19 @@ public sealed class CommandPalette
             height += _moreHeight;
         }
 
+        // The list draws the choice and the tint under the pointer, the fill and corners the rows
+        // drew, and its rows are made unselected: a move of the choice makes no row.
+        var t = _look;
         var list = VirtualListElement<ListRow>.New()
-            .Items(new ListRows(_matches, shown, _selected))
+            .Items(new ListRows(_matches, shown))
             .RowHeights(_listRowHeight ??= (row, _) => ListRowHeight(row))
             .RenderWith(_listRow ??= (row, _) => BuildListRow(row))
+            .SelectedIndex(_selected)
+            .SelectionHighlight(t.SelectedBackground ?? _theme.Primary with { A = 36 }, t.RowCornerRadius)
+            .HoverHighlight(t.HoverBackground ?? _theme.SurfaceVariant, t.RowCornerRadius)
             .Height(height).FlexShrink(1);
-        // Rows that are buttons, in a container that says it is a scroll view, as they were.
+        // Rows that are buttons, in a container that says it is a scroll view, as they were; the
+        // list tells the chosen one it is selected, as the rows said themselves.
         list.RowsAreComposite = true;
         list.Role = AccessibilityRole.ScrollView;
         list.WithRef(scrollRef);
@@ -433,8 +440,8 @@ public sealed class CommandPalette
     /// margins, which the list lays out inside the place. On the list itself the padding would
     /// clip the rows short of the list's edges and draw its scrollbar inside them; a box around
     /// each row to hold it cost a box and its style a row. Kept as it stands while its
-    /// <see cref="ListRow"/> is equal. A keyed row that comes back (the choice moved to or from
-    /// it, it became the last) is patched, so a reader is told the change on the row they had.
+    /// <see cref="ListRow"/> is equal. A keyed row that comes back (it became the last, or no
+    /// longer is) is patched, so a reader is told the change on the row they had.
     /// </summary>
     private Element BuildListRow(ListRow row)
     {
@@ -442,7 +449,7 @@ public sealed class CommandPalette
         var margin = new Thickness(row.Index == 0 ? padding.Top : 0, padding.Right, row.Last ? padding.Bottom : 0, padding.Left);
         if (row.Command is { } command)
         {
-            var element = BuildRow(command, row.Index, row.Selected).Margin(margin);
+            var element = BuildRow(command, row.Index).Margin(margin);
             // Matched by identity, not position, so a narrowed list does not hand a row the click
             // handler of the one that used to be in its place.
             element.Key = $"{command.Group}|{command.Title}|{row.Index}";
@@ -454,18 +461,18 @@ public sealed class CommandPalette
         return more;
     }
 
-    private Element BuildRow(PaletteCommand command, int index, bool selected)
+    /// <summary>A row, made unselected: the list draws the choice and the tint under the pointer
+    /// (<see cref="BuildList"/>), and tells the chosen row it is selected.</summary>
+    private Element BuildRow(PaletteCommand command, int index)
     {
         var t = _look;
-        var normal = selected ? t.SelectedBackground ?? _theme.Primary with { A = 36 } : Color.Transparent;
         var row = Flex.Row(gap: t.RowGap).AlignItems(AlignItems.Center)
             .Height(RowHeight(command)).FlexShrink(0)
             .Padding(t.RowPadding).CornerRadius(t.RowCornerRadius)
-            .Background(normal)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(command.Group is { Length: > 0 } g ? $"{command.Title} ({g})" : command.Title)
-            .AccessibleSelected(selected)
+            .AccessibleSelected(false)
             .AutomationId($"palette-row-{index}");
 
         var groupColor = t.Group ?? _theme.Secondary;
@@ -498,11 +505,6 @@ public sealed class CommandPalette
         if (command.Keys is { Length: > 0 } keys) row.AddChild(Kbd.New(keys).FlexShrink(0));
 
         row.OnClick(_ => Run(index));
-        if (!selected)
-        {
-            var hover = t.HoverBackground ?? _theme.SurfaceVariant;
-            row.OnHover(b => b.BackgroundColor = hover);
-        }
         return row;
     }
 
@@ -518,21 +520,22 @@ public sealed class CommandPalette
     /// One place in the result list: the row of <paramref name="Command"/>, or with none the line
     /// that ends a long list and says how many <paramref name="More"/> there are. Everything a row
     /// shows beside the theme, so that the list keeps a row while this is equal: a move of the
-    /// choice makes two rows, and a keystroke the ones whose command changed. Compared by place, so
-    /// kept rows never move among the others: moving them cost a reader more than making them.
+    /// choice makes none (the list draws it), and a keystroke the rows whose command changed.
+    /// Compared by place, so kept rows never move among the others: moving them cost a reader more
+    /// than making them.
     /// </summary>
-    private readonly record struct ListRow(PaletteCommand? Command, int Index, bool Selected, bool Last, int More);
+    private readonly record struct ListRow(PaletteCommand? Command, int Index, bool Last, int More);
 
     /// <summary>The first <paramref name="shown"/> matches and, when there are others, the line
     /// that counts them, each made when the list asks for it. Its own snapshot of the matches: a
     /// list holds this until it is rebuilt, and the query may have moved on by then.</summary>
-    private sealed class ListRows(IReadOnlyList<PaletteCommand> matches, int shown, int selected) : IReadOnlyList<ListRow>
+    private sealed class ListRows(IReadOnlyList<PaletteCommand> matches, int shown) : IReadOnlyList<ListRow>
     {
         public int Count => matches.Count > shown ? shown + 1 : shown;
 
         public ListRow this[int index] => index < shown
-            ? new ListRow(matches[index], index, index == selected, index == Count - 1, 0)
-            : new ListRow(null, index, false, true, matches.Count - shown);
+            ? new ListRow(matches[index], index, index == Count - 1, 0)
+            : new ListRow(null, index, true, matches.Count - shown);
 
         public IEnumerator<ListRow> GetEnumerator()
         {

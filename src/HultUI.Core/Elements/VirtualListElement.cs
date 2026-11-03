@@ -138,6 +138,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (_selectedIndex == value) return;
         _selectedIndex = value;
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
+        TellRowsSelected();
         if (dropRows) DropRowsWhoseSelectionChanged();
         if (_selectionHighlight is not null || _selectionOverlay is not null) MarkPaintDirty();
     }
@@ -157,7 +158,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// label, an icon's colour — cannot show it any more; such a list keeps the selection in its
     /// rows. A hover tint left off the selected row moves to <see cref="HoverHighlight"/>, and an
     /// affordance on the selected row to <see cref="SelectionOverlay"/>.
-    /// Assistive technology reads the list's selection, not the rows', so it is told the same.
+    /// Assistive technology reads the list's selection, not the rows', so it is told the same. On
+    /// composite rows (<see cref="RowsAreComposite"/>), which it reads as they are, the list tells a
+    /// row that says whether it is selected (<see cref="Element.AccessibleSelected"/> set, as made
+    /// unselected) whether its item is, so the selected row still says so.
     /// </para>
     /// <para>
     /// A change of highlight is drawn on the next frame and makes no row; turning it on or off
@@ -264,6 +268,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         MarkPaintDirty();
         NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
+        TellRowsSelected();
         DropRowsWhoseSelectionChanged();
         OnSelectionChanged?.Invoke(SelectedIndices);
     }
@@ -275,6 +280,27 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// list draws the selection itself (<see cref="SelectionHighlight"/>), when every row is
     /// made unselected.</summary>
     private bool RowSelected(int index) => _selectionHighlight is null && IsItemSelected(index);
+
+    /// <summary>
+    /// A reader reads composite rows (<see cref="RowsAreComposite"/>) as they are, and a row made
+    /// unselected for a list that draws the selection (<see cref="SelectionHighlight"/>) would say
+    /// it is not selected. So the list tells such a row whether its item is, on a row that says it
+    /// can be (its <see cref="Element.AccessibleSelected"/> is set): as it is realized, kept, moved
+    /// or patched, and when the selection moves. The other rows are left as they were made.
+    /// </summary>
+    private void TellSelected(Element row, int index)
+    {
+        if (_selectionHighlight is null || !RowsAreComposite || row.AccessibleSelected is null) return;
+        row.AccessibleSelected = IsItemSelected(index);
+    }
+
+    /// <summary><see cref="TellSelected"/> for every realized row: the selection moved.</summary>
+    private void TellRowsSelected()
+    {
+        if (_selectionHighlight is null || !RowsAreComposite) return;
+        foreach (var (index, row) in _activeElements)
+            TellSelected(row.Element, index);
+    }
 
     // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
     //    virtualization hasn't materialized as elements. ──
@@ -1265,6 +1291,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 live.Element.MarkLayoutDirty();
             }
             if (_stickyRowFor is not null) MarkSticky(live.Element, index);
+            TellSelected(live.Element, index);
             return;
         }
 
@@ -1284,6 +1311,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 moved.MarkLayoutDirty();
             }
             if (_stickyRowFor is not null) MarkSticky(moved, index);
+            TellSelected(moved, index);
             _activeElements[index] = new Row(moved, item, selected);
             return;
         }
@@ -1309,6 +1337,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         element.Box.Height = RowHeight(element, index);
         element.Flex.FlexShrink = 0;
         if (_stickyRowFor is not null) MarkSticky(element, index);
+        TellSelected(element, index);
 
         _activeElements[index] = new Row(element, item, selected);
     }
@@ -1454,6 +1483,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             {
                 _multiSelected.Clear();
                 foreach (var i in vl._multiSelected) _multiSelected.Add(i);
+                TellRowsSelected();
             }
 
             if (keepRows)

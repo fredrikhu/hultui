@@ -1382,7 +1382,12 @@ row drew and the row's own background becomes transparent (a row with a ring kee
 border of the ring's width, so its contents stay where they were). It fits only a selection that
 is a background. A row that shows its selection any other way cannot show it any more: a bolder
 label or an icon's colour. Such a list keeps the selection in its rows. Assistive technology
-reads the list's selection, not the rows', so it is told the same either way.
+reads the list's selection, not the rows', so it is told the same either way. On composite rows
+(`RowsAreComposite`), which a reader reads as they are, a row made unselected would say it is not
+selected: the list tells each row that says whether it is (its `AccessibleSelected` is set — make
+it `false`) whether its item is, as it realizes, keeps or moves the row and as the selection moves.
+A reader hears the same selected row and the same IsSelected changes as when the rows said it
+themselves. The command palette's rows are such buttons.
 
 Two more things a row would have to be told its selection for move to the list. A row that tints
 under the pointer and leaves the tint off its selected row would keep the tint over the highlight,
