@@ -579,6 +579,22 @@ static partial class Scenarios
                 return SelectionWalk(ctx, Applied(rig), itemRows: true, count: 3_000);
             });
 
+        yield return new Scenario("a11y/selection walk 1,000 composite item rows, UIA",
+            "The item-rows walk with each row a keyed button a reader reads as its own (RowsAreComposite), as the command palette's, drawing its own selection, with the UIA bridge: a move makes the row the selection left and the one it reached, patched into the rows the reader has: the twin of the row below",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return SelectionWalk(ctx, Applied(rig), itemRows: true, composite: true);
+            });
+
+        yield return new Scenario("a11y/selection walk 1,000 composite item rows, the list draws the highlight, UIA",
+            "The same walk with .SelectionHighlight(…): the list draws the selection under the selected row and its rows are made unselected",
+            ctx =>
+            {
+                var rig = UiaRig.Install(ctx.Window);
+                return SelectionWalk(ctx, Applied(rig), itemRows: true, listHighlight: true, composite: true);
+            });
+
         yield return new Scenario("a11y/selection walk beside details, keys 60 ms apart, real loop, UIA",
             "The real-loop walk with the UIA bridge: the trees a key builds, the bridge's upkeep and the IsSelected events (all under build)",
             ctx =>
@@ -678,6 +694,14 @@ static partial class Scenarios
             {
                 UiaRig.Install(ctx.Window);
                 return PaletteTyping(ctx);
+            });
+
+        yield return new Scenario("a11y/command palette Down over 2,000 commands, UIA",
+            "Press Down in an open command palette over 2,000 commands and 1,000 rows with the UIA bridge, each key scrolling one row in: the choice told, and the trees a key builds",
+            ctx =>
+            {
+                UiaRig.Install(ctx.Window);
+                return PaletteDown(ctx, trees: true);
             });
 
         yield return new Scenario("a11y/label ticking in a dialog over 1,000 rows, UIA",
@@ -855,5 +879,64 @@ static partial class Scenarios
             Check = _ => palette.IsOpen && palette.Query.Length == 1 && palette.Matches.Count is > 0 and < 2_000
                 ? null : $"the palette's query is \"{palette.Query}\" with {palette.Matches.Count} matches",
         };
+    }
+
+    /// <summary>
+    /// Down in an open command palette over 2,000 commands. The walk starts on the last row the list
+    /// shows whole, so each key also scrolls a row in, and starts over there (untimed) once it passes
+    /// row 90: the palette shows 100. Frames come 120 ms apart, as in the selection walks, so with a
+    /// reader listening each key's scroll is refreshed in its own frame. With <paramref name="trees"/>
+    /// the row reports the accessibility trees a key builds.
+    /// </summary>
+    private static Op PaletteDown(Ctx ctx, bool trees)
+    {
+        var commands = new List<PaletteCommand>(2_000);
+        for (int i = 0; i < 2_000; i++) commands.Add(new PaletteCommand($"{Ui.Label(ctx.Rng)} {i}", () => { }));
+        var palette = new CommandPalette(() => commands);
+        ctx.Mount(Busy(ctx, Text.New("Palette").FontSize(13f)));
+        palette.Open(ctx.Window.Window);
+        ctx.Pump(2);
+        var list = FirstScroll(ctx.Window.FindByAutomationId("palette")!.Element)
+            ?? throw new InvalidOperationException("the palette has no list");
+        while (list.ScrollOffsetY == 0 && palette.SelectedIndex < 50)
+        {
+            palette.Move(1);
+            ctx.Pump(1);
+        }
+        int first = palette.SelectedIndex - 1;   // the last row shown whole with the list at its top
+        void Restart()
+        {
+            palette.Query = "";
+            ctx.Pump(1);
+            palette.Move(first);
+        }
+        Restart();
+        ctx.Pump(1);
+        int treesBefore = 0;
+        return new Op
+        {
+            Reset = _ =>
+            {
+                if (palette.SelectedIndex >= 90) Restart();
+            },
+            Run = _ =>
+            {
+                treesBefore = ctx.Window.AccessibilityTreesBuilt;
+                ctx.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+            },
+            FrameDelta = TimeSpan.FromMilliseconds(120),
+            Figure = trees ? () => ctx.Window.AccessibilityTreesBuilt - treesBefore : null,
+            FigureUnit = trees ? "a11y trees/key" : null,
+            Check = _ => palette.IsOpen && palette.SelectedIndex > first && list.ScrollOffsetY > 0 ? null
+                : $"the palette chose row {palette.SelectedIndex} (the walk starts after {first}), its list scrolled {list.ScrollOffsetY:0}",
+        };
+
+        static ScrollViewElement? FirstScroll(Element element)
+        {
+            if (element is ScrollViewElement scroll) return scroll;
+            foreach (var child in element.Children)
+                if (FirstScroll(child) is { } found) return found;
+            return null;
+        }
     }
 }

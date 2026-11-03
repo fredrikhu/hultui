@@ -56,6 +56,14 @@ static partial class Scenarios
                 return PaletteTyping(ctx);
             });
 
+        yield return new Scenario("a11y/command palette Down over 2,000 commands, AT-SPI",
+            "Press Down in an open command palette over 2,000 commands and 1,000 rows with the AT-SPI bridge, each key scrolling one row in: the choice told, and the trees a key builds",
+            ctx =>
+            {
+                AtSpiRig.Install(ctx.Window);
+                return PaletteDown(ctx, trees: true);
+            });
+
         yield return new Scenario("a11y/label ticking in a dialog over 1,000 rows, AT-SPI",
             "A label in an open dialog (Dialog.Show, whose scrim a click closes) changes every 50 ms over 1,000 rows with the AT-SPI bridge, as a fetch's progress does: what a tick tells, and the trees it builds",
             ctx =>

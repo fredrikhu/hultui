@@ -88,6 +88,10 @@ static partial class Scenarios
                 };
             });
 
+        yield return new Scenario("overlay/command palette Down 2,000",
+            "Press Down in an open command palette over 2,000 commands, each key scrolling one row in: the choice moved in the list",
+            ctx => PaletteDown(ctx, trees: false));
+
         yield return new Scenario("overlay/tooltip show",
             "Hover one of two buttons until its tooltip shows (0.5 s of virtual time over two frames)",
             ctx =>
