@@ -290,12 +290,15 @@ public partial class MeridianApp
 
         // VirtualList: history is the one surface that really does grow to
         // thousands of rows, and it is capped at ten thousand. Item rows: the list keeps a row
-        // while its entry, its place and whether it is selected are what they were, so a key
-        // makes the two rows the selection left and reached, not every row on screen.
+        // while its entry and its place are what they were, and draws the selection itself, under
+        // rows made unselected, so a key makes no row. A row older than today is drawn at 60 %
+        // opacity, its fill with it: the highlight under such a row is the fill at 60 %.
+        bool selectedToday = _historySelection is { } shown && HistoryLog.IsToday(shown, DateTimeOffset.Now);
         var list = VirtualListElement<HistoryRowItem>.New()
             .ItemHeight((int)Azimuth.RowRun)
             .Items(new HistoryRowItems(rows))
-            .RenderWith((item, selected) => HistoryRow(item.Entry, selected, item.Index))
+            .RenderWith((item, _) => HistoryRow(item.Entry, item.Index))
+            .SelectionHighlight(selectedToday ? Azimuth.Raised : Azimuth.Alpha(Azimuth.Raised, OlderRowOpacity))
             // One delegate from build to build, so the list keeps each row's label too.
             .AccessibleItemLabel(_historyItemLabel ??= item => HistoryRowName(item.Entry, DateTimeOffset.Now))
             .OnActivateItem(item => { _historySelection = item.Entry; MarkViewDirty(); })
@@ -355,10 +358,13 @@ public partial class MeridianApp
         return row;
     }
 
+    /// <summary>How opaque a row older than today is drawn — the mock's 60%.</summary>
+    private const float OlderRowOpacity = 0.6f;
+
     /// <summary><paramref name="index"/> only names the row for automation —
     /// virtualized rows are recycled, so a shared id would be ambiguous. The row reads only its
-    /// item, whether it is selected and today's date (see BuildHistoryList).</summary>
-    private Element HistoryRow(HistoryEntry entry, bool selected, int index)
+    /// item and today's date (see BuildHistoryList); the list draws whether it is selected.</summary>
+    private Element HistoryRow(HistoryEntry entry, int index)
     {
         HistoryRowsMade++;
         var now = DateTimeOffset.Now;
@@ -372,9 +378,8 @@ public partial class MeridianApp
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(HistoryRowName(entry, now))
             .AutomationId($"hist-row-{Math.Max(index, 0)}");
-        if (selected) row.Background(Azimuth.Raised);
-        // Older than today reads dimmer — the mock's 60%.
-        if (!today) row.Opacity(0.6f);
+        // Older than today reads dimmer.
+        if (!today) row.Opacity(OlderRowOpacity);
 
         row.AddChild(Ui.Mono(HistoryLog.TimeLabel(entry, now), 10.5f, Azimuth.TextMuted).Width(96).FlexShrink(0));
         row.AddChild(MethodChip(entry.Method, treeScale: true));
@@ -387,7 +392,10 @@ public partial class MeridianApp
 
         var captured = entry;
         row.OnClick(_ => { _historySelection = captured; MarkViewDirty(); });
-        if (!selected) row.HoverBg(Azimuth.Raised, Color.Transparent);
+        // The row's own hover tint, so a hovered row older than today stays at its 60 %: the list's
+        // HoverHighlight would draw it whole. Over the highlight it is the highlight's colour again
+        // (a row older than today hovered while selected reads a little lighter).
+        row.HoverBg(Azimuth.Raised, Color.Transparent);
         return row;
     }
 
