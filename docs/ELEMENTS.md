@@ -1276,10 +1276,28 @@ list made its rows again on a scale change. The window tells the list before its
 event, so an owner that moves its cache to the new scale there has the rows made with the new
 glyphs. Handlers in a kept row are the ones it was made with, so
 they should read live state (`SelectionContains(c.Hash)`) rather than a value the build
-captured. Rows are matched by index: an insertion above the viewport makes the rows it moves
-again, as before. The one-argument template keeps its behaviour exactly; nothing changes for
-a list that does not opt in. On the perf suite's selection walk the opt-in makes 3 rows per
-step instead of 19 and allocates 26 KB instead of 97.
+captured. A row whose index another item takes is not lost: it follows its item (below). The
+one-argument template keeps its behaviour exactly; nothing changes for a list that does not opt
+in. On the perf suite's selection walk the opt-in makes 3 rows per step instead of 19 and
+allocates 26 KB instead of 97.
+
+**Rows follow their item.** A row the list lets go of because another item now stands at its
+index goes back, as it is, to the index where an equal item stands in the same selected state,
+before the template is asked for that index. An insertion above the rows, a removal or a filter
+moves the rows it shifts and makes only the rows that come into the window. A moved row is the
+same element, so a field in it keeps the focus, and a reader hears it under its new item. So
+**keep the index out of the item** unless the row shows it: an item that carries its index is
+equal at no other index, and every row a change moves is made again. A row that shows something
+of its place carries only that, and only while it shows it: Vesper's Detail rows carry whether
+the zebra tint falls on them while the tint is on (`PaneRowItem.Odd`), not their index. Two rows
+are still made again: a row under the pointer, unless the focus is in it (moved, it would take
+its hover tint away from the pointer until the pointer moves), and every row a patch moves when
+its build told the list `InvalidateRow` (what that tells follows a place, see below). On the
+perf suite `virtual/filter 1,000 item rows, rows follow their item` makes 3 rows a step instead
+of 19 and allocates 14.8 KB instead of 76.6, and `virtual/insert above 1,000 item rows, rows
+follow their item` makes 1 row instead of 20 (7.1 KB instead of 80.5); their `rows carry their
+place` twins still make every row that moved. Vesper's Detail type-to-find, once its items
+dropped the index (headless, 400 files, NativeAOT): 195.7 → 102.9 KB a key, rows made 26.5 → 9.3.
 
 **State that only some rows show.** A second highlight beside the selection (the open file
 under a tree's cursor, the branches picked for a comparison), a folder's open state: these
@@ -1315,7 +1333,8 @@ the loader) and the highlight is one value that moves, the app can instead tell 
 rows it moved between: `InvalidateRow(index)` makes that one row again (and lets go of its kept
 label), and keeps every other. Call it for the row the highlight left and the row it reached,
 through the list's ref, before the rebuild patches the list — the same place `InvalidateRows()`
-goes:
+goes. In a build that calls it, the rows the patch moves are made again instead of following their
+item: the indices it names are the new items', the rows it would move the old items':
 
 ```csharp
 if (partner != _partnerWas && _listRef.Current is { } list)

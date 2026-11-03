@@ -619,6 +619,21 @@ files: 300.6 → 230.2 KB a key, 1.00 → 0 trees; Reel's player, alone in its c
 KB a build). The same elements in the same order is the rule: a column handed back in another
 order, or with a new cell, marks its structure as any change does.
 
+### Keep the index out of a list's item
+
+A virtual list on item rows (`.RenderWith((item, selected) => …)`) hands a row back to the index
+where its item now stands (ELEMENTS.md, "Rows follow their item"): a filter, an insertion or a
+removal moves the rows it shifts, and makes only the rows that come into the window. That holds
+only while an equal item can stand at another index. An item that carries its index never does,
+so every row a change moves is made again, as all of them were before round 7. Put in the item
+what the row shows, and of its place only what the row shows of it: Vesper's Detail rows show an
+odd row's zebra tint, so their item carries `Odd` while the tint is on, not the index. Its
+type-to-find (headless, 400 files, a key and two frames, NativeAOT) went 195.7 → 88.5 KB a key
+(−55 %) with the filtered rows made once a filter, rows made 26.5 → 9.3, median −10 %; with UI
+Automation 334.9 → 227.7 KB. An automation id made from the index (Meridian's `hist-row-N`, the
+command palette's `palette-row-N`) is something the row shows of its place: such a list keeps its
+index in the item, and its rows are made again when they move.
+
 ---
 
 ## Component Model
