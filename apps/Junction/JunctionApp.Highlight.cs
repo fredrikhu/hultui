@@ -72,10 +72,13 @@ public partial class JunctionApp
         }
     }
 
-    /// <summary>One file's colours, asked for. <paramref name="Rest"/>: wait until the reader
-    /// has stayed on it (<see cref="HighlightRest"/>) before starting. <paramref name="Scheme"/>:
-    /// which scheme it is coloured under, of those so far.</summary>
-    private sealed record HighlightAsk(string Key, GitRepository Repo, string Path, ExternalDiffMode Mode,
+    /// <summary>One file's colours, asked for. <paramref name="OldPath"/>: where its old side is,
+    /// the name before a rename (<see cref="GitFileDiff.RenamedFrom"/>), else its path; read at the
+    /// new name, a renamed file's old side was not found and its deleted lines stayed plain.
+    /// <paramref name="Rest"/>: wait until the reader has stayed on it (<see cref="HighlightRest"/>)
+    /// before starting. <paramref name="Scheme"/>: which scheme it is coloured under, of those so
+    /// far.</summary>
+    private sealed record HighlightAsk(string Key, GitRepository Repo, string Path, string OldPath, ExternalDiffMode Mode,
         string? CommitHash, string? BaseHash, DiffShownLines Shown, bool Rest, int Scheme);
 
     /// <summary>
@@ -195,7 +198,7 @@ public partial class JunctionApp
         // on files of 8,000 lines is two large-heap strings a key. Nothing is lost by the file
         // they stop on but the rest.
         rest |= HighlightRunningLive && _highlightRunning!.Key != key;
-        AskHighlight(new HighlightAsk(key, repo, path, mode, commitHash, baseHash, shown, rest, _highlightScheme));
+        AskHighlight(new HighlightAsk(key, repo, path, diff.RenamedFrom ?? path, mode, commitHash, baseHash, shown, rest, _highlightScheme));
         return hit;   // what is known so far, if anything: the rest follows
     }
 
@@ -266,15 +269,15 @@ public partial class JunctionApp
     // Runs off the UI thread.
     private static (FileHighlight, int Lines) Tokenize(HighlightAsk ask, TimeProvider clock, CancellationToken token)
     {
-        var (repo, path, shown) = (ask.Repo, ask.Path, ask.Shown);
+        var (repo, path, oldPath, shown) = (ask.Repo, ask.Path, ask.OldPath, ask.Shown);
         bool wantOld = shown.Old.Length > 0, wantNew = shown.New.Length > 0;
         string? oldText = null, newText = null;
         if (wantOld)
             oldText = ask.Mode switch
             {
-                ExternalDiffMode.Commit => repo.GetFileText(ask.BaseHash ?? ask.CommitHash + "^", path),
-                ExternalDiffMode.Staged => repo.GetFileText("HEAD", path),
-                _ => repo.GetIndexFileText(path) ?? repo.GetFileText("HEAD", path),
+                ExternalDiffMode.Commit => repo.GetFileText(ask.BaseHash ?? ask.CommitHash + "^", oldPath),
+                ExternalDiffMode.Staged => repo.GetFileText("HEAD", oldPath),
+                _ => repo.GetIndexFileText(oldPath) ?? repo.GetFileText("HEAD", oldPath),
             };
         token.ThrowIfCancellationRequested();
         if (wantNew)

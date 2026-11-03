@@ -31,6 +31,29 @@ public class DiffParsingTests
         // Kept verbatim: patch synthesis re-emits them, and a rename's two sides differ.
         Assert.Equal("--- a/src/app.cs", file.OldPathHeader);
         Assert.Equal("+++ b/src/app.cs", file.NewPathHeader);
+        Assert.Null(file.RenamedFrom);
+    }
+
+    /// <summary>A renamed file says where its old side was: the highlighter reads it there.</summary>
+    [Fact]
+    public void ARenameKeepsTheNameBefore()
+    {
+        var file = Assert.Single(GitRepository.ParseUnifiedDiff(
+            "diff --git a/src/Orders.cs b/src/Ledger.cs\n" +
+            "similarity index 90%\n" +
+            "rename from src/Orders.cs\n" +
+            "rename to src/Ledger.cs\n" +
+            "index 1111111..2222222 100644\n" +
+            "--- a/src/Orders.cs\n" +
+            "+++ b/src/Ledger.cs\n" +
+            "@@ -1,2 +1,2 @@\n" +
+            " keep\n" +
+            "-old\n" +
+            "+new\n"));
+
+        Assert.Equal("src/Ledger.cs", file.Path);
+        Assert.Equal("src/Orders.cs", file.RenamedFrom);
+        Assert.Null(file.OldPath);
     }
 
     [Fact]
