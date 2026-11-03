@@ -16,9 +16,9 @@ static partial class Scenarios
     /// <paramref name="key"/>, as many of <paramref name="back"/>, and again. Right runs along a shelf
     /// and on into the next; Down goes to the card below, on the next shelf. The row reports the
     /// cards made a key.</summary>
-    internal static Op ShelfWalk(Ctx ctx, KeyCode key, KeyCode back, int turn, bool keepCards = false)
+    internal static Op ShelfWalk(Ctx ctx, KeyCode key, KeyCode back, int turn, bool keepCards = false, bool moveRing = false)
     {
-        var pane = new ShelfPane(ImageGridFilms(ShelfPane.Shelves * ShelfPane.PerShelf), keepCards);
+        var pane = new ShelfPane(ImageGridFilms(ShelfPane.Shelves * ShelfPane.PerShelf), keepCards || moveRing) { MoveRing = moveRing };
         var host = pane.Mount();
         host.On<KeyDownEvent>(e =>
         {
@@ -64,6 +64,14 @@ static partial class Scenarios
         yield return new Scenario("component/shelf walk Down, 5 shelves of 7 cards, cards kept",
             "The Down walk with the cards kept",
             ctx => ShelfWalk(ctx, KeyCode.Down, KeyCode.Up, ShelfPane.Shelves - 1, keepCards: true)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("component/shelf walk Right, 5 shelves of 7 cards, ring moved without a build",
+            "The same walk with no build: a move takes the ring off one live card and puts it on the next, which takes the keyboard (KeptElements.Live), as Aperture's Home does since plan 17's round 7",
+            ctx => ShelfWalk(ctx, KeyCode.Right, KeyCode.Left, 2 * ShelfPane.PerShelf, moveRing: true)) { Width = 1440, Height = 900 };
+
+        yield return new Scenario("component/shelf walk Down, 5 shelves of 7 cards, ring moved without a build",
+            "The Down walk with no build, the page scrolling to follow the focus",
+            ctx => ShelfWalk(ctx, KeyCode.Down, KeyCode.Up, ShelfPane.Shelves - 1, moveRing: true)) { Width = 1440, Height = 900 };
     }
 }
 
@@ -87,11 +95,19 @@ sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Comp
     private static readonly Color Ground = new(21, 21, 24), Raised = new(38, 38, 43), Text1 = new(232, 228, 220),
         Text2 = new(150, 146, 140), Accent = new(240, 170, 60);
 
-    private readonly Signal<int> _cursor = new(-1);
+    private static readonly Outline Ring = new(2f, Accent, 3f);
+
+    /// <summary>Where the cursor is; a write of <see cref="_revision"/> builds the page.</summary>
+    private int _at = -1;
+    private readonly Signal<int> _revision = new(0);
     private readonly Ref<BoxElement> _cursorCard = new();
 
     /// <summary>Cards the page has made.</summary>
     public int CardsMade { get; private set; }
+
+    /// <summary>Whether a move takes the ring from one live card to the other with no build, as
+    /// Aperture's Home does (the cards kept, so the page knows them).</summary>
+    public bool MoveRing { get; init; }
 
     public void Press(KeyCode key)
     {
@@ -104,15 +120,24 @@ sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Comp
             _ => 0,
         };
         if (move == 0) return;
-        int at = _cursor.Peek();
-        _cursor.Value = at < 0 ? 0 : Math.Clamp(at + move, 0, films.Count - 1);
+        int was = _at;
+        _at = was < 0 ? 0 : Math.Clamp(was + move, 0, films.Count - 1);
+        if (MoveRing && _at != was && _kept.Live(films[_at].Id) is BoxElement reached)
+        {
+            if (was >= 0 && _kept.Live(films[was].Id) is BoxElement left) left.Outline = default;
+            reached.Outline = Ring;
+            _cursorCard.Current = reached;
+            reached.Focus();
+            return;
+        }
+        _revision.Value++;
     }
 
     /// <summary>Why the page does not show <paramref name="cursor"/> as the cursor, with the keyboard
     /// on its card, if it does not.</summary>
     public string? Verify(int cursor, Element? focused)
     {
-        if (_cursor.Peek() != cursor) return $"the cursor is on {_cursor.Peek()}, not {cursor}";
+        if (_at != cursor) return $"the cursor is on {_at}, not {cursor}";
         var id = "card-" + films[cursor].Id;
         var ringed = new List<BoxElement>();
         void Walk(Element e)
@@ -128,7 +153,8 @@ sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Comp
 
     public override Element Build()
     {
-        int cursor = _cursor.Value;
+        _ = _revision.Value;
+        int cursor = _at;
         _kept.Begin(++_builds);
         var page = Flex.Column(gap: 32f).Padding(new Thickness(Pad));
         for (int s = 0; s < Shelves; s++)
@@ -173,7 +199,7 @@ sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Comp
         if (cursor)
         {
             card.WithRef(_cursorCard);
-            card.Outline(2f, Accent, offset: 3f);
+            card.Outline = Ring;
         }
         var art = Box.New().Width(CardWidth).Height(CardHeight).FlexShrink(0).CornerRadius(8).Background(Raised)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
@@ -196,7 +222,7 @@ sealed class ShelfPane(List<ImageGridFilm> films, bool keepCards = false) : Comp
         caption.AddChild(Text.New(film.Title).FontSize(12.5f).TextColor(Text1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         caption.AddChild(Text.New(film.Line).FontSize(11.5f).TextColor(Text2).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         card.AddChild(caption);
-        card.OnClick(_ => _cursor.Value = index);
+        card.OnClick(_ => { _at = index; _revision.Value++; });
         return card;
     }
 }

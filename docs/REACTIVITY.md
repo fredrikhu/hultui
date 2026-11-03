@@ -644,6 +644,20 @@ Aperture's Home is its first user (one helper per shelf, as one film can stand o
 perf suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, every card made` against `…,
 cards kept`.
 
+**A key that moves only a ring needs no build.** Nothing on Home shows the cursor but the ring on one
+card and the keyboard on it. So a cursor key there takes the ring off the live card it leaves and
+puts it on the one it reaches (`KeptElements.Live`), hands that card the cursor's ref and the
+keyboard, and builds nothing. The next build compares each card with what it was made with, so the
+two are made again then. Two checks keep it right: Home's latest build is the app's latest (a build
+of another view may have patched its cards into something else), and both places are cards the
+helper knows (a watchlist title card, or End in a list still loading, takes the build). Make the ring
+one value that the build and the move both use, so the two cannot drift. Headless, 1440×900, a key
+and two frames, NativeAOT (JIT and UI Automation the same): one shelf (the fake library) 63.7 → 0.2 KB
+a key, and five shelves of seven 255.7 → 0.3 KB, no build, −8…−11 % time a key; the cards kept
+without the ring move (a build a key that hands back all but two cards) took 32.9 and 70.7 KB. The
+suite pins it: `component/shelf walk Right, 5 shelves of 7 cards, ring moved without a build` (219 →
+0 KB a key against every card made).
+
 A column whose cells are all kept is left with no children by the time the reconciler reaches
 it, since the build moved every one into its new tree. Until round 5 those came back one by one,
 each marking the column's structure, so with a reader listening every key built the whole

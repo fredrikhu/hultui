@@ -2,6 +2,7 @@
 using Aperture.Core.Requests;
 using Aperture.Theme;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -40,6 +41,69 @@ public sealed partial class ApertureApp
     internal const string FavouritesRowKey = "favourites";
     internal static string LatestRowKey(string libraryId) => "latest-" + libraryId;
 
+    /// <summary>
+    /// A shelf's card, handed back as it is when what it shows is what it was made with in the build
+    /// before (REACTIVITY.md, "Hand back the elements a key does not change"): its item, its place in
+    /// the walk, the cursor on it, the picture it draws, the caption setting and the scale its glyphs
+    /// are cut at. A cursor key makes the two cards it moved between instead of every card on Home.
+    /// The picture is asked for either way, which keeps one on screen recent in the cache and is how a
+    /// card finds the one that landed.
+    /// </summary>
+    private Element HomeCard(KeptElements<HomeCardState> cards, MediaItem item, bool still, int index)
+    {
+        var picture = still
+            ? ShownPicture(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight)
+            : ShownPicture(item, ImageKind.Primary, Halide.PosterWidth, MathF.Round(Halide.PosterWidth * 1.5f));
+        var state = new HomeCardState(item, index, IsCursor(index), picture, _settings.Data.ShowCardTitles, Ui.DisplayScale);
+        if (cards.TryKeep(item.Id, state, out var kept)) return kept;
+        return cards.Made(item.Id, state,
+            still ? StillCard(item, index, picture) : PosterCard(item, Halide.PosterWidth, index, picture));
+    }
+
+    /// <summary>What a card on a shelf shows; see <see cref="HomeCard"/>.</summary>
+    private readonly record struct HomeCardState(MediaItem Item, int Index, bool Cursor,
+        HultUI.Core.Rendering.IImageSource? Picture, bool Titles, float Scale);
+
+    /// <summary>Each shelf's cards, by the shelf's key: an item can be on two shelves. The watchlist's
+    /// title cards are made every build.</summary>
+    private readonly Dictionary<string, KeptElements<HomeCardState>> _homeCards = new(StringComparer.Ordinal);
+
+    private KeptElements<HomeCardState> HomeCardsOf(string rowKey)
+    {
+        if (!_homeCards.TryGetValue(rowKey, out var cards)) _homeCards[rowKey] = cards = new();
+        cards.Begin(Builds);
+        return cards;
+    }
+
+    /// <summary>A shelf as Home's latest build drew it: where it starts in the walk, how many it
+    /// holds, its items and its cards (null for the watchlist's titles).</summary>
+    private readonly record struct HomeShelf(int Start, int Count, IReadOnlyList<MediaItem> Items,
+        KeptElements<HomeCardState>? Cards);
+
+    private readonly List<HomeShelf> _homeShelves = [];
+
+    /// <summary>The app build that last built Home, or -1.</summary>
+    private int _homeBuild = -1;
+
+    /// <summary>
+    /// Whether the place <paramref name="index"/> in Home's walk (or -1, nowhere) is a library card
+    /// that Home's latest build drew, and its live element: null when it is on another page of its
+    /// shelf, so not on screen. False for a watchlist title, whose card is built.
+    /// </summary>
+    private bool HomeCardAt(int index, out Element? card)
+    {
+        card = null;
+        if (index < 0) return true;
+        foreach (var shelf in _homeShelves)
+        {
+            if (index < shelf.Start || index >= shelf.Start + shelf.Count) continue;
+            if (shelf.Cards is null) return false;
+            card = shelf.Cards.Live(shelf.Items[index - shelf.Start].Id);
+            return true;
+        }
+        return false;
+    }
+
     private Element BuildHomeView()
     {
         EnsureLibraries();
@@ -74,6 +138,8 @@ public sealed partial class ApertureApp
         SetCursorList($"home:{string.Join(',', shown.Select(r => r.Key))}:{walk.Count}",
             walk, VisibleCards(Halide.PosterWidth));
 
+        _homeBuild = Builds;
+        _homeShelves.Clear();
         int cursorBase = 0;
         for (int index = 0; index < shown.Count; index++)
         {
@@ -81,10 +147,11 @@ public sealed partial class ApertureApp
             int start = cursorBase;
             var items = row.Items;
             var titles = row.Titles;
+            var cards = titles is null ? HomeCardsOf(row.Key) : null;
+            _homeShelves.Add(new HomeShelf(start, row.Count, items, cards));
             page.AddChild(CardRow(row.Title, row.Count,
-                i => titles is not null ? DiscoverCard(titles[i], row.CardWidth, cursorIndex: start + i)
-                    : row.Stills ? StillCard(items[i], cursorIndex: start + i)
-                    : PosterCard(items[i], cursorIndex: start + i),
+                i => cards is null ? DiscoverCard(titles![i], row.CardWidth, cursorIndex: start + i)
+                    : HomeCard(cards, items[i], row.Stills, start + i),
                 row.CardWidth, "row-" + row.Key,
                 headingExtra: HomeRowHeadingExtra(row, all)));
             cursorBase += row.Count;

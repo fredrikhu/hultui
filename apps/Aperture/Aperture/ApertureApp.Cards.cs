@@ -69,7 +69,11 @@ public sealed partial class ApertureApp
     /// progress sliver. Clicking <i>plays</i> rather than opening the detail page — this
     /// row exists to get someone back into a film in one click.
     /// </summary>
-    internal Element StillCard(MediaItem item, int cursorIndex = -1)
+    internal Element StillCard(MediaItem item, int cursorIndex = -1) =>
+        StillCard(item, cursorIndex, ShownPicture(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight));
+
+    /// <summary>A continue-watching card drawing <paramref name="picture"/>; see <see cref="ShownPicture"/>.</summary>
+    private BoxElement StillCard(MediaItem item, int cursorIndex, HultUI.Core.Rendering.IImageSource? picture)
     {
         var card = Flex.Column(gap: Halide.S2)
             .Width(Halide.StillWidth).FlexShrink(0)
@@ -82,7 +86,7 @@ public sealed partial class ApertureApp
 
         // The backdrop of an episode usually lives on its series, which is what
         // BackdropItemId points at; the item's own thumb is the fallback.
-        var art = Artwork(item, ImageKind.Backdrop, Halide.StillWidth, Halide.StillHeight, Halide.Radius2);
+        var art = Artwork(item, Halide.StillWidth, Halide.StillHeight, Halide.Radius2, picture);
         card.AddChild(art);
 
         var caption = Flex.Column(gap: 1).Width(Halide.StillWidth);
@@ -236,8 +240,11 @@ public sealed partial class ApertureApp
         if (cursorIndex < 0) return;
         TrackCursor(card, cursorIndex);
         if (IsCursor(cursorIndex))
-            card.Outline(2f, Halide.Accent, offset: 3f);
+            card.Outline = CursorRing;
     }
+
+    /// <summary>The cursor's ring on a card. Home moves it on the live cards too (MoveRingWithoutBuild).</summary>
+    private static readonly Outline CursorRing = new(2f, Halide.Accent, 3f);
 
     /// <summary>The watched mark: a filled accent disc with a tick, top-right.</summary>
     private static Element WatchedTick()
