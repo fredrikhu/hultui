@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 7
-- **Phase:** build — round 7, step 10 next (steps 1–7, 8a and 9 landed; the rest smallest-first under the usage cap: 9, 10, 12, 13, then 8b and 11). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
+- **Phase:** build — round 7, step 12 next (steps 1–7, 8a, 9 and 10 landed; the rest smallest-first under the usage cap: 9, 10, 12, 13, then 8b and 11). Survey done 2026-11-02 (reports `17-reports/r7-*.md`, 631fe15f..17d4220a):
   seven experts unsatisfied, GL and Vulkan satisfied; one review objection (4325bac6, step 1). 13 build steps; round 7
   questions 1–4 were answered yes on 2026-11-02 (the user's live reader check of step 13 remains). Round 6 released: merge 0b8e684a, CI fixes
   1939afcb, CI run 41432647572 green. Question 10 (`TokenizeDiff` public) open, not blocking. Weekly usage 37 % at the
@@ -281,6 +281,10 @@ Round 6 (the round the next survey reviews; moves to the archive at round 8's su
 | 7 | 4c603918 | junction-composer-skip-build | The composer part records what it shows of the text (issue token, highlighted row, closing reference; both need a '#'); a character builds only when that changes. Off GitLab 14.6 → 2.0 KB (−86 %), on GitLab 16.3 → 2.0 (−88 %), with a reader 2.6 both; a11y 0.5 KB a character, no tree; typing still told. |
 | 7 | 4fcc9663 | junction-renamed-file-colours | Colour bug fix: the diff parser keeps git's `rename from` path in a new `GitFileDiff.RenamedFrom`; `HighlightAsk` reads the old side there (`OldPath` left unset: the review composer sends it to GitLab as `old_path`). Only the four deleted lines' 20 px bands changed in the scene. Step 8a: six scenes dark and light (History, Create MR, issue list, composer on/off GitLab, renamed file) A/A 0 and A/B 0 but the intended bands; suite 0/0 JIT + AOT, no row's bytes moved over 2 % (captures 5912b804); Junction 1,081 ×2, Core 5,042 pass. |
 | 7 | eff3ba90 | vesper-brief-marks-per-cell | `BriefKeptCell` holds `Marked` and `Cut`; the Brief grid's state is a new shape-only `ShapeState<T>` (Thumbnails keeps `GridState`). AOT KB a key (400 files, 1240×820): Insert 471.0 → 35.7 (−92 %), min 1.323 → 1.211 ms (−8 %); Space on a file 470.1 → 31.8 (−93 %), on a folder (marked and measured) 469.8 → 31.8; Shift+Down/Up 470.6 → 35.3; times −8…−9 % (JIT −23…−25 %); with UIA Insert 471.5 → 36.2, −11 %, 0 trees both sides. Cells made a key 140 → 1–2. Type-to-find unchanged (180.6 KB): its ~45 cells a key are entries the filter brings on screen, none remade (REACTIVITY.md). 71 scenes (24 new Brief scenes; cut set by reflection — `Clipboard.SetFiles` writes the user's real clipboard) A/A clean, pixels/a11y/focus identical; suite 0/0, no row's bytes moved (captures 79f0515c); Vesper 878 pass; 2 reverse edits. |
+| 7 | 9a9c4271 | meridian-assertion-banner-key | Bug fix: the stale banner is keyed, so `ReconcilePrefixSuffix` no longer patches assertion row 0 into it; the focused field keeps the keyboard as the banner comes and goes (before: the first key after a send left no focus, the second was lost). Typing with the banner up 114.4 → 114.9 KB a key, time within noise. REACTIVITY.md (Tree Diffing): a child that comes and goes ahead of same-type siblings needs a key. |
+| 7 | 3e2d5864 | meridian-prompt-double-build | A submitted environment prompt builds the window once, not twice: 140.0 → 87.1 KB (−38 %, JIT the same), min −4 % AOT. |
+| 7 | e0ace9c9 | meridian-url-typing-skip-build | A URL character builds nothing when it moves nothing shown (Headers, Body, Auth: compare the Params and Chain counts and the stale banner). KB a character AOT: Headers 66.6 → 4.0 (−94 %), min −17 % (JIT −27 %); Body −93 %, Auth −94 %; a full query string −83 %; Params unchanged. REACTIVITY.md: a text field holds its own text, so a key builds only for what else on screen reads it. |
+| 7 | 5a9f8a54 | meridian-history-list-drawn-selection | Approved (question 4). History's list draws the selection (at 60 % for sends older than today, as the rows' own opacity); rows keep their own hover tint; `hist-row-N` ids kept; the selected send still heard as selected. Down 63.5 → 47.4 KB a key (−25 %), rows made 2 → 0; time over 400 keys AOT min 0 %, median −1 %, with a reader −5 %; JIT −4 / −8 %. Pixels: none for today's sends (3 scenes); older sends (7 scenes) only the selected row, fill 1/255 and glyph edges up to 6/255; one scene keeps a passed row's hover tint (up to 15/255, as Junction History). Step 10: 38 Meridian scenes, a11y and focus identical but the bug's own 3; suite 0/0 JIT + AOT, no allocation moved (captures 7ce5e216); Meridian 468 pass; 4 reverse edits. |
 
 ## Examined, not worth it
 
@@ -773,3 +777,10 @@ From 2026-10-27 (round 6's survey); earlier entries are in the archive ([to 2026
   cut) goes in each cell's record, not the shared shape — a set in the shape makes every cell again when one member
   changes; a driver must never send Ctrl+X/C to Vesper (it writes the system clipboard). A small brief cost ~1 % of
   weekly usage (73 % after it).
+- 2026-11-03: round 7 step 10 landed (9a9c4271..5a9f8a54; captures 7ce5e216): Meridian's assertion field keeps the
+  keyboard after a send (bug fixed), a submitted prompt builds once (−38 %), URL typing on Headers/Body/Auth builds
+  nothing (−93…−94 %), History's list draws the selection (−25 %, rows 2 → 0; approved pixels only on older sends'
+  selected row). Guideline notes: a child that comes and goes ahead of same-type siblings needs a key; a text field
+  holds its own text, so a key builds only for what else reads it; when a row has its own opacity, draw the list's
+  highlight at that opacity. Left open: a History key still builds the window because the archive panel shows the
+  selected send (making it a part would save ~40 KB a key). Usage 74 % weekly; small briefs cost ~1 % a step.
