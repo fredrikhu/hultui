@@ -529,8 +529,9 @@ public partial class JunctionApp
     // It was a scroll view of a column per section holding a row for every file and folder, so
     // every key built all of them again: 3 MB a key with 300 changed files, 3,065 elements resolved
     // and 2,883 patched. It is the Commit list's shape now: one virtual list of tagged rows, so only
-    // the rows on screen are elements and a key makes the rows whose item changed, the two the
-    // caret left and reached. A section's header is a row of the list, held at the top while its
+    // the rows on screen are elements and a key makes the rows whose item changed: none, since the
+    // list draws the caret and the pointer's tint (it made the two the caret left and reached, 2.2
+    // a key at 300 files). A section's header is a row of the list, held at the top while its
     // section scrolls under it — Stage all / Unstage all stay in reach in a long list — until the
     // next section's header pushes it off (StickyRows), as Sticky() did in the columns. The rows
     // keep the heights they had (ChangeRowHeights), so it looks and scrolls as it did.
@@ -542,6 +543,18 @@ public partial class JunctionApp
         // selection of every key, is its own count: the walk over every file is for the others.
         _changeSelFileCount = _changeSelection.Count > 1 ? ChangeSelectionPaths(data).Count : _changeSelection.Count;
         SyncChangeListRows(data);
+
+        // The list draws the caret: the tint under it says whether it is on a pick, a row of the
+        // selection, or alone, which a plain row's hover tint matches so a keyboard walk stays
+        // visible. A selection that is the caret's row alone, every plain key's, is that tint; the
+        // rows of any other draw their own fill. So a key makes no row: the tint moves.
+        var caret = ChangeFocus();
+        _changeSelIsCaret = _changeSelection.Count == 1 && caret is { } c && _changeSelection.Contains(c);
+        bool onPick = caret is { } k && _changeSelection.Contains(k);
+        int caretIndex = caret is { } at ? ChangeListIndex(at) : -1;
+        // On a row of a wider selection the row's own fill is the tint: drawn twice, its rounded
+        // corners' edge pixels would come out a shade darker.
+        var caretTint = !onPick ? Nocturne.Neutral900 : _changeSelIsCaret ? Nocturne.Accent900 : Color.Transparent;
 
         // Everything else a row shows is the colour scheme and the scale its glyphs are cut at.
         var shape = new ChangeListShape(Nocturne.Theme, Ui.DisplayScale);
@@ -555,11 +568,16 @@ public partial class JunctionApp
             .Items(new ChangeListItems(this, _changeListRows))
             .RenderWith((item, _) => ChangeListRow(item))
             .RowHeights(_changeRowHeight ??= (item, _) => ChangeRowHeight(item))
-            .StickyRows(ChangeRowIsHeld);
+            .StickyRows(ChangeRowIsHeld)
+            .SelectionHighlight(caretTint, Nocturne.RadiusRow)
+            .HoverHighlight(Nocturne.Neutral900, Nocturne.RadiusRow, rows: ChangeRowTakesHover)
+            .SelectedIndex(caretIndex);
         list.FlexGrow(1).Padding(new Thickness(8, 8, 4, 8));
         // The rows are what a reader walks — tree items for the folders, the buttons in them — in
         // a container that says it is a scroll view, as it did. A row off screen is not an
-        // element, so a reader no longer finds it there (the Commit list's trade).
+        // element, so a reader no longer finds it there (the Commit list's trade). A row the
+        // caret can reach says it is selected or not (AccessibleSelected), and the list tells it
+        // which: the caret's row is the selected one.
         list.RowsAreComposite = true;
         list.Role = AccessibilityRole.ScrollView;
         list.WithRef(_changeScrollRef);
@@ -585,13 +603,14 @@ public partial class JunctionApp
     /// <summary>
     /// One row of the list as its list sees it: what it is, and what its look takes from the rest
     /// of the view. A header carries its section's count and whether another section precedes it;
-    /// a hidden file its path; a folder or a file row its node, and whether it is in the selection,
-    /// under the caret, an open folder, and how many files a row action takes while it is part of
-    /// a selection of several. A key that moves the caret changes two items.
+    /// a hidden file its path; a folder or a file row its node, and whether it is an open folder,
+    /// draws a pick's fill (a row of a selection that is not the caret's row alone; the list draws
+    /// the caret), and how many files a row action takes while it is part of a selection of
+    /// several. A key that moves the caret changes no item.
     /// </summary>
     private readonly record struct ChangeListItem(ChangeListKind Kind, ChangeSection Section = default,
         TreeNode<GitFileChange>? Node = null, string? Path = null, int Count = 0, bool TopGap = false,
-        bool Expanded = false, bool Selected = false, bool Focused = false, int SelectedFiles = 0)
+        bool Expanded = false, bool Selected = false, int SelectedFiles = 0)
     {
         /// <summary>How many files a row action targets: every file the selection covers when the
         /// row is inside a selection of several, otherwise the row's own.</summary>
@@ -601,6 +620,16 @@ public partial class JunctionApp
     private static readonly Func<ChangeListItem, int, bool> ChangeRowIsHeld = static (item, _) =>
         item.Kind is ChangeListKind.ConflictsHeader or ChangeListKind.StagedHeader or ChangeListKind.ChangesHeader
             or ChangeListKind.HiddenHeader;
+
+    /// <summary>The rows the pointer tints: the ones that tinted themselves, not a header or "No changes",
+    /// nor a pick, whose fill covers the tint but for its rounded corners' edge pixels.</summary>
+    private static readonly Func<ChangeListItem, int, bool> ChangeRowTakesHover = static (item, _) =>
+        !item.Selected
+        && item.Kind is ChangeListKind.Folder or ChangeListKind.File or ChangeListKind.Conflict or ChangeListKind.Hidden;
+
+    /// <summary>The selection is the caret's row alone, as every plain key leaves it: the list draws
+    /// it, and no row draws a pick's fill. Read as the build reads the selection.</summary>
+    private bool _changeSelIsCaret;
 
     /// <summary>The rows as the list's items, each made when the list asks for it, the selection
     /// read then.</summary>
@@ -614,12 +643,12 @@ public partial class JunctionApp
             {
                 var row = rows[index];
                 if (row.Node is not { } node) return row;
+                if (app._changeSelection.Count == 0) return row;
                 var self = new ChangeRef(node.Path, row.Section, node.IsFolder);
                 bool selected = app._changeSelection.Contains(self);
                 return row with
                 {
-                    Selected = selected,
-                    Focused = app._changeCaret == self,
+                    Selected = selected && !app._changeSelIsCaret,
                     SelectedFiles = selected && app._changeSelFileCount > 1 ? app._changeSelFileCount : 0,
                 };
             }
@@ -839,10 +868,7 @@ public partial class JunctionApp
         var section = item.Section;
         var tree = ChangeTreeFor(section);
         var self = new ChangeRef(node.Path, section, IsFolder: true);
-        var (selected, focused, expanded) = (item.Selected, item.Focused, item.Expanded);
-        var bg = selected ? Nocturne.Accent900
-            : focused ? Nocturne.Neutral900
-            : Color.Transparent;
+        var (selected, expanded) = (item.Selected, item.Expanded);
         var n = item.ActionCount(node.LeafCount);
         var (additions, deletions) = FolderTotals(node);
 
@@ -866,11 +892,12 @@ public partial class JunctionApp
         }
 
         var row = ChangeFolderRow(node, expanded, lead: check, trail: ChangeCounts(additions, deletions));
-        // Selection, focus and open state all change how the row looks, and a collapse
-        // moves every row below it — see ChangeRow for why a patched row would otherwise
-        // keep the previous occupant's handlers.
-        row.Key = $"{section}:dir:{node.Path}{(selected ? "#s" : "")}{(focused ? "#f" : "")}{(expanded ? "#o" : "")}";
-        if (bg != Color.Transparent) row.Background(bg);
+        // A pick and the open state change how the row looks, and a collapse moves every row
+        // below it — see ChangeRow for why a patched row would otherwise keep the previous
+        // occupant's handlers. The caret's tint and the pointer's are the list's.
+        row.Key = $"{section}:dir:{node.Path}{(selected ? "#s" : "")}{(expanded ? "#o" : "")}";
+        if (selected) row.Background(Nocturne.Accent900);
+        row.AccessibleSelected = false;
 
         row.OnClick(e =>
         {
@@ -889,7 +916,6 @@ public partial class JunctionApp
             }
         });
         row.ContextMenu(() => ChangeFolderMenuItems(section, node));
-        if (!selected) row.HoverBg(Nocturne.Neutral900, bg);
         return row;
     }
 
@@ -899,13 +925,9 @@ public partial class JunctionApp
         var f = node.Item;
         bool isStaged = item.Section == ChangeSection.Staged;
         var self = new ChangeRef(f.Path, item.Section);
+        // A pick's fill; the focus caret's tint (a pick's, or a hover-strength one off the
+        // selection, so keyboard navigation stays visible) is the list's.
         var selected = item.Selected;
-        // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
-        // hover-strength tint so keyboard navigation stays visible.
-        var focused = item.Focused;
-        var bg = selected ? Nocturne.Accent900
-            : focused ? Nocturne.Neutral900
-            : Color.Transparent;
         var n = item.ActionCount(1);
         var (letter, color) = StatusLetter(f.Kind);
 
@@ -914,10 +936,10 @@ public partial class JunctionApp
         var row = Grid.Of(ChangeRowColumns, gap: 8).AlignItems(AlignItems.Center)
             .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
-        // Selection and focus in the key so either change gives a fresh element (see
-        // FileTreeRow — the stale hover handler would otherwise clobber the highlight).
-        row.Key = (isStaged ? "s:" : "u:") + f.Path + (selected ? "#s" : "") + (focused ? "#f" : "");
-        if (bg != Color.Transparent) row.Background(bg);
+        // A pick in the key so a change of it gives a fresh element (see FileTreeRow).
+        row.Key = (isStaged ? "s:" : "u:") + f.Path + (selected ? "#s" : "");
+        if (selected) row.Background(Nocturne.Accent900);
+        row.AccessibleSelected = false;
 
         // Checkbox toggles staging without moving the selection — and acts on the whole
         // selection when this row is part of one, the same set the context menu takes.
@@ -958,7 +980,6 @@ public partial class JunctionApp
             }
         });
         row.ContextMenu(() => ChangeFileMenuItems(f, isStaged));
-        if (!selected) row.HoverBg(Nocturne.Neutral900, bg);   // restore the focus tint on leave
         return row;
     }
 
@@ -984,7 +1005,7 @@ public partial class JunctionApp
         var watch = Ui.IconButton(Icons.Eye, () => SetAssumeUnchanged(path, false), "Watch again", 28f);
         watch.OnClick(e => e.StopPropagation = true);
         row.AddChild(watch.FlexShrink(0));
-        row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        // Its hover tint is the list's, with the rows'.
         return row;
     }
 

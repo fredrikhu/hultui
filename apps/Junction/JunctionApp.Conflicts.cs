@@ -107,16 +107,15 @@ public partial class JunctionApp
         var node = item.Node!;
         var f = node.Item;
         var self = new ChangeRef(f.Path, ChangeSection.Conflicted);
-        var (selected, focused) = (item.Selected, item.Focused);
-        var bg = selected ? Nocturne.Accent900
-            : focused ? Nocturne.Neutral900
-            : Color.Transparent;
+        // A pick's fill; the caret's tint and the pointer's are the list's (see ChangeRow).
+        var selected = item.Selected;
 
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
-        row.Key = "c:" + f.Path + (selected ? "#s" : "") + (focused ? "#f" : "");
-        if (bg != Color.Transparent) row.Background(bg);
+        row.Key = "c:" + f.Path + (selected ? "#s" : "");
+        if (selected) row.Background(Nocturne.Accent900);
+        row.AccessibleSelected = false;
 
         row.AddChild(Box.New().Width(14).FlexShrink(0)
             .Children(Ui.Icon(Icons.Warning, 12f, Nocturne.DangerIcon)));
@@ -136,7 +135,6 @@ public partial class JunctionApp
             }
         });
         row.ContextMenu(() => ConflictFileMenuItems(f));
-        if (!selected) row.HoverBg(Nocturne.Neutral900, bg);
         return row;
     }
 

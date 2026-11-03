@@ -1217,7 +1217,7 @@ var list = VirtualListElement<FileEntry>.New()
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see; with `ItemRowTemplate`, whenever anything a row shows besides its item and selected state changes |
 | — | `InvalidateRow(index)` | `InvalidateRows()` for one item: its row (if realized) and its kept label are made again, every other row is kept — for something only a row or two show that moves (see **State that only some rows show** below) |
 | `.SelectionHighlight(fill, radius, ring, width)`, `.SelectionHighlight(RowHighlight?)` | `SelectionHighlight` | the list draws the selection itself, under each selected row on screen, and makes its rows unselected, so a selection move makes no row — see **A selection the list draws** below |
-| `.HoverHighlight(fill, radius)` | `HoverHighlight` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own — same section |
+| `.HoverHighlight(fill, radius, rows)` | `HoverHighlight`, `HoverRowFor` | the list draws a tint under the unselected row the pointer is on, so rows it keeps need no hover of their own; with `rows`, only under the rows it is true for (not a header) — same section |
 | `.SelectionOverlay(element)` | `SelectionOverlay` | the list holds one element over the selected row, against its end, for what only that row shows — same section |
 | `.StickyRows(Func<T,int,bool>)` | `StickyRowFor` | the rows held at the top while the rows after them scroll under them, each until the next pushes it off — see **Rows held at the top** below |
 
@@ -1394,7 +1394,10 @@ under the pointer and leaves the tint off its selected row would keep the tint o
 since a kept row never learns it became selected: `.HoverHighlight(fill)` has the list draw the
 tint, under the row the pointer is on (`Element.IsHovered`, what a row's own `.OnHover` sees) and
 only if that row is not selected. The pixels are a row's own, and a row with a fill of its own
-covers the tint. Something only the selected row has goes in `.SelectionOverlay(element)`: one
+covers the tint. A row that took no tint of its own (a held section header, whose fill the tint
+would go over, or a "No changes" line) is left out with `rows`: Junction's Changes list passes
+`.HoverHighlight(Nocturne.Neutral900, Nocturne.RadiusRow, rows: (item, _) => item.Kind is …)`.
+Something only the selected row has goes in `.SelectionOverlay(element)`: one
 element the list holds over the selected row (`SelectedIndex`), at the row's end and as tall as it,
 over the rows and under the scroll bars, scrolled and clipped as they are. A move only moves it, with
 no layout. Hand back the element on screen from a build, or a new one, which is patched into it.

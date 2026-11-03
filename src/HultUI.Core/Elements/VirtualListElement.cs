@@ -214,6 +214,27 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private RowHighlight? _hoverHighlight;
 
     /// <summary>
+    /// The rows <see cref="HoverHighlight"/> is drawn under: null (the default) every row, otherwise
+    /// those it is true for, so a row that took no tint of its own (a section's header, a line that
+    /// says the list is empty) takes none from the list. Read for the row under the pointer as the
+    /// list draws. Set by <c>.HoverHighlight(…, rows: …)</c>.
+    /// </summary>
+    public Func<T, int, bool>? HoverRowFor
+    {
+        get => _hoverRowFor;
+        set
+        {
+            if (ReferenceEquals(_hoverRowFor, value)) return;
+            _hoverRowFor = value;
+            if (_hoverHighlight is not null) MarkPaintDirty();
+        }
+    }
+    private Func<T, int, bool>? _hoverRowFor;
+
+    private bool TakesHover(int index) =>
+        _hoverRowFor is null || (uint)index < (uint)_items.Count && _hoverRowFor(_items[index], index);
+
+    /// <summary>
     /// An element the list holds over the selected row (<see cref="SelectedIndex"/>), against the
     /// row's end and as tall as it, so what only the selected row shows — "Details →" — is not
     /// in a row and a selection move makes no row for it: the one element moves. Null (the
@@ -1025,7 +1046,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (_hoverHighlight is { } hover)
         {
             foreach (var (index, row) in _activeElements)
-                if (row.Element.IsHovered && !IsItemSelected(index) && !DrawsOverItsFill(row.Element))
+                if (row.Element.IsHovered && !IsItemSelected(index) && !DrawsOverItsFill(row.Element) && TakesHover(index))
                     DrawHighlight(ctx, in hover, row.Element);
         }
         if (_selectionHighlight is not { } highlight) return;
@@ -1052,8 +1073,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         if (_stickyRowFor is null) return;
         // Which row it is, from where it is laid out: a list holds few of these.
-        bool selected = IsItemSelected(IndexAt(row.Layout.AbsoluteBorderBox.Y - Layout.AbsoluteContentBox.Y + 0.5f));
-        if (_hoverHighlight is { } hover && row.IsHovered && !selected)
+        int index = IndexAt(row.Layout.AbsoluteBorderBox.Y - Layout.AbsoluteContentBox.Y + 0.5f);
+        bool selected = IsItemSelected(index);
+        if (_hoverHighlight is { } hover && row.IsHovered && !selected && TakesHover(index))
             DrawHighlight(ctx, in hover, row);
         if (_selectionHighlight is { } highlight && selected)
             DrawHighlight(ctx, in highlight, row);
@@ -1460,6 +1482,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             // below and the kept rows' check compare against.
             SelectionHighlight = vl.SelectionHighlight;
             HoverHighlight = vl.HoverHighlight;
+            HoverRowFor = vl.HoverRowFor;
             // A new overlay is patched into the one on screen, as a keyed row is; one handed back
             // stays; anything else goes in its place on the next frame.
             if (_selectionOverlay is not { Parent: not null } live || vl._selectionOverlay is not { } overlay

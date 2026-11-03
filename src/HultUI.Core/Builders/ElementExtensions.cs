@@ -367,10 +367,14 @@ public static class ElementExtensions
 
     /// <summary>The list draws a tint under the unselected row the pointer is on, as
     /// <see cref="SelectionHighlight{T}(VirtualListElement{T}, Color, float, Color, float)"/> draws
-    /// the selection; see <see cref="VirtualListElement{T}.HoverHighlight"/>.</summary>
-    public static VirtualListElement<T> HoverHighlight<T>(this VirtualListElement<T> el, Color background, float cornerRadius = 0f)
+    /// the selection; see <see cref="VirtualListElement{T}.HoverHighlight"/>. With
+    /// <paramref name="rows"/>, only under the rows it is true for
+    /// (<see cref="VirtualListElement{T}.HoverRowFor"/>).</summary>
+    public static VirtualListElement<T> HoverHighlight<T>(this VirtualListElement<T> el, Color background, float cornerRadius = 0f,
+        Func<T, int, bool>? rows = null)
     {
         el.HoverHighlight = new RowHighlight(background, new CornerRadius(cornerRadius));
+        el.HoverRowFor = rows;
         return el;
     }
 
