@@ -558,6 +558,29 @@ row it is in, all the items, and every control in an item row of any list. The o
 give is a draft read with the focus elsewhere: the row is its item then ("new comment"), and Tab goes
 back into it.
 
+### A find step writes its count; the find bar got no part of its own (round 7)
+
+A find step (Enter, F3, `n`) built the whole view around the find bar: Junction's window, Meridian's
+response panel, Vesper's view. The candidate was to give the bar a `Part` of its own, so a step would
+build the bar and not the view. Three routes, NativeAOT walk host, UI-thread KB a key, each run twice
+alternated with the baseline (plan 17, round 7, step 6):
+
+| | Junction diff, Enter | Meridian response, Enter | Vesper reader, Enter | Typing: Junction / Meridian / Vesper |
+|---|---|---|---|---|
+| Baseline: a step builds the view | 87.8 | 60.2 | 69.1 | 406.3 / 51.0 / 291.4 |
+| The bar a `Part` of its own | 48.8 | 28.6 | 38.4 | 406.3 / 51.3 / 291.4 |
+| The count a `Part` of its own | 32.2 | 13.3 | 21.8 | 406.6 / 51.4 / 291.7 |
+| The step writes the count (kept) | 31.5 | 12.6 | 21.1 | 406.3 / 51.0 / 291.4 |
+
+The bar's own build is 16 KB: its field, chips, buttons and glyphs made again for one label. A part
+holding the count alone costs every build of the bar a component build of its own, 0.3–0.4 KB a typed
+key. What was kept is `FindBar.Moved`: a step that moves only the current match writes the count into
+the label on screen, as `REACTIVITY.md` shows for a value that changes ten times a second, and the owner
+tints the two places the match moved between on the body as it is. It builds nothing, costs typing
+nothing, and adds one property and no `Place()`. The label is found by its automation id beside the live
+field, as `FindBarElement` finds its parts: a `Ref` on it cost every build of the bar a list (0.1 KB a
+typed key).
+
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
 BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction

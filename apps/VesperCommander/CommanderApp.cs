@@ -441,8 +441,10 @@ public partial class CommanderApp : Component, IDisposable
         _viewerPan = new HorizontalPan(MarkDirty);
         _viewerFind = NewFindBar("Find in file…", _viewerScrollRef, RevealViewerHit);
         _viewerFind.Selection = ViewerFindSelection;
+        _viewerFind.Moved = () => FindMoved(_viewerScrollRef.Current as VirtualListElement<int>, _viewerFind.Search, ref _viewerHit);
         _diffFind = NewFindBar("Find in comparison…", _diffScrollRef, RevealDiffHit);
         _diffFind.Selection = DiffFindSelection;
+        _diffFind.Moved = () => FindMoved(_diffScrollRef.Current as VirtualListElement<DiffRow>, _diffFind.Search, ref _diffHit);
         Nocturne.Use(_settings.Theme, _settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
         RebuildKeymap();

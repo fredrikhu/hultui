@@ -427,9 +427,9 @@ public partial class JunctionApp : Component, IDisposable
             settings.CommitFileListWidth);
         _changesSplit = new PaneSplitter(MarkViewDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.ChangesFileListWidth);
-        _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit);
+        _diffFind = NewFindBar("Find in diff…", () => _diffBodyRef.Current, RevealDiffHit, DiffFindMoved);
         _diffFind.Selection = DiffFindSelection;
-        _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit);
+        _filesFind = NewFindBar("Find in file…", () => _fileBodyRef.Current, RevealFilesHit, FilesFindMoved);
         _filesFind.Selection = FilesFindSelection;
         // Blame replaces the file's text with a gutter view the search cannot bind to, and its
         // reveal would scroll a body no longer on screen: Ctrl+F comes back to the source.

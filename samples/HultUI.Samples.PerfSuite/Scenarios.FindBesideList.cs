@@ -18,7 +18,7 @@ static partial class Scenarios
             ctx => FindBesideListOp(ctx, ownPart: false));
 
         yield return new Scenario("text/find Enter beside a 3,000-row list, bar in its own part",
-            "The same step with the bar placed as a part of its own",
+            "The same step with FindBar.Moved telling the list the two rows: the bar writes its count into the label on screen, and the step builds nothing",
             ctx => FindBesideListOp(ctx, ownPart: true));
     }
 
@@ -63,20 +63,16 @@ sealed class FindBesideList : Component
 
     private static readonly Color HitTint = Color.FromHex("#FFE08A"), CurrentTint = Color.FromHex("#FF9F1C");
 
-    private readonly bool _ownPart;
     private readonly string[] _lines = new string[Rows];
     private readonly string[] _files = new string[Files];
     private readonly int[] _items = Enumerable.Range(0, Rows).ToArray();
     private readonly int[] _madeWith = new int[Rows];
     private readonly Ref<ScrollViewElement> _list = new();
-    private readonly PartGroup _parts = new();
-    private Part? _bar;
     private (string, bool, bool, int) _shape;
     private (int Index, int Line) _hitWas = (-1, -1);
 
     public FindBesideList(Random rng, bool ownPart)
     {
-        _ownPart = ownPart;
         for (int i = 0; i < Rows; i++)
             _lines[i] = i < 24 && i % 2 == 1 ? $"the quick brown fox jumps over {Ui.Label(rng)}" : Ui.Paragraph(rng, 9);
         for (int i = 0; i < Files; i++) _files[i] = $"src/{Ui.Label(rng).Replace(' ', '-')}.cs";
@@ -87,7 +83,25 @@ sealed class FindBesideList : Component
             RevealAfterLayout = false,
             LetterKeys = true,
         };
+        if (ownPart) Find.Moved = Moved;
         Find.Search.Bind(Rows, 1, (line, _) => line >= 0 && line < Rows ? _lines[line] : null);
+    }
+
+    /// <summary>The current match as the rows show it: its index and its line, or -1 for both.</summary>
+    private (int Index, int Line) Hit() =>
+        Find.Search.Current is { } current ? (Find.Search.Index, current.Line) : (-1, -1);
+
+    /// <summary>A step (<see cref="FindBar.Moved"/>): what the build does when it sees the match
+    /// move, without the build.</summary>
+    private void Moved()
+    {
+        var hit = Hit();
+        if (hit != _hitWas && _list.Current is VirtualListElement<int> list)
+        {
+            list.InvalidateRow(_hitWas.Line);
+            list.InvalidateRow(hit.Line);
+        }
+        _hitWas = hit;
     }
 
     public FindBar Find { get; }
@@ -100,7 +114,7 @@ sealed class FindBesideList : Component
         Builds++;
         var search = Find.Search;
         var shape = (search.Query, search.MatchCase, search.UseRegex, search.Hits.Count);
-        (int Index, int Line) hit = search.Current is { } current ? (search.Index, current.Line) : (-1, -1);
+        var hit = Hit();
         if (_list.Current is VirtualListElement<int> mounted)
         {
             if (shape != _shape) mounted.InvalidateRows();
@@ -130,7 +144,7 @@ sealed class FindBesideList : Component
                     Button.New("Wrap", ButtonVariant.Secondary),
                     Button.New("Open", ButtonVariant.Secondary)));
         if (Find.IsOpen)
-            main.AddChild(_ownPart ? (_bar ??= new Part(_parts, Find.Build)).Place(stale: true).FlexShrink(0) : Find.Build());
+            main.AddChild(Find.Build());
         main.AddChild(list);
         main.AddChild(Text.New($"{Rows:N0} lines").FontSize(11f).TextColor(Ui.Muted).Padding(new Thickness(4, 12)));
 

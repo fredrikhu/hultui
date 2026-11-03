@@ -1004,6 +1004,21 @@ public partial class JunctionApp
     private (int Index, int Line) DiffFindHit() =>
         _diffFind.Search is { Current: { } hit } s ? (s.Index, hit.Line) : (-1, -1);
 
+    /// <summary>A find step (<see cref="FindBar.Moved"/>): the list makes the row the current
+    /// match left and the row it reached, as the build does when it sees the match move, with no
+    /// build. The next build then finds it where the rows show it.</summary>
+    private void DiffFindMoved()
+    {
+        var hit = DiffFindHit();
+        if (hit == _diffHit) return;
+        if (_diffBodyRef.Current is VirtualListElement<DiffRow> list)
+        {
+            list.InvalidateRow(_diffHit.Line);   // -1 does nothing
+            list.InvalidateRow(hit.Line);
+        }
+        _diffHit = hit;
+    }
+
     // The staged-line picks as the rows on screen last drew them.
     private readonly HashSet<GitDiffLine> _diffRowStageSel = new();
 

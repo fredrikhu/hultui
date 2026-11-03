@@ -19,8 +19,11 @@ public partial class CommanderApp
 
     /// <summary>A bar over one of the two views. The reveal lands on the same frame: both views
     /// scroll with ScrollRangeIntoView, which holds a request made before layout until the
-    /// rows are measured. View-only: a step of the bar changes nothing a part shows, and a full
-    /// build made the title bar and the command line again on every Enter.</summary>
+    /// rows are measured. View-only: a change of the search changes nothing a part shows, and a
+    /// full build made the title bar and the command line again on every Enter. A step (Enter,
+    /// F3, n, p) not even the view: the bar writes its count into the label on screen, and its
+    /// Moved makes the two rows the match left and reached (<see cref="FindMoved"/>); the reader on
+    /// a 3,000-line file, NativeAOT, 69 → 21 KB an Enter (plan 17, round 7).</summary>
     private FindBar NewFindBar(string placeholder, Ref<ScrollViewElement> body, Action reveal) => new(MarkViewDirty)
     {
         Placeholder = placeholder,
@@ -49,7 +52,7 @@ public partial class CommanderApp
     /// changed (<paramref name="all"/>), else the rows the current match left and reached when it
     /// moved. The current match used to be in the rows' shape, so every Enter or F3 made every row
     /// on screen again (the reader on a 3,000-line file: 35 rows and 330 KB an Enter, 2.5 rows and
-    /// 69 KB now).</summary>
+    /// 69 KB in round 6 of plan 17).</summary>
     private static void RemakeForFind<T>(VirtualListElement<T> list, bool all, (int Index, int Line) was, (int Index, int Line) now)
     {
         if (all) list.InvalidateRows();
@@ -58,6 +61,16 @@ public partial class CommanderApp
             list.InvalidateRow(was.Line);   // -1 does nothing
             list.InvalidateRow(now.Line);
         }
+    }
+
+    /// <summary>A find step (<see cref="FindBar.Moved"/>): the list makes the row the current match
+    /// left and the row it reached, as the build does when it sees the match move, with no build;
+    /// the next build finds it where the rows show it.</summary>
+    private static void FindMoved<T>(VirtualListElement<T>? list, TextSearch search, ref (int Index, int Line) was)
+    {
+        var now = CurrentHit(search);
+        if (list is not null) RemakeForFind(list, all: false, was, now);
+        was = now;
     }
 
     /// <summary>The selection in the viewer. Its line numbers are the search's line numbers.</summary>

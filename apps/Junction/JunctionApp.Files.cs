@@ -983,6 +983,14 @@ public partial class JunctionApp
         return tints;
     }
 
+    /// <summary>A find step (<see cref="FindBar.Moved"/>): the body on screen takes the tints with
+    /// the current one moved, the list the next build hands it too, with no build.</summary>
+    private void FilesFindMoved()
+    {
+        if (_fileBodyRef.Current is { } area && _window.IsInTree(area))
+            area.Highlights = FilesHighlights();
+    }
+
     private IReadOnlyList<TextHighlight>? _filesHighlights;
     private int[]? _filesHighlightsStarts;
     private (string Query, bool MatchCase, bool UseRegex, int Index, int Count, Color Hit, Color Current) _filesHighlightsSearch;

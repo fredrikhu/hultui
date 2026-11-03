@@ -1868,6 +1868,7 @@ _find = new FindBar(MarkDirty)
     Reveal = RevealCurrentMatch,            // scroll _find.Search.Current into view
     Selection = SelectionInBody,            // Ctrl+F searches for it, starting at it
     LetterKeys = true,                      // n / p walk the matches when no field has the keyboard
+    Moved = MatchMoved,                     // a step: re-tint where the match left and reached
 };
 _find.Search.Bind(lines.Length, lanes: 1, (line, _) => lines[line]);   // when the text changes
 
@@ -1888,6 +1889,7 @@ _find.Service();
 | `HandleKey(e)` | Ctrl+F, Escape, Enter / Shift+Enter, Alt+C, Alt+R, and `n` / `p` with `LetterKeys` |
 | `Service()` | focus the field, give the body the keyboard back, reveal the current match |
 | `RevealCurrent()` | ask for a reveal at the next `Service` without rebuilding |
+| `Moved` | runs instead of `onChanged` after a step that moved only the current match: the step builds nothing |
 | `Body`, `Reveal`, `Selection`, `Opening` | the owner's hooks |
 | `RevealAfterLayout` (true) | false when `Reveal` defers itself (`ScrollRangeIntoView`) and can land on the same frame |
 | `Placeholder`, `FieldWidth` 280, `FieldHeight` 30, `Icon` | the field and the glyphs |
@@ -1924,6 +1926,35 @@ own rebuild made view-only (an owner with kept parts gives the bar the rebuild t
 nothing a part shows moves with a find step, and a full one built Vesper's title bar and command
 line again on every Enter). Headless, JIT; NativeAOT 326 → 68 KB (plan 17, round 6). Junction's
 diff the same: 36 rows and 468 KB an Enter, 3 rows and 108 KB now.
+
+**A step builds nothing.** With `Moved` set, a step that moves only the current match — Enter,
+Shift+Enter, `n`, `p`, the arrows — runs `Moved` instead of `onChanged`. Of the bar it changes
+the count alone, which the bar writes into the label on screen, as the reconciler would after a
+build; then it runs `Service`, as the owner's `OnAfterBuild` would, and the match is revealed. The
+owner's view is not built at all. `Moved` does on the body as it is what the owner's build does
+when it sees the match move, and leaves the field that build compares where the rows show it:
+
+```csharp
+private void MatchMoved()
+{
+    var s = _find.Search;
+    var hit = s.Index >= 0 && s.Index < s.Hits.Count ? (s.Index, s.Hits[s.Index].Line) : (-1, -1);
+    if (hit != _hitWas && _listRef.Current is { } list)
+    {
+        list.InvalidateRow(_hitWas.Line);
+        list.InvalidateRow(hit.Line);
+    }
+    _hitWas = hit;
+}
+// A TextArea body: area.Highlights = Tints(), the same list the next build hands it.
+```
+
+Without `Moved` a step builds the owner as any other change does; a switch, typing, opening and
+closing always do, because they move every match or the bar itself. An Enter, headless app
+walks, NativeAOT (JIT agrees within 2 KB): Junction's diff on a 3,000-line file 88 → 31.5 KB,
+Meridian's 2,000-line response 60 → 12.6 KB, Vesper's reader on 3,000 lines 69 → 21 KB, with no
+build; a typed character unchanged (plan 17, round 7). A `Part` of its own for the bar was
+measured first and declined: its build alone is 16 KB a step (see DECISIONS.md).
 
 **A TextArea body takes the matches as highlights.** One `TextArea` over a whole document
 (Meridian's response, Junction's Files view) has one span list for the document, so the matches

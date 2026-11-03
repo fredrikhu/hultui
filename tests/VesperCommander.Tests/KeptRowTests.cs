@@ -689,9 +689,11 @@ public class KeptRowTests
 
     /// <summary>A step of find (Enter in its field) makes the row the current match left and the
     /// row it reached, and keeps every other row on screen; the kept rows show what a remake of all
-    /// of them shows; and the step builds the window and no part. The current match was in the
-    /// rows' shape, so every Enter or F3 made every row on screen again (35 rows, 330 KB an Enter
-    /// on a 3,000-line file), and the bar's full build made the title bar and the command line too.</summary>
+    /// of them shows; and the step builds neither the window nor a part of it: the bar is a part of
+    /// its own and builds its count alone. The current match was in the rows' shape, so every Enter
+    /// or F3 made every row on screen again (35 rows, 330 KB an Enter on a 3,000-line file), the
+    /// bar's full build made the title bar and the command line too, and until round 7 of plan 17
+    /// the step built the window.</summary>
     [Fact]
     public void TheViewer_AFindStepMakesTheTwoRowsTheMatchMovesBetween_AndNoPart()
     {
@@ -712,8 +714,10 @@ public class KeptRowTests
             var after = ViewerRows(t).ToList();
             var made = after.Where(r => !before.Contains(r)).ToList();
             Assert.Equal(2, made.Count);
-            Assert.Equal(1, t.Field<int>("_builds") - builds);
+            Assert.Equal(0, t.Field<int>("_builds") - builds);
             Assert.Equal(0, t.App.PartBuilds - parts);
+            var count = (TextElement)t.Session.Window.FindByAutomationId("find-status")!.Element;
+            Assert.StartsWith($"{step + 2} of ", count.Content);
 
             // The current match is on the second of the two rows made, and every row on screen is
             // what a remake of all of them makes.

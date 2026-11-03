@@ -28,6 +28,7 @@ public readonly record struct FindSelection(string Text, int Line, int Lane, int
 /// <item>calls <see cref="Service"/> from <c>OnAfterBuild</c>,</item>
 /// <item>and adds <see cref="Build"/> where the bar goes while <see cref="IsOpen"/>.</item>
 /// </list>
+/// With <see cref="Moved"/> set, a step that only moves the current match builds nothing.
 /// </summary>
 /// <remarks>
 /// Three apps had grown the same bar around the same search, one per view that shows text, and
@@ -125,6 +126,17 @@ public sealed class FindBar
     /// show its searchable text first.</summary>
     public Action? Opening { get; set; }
 
+    /// <summary>
+    /// Runs in place of <c>onChanged</c> after a step that moved only the current match —
+    /// Enter, Shift+Enter, <c>n</c>, <c>p</c>, the arrows — so the step builds nothing: the bar
+    /// writes its count into the label on screen, and the owner tints the match the step left and
+    /// the one it reached on the body as it is: a list's
+    /// <see cref="VirtualListElement{T}.InvalidateRow"/> on their two lines, a TextArea's
+    /// <see cref="TextAreaElement.Highlights"/>. The reveal follows as after any step. Unset, a
+    /// step runs <c>onChanged</c> as every other change does.
+    /// </summary>
+    public Action? Moved { get; set; }
+
     /// <summary>Opens the bar with the keyboard in its field, seeded from <see cref="Selection"/>;
     /// on an open bar, puts the keyboard back in the field with the query selected whole, so
     /// what is typed next replaces it.</summary>
@@ -174,7 +186,29 @@ public sealed class FindBar
         _inStep++;
         try { Search.Move(dir); }
         finally { _inStep--; }
-        _onChanged();
+        // A move changes the current match and nothing else: not the query, its options or the
+        // matches, which is what the owner's view shows of the search besides that one tint. Of the
+        // bar it changes the count alone, which the step writes into the label on screen, as the
+        // reconciler would after a build; the work the owner's OnAfterBuild would have done follows.
+        if (Moved is { } moved && CountOnScreen() is { } count)
+        {
+            moved();
+            count.Content = Status(Search);
+            Service();
+        }
+        else _onChanged();
+    }
+
+    /// <summary>The count on the bar in the window, or null when the bar is not there. Found the
+    /// way <see cref="FindBarElement"/> finds its parts, by its automation id beside the live
+    /// field, rather than held: a ref would cost every build of the bar a list.</summary>
+    private TextElement? CountOnScreen()
+    {
+        if (_field.Current?.Parent is not FindBarElement bar || HostOf(bar) is not { } host || !host.IsInTree(bar))
+            return null;
+        foreach (var part in bar.Children)
+            if (part is TextElement { AutomationId: "find-status" } count) return count;
+        return null;
     }
 
     private void ToggleMatchCase()
@@ -305,6 +339,8 @@ public sealed class FindBar
         var status = TextElement.New(Status(search)).MaxLines(1);
         status.Flex.FlexShrink = 0;
         status.AutomationId = "find-status";
+        // A move changes none of what makes the count look bad, so a step that rewrites the count
+        // alone leaves this as it is.
         bar.StatusIsBad = search.Error is not null || (search.Query.Length > 0 && !search.HasHits);
         bar.AddChild(status);
 

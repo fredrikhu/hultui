@@ -247,7 +247,7 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
 
     /// <summary>A response: it reaches the panel when the send ends, its body when the worker has
     /// formatted it, and the panel's own controls — the find bar, the tabs, pretty and raw —
-    /// rebuild the panel alone, never the window.</summary>
+    /// rebuild the panel alone, never the window; a find step not even the panel.</summary>
     [Fact]
     public void AResponseReachesThePanel_AndItsControlsRebuildThePanelAlone()
     {
@@ -281,8 +281,20 @@ public class PartTests : IClassFixture<TestHttpServer>, IDisposable
                 () => Assert.Equal("find-input", s.Window.Window.FocusedElement?.AutomationId));
             PanelOnly("find typing", () => s.Window.TypeText("a"),
                 () => Assert.True(HasTextStarting(Part(fx, "response-right"), "1 of "), "the count did not follow the query"));
-            PanelOnly("the next match", () => s.Window.PressKey(KeyCode.Enter),
-                () => Assert.True(HasTextStarting(Part(fx, "response-right"), "2 of "), "the count did not follow Enter"));
+            // A step builds neither: the bar is a part of its own and builds its count alone, and the
+            // body takes the tints with the current match moved (plan 17, round 7).
+            {
+                int builds = fx.App.Builds, parts = fx.App.PartBuilds;
+                var body = (TextAreaElement)s.Window.FindByAutomationId("response-body")!.Element;
+                var tints = body.Highlights;
+                s.Window.PressKey(KeyCode.Enter);
+                s.PumpFrames(3);
+                Assert.True(fx.App.Builds == builds, "the next match rebuilt the window");
+                Assert.True(fx.App.PartBuilds == parts, "the next match rebuilt the panel");
+                Assert.True(HasTextStarting(Part(fx, "response-right"), "2 of "), "the count did not follow Enter");
+                Assert.NotSame(tints, body.Highlights);
+                AssertPartsAreAFullBuild(fx, "after the next match");
+            }
             PanelOnly("the find bar closing", () => s.Window.PressKey(KeyCode.Escape),
                 () => Assert.Equal("response-body", s.Window.Window.FocusedElement?.AutomationId));
             PanelOnly("the Headers tab", () => Click(fx, "resptab-headers"));
