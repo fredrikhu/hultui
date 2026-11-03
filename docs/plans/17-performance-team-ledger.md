@@ -5,7 +5,7 @@ file after every step and commits it with the step's work. Full survey reports a
 [`17-reports/`](17-reports/).
 
 - **Round:** 8
-- **Phase:** build — round 8, step 1 next (9 steps; question 11 open, it joins step 2 if yes). The survey's eight
+- **Phase:** build — round 8, step 2 next (9 steps; step 1 landed; question 11 answered yes, it joins step 2). The survey's eight
   reports are `17-reports/r8-*.md` (common brief: session 64e7e0e2's scratchpad `brief-r8-survey.md`). Weekly usage 86 %
   after the survey (it cost ~5 %): the 90 % pause applies to build steps (the user waived it for the survey only), so
   small steps go first and the rest wait for the reset if a step would cross 90 %. Round 7
@@ -93,8 +93,12 @@ its brief quotes (`r8-k` = `17-reports/r8-k-<area>.md`).
    the unchanged 264-node tree 7.67 → 0.02 KB; caret Down 120 ms apart with tree/UIA/AT-SPI 91.4/94.1/96.3 →
    81.6/84.3/86.5 KB (−10.2…−10.7 %); wheel a notch every 120 ms 22.8/25.4/27.3 → 16.2/18.8/20.7 (−24…−29 %); bridge
    off flat; trees 0, the same diffs and events. Add a suite twin row (composite rows named by 2–3 texts, with a
-   reader), check bytes on AOT, rerun the staleness audit. Small, no API or reader change. **(question 11)** adds the
-   disabled-menu-item fix to this step if the user says yes.
+   reader), check bytes on AOT, rerun the staleness audit. Small, no API or reader change. **(question 11: yes)** adds,
+   as its own commit, **a11y-disabled-menu-item** (reader bug, not perf; round 7 step 13): a disabled context-menu or
+   menu-bar item is published as enabled because `MakeItemNode` always sets `isEnabled: true`
+   (AccessibilityTreeBuilder.cs:558). Fix (r8-7 Waiting): an additive default member `IAccessibleItemSource.ItemIsEnabled(int)`
+   (default enabled), `ContextMenuElement` answering `!IsDisabled`, compared in `MatchItems` and the served-item
+   providers; small–medium.
 3. **Rich text editor blocks** (5; r8-5 Candidates 1–3, Waiting richtext-short-viewport-jitter) — (a) a paragraph keeps
    the layout's exact `TextLine[]` (PipelineTextParagraph.cs:35-47), makes its `TextLineBox[]` on the first `Lines` read,
    `SpansOf` returns an exact array (RichTextEditorElement.Layout.cs:105), and `RichTable.Normalize` makes no closure per
@@ -147,10 +151,6 @@ its brief quotes (`r8-k` = `17-reports/r8-k-<area>.md`).
 
 Re-ranked by the next survey.
 
-- **a11y-disabled-menu-item** (7, reader bug, not perf; round 7 step 13; **question 11**) — a disabled context-menu or
-  menu-bar item is published as enabled: `MakeItemNode` always sets `isEnabled: true` (AccessibilityTreeBuilder.cs:558).
-  Fix (r8-7): an additive default member `IAccessibleItemSource.ItemIsEnabled(int)`, `ContextMenuElement` answering
-  `!IsDisabled`, compared in `MatchItems` and the served-item providers; small–medium. With step 2 if the user says yes.
 - **live-reader check of menus** (user) — the six-step script in ACCESSIBILITY-PLAN.md (round 7 step 13) for Narrator,
   NVDA and Orca; a silent move would mean moving focus to the selected item (needs the user's approval).
 - **junction-changes-leads** (6/7/8, reader behaviour, no perf number) — only the caret is told to a reader, not a
@@ -192,11 +192,11 @@ Closed from Waiting by the round 8 survey: a11y-walk-unchanged-bytes (→ step 2
 layout-patch-keeps-layout-dropdown-expander (Examined), the held-selection suite scenario (pinned by
 `CommitPrefetchTests.AHeldArrow_LoadsOnlyTheCommitItStopsOn`), junction-leads' `ChangesView` lists (95c86c97) and big
 files' gen 2 (Examined), aperture-leads' Discover and the grid cursor's focus (→ step 5), junction-changes-leads' perf
-parts (Examined).
+parts (Examined). After the survey: a11y-disabled-menu-item (→ step 2, question 11 yes).
 
 ## Landed
 
-Round 7 (the round the next survey reviews; moves to the archive at round 9's survey). Rounds 1–6 are in
+Rounds 7 and 8 (round 8 is the round the next survey reviews; round 7 moves to the archive at round 9's survey). Rounds 1–6 are in
 [the archive](17-performance-team-ledger-archive.md#landed-rounds-14) ([round 5](17-performance-team-ledger-archive.md#landed-round-5),
 [round 6](17-performance-team-ledger-archive.md#landed-round-6)).
 
@@ -232,6 +232,7 @@ Round 7 (the round the next survey reviews; moves to the archive at round 9's su
 | 7 | 95c86c97 | junction-changes-rows-follow-their-item | `ChangesView` kept while a stage is in flight; items compare tree nodes by value (path, depth, segment, file count, file, folder totals), no index. Stage/unstage one file, KB an operation JIT / AOT: no bridge 2,271 → 1,280 / 2,349 → 1,334 (−44 %), UIA and AT-SPI −42…−43 %; rows made 62 → 5; min cycles −5…−12 %. Step 8b: 108 scene checkpoints dark and light identical but one intended hover case (a row the caret passes under a resting pointer keeps its tint and tooltip, 6 checkpoints per theme); a11y tree identical but rows' selected states (the caret's row selected in 30 of 41); focus, reader focus, Tab order identical; held header keeps focus; audit 0 STALE in 3,129; suite no row past 8 %, no allocation past 1 % (captures 04e4ce4c). Junction 1,082, Core 5,044, Headless 1,339, Fedora Headless a11y 348 pass. REACTIVITY.md, ELEMENTS.md. |
 | 7 | 637811cc, bdd8cd1c | kept-elements-helper (API) | Approved (question 3). Suite rows `component/shelf walk Right/Down, 5 shelves of 7 cards` (every card made / cards kept / ring moved without a build). **Public `KeptElements<TState>` (HultUI.Core.Components)**: `Begin(build)` (only what the owner's previous build made or handed back can come back — a build can patch a dropped element by position into something else that stays in the window), `TryKeep(key, state, out element, place)` (equal state, still hosted, optional row-place check for virtual-list rows), `Made(key, state, element)` (sets the key, one ref per key that follows the patch), `Live(key)` (the live element, for a change made with no build), `Clear()`, `Count`; entries pruned each time the count doubles. 8 tests; ELEMENTS.md §28, REACTIVITY.md. |
 | 7 | 31e1aaa7 | aperture-home-cursor-no-build | Aperture Home on `KeptElements`, and a cursor key builds nothing: it moves the ring on the live cards through `Live` (one ring value for the build and the move; checks the owner's latest build drew that view). AOT KB a key (before / cards kept / both): one shelf Right 63.7 / 32.9 / 0.2, Down 65.3 / 31.9 / 0.2, min 0.526 → 0.482 / 0.505 → 0.476 ms; five shelves Right 255.7 / 70.7 / 0.3, Down 249.3 / 69.3 / 0.3, min 0.801 → 0.729 / 0.784 → 0.730; builds a key 1 → 0; UIA same bytes, min −3…−12 %; JIT min −8…−29 %. Suite rows 218.4 → 38.2 → 0.3 KB, cards made 35 → 2 → 0; `--compare` 0/0 JIT + AOT (captures 80f14806). 34 Home scenes: pixels, a11y tree (bounds, offscreen) and focus identical for both routes, A/A identical. Core 5,044, Headless 1,347, Aperture 332 pass; 7 reverse edits. REACTIVITY.md "A key that moves only a ring needs no build". |
+| 8 | f3302209, bda4dad3 | paint-beginframe-keeps-surface-clip | Correctness, the objection to d04464f6: `SkiaRenderContext.SetCanvas(canvas, baseSaveCount = 1)` and `BeginFrame` restores to that count; the Vulkan surface records `SaveCount` after its 8-bit kept-target and F16 offscreen clips (`WrappedImage.BaseSaveCount`, `_offscreenBaseSaveCount`, reset on `Hold` and a new offscreen); GL and raster still restore to 1. 2400×1600 canvas at 1.5× clipped to 1200×800: after `BeginFrame` save count 1 → 2, device clip 2400×1600 → 1200×800, `ClipBounds` 1601×1068 → 801×535. In-process saves over a 16-step Vulkan drag: a clip 64 px too narrow differs in exactly 64 columns with the fix (142–176k channels 8-bit, 139–173k F16) and in 0 without; shown pixels identical. Suite 0/0 ×2 alternated, allocKB flat, steady frame 0 B; goldens identical. `SurfaceClipThroughBeginFrameTests` (3 cases, reverse edits fail 2 each). Skia 360, Core 5,054, Headless 1,443, VulkanProbe 38 (`HULTUI_UITESTS=1`) pass. |
 
 ## Examined, not worth it
 
@@ -430,7 +431,7 @@ Round 8 question (asked 2026-11-03). Recommendations in brackets.
 11. **a11y-disabled-menu-item** (with step 2): disabled context-menu and menu-bar items are read as enabled. The fix
     adds a public default interface member, `IAccessibleItemSource.ItemIsEnabled(int)` (default: enabled), which
     `ContextMenuElement` answers from `IsDisabled`. Additive; no existing implementer has to change. [Yes: a reader bug,
-    small.]
+    small.] → **yes, with step 2** (2026-11-03).
 
 Round 7 questions 1–4, round 6 questions 1–9 and round 5's question 5, all answered, are in the archive
 ([round 7](17-performance-team-ledger-archive.md#needs-the-user-round-7), [round 6](17-performance-team-ledger-archive.md#needs-the-user-round-6)).
@@ -625,3 +626,11 @@ From 2026-11-02 (round 7's survey); earlier entries are in the archive ([to 2026
   Aperture Home's build, Meridian History's archive part, a measure-first faded-rows step); one question for the user
   (11: an additive `IAccessibleItemSource.ItemIsEnabled`). Bug found: Aperture Home's cursor walks onto a hidden shelf
   page (step 5). Survey agents 235–375k tokens each; weekly usage 81 → 86 %. Phase → build.
+- 2026-11-03: the user answered question 11 yes: disabled menu items get `IAccessibleItemSource.ItemIsEnabled` with
+  step 2.
+- 2026-11-03: round 8 step 1 landed (f3302209; captures bda4dad3): `BeginFrame` restores to the save count the surface
+  handed over, so the Vulkan drag clip (6c627f27, 1b11aeda) holds again (`ClipBounds` 1601×1068 → 801×535; a 64 px
+  too-narrow clip shows in in-process saves again); suite flat, pixels identical. Guideline notes: a surface that puts
+  state on the canvas before the context's `BeginFrame` hands over its base save count, and resets restore to it; to
+  prove a clip, compare two in-process saves with a deliberately wrong clip (`--frame-counter` cannot see it);
+  VulkanProbeTests skip without `HULTUI_UITESTS=1` and an all-skipped run exits 0. Usage 87 % weekly (~1 % a small step).
