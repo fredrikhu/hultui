@@ -148,18 +148,20 @@ public partial class JunctionApp
         MarkDirty();
     }
 
-    /// <summary>↑ ↓ ↵ Esc while the list is open. True when the key was taken.</summary>
+    /// <summary>↑ ↓ ↵ Esc while the list is open. True when the key was taken. The list is the
+    /// composer's: a move or Esc builds the composer alone (_composerRevision), as a character
+    /// does. They built the window and its chrome (212 KB a key).</summary>
     private bool HandleIssueSuggestionKey(KeyDownEvent e)
     {
         var items = IssueSuggestions(out _);
         if (items.Count == 0) return false;
         switch (e.Key)
         {
-            case KeyCode.Down: _issueSel = Math.Min(_issueSel + 1, items.Count - 1); MarkDirty(); return true;
-            case KeyCode.Up: _issueSel = Math.Max(_issueSel - 1, 0); MarkDirty(); return true;
+            case KeyCode.Down: _issueSel = Math.Min(_issueSel + 1, items.Count - 1); _composerRevision.Value++; return true;
+            case KeyCode.Up: _issueSel = Math.Max(_issueSel - 1, 0); _composerRevision.Value++; return true;
             case KeyCode.Enter when !e.Modifiers.HasFlag(KeyModifiers.Ctrl) && !e.Modifiers.HasFlag(KeyModifiers.Super):
                 InsertIssue(items[Math.Clamp(_issueSel, 0, items.Count - 1)]); return true;
-            case KeyCode.Escape: _issueCaret = -1; MarkDirty(); return true;
+            case KeyCode.Escape: _issueCaret = -1; _composerRevision.Value++; return true;
         }
         return false;
     }

@@ -424,6 +424,48 @@ public class CreateMergeRequestTests
         });
     }
 
+    /// <summary>↓, ↑ and Esc in the issue list build the composer alone, as a character does: the
+    /// list is the composer's. They built the window and its chrome (212 KB a key).</summary>
+    [Fact]
+    public void TheIssueListsKeys_BuildTheComposerAlone()
+    {
+        Hosted((repo, session, app) =>
+        {
+            repo.Write("new.txt", "x\n");
+            session.Window.PressKey(KeyCode.Digit4);
+            session.PumpUntil(() => SummaryField(session) is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            var summary = SummaryField(session)!;
+            session.Window.Click(summary);
+            session.Window.TypeText("Fix #1");
+            session.PumpUntil(() => ById(session, "issue-suggestions") is not null, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+            string? Highlighted() => Root(session) is { } root
+                ? LayoutProbe.Descendants<Element>(root, e => e.Key is { } k && k.StartsWith("issue-", StringComparison.Ordinal) && k.EndsWith("#s", StringComparison.Ordinal)).FirstOrDefault()?.Key
+                : null;
+            var first = Highlighted();
+            Assert.NotNull(first);
+
+            foreach (var (key, check) in new (KeyCode, Action)[]
+                     {
+                         (KeyCode.Down, () => Assert.NotEqual(first, Highlighted())),
+                         (KeyCode.Up, () => Assert.Equal(first, Highlighted())),
+                         (KeyCode.Escape, () => Assert.Null(ById(session, "issue-suggestions"))),
+                     })
+            {
+                int builds = app.Builds, chrome = app.ChromeBuilds, composer = app.ComposerBuilds;
+                session.Window.PressKey(key);
+                session.PumpFrames(2);
+                Assert.Equal(0, app.Builds - builds);
+                Assert.Equal(0, app.ChromeBuilds - chrome);
+                Assert.Equal(1, app.ComposerBuilds - composer);
+                check();
+            }
+            Assert.Same(summary, session.Window.Window.FocusedElement);
+            Assert.Equal("Fix #1", summary.Text);
+        });
+    }
+
     /// <summary>A character builds the composer alone (ComposerPart), and that build is what
     /// the list and the hint follow: the list opens and narrows, the hint comes and goes, and
     /// the window is not built for any of it.</summary>
