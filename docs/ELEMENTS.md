@@ -1227,7 +1227,15 @@ component always shows current data with no reference tricks. A row with a `Key`
 patched instead of replaced, which is what keeps focus, a caret or a scroll offset alive
 inside it; key rows that hold state. Rows are force-sized to their height and
 `FlexShrink(0)`, so a template that wants a different height must say so through
-`RowHeights`. A row inherits text style from the list like any other child: a `.FontSize()`,
+`RowHeights`. A row's margins are laid out inside its place, as a column lays out a child's:
+the row is as tall as its place less its top and bottom margins and as wide as the list less
+its side margins, set in by them. The place — what `ItemHeight` or `RowHeights` gives, and what
+scrolling, reveals and a reader's item bounds go by — keeps its height, so the margins add
+nothing to the list's length, and a press in a margin reaches no row. A list whose rows need an
+inset gives them margins instead of a box around each: the command palette's rows carry the
+list's padding this way (its first row the top, its last the bottom), which saved a box and its
+style per row made. (Until plan 17 round 7 step 5 a row's margins were dropped: it filled its
+place.) A row inherits text style from the list like any other child: a `.FontSize()`,
 `.TextColor()` or `.Cursor()` set above the list reaches every row that does not set its own.
 (Until 2026-10-12 a row from the one-argument template was resolved under the theme's
 defaults while it was made, and the next style pass resolved it again under the list,

@@ -429,31 +429,29 @@ public sealed class CommandPalette
     }
 
     /// <summary>
-    /// One place in the list, in the box that holds the list's padding: on the list itself the
-    /// padding would clip the rows short of the list's edges and draw its scrollbar inside them.
-    /// Kept as it stands while its <see cref="ListRow"/> is equal. A keyed box that comes back
-    /// (the choice moved to or from its row, the row became the last) is patched, so a reader is
-    /// told the change on the row they had.
+    /// One place in the list: the row, or the line under the rows, with the list's padding as its
+    /// margins, which the list lays out inside the place. On the list itself the padding would
+    /// clip the rows short of the list's edges and draw its scrollbar inside them; a box around
+    /// each row to hold it cost a box and its style a row. Kept as it stands while its
+    /// <see cref="ListRow"/> is equal. A keyed row that comes back (the choice moved to or from
+    /// it, it became the last) is patched, so a reader is told the change on the row they had.
     /// </summary>
     private Element BuildListRow(ListRow row)
     {
         var padding = _look.ListPadding;
-        var place = Flex.Column(gap: 0).Padding(new Thickness(row.Index == 0 ? padding.Top : 0, padding.Right,
-            row.Last ? padding.Bottom : 0, padding.Left));
+        var margin = new Thickness(row.Index == 0 ? padding.Top : 0, padding.Right, row.Last ? padding.Bottom : 0, padding.Left);
         if (row.Command is { } command)
         {
-            place.AddChild(BuildRow(command, row.Index, row.Selected));
+            var element = BuildRow(command, row.Index, row.Selected).Margin(margin);
             // Matched by identity, not position, so a narrowed list does not hand a row the click
             // handler of the one that used to be in its place.
-            place.Key = $"{command.Group}|{command.Title}|{row.Index}";
+            element.Key = $"{command.Group}|{command.Title}|{row.Index}";
+            return element;
         }
-        else
-        {
-            place.AddChild(Text.New(MoreLine(row.More)).FontSize(_look.MutedFontSize)
-                .TextColor(_look.Muted ?? _theme.Secondary).Padding(MoreLinePadding));
-            place.Key = "more";
-        }
-        return place;
+        var more = Text.New(MoreLine(row.More)).FontSize(_look.MutedFontSize)
+            .TextColor(_look.Muted ?? _theme.Secondary).Padding(MoreLinePadding).Margin(margin);
+        more.Key = "more";
+        return more;
     }
 
     private Element BuildRow(PaletteCommand command, int index, bool selected)

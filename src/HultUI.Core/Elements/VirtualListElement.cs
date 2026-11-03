@@ -574,8 +574,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// keeps its uniform <see cref="ItemHeight"/> behaviour exactly.
     /// <para>
     /// The height returned is the height the row is <b>given</b> — the list forces it, as it
-    /// does with <see cref="ItemHeight"/>. It has to match what the row would lay out to, or
-    /// the row is clipped or leaves a gap.
+    /// does with <see cref="ItemHeight"/>, less the row's own top and bottom margins, which are
+    /// laid out inside it (as its side margins are inside the list's width). It has to match
+    /// what the row would lay out to, or the row is clipped or leaves a gap.
     /// </para>
     /// </summary>
     public Func<T, int, float>? ItemHeightFor
@@ -767,6 +768,11 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _offsets is { } o && index >= 0 && index < _items.Count
             ? o[index + 1] - o[index]
             : _itemHeight;
+
+    /// <summary>The height <paramref name="row"/> is given at <paramref name="index"/>: its place's,
+    /// less its own vertical margins, which are laid out inside the place.</summary>
+    private float RowHeight(Element row, int index) =>
+        Math.Max(0f, HeightOf(index) - row.BoxRead.Margin.Vertical);
 
     private float OffsetOf(int index) =>
         _offsets is { } o
@@ -1062,9 +1068,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 StyleResolver.ResolveUnder(child, ResolvedInherited, _activeTheme);
             }
 
+            // A row's margins are laid out inside its place: as wide as the list less its
+            // horizontal margins, as tall as its place less its vertical ones (RealizeRow).
             if ((child.DirtyFlags & DirtyFlags.Layout) != 0)
-                _childLayoutEngine.PerformLayout(child, viewportWidth,
-                    child == _spacer || child == _heldGap ? _itemHeight : HeightOf(RowOfChild(i)));
+            {
+                var margin = child.BoxRead.Margin;
+                _childLayoutEngine.PerformLayout(child, viewportWidth - margin.Horizontal,
+                    (child == _spacer || child == _heldGap ? _itemHeight : HeightOf(RowOfChild(i))) - margin.Vertical);
+            }
         }
 
         // Position every child at its exact virtual Y coordinate.
@@ -1079,7 +1090,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 : child == _heldGap ? contentBox.Y + OffsetOf(_heldRow + 1)
                 : contentBox.Y + OffsetOf(RowOfChild(i));
 
-            SetAbsolutePosition(child, contentBox.X, targetY);
+            var margin = child.BoxRead.Margin;
+            SetAbsolutePosition(child, contentBox.X + margin.Left, targetY + margin.Top);
         }
     }
 
@@ -1247,9 +1259,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         {
             // A kept row's height can move without its item changing (a height function
             // rebuilt with the owner); it is forced again, the way a new row is below.
-            if (_itemRowTemplate is not null && live.Element.Box.Height != Dimension.Px(HeightOf(index)))
+            if (_itemRowTemplate is not null && live.Element.Box.Height != Dimension.Px(RowHeight(live.Element, index)))
             {
-                live.Element.Box.Height = HeightOf(index);
+                live.Element.Box.Height = RowHeight(live.Element, index);
                 live.Element.MarkLayoutDirty();
             }
             if (_stickyRowFor is not null) MarkSticky(live.Element, index);
@@ -1266,9 +1278,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         // A row the patch moved off this item's old index comes back unmade.
         if (_moving is { Count: > 0 } && TakeMovingRow(item, selected) is { } moved)
         {
-            if (moved.Box.Height != Dimension.Px(HeightOf(index)))
+            if (moved.Box.Height != Dimension.Px(RowHeight(moved, index)))
             {
-                moved.Box.Height = HeightOf(index);
+                moved.Box.Height = RowHeight(moved, index);
                 moved.MarkLayoutDirty();
             }
             if (_stickyRowFor is not null) MarkSticky(moved, index);
@@ -1292,8 +1304,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                     if (ReferenceEquals(moving[m].Element, kept)) { moving.RemoveAt(m); break; }
         }
 
-        // Force item to its row height, full width
-        element.Box.Height = HeightOf(index);
+        // Force item to its row height, full width: its place's, less its margins, which are laid
+        // out inside the place (LayoutVisibleChildren).
+        element.Box.Height = RowHeight(element, index);
         element.Flex.FlexShrink = 0;
         if (_stickyRowFor is not null) MarkSticky(element, index);
 

@@ -444,6 +444,22 @@ public sealed class CommandPaletteTests
     }
 
     [Fact]
+    public void EachRowIsItselfAPlaceInTheList_ItsMarginsThePadding()
+    {
+        // The list lays a row's margins out inside its place, so a row needs no box around it to
+        // hold the list's padding — a box, and its style, with every row made.
+        var look = new CommandPaletteTheme { ListPadding = new Thickness(10, 4, 14, 8), MaxHeight = 600 };
+        var (session, _, _) = Open(Mixed(50), Theme.Light.With(look), maxRows: 6);
+        using var _s = session;
+        var list = FindScroll(session.Window.FindByAutomationId("palette")!.Element);
+
+        var places = list.Children.Skip(1).ToList();   // the first is the list's spacer
+        Assert.Equal(7, places.Count);
+        for (int i = 0; i < 6; i++) Assert.Equal($"palette-row-{i}", places[i].AutomationId);
+        Assert.Equal("44 more — type to narrow them down", Assert.IsType<TextElement>(places[6]).Content);
+    }
+
+    [Fact]
     public void TheLineUnderTheList_WrapsAsItWouldInACardTooNarrowForIt()
     {
         var (session, _, _) = Open(Mixed(50), Theme.Light.With(new CommandPaletteTheme { Width = 160 }), maxRows: 2);
