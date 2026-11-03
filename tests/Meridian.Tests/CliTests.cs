@@ -235,7 +235,7 @@ public class CliTests : IClassFixture<TestHttpServer>, IDisposable
         Write("envs/sec.env", $"base_url={_server.Origin}\nsecret api_token\n");
         var (_, _, stderr) = Cli("run", "api", "--env", "sec");
 
-        Assert.Contains("secret api_token is not set on this machine", stderr);
+        Assert.Contains("secret api_token is not set on this machine for sec (keyring, $sec__api_token or $api_token)", stderr);
     }
 
     [Fact]
@@ -263,6 +263,43 @@ public class CliTests : IClassFixture<TestHttpServer>, IDisposable
 
         Assert.DoesNotContain("not set on this machine", stderr);
         Assert.Contains("✓ UsesSecret", stdout);
+        Assert.Equal(0, process.ExitCode);
+    }
+
+    /// <summary>A machine with no keyring (CI, Linux) holds a value per environment in
+    /// <c>&lt;env&gt;__&lt;key&gt;</c>, which wins over the plain <c>&lt;key&gt;</c> every
+    /// environment shares — and only in its own environment.</summary>
+    [Theory]
+    [InlineData("sec", "from-sec")]
+    [InlineData("other", "from-ci")]
+    public void AnEnvironmentsOwnVariableWinsOverThePlainOne(string env, string expected)
+    {
+        Write("envs/sec.env", $"base_url={_server.Origin}\nsecret injected_token\n");
+        Write("envs/other.env", $"base_url={_server.Origin}\nsecret injected_token\n");
+        // The token endpoint echoes the body back as JSON, so the assertion sees what was sent.
+        Write("api/uses-secret.req",
+            $"POST {{{{base_url}}}}/token\nname UsesSecret\nbody text\n{{{{injected_token}}}}\nend\nassert body $.echo equals \"{expected}\"\n");
+
+        var psi = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
+            UseShellExecute = false,
+            WorkingDirectory = _root,
+        };
+        psi.ArgumentList.Add(CliDll);
+        foreach (var arg in new[] { "run", "api", "--env", env }) psi.ArgumentList.Add(arg);
+        psi.Environment["sec__injected_token"] = "from-sec";
+        psi.Environment["injected_token"] = "from-ci";
+
+        using var process = Process.Start(psi)!;
+        string stdout = process.StandardOutput.ReadToEnd();
+        string stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit(60_000);
+
+        Assert.True(stdout.Contains("✓ UsesSecret"), stdout + stderr);
         Assert.Equal(0, process.ExitCode);
     }
 }

@@ -246,17 +246,62 @@ public partial class MeridianApp
     /// <summary>Secret keys removed from every environment since the last save.</summary>
     private readonly HashSet<string> _removedSecrets = new(StringComparer.Ordinal);
 
-    /// <summary>Forgets the keyring values of the removed secrets, once every file is saved without
-    /// them. A key added back before the save keeps its value; a file that failed to save keeps
-    /// them waiting for the next save.</summary>
+    /// <summary>Forgets the keyring values of the removed secrets — the shared one and every
+    /// environment's own — once every file is saved without them. A key added back before the
+    /// save keeps its values; a file that failed to save keeps them waiting for the next save.</summary>
     private void ForgetRemovedSecrets()
     {
         if (_workspace is not { } ws || _removedSecrets.Count == 0) return;
         if (_envFiles.Any(e => _envDocs.GetValueOrDefault(e.Name)?.Edited == true)) return;
         foreach (var key in _removedSecrets)
             if (_envFiles.All(e => _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) != true))
-                _keyring.Delete(ws.Root, key);
+            {
+                _keyring.Delete(ws.Root, null, key);
+                foreach (var env in _envFiles) _keyring.Delete(ws.Root, env.Name, key);
+            }
         _removedSecrets.Clear();
+    }
+
+    /// <summary>The keys an environment may hold keyring values for: every key in the table, and
+    /// a removed secret whose values wait for the save.</summary>
+    private IEnumerable<string> KeyringKeys() => AllKeys().Union(_removedSecrets);
+
+    /// <summary>The keys <paramref name="envName"/> has a keyring value of its own for.</summary>
+    private List<string> OwnSecrets(string envName) =>
+        KeyringKeys().Where(k => _keyring.Get(_workspace!.Root, envName, k) != null).ToList();
+
+    /// <summary>A renamed environment's own keyring values go with it, so its secrets resolve under
+    /// the new name as they did under the old. A change of letter case alone forgets the entry
+    /// first: a store that ignores case (Windows) would take the new name for the old.</summary>
+    private void MoveEnvironmentSecrets(string from, string to)
+    {
+        var root = _workspace!.Root;
+        bool caseOnly = string.Equals(from, to, StringComparison.OrdinalIgnoreCase);
+        foreach (var key in KeyringKeys())
+        {
+            if (_keyring.Get(root, from, key) is not { } value)
+            {
+                // Left by an environment of the new name made and deleted outside the app.
+                if (!caseOnly) _keyring.Delete(root, to, key);
+                continue;
+            }
+            if (caseOnly)
+            {
+                _keyring.Delete(root, from, key);
+                if (!_keyring.Set(root, to, key, value)) _keyring.Set(root, from, key, value);
+            }
+            else if (_keyring.Set(root, to, key, value))
+                _keyring.Delete(root, from, key);
+        }
+    }
+
+    /// <summary>A deleted environment's own keyring values are forgotten: an entry left behind would
+    /// come back if an environment of that name were made again. The shared values stay; the
+    /// others use them.</summary>
+    private void ForgetEnvironmentSecrets(string envName)
+    {
+        foreach (var key in OwnSecrets(envName))
+            _keyring.Delete(_workspace!.Root, envName, key);
     }
 
     private Element BuildCell(string envName, string key, bool secret)
@@ -296,56 +341,123 @@ public partial class MeridianApp
         return cell;
     }
 
-    /// <summary>A secret's cell is per-machine, not per-file: masked when the
-    /// keyring has it (with the timed reveal), the fresh-clone fix when it
-    /// doesn't. The same cell for every column — the keyring is not
-    /// environment-scoped.</summary>
+    /// <summary>A secret's cell is per machine and per environment: masked when this environment
+    /// resolves it (<see cref="Secrets.Resolve"/>), with the timed reveal and where the value comes
+    /// from, the fresh-clone fix when it doesn't. Its own value wins over the shared one, so the cell
+    /// offers the step to the other: share its own value with every environment, or override the
+    /// shared one with a value for this environment alone.</summary>
     private Element BuildSecretCell(string envName, string key)
     {
         var ws = _workspace!;
-        string? value = _keyring.Get(ws.Root, key);
         var cell = Flex.Row(gap: Azimuth.S1).FlexGrow(1).AlignItems(AlignItems.Center);
 
-        if (value == null)
+        if (Secrets.Resolve(_keyring, ws.Root, envName, key) is not { } secret)
         {
-            var set = Ui.Button(ButtonVariant.Ghost, "! not set on this machine — set value", null,
-                    $"set-secret-{key}", style: Ui.WarnFill)
-                .AccessibleName($"set {key} for this machine");
-            set.OnClick(_ => OpenDialog($"Secret {key}", "value — stored in the OS keyring, never in the file", v =>
-            {
-                if (!_keyring.Set(ws.Root, key, v))
-                    Flash("No keyring on this platform — set it as an environment variable instead");
-                MarkDirty();
-            }));
+            var set = Ui.Button(ButtonVariant.Ghost, "! not set on this machine — set value",
+                    () => OpenSetSecretDialog(envName, key), $"set-secret-{key}-{envName}", style: Ui.WarnFill)
+                .AccessibleName($"set {key} for {envName} on this machine");
             cell.AddChild(set);
             return cell;
         }
 
-        bool revealed = _reveal is { } r && r.Key == key
+        bool revealed = _reveal is { } r && r.Env == envName && r.Key == key
             && System.Diagnostics.Stopwatch.GetTimestamp() < r.UntilTs;
-        cell.AddChild(Ui.Mono(revealed ? value : "••••••••", 11.5f, revealed ? Azimuth.Text : Azimuth.TextMuted)
-            .AutomationId($"secret-value-{key}"));
-        cell.AddChild(Ui.Mono("keyring", 9f, Azimuth.TextFaint));
+        var value = Flex.Column(gap: 0).FlexShrink(1).JustifyContent(JustifyContent.Center);
+        value.AddChild(Ui.Mono(revealed ? secret.Value : "••••••••", 11.5f, revealed ? Azimuth.Text : Azimuth.TextMuted)
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
+            .AutomationId($"secret-value-{key}-{envName}"));
+        var (source, about) = secret.Source switch
+        {
+            SecretSource.Keyring => ("keyring", $"{envName}'s own value, in this machine's keyring"),
+            SecretSource.SharedKeyring => ("shared", "the value every environment without its own uses, in this machine's keyring"),
+            SecretSource.Variable => ("$" + Secrets.VariableName(envName, key), $"from the environment variable {Secrets.VariableName(envName, key)}"),
+            _ => ("$" + key, $"from the environment variable {key}, for every environment"),
+        };
+        // Under the value rather than beside it, where a narrow column squeezed it out first.
+        value.AddChild(Ui.Mono(source, 9f, Azimuth.TextFaint).MaxLines(1).TextOverflow(TextOverflow.Ellipsis)
+            .Tooltip(about).AutomationId($"secret-source-{key}-{envName}"));
+        cell.AddChild(value);
         cell.AddChild(Box.New().FlexGrow(1));
         if (!revealed)
-            cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}", () => RevealSecret(key)));
+            cell.AddChild(BarAction($"reveal ({RevealSeconds} s)", $"reveal-{key}-{envName}", () => RevealSecret(envName, key)));
+        // The rest in a menu, as on the file rows: a column holds one masked value, its source and
+        // reveal, and a row of buttons ran into the next column at a laptop's width.
+        if (SecretActions(envName, key, secret) is { Count: > 0 } actions)
+        {
+            cell.AddChild(RowActionsButton($"{key} in {envName}", $"secret-actions-{key}-{envName}", () => actions,
+                tooltip: secret.Source == SecretSource.Keyring ? "use everywhere" : "set own value"));
+            RowContextMenu(cell, () => actions);
+        }
         return cell;
+    }
+
+    /// <summary>What a stored value's menu offers. Many secrets are one value everywhere: an own
+    /// value becomes the shared one in a click. A shared value, or one from a variable, can be
+    /// overridden with a value for this environment alone, which then wins.</summary>
+    private List<(string, Action)> SecretActions(string envName, string key, SecretValue secret)
+    {
+        var actions = new List<(string, Action)>();
+        if (secret.Source == SecretSource.Keyring)
+        {
+            if (_envFiles.Any(e => e.Name != envName && _envDocs.GetValueOrDefault(e.Name)?.Keys.Contains(key) == true))
+                actions.Add(("Use everywhere", () => ShareSecret(envName, key)));
+        }
+        else
+            actions.Add(("Set own value…", () => OpenSetSecretDialog(envName, key)));
+        return actions;
+    }
+
+    /// <summary>Asks for <paramref name="envName"/>'s own value of a secret.</summary>
+    private void OpenSetSecretDialog(string envName, string key) =>
+        OpenDialog($"Secret {key} for {envName}", "value — stored in the OS keyring, never in the file", v =>
+        {
+            if (!_keyring.Set(_workspace!.Root, envName, key, v)) FlashNoKeyring(envName, key);
+            MarkDirty();
+        });
+
+    private void FlashNoKeyring(string envName, string key) =>
+        Flash($"No keyring on this platform — set the environment variable {Secrets.VariableName(envName, key)} (or {key} for every environment) instead");
+
+    /// <summary>Makes <paramref name="envName"/>'s own value the shared one, and every environment
+    /// then uses it: the own values of the others on this machine go too, after a confirmation that
+    /// names them.</summary>
+    private void ShareSecret(string envName, string key)
+    {
+        var root = _workspace!.Root;
+        if (_keyring.Get(root, envName, key) is not { } value) return;
+        var others = _envFiles.Select(e => e.Name)
+            .Where(n => n != envName && _keyring.Get(root, n, key) != null).ToList();
+
+        void Share()
+        {
+            if (!_keyring.Set(root, null, key, value)) { FlashNoKeyring(envName, key); return; }
+            foreach (var env in _envFiles) _keyring.Delete(root, env.Name, key);
+            MarkDirty();
+        }
+
+        if (others.Count == 0) Share();
+        else
+            OpenConfirm($"Use {envName}'s {key} in every environment?",
+                $"{string.Join(", ", others)} {(others.Count == 1 ? "has a value" : "have values")} of {(others.Count == 1 ? "its" : "their")} own "
+                + "on this machine, which this forgets.",
+                "Use everywhere", Share);
     }
 
     /// <summary>A key flagged secret whose file still holds a value in plain text — typed into
     /// the table before the flag went on. Marking leaves the line alone, so this cell offers the
-    /// fix: move the value to the keyring when this machine has none yet, else clear it.</summary>
+    /// fix: move the value to the keyring as this environment's own when it has none yet, else
+    /// clear it.</summary>
     private Element BuildPlainSecretFix(EnvDocument doc, string envName, string key, string plain)
     {
         var ws = _workspace!;
-        bool keyringHasIt = _keyring.Get(ws.Root, key) != null;
+        bool keyringHasIt = _keyring.Get(ws.Root, envName, key) != null;
         var fix = Ui.Button(ButtonVariant.Ghost,
                 keyringHasIt ? $"! still in {envName}.env — clear" : $"! still in {envName}.env — move to keyring",
                 () =>
                 {
-                    if (!keyringHasIt && !_keyring.Set(ws.Root, key, plain))
+                    if (!keyringHasIt && !_keyring.Set(ws.Root, envName, key, plain))
                     {
-                        Flash("No keyring on this platform — set it as an environment variable instead");
+                        FlashNoKeyring(envName, key);
                         return;
                     }
                     doc.SetValue(key, "");
@@ -358,13 +470,13 @@ public partial class MeridianApp
         return Flex.Row(gap: Azimuth.S1).FlexGrow(1).AlignItems(AlignItems.Center).Children(fix);
     }
 
-    private async void RevealSecret(string key)
+    private async void RevealSecret(string envName, string key)
     {
-        _reveal = (key, System.Diagnostics.Stopwatch.GetTimestamp()
+        _reveal = (envName, key, System.Diagnostics.Stopwatch.GetTimestamp()
             + System.Diagnostics.Stopwatch.Frequency * RevealSeconds);
         MarkDirty();
         await Task.Delay(TimeSpan.FromSeconds(RevealSeconds));
-        if (_reveal is { } r && r.Key == key)
+        if (_reveal is { } r && r.Env == envName && r.Key == key)
         {
             _reveal = null;
             MarkDirty();

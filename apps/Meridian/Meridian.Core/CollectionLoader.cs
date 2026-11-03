@@ -61,10 +61,10 @@ public static class CollectionLoader
             {
                 if (doc.IsSecret(key))
                 {
-                    // Keyring, then the CI-injected environment variable. A
-                    // secret this machine lacks is reported, not silently
-                    // resolved to its placeholder.
-                    if (keyring.Get(root.Root, key) is { } secret) values[key] = secret;
+                    // This environment's value, else the shared one — keyring, then the
+                    // CI-injected environment variable, as the app does. A secret this
+                    // machine lacks is reported, not silently resolved to its placeholder.
+                    if (Secrets.Resolve(keyring, root.Root, envName, key) is { } secret) values[key] = secret.Value;
                     else missing.Add(key);
                 }
                 else if (doc.Values.TryGetValue(key, out var value))

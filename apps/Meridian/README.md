@@ -50,8 +50,24 @@ extract body $.id -> charge_id
 **Variables** resolve environment-first, then values extracted by earlier
 requests; `{{$uuid}}` and `{{$timestamp}}` are built-ins and can't be shadowed.
 **Secrets** are flagged in the `.env` file and stored in the OS keyring (or, in
-CI, read from an environment variable of the same name) — never in the
-collection.
+CI, read from an environment variable) — never in the collection. A value
+belongs to one environment, so `local` and `staging` can each hold their own
+`client_secret`; a **shared** value serves every environment that has none of
+its own. For the active environment, say `staging`, a secret resolves from the
+first of:
+
+1. `staging`'s own value in the keyring;
+2. the environment variable `staging__client_secret`;
+3. the shared value in the keyring;
+4. the environment variable `client_secret`.
+
+The variables are what a machine without a keyring has: CI, and Linux and
+macOS, where Meridian has no keyring store yet. `<env>__<key>` is the one that
+holds a different value per environment there. On Windows the keyring is the
+Credential Manager (generic credentials): `meridian:staging|<collection>|client_secret`
+for one environment's value, `meridian|<collection>|client_secret` for the
+shared one. Values stored before they were per environment have the shared
+name, so they keep serving every environment; nothing needs moving.
 
 **Collections, requests and folders are made in the app** (key 1), with no
 file to write by hand:
@@ -83,13 +99,24 @@ file to write by hand:
 - **＋ add key** adds a key to the active environment; a key another
   environment lacks shows **missing — add to …** in that column (a secret
   arrives as its flag alone); **✕** at a row's end removes the key from every
-  environment. Removing a secret also forgets this machine's keyring value for
-  it, on the save that writes the files without it.
+  environment. Removing a secret also forgets this machine's keyring values for
+  it (the shared one and every environment's own), on the save that writes the
+  files without it.
 - The **SECRET** column's **○ / ●** toggles a key's secret flag in every file
   that has it: on appends `secret <key>`, off takes it out again (a key with
   only the flag keeps its place as `key=`). A flagged key's cell then asks for
-  the value, which goes to the OS keyring. A value already typed into the file
-  shows **still in local.env — move to keyring** (or **— clear**).
+  that environment's value — **not set on this machine — set value** — which
+  goes to the OS keyring. A value already typed into the file shows **still in
+  local.env — move to keyring** (it becomes `local`'s own value), or **— clear**
+  when `local` already has one.
+- A secret's cell is per environment: masked, with **reveal** for five seconds,
+  and where the value comes from — **keyring** (the environment's own),
+  **shared**, or the environment variable it was read from. Its **⋯** (or a
+  right-click on the cell) holds the rest: **Use everywhere** on an own value
+  makes it the shared value, so every environment uses it — when others have
+  values of their own it asks first and names them, since those are forgotten;
+  **Set own value…** on a shared (or variable) value gives that environment one
+  of its own.
 - Every edit waits in the table until **Ctrl+S**, which rewrites only the lines
   that changed.
 
@@ -104,7 +131,8 @@ the active environment on the Environments view.
   has in any letter case; a change of letter case alone is allowed.
   An open tab follows its file, unsaved edits and all, and saves to the new
   name; a folder takes its `_folder.req` defaults and everything else in it
-  along. A renamed environment keeps its unsaved edits and stays active. The
+  along. A renamed environment keeps its unsaved edits, its own keyring values
+  and stays active. The
   tree shows a request's `name` line when it has one, so renaming the file
   leaves that label as it is.
 - **Delete** asks first, naming what goes: the file, or the folder with the
@@ -115,8 +143,9 @@ the active environment on the Environments view.
   bin refuses a path (a network share, another file system than the trash) a
   second confirmation offers to delete it for good. Open tabs of what went
   close. Deleting the active environment makes `local` active, else the first
-  left — as opening a collection does. Its secrets stay in the keyring: they
-  belong to the collection, and the file can come back from the bin.
+  left — as opening a collection does. Its own keyring values are forgotten
+  (the confirmation names them), so an environment made later under the same
+  name starts without them; the shared values stay for the others.
 
 ## Running in CI
 
@@ -162,6 +191,21 @@ GitHub Actions:
   env:
     client_secret: ${{ secrets.CLIENT_SECRET }}   # a flagged secret, injected
 ```
+
+A job that runs two environments with different values names them per
+environment instead, `<env>__<key>`:
+
+```yaml
+- run: |
+    meridian run payments-api/ --env staging
+    meridian run payments-api/ --env prod
+  env:
+    staging__client_secret: ${{ secrets.STAGING_CLIENT_SECRET }}
+    prod__client_secret: ${{ secrets.PROD_CLIENT_SECRET }}
+```
+
+A secret the run can't resolve is named before the first request:
+`meridian: secret client_secret is not set on this machine for ci (keyring, $ci__client_secret or $client_secret)`.
 
 ## Keys
 

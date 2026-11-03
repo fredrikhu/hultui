@@ -34,16 +34,26 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
     }
 
 
-    internal sealed class FakeKeyring : IKeyring
+    /// <summary>A keyring in a dictionary: one entry per collection, environment (empty for the
+    /// shared value) and key. <paramref name="ignoreCase"/> plays Windows, whose Credential Manager
+    /// matches names in any letter case.</summary>
+    internal sealed class FakeKeyring(bool ignoreCase = false) : IKeyring
     {
-        public readonly Dictionary<string, string> Store = new(StringComparer.Ordinal);
-        public string? Get(string workspaceRoot, string key) => Store.GetValueOrDefault($"{workspaceRoot}|{key}");
-        public bool Set(string workspaceRoot, string key, string value)
+        public readonly Dictionary<string, string> Store =
+            new(ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        private static string Entry(string root, string? env, string key) => $"{root}|{env}|{key}";
+        public string? Get(string workspaceRoot, string? environment, string key) =>
+            Store.GetValueOrDefault(Entry(workspaceRoot, environment, key));
+        public bool Set(string workspaceRoot, string? environment, string key, string value)
         {
-            Store[$"{workspaceRoot}|{key}"] = value;
+            // Remove first: a dictionary that ignores case keeps the old key's letters on a replace,
+            // where the store takes the new name.
+            Store.Remove(Entry(workspaceRoot, environment, key));
+            Store[Entry(workspaceRoot, environment, key)] = value;
             return true;
         }
-        public bool Delete(string workspaceRoot, string key) => Store.Remove($"{workspaceRoot}|{key}");
+        public bool Delete(string workspaceRoot, string? environment, string key) =>
+            Store.Remove(Entry(workspaceRoot, environment, key));
     }
 
     private void Hosted(Action<HeadlessSession, MeridianApp, FakeKeyring> body)
@@ -260,7 +270,7 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.Equal(true, Node(session, "secret-toggle-client_secret").IsToggled);
             Assert.True(Contains(session, "2 unsaved"));
             // The keyring cell takes over the column: the fresh-machine fix.
-            Assert.NotNull(session.Window.FindByAutomationId("set-secret-client_secret"));
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-client_secret-staging"));
             Assert.Null(session.Window.FindByAutomationId("cell-client_secret-staging"));
 
             session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
@@ -320,8 +330,8 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
             Assert.True(Contains(session, "still in local.env — move to keyring"));
             Click(session, "plain-secret-client_secret-local");
 
-            Assert.Equal("s3cr3t", keyring.Get(app.Workspace!.Root, "client_secret"));
-            Assert.NotNull(session.Window.FindByAutomationId("secret-value-client_secret"));
+            Assert.Equal("s3cr3t", keyring.Get(app.Workspace!.Root, "local", "client_secret"));
+            Assert.NotNull(session.Window.FindByAutomationId("secret-value-client_secret-local"));
             session.Window.PressKey(KeyCode.S, KeyModifiers.Ctrl);
             session.PumpFrames(2);
             Assert.Equal($"base_url={_server.Origin}\nclient_secret=\nsecret client_secret\n", EnvText("local"));
@@ -411,17 +421,17 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         {
             GoToEnvironments(session);
 
-            Assert.NotNull(session.Window.FindByAutomationId("set-secret-api_token"));
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-api_token-local"));
 
-            Click(session, "set-secret-api_token");
+            Click(session, "set-secret-api_token-local");
             Assert.NotNull(session.Window.FindByAutomationId("dialog-input"));
             session.Window.TypeText("s3cr3t-value");
             session.Window.PressKey(KeyCode.Enter);
             session.PumpFrames(2);
 
-            Assert.Equal("s3cr3t-value", keyring.Get(app.Workspace!.Root, "api_token"));
+            Assert.Equal("s3cr3t-value", keyring.Get(app.Workspace!.Root, "local", "api_token"));
             // The cell is now the masked keyring cell.
-            Assert.NotNull(session.Window.FindByAutomationId("secret-value-api_token"));
+            Assert.NotNull(session.Window.FindByAutomationId("secret-value-api_token-local"));
             Assert.True(Contains(session, "••••••••"));
         });
     }
@@ -431,11 +441,11 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
     {
         Hosted((session, app, keyring) =>
         {
-            keyring.Set(_rootFull(app), "api_token", "peekaboo");
+            keyring.Set(_rootFull(app), "local", "api_token", "peekaboo");
             GoToEnvironments(session);
 
             Assert.False(Contains(session, "peekaboo"), "the value must start masked");
-            Click(session, "reveal-api_token");
+            Click(session, "reveal-api_token-local");
 
             Assert.True(Contains(session, "peekaboo"), "reveal should show the value");
         });
@@ -526,12 +536,153 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    // ── Per environment ──────────────────────────────────────────────────
+    // A secret's value belongs to one environment: local and staging each hold their own
+    // api_token, set in their own column, and a send resolves the active one's.
+
+    private static AccessibilityNode Dialog(HeadlessSession session) =>
+        Walk(session.Window.AccessibilityTree).Single(n => n.Role == AccessibilityRole.Dialog);
+
+    private static void Type(HeadlessSession session, string text)
+    {
+        session.Window.TypeText(text);
+        session.PumpFrames(1);
+        session.Window.PressKey(KeyCode.Enter);
+        session.PumpFrames(2);
+    }
+
+    /// <summary>Opens a cell's menu with its ⋯ and picks an entry.</summary>
+    private static void Menu(HeadlessSession session, string actionsId, string entry)
+    {
+        Click(session, actionsId);
+        Click(session, "popover-" + entry);
+    }
+
+    private static string Source(HeadlessSession session, string key, string env) =>
+        Node(session, $"secret-source-{key}-{env}").Name!;
+
+    /// <summary>Sends echo.req in the active environment and returns what the server got.</summary>
+    private static string Send(HeadlessSession session, MeridianApp app)
+    {
+        session.Window.PressKey(KeyCode.Digit1);
+        session.PumpFrames(2);
+        Click(session, "req-echo");
+        var before = app.ActiveTab!.Result;
+        Click(session, "send");
+        session.PumpUntil(() => app.ActiveTab!.Result is { } r && !ReferenceEquals(r, before), TimeSpan.FromSeconds(10));
+        return app.ActiveTab!.Result!.Response!.Body.Text;
+    }
+
+    [Fact]
+    public void EachEnvironmentSetsItsOwnValue_AndASendResolvesTheActiveOnes()
+    {
+        Write("envs/staging.env", $"base_url={_server.Origin}\nsecret api_token\n");
+        Hosted((session, app, keyring) =>
+        {
+            string root = app.Workspace!.Root;
+            GoToEnvironments(session);
+            // A fresh machine: each column asks for its own value.
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-api_token-local"));
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-api_token-staging"));
+
+            Click(session, "set-secret-api_token-local");
+            Assert.Equal("Secret api_token for local", Dialog(session).Name);
+            Type(session, "tok-local");
+            Assert.Equal("keyring", Source(session, "api_token", "local"));
+            Assert.NotNull(session.Window.FindByAutomationId("set-secret-api_token-staging"));   // local's alone
+
+            Click(session, "set-secret-api_token-staging");
+            Type(session, "tok-staging");
+            Assert.Equal("tok-local", keyring.Get(root, "local", "api_token"));
+            Assert.Equal("tok-staging", keyring.Get(root, "staging", "api_token"));
+            Assert.Null(keyring.Get(root, null, "api_token"));
+
+            // The reveal is the cell's: staging's value shows, local's stays masked.
+            Click(session, "reveal-api_token-staging");
+            Assert.True(Contains(session, "tok-staging"));
+            Assert.False(Contains(session, "tok-local"));
+
+            Assert.Contains("token=tok-local", Send(session, app));
+            app.SelectEnvironment("staging");
+            session.PumpFrames(2);
+            Assert.Contains("token=tok-staging", Send(session, app));
+        });
+    }
+
+    [Fact]
+    public void ASharedValueServesEveryEnvironmentWithoutItsOwn_AndOverrideGivesOneItsOwn()
+    {
+        Write("envs/staging.env", $"base_url={_server.Origin}\nsecret api_token\n");
+        Hosted((session, app, keyring) =>
+        {
+            string root = app.Workspace!.Root;
+            keyring.Set(root, null, "api_token", "tok-shared");   // as every entry was before values were per environment
+            GoToEnvironments(session);
+            Assert.Equal("shared", Source(session, "api_token", "local"));
+            Assert.Equal("shared", Source(session, "api_token", "staging"));
+            
+            // A shared value has no own value to use everywhere; it can be overridden.
+            Click(session, "secret-actions-api_token-staging");
+            Assert.Null(session.Window.FindByAutomationId("popover-Use everywhere"));
+            Click(session, "popover-Set own value…");
+            Assert.Equal("Secret api_token for staging", Dialog(session).Name);
+            Type(session, "tok-staging");
+            Assert.Equal("keyring", Source(session, "api_token", "staging"));
+            Assert.Equal("shared", Source(session, "api_token", "local"));
+            Assert.Equal("tok-shared", keyring.Get(root, null, "api_token"));
+
+            Assert.Contains("token=tok-shared", Send(session, app));
+            app.SelectEnvironment("staging");
+            session.PumpFrames(2);
+            Assert.Contains("token=tok-staging", Send(session, app));
+        });
+    }
+
+    [Fact]
+    public void ShareUsesOneValueInEveryEnvironment_AskingFirstWhenOthersHaveTheirOwn()
+    {
+        Write("envs/staging.env", $"base_url={_server.Origin}\nsecret api_token\n");
+        Write("envs/ci.env", "base_url=https://ci.example\nsecret api_token\n");
+        Hosted((session, app, keyring) =>
+        {
+            string root = app.Workspace!.Root;
+            GoToEnvironments(session);
+            Click(session, "set-secret-api_token-local");
+            Type(session, "tok-1");
+
+            // No other environment had a value: no question.
+            Menu(session, "secret-actions-api_token-local", "Use everywhere");
+            Assert.Null(session.Window.FindByAutomationId("confirm"));
+            Assert.Equal("tok-1", keyring.Get(root, null, "api_token"));
+            Assert.Null(keyring.Get(root, "local", "api_token"));
+            foreach (var env in new[] { "local", "staging", "ci" })
+                Assert.Equal("shared", Source(session, "api_token", env));
+
+            Menu(session, "secret-actions-api_token-staging", "Set own value…");
+            Type(session, "tok-staging");
+            Menu(session, "secret-actions-api_token-local", "Set own value…");
+            Type(session, "tok-2");
+
+            Menu(session, "secret-actions-api_token-local", "Use everywhere");
+            var dialog = Dialog(session);
+            Assert.Equal("Use local's api_token in every environment?", dialog.Name);
+            Assert.Contains("staging has a value of its own on this machine, which this forgets.", dialog.Description);
+            Assert.Equal("tok-staging", keyring.Get(root, "staging", "api_token"));   // nothing goes before the yes
+
+            Click(session, "confirm-ok");
+            Assert.Null(keyring.Get(root, "staging", "api_token"));
+            Assert.Null(keyring.Get(root, "local", "api_token"));
+            Assert.Equal("tok-2", keyring.Get(root, null, "api_token"));
+            Assert.Equal("shared", Source(session, "api_token", "staging"));
+        });
+    }
+
     [Fact]
     public void ASecretResolvesFromTheKeyringOnSend()
     {
         Hosted((session, app, keyring) =>
         {
-            keyring.Set(_rootFull(app), "api_token", "tok-123");
+            keyring.Set(_rootFull(app), null, "api_token", "tok-123");   // shared, as every entry was before values were per environment
 
             Click(session, "req-echo");
             Click(session, "send");
@@ -570,7 +721,7 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
             session.PumpFrames(3);
 
             Assert.Null(app.ActiveTab!.Result);   // blocked: keyring empty
-            keyring.Set(_rootFull(app), "api_token", "from-keyring");
+            keyring.Set(_rootFull(app), "local", "api_token", "from-keyring");
             Click(session, "send");
             session.PumpUntil(() => app.ActiveTab!.Result != null, TimeSpan.FromSeconds(10));
 

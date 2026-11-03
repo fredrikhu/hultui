@@ -49,7 +49,7 @@ public partial class MeridianApp : Component, IDisposable
     private readonly IKeyring _keyring;
 
     // The one secret whose value is momentarily revealed, and until when.
-    private (string Key, long UntilTs)? _reveal;
+    private (string Env, string Key, long UntilTs)? _reveal;
 
     // Open requests. One engine for the whole session — it owns the connection
     // pool, the cookie jar, and the workspace's trusted certificates.
@@ -523,12 +523,12 @@ public partial class MeridianApp : Component, IDisposable
     internal Dictionary<string, string> EnvironmentValues()
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (_env is not { } env || _workspace is not { } ws) return values;
+        if (_env is not { } env || _envName is not { } envName || _workspace is not { } ws) return values;
         foreach (var key in env.Keys)
         {
             if (env.IsSecret(key))
             {
-                if (_keyring.Get(ws.Root, key) is { } secret) values[key] = secret;
+                if (Secrets.Resolve(_keyring, ws.Root, envName, key) is { } secret) values[key] = secret.Value;
             }
             else if (env.Values.TryGetValue(key, out var value))
                 values[key] = value;
@@ -568,7 +568,7 @@ public partial class MeridianApp : Component, IDisposable
             // copy, naming the machine-local fix rather than the environment.
             var missingSecret = unresolved.Distinct().FirstOrDefault(n => _env?.IsSecret(n) == true);
             Flash(missingSecret != null
-                ? $"secret {missingSecret} not set on this machine — set it in Environments (5)"
+                ? $"secret {missingSecret} not set on this machine for {_envName} — set it in Environments (5)"
                 : $"Unresolved in env {_envName ?? "(none)"}: {string.Join(", ", unresolved.Distinct().Select(n => $"{{{{{n}}}}}"))}");
             return;
         }

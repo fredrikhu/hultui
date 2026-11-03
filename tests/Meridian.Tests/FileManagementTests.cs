@@ -3,6 +3,7 @@ using HultUI.Core.Events;
 using HultUI.Headless;
 using Meridian.Core;
 using Xunit;
+using FakeKeyring = Meridian.Tests.EnvironmentsViewTests.FakeKeyring;
 
 namespace Meridian.Tests;
 
@@ -59,18 +60,6 @@ public class FileManagementTests : IDisposable
             Binned.Add(path);
             return null;
         }
-    }
-
-    private sealed class FakeKeyring : IKeyring
-    {
-        public readonly Dictionary<string, string> Store = new(StringComparer.Ordinal);
-        public string? Get(string workspaceRoot, string key) => Store.GetValueOrDefault($"{workspaceRoot}|{key}");
-        public bool Set(string workspaceRoot, string key, string value)
-        {
-            Store[$"{workspaceRoot}|{key}"] = value;
-            return true;
-        }
-        public bool Delete(string workspaceRoot, string key) => Store.Remove($"{workspaceRoot}|{key}");
     }
 
     private void Hosted(Action<HeadlessSession, MeridianApp, FakeTrash> body, FakeKeyring? keyring = null)
@@ -315,18 +304,97 @@ public class FileManagementTests : IDisposable
         Hosted((session, app, trash) =>
         {
             string root = app.Workspace!.Root;
-            keyring.Set(root, "api_token", "tok-123");
-            keyring.Set(root, "timeout_ms", "kept");   // no secret flag: not the app's to forget
+            keyring.Set(root, null, "api_token", "tok-123");
+            keyring.Set(root, "local", "api_token", "tok-local");
+            keyring.Set(root, null, "timeout_ms", "kept");   // no secret flag: not the app's to forget
             Key(session, KeyCode.Digit5);
 
             Click(session, "remove-key-api_token");
             Click(session, "remove-key-timeout_ms");
-            Assert.Equal("tok-123", keyring.Get(root, "api_token"));   // nothing goes before the save
+            Assert.Equal("tok-123", keyring.Get(root, null, "api_token"));   // nothing goes before the save
 
             Key(session, KeyCode.S, KeyModifiers.Ctrl);
             Assert.Equal("base_url=http://localhost:1\n", EnvText("local"));
-            Assert.Null(keyring.Get(root, "api_token"));
-            Assert.Equal("kept", keyring.Get(root, "timeout_ms"));
+            Assert.Null(keyring.Get(root, null, "api_token"));      // the shared value
+            Assert.Null(keyring.Get(root, "local", "api_token"));   // and local's own
+            Assert.Equal("kept", keyring.Get(root, null, "timeout_ms"));
+        }, keyring);
+    }
+
+    [Fact]
+    public void RenamingAnEnvironmentCarriesItsOwnSecretValues()
+    {
+        var keyring = new FakeKeyring();
+        Hosted((session, app, trash) =>
+        {
+            string root = app.Workspace!.Root;
+            keyring.Set(root, "local", "api_token", "tok-local");
+            keyring.Set(root, null, "api_token", "tok-shared");
+            keyring.Set(root, "dev", "timeout_ms", "left-behind");   // a dev made and deleted outside the app
+            Key(session, KeyCode.Digit5);
+
+            Menu(session, "env-actions-local", "Rename…");
+            session.Window.TypeText("dev");
+            session.PumpFrames(1);
+            Key(session, KeyCode.Enter);
+
+            Assert.Equal(["ci", "dev", "staging"], EnvNames());
+            Assert.Equal("tok-local", keyring.Get(root, "dev", "api_token"));
+            Assert.Null(keyring.Get(root, "local", "api_token"));
+            Assert.Null(keyring.Get(root, "dev", "timeout_ms"));                // not local's: gone
+            Assert.Equal("tok-shared", keyring.Get(root, null, "api_token"));   // the others' stays
+            Assert.Equal("tok-local", app.EnvironmentValues()["api_token"]);    // what a send resolves
+            Assert.Equal("keyring", Node(session, "secret-source-api_token-dev").Name);
+        }, keyring);
+    }
+
+    /// <summary>Windows matches credential names in any letter case: a rename that changes only the
+    /// case must not write the new name's entry and then delete it as the old one.</summary>
+    [Fact]
+    public void ACaseOnlyRenameKeepsTheValues_InAStoreThatIgnoresCase()
+    {
+        var keyring = new FakeKeyring(ignoreCase: true);
+        Hosted((session, app, trash) =>
+        {
+            string root = app.Workspace!.Root;
+            keyring.Set(root, "local", "api_token", "tok-local");
+            Key(session, KeyCode.Digit5);
+
+            Menu(session, "env-actions-local", "Rename…");
+            Submit(session, "Local");
+
+            Assert.Equal(["Local", "ci", "staging"], EnvNames());
+            Assert.Equal("tok-local", keyring.Get(root, "Local", "api_token"));
+            Assert.Contains(keyring.Store.Keys, k => k == $"{root}|Local|api_token");   // under the new letters
+            Assert.Equal("tok-local", app.EnvironmentValues()["api_token"]);
+        }, keyring);
+    }
+
+    [Fact]
+    public void DeletingAnEnvironmentForgetsItsOwnSecretValues_AndKeepsTheShared()
+    {
+        var keyring = new FakeKeyring();
+        Hosted((session, app, trash) =>
+        {
+            string root = app.Workspace!.Root;
+            keyring.Set(root, "local", "api_token", "tok-local");
+            keyring.Set(root, "staging", "api_token", "tok-staging");
+            keyring.Set(root, null, "api_token", "tok-shared");
+            Key(session, KeyCode.Digit5);
+
+            Menu(session, "env-actions-local", "Delete…");
+            Assert.Contains("Its own value of api_token on this machine is forgotten.", Dialog(session).Description);
+            Assert.Equal("tok-local", keyring.Get(root, "local", "api_token"));   // nothing goes before the yes
+
+            Click(session, "confirm-ok");
+            Assert.Equal(["ci", "staging"], EnvNames());
+            Assert.Null(keyring.Get(root, "local", "api_token"));
+            Assert.Equal("tok-staging", keyring.Get(root, "staging", "api_token"));
+            Assert.Equal("tok-shared", keyring.Get(root, null, "api_token"));
+
+            // An environment with no values of its own says nothing about secrets.
+            Menu(session, "env-actions-ci", "Delete…");
+            Assert.DoesNotContain("forgotten", Dialog(session).Description);
         }, keyring);
     }
 

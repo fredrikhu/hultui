@@ -138,7 +138,8 @@ public partial class MeridianApp
             input => EnvNameProblem(input, except: name), initial: name);
 
     /// <summary>Moves envs/&lt;old&gt;.env to the new name. Unsaved edits come along (the table
-    /// keeps them under the new name), and the environment stays active if it was.</summary>
+    /// keeps them under the new name), the environment's own keyring values too, and it stays
+    /// active if it was.</summary>
     internal void RenameEnvironment(string oldName, string input)
     {
         if (_workspace is null || _envFiles.FirstOrDefault(e => e.Name == oldName) is not { } env) return;
@@ -150,6 +151,7 @@ public partial class MeridianApp
             Flash($"Could not rename {oldName}.env: {error}");
             return;
         }
+        MoveEnvironmentSecrets(oldName, name);
         // Before the rescan, which drops the documents of files it no longer finds, and picks
         // another environment when the active one has gone.
         if (_envDocs.Remove(oldName, out var doc)) _envDocs[name] = doc;
@@ -163,6 +165,9 @@ public partial class MeridianApp
         if (_workspace is null || _envFiles.All(e => e.Name != name)) return;
         string message = WhereItGoes($"envs/{name}.env");
         if (_envDocs.GetValueOrDefault(name)?.Edited == true) message += " Its unsaved changes go with it.";
+        if (OwnSecrets(name) is { Count: > 0 } secrets)
+            message += $" Its own {(secrets.Count == 1 ? "value" : "values")} of {string.Join(", ", secrets)} on this machine "
+                + $"{(secrets.Count == 1 ? "is" : "are")} forgotten.";
         if (name == _envName)
         {
             var next = _envFiles.Select(e => e.Name).Where(n => n != name).ToList();
@@ -173,13 +178,14 @@ public partial class MeridianApp
     }
 
     /// <summary>Deletes envs/&lt;name&gt;.env; when it was the active environment, the rescan picks
-    /// the next as opening a collection does — local, else the first. The keyring keeps its secrets:
-    /// they belong to the collection, not one environment, and the file can come back from the bin.</summary>
+    /// the next as opening a collection does — local, else the first. Its own keyring values are
+    /// forgotten (the confirmation says so); the shared ones stay for the others.</summary>
     internal void DeleteEnvironment(string name)
     {
         if (_envFiles.FirstOrDefault(e => e.Name == name) is not { } env) return;
         Discard(env.Path, $"{name}.env", () =>
         {
+            ForgetEnvironmentSecrets(name);   // while its document still names its keys
             _envDocs.Remove(name);
             RescanWorkspace();
             MarkDirty();
@@ -352,11 +358,12 @@ public partial class MeridianApp
 
     /// <summary>The ⋯ at a row's end, opening its rename / delete menu under it. A button of its
     /// own, so the keyboard and a reader reach what right-click does.</summary>
-    private Element RowActionsButton(string accessibleName, string automationId, Func<IReadOnlyList<(string, Action)>> items)
+    private Element RowActionsButton(string accessibleName, string automationId, Func<IReadOnlyList<(string, Action)>> items,
+        string tooltip = "rename · delete")
     {
         var b = Ui.Button(ButtonVariant.Ghost, "⋯", null, automationId, style: Ui.Remove);
         b.AccessibleName = accessibleName;
-        b.Tooltip("rename · delete");
+        b.Tooltip(tooltip);
         b.On<ClickEvent>(e =>
         {
             e.StopPropagation = true;   // the row behind opens or selects
